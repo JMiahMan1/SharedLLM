@@ -407,7 +407,9 @@ describe('Bible page', () => {
     fireEvent.click(screen.getByTestId('bible-ref-go'));
 
     expect(await screen.findByTestId('bible-search-results')).toHaveTextContent('Results for “shepherd”');
-    await waitFor(() => expect(mocked.searchBible).toHaveBeenCalledWith('shepherd', { version: 'kjv', limit: 40 }));
+    await waitFor(() =>
+      expect(mocked.searchBible).toHaveBeenCalledWith('shepherd', expect.objectContaining({ version: 'kjv', limit: 40, offset: 0, match: 'all' })),
+    );
   });
 
   it('does not search for a one-letter word', async () => {

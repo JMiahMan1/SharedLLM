@@ -6,6 +6,7 @@ import {
 import { useHaptics } from '../../hooks/useHaptics';
 import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
 import { PAGE_TONES, PAGE_TONE_ORDER, TEXT_STEPS, toneOf } from './readingPage';
+import { forgetSearches, recentSearches } from './recentSearches';
 import type {
   BibleBookInfo,
   BibleEditionInfo,
@@ -37,6 +38,8 @@ interface ReferenceBarProps {
   onListen?: () => void;
   /** The translation on the page; with none saved it names the pill (it read "V..." on a phone). */
   readingVersion?: string;
+  /** Search again for one of the reader's recent searches. */
+  onRecentSearch?: (term: string) => void;
 }
 
 type Panel = 'passage' | 'version' | 'compare' | 'display';
@@ -95,10 +98,13 @@ export default function ReferenceBar({
   listening = false,
   onListen,
   readingVersion = '',
+  onRecentSearch,
 }: ReferenceBarProps) {
   const { trigger } = useHaptics();
   const isPhone = useMediaQuery(PHONE_QUERY);
   const [panel, setPanel] = useState<Panel | null>(null);
+  // Read when the passage panel opens, so a search made a moment ago is listed.
+  const [recent, setRecent] = useState<string[]>(recentSearches);
   const [openBook, setOpenBook] = useState<string | null>(null);
 
   const book = books.find((b) => b.osis === position.book) ?? books[0];
@@ -120,6 +126,7 @@ export default function ReferenceBar({
 
   const open = (next: Panel) => {
     void trigger('light');
+    if (next === 'passage') setRecent(recentSearches());
     setPanel((current) => (current === next ? null : next));
     if (next === 'passage') setOpenBook(position.book);
   };
@@ -189,6 +196,39 @@ export default function ReferenceBar({
           Go
         </button>
       </form>
+
+      {onRecentSearch && !input.trim() && recent.length ? (
+        <div data-testid="bible-recent-searches">
+          <div className="mb-1 flex items-center justify-between">
+            <span className={LABEL}>Recent searches</span>
+            <button
+              type="button"
+              onClick={() => {
+                forgetSearches();
+                setRecent([]);
+              }}
+              className="min-h-11 px-2 text-xs text-slate-500 hover:text-white"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {recent.map((term) => (
+              <button
+                key={term}
+                type="button"
+                onClick={() => {
+                  onRecentSearch(term);
+                  close();
+                }}
+                className="min-h-11 max-w-full truncate rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs text-slate-200 hover:bg-white/10"
+              >
+                {term}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
         <label className="flex min-w-0 flex-col gap-1">

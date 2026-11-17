@@ -3334,6 +3334,25 @@ export interface BibleSearchHit {
   verse: number;
   reference: string;
   text: string;
+  /** The translation the text is from (with "all translations", the first that matched). */
+  version?: string;
+  /** [start, end) character spans of the matched words in `text`. */
+  highlights?: number[][];
+  /** Every translation searched that has a match at this verse. */
+  versions?: string[];
+}
+
+export type BibleSearchMatch = 'all' | 'any' | 'exact';
+export type BibleSearchSort = 'rank' | 'canon';
+
+/** How the server read the search text, for the summary line. */
+export interface BibleSearchParsed {
+  all: string[];
+  without: string[];
+  scopes: string[];
+  versions: string[] | 'all';
+  strongs: string[];
+  has: string[];
 }
 
 export interface BibleSearchResult {
@@ -3341,6 +3360,15 @@ export interface BibleSearchResult {
   query: string;
   results: BibleSearchHit[];
   count: number;
+  /** Matching verses in all, before paging. */
+  total?: number;
+  offset?: number;
+  versions?: string[];
+  sort?: BibleSearchSort;
+  /** `like` while the full-text index is still being built. */
+  index?: 'fts' | 'like';
+  by_book?: Array<{ osis: string; name: string; count: number }>;
+  parsed?: BibleSearchParsed;
 }
 
 /**

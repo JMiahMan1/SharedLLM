@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { BookMarked, BookOpen, Brain, ChevronLeft, ChevronRight, Gamepad2, Search, Sparkles, Trophy, X } from 'lucide-react';
+import { BookMarked, BookOpen, Brain, ChevronLeft, ChevronRight, Gamepad2, Sparkles, Trophy } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import type {
@@ -15,6 +15,9 @@ import type {
   BibleVersionInfo,
 } from '../types/api';
 import ReferenceBar from '../components/bible/ReferenceBar';
+import BibleSearchResults from '../components/bible/BibleSearchResults';
+import { rememberSearch } from '../components/bible/recentSearches';
+import { looksLikeReference } from '../components/bible/references';
 import ChapterReader from '../components/bible/ChapterReader';
 import ParallelReader from '../components/bible/ParallelReader';
 import FocusReader from '../components/bible/FocusReader';
@@ -68,10 +71,6 @@ const DEFAULT_PREFERENCES: BiblePreferences = {
 
 
 /** Something with digits in it is a passage; anything else is a search. */
-function looksLikeReference(value: string): boolean {
-  return /\d/.test(value);
-}
-
 function chapterRef(position: BiblePosition): string {
   return `${position.book} ${position.chapter}`;
 }
@@ -228,13 +227,6 @@ function BibleReaderPane({
     queryKey: ['bible-passage', version, requestRef],
     queryFn: () => api.getBiblePassage(requestRef, version),
     enabled: Boolean(version) && !searching,
-    retry: 0,
-  });
-
-  const { data: searchData, isFetching: searchLoading } = useQuery({
-    queryKey: ['bible-search', searchTerm, version],
-    queryFn: () => api.searchBible(searchTerm ?? '', { version, limit: 40 }),
-    enabled: searching && (searchTerm?.length ?? 0) >= 2,
     retry: 0,
   });
 
@@ -485,6 +477,7 @@ function BibleReaderPane({
       onRequestRef(value);
       return;
     }
+    rememberSearch(value);
     setSearchTerm(value);
   };
 
@@ -580,6 +573,11 @@ function BibleReaderPane({
           listening={listening}
           onListen={() => setListening((on) => !on)}
           readingVersion={version}
+          onRecentSearch={(term) => {
+            rememberSearch(term);
+            setInput(term);
+            setSearchTerm(term);
+          }}
         />
       </div>
       {passage?.reference && !searching ? (
@@ -597,57 +595,21 @@ function BibleReaderPane({
       ) : null}
 
       {searching ? (
-        <section className="glass-panel rounded-2xl p-4 border border-white/10" data-testid="bible-search-results">
-          <div className="flex items-center gap-2 mb-3">
-            <Search size={15} className="text-sky-300 shrink-0" />
-            <h2 className="text-sm font-bold text-white truncate">Results for “{searchTerm}”</h2>
-            <button
-              type="button"
-              onClick={() => {
-                setSearchTerm(null);
-                setInput('');
-              }}
-              aria-label="Clear search"
-              className="ml-auto min-h-11 min-w-11 shrink-0 flex items-center justify-center rounded-xl text-slate-400 hover:text-white"
-            >
-              <X size={15} />
-            </button>
-          </div>
-          {searchLoading ? (
-            <div className="space-y-2">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="skeleton h-10 rounded-xl" />
-              ))}
-            </div>
-          ) : !searchData?.results.length ? (
-            <p className="text-sm text-slate-400">
-              {(searchTerm ?? '').trim().length < 2
-                ? 'Type at least two letters to search.'
-                : 'Nothing found. Try a shorter word, or name a book.'}
-            </p>
-          ) : (
-            <ul className="space-y-1.5">
-              {searchData.results.map((hit) => (
-                <li key={`${hit.osis}-${hit.chapter}-${hit.verse}`}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchTerm(null);
-                      setInput(hit.reference);
-                      onOpenRef(hit.reference);
-                    }}
-                    className="w-full text-left rounded-xl px-3 py-2.5 min-h-11 pointer-coarse:min-h-11 hover:bg-white/5 transition-colors"
-                  >
-                    <span className="block text-xs font-semibold text-amber-300">{hit.reference}</span>
-                    <span className="block text-sm text-slate-300 font-serif leading-relaxed line-clamp-2">
-                      {hit.text}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <BibleSearchResults
+          key={searchTerm ?? ''}
+          term={searchTerm ?? ''}
+          version={version}
+          versions={versions}
+          onOpen={(reference) => {
+            setSearchTerm(null);
+            setInput(reference);
+            onOpenRef(reference);
+          }}
+          onClear={() => {
+            setSearchTerm(null);
+            setInput('');
+          }}
+        />
       ) : (
         <div className={notesAlongside ? 'lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-4 lg:items-start' : ''}>
           <section

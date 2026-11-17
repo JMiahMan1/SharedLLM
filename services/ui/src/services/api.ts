@@ -223,6 +223,8 @@ import type {
   BibleVersionInfo,
   BibleBookInfo,
   BibleSearchResult,
+  BibleSearchMatch,
+  BibleSearchSort,
   BibleVerseContext,
   BibleVerseOfDay,
   BibleDevotionalSourceInfo,
@@ -5463,7 +5465,17 @@ export const api = {
     }
   },
 
-  async searchBible(q: string, options: { version?: string; book?: string; limit?: number } = {}): Promise<BibleSearchResult> {
+  async searchBible(
+    q: string,
+    options: {
+      version?: string;
+      book?: string;
+      limit?: number;
+      offset?: number;
+      match?: BibleSearchMatch;
+      sort?: BibleSearchSort;
+    } = {},
+  ): Promise<BibleSearchResult> {
     const resp = await apiClient.get('/api/bible/search', { params: { q, ...options } });
     return resp.data;
   },
