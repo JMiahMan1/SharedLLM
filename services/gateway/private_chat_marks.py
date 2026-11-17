@@ -1,7 +1,8 @@
 """Edits and reactions on private chat messages, end to end encrypted.
 
 The parents' private chat (services/gateway/private_chat.py) keeps its messages
-on Nextcloud Talk as sealed envelopes. A message can also be **edited** by the
+as sealed envelopes (services/gateway/private_chat_messages.py; a chat not yet
+moved off Talk still has them in its Talk room). A message can also be **edited** by the
 parent who wrote it and **reacted to** by either parent (a heart, a thumbs up,
 a laugh...). Both are kept here, beside the gallery entries, as sealed records
 made on the device with the chat's data key. This service never sees the new
@@ -10,16 +11,19 @@ text or the emoji.
 Why edits are an overlay here and not Talk's own edit
 ------------------------------------------------------
 
-Talk can edit a message in place (``PUT /chat/<token>/<id>``, and
-``guard_talk`` already lets a sealed edit through), which would also keep the
-server blind. It was not used because of two surprises:
+When the messages were on Talk, Talk could edit a message in place
+(``PUT /chat/<token>/<id>``), which would also have kept the server blind. It
+was not used because of two surprises, and the overlay stayed when the
+messages moved into the gateway's own store (marks are keyed by message id,
+which the move keeps):
 
 * **Talk refuses an edit after 24 hours** (``{"error": "age"}``), except in a
   note-to-self room. A typo noticed the next morning could not be fixed.
 * **Talk lets a moderator edit someone else's message.** The parent who made
   the room is its owner, so Talk alone would not stop one parent rewriting the
-  other's words. Here the author is checked against Talk's own record of who
-  sent the message (``_talk_message``), and nobody else may edit it.
+  other's words. Here the author is checked against the stored message (or,
+  for a chat still on Talk, Talk's own record of who sent it), and nobody else
+  may edit it.
 
 An overlay also leaves Talk's thread as it was (no "You edited a message"
 system lines). The record is bound to its message inside the encryption (the
@@ -46,7 +50,8 @@ every copy of yours, and the thread counts each person once per emoji. The
 server only caps reactions per person per message (``MAX_REACTIONS_PER_PERSON``)
 so a runaway client cannot fill the disk.
 
-Deleting a message (the Talk delete route in main.py, which calls
+Deleting a message (``DELETE /messages/<id>`` in private_chat_messages.py, or
+the Talk delete route in main.py for a chat still on Talk, both calling
 ``forget_message``) deletes its edit and reactions with it, and deleting the
 chat removes the whole ``marks/<token>`` folder (``Store.remove``).
 
@@ -242,6 +247,23 @@ async def _talk_message(request: Request, token: str, message_id: int) -> dict[s
     return record
 
 
+async def _author(request: Request, token: str, chat: dict[str, Any], people: dict[str, dict[str, Any]],
+                  message_id: int) -> str:
+    """The username who wrote a live message in the chat, or 404 when there is none to mark."""
+    if chat.get("storage") == "store":
+        from services.gateway import private_chat_messages
+
+        try:
+            by = await asyncio.to_thread(private_chat_messages.author, token, message_id)
+        except private_chat_messages.StoreUnreadable as exc:
+            raise HTTPException(status_code=503, detail="Could not read the chat; try again.") from exc
+        if not by:
+            raise HTTPException(status_code=404, detail="No such message.")
+        return by
+    record = await _talk_message(request, token, message_id)
+    return next((name for name, person in people.items() if _sent_by(record, person)), "")
+
+
 def _sent_by(record: dict[str, Any], person: dict[str, Any]) -> bool:
     """Whether Talk says this person (by their chat account) sent the message."""
     account = str(person.get("nextcloud_user") or "").lower()
@@ -318,11 +340,10 @@ async def list_marks(token: str, request: Request):
 @router.put("/messages/{message_id}/edit")
 async def edit_message(token: str, message_id: str, request: Request):
     """Replace a message's text with a new sealed version. Only the parent who sent it may."""
-    user, _chat, people = await private_chat._member_chat(request, token)
+    user, chat, people = await private_chat._member_chat(request, token)
     mid = _message_id(message_id)
     sealed = _sealed((await _body(request)).get("sealed"), MAX_EDIT_BYTES)
-    record = await _talk_message(request, token, mid)
-    if not _sent_by(record, people[user]):
+    if await _author(request, token, chat, people, mid) != user:
         raise HTTPException(status_code=403, detail="Only the one who wrote it can edit it.")
     async with _lock:
         store = get_store()
@@ -339,7 +360,7 @@ async def add_reaction(token: str, message_id: str, request: Request):
     user, chat, people = await private_chat._member_chat(request, token)
     mid = _message_id(message_id)
     sealed = _sealed((await _body(request)).get("sealed"), MAX_REACTION_BYTES)
-    await _talk_message(request, token, mid)
+    await _author(request, token, chat, people, mid)
     async with _lock:
         store = get_store()
         mark = store.get(token, mid)

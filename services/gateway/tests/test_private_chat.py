@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from services.common import notify
-from services.gateway import chat_notify, private_chat, push_callbacks
+from services.gateway import chat_notify, private_chat, private_chat_messages, push_callbacks
 from services.gateway import main as gateway_main
 
 PEOPLE = {
@@ -109,6 +109,9 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(private_chat, "_people", people)
     monkeypatch.setattr(private_chat, "_talk", talk)
     monkeypatch.setattr(private_chat, "_store", private_chat.Store(tmp_path))
+    # New chats get an id of their own (never a Talk room); a fixed one keeps the tests readable.
+    monkeypatch.setattr(private_chat, "_new_token", lambda: "room123abc")
+    monkeypatch.setattr(private_chat_messages, "NOTICE_DELAY_S", 0)
     monkeypatch.setattr(notify, "send_many", send_many)
     import services.gateway.cache as gateway_cache
 
@@ -125,6 +128,17 @@ def _create(env, user="alex", partner="sam", **over):
     return env["client"].post("/api/private-chat/chats", json={"partner": partner, **_params(**over)}, headers=_as(user))
 
 
+def _legacy(env, user="alex", partner="sam"):
+    """A chat made before the store: its registry record has no ``storage`` and its messages are on Talk."""
+    resp = _create(env, user=user, partner=partner)
+    assert resp.status_code == 200, resp.text
+    path = env["root"] / "chats" / "room123abc.json"
+    record = json.loads(path.read_text())
+    record.pop("storage")
+    path.write_text(json.dumps(record))
+    return resp
+
+
 # --- Who may be in one --------------------------------------------------------
 
 
@@ -138,11 +152,12 @@ def test_a_parent_starts_one_with_the_other_parent_and_the_server_keeps_no_key(e
     assert chat["kdf"] == {"name": "PBKDF2-SHA256", "salt": _b64(16), "iterations": 600_000}
     assert chat["wrapped_key"] == {"iv": _fill(12, 7), "ct": _fill(48, 7)}
     assert "auth_hash" not in chat and "auth" not in chat and "history" not in chat
-    create = next(c for c in env["calls"] if c["action"] == "create_group")
-    assert create["participants"] == ["sam"]
+    # Its messages are kept by the gateway: Talk never hears of a new private chat.
+    assert chat["storage"] == "store"
+    assert env["calls"] == []
     saved = json.loads((env["root"] / "chats" / "room123abc.json").read_text())
     assert set(saved) == {"token", "members", "created_by", "created_at", "version", "kdf", "wrapped_key",
-                          "verifier", "auth_hash"}
+                          "verifier", "auth_hash", "storage"}
     # Only a hash of the password proof is kept, never the proof itself.
     assert saved["auth_hash"] == hashlib.sha256(bytes([1]) * 32).hexdigest()
     assert AUTH_1 not in json.dumps(saved)
@@ -304,7 +319,7 @@ def talk_routes(env, monkeypatch):
         return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {"deleted": True}})
 
     monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", proxy)
-    _create(env)
+    _legacy(env)
     env["sent"] = sent
     return env
 
@@ -369,7 +384,7 @@ def test_the_conversation_list_hides_the_last_message(talk_routes, monkeypatch):
 
 
 def test_a_nudge_says_who_and_nothing_else(env):
-    _create(env)
+    _legacy(env)
     resp = env["client"].post("/api/private-chat/chats/room123abc/nudge", headers=_as("alex"))
     assert resp.status_code == 200, resp.text
     assert resp.json()["nudged"] == ["sam"]
@@ -385,7 +400,7 @@ def test_a_nudge_says_who_and_nothing_else(env):
 
 
 def test_nudges_are_rate_limited_per_chat_per_sender(env):
-    _create(env)
+    _legacy(env)
     c = env["client"]
     assert c.post("/api/private-chat/chats/room123abc/nudge", headers=_as("alex")).status_code == 200
     again = c.post("/api/private-chat/chats/room123abc/nudge", headers=_as("alex"))
@@ -395,7 +410,7 @@ def test_nudges_are_rate_limited_per_chat_per_sender(env):
 
 
 def test_a_failed_nudge_does_not_use_up_the_limit(env):
-    _create(env)
+    _legacy(env)
     env["state"]["deliver"] = False
     assert env["client"].post("/api/private-chat/chats/room123abc/nudge", headers=_as("alex")).status_code == 502
     env["state"]["deliver"] = True
@@ -408,7 +423,7 @@ def test_a_failed_nudge_does_not_use_up_the_limit(env):
     {"last_message_id": 0, "last_common_read": 0, "last_message_actor_id": ""},  # empty chat
 ])
 def test_only_while_my_latest_message_is_unread(env, conversation):
-    _create(env)
+    _legacy(env)
     env["state"]["conversation"] = conversation
     assert env["client"].post("/api/private-chat/chats/room123abc/nudge", headers=_as("alex")).status_code == 409
     assert env["notices"] == []

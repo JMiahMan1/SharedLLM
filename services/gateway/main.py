@@ -92,6 +92,7 @@ from services.gateway import (
     phone_routes,
     private_chat,
     private_chat_marks,
+    private_chat_messages,
     push_routes,
     recipe_images,
     room_presence,
@@ -922,6 +923,13 @@ async def lifespan(app: FastAPI):
     if raven_worker:
         raven_worker.start()
 
+    # Private chats made on Talk move their (sealed) history into the gateway's own store, once,
+    # keeping the Talk room; a failure leaves the chat on Talk and is retried with backoff.
+    try:
+        _run_in_background(private_chat_messages.migrate_all())
+    except Exception as e:  # non-fatal
+        log.error(f"[private-chat] could not schedule the move off Talk: {e}")
+
     # Warm RAG's embedding model in the background so the FIRST Raven mission's
     # lesson injection doesn't hit RAG's ~25s cold start and silently skip lessons.
     try:
@@ -994,6 +1002,7 @@ app.include_router(room_presence.router)  # Room detection: phone beacons and th
 app.include_router(dashboard_routes.router)  # Rooms, Energy, History, Climate pages
 app.include_router(todo_routes.router)
 app.include_router(private_chat_marks.router)  # Edits and reactions on private chat messages, sealed on the device
+app.include_router(private_chat_messages.router)  # The private chat's sealed messages, kept here instead of on Talk
 app.include_router(beloved_routes.router)  # Beloved: the couple's page inside the private chat (one father, one mother)
 app.include_router(private_chat.router)  # Private chat: the parents' end-to-end encrypted conversation  # Lists: the hub's to-do lists for every member
 app.include_router(automation_routes.router)  # Automations and schedules
@@ -8708,8 +8717,15 @@ async def proxy_list_talk_conversations(request: Request):
         content = json.loads(resp.body)
     except (TypeError, ValueError):
         return resp
-    # Private chats: marked, and their (ciphertext) last message never leaves.
-    return JSONResponse(status_code=200, content=private_chat.scrub_conversations(content))
+    # Private chats: marked, and their (ciphertext) last message never leaves. A chat whose messages
+    # moved off Talk is counted from the gateway's store (and listed even once its Talk room is gone).
+    content = private_chat.scrub_conversations(content)
+    try:
+        ident = await _resolve_identity_from_request(request)
+        content = await private_chat_messages.inbox(content, str((ident or {}).get("user") or ""))
+    except HTTPException:
+        pass
+    return JSONResponse(status_code=200, content=content)
 
 
 @app.post("/api/communication/talk/conversations/open")
@@ -8888,6 +8904,7 @@ async def proxy_edit_talk_message(request: Request):
 @app.post("/api/communication/talk/messages/delete")
 async def proxy_delete_talk_message(request: Request):
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "delete_message")
     payload = {"action": "delete_message", "token": body.get("token"), "message_id": body.get("message_id")}
     resp = await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
     if resp.status_code == 200 and private_chat.is_private(body.get("token")):
@@ -9008,6 +9025,19 @@ async def _call_recipients(request: Request, token: str, me: str) -> tuple[str, 
     ever sees a call that nobody answers.
     """
     from services.gateway import calls as _calls
+
+    chat = private_chat.get_store().get(token) if private_chat.is_private(token) else None
+    if chat:
+        # A private chat's members are in its registry (it may have no Talk room at all).
+        try:
+            people = await private_chat._people()
+        except HTTPException:
+            log.warning("[call-notice] room %s: could not list the family", token)
+            return None
+        if me not in chat.get("members", []):
+            return None
+        others = {m for m in chat.get("members", []) if m != me and m in people}
+        return private_chat._display(people.get(me) or {"username": me}), others
 
     try:
         detail, why = await _talk_detail(request, {"action": "participants", "token": token})
