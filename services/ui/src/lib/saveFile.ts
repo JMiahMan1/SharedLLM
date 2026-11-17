@@ -7,10 +7,21 @@ import { blobToBase64 } from './base64';
  * URL, so every Download button did nothing there. The app instead hands the
  * bytes to SaveFilePlugin.java, which opens Android's "Save to" picker with
  * the name filled in.
+ *
+ * The bytes go over in pieces into a staged file in the app's cache (`begin`,
+ * `append`), and `save` only names it. A whole backup sent in one call was
+ * kept in Capacitor's saved state while the picker was up, which crashed the
+ * app for anything over a couple of megabytes.
  */
 interface SaveFilePlugin {
-  save(options: { data: string; filename: string; mimeType: string }): Promise<{ saved: boolean }>;
+  begin(): Promise<{ id: string }>;
+  append(options: { id: string; data: string }): Promise<void>;
+  discard(options: { id: string }): Promise<void>;
+  save(options: { id?: string; data?: string; filename: string; mimeType: string }): Promise<{ saved: boolean }>;
 }
+
+/** Raw bytes per piece (a multiple of 3, so each piece is whole base64). */
+export const CHUNK_BYTES = 768 * 1024;
 
 let plugin: SaveFilePlugin | null = null;
 
@@ -52,18 +63,42 @@ function notImplemented(err: unknown): boolean {
 }
 
 /**
+ * Stage the blob in the app's cache piece by piece. Null when the installed
+ * app predates staging (an older APK running a newer web bundle).
+ */
+async function stage(native: SaveFilePlugin, blob: Blob): Promise<string | null> {
+  let id: string;
+  try {
+    ({ id } = await native.begin());
+  } catch (err) {
+    if (notImplemented(err)) return null;
+    throw err;
+  }
+  try {
+    for (let offset = 0; offset < blob.size; offset += CHUNK_BYTES) {
+      await native.append({ id, data: await blobToBase64(blob.slice(offset, offset + CHUNK_BYTES)) });
+    }
+  } catch (err) {
+    await native.discard({ id }).catch(() => undefined);
+    throw err;
+  }
+  return id;
+}
+
+/**
  * Save a blob as a file. Resolves false when the person cancelled the
  * picker, and rejects with the reason when the file could not be saved.
  */
 export async function saveBlob(blob: Blob, filename: string): Promise<boolean> {
   const native = nativeSaver();
   if (native) {
+    const name = baseName(filename);
+    const mimeType = blob.type || 'application/octet-stream';
     try {
-      const { saved } = await native.save({
-        data: await blobToBase64(blob),
-        filename: baseName(filename),
-        mimeType: blob.type || 'application/octet-stream',
-      });
+      const id = await stage(native, blob);
+      const { saved } = id
+        ? await native.save({ id, filename: name, mimeType })
+        : await native.save({ data: await blobToBase64(blob), filename: name, mimeType });
       return saved;
     } catch (err) {
       if (!notImplemented(err)) throw err;
