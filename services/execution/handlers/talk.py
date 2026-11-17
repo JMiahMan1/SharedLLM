@@ -1272,6 +1272,26 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message=message or "Could not edit the message.", service="talk_edit")
             return ExecutionResult(status="SUCCESS", message="Message edited.", service="talk_edit", detail={"message_record": _message_summary(data or {})})
 
+        if action == "message":
+            # One message as Talk records it (who sent it), for a check made on the server.
+            if not req.token or req.message_id is None:
+                return ExecutionResult(status="FAILURE", message="Conversation token and message_id are required.", service="talk_message")
+            ok, data, message = await _talk_request_with_retry(
+                provider,
+                "GET",
+                f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}/{int(req.message_id)}/context",
+                params={"limit": "1"},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Could not read the message.", service="talk_message")
+            found = next(
+                (item for item in (data or []) if isinstance(item, dict) and item.get("id") == int(req.message_id)),
+                None,
+            )
+            if found is None:
+                return ExecutionResult(status="FAILURE", message="No such message.", service="talk_message")
+            return ExecutionResult(status="SUCCESS", message="Message loaded.", service="talk_message", detail={"message_record": _message_summary(found)})
+
         if action == "delete_message":
             if not req.token or req.message_id is None:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message_id are required.", service="talk_delete")

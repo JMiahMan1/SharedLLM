@@ -156,6 +156,29 @@ async def test_edit_and_delete_hit_the_message(provider, monkeypatch):
     assert calls[1][0] == "DELETE" and calls[1][1].endswith("/chat/room/5")
 
 
+async def test_one_message_is_read_from_its_context_and_says_who_sent_it(monkeypatch):
+    """The private chat checks who wrote a message before letting an edit through."""
+    monkeypatch.setattr(talk_handler, "resolve_personal_data_provider", lambda _ctx: FakeProvider())
+    calls = []
+
+    async def fake_talk_request(_provider, method, endpoint, *, params=None, data=None, timeout=30):
+        calls.append((method, endpoint, params))
+        return True, [
+            {"id": 4, "actorType": "users", "actorId": "sam", "message": "before"},
+            {"id": 5, "actorType": "users", "actorId": "alex", "message": "this one"},
+        ], ""
+
+    monkeypatch.setattr(talk_handler, "_talk_request_with_retry", fake_talk_request)
+    found = await talk_handler.handle_talk(request("message", token="room", message_id=5))
+    missing = await talk_handler.handle_talk(request("message", token="room", message_id=9))
+
+    assert calls[0] == ("GET", "/ocs/v2.php/apps/spreed/api/v1/chat/room/5/context", {"limit": "1"})
+    assert found.status == "SUCCESS"
+    assert found.detail["message_record"]["actor_id"] == "alex"
+    assert found.detail["message_record"]["id"] == 5
+    assert missing.status == "FAILURE"
+
+
 async def test_a_file_path_cannot_climb_out_of_the_users_files(monkeypatch):
     from services.execution.schemas import TalkFileRequest
 

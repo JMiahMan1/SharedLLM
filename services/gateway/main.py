@@ -91,6 +91,7 @@ from services.gateway import (
     notices,
     phone_routes,
     private_chat,
+    private_chat_marks,
     push_routes,
     recipe_images,
     room_presence,
@@ -992,6 +993,7 @@ app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sens
 app.include_router(room_presence.router)  # Room detection: phone beacons and the room map
 app.include_router(dashboard_routes.router)  # Rooms, Energy, History, Climate pages
 app.include_router(todo_routes.router)
+app.include_router(private_chat_marks.router)  # Edits and reactions on private chat messages, sealed on the device
 app.include_router(beloved_routes.router)  # Beloved: the couple's page inside the private chat (one father, one mother)
 app.include_router(private_chat.router)  # Private chat: the parents' end-to-end encrypted conversation  # Lists: the hub's to-do lists for every member
 app.include_router(automation_routes.router)  # Automations and schedules
@@ -8887,7 +8889,16 @@ async def proxy_edit_talk_message(request: Request):
 async def proxy_delete_talk_message(request: Request):
     body = await request.json()
     payload = {"action": "delete_message", "token": body.get("token"), "message_id": body.get("message_id")}
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+    resp = await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+    if resp.status_code == 200 and private_chat.is_private(body.get("token")):
+        # A private message takes its sealed edit and reactions with it.
+        try:
+            deleted = json.loads(resp.body).get("status") == "SUCCESS"
+        except (TypeError, ValueError, AttributeError):
+            deleted = False
+        if deleted:
+            await asyncio.to_thread(private_chat_marks.forget_message, body.get("token"), body.get("message_id"))
+    return resp
 
 
 @app.get("/api/communication/talk/mentions")
