@@ -435,6 +435,90 @@ class Driver:
         """Record what the device reported about one entity (device class, unit, feature flags, ranges...)."""
         return self.hub.confirm_entity(entity, **info)
 
+    def gone_entities(self) -> dict[str, str]:
+        """``entity_id -> why`` for this entry's registry entities the integration says no longer exist.
+
+        Not "unavailable" (a device that is off or away comes back): only what the integration's own,
+        complete listing no longer has (Music Assistant dropped the player, the ESPHome node's firmware
+        no longer has the entity). The prune dry run lists them (``entity_gone``) for a person to review;
+        nothing is removed on this word alone. Empty until the driver has a complete listing.
+        """
+        return {}
+
+    # -- entities the integration itself creates ----------------------------------------------------
+    def registry_entity(self, domain: str, unique_id: str) -> EntityEntry | None:
+        """This entry's registry entity of ``domain`` with ``unique_id`` (case-insensitive), disabled ones too."""
+        want = str(unique_id).lower()
+        return next((e for e in self.hub.entities.values()
+                     if e.config_entry_id == self.entry.entry_id and e.domain == domain
+                     and str(e.unique_id).lower() == want), None)
+
+    def ensure_device(self, name: str, *, identifiers: list[list[str]] | None = None,
+                      connections: list[list[str]] | None = None, **info: Any) -> DeviceEntry:
+        """The device this entry's entities belong to, registering it the first time (HA's device_info).
+
+        A device of this entry sharing one of the ``identifiers`` or ``connections`` is reused, else
+        the entry's only device, else (as HA's device registry merges them) another integration's
+        device with one of those ``connections``, which this entry then joins. ``info`` (manufacturer,
+        model...) is confirmed as the device's own.
+        """
+        pairs = {tuple(map(str, p)) for p in (identifiers or []) + (connections or [])}
+        mine = [d for d in self.hub.devices.values() if self.entry.entry_id in d.config_entries]
+        dev = next((d for d in mine if pairs & {tuple(map(str, p)) for p in d.identifiers + d.connections}), None)
+        if dev is None and len(mine) == 1:
+            dev = mine[0]
+        conns = {tuple(map(str, p)) for p in connections or []}
+        if dev is None and conns:
+            dev = next((d for d in self.hub.devices.values()
+                        if conns & {tuple(map(str, p)) for p in d.connections}), None)
+            if dev is not None:
+                dev.config_entries.append(self.entry.entry_id)
+                self.hub._save("device", dev)
+                self.hub.bus.fire("device_registry_updated", {"action": "update", "device_id": dev.id})
+        if dev is None:
+            dev = DeviceEntry(id=uuid.uuid4().hex, name=name, config_entries=[self.entry.entry_id])
+            self.hub.devices[dev.id] = dev
+            self.hub._save("device", dev)
+            self.hub.bus.fire("device_registry_updated", {"action": "create", "device_id": dev.id})
+            self.log.info("%s: registered device %s", self.entry.title, name)
+        fields = {k: v for k, v in info.items() if v not in (None, "")}
+        if identifiers:
+            fields["identifiers"] = identifiers
+        if connections:
+            fields["connections"] = connections
+        if fields:
+            self.hub.confirm_device(dev.id, **fields)
+        return dev
+
+    def ensure_entity(self, domain: str, unique_id: str, name: str | None = None, *,
+                      device: DeviceEntry | None = None, disabled: bool = False, **info: Any) -> EntityEntry:
+        """This entry's entity with ``unique_id``, registering it when the registry has none.
+
+        HA's integrations create their entities when they set up; the hub's registry came from HA's,
+        so an entity HA lost (or one a device gained since) would otherwise never appear. A registry
+        entity that exists, disabled or not, is returned untouched: a person's choices win. ``name``
+        is the entity's own name (``None`` for the device's main entity); ``info`` holds registry info
+        fields (``original_device_class``, ``unit_of_measurement``...), confirmed as the device's own.
+        ``disabled`` registers it disabled by the integration (diagnostics HA also hides).
+        """
+        ent = self.registry_entity(domain, unique_id)
+        if ent is not None:
+            return ent
+        from services.homehub.flows import free_entity_id, slugify
+
+        dev_name = (device.display_name if device else "") or self.entry.title
+        base = slugify(f"{dev_name} {name}" if name else dev_name)
+        ent = EntityEntry(entity_id=free_entity_id(self.hub, domain, base, set()), platform=self.entry.domain,
+                          unique_id=unique_id, config_entry_id=self.entry.entry_id,
+                          device_id=device.id if device else None, has_entity_name=device is not None,
+                          disabled_by="integration" if disabled else None)
+        self.hub.entities[ent.entity_id] = ent
+        self.hub.confirm_entity(ent, original_name=name, **info)
+        self.hub._save("entity", ent)
+        self.hub.bus.fire("entity_registry_updated", {"action": "create", "entity_id": ent.entity_id})
+        self.log.info("%s: registered %s (%s)", self.entry.title, ent.entity_id, unique_id)
+        return ent
+
     @staticmethod
     def user_unit(entity: EntityEntry) -> str | None:
         """The display unit a person chose for a sensor (HA's ``options.sensor.unit_of_measurement``), if any.

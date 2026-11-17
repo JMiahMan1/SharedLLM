@@ -186,3 +186,50 @@ def test_a_connected_tv_teaches_the_hub_its_mac(tmp_path):
     entry.options["mac"] = "11:22:33:44:55:66"  # an operator's value is never overwritten
     assert media_common.remember_mac(drv, "10.0.0.7", str(arp)) is None
     assert entry.options["mac"] == "11:22:33:44:55:66"
+
+
+async def test_every_lg_tv_gets_a_remote_with_the_standard_keys():
+    hub, drv, _holder = build()
+    await drv.async_setup()
+    remotes = [e for e in hub.entities.values() if e.domain == "remote"]
+    assert len(remotes) == 1
+    remote = remotes[0]
+    media = hub.entities[ENT]
+    assert remote.unique_id == media.unique_id and remote.device_id == media.device_id
+    st = hub.states.get(remote.entity_id)
+    assert st.state == "on"
+    cmds = st.attributes["command_list"]
+    for key in ("up", "select", "back", "home", "volume_up", "mute", "channel_up", "power", "5", "NETFLIX"):
+        assert key in cmds
+    assert "input" not in cmds  # webOS inputs are sources
+    await drv.async_setup()  # a second setup registers nothing new
+    assert len([e for e in hub.entities.values() if e.domain == "remote"]) == 1
+
+
+async def test_lg_remote_send_command_maps_standard_and_native_names():
+    hub, drv, holder = build()
+    await drv.async_setup()
+    remote = next(e for e in hub.entities.values() if e.domain == "remote")
+    await drv.async_call(remote, "remote", "send_command",
+                         {"command": ["up", "select", "volume_down", "7", "RED", "exit"], "delay_secs": 0})
+    buttons = [c[1] for c in holder["c"].calls if c[0] == "button"]
+    assert buttons == ["UP", "ENTER", "VOLUMEDOWN", "7", "RED", "EXIT"]
+    await drv.async_call(remote, "remote", "send_command", {"command": "power_off"})
+    assert ("power_off",) in holder["c"].calls
+    with pytest.raises(HubError):
+        await drv.async_call(remote, "remote", "send_command", {"command": []})
+
+
+async def test_lg_remote_power_on_is_wake_on_lan(monkeypatch):
+    sent = []
+
+    async def fake_wol(macs, broadcast="255.255.255.255"):
+        sent.extend(macs)
+        return len(list(macs))
+    monkeypatch.setattr(mod, "wake_on_lan", fake_wol)
+    hub, drv, _holder = build(reachable=False, options={"mac": "02:00:00:00:01:09"})
+    await drv.async_setup()
+    remote = next(e for e in hub.entities.values() if e.domain == "remote")
+    assert hub.states.get(remote.entity_id).state == "off"
+    await drv.async_call(remote, "remote", "send_command", {"command": "power_on"})
+    assert "02:00:00:00:01:09" in sent

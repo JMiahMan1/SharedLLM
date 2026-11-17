@@ -15,8 +15,9 @@
 | ``PATCH /hub/areas/{id}``, ``DELETE /hub/areas/{id}`` | Rename or change one; remove one (its devices and entities are left with no area) |
 
 Admins only, like the rest of ``/hub/*``, except ``/hub/integrations/{domain}``: it answers with the
-entry's data, secrets included (the abuse.ch key telemetry looks apps up with), so only a service
-holding the stack's ``INTERNAL_SECRET`` may call it; an admin's own token is refused. See
+entry's data, secrets included when an account has any (telemetry reads the Common Sense Media entry
+with it), so only a service holding the stack's ``INTERNAL_SECRET`` may call it; an admin's own token
+is refused. See
 ``entries.py`` and ``pairing.py``.
 """
 from __future__ import annotations

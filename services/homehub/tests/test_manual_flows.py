@@ -96,6 +96,28 @@ async def test_lists_shopping_and_switch_as_x(rt):
         await add(rt, "switch_as_x", {"entity_id": "switch.example_plug", "target_domain": "fan"})
 
 
+async def test_a_relay_and_a_door_sensor_become_a_garage_door(rt):
+    rt.hub.entities["switch.example_opener"] = EntityEntry("switch.example_opener", "esphome", "u2")
+    rt.hub.entities["binary_sensor.example_door"] = EntityEntry("binary_sensor.example_door", "esphome", "u3")
+    fields = {f["key"]: f for f in manual_flows.fields_for(rt.hub, "switch_as_x")}
+    assert {"value": "binary_sensor.example_door", "label": "binary_sensor.example_door"} in \
+        fields["state_entity_id"]["options"]
+    assert {"value": "garage", "label": "Garage"} in fields["device_class"]["options"]
+    with pytest.raises(NeedsInput):  # cover options on a light
+        await add(rt, "switch_as_x", {"entity_id": "switch.example_opener", "target_domain": "light",
+                                      "momentary": "1"})
+    with pytest.raises(NeedsInput):  # a sensor that is not there
+        await add(rt, "switch_as_x", {"entity_id": "switch.example_opener", "target_domain": "cover",
+                                      "state_entity_id": "binary_sensor.nope"})
+    out = await add(rt, "switch_as_x", {"entity_id": "switch.example_opener", "target_domain": "cover",
+                                        "state_entity_id": "binary_sensor.example_door", "momentary": "1",
+                                        "device_class": "garage"}, name="Garage door")
+    assert rt.hub.config_entries[out["entry_id"]].options == {
+        "entity_id": "switch.example_opener", "target_domain": "cover", "invert": False,
+        "state_entity_id": "binary_sensor.example_door", "momentary": True, "device_class": "garage"}
+    assert rt.hub.entities[out["entities"][0]].domain == "cover"
+
+
 async def test_weather_from_a_zone_and_from_the_nws(rt):
     out = await add(rt, "open_meteo", {"zone": "zone.home"})
     assert rt.hub.entities[out["entities"][0]].unique_id == "zone.home"

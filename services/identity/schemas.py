@@ -61,6 +61,10 @@ class ResolvedCredentials(BaseModel):
     git_user: str | None = None
     git_token: str | None = None
     huggingface_token: str | None = None
+    #: The abuse.ch Auth-Key app vetting looks app file hashes up with: the
+    #: user's own, else the household default (the system default user's), with
+    #: no grant needed. credential_sources["abuse_ch"] says which.
+    malwarebazaar_key: str | None = None
     #: Branch patterns the workspace runtime must never push to directly
     #: (docs/INTEGRATIONS.md, GitHub > Protected Branches). Empty leaves the
     #: runtime's own default patterns in force.
@@ -75,6 +79,7 @@ class ResolvedCredentials(BaseModel):
     #   "own"     -> this user's own entry
     #   "granted" -> borrowed from the system default user under an explicit grant
     #   "shared"  -> the system default user's shared account (skylight only)
+    #   "household" -> the household default every user falls back to (abuse_ch)
     #   "absent"  -> not configured and not granted; the consumer must fail loudly
     credential_sources: dict = {}
     # Username whose credentials were borrowed, when a grant was used.
@@ -130,6 +135,7 @@ class UserCreate(BaseModel):
     mass_url: str | None = None
     mass_token: str | None = None
     huggingface_token: str | None = None
+    malwarebazaar_key: str | None = None
     skylight_url: str | None = None
     skylight_email: str | None = None
     skylight_pass: str | None = None
@@ -165,6 +171,8 @@ class UserUpdate(BaseModel):
     git_user: str | None = None
     git_token: str | None = None
     huggingface_token: str | None = None
+    #: abuse.ch Auth-Key; checked with abuse.ch before it is saved.
+    malwarebazaar_key: str | None = None
     #: Branch patterns Jarvis must never push to directly (GitHub > Protected
     #: Branches). Stored as a JSON array string; sent as a list.
     forbidden_branches: list[str] | None = None
@@ -211,7 +219,12 @@ CREDENTIAL_COLUMNS: dict[str, str] = {
     "git_token": "git_token_enc",
     "huggingface_token": "huggingface_token_enc",
     "skylight_pass": "skylight_pass_enc",
+    "malwarebazaar_key": "malwarebazaar_key_enc",
 }
+
+#: Credentials that are written and cleared but never read back, not even by
+#: the reveal eye: the UI only learns whether one is set and where it comes from.
+WRITE_ONLY_CREDENTIALS = frozenset({"malwarebazaar_key"})
 
 
 def forbidden_branch_list(raw: Any) -> list[str]:
@@ -286,6 +299,10 @@ class UserRead(BaseModel):
     #: Skylight for this user: "connected" (the household account is set up
     #: and they have it on), "off" (they turned it off) or "not_set_up".
     skylight_status: str | None = None
+    #: The abuse.ch Auth-Key app vetting uses for this user (GET /api/users/me):
+    #: "own", "household" (the household default, set on the system default
+    #: user) or "not_set_up". Never the key.
+    abuse_ch_status: str | None = None
     voice_fingerprint: str | None = None
     preferred_tts_voice: str | None = None
     calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)

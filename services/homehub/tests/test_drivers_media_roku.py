@@ -154,3 +154,22 @@ def test_ecp_key_names():
     assert ecp_key("VolumeUp") == "VolumeUp"
     assert ecp_key("power_off") == "PowerOff"
     assert ecp_key("Lit_a") == "Lit_a"
+
+
+async def test_roku_remote_lists_standard_keys_and_its_sources_as_activities():
+    from services.homehub.drivers.media_common import STANDARD_REMOTE_KEYS
+    from services.homehub.drivers.roku import COMMAND_LIST
+
+    hub, drv, http = build()
+    await drv.async_setup()
+    st = hub.states.get(REMOTE)
+    assert st.attributes["supported_features"] == 4
+    assert st.attributes["command_list"] == COMMAND_LIST
+    assert st.attributes["activity_list"] == hub.states.get(MP).attributes["source_list"]
+    assert st.attributes.get("current_activity")
+    missing = {k for k in STANDARD_REMOTE_KEYS if k not in COMMAND_LIST}
+    assert missing == {"input", "stop", *(str(d) for d in range(10))}
+    await drv.async_call(hub.entities[REMOTE], "remote", "send_command",
+                         {"command": ["exit", "play_pause", "guide", "mute"], "delay_secs": 0})
+    keys = [c["url"].rsplit("/", 1)[-1] for c in http.posted("/keypress/")]
+    assert keys == ["Back", "Play", "Info", "VolumeMute"]

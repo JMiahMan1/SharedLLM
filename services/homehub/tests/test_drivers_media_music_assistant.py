@@ -394,3 +394,24 @@ async def test_join_and_unjoin_group_players_through_set_members():
     assert c.sent[-1] == ("players/cmd/set_members", {"target_player": OFFICE, "player_ids_to_remove": [ROKU]})
     await hub.call_service("media_player", "unjoin", {"entity_id": "media_player.office_speaker"})
     assert c.sent[-1] == ("players/cmd/ungroup", {"player_id": OFFICE})
+
+
+async def test_gone_entities_are_only_players_music_assistant_no_longer_lists():
+    hub, drv, made = build()
+    assert drv.gone_entities() == {}  # nothing listed yet: nothing is known to be gone
+    await drv.async_setup()
+    gone = drv.gone_entities()
+    assert set(gone) == {"media_player.rv_tv_2"}
+    assert "upa4e88d93e22f" in gone["media_player.rv_tv_2"]
+    # A player MA lists but cannot reach is unavailable, not gone; so is its favourite button.
+    made["c"].players[1]["available"] = False
+    await drv.refresh()
+    assert hub.states.get("media_player.taylors_tv").state == "unavailable"
+    assert set(drv.gone_entities()) == {"media_player.rv_tv_2"}
+    # When MA drops a player, its button goes with it; with MA unreachable nothing is called gone.
+    made["c"].players = made["c"].players[1:]
+    await drv.refresh()
+    assert set(drv.gone_entities()) == {"media_player.rv_tv_2", "media_player.office_speaker",
+                                        "button.office_speaker_favorite_current_song"}
+    made["c"].connected = False
+    assert drv.gone_entities() == {}

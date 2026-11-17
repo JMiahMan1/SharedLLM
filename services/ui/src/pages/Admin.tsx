@@ -41,7 +41,7 @@ import toast from 'react-hot-toast';
 import SecretInput from '../components/ui/SecretInput';
 import SystemValueHint from '../components/ui/SystemValueHint';
 import AccountAuditPanel from '../components/admin/AccountAuditPanel';
-import { INTEGRATIONS, credentialPayload, inUse, missingFields, prefill, validateIntegrations, type Defaults } from '../lib/credentialForm';
+import { INTEGRATIONS, canReveal, credentialPayload, inUse, missingFields, prefill, validateIntegrations, type Defaults } from '../lib/credentialForm';
 import { api } from '../services/api';
 import { errorText } from '../lib/errorText';
 import type {
@@ -133,6 +133,7 @@ type UserFormState = {
   audiobookshelf_api_key: string;
   mass_url: string;
   mass_token: string;
+  malwarebazaar_key: string;
 };
 
 const emptyUserForm: UserFormState = {
@@ -157,6 +158,7 @@ const emptyUserForm: UserFormState = {
   audiobookshelf_api_key: '',
   mass_url: '',
   mass_token: '',
+  malwarebazaar_key: '',
 };
 
 const toUserForm = (user?: UserProfile | null): UserFormState => ({
@@ -181,6 +183,7 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   audiobookshelf_api_key: String(user?.audiobookshelf_api_key ?? ''),
   mass_url: String(user?.mass_url ?? ''),
   mass_token: '',
+  malwarebazaar_key: '',
 });
 
 const NO_SERVICE_DEFAULTS = { urls: {} as Record<string, string | null>, source: {} as Record<string, string> };
@@ -408,7 +411,8 @@ const Admin = () => {
       setIsUserModalOpen(false);
       toast.success('User saved');
     },
-    onError: (error: Error) => toast.error(error.message || 'Failed to save user'),
+    // The server's own words: a refused abuse.ch key says why it was not saved.
+    onError: (error: unknown) => toast.error(errorText(error, 'Failed to save user')),
   });
 
   const deleteUserMutation = useMutation({
@@ -2141,7 +2145,7 @@ const Admin = () => {
                     {configured && (
                       <button
                         type="button"
-                        className={`rounded-full px-2 py-0.5 text-[10px] normal-case tracking-normal ${removing ? 'bg-white/10 text-slate-200' : 'text-rose-300 hover:bg-rose-500/15'}`}
+                        className={`rounded-full px-2 py-0.5 pointer-coarse:min-h-11 text-[10px] normal-case tracking-normal ${removing ? 'bg-white/10 text-slate-200' : 'text-rose-300 hover:bg-rose-500/15'}`}
                         onClick={() =>
                           setClearIntegrations((current) =>
                             current.includes(integration.id) ? current.filter((id) => id !== integration.id) : [...current, integration.id],
@@ -2164,7 +2168,7 @@ const Admin = () => {
                               label={field.label}
                               value={String(userForm[field.key as keyof UserFormState] ?? '')}
                               saved={saved.has(field.key)}
-                              onReveal={editingUser ? () => api.revealCredential(editingUser.username, field.key) : undefined}
+                              onReveal={editingUser && canReveal(field.key) ? () => api.revealCredential(editingUser.username, field.key) : undefined}
                               onChange={(value) => setUserForm((current) => ({ ...current, [field.key]: value }))}
                             />
                           ) : (
@@ -2195,6 +2199,14 @@ const Admin = () => {
                       ))}
                     </div>
                   )}
+                  {integration.householdDefault && !removing && (
+                    <p className="mt-2 text-[11px] text-slate-300" data-testid={`household-default-${integration.id}`}>
+                      {editingUser?.is_system_default
+                        ? 'This is the household key: everyone who has not set their own uses it.'
+                        : 'Leave it blank to use the household key (set on the default user).'}
+                    </p>
+                  )}
+                  {integration.help && !removing && <p className="mt-1 text-[11px] text-slate-500">{integration.help}</p>}
                   {missing.length > 0 && <p className="mt-2 text-[11px] text-amber-300">Still needed: {missing.join(', ')}</p>}
                 </fieldset>
               );

@@ -149,6 +149,8 @@ def test_user_with_nothing_configured_gets_nothing(client: TestClient):
         "music_assistant": "absent",
         "audiobookshelf": "absent",
         "nextcloud": "absent",
+        # The household abuse.ch key needs no grant, but this household has none.
+        "abuse_ch": "absent",
     }, data["credential_sources"]
     # Skylight is one shared system account, so it is the documented exception.
     assert data["credential_sources"]["skylight"] == "shared"

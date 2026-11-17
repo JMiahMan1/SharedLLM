@@ -15,6 +15,8 @@ export interface CredentialField {
   key: string;
   label: string;
   secret?: boolean;
+  /** A secret the server never shows again once saved (no reveal eye): only whether it is set. */
+  writeOnly?: boolean;
 }
 
 export interface Integration {
@@ -23,6 +25,13 @@ export interface Integration {
   fields: CredentialField[];
   /** Ways to be complete: any one list fully present is enough. */
   complete: string[][];
+  /** One line under the form: what it is for and what leaves the house. */
+  help?: string;
+  /**
+   * The default user's login is the household default: everyone who has not
+   * set their own uses it, with no admin grant (unlike the shared services).
+   */
+  householdDefault?: boolean;
 }
 
 export const INTEGRATIONS: Integration[] = [
@@ -88,7 +97,30 @@ export const INTEGRATIONS: Integration[] = [
     ],
     complete: [['mass_url', 'mass_token']],
   },
+  {
+    id: 'abuse_ch',
+    name: 'abuse.ch',
+    fields: [{ key: 'malwarebazaar_key', label: 'abuse.ch Auth-Key', secret: true, writeOnly: true }],
+    complete: [['malwarebazaar_key']],
+    help: "Free at auth.abuse.ch. Only the fingerprints (SHA-256) of app files on children's devices are sent to abuse.ch.",
+    householdDefault: true,
+  },
 ];
+
+/** Where the abuse.ch key a person's app checks use comes from (identity's abuse_ch_status). */
+export type HouseholdKeyStatus = 'own' | 'household' | 'not_set_up';
+
+/** The one line an abuse.ch card shows for its status. */
+export function householdKeyLine(status: HouseholdKeyStatus | null | undefined, isSystemDefault = false): string {
+  if (status === 'own') return isSystemDefault ? 'Household key set' : 'Using your own key';
+  if (status === 'household') return 'Using the household key';
+  return isSystemDefault ? 'No household key yet' : 'Not set up';
+}
+
+/** Whether a field's saved value may be fetched for the reveal eye. */
+export function canReveal(key: string): boolean {
+  return !INTEGRATIONS.some((i) => i.fields.some((f) => f.key === key && f.writeOnly));
+}
 
 const SECRET_KEYS = new Set(INTEGRATIONS.flatMap((i) => i.fields.filter((f) => f.secret).map((f) => f.key)));
 

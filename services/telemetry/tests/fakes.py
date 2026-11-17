@@ -26,6 +26,10 @@ class FakeRedis:
         self.hashes.pop(key, None)
         return 1
 
+    async def expire(self, key, seconds):
+        """Expiry is not modelled; the key stays."""
+        return any(key in store for store in (self.strings, self.sets, self.zsets, self.lists, self.hashes))
+
     async def sadd(self, key, *members):
         self.sets.setdefault(key, set()).update(members)
         return len(members)

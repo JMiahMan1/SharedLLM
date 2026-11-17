@@ -12,6 +12,16 @@
 # copy that could catch a half-written page). The copies are tarred together
 # and old archives are pruned.
 #
+# Some data is files, not databases, and is just as irreplaceable: the private
+# chat's folder holds each chat's wrapped key record, and without it the whole
+# encrypted history can never be read again. Those folders (BACKUP_FOLDERS,
+# relative to ./data) are copied into the archive as they are. They hold only
+# ciphertext and key records that are useless without the parents' password.
+#
+# This file must stay executable: it lost its mode bit on 2026-11-12 and cron
+# answered "Permission denied" every night for weeks while nothing noticed.
+# tests/unit/test_backup_script.py checks the bit.
+#
 # Run it by hand:
 #   ./scripts/backup_databases.sh
 #
@@ -22,12 +32,14 @@
 #   BACKUP_DIR    where the archives go (default: <root>/data/backups)
 #   BACKUP_KEEP   how many archives to keep (default: 14)
 #   BACKUP_ROOT   the SharedLLM checkout (default: the script's parent directory)
+#   BACKUP_FOLDERS  space-separated folders under ./data copied whole (default: private_chat)
 
 set -euo pipefail
 
 ROOT="${BACKUP_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DEST="${BACKUP_DIR:-$ROOT/data/backups}"
 KEEP="${BACKUP_KEEP:-14}"
+FOLDERS="${BACKUP_FOLDERS-private_chat}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 if ! command -v sqlite3 >/dev/null 2>&1; then
@@ -70,10 +82,21 @@ for db in "${DBS[@]}"; do
   fi
 done
 
+folders=0
+for folder in $FOLDERS; do
+  src="$ROOT/data/$folder"
+  # A folder that does not exist yet (a fresh install) is nothing to back up.
+  [ -d "$src" ] || continue
+  mkdir -p "$STAGE/folders"
+  cp -a "$src" "$STAGE/folders/$folder"
+  folders=$((folders + 1))
+  echo "backed up data/$folder"
+done
+
 ARCHIVE="$DEST/sharedllm-$STAMP.tar.gz"
 tar -czf "$ARCHIVE" -C "$STAGE" .
 
-echo "wrote $ARCHIVE ($count database(s), $(du -h "$ARCHIVE" | cut -f1))"
+echo "wrote $ARCHIVE ($count database(s), $folders folder(s), $(du -h "$ARCHIVE" | cut -f1))"
 
 # Keep the newest $KEEP archives.
 pruned=0

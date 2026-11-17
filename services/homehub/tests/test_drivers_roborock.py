@@ -223,8 +223,9 @@ async def test_states_published_like_ha():
     assert s("number.roborock_s5_max_volume") == "60"
     assert s("switch.roborock_s5_max_do_not_disturb") == "on"
     assert s("time.roborock_s5_max_do_not_disturb_begin") == "22:00:00"
-    # A map picture is drawn when someone looks at it; until then its state (when it was drawn) is unknown.
-    assert s("image.roborock_s5_max_map_0") == "unknown"
+    # The current map is drawn once the vacuum answers (HA does too): its state is when it was drawn.
+    assert s("image.roborock_s5_max_map_0").startswith("20")
+    assert s("image.roborock_s5_max_upstairs") == "unknown"  # another saved map is never drawn by switching
     assert v.attributes["segments"] == [{"id": 16, "name": "Kitchen"}, {"id": 17, "name": "Hallway"}]
 
 
@@ -301,8 +302,8 @@ async def test_the_current_map_is_served_as_an_image_with_a_token():
     assert (body, ctype) == (PNG, "image/png")
     assert hub.states.get(ent.entity_id).state.startswith("20")  # when it was drawn
     await driver.async_image(ent)
-    assert props.map_content.refreshes == 1  # a second look within a minute reuses the picture
-    driver._map_drawn[ent.entity_id] = (0.0, driver._map_drawn[ent.entity_id][1])
+    assert props.map_content.refreshes == 1  # drawn at setup; looks within a minute reuse the picture
+    driver._map_drawn[LDUID] = (-1e9, driver._map_drawn[LDUID][1])
     await driver.async_image(ent)
     assert props.map_content.refreshes == 2
 
@@ -325,6 +326,7 @@ async def test_a_map_the_vacuum_does_not_send_is_unavailable():
 
     hub, driver, props, _ = await setup()
     props.map_content.fail = True
+    driver._map_drawn[LDUID] = (-1e9, driver._map_drawn[LDUID][1])  # the picture from setup is old
     with pytest.raises(DeviceUnavailable, match="did not send its map"):
         await driver.async_image(hub.entities["image.roborock_s5_max_map_0"])
 
@@ -421,3 +423,77 @@ async def test_unload_closes_manager():
     _hub, driver, _props, manager = await setup()
     await driver.async_unload()
     assert manager.closed
+
+
+ROOMS_MAP = SimpleNamespace(
+    rooms={16: SimpleNamespace(number=16, name=None), 18: SimpleNamespace(number=18, name="Den")},
+    vacuum_room=18, vacuum_room_name=None)
+
+
+async def test_an_image_with_no_map_name_shows_the_current_map():
+    hub, driver, props, _ = await setup()
+    from services.homehub.core import EntityEntry
+
+    e = EntityEntry(entity_id="image.roborock_s5_max", platform="roborock", unique_id=f"{LDUID}_map_",
+                    config_entry_id=driver.entry.entry_id, device_id="dev1")
+    hub.entities[e.entity_id] = e
+    driver.publish_device(LDUID)
+    assert hub.states.get(e.entity_id).state.startswith("20")
+    assert await driver.async_image(e) == (PNG, "image/png")
+    props.maps.map_info, props.maps.current_map_info = [], None  # a vacuum that lists no saved maps
+    assert (await driver.async_image(e))[0] == PNG
+
+
+async def test_a_failed_first_drawing_is_not_fatal_and_is_retried_later(caplog):
+    props = make_props()
+    props.map_content.fail = True
+    hub, driver, props, _ = await setup(props)
+    assert hub.states.get("vacuum.roborock_s5_max").state == "docked"
+    assert hub.states.get("image.roborock_s5_max_map_0").state == "unknown"
+    await driver.async_poll()
+    assert props.map_content.refreshes == 1  # not asked again within MAP_REFRESH_S
+    props.map_content.fail = False
+    driver._map_tried[LDUID] = -1e9
+    await driver.async_poll()
+    assert hub.states.get("image.roborock_s5_max_map_0").state.startswith("20")
+
+
+async def test_the_map_is_redrawn_while_cleaning_but_not_while_docked():
+    _hub, driver, props, _ = await setup()
+    assert props.map_content.refreshes == 1
+    driver._map_tried[LDUID] = -1e9
+    await driver.async_poll()
+    assert props.map_content.refreshes == 1  # docked: the picture does not change
+    props.status.state_name = "segment_cleaning"
+    await driver.async_poll()
+    assert props.map_content.refreshes == 2
+    await driver.async_poll()
+    assert props.map_content.refreshes == 2  # at most every MAP_REFRESH_S
+    driver._map_tried[LDUID] = -1e9
+    await driver.async_poll()
+    assert props.map_content.refreshes == 3
+
+
+async def test_rooms_fall_back_to_the_parsed_map_and_the_robot_is_placed_in_one(caplog):
+    props = make_props()
+    props.rooms.rooms = []
+    props.rooms.fail = True
+    props.map_content.map_data = ROOMS_MAP
+    with caplog.at_level("WARNING"):
+        hub, _driver, props, _ = await setup(props)
+    assert "did not send its room mapping" in caplog.text
+    v = hub.states.get("vacuum.roborock_s5_max")
+    assert v.attributes["segments"] == [{"id": 16, "name": "Room 16"}, {"id": 18, "name": "Den"}]
+    room = hub.states.get("sensor.roborock_s5_max_current_room")
+    assert room.state == "Den"
+    assert room.attributes["device_class"] == "enum" and room.attributes["options"] == ["Room 16", "Den"]
+    await hub.call_service("vacuum", "send_command", {"entity_id": "vacuum.roborock_s5_max",
+                                                      "command": "app_segment_clean", "params": [18]})
+    assert props.command.sent[-1] == ("app_segment_clean", [18])
+
+
+async def test_the_current_room_uses_the_apps_room_names():
+    props = make_props()
+    props.map_content.map_data = SimpleNamespace(rooms={}, vacuum_room=17, vacuum_room_name=None)
+    hub, *_ = await setup(props)
+    assert hub.states.get("sensor.roborock_s5_max_current_room").state == "Hallway"

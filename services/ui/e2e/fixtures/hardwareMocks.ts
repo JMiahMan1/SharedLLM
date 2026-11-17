@@ -307,10 +307,8 @@ export const MOVED_FINDING = {
 export const FLOWS = [
   { domain: 'roku', label: 'Roku', kind: 'local', fields: [{ key: 'host', label: 'Address', type: 'text' }] },
   { domain: 'roborock', label: 'Roborock account', kind: 'cloud', fields: [{ key: 'email', label: 'Email', type: 'text' }] },
-  // App vetting's outside sources (docs/APP_VETTING.md), as services/homehub/manual_flows.py lists them.
-  { domain: 'malwarebazaar', label: 'abuse.ch MalwareBazaar (app malware check)', kind: 'cloud', single: true,
-    configured: false, fields: [{ key: 'auth_key', label: 'Auth-Key', type: 'password',
-      help: "Free at auth.abuse.ch. Only the fingerprints (SHA-256) of app files on children's devices are sent to abuse.ch." }] },
+  // App vetting's hub account (docs/APP_VETTING.md), as services/homehub/manual_flows.py lists it. The abuse.ch
+  // key is not here: it is in Accounts & Integrations.
   { domain: 'common_sense_media', label: 'Common Sense Media (app age ratings)', kind: 'cloud', single: true,
     configured: false, fields: [] },
   { domain: 'switch_as_x', label: 'Switch as another device', kind: 'helper', fields: [

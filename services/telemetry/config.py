@@ -16,7 +16,7 @@ AUTOMATION_SVC_URL = (
     os.getenv("AUTOMATION_SVC_URL") or _net_url("AUTOMATION", "http://automation:11437")
 ).rstrip("/")
 
-#: The device hub: the app checks' accounts are its integrations (GET /hub/integrations/{domain}).
+#: The device hub: the Common Sense Media app check is its integration (GET /hub/integrations/{domain}).
 HOMEHUB_URL = os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123").rstrip("/")
 
 GEO_SVC = (GEO_SVC_URL or "").rstrip("/")
@@ -80,9 +80,10 @@ COMMON_SENSE_MIN_INTERVAL_S = float(os.getenv("COMMON_SENSE_MIN_INTERVAL_S", "20
 COMMON_SENSE_TTL_DAYS = int(os.getenv("COMMON_SENSE_TTL_DAYS", "30"))
 COMMON_SENSE_BACKOFF_BASE_S = int(os.getenv("COMMON_SENSE_BACKOFF_BASE_S", "900"))
 COMMON_SENSE_BACKOFF_MAX_S = int(os.getenv("COMMON_SENSE_BACKOFF_MAX_S", str(24 * 3600)))
-#: abuse.ch MalwareBazaar lookups of app file hashes (the Auth-Key is the hub's
-#: abuse.ch MalwareBazaar integration): spacing, how long a "not a known
-#: sample" answer is trusted, and the backoff after a failure.
+#: abuse.ch MalwareBazaar lookups of app file hashes (the Auth-Key is the
+#: device user's own abuse.ch key in Accounts & Integrations, else the household
+#: default): spacing, how long a "not a known sample" answer is trusted, and the
+#: backoff after a failure (a refused key backs off on its own, per key).
 MALWAREBAZAAR_MIN_INTERVAL_S = float(os.getenv("MALWAREBAZAAR_MIN_INTERVAL_S", "5"))
 MALWAREBAZAAR_TTL_DAYS = int(os.getenv("MALWAREBAZAAR_TTL_DAYS", "7"))
 MALWAREBAZAAR_BACKOFF_BASE_S = int(os.getenv("MALWAREBAZAAR_BACKOFF_BASE_S", "600"))

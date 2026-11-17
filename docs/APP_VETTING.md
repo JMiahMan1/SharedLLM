@@ -142,17 +142,44 @@ fingerprint of a public file, goes out. At most one lookup per
 `MALWAREBAZAAR_BACKOFF_MAX_S` (24 h); "not a known sample" is trusted for
 `MALWAREBAZAAR_TTL_DAYS` (7), a hit is kept.
 
-The key is the Auth-Key of the hub's **abuse.ch MalwareBazaar (app malware
-check)** integration (free at auth.abuse.ch; added under Devices > Add & fix >
-Add by address > Cloud accounts). Adding it makes one real lookup first, of the
-empty file's SHA-256 (`malwarebazaar.KEY_CHECK_SHA256`, so nothing about the
-family goes out), and a key abuse.ch refuses is not saved. It is replaced the
-same way, checked again, under Devices > Setup > Integrations > Reconfigure. It
-is a secret: the hub never sends it back to the UI (only that it is set), it is
-never logged and never in any card. With no key nothing is asked and every
-app's `malware_check` says `not_set_up` (naming where to add it); a refused
-key says so (`error`) until the key changes. A hit is the highest
-severity and notifies every parent at severe.
+The key is an **abuse.ch Auth-Key** (free at auth.abuse.ch), a per-person
+login in Accounts & Integrations (identity, `User.malwarebazaar_key_enc`,
+encrypted like the other secrets):
+
+- **The household default applies to everyone.** The default user's key is
+  the household key: every person who has not set their own uses it, with no
+  admin grant (unlike the shared Home Assistant or Nextcloud logins). An admin
+  sets it in Admin > Users & Devices by editing the default user; signed in as
+  the default user it is also in Settings > Accounts & Integrations.
+- **A person's own key wins.** Anyone can add their own in Settings > Accounts
+  & Integrations (the abuse.ch card); removing it goes back to the household key.
+- The card says only which key applies ("Using the household key", "Using your
+  own key", "Not set up"; identity's `abuse_ch_status` on `GET /api/users/me`).
+  The key itself is never sent back to a browser, not even by the reveal eye,
+  and never logged; only `POST /api/resolve` (internal secret) carries it, as
+  `malwarebazaar_key` with `credential_sources["abuse_ch"]` = `own`,
+  `household` or `absent`.
+- Saving a key makes one real lookup first, of the empty file's SHA-256
+  (`malwarebazaar.KEY_CHECK_SHA256`, so nothing about the family goes out). A
+  key abuse.ch refuses is not saved (400, saying so); abuse.ch not answering is
+  an error too (502), never a silent save (`services/identity/abuse_ch.py`).
+
+**Whose key a lookup uses.** Telemetry notes who reported each hash. For each
+round it resolves the key of the people holding the hash through identity
+(`POST /api/resolve` with `rag_user`, cached a minute per person): their own,
+else the household's. A hash several people's devices report is looked up
+once, with the first holder (by username) whose key is usable, and that answer
+serves everyone. A hash nobody holding it can look up waits 10 minutes and
+the next one gets its turn. While identity cannot be asked nothing is looked
+up (logged once until it answers).
+
+With no key nothing is asked and every app's `malware_check` says
+`not_set_up` (naming both places to add one). A key abuse.ch refuses backs off
+on its own (the same doubling as a failure), so other people's keys keep
+working; the card says whose key was refused ("this person's own" or "the
+household's") and where to replace it, never the key, and a changed key is
+used at once. A failure to reach abuse.ch pauses all lookups with the backoff
+above. A hit is the highest severity and notifies every parent at severe.
 
 `malware_check.state`: `malware`, `not_known`, `checking`, `not_set_up`,
 `error`, `skipped` (too large, unreadable), `no_hash` (the device's Jarvis app
@@ -163,25 +190,32 @@ is older than the check).
 | Setting | Default | Where | What |
 |---|---|---|---|
 | Common Sense Media (app age ratings) | set up on existing households (see below) | homehub integration, Devices > Add & fix > Add by address > Cloud accounts | Common Sense Media lookups on while it exists |
-| abuse.ch MalwareBazaar (app malware check) | not set up | homehub integration (same place), its Auth-Key a secret | abuse.ch Auth-Key for the malware check |
+| abuse.ch Auth-Key | not set up | identity, per person: the default user's is the household default (Admin > Users & Devices), a person's own in Settings > Accounts & Integrations | the malware check's key |
 | `COMMON_SENSE_MIN_INTERVAL_S`, `_TTL_DAYS`, `_BACKOFF_BASE_S`, `_BACKOFF_MAX_S` | 20, 30, 900, 86400 | telemetry environment, read at start | Common Sense pacing |
 | `MALWAREBAZAAR_MIN_INTERVAL_S`, `_TTL_DAYS`, `_BACKOFF_BASE_S`, `_BACKOFF_MAX_S` | 5, 7, 600, 86400 | telemetry environment, read at start | MalwareBazaar pacing |
 
-Telemetry reads the two integrations from the hub in its background loop only,
-for each round of lookups (`GET /hub/integrations/{domain}` with the internal
-secret, cached a minute, so a change applies within a minute). That route
-answers only the stack's `INTERNAL_SECRET`: an admin's own token is refused,
-so the key never reaches a browser. While the hub cannot be asked both checks
-count as not set up for that pass (logged once until it answers again).
+Telemetry reads the Common Sense Media integration from the hub in its
+background loop only, for each round of lookups (`GET /hub/integrations/{domain}`
+with the internal secret, cached a minute, so a change applies within a
+minute). That route answers only the stack's `INTERNAL_SECRET`: an admin's own
+token is refused. While the hub cannot be asked the check counts as not set up
+for that pass (logged once until it answers again).
 
-They were identity global settings (`app_vetting_common_sense_enabled`,
-`malwarebazaar_auth_key`) edited in an Admin box. On its first start after the
-change the hub moves them once (`services/homehub/app_checks_migration.py`,
-marker `app_checks_moved` in its store): it creates the Common Sense Media
-entry unless the old switch was "false", creates the MalwareBazaar entry with
-the stored key when there was one, and empties both settings, which identity
-deletes on its next start. Until identity answers the hub keeps trying, and an
-entry an admin removes afterwards stays removed.
+Where they used to be:
+
+- Both were identity global settings (`app_vetting_common_sense_enabled`,
+  `malwarebazaar_auth_key`) edited in an Admin box. The hub moves the Common
+  Sense switch once (`services/homehub/app_checks_migration.py`, marker
+  `app_checks_moved`): it creates the Common Sense Media entry unless the old
+  switch was "false", and empties the setting. Identity moves an old
+  `malwarebazaar_auth_key` itself at start: it becomes the default user's key
+  when that user has none, and the setting is emptied and deleted.
+- Then the abuse.ch key was a hub integration (`malwarebazaar`). The hub moves
+  it once (`services/homehub/abuse_ch_move.py`, marker `abuse_ch_moved`): the
+  entry's key goes to the default user through identity's internal
+  `POST /api/internal/household-abuse-ch-key`, which never overwrites a key
+  already set, and the entry is removed. Until identity answers the entry
+  stays and the hub keeps trying; the key is never logged.
 
 ## The local review
 

@@ -55,6 +55,28 @@ class F:
 #: HA ``RemoteEntityFeature.ACTIVITY``.
 REMOTE_ACTIVITY = 4
 
+#: The key names every TV remote takes in ``remote.send_command``, whatever its protocol, so one
+#: remote control in the app works for any TV. A driver publishes the ones its protocol really has in
+#: the remote's ``command_list`` (:func:`remote_command_list`); native names (``KEY_*``, ``KEYCODE_*``,
+#: ECP and LG button names) keep working beside them.
+STANDARD_REMOTE_KEYS: tuple[str, ...] = (
+    "up", "down", "left", "right", "select", "back", "home", "menu", "info", "guide", "exit",
+    "volume_up", "volume_down", "mute", "channel_up", "channel_down", "power", "power_on", "power_off",
+    "input", "play", "pause", "play_pause", "stop", "next", "previous", "fast_forward", "rewind",
+    *(str(d) for d in range(10)),
+)
+
+
+def supported_standard_keys(supports: Callable[[str], bool]) -> list[str]:
+    """The standard key names a driver's protocol has, in :data:`STANDARD_REMOTE_KEYS` order."""
+    return [k for k in STANDARD_REMOTE_KEYS if supports(k)]
+
+
+def remote_command_list(supports: Callable[[str], bool], extras: Iterable[str] = ()) -> list[str]:
+    """A remote's ``command_list``: its standard keys first, then its own extra names, sorted."""
+    standard = supported_standard_keys(supports)
+    return standard + sorted({str(e) for e in extras} - set(standard))
+
 #: HA media_content_type -> the MIME type a renderer needs, when the caller gave a generic type.
 GENERIC_MIME = {
     "music": "audio/mpeg", "audio": "audio/mpeg", "podcast": "audio/mpeg", "track": "audio/mpeg",
