@@ -60,6 +60,25 @@ The plan id is a hash of the cutoff, the ``drop_history`` flag and every item
 with its reason. Apply rebuilds the plan with the reviewed cutoff and refuses
 (409) when the id differs, so what is removed is exactly what was reviewed.
 
+Entities an integration says are gone
+-------------------------------------
+A loaded driver may list registry entities its own complete listing no longer
+has (``Driver.gone_entities``: Music Assistant no longer has the player).
+They are candidates at once, reason ``entity_gone`` with the driver's ``why``,
+without waiting for the cutoff, but every protection above still applies (an
+automation naming one keeps it). "Unavailable" is never "gone": a TV that is
+off or a phone that is away is not listed.
+
+Undo
+----
+Before anything is removed, apply saves the registry rows of every entity and
+device in the plan (``prune_undo`` in the store, the last ``UNDO_KEEP``
+applies). ``restore_plan`` (``POST /hub/prune/restore``) puts back every row
+whose id is still free and whose config entry still exists, then reloads those
+entries. History is kept unless ``drop_history`` was asked for, so a restored
+entity has its past. Removed config entries cannot be restored this way (a
+HomeKit pairing released on the device stays released); add the device again.
+
 This module writes only to the store and statistics database it is given. The
 HA config directory is opened read-only for timestamps and never written.
 """
@@ -74,7 +93,7 @@ import re
 import sqlite3
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -95,6 +114,9 @@ PROTECTED_ENTITY_DOMAINS = {"person", "zone", "scene", "automation", "script",
 PROTECTED_ENTRY_DOMAINS = {"scheduler"}
 #: Statistics origins that count as activity (see the module docstring).
 STAT_ORIGINS_COUNTED = (1, 2)
+#: How many applied plans keep their registry rows for ``restore_plan``.
+UNDO_KEEP = 10
+UNDO_KEY = "prune_undo"
 
 _ENTITY_TOKEN = re.compile(r"\b([a-z_][a-z0-9_]*\.[a-z0-9_]+)\b")
 _LOCK = asyncio.Lock()
@@ -136,6 +158,8 @@ class Snapshot:
     protecting: list[tuple[str, Any]] = field(default_factory=list)
     registry_ids: dict[str, str] = field(default_factory=dict)
     has_driver: Any = None
+    #: ``entity_id -> why`` for entities a loaded driver says no longer exist (``Driver.gone_entities``).
+    gone: dict[str, str] = field(default_factory=dict)
 
     def driver_exists(self, domain: str) -> bool:
         if self.has_driver is not None:
@@ -319,12 +343,24 @@ def snapshot_from_runtime(runtime: Any, import_dir: str | None = None) -> Snapsh
         items = _items_from_store(stored, store.get_kv, hub.entities, states, store.get_kv("automation_remap"))
         scenes = []
     protecting = [*scenes, *(("scene", d) for d in stored["scene"]), *_protecting_from_kv(store.get_kv)]
+    gone: dict[str, str] = {}
+    for entry_id, driver in hub.drivers.items():
+        entry = hub.config_entries.get(entry_id)
+        if entry is None or entry.state != "loaded":
+            continue
+        reporter = getattr(driver, "gone_entities", None)
+        if reporter is None:
+            continue
+        try:
+            gone.update(reporter() or {})
+        except Exception:  # a driver's opinion is optional; the dry run must still answer
+            log.exception("%s could not say which of its entities are gone", entry.title)
     return Snapshot(
         entries=dict(hub.config_entries), devices=dict(hub.devices), entities=dict(hub.entities), states=states,
         loaded_entries={eid for eid in hub.drivers if (e := hub.config_entries.get(eid)) is not None
                         and e.state == "loaded"},
         history_last=history_last, stats_last=stats_last, registry_times=ha_registry_times(import_dir),
-        items=items, protecting=protecting, registry_ids=dict(hub.entity_registry_ids or {}),
+        items=items, protecting=protecting, registry_ids=dict(hub.entity_registry_ids or {}), gone=gone,
     )
 
 
@@ -441,7 +477,8 @@ def build_plan(snap: Snapshot, cutoff: float, *, drop_history: bool = False) -> 
         st = snap.states.get(e.entity_id)
         if e.domain in PROTECTED_ENTITY_DOMAINS:
             prot_e.setdefault(e.entity_id, f"{e.domain} entities are never pruned here")
-        elif not e.disabled_by and e.config_entry_id in snap.loaded_entries and _real(st):
+        elif not e.disabled_by and e.config_entry_id in snap.loaded_entries and _real(st) \
+                and e.entity_id not in snap.gone:
             prot_e.setdefault(e.entity_id, "a loaded driver publishes it")
     for x in snap.entries.values():
         if x.source == "ignore":
@@ -452,7 +489,13 @@ def build_plan(snap: Snapshot, cutoff: float, *, drop_history: bool = False) -> 
     # Raw candidates --------------------------------------------------------------------------
     raw_e: dict[str, str] = {}
     for e in snap.entities.values():
-        if e.domain in PROTECTED_ENTITY_DOMAINS or not stale(act_e[e.entity_id]):
+        if e.domain in PROTECTED_ENTITY_DOMAINS:
+            continue
+        if e.entity_id in snap.gone and e.config_entry_id in snap.loaded_entries:
+            # The integration's own complete listing no longer has it: no waiting for the cutoff.
+            raw_e[e.entity_id] = "entity_gone"
+            continue
+        if not stale(act_e[e.entity_id]):
             continue
         orphan = (not e.device_id or e.device_id not in snap.devices) and \
                  (not e.config_entry_id or e.config_entry_id not in snap.entries)
@@ -571,9 +614,12 @@ def build_plan(snap: Snapshot, cutoff: float, *, drop_history: bool = False) -> 
             reason = "with_device"
         else:
             reason = raw_e[eid]
-        plan_items.append({"kind": "entity", "id": eid, "name": e.name or e.original_name or eid,
-                           "platform": e.platform, "device_id": e.device_id, "config_entry_id": e.config_entry_id,
-                           "disabled_by": e.disabled_by, "reason": reason, "last_activity": _iso(act_e[eid])})
+        item = {"kind": "entity", "id": eid, "name": e.name or e.original_name or eid,
+                "platform": e.platform, "device_id": e.device_id, "config_entry_id": e.config_entry_id,
+                "disabled_by": e.disabled_by, "reason": reason, "last_activity": _iso(act_e[eid])}
+        if reason == "entity_gone":
+            item["why"] = snap.gone[eid]
+        plan_items.append(item)
     for it, reason in rm_items:
         plan_items.append({"kind": it.kind, "id": it.id, "name": it.alias, "entity_id": it.entity_id,
                            "reason": reason, "last_activity": _iso(it.last_triggered)})
@@ -644,6 +690,7 @@ async def apply_plan(runtime: Any, *, plan_id: str, cutoff: float, drop_history:
         by_kind: dict[str, list[dict[str, Any]]] = {}
         for p in plan["items"]:
             by_kind.setdefault(p["kind"], []).append(p)
+        _save_undo(runtime, plan_id, by_kind)
         result: dict[str, Any] = {"status": "applied", "plan_id": plan_id, "removed": {}, "warnings": [],
                                   "already_gone": []}
         removed_entities: list[str] = []
@@ -718,5 +765,78 @@ async def apply_plan(runtime: Any, *, plan_id: str, cutoff: float, drop_history:
                 _delete_rows(stats._exec, "DELETE FROM statistics_meta WHERE statistic_id IN ({marks})", keys)
                 result["statistics_rows_deleted"] = n
         result["counts"] = {k: len(v) for k, v in result["removed"].items()}
+        result["undo"] = plan_id
         log.info("prune %s applied: %s", plan_id, result["counts"])
+        return result
+
+
+def _save_undo(runtime: Any, plan_id: str, by_kind: dict[str, list[dict[str, Any]]]) -> None:
+    """Keep the registry rows a plan is about to remove, so ``restore_plan`` can put them back."""
+    hub = runtime.hub
+    devices = [asdict(hub.devices[p["id"]]) for p in by_kind.get("device", []) if p["id"] in hub.devices]
+    entities = [asdict(hub.entities[p["id"]]) for p in by_kind.get("entity", []) if p["id"] in hub.entities]
+    if not devices and not entities:
+        return
+    batches = [b for b in (runtime.store.get_kv(UNDO_KEY, []) or []) if isinstance(b, dict)]
+    batches = [b for b in batches if b.get("plan_id") != plan_id]
+    batches.append({"plan_id": plan_id, "at": time.time(), "devices": devices, "entities": entities})
+    runtime.store.set_kv(UNDO_KEY, batches[-UNDO_KEEP:])
+
+
+def list_undo(runtime: Any) -> list[dict[str, Any]]:
+    """The applied plans that can be restored, newest first (ids and counts, not the rows)."""
+    batches = [b for b in (runtime.store.get_kv(UNDO_KEY, []) or []) if isinstance(b, dict)]
+    return [{"plan_id": b.get("plan_id"), "at": _iso(b.get("at")), "devices": len(b.get("devices") or []),
+             "entities": len(b.get("entities") or []),
+             "entity_ids": sorted(str(e.get("entity_id")) for e in b.get("entities") or [])}
+            for b in reversed(batches)]
+
+
+async def restore_plan(runtime: Any, plan_id: str) -> dict[str, Any]:
+    """Put back the devices and entities an applied plan removed, where nothing has taken their place."""
+    from services.homehub import hardware
+
+    if not isinstance(plan_id, str) or not plan_id:
+        raise PruneError("plan_id is required (the plan_id of an applied prune)")
+    async with _LOCK:
+        hub, store = runtime.hub, runtime.store
+        batches = [b for b in (store.get_kv(UNDO_KEY, []) or []) if isinstance(b, dict)]
+        batch = next((b for b in batches if b.get("plan_id") == plan_id), None)
+        if batch is None:
+            raise PruneError(f"No undo is kept for plan {plan_id} (only the last {UNDO_KEEP} applies)", 404)
+        result: dict[str, Any] = {"status": "restored", "plan_id": plan_id, "devices": [], "entities": [],
+                                  "skipped": []}
+        touched: set[str] = set()
+        for row in batch.get("devices") or []:
+            dev = DeviceEntry(**row)
+            if dev.id in hub.devices:
+                result["skipped"].append({"device": dev.id, "why": "a device with this id exists"})
+                continue
+            hub.devices[dev.id] = dev
+            store.save_device(dev)
+            hub.bus.fire("device_registry_updated", {"action": "create", "device_id": dev.id})
+            result["devices"].append(dev.id)
+        for row in batch.get("entities") or []:
+            ent = EntityEntry(**row)
+            if ent.entity_id in hub.entities:
+                result["skipped"].append({"entity": ent.entity_id, "why": "the entity id is in use"})
+                continue
+            if ent.config_entry_id and ent.config_entry_id not in hub.config_entries:
+                result["skipped"].append({"entity": ent.entity_id, "why": "its config entry was removed"})
+                continue
+            if ent.device_id and ent.device_id not in hub.devices:
+                ent.device_id = None
+            hub.entities[ent.entity_id] = ent
+            store.save_entity(ent)
+            hub.bus.fire("entity_registry_updated", {"action": "create", "entity_id": ent.entity_id})
+            result["entities"].append(ent.entity_id)
+            if ent.config_entry_id:
+                touched.add(ent.config_entry_id)
+        for xid in sorted(touched):
+            if xid in hub.drivers and xid in hub.config_entries:
+                await hardware._reload(runtime, hub.config_entries[xid])
+        if not result["skipped"]:
+            store.set_kv(UNDO_KEY, [b for b in batches if b.get("plan_id") != plan_id])
+        log.info("prune %s restored: %d devices, %d entities, %d skipped", plan_id, len(result["devices"]),
+                 len(result["entities"]), len(result["skipped"]))
         return result

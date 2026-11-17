@@ -590,3 +590,79 @@ async def test_live_engine_items_are_planned_and_removed_through_the_editor(env)
     assert set(engine.automations) == {"a-on"}
     assert "automation.auto_a_old" not in env.hub.entities
     assert [d["id"] for d in env.store.load_automations("automation")] == ["a-on"]
+
+
+# -- entities an integration says are gone, and undo -------------------------------------------
+
+class GoneDriver(FakeDriver):
+    def __init__(self, gone):
+        self.gone = gone
+
+    def gone_entities(self):
+        return dict(self.gone)
+
+
+def test_an_entity_the_integration_dropped_is_listed_at_once_with_its_reason(env):
+    env.entry("ma", "music_assistant", loaded=True, modified=RECENT)
+    env.device("d-ma", ["ma"], modified=RECENT)
+    env.entity("media_player.speaker", entry="ma", device="d-ma", state=("idle", NOW), modified=RECENT)
+    env.entity("media_player.speaker_2", entry="ma", device="d-ma", state=("unavailable", RECENT), modified=RECENT)
+    env.entity("media_player.away_laptop", entry="ma", device="d-ma", state=("unavailable", RECENT),
+               modified=RECENT)
+    env.hub.drivers["ma"] = GoneDriver({"media_player.speaker_2": "Music Assistant has no player p2 any more"})
+    plan = env.plan()
+    assert ids(plan, "entity", "entity_gone") == {"media_player.speaker_2"}
+    item = next(p for p in plan["items"] if p["id"] == "media_player.speaker_2")
+    assert item["why"] == "Music Assistant has no player p2 any more"
+    # Merely unavailable is not gone, and the device with a live entity stays.
+    assert "media_player.away_laptop" not in ids(plan)
+    assert "d-ma" not in ids(plan)
+
+
+def test_a_gone_entity_an_automation_names_is_kept(env):
+    env.entry("ma", "music_assistant", loaded=True, modified=RECENT)
+    env.entity("media_player.speaker_2", entry="ma", state=("unavailable", RECENT), modified=RECENT)
+    env.hub.drivers["ma"] = GoneDriver({"media_player.speaker_2": "gone"})
+    env.automation("a1", {"triggers": [], "actions": [{"action": "media_player.media_pause",
+                                                     "target": {"entity_id": "media_player.speaker_2"}}]},
+                   enabled=True)
+    plan = env.plan()
+    assert "media_player.speaker_2" not in ids(plan)
+
+
+def test_a_driver_that_is_not_loaded_is_not_believed(env):
+    env.entry("ma", "music_assistant", loaded=False, modified=RECENT)
+    env.entity("media_player.speaker_2", entry="ma", state=("unavailable", RECENT), modified=RECENT)
+    env.hub.drivers["ma"] = GoneDriver({"media_player.speaker_2": "gone"})
+    assert "media_player.speaker_2" not in ids(env.plan())
+
+
+async def test_an_applied_plan_can_be_restored(env):
+    _seed(env)
+    plan = env.plan()
+    before_entities = {e.entity_id: e for e in env.store.load_entities()}
+    res = await prune.apply_plan(env.rt, plan_id=plan["plan_id"], cutoff=plan["cutoff"], import_dir=str(env.ha),
+                                 now=NOW)
+    assert res["undo"] == plan["plan_id"]
+    listed = prune.list_undo(env.rt)
+    assert listed[0]["plan_id"] == plan["plan_id"] and "light.dead" in listed[0]["entity_ids"]
+    out = await prune.restore_plan(env.rt, plan["plan_id"])
+    # Devices come back; entities come back unless their config entry was removed with the plan.
+    assert "d-dead" in out["devices"] and "light.dead" in out["entities"]
+    assert "sensor.orphan_old" in out["entities"]
+    skipped = {s.get("entity"): s["why"] for s in out["skipped"]}
+    assert skipped.get("light.porch") == "its config entry was removed"
+    restored = env.hub.entities["light.dead"]
+    assert restored.unique_id == before_entities["light.dead"].unique_id
+    assert "light.dead" in {e.entity_id for e in env.store.load_entities()}
+    with pytest.raises(prune.PruneError):
+        await prune.restore_plan(env.rt, "no-such-plan")
+
+
+def test_undo_routes_are_admin_only(env):
+    c = TestClient(build_app(env.rt, Auth(env.store, SECRET)))
+    assert c.get("/hub/prune/undo").status_code == 401
+    assert c.post("/hub/prune/restore", json={"plan_id": "x"}).status_code == 401
+    assert c.get("/hub/prune/undo", headers=H).json() == {"undo": []}
+    assert c.post("/hub/prune/restore", headers=H, json={"plan_id": "x"}).status_code == 404
+    assert c.post("/hub/prune/restore", headers=H, json=[1]).status_code == 400

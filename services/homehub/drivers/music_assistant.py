@@ -227,6 +227,8 @@ class MusicAssistantDriver(Driver):
         self.players: dict[str, dict[str, Any]] = {}
         self.queues: dict[str, dict[str, Any]] = {}
         self._pressed: dict[str, str] = {}
+        #: True once ``players/all`` answered: only then does a missing player mean MA dropped it.
+        self._listed = False
 
     # -- lifecycle ------------------------------------------------------------------
     async def async_setup(self) -> None:
@@ -272,6 +274,7 @@ class MusicAssistantDriver(Driver):
         queues = await self.cmd("player_queues/all") or []
         self.players = {p["player_id"]: p for p in players if isinstance(p, dict) and p.get("player_id")}
         self.queues = {q["queue_id"]: q for q in queues if isinstance(q, dict) and q.get("queue_id")}
+        self._listed = True
         self.publish_all()
 
     async def cmd(self, command: str, **args: Any) -> Any:
@@ -323,6 +326,25 @@ class MusicAssistantDriver(Driver):
         if p is None:
             raise DeviceUnavailable(f"Music Assistant has no player {entity.unique_id} for {entity.entity_id}")
         return p
+
+    def gone_entities(self) -> dict[str, str]:
+        """Players Music Assistant no longer lists at all (removed there), and their favourite buttons.
+
+        A player MA still lists but cannot reach (a TV that is off, a laptop that is away) is only
+        unavailable, never gone.
+        """
+        if not self._listed or self.conn is None or not self.conn.connected:
+            return {}
+        gone: dict[str, str] = {}
+        for e in self.entities:
+            pid = e.unique_id
+            if e.domain == "button":
+                pid = pid.removesuffix(FAVORITE_SUFFIX)
+            elif e.domain != "media_player":
+                continue
+            if pid and pid not in self.players:
+                gone[e.entity_id] = f"Music Assistant has no player {pid} any more"
+        return gone
 
     def queue_for(self, player: dict[str, Any]) -> dict[str, Any] | None:
         src = player.get("active_source")
