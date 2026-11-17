@@ -217,6 +217,7 @@
 [data-theme-scheme="light"] .bg-red-950\/15 { background-color: color-mix(in srgb, oklch(93.6% 0.032 17.717) 60%, transparent) !important; }
 [data-theme-scheme="light"] .bg-red-950\/20 { background-color: color-mix(in srgb, oklch(93.6% 0.032 17.717) 60%, transparent) !important; }
 [data-theme-scheme="light"] .bg-red-950\/30 { background-color: color-mix(in srgb, oklch(93.6% 0.032 17.717) 60%, transparent) !important; }
+[data-theme-scheme="light"] .bg-rose-900\/90 { background-color: color-mix(in srgb, oklch(94.1% 0.03 12.58) 90%, transparent) !important; }
 [data-theme-scheme="light"] .bg-sky-950\/70 { background-color: color-mix(in srgb, oklch(95.1% 0.026 236.824) 70%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-600 { background-color: var(--ht-surface) !important; }
 [data-theme-scheme="light"] .bg-slate-600\/80 { background-color: color-mix(in srgb, var(--ht-surface) 80%, transparent) !important; }
@@ -229,6 +230,7 @@
 [data-theme-scheme="light"] .bg-slate-800\/50 { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .bg-slate-800\/80 { background-color: color-mix(in srgb, var(--ht-surface) 80%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-800\/90 { background-color: color-mix(in srgb, var(--ht-surface) 90%, transparent) !important; }
+[data-theme-scheme="light"] .bg-slate-800\/95 { background-color: color-mix(in srgb, var(--ht-surface) 95%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-900 { background-color: var(--ht-surface) !important; }
 [data-theme-scheme="light"] .bg-slate-900\/10 { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .bg-slate-900\/30 { background-color: var(--site-card-bg) !important; }
@@ -278,6 +280,7 @@
 [data-theme-scheme="light"] .border-slate-800\/40 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-slate-800\/80 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-slate-900 { border-color: var(--color-border-soft) !important; }
+[data-theme-scheme="light"] .border-slate-950 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-white { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-white\/\[0\.06\] { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-white\/10 { border-color: var(--color-border-soft) !important; }
@@ -290,6 +293,7 @@
 [data-theme-scheme="light"] .focus\:bg-black\/40:focus { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .focus\:border-slate-600\/50:focus { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .from-amber-950\/30 { --tw-gradient-from: color-mix(in srgb, oklch(96.2% 0.059 95.617) 60%, transparent); }
+[data-theme-scheme="light"] .from-black\/80 { --tw-gradient-from: color-mix(in srgb, var(--ht-surface) 80%, transparent); }
 [data-theme-scheme="light"] .from-black\/85 { --tw-gradient-from: color-mix(in srgb, var(--ht-surface) 85%, transparent); }
 [data-theme-scheme="light"] .from-emerald-950 { --tw-gradient-from: oklch(95% 0.052 163.051); }
 [data-theme-scheme="light"] .from-orange-950\/25 { --tw-gradient-from: color-mix(in srgb, oklch(95.4% 0.038 75.164) 60%, transparent); }

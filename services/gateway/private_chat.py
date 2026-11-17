@@ -48,9 +48,16 @@ one, and only they can read it:
   same envelope as a message, so the server sees ciphertext and who added it
   when, nothing else. They are not Talk messages, so they make no unread
   count, no notice and no nudge, and they never appear in the thread.
+* **Edits and reactions are sealed too** (services/gateway/private_chat_marks.py):
+  an overlay kept here per message, not Talk's own edit (24-hour limit, and a
+  room moderator could edit the other parent's words) and never a Talk
+  reaction. Only the author may edit (checked against Talk's record of who
+  sent it); the server sees who reacted to which message and who has seen
+  it, never the emoji or the new text.
 * **Notices carry no content**: "New private message from Sam" (chat_notify),
-  "Sam nudged you in your private chat" (``nudge``) and "Sam changed the
-  private chat password" (``change_password``).
+  "Sam nudged you in your private chat" (``nudge``), "Sam changed the
+  private chat password" (``change_password``) and "Sam reacted in your
+  private chat" (a reaction).
 
 The registry is one JSON file per chat (``chats/<token>.json``); pictures are
 ``blobs/<token>/<id>``. Both are ciphertext or public parameters only.
@@ -182,6 +189,8 @@ class Store:
         path.unlink(missing_ok=True)
         shutil.rmtree(self._blob_dir(token), ignore_errors=True)
         shutil.rmtree(self._gallery_dir(token), ignore_errors=True)
+        # Edits and reactions (services/gateway/private_chat_marks.py) go with the chat.
+        shutil.rmtree(self.root / "marks" / token, ignore_errors=True)
         # Beloved, the couple's page (services/gateway/beloved.py), goes with the chat.
         shutil.rmtree(self.root / "beloved" / token, ignore_errors=True)
 

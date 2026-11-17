@@ -8,7 +8,7 @@ import type {
 import { storageGetSync, storageSet } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
-import type { PrivateChatInfo, PrivateChatStatus } from '../components/chat/privateChatModel';
+import type { MessageMark, PrivateChatInfo, PrivateChatStatus } from '../components/chat/privateChatModel';
 import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto';
 import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
 import type { FreshPosition } from '../lib/freshPosition';
@@ -3671,6 +3671,33 @@ export const api = {
 
   async nudgePrivateChat(token: string): Promise<{ nudged: string[]; next_in: number }> {
     const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/nudge`);
+    return resp.data;
+  },
+
+  /** Every edited or reacted-to message's sealed edit and reactions, with whether I have seen each reaction. */
+  async getPrivateChatMarks(token: string): Promise<{ marks: MessageMark[] }> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/marks`);
+    return resp.data;
+  },
+
+  /** Replace my message's text with a new sealed version (only the author may; the server checks Talk). */
+  async editPrivateMessage(token: string, messageId: number, sealed: string): Promise<MessageMark> {
+    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/messages/${messageId}/edit`, { sealed });
+    return resp.data;
+  },
+
+  async addPrivateReaction(token: string, messageId: number, sealed: string): Promise<MessageMark & { reaction_id: string; notified: boolean }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/messages/${messageId}/reactions`, { sealed });
+    return resp.data;
+  },
+
+  async removePrivateReaction(token: string, messageId: number, reactionId: string): Promise<void> {
+    await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}/messages/${messageId}/reactions/${encodeURIComponent(reactionId)}`);
+  },
+
+  /** These reactions have played on this device: they stop waiting for me. */
+  async markPrivateReactionsSeen(token: string, ids: string[]): Promise<{ seen: string[] }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/marks/seen`, { ids });
     return resp.data;
   },
 

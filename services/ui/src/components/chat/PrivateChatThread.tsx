@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Camera, Heart, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { BellRing, Camera, Heart, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, Pencil, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -32,7 +32,23 @@ import {
   type TalkConversation,
   type TalkMessage,
 } from './chatModel';
-import { canNudge, errorText, threadMessages, type PrivateChatInfo } from './privateChatModel';
+import {
+  canNudge,
+  errorText,
+  MAX_EDIT_CHARS,
+  myReactionIds,
+  openMarks,
+  pendingAnimations,
+  prefersReducedMotion,
+  reactionChips,
+  sameReactionIds,
+  threadMessages,
+  type OpenedMark,
+  type PendingAnimation,
+  type PrivateChatInfo,
+} from './privateChatModel';
+import PrivateMessageSheet, { ReactionRow } from './PrivateMessageSheet';
+import ReactionBurst from './ReactionBurst';
 import { isImeKey } from '../../lib/keyboard';
 
 interface PrivateChatThreadProps {
@@ -374,9 +390,34 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
   const [nudgeSent, setNudgeSent] = useState(false);
   const { trigger } = useHaptics();
   const [selected, setSelected] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<{ url: string; name: string; message?: TalkMessage } | null>(null);
+  const [viewing, setViewing] = useState<{ url: string; name: string; message: TalkMessage; own: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // A message of mine being edited: the composer holds its text until saved or cancelled.
+  const [editing, setEditing] = useState<{ id: number; original: string } | null>(null);
+  const pageVisible = usePageVisible();
+
+  // Edits and reactions: sealed overlays the gateway keeps per message, opened here with the chat's key.
+  const marksQuery = useQuery({
+    queryKey: ['private-chat-marks', token],
+    queryFn: () => api.getPrivateChatMarks(token),
+    retry: false,
+    refetchInterval: pageVisible ? 5_000 : false,
+  });
+  const refetchMarks = marksQuery.refetch;
+  const [marks, setMarks] = useState<Record<number, OpenedMark>>({});
+  useEffect(() => {
+    const list = marksQuery.data?.marks;
+    if (!list) return;
+    let live = true;
+    void openMarks(list, (sealed) => vault.openRecord(sealed)).then((opened) => {
+      if (live && vault.unlocked) setMarks(opened);
+    });
+    return () => {
+      live = false;
+    };
+  }, [marksQuery.data, vault]);
 
   // Only what was said in the chat: a picture added straight to the gallery is never part of the thread.
   const visible = threadMessages(messages, opened);
@@ -390,6 +431,126 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
     const feed = feedRef.current;
     if (feed) feed.scrollTop = feed.scrollHeight;
   }, [lastId, openedCount]);
+  // A new message may already carry reactions: ask again whenever the thread moves.
+  useEffect(() => {
+    void refetchMarks();
+  }, [lastId, refetchMarks]);
+
+  // --- Reaction animations: the other parent's, the first time this device shows them; mine as I tap. ---
+  const played = useRef(new Set<string>());
+  const [queue, setQueue] = useState<Array<PendingAnimation & { local?: boolean }>>([]);
+  const [playing, setPlaying] = useState<(PendingAnimation & { local?: boolean }) | null>(null);
+  useEffect(() => {
+    if (!pageVisible) return;
+    const fresh = pendingAnimations(marks, played.current);
+    if (!fresh.length) return;
+    for (const item of fresh) played.current.add(item.id);
+    setQueue((current) => [...current, ...fresh]);
+  }, [marks, pageVisible]);
+
+  const firstShownId = Number(visible.find((m) => typeof m.id === 'number')?.id ?? 0);
+  const markReactionSeen = useCallback(
+    (item: PendingAnimation) => {
+      void api
+        .markPrivateReactionsSeen(token, sameReactionIds(marks, item))
+        .then(() => refetchMarks())
+        .catch(() => {
+          // It plays once more next time; nothing is lost.
+        });
+    },
+    [marks, refetchMarks, token],
+  );
+  useEffect(() => {
+    if (playing || !queue.length || !pageVisible) return;
+    const [next, ...rest] = queue;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- taking the next animation off the queue
+    setQueue(rest);
+    const bubble = feedRef.current?.querySelector<HTMLElement>(`[data-message-id="${next.messageId}"]`);
+    if (!bubble) {
+      if (!next.local && firstShownId && next.messageId < firstShownId) {
+        // Older than anything on screen: it cannot be shown, so it stops waiting.
+        markReactionSeen(next);
+      } else if (!next.local) {
+        // Not in the thread yet (a message still arriving): it is asked for again on the next refresh.
+        played.current.delete(next.id);
+      }
+      return;
+    }
+    bubble.scrollIntoView?.({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    setPlaying(next);
+  }, [playing, queue, pageVisible, firstShownId, markReactionSeen]);
+
+  const burstDone = useCallback(() => {
+    const item = playing;
+    if (item && !item.local) markReactionSeen(item);
+    // A short breath between several waiting reactions.
+    window.setTimeout(() => setPlaying(null), 160);
+  }, [playing, markReactionSeen]);
+
+  const localCount = useRef(0);
+  const react = async (messageId: number, emoji: string) => {
+    setSelected(null);
+    const mine = myReactionIds(marks[messageId]?.reactions, emoji);
+    try {
+      if (mine.length) {
+        for (const id of mine) await api.removePrivateReaction(token, messageId, id);
+      } else {
+        trigger('light');
+        localCount.current += 1;
+        const local = { id: `local-${localCount.current}`, messageId, emoji, local: true };
+        // Mine plays now, ahead of anything waiting.
+        setQueue((current) => [local, ...current]);
+        await api.addPrivateReaction(token, messageId, await vault.sealRecord({ t: 'reaction', m: messageId, e: emoji }));
+      }
+    } catch (error) {
+      toast.error(errorText(error, 'Could not react'));
+    } finally {
+      void refetchMarks();
+    }
+  };
+
+  const startEdit = (messageId: number, current: string) => {
+    setSelected(null);
+    setEditing({ id: messageId, original: current });
+    setText(current);
+    window.setTimeout(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, 0);
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setText('');
+  };
+
+  const saveEdit = async (target: { id: number; original: string }) => {
+    const body = text.trim();
+    if (!body) {
+      toast.error('A message cannot be empty. Delete it instead.');
+      return;
+    }
+    if (body.length > MAX_EDIT_CHARS) {
+      toast.error('That is too long for one message.');
+      return;
+    }
+    if (body === target.original.trim()) {
+      cancelEdit();
+      return;
+    }
+    setSending(true);
+    try {
+      await api.editPrivateMessage(token, target.id, await vault.sealRecord({ t: 'edit', m: target.id, text: body }));
+      cancelEdit();
+      await refetchMarks();
+    } catch (error) {
+      toast.error(errorText(error, 'Could not save the edit'));
+    } finally {
+      setSending(false);
+    }
+  };
 
   const post = async (payload: PrivatePayload) => {
     const message = await vault.seal(payload);
@@ -399,6 +560,10 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
 
   const sendText = async (event: FormEvent) => {
     event.preventDefault();
+    if (editing) {
+      if (!sending) await saveEdit(editing);
+      return;
+    }
     const body = text.trim();
     if (!body || sending) return;
     setSending(true);
@@ -471,7 +636,10 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
       const res = await api.deleteTalkMessage({ token, message_id: messageId });
       if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Could not delete the message');
       if (blob) await api.deletePrivateBlob(token, blob);
+      if (editing?.id === messageId) cancelEdit();
       onChanged();
+      // Its edit and reactions went with it on the server.
+      void refetchMarks();
     } catch (error) {
       toast.error(errorText(error, 'Could not delete the message'));
     }
@@ -498,6 +666,14 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
       setNudging(false);
     }
   };
+
+  // The message whose sheet is open: a readable text message, mine or the other parent's.
+  const sheetMessage = visible.find((m, index) => String(m.id ?? index) === selected);
+  const sheetPayload = sheetMessage ? opened[String(sheetMessage.id)] : undefined;
+  const sheetId = typeof sheetMessage?.id === 'number' ? sheetMessage.id : null;
+  const sheetText = sheetPayload && sheetPayload !== 'unreadable' && sheetPayload.t === 'text' ? sheetPayload.text : null;
+  const sheetEdit = sheetId !== null ? marks[sheetId]?.edit : undefined;
+  const sheetOwn = sheetMessage ? isMine(sheetMessage, myActorIds) : false;
 
   return (
     <div
@@ -593,7 +769,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
         </p>
       )}
 
-      <div ref={feedRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4" data-testid="private-feed" role="log" aria-label="Messages">
+      <div ref={feedRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-3 sm:px-4" data-testid="private-feed" role="log" aria-label="Messages">
         {visible.length === 0 && <p className="py-10 text-center text-sm text-slate-500">No messages yet. Only the two of you will ever see what you write here.</p>}
         {visible.map((message, index) => {
           const previous = visible[index - 1];
@@ -618,17 +794,24 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
           const payload = opened[String(message.id)];
           const sealed = isSealedMessage(message.message);
           const isSelected = selected === key;
-          const picture = payload !== undefined && payload !== 'unreadable' && payload.t === 'image';
-          const comment = payload !== undefined && payload !== 'unreadable' && payload.t === 'comment';
-          // A text bubble of yours is tapped for Delete; a picture opens the viewer and a comment the gallery, which have Delete.
-          const selectable = own && !picture && !comment && typeof message.id === 'number';
+          const textual = payload !== undefined && payload !== 'unreadable' && payload.t === 'text';
+          const messageId = typeof message.id === 'number' ? message.id : null;
+          const mark = messageId !== null ? marks[messageId] : undefined;
+          // Only a text message can be edited; an edit on anything else is not shown.
+          const edit = textual ? mark?.edit : undefined;
+          const chips = reactionChips(mark?.reactions ?? []);
+          // A text bubble (either parent's) opens the message sheet; a picture opens the viewer and a comment the gallery.
+          const selectable = textual && messageId !== null;
+          const bursting = playing !== null && messageId !== null && playing.messageId === messageId;
           return (
             <div key={key}>
               {separator}
               <div className={`mb-2 flex flex-col ${own ? 'items-end' : 'items-start'}`}>
                 <div
+                  data-message-id={messageId ?? undefined}
                   role={selectable ? 'button' : undefined}
                   tabIndex={selectable ? 0 : undefined}
+                  aria-haspopup={selectable ? 'dialog' : undefined}
                   onClick={() => selectable && setSelected(isSelected ? null : key)}
                   onKeyDown={(event) => {
                     if (selectable && (event.key === 'Enter' || event.key === ' ')) {
@@ -636,11 +819,13 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
                       setSelected(isSelected ? null : key);
                     }
                   }}
-                  className={`max-w-[82%] select-text whitespace-pre-wrap break-words rounded-3xl px-3.5 py-2 text-left text-[15px] leading-snug sm:max-w-[70%] ${
+                  className={`relative max-w-[82%] select-text whitespace-pre-wrap break-words rounded-3xl px-3.5 py-2 text-left text-[15px] leading-snug sm:max-w-[70%] ${
                     own
                       ? 'rounded-br-md bg-gradient-to-br from-rose-600 to-purple-600 text-white'
                       : 'rounded-bl-md border border-white/[0.06] bg-slate-800/90 text-slate-100'
-                  } ${isSelected ? 'ring-2 ring-rose-300/60' : ''}`}
+                  } ${isSelected ? 'ring-2 ring-rose-300/70' : ''} ${editing?.id === messageId ? 'ring-2 ring-amber-300/70' : ''} ${
+                    bursting ? 'motion-safe:animate-[reaction-bubble_600ms_ease-out]' : ''
+                  }`}
                 >
                   {!sealed ? (
                     <span className="italic text-amber-100">Not encrypted (sent outside Jarvis): {message.message}</span>
@@ -651,7 +836,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
                   ) : payload === 'unreadable' ? (
                     <span className="italic opacity-80">This message could not be decrypted.</span>
                   ) : payload.t === 'text' ? (
-                    payload.text
+                    edit ? edit.text : payload.text
                   ) : payload.t === 'comment' ? (
                     <button
                       type="button"
@@ -669,21 +854,37 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
                       token={token}
                       payload={payload}
                       vault={vault}
-                      onOpen={(url) => setViewing({ url, name: payload.name || 'Picture', message: own ? message : undefined })}
+                      onOpen={(url) => setViewing({ url, name: payload.name || 'Picture', message, own })}
                     />
                   ) : null}
+                  {bursting && playing && <ReactionBurst key={playing.id} emoji={playing.emoji} onDone={burstDone} />}
                 </div>
-                {isSelected && (
-                  <button
-                    type="button"
-                    onClick={() => void remove(message)}
-                    className="mt-1 flex min-h-11 items-center gap-1.5 rounded-full border border-rose-400/30 bg-rose-500/10 px-3 text-xs font-semibold text-rose-200"
-                  >
-                    <Trash2 size={13} aria-hidden /> Delete for both of you
-                  </button>
+                {chips.length > 0 && (
+                  <div className={`relative z-10 -mt-1.5 flex max-w-[82%] flex-wrap gap-1 px-2 ${own ? 'justify-end' : 'justify-start'}`}>
+                    {chips.map((chip) => (
+                      <span
+                        key={chip.emoji}
+                        role="img"
+                        aria-label={`${chip.emoji} from ${chip.names.join(' and ')}`}
+                        title={chip.names.join(', ')}
+                        data-testid="private-reaction-chip"
+                        className={`inline-flex items-center gap-1 rounded-full border-2 border-slate-950 px-1.5 py-px text-[13px] leading-5 shadow-sm ${
+                          chip.mine ? 'bg-rose-900/90 text-rose-50' : 'bg-slate-700 text-slate-100'
+                        }`}
+                      >
+                        <span aria-hidden>{chip.emoji}</span>
+                        {chip.count > 1 && <span className="text-[11px] font-semibold tabular-nums" aria-hidden>{chip.count}</span>}
+                      </span>
+                    ))}
+                  </div>
                 )}
                 <span className="mt-0.5 flex items-center gap-1.5 px-2 text-[10px] text-slate-500">
                   {message.timestamp ? timeLabel(message.timestamp) : ''}
+                  {edit && (
+                    <span title={`Edited ${timeLabel(edit.at)}`} data-testid="private-edited" className="italic">
+                      Edited
+                    </span>
+                  )}
                   {own && message === myLatest && <Receipt read={receiptFor(message, conversation.last_common_read) === 'read'} />}
                 </span>
               </div>
@@ -692,6 +893,20 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
         })}
       </div>
 
+      {editing && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-amber-300/20 bg-amber-400/[0.07] pl-3 pr-1" data-testid="private-editing">
+          <Pencil size={13} className="shrink-0 text-amber-200" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-amber-100">Editing your message</span>
+          <button
+            type="button"
+            onClick={cancelEdit}
+            data-testid="private-edit-cancel"
+            className="flex min-h-11 shrink-0 items-center gap-1 rounded-xl px-3 text-xs font-semibold text-slate-200 hover:bg-white/10"
+          >
+            <X size={13} aria-hidden /> Cancel
+          </button>
+        </div>
+      )}
       <form onSubmit={(event) => void sendText(event)} className="flex shrink-0 items-end gap-2 border-t border-white/5 bg-slate-900/95 p-2">
         <input
           ref={fileRef}
@@ -744,23 +959,34 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
             event.preventDefault();
             void sendFiles(files);
           }}
+          ref={inputRef}
           rows={1}
-          placeholder="Private message"
-          aria-label="Private message"
+          placeholder={editing ? 'Edit your message' : 'Private message'}
+          aria-label={editing ? 'Edit your message' : 'Private message'}
           data-testid="private-input"
           className="glass-input max-h-32 min-h-11 min-w-0 flex-1 resize-none text-base sm:text-sm"
         />
         <button
           type="submit"
           disabled={sending || !text.trim()}
-          aria-label="Send"
-          data-testid="private-send"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white disabled:opacity-50"
+          aria-label={editing ? 'Save the edit' : 'Send'}
+          data-testid={editing ? 'private-edit-save' : 'private-send'}
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white disabled:opacity-50 ${editing ? 'bg-amber-600' : 'bg-rose-600'}`}
         >
-          {sending ? <Loader2 size={17} className="animate-spin" /> : <SendHorizontal size={17} />}
+          {sending ? <Loader2 size={17} className="animate-spin" /> : editing ? <Check size={18} /> : <SendHorizontal size={17} />}
         </button>
       </form>
 
+      {sheetMessage && sheetId !== null && sheetText !== null && (
+        <PrivateMessageSheet
+          mine={new Set((marks[sheetId]?.reactions ?? []).filter((r) => r.own).map((r) => r.emoji))}
+          editedLabel={sheetEdit ? `Edited at ${timeLabel(sheetEdit.at)}` : undefined}
+          onReact={(emoji) => void react(sheetId, emoji)}
+          onEdit={sheetOwn ? () => startEdit(sheetId, sheetEdit ? sheetEdit.text : sheetText) : undefined}
+          onDelete={sheetOwn ? () => void remove(sheetMessage) : undefined}
+          onClose={() => setSelected(null)}
+        />
+      )}
       {gallery && (
         <PrivateGallery
           token={token}
@@ -800,10 +1026,20 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
           url={viewing.url}
           name={viewing.name}
           onClose={() => setViewing(null)}
+          mine={new Set((typeof viewing.message.id === 'number' ? marks[viewing.message.id]?.reactions ?? [] : []).filter((r) => r.own).map((r) => r.emoji))}
+          onReact={
+            typeof viewing.message.id === 'number'
+              ? (emoji) => {
+                  const id = viewing.message.id as number;
+                  setViewing(null);
+                  void react(id, emoji);
+                }
+              : undefined
+          }
           onDelete={
-            viewing.message
+            viewing.own
               ? () => {
-                  const target = viewing.message as TalkMessage;
+                  const target = viewing.message;
                   setViewing(null);
                   void remove(target);
                 }
@@ -864,7 +1100,22 @@ function PrivatePicture({
 }
 
 /** Full-screen view of a picture, inside the chat only (no download, share or new tab). */
-function PictureViewer({ url, name, onClose, onDelete }: { url: string; name: string; onClose: () => void; onDelete?: () => void }) {
+function PictureViewer({
+  url,
+  name,
+  onClose,
+  onDelete,
+  onReact,
+  mine,
+}: {
+  url: string;
+  name: string;
+  onClose: () => void;
+  onDelete?: () => void;
+  /** React to the picture (either parent's); the viewer closes so its bubble can play the animation. */
+  onReact?: (emoji: string) => void;
+  mine: ReadonlySet<string>;
+}) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -882,14 +1133,23 @@ function PictureViewer({ url, name, onClose, onDelete }: { url: string; name: st
       >
         <X size={20} />
       </button>
-      {onDelete && (
-        <button
-          type="button"
-          onClick={onDelete}
-          className="absolute bottom-[max(0.75rem,var(--safe-bottom))] left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full border border-rose-400/30 bg-rose-500/20 px-4 text-xs font-semibold text-rose-100"
-        >
-          <Trash2 size={13} aria-hidden /> Delete for both of you
-        </button>
+      {(onReact || onDelete) && (
+        <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 bg-gradient-to-t from-black/80 to-transparent px-3 pt-8 pb-[max(0.75rem,var(--safe-bottom))]">
+          {onReact && (
+            <div className="w-full max-w-sm">
+              <ReactionRow mine={mine} onReact={onReact} tone="viewer" />
+            </div>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="flex min-h-11 items-center gap-1.5 rounded-full border border-rose-400/30 bg-rose-500/20 px-4 text-xs font-semibold text-rose-100"
+            >
+              <Trash2 size={13} aria-hidden /> Delete for both of you
+            </button>
+          )}
+        </div>
       )}
       <img
         src={url}
@@ -898,5 +1158,17 @@ function PictureViewer({ url, name, onClose, onDelete }: { url: string; name: st
         className="pointer-events-none max-h-full max-w-full select-none object-contain [-webkit-touch-callout:none] [-webkit-user-drag:none]"
       />
     </div>
+  );
+}
+
+/** Whether this page is on screen (reactions wait to play until it is). */
+function usePageVisible(): boolean {
+  return useSyncExternalStore(
+    (fn) => {
+      document.addEventListener('visibilitychange', fn);
+      return () => document.removeEventListener('visibilitychange', fn);
+    },
+    () => document.visibilityState !== 'hidden',
+    () => true,
   );
 }
