@@ -9,6 +9,10 @@
  * whole file in memory; the unit tests run it against files crypto.ts made.
  */
 import { toBase64 } from './crypto';
+import { presentExport } from './present';
+
+/** The viewer's formatting, as source text for the page (present.ts keeps it self-contained). */
+export const PAGE_PRESENTER = `var jarvisPresentExport = (${presentExport.toString()});`;
 
 export const PAGE_DECRYPTOR = String.raw`async function jarvisOpenExport(bytes, password) {
   var MAGIC = [74,65,82,86,73,83,65,67,67,84,0,1];
@@ -58,12 +62,49 @@ export const PAGE_DECRYPTOR = String.raw`async function jarvisOpenExport(bytes, 
 const PAGE_SCRIPT = String.raw`
 (function () {
   var form = document.getElementById('unlock'), out = document.getElementById('out'), msg = document.getElementById('msg');
-  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
-  function show(v) {
-    if (v === null || v === undefined || v === '') return '';
-    if (typeof v === 'object') return v.$base64 ? '(picture)' : JSON.stringify(v);
-    if (typeof v === 'string' && /^[\[{]/.test(v)) { try { var p = JSON.parse(v); var t = JSON.stringify(p); return t === '{}' || t === '[]' ? '' : t; } catch (e) {} }
-    return String(v);
+  var PAGE = 25, PREVIEW = 6;
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
+  function itemCard(item) {
+    var a = el('article', 'item'), head = el('div', 'head');
+    if (item.swatch) { var dot = el('span', 'dot'); dot.style.background = item.swatch; head.appendChild(dot); }
+    var t = el('div'); t.appendChild(el('p', 'title', item.title)); if (item.subtitle) t.appendChild(el('p', 'muted', item.subtitle));
+    head.appendChild(t); a.appendChild(head);
+    if (item.detail) a.appendChild(el('p', 'detail', item.detail));
+    if (item.facts && item.facts.length) {
+      var dl = el('dl'); item.facts.forEach(function (f) { dl.appendChild(el('dt', '', f.label)); dl.appendChild(el('dd', '', f.value)); }); a.appendChild(dl);
+    }
+    var turns = item.transcript || [];
+    if (turns.length) {
+      var box = el('div', 'chat');
+      var draw = function (all) {
+        box.textContent = '';
+        (all ? turns : turns.slice(0, PREVIEW)).forEach(function (m) { var row = el('div', 'row ' + m.who); row.appendChild(el('div', 'bubble', m.text)); box.appendChild(row); });
+        if (turns.length > PREVIEW) {
+          var more = el('button', 'more', all ? 'Show less' : 'Show the whole conversation (' + turns.length + ' messages)');
+          more.type = 'button'; more.onclick = function () { draw(!all); }; box.appendChild(more);
+        }
+      };
+      draw(false); a.appendChild(box);
+    }
+    return a;
+  }
+  function collectionBlock(c) {
+    var d = el('details'); var sum = el('summary'); sum.appendChild(el('span', '', c.label + (c.readOnly ? ' (for reading)' : ''))); sum.appendChild(el('span', 'muted', String(c.count)));
+    d.appendChild(sum); var body = el('div'); d.appendChild(body); var shown = 0;
+    var more = el('button', 'more'); more.type = 'button';
+    var flat = []; c.groups.forEach(function (g) { g.items.forEach(function (it, i) { flat.push({ g: g, first: i === 0, item: it }); }); });
+    var lastLabel = null;
+    function page() {
+      flat.slice(shown, shown + PAGE).forEach(function (x) {
+        if (x.g.label && x.g.label !== lastLabel) { body.appendChild(el('p', 'month', x.g.label + ' · ' + x.g.count)); lastLabel = x.g.label; }
+        body.appendChild(itemCard(x.item));
+      });
+      shown = Math.min(flat.length, shown + PAGE);
+      if (shown < flat.length) { more.textContent = 'Show more (' + (flat.length - shown) + ' left)'; body.appendChild(more); } else if (more.parentNode) more.remove();
+    }
+    more.onclick = function () { more.remove(); page(); };
+    page();
+    return d;
   }
   function render(text) {
     var services = {}, manifest = null, ended = null;
@@ -80,20 +121,10 @@ const PAGE_SCRIPT = String.raw`
     if (!manifest || !ended) throw new Error('This export was not finished when it was made.');
     out.textContent = '';
     out.appendChild(el('h2', '', 'Export of ' + manifest.subject.username));
-    out.appendChild(el('p', 'muted', 'Made ' + new Date(manifest.exported_at).toLocaleString() + '. Read only.'));
-    Object.keys(services).forEach(function (svc) {
-      var sec = el('section'); sec.appendChild(el('h3', '', svc));
-      Object.keys(services[svc]).forEach(function (name) {
-        var rows = services[svc][name]; if (!rows.length) return;
-        var d = el('details'); d.appendChild(el('summary', '', name.replace(/_/g, ' ') + ' (' + rows.length + ')'));
-        rows.slice(0, 500).forEach(function (row) {
-          var dl = el('dl');
-          Object.keys(row).forEach(function (k) { var v = show(row[k]); if (!v) return; dl.appendChild(el('dt', '', k)); dl.appendChild(el('dd', '', v)); });
-          d.appendChild(dl);
-        });
-        if (rows.length > 500) d.appendChild(el('p', 'muted', 'And ' + (rows.length - 500) + ' more (open the file in Jarvis to see them all).'));
-        sec.appendChild(d);
-      });
+    out.appendChild(el('p', 'muted', 'Made ' + new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(manifest.exported_at)) + '. Read only.'));
+    jarvisPresentExport(services, {}).forEach(function (svc) {
+      var sec = el('section'); sec.appendChild(el('h3', '', svc.label + ' · ' + svc.total));
+      svc.collections.forEach(function (c) { sec.appendChild(collectionBlock(c)); });
       out.appendChild(sec);
     });
   }
@@ -108,21 +139,32 @@ const PAGE_SCRIPT = String.raw`
 })();`;
 
 const PAGE_STYLE = `
-:root{color-scheme:light dark;--bg:#0f172a;--fg:#e2e8f0;--muted:#94a3b8;--card:#1e293b;--accent:#a78bfa}
-@media (prefers-color-scheme: light){:root{--bg:#f8fafc;--fg:#0f172a;--muted:#475569;--card:#fff;--accent:#6d28d9}}
+:root{color-scheme:light dark;--bg:#0f172a;--fg:#e2e8f0;--muted:#94a3b8;--card:#1e293b;--inner:rgba(0,0,0,.2);--accent:#7c3aed;--them:rgba(255,255,255,.1)}
+@media (prefers-color-scheme: light){:root{--bg:#f8fafc;--fg:#0f172a;--muted:#475569;--card:#fff;--inner:#f1f5f9;--accent:#6d28d9;--them:#e2e8f0}}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
 main{max-width:760px;margin:0 auto;padding:24px 16px calc(24px + env(safe-area-inset-bottom))}
 form{background:var(--card);border-radius:16px;padding:16px;display:grid;gap:12px}
 input,button{font:inherit;min-height:44px;border-radius:12px;padding:0 12px}
 input{border:1px solid var(--muted);background:transparent;color:inherit}
-button{border:0;background:var(--accent);color:#fff;font-weight:600}
-.muted{color:var(--muted);font-size:14px} details{background:var(--card);border-radius:12px;margin:8px 0;padding:8px 12px}
-summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600}
-dl{display:grid;grid-template-columns:minmax(90px,30%) 1fr;gap:2px 12px;border-top:1px solid rgba(148,163,184,.3);padding:8px 0;margin:0}
-dt{color:var(--muted);font-size:13px;overflow-wrap:anywhere} dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
+button{border:0;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+button.more{width:100%;background:var(--inner);color:inherit;font-size:13px;margin-top:8px}
+.muted{color:var(--muted);font-size:13px;margin:2px 0}
+h3{margin:24px 0 8px}
+details{background:var(--card);border-radius:12px;margin:8px 0;padding:4px 12px}
+summary{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;font-weight:600}
+details>div{padding-bottom:12px}
+.month{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px}
+.item{background:var(--inner);border-radius:10px;padding:10px 12px;margin:8px 0;overflow-wrap:anywhere}
+.head{display:flex;gap:8px;align-items:flex-start}.dot{width:12px;height:12px;border-radius:50%;margin-top:5px;flex:none}
+.title{margin:0;font-weight:600}.detail{white-space:pre-wrap;font-size:13px;margin:8px 0 0}
+dl{display:grid;grid-template-columns:minmax(90px,40%) 1fr;gap:2px 12px;margin:8px 0 0;font-size:13px}
+dt{color:var(--muted)} dd{margin:0;overflow-wrap:anywhere}
+.chat{margin-top:10px;display:grid;gap:6px}.row{display:flex}.row.me{justify-content:flex-end}
+.bubble{max-width:85%;white-space:pre-wrap;font-size:13px;padding:8px 12px;border-radius:16px;background:var(--them)}
+.row.me .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:4px}.row.jarvis .bubble{border-bottom-left-radius:4px}
 `;
 
-/** The self-contained page for an encrypted export file. */
 export function buildEncryptedPage(file: Uint8Array, title = 'Jarvis export'): string {
   const data = toBase64(file).replace(/.{1,120}/g, '$&\n');
   const safeTitle = title.replace(/[<>&"]/g, '');
@@ -140,6 +182,7 @@ export function buildEncryptedPage(file: Uint8Array, title = 'Jarvis export'): s
 <script id="jarvis-export-data" type="application/octet-stream">
 ${data}</script>
 <script>${PAGE_DECRYPTOR}
+${PAGE_PRESENTER}
 ${PAGE_SCRIPT}</script>
 </body></html>
 `;

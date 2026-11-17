@@ -5,7 +5,7 @@
  * again with its password (and refused with a wrong one), read, and restored.
  * Runs in every hermetic project (desktop, phones, tablets).
  */
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { mockHome } from '../fixtures/homeMocks';
 import { mockHealth } from '../fixtures/healthMocks';
@@ -21,17 +21,41 @@ function exportStream(): string {
       subject: { username: 'parent' }, exported_by: { username: 'parent' }, services: ['identity', 'health', 'bible', 'geo'],
       excluded: [{ what: 'Passwords, API keys and stored service logins', why: 'never exported' }] },
     { kind: 'section', service: 'identity', collections: {
-      profile: [{ username: 'parent', display_name: 'Pat Example', family_role: 'father' }],
+      profile: [{ id: 1, username: 'parent', display_name: 'Pat Example', family_role: 'father' }],
       theme: [{ username: 'parent', data: '{"theme_id":"forest"}' }],
-      dashboard_widgets: [{ id: 1, widget_key: 'weather', order_index: 1, updated_at: 1000 }],
+      dashboard_widgets: [{ id: 1, username: 'parent', widget_key: 'weather', visibility: 'visible', size: 'medium', order_index: 1, updated_at: 1000 }],
+      assistant_conversations: [{ id: 7, username: 'parent', at: '2026-02-03T19:42:00', features: '["lights"]', turns: JSON.stringify([
+        { role: 'user', text: 'Is the porch light on?' },
+        { role: 'assistant', text: 'It is off. Do you want me to turn it on?' },
+        { role: 'user', text: 'Yes please, and dim it to half.' },
+        { role: 'assistant', text: 'Done: the porch light is on at 50%.' },
+      ]) }],
     } },
     { kind: 'section', service: 'health', collections: {
-      metrics: Array.from({ length: 40 }, (_, i) => ({ id: i + 1, metric: 'weight', value: 70 + i / 10, unit: 'kg', recorded_at: `2026-01-${String((i % 28) + 1).padStart(2, '0')}` })),
-      checkins: [{ day: '2026-01-02', note: `A very long note ${'Supercalifragilisticexpialidociousnessreallylongunbrokenword'.repeat(2)}` }],
+      profile: [{ user_id: 'parent', display_name: 'Pat', birth_year: 1984, height_cm: 178, units: 'metric', activity_level: 'moderate', goal: 'maintain', kid_mode: false }],
+      metrics: Array.from({ length: 40 }, (_, i) => ({ id: i + 1, user_id: 'parent', metric: 'weight', value: 70 + i / 10, unit: 'kg', source: 'manual',
+        recorded_at: `2026-0${i < 20 ? 1 : 2}-${String((i % 20) + 1).padStart(2, '0')}T07:30:00` })),
+      sleep: [1, 2, 3].map((d) => ({ id: d, user_id: 'parent', night: `2026-02-0${d}`, bedtime: `2026-02-0${d}T22:40:00`, wake_time: `2026-02-0${d + 1}T06:25:00`, duration_minutes: 445, efficiency: 0.9, quality: 'good' })),
+      checkins: [{ id: 1, user_id: 'parent', day: '2026-01-02', mood: 4, energy: 3, note: `A very long note ${'Supercalifragilisticexpialidociousnessreallylongunbrokenword'.repeat(2)}` }],
     } },
-    { kind: 'section', service: 'bible', collections: { marks: [{ osis: 'John', chapter: 3, verse_start: 16, kind: 'highlight', color: 'gold' }] } },
-    { kind: 'section', service: 'geo', collections: { trips: [{ id: 't1', distance_miles: 3.2 }], daily_steps: [{ day: '2026-01-01', steps: '8000' }] } },
-    { kind: 'section', service: 'geo', collections: { location_history: [{ t: 1, lat: 1, lon: 2 }] } },
+    { kind: 'section', service: 'bible', collections: {
+      marks: [
+        { id: 1, username: 'parent', osis: 'John', chapter: 3, verse_start: 16, verse_end: 17, kind: 'highlight', color: 'yellow', version_code: 'kjv', note_preview: 'For God so loved the world', created_at: '2026-02-01T06:10:00', updated_at: '2026-02-01T06:10:00' },
+        { id: 2, username: 'parent', osis: 'Ps', chapter: 23, verse_start: 1, kind: 'bookmark', version_code: 'kjv', created_at: '2026-01-20T06:10:00', updated_at: '2026-01-20T06:10:00' },
+        { id: 3, username: 'parent', osis: 'Rom', chapter: 8, verse_start: 28, kind: 'highlight', color: 'blue', version_code: 'esv', created_at: '2026-01-12T06:10:00', updated_at: '2026-01-12T06:10:00' },
+      ],
+      memory_verses: [{ id: 1, username: 'parent', ref: 'Philippians 4:13', level: 3, due_on: '2026-02-10', created_at: '2026-01-01T00:00:00' }],
+    } },
+    { kind: 'section', service: 'geo', collections: {
+      trips: [
+        { id: 't1', user_id: 'parent', start_time: 1770130800, end_time: 1770132600, distance_miles: 12.4, duration_seconds: 1800, activity_type: 'driving',
+          start_location: { name: 'Home' }, end_location: { name: 'Corner Cafe' }, vehicle_name: 'Family van' },
+        { id: 't2', user_id: 'parent', start_time: 1770220800, end_time: 1770221700, distance_miles: 3.1, duration_seconds: 900, activity_type: 'driving',
+          start_location: { name: 'Corner Cafe' }, end_location: { name: 'Home' } },
+      ],
+      daily_steps: [{ day: '2026-02-01', steps: '8000' }],
+    } },
+    { kind: 'section', service: 'geo', collections: { location_history: [{ t: 1770130800, lat: 1, lon: 2 }] } },
     { kind: 'end', sections: 4, failed: [] },
   ];
   return lines.map((l) => JSON.stringify(l)).join('\n') + '\n';
@@ -132,29 +156,93 @@ test.describe('account export', () => {
     await sheet.getByTestId('account-open-submit').click();
     const viewer = page.getByTestId('account-viewer');
     await expect(viewer).toBeVisible();
-    await expect(viewer.getByTestId('account-viewer-health')).toContainText('41 items');
+    await expect(viewer.getByTestId('account-viewer-health')).toContainText('45 items');
+    const shot = async (name: string, at: import('@playwright/test').Locator) => {
+      await at.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath(`${name}.png`) });
+    };
+
+    // Health: measurements by month, a night's sleep, a check-in.
     await viewer.getByTestId('account-viewer-health').getByRole('button', { name: /Health/ }).click();
-    await viewer.getByRole('button', { name: /Check-ins/ }).click();
-    await expect(viewer).toContainText('A very long note');
-    await viewer.getByRole('button', { name: /Measurements/ }).click();
-    await expect(viewer.getByRole('button', { name: /Show more \(15 left\)/ })).toBeVisible();
+    const health = viewer.getByTestId('account-viewer-health');
+    await health.getByRole('button', { name: /Measurements/ }).click();
+    await expect(health.getByTestId('account-kind-metrics')).toContainText('February 2026 · 20');
+    await expect(health.getByTestId('account-kind-metrics')).toContainText('Weight 73.9 kg');
+    await expect(health.getByRole('button', { name: /Show more \(15 left\)/ })).toBeVisible();
+    await health.getByRole('button', { name: /Sleep/ }).click();
+    await expect(health.getByTestId('account-kind-sleep')).toContainText('7 h 25 min, night of');
+    await health.getByRole('button', { name: /Check-ins/ }).click();
+    await expect(health).toContainText('A very long note');
+    await shot('account-viewer-health', health.getByTestId('account-kind-metrics'));
+    await shot('account-viewer-health-sleep', health.getByTestId('account-kind-sleep'));
+
+    // Bible: highlights with their verse and colour, a bookmark.
+    await viewer.getByTestId('account-viewer-bible').getByRole('button', { name: /Bible/ }).click();
+    const bible = viewer.getByTestId('account-viewer-bible');
+    await bible.getByRole('button', { name: /Highlights and bookmarks/ }).click();
+    await expect(bible).toContainText('John 3:16-17');
+    await expect(bible).toContainText('Yellow highlight · KJV');
+    await expect(bible).toContainText('Psalms 23:1');
+    await bible.getByRole('button', { name: /Memory verses/ }).click();
+    await shot('account-viewer-bible', bible.getByTestId('account-kind-marks'));
+
+    // Trips: from and to, the day and times, the distance.
+    await viewer.getByTestId('account-viewer-geo').getByRole('button', { name: /Places, trips and steps/ }).click();
+    const geo = viewer.getByTestId('account-viewer-geo');
+    await geo.getByRole('button', { name: /^Trips/ }).click();
+    await expect(geo).toContainText('Home to Corner Cafe');
+    await expect(geo).toContainText('20 km'); // the health profile chose metric
+    await shot('account-viewer-trips', geo.getByTestId('account-kind-trips'));
+
+    // A conversation with Jarvis, as bubbles.
+    await viewer.getByTestId('account-viewer-identity').getByRole('button', { name: /Profile and settings/ }).click();
+    const identity = viewer.getByTestId('account-viewer-identity');
+    await identity.getByRole('button', { name: /Conversations with Jarvis/ }).click();
+    const transcript = identity.getByTestId('account-transcript');
+    await expect(transcript).toContainText('Is the porch light on?');
+    await expect(transcript).toContainText('Done: the porch light is on at 50%.');
+    await shot('account-viewer-conversation', transcript);
+
+    // Nothing internal shows: no field names, ids, raw flags or JSON.
+    const shownText = await viewer.innerText();
+    expect(shownText).not.toMatch(/\b[a-z]+_[a-z_]+\b|\btrue\b|\bfalse\b|\{"|recorded at|user id/);
     await expectNoHorizontalOverflow(page);
     await expectTapTargets(sheet);
-    await page.screenshot({ path: testInfo.outputPath('account-viewer.png') });
 
     await expectReachable(viewer.getByTestId('account-save-page'));
     await expectReachable(viewer.getByTestId('account-restore-preview'));
     const pageDownload = page.waitForEvent('download');
     await viewer.getByTestId('account-save-page').click();
-    const html = await readFile(await (await pageDownload).path(), 'utf8');
+    const pagePath = await (await pageDownload).path();
+    const html = await readFile(pagePath, 'utf8');
     expect(html).toContain('jarvis-export-data');
     expect(html).not.toContain('Pat Example');
     expect(html).not.toContain('A very long note');
 
+    // The saved page opens on its own, offline, and reads like the app.
+    const htmlFile = testInfo.outputPath('saved-export.html');
+    await writeFile(htmlFile, html);
+    const standalone = await page.context().newPage();
+    await standalone.goto(`file://${htmlFile}`);
+    await standalone.locator('#pw').fill('wrong password entirely');
+    await standalone.getByRole('button', { name: 'Open' }).click();
+    await expect(standalone.locator('#msg')).toHaveText('That password does not open this file.');
+    await standalone.locator('#pw').fill(PASSWORD);
+    await standalone.getByRole('button', { name: 'Open' }).click();
+    await expect(standalone.locator('#out')).toContainText('Health · 45');
+    await expect(standalone.locator('#unlock')).toBeHidden();
+    await standalone.getByText('Highlights and bookmarks').click();
+    await expect(standalone.locator('#out')).toContainText('Yellow highlight · KJV');
+    await standalone.getByText('Conversations with Jarvis').click();
+    await expect(standalone.locator('.bubble').first()).toHaveText('Is the porch light on?');
+    expect(await standalone.locator('#out').innerText()).not.toMatch(/\b[a-z]+_[a-z_]+\b|\btrue\b|\bfalse\b/);
+    await standalone.screenshot({ path: testInfo.outputPath('account-encrypted-page.png'), fullPage: true });
+    await standalone.close();
+
     await viewer.getByTestId('account-restore-preview').click();
     const summary = page.getByTestId('account-restore-summary');
     await expect(summary).toBeVisible();
-    await expect(summary.getByTestId('account-counts-health')).toContainText('41 new');
+    await expect(summary.getByTestId('account-counts-health')).toContainText('45 new');
     await expect(summary.getByTestId('account-counts-identity')).toContainText('1 newer here');
     await expect(summary.getByTestId('account-restore-replace')).not.toBeChecked();
     expect(imports.every((b) => b.dry_run === true)).toBe(true);
@@ -167,7 +255,7 @@ test.describe('account export', () => {
     await summary.getByTestId('account-restore-apply').click();
     const result = page.getByTestId('account-restore-result');
     await expect(result).toBeVisible();
-    await expect(result.getByTestId('account-counts-bible')).toContainText('1 updated');
+    await expect(result.getByTestId('account-counts-bible')).toContainText('4 updated');
     const applied = imports.filter((b) => b.dry_run === false);
     expect(applied.map((b) => b.service)).toEqual(['identity', 'health', 'bible', 'geo']);
     expect(applied.every((b) => b.replace_conflicts === false && b.user === undefined)).toBe(true);

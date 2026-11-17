@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Archive, Check, ChevronDown, ChevronRight, Download, FileLock2, FolderOpen, KeyRound, Loader2, RotateCcw, TriangleAlert } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import ChatSheet from '../chat/Sheet';
@@ -10,8 +10,6 @@ import {
   IncompleteExportError,
   MIN_EXPORT_PASSWORD,
   addCounts,
-  collectionLabel,
-  displayValue,
   endChecker,
   exportFileName,
   exportPasswordProblem,
@@ -19,12 +17,11 @@ import {
   readExport,
   restoreParts,
   serviceLabel,
-  summarize,
   type Counts,
   type OpenedExport,
-  type Row,
 } from '../../lib/accountExport/model';
 import { buildEncryptedPage } from '../../lib/accountExport/page';
+import { presentExport, type PresentedCollection, type PresentedItem, type PresentedService } from '../../lib/accountExport/present';
 
 /**
  * Export my data and Open an export file (docs/ACCOUNT_EXPORT.md). The file
@@ -271,6 +268,7 @@ export function OpenExportSheet({ onClose }: { onClose: () => void }) {
   const [replace, setReplace] = useState(false);
   const [notice, setNotice] = useState('');
 
+  const presented = useMemo(() => (opened ? presentExport(opened.services) : []), [opened]);
   const subject = opened?.manifest.subject.username || '';
   const own = Boolean(subject && subject === user?.username);
   const mayRestore = own || Boolean(user?.is_admin);
@@ -394,15 +392,15 @@ export function OpenExportSheet({ onClose }: { onClose: () => void }) {
       {opened && view === 'read' && (
         <div className="space-y-3" data-testid="account-viewer">
           <p className="text-xs text-slate-400">
-            Made {new Date(opened.manifest.exported_at).toLocaleString()}. Read only: nothing here changes your account.
+            Made {new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(opened.manifest.exported_at))}. Read only: nothing here changes your account.
           </p>
           {opened.failed.length > 0 && (
             <p className="rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-xs text-amber-100">
               Not in this file (could not be read when it was made): {opened.failed.map((f) => serviceLabel(f.split(':')[0])).join(', ')}.
             </p>
           )}
-          {summarize(opened).map((service) => (
-            <ServiceSection key={service.service} opened={opened} service={service.service} label={service.label} total={service.total} />
+          {presented.map((service) => (
+            <ServiceSection key={service.service} service={service} />
           ))}
           {notice && <p className="text-sm text-emerald-300" role="status">{notice}</p>}
           {error && <p className="text-sm text-rose-200" role="alert">{error}</p>}
@@ -536,27 +534,27 @@ function CountsTable({ rows }: { rows: RestoreResult[] }) {
 }
 
 const PAGE = 25;
+const TRANSCRIPT_PREVIEW = 6;
 
-function ServiceSection({ opened, service, label, total }: { opened: OpenedExport; service: string; label: string; total: number }) {
+function ServiceSection({ service }: { service: PresentedService }) {
   const [open, setOpen] = useState(false);
-  const collections = Object.entries(opened.services[service] || {}).filter(([, rows]) => rows.length > 0);
   return (
-    <section className="rounded-xl bg-white/5" data-testid={`account-viewer-${service}`}>
+    <section className="rounded-xl bg-white/5" data-testid={`account-viewer-${service.service}`}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className="flex min-h-12 w-full items-center justify-between gap-3 px-3 text-left"
       >
-        <span className="text-sm font-semibold text-white">{label}</span>
-        <span className="flex items-center gap-2 text-xs text-slate-400">
-          {total} {total === 1 ? 'item' : 'items'} {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span className="text-sm font-semibold text-white">{service.label}</span>
+        <span className="flex shrink-0 items-center gap-2 text-xs text-slate-400">
+          {service.total} {service.total === 1 ? 'item' : 'items'} {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </span>
       </button>
       {open && (
         <div className="space-y-2 px-3 pb-3">
-          {collections.map(([name, rows]) => (
-            <CollectionList key={name} name={name} rows={rows} />
+          {service.collections.map((c) => (
+            <CollectionList key={c.name} collection={c} />
           ))}
         </div>
       )}
@@ -564,42 +562,106 @@ function ServiceSection({ opened, service, label, total }: { opened: OpenedExpor
   );
 }
 
-function CollectionList({ name, rows }: { name: string; rows: Row[] }) {
+function visibleGroups(collection: PresentedCollection, shown: number) {
+  const out: PresentedCollection['groups'] = [];
+  let left = shown;
+  for (const g of collection.groups) {
+    if (left <= 0) break;
+    const items = g.items.slice(0, left);
+    left -= items.length;
+    out.push({ ...g, items });
+  }
+  return out;
+}
+
+function CollectionList({ collection }: { collection: PresentedCollection }) {
   const [shown, setShown] = useState(0);
+  // Page through the items in order, keeping each month's heading with its count.
+  const visible = visibleGroups(collection, shown);
   return (
-    <div className="rounded-lg border border-white/5">
+    <div className="rounded-lg border border-white/5" data-testid={`account-kind-${collection.name}`}>
       <button
         type="button"
         onClick={() => setShown((v) => (v ? 0 : PAGE))}
         aria-expanded={shown > 0}
         className="flex min-h-11 w-full items-center justify-between gap-2 px-3 text-left text-sm text-slate-200"
       >
-        <span>{collectionLabel(name)}</span>
-        <span className="text-xs text-slate-400">{rows.length}</span>
+        <span className="min-w-0">
+          {collection.label}
+          {collection.readOnly && <span className="ml-2 text-[11px] text-slate-500">for reading</span>}
+        </span>
+        <span className="shrink-0 text-xs text-slate-400">{collection.count}</span>
       </button>
       {shown > 0 && (
-        <div className="space-y-2 px-3 pb-3">
-          {rows.slice(0, shown).map((record, index) => (
-            <dl key={index} className="grid grid-cols-[minmax(6rem,35%)_1fr] gap-x-3 gap-y-1 rounded-lg bg-black/20 p-2 text-xs">
-              {Object.entries(record).map(([key, value]) => {
-                const text = displayValue(value);
-                if (!text) return null;
-                return (
-                  <div key={key} className="contents">
-                    <dt className="break-words text-slate-400">{key.replace(/_/g, ' ')}</dt>
-                    <dd className="min-w-0 whitespace-pre-wrap break-words text-slate-200 [overflow-wrap:anywhere]">{text.length > 600 ? `${text.slice(0, 600)}…` : text}</dd>
-                  </div>
-                );
-              })}
-            </dl>
+        <div className="space-y-3 px-3 pb-3">
+          {visible.map((g, gi) => (
+            <div key={`${g.label}-${gi}`} className="space-y-2">
+              {g.label && (
+                <p className="pt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  {g.label} <span className="font-normal normal-case tracking-normal text-slate-500">· {g.count}</span>
+                </p>
+              )}
+              {g.items.map((item, ii) => (
+                <ItemCard key={ii} item={item} />
+              ))}
+            </div>
           ))}
-          {shown < rows.length && (
+          {shown < collection.count && (
             <button type="button" onClick={() => setShown((v) => v + PAGE)} className="min-h-11 w-full rounded-lg bg-white/5 text-xs font-semibold text-slate-200">
-              Show more ({rows.length - shown} left)
+              Show more ({collection.count - shown} left)
             </button>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+function ItemCard({ item }: { item: PresentedItem }) {
+  const [whole, setWhole] = useState(false);
+  const turns = item.transcript || [];
+  const shownTurns = whole ? turns : turns.slice(0, TRANSCRIPT_PREVIEW);
+  return (
+    <article className="rounded-lg bg-black/20 p-3 text-sm">
+      <div className="flex items-start gap-2">
+        {item.swatch && <span aria-hidden className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ background: item.swatch }} />}
+        <div className="min-w-0 flex-1">
+          <p className="break-words font-medium text-white [overflow-wrap:anywhere]">{item.title}</p>
+          {item.subtitle && <p className="mt-0.5 break-words text-xs text-slate-400 [overflow-wrap:anywhere]">{item.subtitle}</p>}
+        </div>
+      </div>
+      {item.detail && <p className="mt-2 whitespace-pre-wrap break-words text-xs text-slate-300 [overflow-wrap:anywhere]">{item.detail}</p>}
+      {item.facts && item.facts.length > 0 && (
+        <dl className="mt-2 grid grid-cols-[minmax(6rem,40%)_1fr] gap-x-3 gap-y-1 text-xs">
+          {item.facts.map((f) => (
+            <div key={f.label} className="contents">
+              <dt className="text-slate-400">{f.label}</dt>
+              <dd className="min-w-0 break-words text-slate-200 [overflow-wrap:anywhere]">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {turns.length > 0 && (
+        <div className="mt-3 space-y-2" data-testid="account-transcript">
+          {shownTurns.map((t, i) => (
+            <div key={i} className={`flex ${t.who === 'me' ? 'justify-end' : 'justify-start'}`}>
+              <div
+                className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-xs [overflow-wrap:anywhere] ${
+                  t.who === 'me' ? 'rounded-br-md bg-purple-600/80 text-white' : 'rounded-bl-md bg-white/10 text-slate-100'
+                }`}
+              >
+                <span className="sr-only">{t.who === 'me' ? 'You: ' : 'Jarvis: '}</span>
+                {t.text}
+              </div>
+            </div>
+          ))}
+          {turns.length > TRANSCRIPT_PREVIEW && (
+            <button type="button" onClick={() => setWhole((v) => !v)} className="min-h-11 w-full rounded-lg bg-white/5 text-xs font-semibold text-slate-200">
+              {whole ? 'Show less' : `Show the whole conversation (${turns.length} messages)`}
+            </button>
+          )}
+        </div>
+      )}
+    </article>
   );
 }

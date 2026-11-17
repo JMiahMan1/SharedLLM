@@ -95,11 +95,25 @@ The header (readable without the password, and holding nothing personal):
 
 **Open an export file** asks for the file and its password, checks the
 password, checks every chunk and the end line, and shows a read-only copy
-grouped by service and kind, 25 records at a time.
+grouped by service and kind, 25 records at a time, long lists split by month
+with their counts.
+
+Every kind of record reads the way the app shows it (`present.ts`): a weight
+with its date, a night's sleep with its times, a highlight with its verse and
+colour, a trip from one place to another with its day, times and distance, a
+conversation with Jarvis or a workspace chat as bubbles. Dates, times and
+numbers follow the reader's locale; distances, weights and water follow the
+health profile's unit choice, else the locale. Internal ids, keys, raw flags
+and field names are never shown. A kind with no formatter is shown as a tidy
+card with plain labels and no ids, and two tests keep that from happening by
+accident: `tests/unit/test_account_export_kinds.py` keeps `kinds.json` equal
+to what the services export, and the vitest test checks every kind in it has
+a formatter.
 
 **Save as an encrypted page** writes one HTML file holding the encrypted file
 unchanged and a small decryptor (`page.ts`) that asks for the password and
-shows the same read-only copy in any modern browser, offline, with a
+shows the same read-only copy (the same `presentExport`, embedded as source
+text and checked to still run after the build minifies it) in any modern browser, offline, with a
 `default-src 'none'` content policy. The page never holds the data in clear.
 
 A plain readable file is deliberately not offered: every copy Jarvis makes is
