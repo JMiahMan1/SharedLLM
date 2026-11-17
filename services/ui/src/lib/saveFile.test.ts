@@ -1,26 +1,89 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const native = vi.hoisted(() => ({ platform: 'web', save: vi.fn() }));
+const native = vi.hoisted(() => ({
+  platform: 'web',
+  begin: vi.fn(),
+  append: vi.fn(),
+  discard: vi.fn(),
+  save: vi.fn(),
+}));
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => native.platform },
-  registerPlugin: () => ({ save: native.save }),
+  registerPlugin: () => ({
+    begin: native.begin,
+    append: native.append,
+    discard: native.discard,
+    save: native.save,
+  }),
 }));
 
-import { saveBlob } from './saveFile';
+import { saveBlob, CHUNK_BYTES } from './saveFile';
+import { base64ToBytes } from './base64';
+
+const unimplemented = () => Object.assign(new Error('not implemented'), { code: 'UNIMPLEMENTED' });
 
 describe('saveBlob', () => {
   beforeEach(() => {
+    native.begin.mockReset().mockResolvedValue({ id: 'abc' });
+    native.append.mockReset().mockResolvedValue(undefined);
+    native.discard.mockReset().mockResolvedValue(undefined);
     native.save.mockReset();
     URL.createObjectURL = vi.fn(() => 'blob:x');
     URL.revokeObjectURL = vi.fn();
   });
 
-  it('hands the bytes to the Android save picker in the app', async () => {
+  it('stages the bytes in pieces and then opens the Android save picker', async () => {
     native.platform = 'android';
     native.save.mockResolvedValue({ saved: true });
     const saved = await saveBlob(new Blob(['hi'], { type: 'image/png' }), 'dir/photo.png');
     expect(saved).toBe(true);
-    expect(native.save).toHaveBeenCalledWith({ data: btoa('hi'), filename: 'photo.png', mimeType: 'image/png' });
+    expect(native.append).toHaveBeenCalledWith({ id: 'abc', data: btoa('hi') });
+    expect(native.save).toHaveBeenCalledWith({ id: 'abc', filename: 'photo.png', mimeType: 'image/png' });
+  });
+
+  it('never sends a large file in one call, and the pieces add up to the file', async () => {
+    native.platform = 'android';
+    native.save.mockResolvedValue({ saved: true });
+    const size = CHUNK_BYTES * 2 + 5;
+    const bytes = new Uint8Array(size);
+    for (let i = 0; i < size; i += 1) bytes[i] = (i * 31) & 255;
+    await saveBlob(new Blob([bytes]), 'backup.jarvis-backup');
+    expect(native.append).toHaveBeenCalledTimes(3);
+    const pieces = native.append.mock.calls.map(([o]) => base64ToBytes(o.data));
+    expect(pieces.map((p) => p.length)).toEqual([CHUNK_BYTES, CHUNK_BYTES, 5]);
+    const joined = new Uint8Array(size);
+    let at = 0;
+    for (const p of pieces) {
+      joined.set(p, at);
+      at += p.length;
+    }
+    expect(joined).toEqual(bytes);
+    const [options] = native.save.mock.calls[0];
+    expect(options).not.toHaveProperty('data');
+  });
+
+  it('stages nothing for an empty file but still saves it', async () => {
+    native.platform = 'android';
+    native.save.mockResolvedValue({ saved: true });
+    expect(await saveBlob(new Blob([]), 'empty.txt')).toBe(true);
+    expect(native.append).not.toHaveBeenCalled();
+    expect(native.save).toHaveBeenCalledWith({ id: 'abc', filename: 'empty.txt', mimeType: 'application/octet-stream' });
+  });
+
+  it('discards the staged file when a piece fails', async () => {
+    native.platform = 'android';
+    native.append.mockRejectedValueOnce(Object.assign(new Error('disk full'), { code: 'ERR' }));
+    await expect(saveBlob(new Blob(['abc']), 'a.txt')).rejects.toThrow('disk full');
+    expect(native.discard).toHaveBeenCalledWith({ id: 'abc' });
+    expect(native.save).not.toHaveBeenCalled();
+  });
+
+  it('sends the whole file in one call to an app build from before staging', async () => {
+    native.platform = 'android';
+    native.begin.mockRejectedValue(unimplemented());
+    native.save.mockResolvedValue({ saved: true });
+    expect(await saveBlob(new Blob(['hi'], { type: 'text/plain' }), 'a.txt')).toBe(true);
+    expect(native.save).toHaveBeenCalledWith({ data: btoa('hi'), filename: 'a.txt', mimeType: 'text/plain' });
   });
 
   it('reports a cancelled picker and a failed save', async () => {
@@ -34,7 +97,8 @@ describe('saveBlob', () => {
   it('falls back to a browser download on an app build without the plugin, and in a browser', async () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     native.platform = 'android';
-    native.save.mockRejectedValueOnce(Object.assign(new Error('not implemented'), { code: 'UNIMPLEMENTED' }));
+    native.begin.mockRejectedValue(unimplemented());
+    native.save.mockRejectedValueOnce(unimplemented());
     expect(await saveBlob(new Blob(['a']), 'a.jpg')).toBe(true);
     native.platform = 'web';
     expect(await saveBlob(new Blob(['a']), 'b.jpg')).toBe(true);
