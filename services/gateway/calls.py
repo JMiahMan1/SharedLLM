@@ -1,12 +1,45 @@
-"""In-app family calls.
+"""In-app family calls, and what keeps them private.
 
-The gateway is only the signalling relay: browsers exchange SDP offers,
-answers and ICE candidates here, then send audio and video directly to one
-another over WebRTC. No call media passes through this service.
+Who can join. A call's room is a conversation token, and only that
+conversation's members may join its call (``may_join``):
 
-Rooms are Nextcloud Talk conversation tokens so the Family calls list can use
-the family's existing conversations, but the call itself does not touch
-Nextcloud Talk. Talk still owns the chat; this module owns the call.
+* the parents' private chat: exactly its two members
+  (``private_chat.members``), never anyone else, an admin included;
+* a Talk conversation: a participant of that Talk room (it is one of the
+  caller's own conversations, asked of Talk as the caller through the
+  execution Talk handler), cached briefly; or someone the call already rang. A ring
+  is built from the conversation's member list, so a drop-in reaches exactly
+  the people it rang, and a one-to-one room still reaches the other person
+  after they left the Talk chat.
+
+Anyone else is refused with close code 1008 and a reason. The call list
+(``GET /api/communication/calls``) shows a call only to its members and the
+people in it.
+
+What the server sees. The gateway is only the signalling relay: browsers
+exchange SDP offers, answers and ICE candidates here, then send audio and
+video directly to one another over WebRTC, encrypted with DTLS-SRTP. No call
+media passes through this service and nothing is recorded. The gateway does
+see who is in which call, when, and the SDP and ICE candidates it relays
+(which include the devices' addresses); it never logs them, the API key or
+the media keys.
+
+The relay (``TURN_URLS``) is the home coturn: it forwards encrypted packets
+when two devices cannot reach each other directly and cannot decrypt them.
+STUN goes to the same coturn, so no third party learns who is calling; the
+public STUN servers are used only when no TURN is configured.
+
+The private chat goes further. A compromised gateway could swap the DTLS
+fingerprints in the SDP it relays and sit in the middle. So each device
+proves its fingerprint with the chat's key (an HMAC under a key derived on
+the device from the chat's data key, bound to the room and both sides' fresh
+nonces; services/ui/src/lib/callVerify.ts) and refuses a peer that cannot.
+This module relays those ``auth`` messages as opaque data and never sees the
+key.
+
+Rooms are conversation tokens so the Family calls list can use the family's
+existing conversations, but the call itself does not touch Nextcloud Talk.
+Talk still owns the chat; this module owns the call.
 """
 from __future__ import annotations
 
@@ -46,28 +79,83 @@ ROOM_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 #: they can answer or decline. After it, the call is still listed and can be
 #: joined, it just stops ringing.
 RING_SECONDS = 60
+#: A fingerprint proof is a nonce and a MAC: a few hundred bytes.
+MAX_AUTH_BYTES = 2048
+#: How long a confirmed Talk membership is trusted before Talk is asked again.
+MEMBERSHIP_CACHE_SECONDS = 60
 
-#: A public STUN server is enough for a home network and most NATs. A TURN
-#: relay can be supplied through CALL_ICE_SERVERS without changing the code.
-DEFAULT_ICE_SERVERS: list[dict[str, Any]] = [
+#: The fallback when nothing is configured: public STUN tells these companies
+#: that a family device is starting a call (and from which address), so it is
+#: used only when there is no home coturn (``TURN_URLS``) to ask instead.
+PUBLIC_STUN_SERVERS: list[dict[str, Any]] = [
     {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]},
     {"urls": ["stun:stun.cloudflare.com:3478"]},
 ]
+#: Kept for anything that imported the old name.
+DEFAULT_ICE_SERVERS = PUBLIC_STUN_SERVERS
 
 
-def _ice_servers() -> list[dict[str, Any]]:
+def _configured_ice_servers() -> list[dict[str, Any]] | None:
+    """``CALL_ICE_SERVERS`` when set to a usable list, else None."""
     raw = (os.getenv("CALL_ICE_SERVERS") or "").strip()
     if not raw:
-        return DEFAULT_ICE_SERVERS
+        return None
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        log.warning("[calls] CALL_ICE_SERVERS is not valid JSON; using public STUN")
-        return DEFAULT_ICE_SERVERS
+        log.warning("[calls] CALL_ICE_SERVERS is not valid JSON; ignoring it")
+        return None
     if not isinstance(parsed, list) or not parsed:
-        log.warning("[calls] CALL_ICE_SERVERS must be a non-empty list; using public STUN")
-        return DEFAULT_ICE_SERVERS
+        log.warning("[calls] CALL_ICE_SERVERS must be a non-empty list; ignoring it")
+        return None
     return parsed
+
+
+def _ice_servers() -> list[dict[str, Any]]:
+    """The STUN list read at start: ``CALL_ICE_SERVERS``, or public STUN as the fallback."""
+    return _configured_ice_servers() or PUBLIC_STUN_SERVERS
+
+
+def _turn_urls() -> list[str]:
+    return [u.strip() for u in (os.getenv("TURN_URLS") or "").split(",") if u.strip()]
+
+
+_TURN_URL_RE = re.compile(r"^(?P<scheme>turns?):(?P<host>\[[^\]]+\]|[^:?\s]+)(?::(?P<port>\d+))?", re.IGNORECASE)
+
+
+def stun_urls_from_turn(urls: list[str]) -> list[str]:
+    """``stun:host:port`` for each TURN listener: coturn answers STUN on the same port.
+
+    ``turns:`` (TLS) listeners are skipped when a plain one exists for the same
+    host, since browsers do not speak STUN over TLS; a host with only ``turns:``
+    gets the standard port 3478.
+    """
+    plain: list[str] = []
+    tls_hosts: list[str] = []
+    for url in urls:
+        m = _TURN_URL_RE.match(url.strip())
+        if not m:
+            continue
+        host = m.group("host")
+        if m.group("scheme").lower() == "turn":
+            plain.append(f"stun:{host}:{m.group('port') or '3478'}")
+        else:
+            tls_hosts.append(host)
+    plain_hosts = {u.split(":", 1)[1].rsplit(":", 1)[0] for u in plain}
+    out = list(dict.fromkeys(plain))
+    out += [f"stun:{h}:3478" for h in dict.fromkeys(tls_hosts) if h not in plain_hosts]
+    return list(dict.fromkeys(out))
+
+
+_warned_public_stun = False
+
+
+def _warn_public_stun_once() -> None:
+    global _warned_public_stun
+    if not _warned_public_stun:
+        _warned_public_stun = True
+        log.warning("[calls] no TURN_URLS/TURN_SECRET or CALL_ICE_SERVERS set: calls use public STUN "
+                    "(Google, Cloudflare), which learns each device's address when a call starts")
 
 
 ICE_SERVERS = _ice_servers()
@@ -88,7 +176,7 @@ def turn_ice_server(username: str, now: float | None = None) -> dict[str, Any] |
     leaked credential expires on its own. None when TURN is not configured.
     """
     secret = (os.getenv("TURN_SECRET") or "").strip()
-    urls = [u.strip() for u in (os.getenv("TURN_URLS") or "").split(",") if u.strip()]
+    urls = _turn_urls()
     if not secret or not urls:
         return None
     expiry = int((now if now is not None else time.time()) + TURN_CREDENTIAL_SECONDS)
@@ -98,9 +186,22 @@ def turn_ice_server(username: str, now: float | None = None) -> dict[str, Any] |
 
 
 def ice_servers_for(username: str) -> list[dict[str, Any]]:
-    """The ICE servers one caller gets: STUN, plus a TURN relay when set up."""
+    """The ICE servers one caller gets.
+
+    With the home coturn configured: STUN and TURN both on coturn, and no third
+    party at all. ``CALL_ICE_SERVERS`` set by hand is used as given (plus the
+    TURN credential). Only with neither is public STUN the fallback, with a
+    warning in the log once.
+    """
     turn = turn_ice_server(username)
-    return [*ICE_SERVERS, turn] if turn else ICE_SERVERS
+    configured = _configured_ice_servers()
+    if configured is not None:
+        return [*configured, turn] if turn else configured
+    if turn:
+        stun = stun_urls_from_turn(turn["urls"])
+        return [{"urls": stun}, turn] if stun else [turn]
+    _warn_public_stun_once()
+    return PUBLIC_STUN_SERVERS
 
 
 @dataclass
@@ -156,10 +257,13 @@ class CallHub:
     restart ends calls, which is the same thing a dropped signalling socket
     means to the browsers.
 
-    A room's ``_members`` are the conversation's members, recorded when the
-    caller rings them. Once they are known the call is listed only to them,
-    so a direct call between two people never shows up (or gets auto-answered
-    by a drop-in device) anywhere else in the family.
+    A room's ``_members`` are the conversation's members, recorded when a
+    private chat's call starts or when the caller rings them. A call is listed
+    only to its members and the people in it; one whose members were never
+    recorded (nobody rang yet) is listed only to the people in it, so a direct
+    call between two people never shows up (or gets auto-answered by a drop-in
+    device) anywhere else in the family. ``_private`` marks the parents'
+    private chat rooms, whose calls the apps verify end to end.
     """
 
     def __init__(self) -> None:
@@ -167,19 +271,37 @@ class CallHub:
         self._names: dict[str, str] = {}
         self._members: dict[str, set[str]] = {}
         self._rings: dict[str, Ring] = {}
+        self._private: set[str] = set()
         self._lock = asyncio.Lock()
 
-    async def join(self, peer: Peer, call_name: str = "") -> list[Peer] | None:
-        """Add a peer; return the people already in the room, or None if full."""
+    async def join(
+        self, peer: Peer, call_name: str = "", members: set[str] | None = None, private: bool = False,
+    ) -> list[Peer] | None:
+        """Add a peer; return the people already in the room, or None if full.
+
+        ``members`` (a private chat's two parents) is recorded as the room's
+        members when the room has none yet, so its call is listed only to them.
+        """
         async with self._lock:
             room = self._rooms.setdefault(peer.room, {})
             if len(room) >= MAX_PEERS:
+                if not room:
+                    self._rooms.pop(peer.room, None)
                 return None
             existing = list(room.values())
             room[peer.id] = peer
             if call_name and peer.room not in self._names:
                 self._names[peer.room] = call_name[:100]
+            if members and peer.room not in self._members:
+                self._members[peer.room] = set(members)
+            if private:
+                self._private.add(peer.room)
             return existing
+
+    async def is_member(self, room: str, username: str) -> bool:
+        """Whether ``username`` is a recorded member of the call in ``room`` (it rang them)."""
+        async with self._lock:
+            return bool(username) and username in self._members.get(room, set())
 
     async def leave(self, peer: Peer) -> list[Peer]:
         """Remove a peer and return whoever is left in its room."""
@@ -193,6 +315,7 @@ class CallHub:
                 self._names.pop(peer.room, None)
                 self._members.pop(peer.room, None)
                 self._rings.pop(peer.room, None)
+                self._private.discard(peer.room)
             return list(room.values())
 
     async def is_in(self, room: str, username: str) -> bool:
@@ -214,7 +337,9 @@ class CallHub:
             if not room_peers or room in self._rings:
                 return False
             present = {p.username for p in room_peers.values()}
-            self._members[room] = {caller, *recipients}
+            # A private chat's members are fixed when its call starts; a ring never widens them.
+            if room not in self._private:
+                self._members[room] = {caller, *recipients}
             self._rings[room] = Ring(
                 caller, caller_name, set(recipients) - present, drop_in=set(drop_in or ()) & set(recipients),
                 video=video,
@@ -248,8 +373,10 @@ class CallHub:
                     continue
                 participants = sorted(room.values(), key=lambda p: p.joined_at)
                 present = {p.username for p in participants}
-                members = self._members.get(token)
-                if members is not None and username not in members and username not in present:
+                members = self._members.get(token) or set()
+                # Never shown to someone who is not a member: a call nobody has rung yet
+                # (its members unknown) is listed only to the people already in it.
+                if not username or (username not in members and username not in present):
                     continue
                 ring = self._rings.get(token)
                 calls.append(
@@ -264,6 +391,8 @@ class CallHub:
                         "drop_in": bool(ring and username in ring.drop_in),
                         # A video call: answering shows the camera.
                         "video": bool(ring and ring.video),
+                        # The parents' private chat: the app verifies this call with the chat's key.
+                        "private": token in self._private,
                     }
                 )
             calls.sort(key=lambda c: c["started_at"], reverse=True)
@@ -279,12 +408,16 @@ class CallHub:
         target = await self.target(peer, message.get("to"))
         if target is None or target.id == peer.id:
             return
-        payload = {
-            "type": message["type"],
-            "from": peer.id,
-            "sdp": message.get("sdp"),
-            "candidate": message.get("candidate"),
-        }
+        payload: dict[str, Any] = {"type": message["type"], "from": peer.id}
+        if message["type"] == "auth":
+            # The private chat's fingerprint proof: opaque to the server, passed on as it came.
+            auth = message.get("auth")
+            if not isinstance(auth, dict) or len(json.dumps(auth)) > MAX_AUTH_BYTES:
+                return
+            payload["auth"] = auth
+        else:
+            payload["sdp"] = message.get("sdp")
+            payload["candidate"] = message.get("candidate")
         await _send(target, payload)
 
     async def broadcast(self, peers: list[Peer], payload: dict[str, Any]) -> None:
@@ -395,6 +528,83 @@ def one_to_one_members(conversation: Any) -> list[dict[str, Any]]:
     if not other:
         return []
     return [{"actor_type": "users", "actor_id": other, "display_name": conversation.get("display_name") or other}]
+
+
+# ---------------------------------------------------------------------------
+# Who may join a call
+# ---------------------------------------------------------------------------
+
+
+def _private_members(room: str) -> list[str] | None:
+    """The private chat's two members, or None when ``room`` is not a private chat."""
+    from services.gateway import private_chat
+
+    members = private_chat.members(room)
+    return members or None
+
+
+async def _talk_conversations_as(api_key: str) -> set[str] | None:
+    """The tokens of the caller's own Talk conversations, or None when Talk cannot be asked.
+
+    Asked as the caller (their own Talk account, through the execution Talk
+    handler's ``list``), so Talk itself decides: it lists only the rooms a
+    person is a participant of. This is the same list the chat shows them.
+    """
+    from services.gateway.config import EXECUTION_SVC
+    from services.gateway.main import resolve_identity
+
+    try:
+        creds = await resolve_identity({"api_key": api_key})
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
+            f"{EXECUTION_SVC}/execute/talk",
+            json={"user_context": creds, "action": "list"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        ) as resp:
+            data = await resp.json(content_type=None)
+    except Exception as e:
+        log.warning(f"[calls] could not read the caller's conversations: {type(e).__name__}")
+        return None
+    detail = data.get("detail") if isinstance(data, dict) and isinstance(data.get("detail"), dict) else {}
+    conversations = detail.get("conversations")
+    if not isinstance(conversations, list):
+        return None
+    return {str(c.get("token")) for c in conversations if isinstance(c, dict) and c.get("token")}
+
+
+_membership_cache: dict[tuple[str, str], float] = {}
+
+
+async def may_join(user: dict[str, Any], room: str, api_key: str) -> tuple[bool, str]:
+    """Whether ``user`` may join the call in ``room``, and why not.
+
+    A private chat: only its two members. A Talk conversation: one of the
+    caller's own Talk conversations (a yes cached for ``MEMBERSHIP_CACHE_SECONDS``),
+    or someone the call rang. Anything that cannot be checked is a no.
+    """
+    username = str(user.get("username") or "")
+    if not username:
+        return False, "Sign in to join this call."
+    private = _private_members(room)
+    if private is not None:
+        if username in private:
+            return True, ""
+        return False, "Only the two people in this private chat can join its calls."
+    if await hub.is_member(room, username):
+        return True, ""
+    key = (username, room)
+    now = time.time()
+    if _membership_cache.get(key, 0.0) > now:
+        return True, ""
+    tokens = await _talk_conversations_as(api_key)
+    if tokens is None:
+        return False, "Could not check that you are in this conversation. Try again."
+    if room in tokens:
+        if len(_membership_cache) > 1000:
+            _membership_cache.clear()
+        _membership_cache[key] = now + MEMBERSHIP_CACHE_SECONDS
+        return True, ""
+    return False, "Only the people in this conversation can join its call."
 
 
 @router.get("/api/communication/calls")
@@ -728,6 +938,14 @@ async def calls_websocket(
 
     await websocket.accept()
 
+    allowed, reason = await may_join(user, room, token)
+    if not allowed:
+        log.info(f"[calls] refused {user.get('username') or '?'} in a call they are not a member of")
+        await websocket.send_json({"type": "error", "message": reason})
+        await websocket.close(code=1008, reason=reason[:120])
+        return
+    private_members = _private_members(room)
+
     peer = Peer(
         id=uuid.uuid4().hex[:12],
         room=room,
@@ -735,7 +953,9 @@ async def calls_websocket(
         name=_display_name(user),
         websocket=websocket,
     )
-    existing = await hub.join(peer, name)
+    existing = await hub.join(
+        peer, name, members=set(private_members) if private_members else None, private=private_members is not None,
+    )
     if existing is None:
         await _send(peer, {"type": "error", "message": "That call is full."})
         await websocket.close(code=1008, reason="Call is full")
@@ -750,6 +970,8 @@ async def calls_websocket(
             "ice_servers": ice_servers_for(peer.username),
             "room": room,
             "name": await hub.room_name(room),
+            # The parents' private chat: both apps prove their DTLS fingerprints with the chat's key.
+            "private": private_members is not None,
         },
     )
     # "from" on every message about a person: the app routes each one by it (without it, a join was dropped and
@@ -771,7 +993,7 @@ async def calls_websocket(
                 continue
 
             kind = message.get("type")
-            if kind in ("offer", "answer", "ice"):
+            if kind in ("offer", "answer", "ice", "auth"):
                 await hub.relay(peer, message)
             elif kind == "state":
                 await hub.update_state(peer, message.get("muted", peer.muted), message.get("camera", peer.camera))

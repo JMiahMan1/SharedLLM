@@ -1352,6 +1352,8 @@ export interface TalkConversation {
   type?: number | null;
   has_call?: boolean;
   can_start_call?: boolean;
+  /** The parents' end-to-end encrypted private chat. */
+  private?: boolean;
 }
 
 export interface TalkMessage {
@@ -1390,6 +1392,8 @@ export interface ActiveCall {
   drop_in?: boolean;
   /** A video call: answering turns the camera on (a drop-in only where video drop-in is on). */
   video?: boolean;
+  /** The parents' private chat: the call is verified with the chat's key, which must be unlocked. */
+  private?: boolean;
 }
 
 export interface DropInPerson {

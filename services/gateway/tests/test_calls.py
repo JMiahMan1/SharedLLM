@@ -17,6 +17,18 @@ def fresh_hub(monkeypatch):
 
     monkeypatch.setattr(calls, "_user_for_token", fake_user)
 
+    class _EveryRoom:
+        def __contains__(self, room):
+            return True
+
+    async def every_conversation(api_key):
+        return _EveryRoom()
+
+    # Unless a test says otherwise: no private chats, and every caller is in every Talk conversation.
+    monkeypatch.setattr(calls, "_private_members", lambda room: None)
+    monkeypatch.setattr(calls, "_talk_conversations_as", every_conversation)
+    monkeypatch.setattr(calls, "_membership_cache", {})
+
 
 def test_two_people_join_the_same_room_and_exchange_signals(one_loop_client):
     c = one_loop_client
@@ -102,16 +114,25 @@ def test_a_started_call_appears_in_the_list_with_its_people(one_loop_client):
 
     with c.websocket_connect("/api/communication/calls/ws?token=mom-token&room=family&name=Family") as mom:
         mom.receive_json()
+        # Nobody rang yet, so its members are unknown: only the people in it see it.
+        assert _calls_for(c, "kid-token") == []
+        [mine] = _calls_for(c, "mom-token")
+        assert mine["token"] == "family" and mine["private"] is False
+
+        import asyncio
+
+        assert asyncio.run(calls.hub.ring("family", "mom", "Mom", {"kid"})) is True
         response = c.get(
             "/api/communication/calls",
             headers={"Authorization": "Bearer kid-token"},
         )
         assert response.status_code == 200
-        calls = response.json()["calls"]
-        assert len(calls) == 1
-        assert calls[0]["token"] == "family"
-        assert calls[0]["name"] == "Family"
-        assert [p["name"] for p in calls[0]["participants"]] == ["Mom"]
+        listed = response.json()["calls"]
+        assert len(listed) == 1
+        assert listed[0]["token"] == "family"
+        assert listed[0]["name"] == "Family"
+        assert [p["name"] for p in listed[0]["participants"]] == ["Mom"]
+        mom.send({"type": "websocket.disconnect", "code": 1000})
 
 
 def _calls_for(c, token):

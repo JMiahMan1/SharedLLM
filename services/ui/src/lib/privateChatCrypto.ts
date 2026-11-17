@@ -29,6 +29,8 @@
  * decrypted message and every picture's object URL; nothing survives a lock.
  */
 
+import { deriveCallKey } from './callVerify';
+
 export const PBKDF2_ITERATIONS = 600_000;
 export const SALT_BYTES = 16;
 export const IV_BYTES = 12;
@@ -505,6 +507,11 @@ export class PrivateVault {
 
   async open(raw: string | null | undefined): Promise<PrivatePayload | null> {
     return openMessage(this.need(), raw);
+  }
+
+  /** The key that verifies this chat's calls, derived here (lib/callVerify.ts); the chat's key never leaves. */
+  async callKey(): Promise<CryptoKey> {
+    return deriveCallKey(this.need());
   }
 
   /** Seal any record (Beloved) with the chat's key. */

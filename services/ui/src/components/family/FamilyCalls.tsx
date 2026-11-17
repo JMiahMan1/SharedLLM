@@ -38,7 +38,7 @@ export default function FamilyCalls() {
     params.delete('video');
     setSearchParams(params, { replace: true });
     const ringing = activeCalls.find((active) => active.token === answer);
-    void startCall(answer, ringing?.name || 'Family call', { video: answerVideo || Boolean(ringing?.video) });
+    void startCall(answer, ringing?.name || 'Family call', { video: answerVideo || Boolean(ringing?.video), private: ringing?.private });
   }, [answer, answerVideo, activeCalls, searchParams, setSearchParams, startCall]);
   const {
     data: conversations = [],
@@ -72,7 +72,7 @@ export default function FamilyCalls() {
   const start = async (conversation: TalkConversation, video = false) => {
     setStarting(conversation.token);
     try {
-      await startCall(conversation.token, conversation.display_name, { video });
+      await startCall(conversation.token, conversation.display_name, { video, private: conversation.private });
     } finally {
       setStarting(null);
     }
