@@ -88,22 +88,30 @@ def test_malformed_entity_ids_never_reach_a_dropdown(client):
     ]
 
 
-def test_entities_fail_loudly_for_a_user_without_home_assistant(client, monkeypatch):
+def test_a_user_without_home_assistant_reads_through_the_hub_trimmed_to_what_they_may_see(client, monkeypatch):
+    """No stored HA token: no login in the query (execution uses the hub's own) and only their entities."""
+    from services.execution.entity_access import EntityPermissions
+    from services.gateway import hub_access
+
     async def _resolve(body):
         return {"user": "casey", "username": "casey", "is_admin": False, "ha_url": None, "ha_token": None}
 
+    async def _perms(username, is_admin=False):
+        return EntityPermissions(assigned=frozenset({"light.kitchen"}))
+
+    data = {"entities": [*ENTITY_FIXTURE["entities"],
+                         {"entity_id": "light.kitchen", "state": "on", "attributes": {}}]}
+
     monkeypatch.setattr(gateway_main, "resolve_identity", _resolve)
-    fake_client = _Client()
+    monkeypatch.setattr(hub_access, "load_entity_permissions", _perms)
+    fake_client = _Client(data=data)
 
     with patch.object(gateway_main, "get_http_client", return_value=fake_client):
         resp = client.get("/api/entities")
 
-    assert not fake_client.calls, "must not call the execution service without credentials"
-    body = resp.json()
-    assert body["entities"] == []
-    assert body["status"] == "FAILURE"
-    assert "casey" in body["message"]
-    assert "Home Assistant" in body["message"]
+    ((_url, params),) = fake_client.calls
+    assert params == {}, "no login of their own: nothing travels in the query"
+    assert [e["entity_id"] for e in resp.json()["entities"]] == ["light.kitchen"]
 
 
 def test_entities_require_authentication(client, monkeypatch):

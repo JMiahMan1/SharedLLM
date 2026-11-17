@@ -259,7 +259,7 @@ async def test_events_do_not_leak_between_users(monkeypatch):
 async def test_acquire_media_hub_reuses_and_removes_on_stop(monkeypatch):
     created = []
 
-    def fake_build_sources(hub, creds):
+    def fake_build_sources(hub, creds, may_view=None):
         created.append(hub)
         return [FakeSource()]
 

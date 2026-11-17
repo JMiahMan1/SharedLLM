@@ -35,13 +35,14 @@ MAX_DESCRIPTION = 2000
 
 
 async def _hub_post(creds: dict[str, Any], path: str, body: dict[str, Any], *, response: bool = False) -> Any:
-    """A service call to the hub with the caller's own HA credentials; the hub's refusal passes through."""
+    """A service call to the hub with the caller's own HA login, else the hub's; the hub's refusal passes through.
+
+    Every route checks the list is one the caller may use (``_visible_lists``)
+    before it calls this, so the hub's login widens nothing.
+    """
     from services.gateway.main import shared_http_client
 
-    base = str(creds.get("ha_url") or "").rstrip("/")
-    token = str(creds.get("ha_token") or "")
-    if not base or not token:
-        raise HTTPException(status_code=503, detail="Home Assistant is not set up for your account")
+    base, token = dash._hub_login(creds, personal=False)
     try:
         async with shared_http_client() as client, client.post(
             f"{base}{path}", params={"return_response": ""} if response else None, json=body,

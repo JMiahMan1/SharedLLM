@@ -57,6 +57,11 @@ def cache_all_states(entities: list[dict]) -> int:
     }
     return redis_cache_set_many(items, HA_STATE_CACHE_TTL)
 
+def _login_params(ha_url: str | None, ha_token: str | None) -> dict[str, str]:
+    """A caller's own HA login when they have one; none and execution reads with the hub's own."""
+    return {"ha_url": ha_url, "ha_token": ha_token} if ha_url and ha_token else {}
+
+
 async def fetch_live_states(execution_url: str, ha_url: str, ha_token: str, internal_secret: str) -> list[dict]:
     """Fetch all states from HA via execution service and cache them."""
     try:
@@ -64,7 +69,7 @@ async def fetch_live_states(execution_url: str, ha_url: str, ha_token: str, inte
         async with shared_http_client() as client:
             resp = await client.get(
                 f"{execution_url}/discovery/entities",
-                params={"ha_url": ha_url, "ha_token": ha_token},
+                params=_login_params(ha_url, ha_token),
                 headers={"X-Internal-Secret": internal_secret},
                 timeout=aiohttp.ClientTimeout(total=10.0),
             )
@@ -90,7 +95,7 @@ async def get_live_state(entity_id: str, execution_url: str, ha_url: str, ha_tok
         client = get_http_client()
         async with client.get(
             f"{execution_url}/discovery/entities",
-            params={"ha_url": ha_url, "ha_token": ha_token},
+            params=_login_params(ha_url, ha_token),
             headers={"X-Internal-Secret": internal_secret},
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:

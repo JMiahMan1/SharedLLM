@@ -107,8 +107,10 @@ async def _hub(method: str, path: str, *, creds: dict[str, Any] | None = None,
                timeout: aiohttp.ClientTimeout = _TIMEOUT) -> tuple[int, Any]:
     """One call to the hub; ``(status, body)``.
 
-    ``creds`` set: the caller's own HA URL and token (reads, hold, resume).
-    ``creds`` None: ``HOMEHUB_URL`` with the internal secret (admin writes).
+    ``creds`` set: the caller's own HA URL and token, else the hub's own login
+    (reads, hold, resume: each filters by the caller's entity permissions or
+    checks the thermostat first). ``creds`` None: ``HOMEHUB_URL`` with the
+    internal secret (admin writes).
     502 when the hub does not answer.
     """
     from services.gateway.main import shared_http_client
@@ -116,9 +118,9 @@ async def _hub(method: str, path: str, *, creds: dict[str, Any] | None = None,
     if creds is None:
         base, token = HOMEHUB_URL, INTERNAL_SECRET
     else:
-        base, token = str(creds.get("ha_url") or "").rstrip("/"), str(creds.get("ha_token") or "")
-        if not base or not token:
-            raise HTTPException(status_code=503, detail="Home Assistant is not set up for your account")
+        from services.gateway.dashboard_routes import _hub_login
+
+        base, token = _hub_login(creds, personal=False)
     headers = {"Authorization": f"Bearer {token}"}
     try:
         async with shared_http_client() as client, client.request(
