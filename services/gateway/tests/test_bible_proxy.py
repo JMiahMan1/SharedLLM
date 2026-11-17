@@ -946,3 +946,16 @@ def test_a_game_review_is_read_as_the_caller(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
     make_client(user="sam").get("/api/bible/games/attempts/7", params={"viewer": "alex"})
     assert captured["calls"][-1]["params"] == {"viewer": "sam"}
+
+
+def test_search_forwards_its_options_and_searches_as_the_caller(make_client, monkeypatch):
+    """has:note searches the caller's own marks, so the name comes from the token."""
+    captured = _patch_bible(monkeypatch, payload={"results": []})
+    resp = make_client(user="sam").get(
+        "/api/bible/search",
+        params={"q": "grace in:Rom", "match": "any", "sort": "canon", "offset": 50, "username": "alex"},
+    )
+    assert resp.status_code == 200
+    sent = captured["calls"][-1]["params"]
+    assert sent["username"] == "sam"
+    assert (sent["q"], sent["match"], sent["sort"], sent["offset"]) == ("grace in:Rom", "any", "canon", 50)

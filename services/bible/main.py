@@ -61,6 +61,7 @@ from services.bible import (
     votd,
 )
 from services.bible import books as book_table
+from services.bible import search as verse_search
 from services.bible import (
     narration as narration_mod,
 )
@@ -138,6 +139,11 @@ async def lifespan(app: FastAPI):
             applied["applied"] or "-",
             applied["editions_created"] or "-",
         )
+    # The search index: created now, rebuilt off the event loop when it does
+    # not match the verses (a first boot). Search answers from a substring
+    # scan until the rebuild is done.
+    stale = verse_search.prepare(engine)
+    search_task = asyncio.create_task(asyncio.to_thread(verse_search.rebuild, engine, stale)) if stale else None
     log.info(
         "[Bible] ready db=%s devotional_dir=%s blb=%s",
         _database_url(),
@@ -153,6 +159,8 @@ async def lifespan(app: FastAPI):
     reminder_task.cancel()
     tagged_task.cancel()
     context_task.cancel()
+    if search_task is not None and not search_task.done():
+        log.info("[Bible] shutting down while the search index is still building")
 
 
 from services.common.logging_utils import redact_access_log  # noqa: E402
@@ -868,20 +876,29 @@ async def narration_chunk(
 
 @app.get("/search")
 def search(
-    q: str = Query(..., min_length=2),
+    q: str = Query(..., min_length=2, max_length=500),
     version: str | None = Query(default=None),
     book: str | None = Query(default=None),
+    match: str = Query(default="all", pattern="^(all|any|exact)$"),
+    sort: str | None = Query(default=None, pattern="^(rank|canon)$"),
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=100_000),
+    username: str | None = Query(default=None),
     session: Session = Depends(get_session),
 ):
+    """Search the Bible. ``q`` is the search box's text and may carry filters
+    (``in:John``, ``ver:all``, ``G26``, ``has:note``); see ``services/bible/search``."""
     resolved = _require_version(session, version) if version else _default_version(session)
-    osis = None
-    if book:
-        osis = book_table.resolve_book(book)
-        if not osis:
-            raise HTTPException(status_code=400, detail=f"Unknown book {book!r}.")
-    hits = corpus.search_verses(session, resolved, q, osis=osis, limit=limit)
-    return {"version": resolved, "query": q, "results": hits, "count": len(hits)}
+    installed = [v["code"] for v in corpus.list_versions(session)]
+    try:
+        body = verse_search.run(
+            session, q, version=resolved, installed=installed, mode=match, sort=sort,
+            limit=limit, offset=offset, book=book, username=username,
+        )
+    except verse_search.QueryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    body["query"] = q
+    return body
 
 
 @app.get("/verse-of-day")

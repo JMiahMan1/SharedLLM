@@ -125,6 +125,19 @@ export async function mockBible(page: Page) {
     if (/^\/imported-books\/7\/chapters\/\d+$/.test(p)) {
       return json({ book_id: 7, ordinal: Number(p.split('/').pop()), label: 'Session 1', text: STUDY_TEXT, questions: [] });
     }
+    if (p === '/search') {
+      // Long book names and a long verse: the cases that overflow a phone.
+      const results = Array.from({ length: 6 }, (_, i) => ({
+        osis: i % 2 ? '1Thess' : 'Gen', book_name: i % 2 ? '1 Thessalonians' : 'Genesis', chapter: 4, verse: i + 1,
+        reference: `${i % 2 ? '1 Thessalonians' : 'Genesis'} 4:${i + 1}`, version: 'tst',
+        text: `Made-up verse ${i + 1} about faith and love, long enough to wrap across two or three lines on a small phone screen.`,
+        highlights: [[22, 27]], versions: ['tst'],
+      }));
+      return json({ version: 'tst', query: url.searchParams.get('q') ?? '', results, count: 6, total: 50, offset: 0,
+        sort: 'rank', index: 'fts', versions: ['tst'],
+        by_book: [{ osis: 'Gen', name: 'Genesis', count: 30 }, { osis: '1Thess', name: '1 Thessalonians', count: 20 }],
+        parsed: { all: ['faith'], without: [], scopes: [], versions: ['tst'], strongs: [], has: [] } });
+    }
     if (p === '/voices') return json({ voices: [], count: 0 });
     // The verse sheet's study links: a made-up lexicon and a one-verse interlinear.
     if (p === '/lexicon/status') return json({ installed: true, entries: 10, occurrences: 40, source: 'test' });
