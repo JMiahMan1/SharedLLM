@@ -1,6 +1,7 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Archive, Check, ChevronDown, ChevronRight, Download, FileLock2, FolderOpen, KeyRound, Loader2, RotateCcw, TriangleAlert } from 'lucide-react';
-import Sheet from '../chat/Sheet';
+import { createPortal } from 'react-dom';
+import ChatSheet from '../chat/Sheet';
 import { api } from '../../services/api';
 import { saveBlob } from '../../lib/saveFile';
 import { useAuth } from '../../context/AuthContext';
@@ -41,6 +42,15 @@ function errorText(err: unknown, fallback: string): string {
 
 function megabytes(n: number): string {
   return n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The chat's sheet, put on document.body: inside the page it sat in the
+ * page's stacking context, so on a tablet the bottom bar covered its buttons
+ * and page controls showed through it.
+ */
+function Sheet(props: Parameters<typeof ChatSheet>[0]) {
+  return createPortal(<ChatSheet {...props} />, document.body);
 }
 
 const row = 'w-full min-h-14 flex items-center justify-between gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left';
@@ -221,16 +231,9 @@ export function ExportSheet({ onClose, person }: { onClose: () => void; person?:
               file is useless.
             </p>
           </div>
-          <label className="flex min-h-11 items-center gap-3 text-sm text-slate-200">
-            <input
-              type="checkbox"
-              checked={understood}
-              onChange={(event) => setUnderstood(event.target.checked)}
-              className="h-5 w-5 shrink-0 accent-purple-500"
-              data-testid="account-export-understood"
-            />
+          <CheckRow checked={understood} onChange={setUnderstood} testId="account-export-understood">
             I understand a forgotten password cannot be recovered
-          </label>
+          </CheckRow>
           {error && (
             <p className="text-sm text-rose-200" role="alert" data-testid="account-export-error">
               {error}
@@ -440,19 +443,10 @@ export function OpenExportSheet({ onClose }: { onClose: () => void }) {
           </p>
           <CountsTable rows={preview} />
           {conflicts > 0 && (
-            <label className="flex min-h-11 items-start gap-3 rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-sm text-amber-100">
-              <input
-                type="checkbox"
-                checked={replace}
-                onChange={(event) => setReplace(event.target.checked)}
-                className="mt-0.5 h-5 w-5 shrink-0 accent-amber-500"
-                data-testid="account-restore-replace"
-              />
-              <span>
-                Also replace {conflicts} {conflicts === 1 ? 'item' : 'items'} that changed here since the export (or cannot be compared). Left
-                unticked, the newer copy here is kept.
-              </span>
-            </label>
+            <CheckRow checked={replace} onChange={setReplace} testId="account-restore-replace" tone="amber">
+              Also replace {conflicts} {conflicts === 1 ? 'item' : 'items'} that changed here since the export (or cannot be compared). Left
+              unticked, the newer copy here is kept.
+            </CheckRow>
           )}
           {error && <p className="text-sm text-rose-200" role="alert">{error}</p>}
           <div className="grid gap-2 sm:grid-cols-2">
@@ -486,6 +480,38 @@ export function OpenExportSheet({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Sheet>
+  );
+}
+
+/**
+ * A checkbox whose whole row is the target: the real input covers the row
+ * (invisible), so a thumb anywhere on it toggles it and it stays 44px tall.
+ */
+function CheckRow({ checked, onChange, testId, tone = 'plain', children }: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  testId: string;
+  tone?: 'plain' | 'amber';
+  children: ReactNode;
+}) {
+  const frame = tone === 'amber' ? 'rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-amber-100' : 'text-slate-200';
+  return (
+    <label className={`relative flex min-h-11 cursor-pointer items-center gap-3 text-sm ${frame}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="peer absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        data-testid={testId}
+      />
+      <span
+        aria-hidden
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/40 text-white peer-checked:border-purple-400 peer-checked:bg-purple-500 peer-focus-visible:ring-2 peer-focus-visible:ring-purple-300"
+      >
+        {checked && <Check size={14} />}
+      </span>
+      <span>{children}</span>
+    </label>
   );
 }
 
