@@ -658,10 +658,16 @@ def run(
 
     params: dict[str, object] = {}
     where = []
-    where.append("v.version_code IN (" + ", ".join(f":ver{i}" for i in range(len(versions))) + ")")
+    # With words to match, the full-text index must drive the query. A leading
+    # "+" stops SQLite using bibleverse's (version_code, osis, ...) key for
+    # these filters: with one translation it otherwise walks all 31,000 of its
+    # verses and probes the index for each (1.5 s instead of 1 ms on the live
+    # data). Without words (Strong's, has:) the key is the right way in.
+    col = "+v." if stemmed else "v."
+    where.append(f"{col}version_code IN (" + ", ".join(f":ver{i}" for i in range(len(versions))) + ")")
     params.update({f"ver{i}": code for i, code in enumerate(versions)})
     if books is not None:
-        where.append("v.osis IN (" + ", ".join(f":bk{i}" for i in range(len(books))) + ")")
+        where.append(f"{col}osis IN (" + ", ".join(f":bk{i}" for i in range(len(books))) + ")")
         params.update({f"bk{i}": osis for i, osis in enumerate(books)})
 
     conn = session.connection()
@@ -726,7 +732,9 @@ def run(
         clauses = []
         lookup: dict[str, object] = {}
         for i, ((osis, chapter, verse), code, _m) in enumerate(chosen):
-            clauses.append(f"(v.version_code = :c{i} AND v.osis = :o{i} AND v.chapter = :h{i} AND v.verse = :v{i})")
+            clauses.append(
+                f"({col}version_code = :c{i} AND {col}osis = :o{i} AND {col}chapter = :h{i} AND {col}verse = :v{i})"
+            )
             lookup.update({f"c{i}": code, f"o{i}": osis, f"h{i}": chapter, f"v{i}": verse})
         if stemmed:
             got = conn.execute(

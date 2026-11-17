@@ -212,3 +212,28 @@ def test_parser_reads_the_whole_language():
     assert described["all"] == ["grace", '"living water"', "faith or works", "rejoic*"]
     assert described["without"] == ["law"] and described["scopes"] == ["John"]
     assert described["versions"] == "all" and described["strongs"] == ["H2617"] and described["has"] == ["note"]
+
+
+def test_word_searches_are_driven_by_the_index_not_a_walk_of_the_translation(bible, engine):
+    """With one translation, SQLite preferred bibleverse's key and probed the
+    full-text index once per verse: 1.5 s instead of 1 ms on the live Bible."""
+    from sqlalchemy import event
+
+    seen: list[tuple[str, object]] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        if "MATCH" in statement and statement.lstrip().startswith(("WITH", "SELECT")):
+            seen.append((statement, parameters))
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        _search(bible, "faith works in:Jas")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert seen
+    with engine.connect() as conn:
+        for statement, parameters in seen:
+            plan = [row[3] for row in conn.exec_driver_sql("EXPLAIN QUERY PLAN " + statement, parameters)]
+            fts = next(i for i, step in enumerate(plan) if "verse_fts VIRTUAL TABLE" in step)
+            walks = [i for i, step in enumerate(plan) if "sqlite_autoindex_bibleverse" in step]
+            assert not walks or fts < walks[0], plan
