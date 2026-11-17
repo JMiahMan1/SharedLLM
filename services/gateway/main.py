@@ -9025,6 +9025,7 @@ async def _call_recipients(request: Request, token: str, me: str) -> tuple[str, 
     ever sees a call that nobody answers.
     """
     from services.gateway import calls as _calls
+    from services.gateway import private_chat as _private_chat
 
     chat = private_chat.get_store().get(token) if private_chat.is_private(token) else None
     if chat:
@@ -9039,15 +9040,20 @@ async def _call_recipients(request: Request, token: str, me: str) -> tuple[str, 
         others = {m for m in chat.get("members", []) if m != me and m in people}
         return private_chat._display(people.get(me) or {"username": me}), others
 
+    # The parents' private chat rings its other member, from its own record (never Talk's member list).
+    private = _private_chat.members(token)
     try:
-        detail, why = await _talk_detail(request, {"action": "participants", "token": token})
-        people = detail.get("participants") or []
-        if not people:
-            log.warning("[call-notice] room %s: Talk gave no members (%s)", token, why or "empty list")
-        if len(people) < 2:
+        if private:
+            people = []
+        else:
+            detail, why = await _talk_detail(request, {"action": "participants", "token": token})
+            people = detail.get("participants") or []
+            if not people:
+                log.warning("[call-notice] room %s: Talk gave no members (%s)", token, why or "empty list")
+        if not private and len(people) < 2:
             # Only the caller (or nobody) is listed. A one-to-one room still names the other person, who may
             # have left the Talk chat (Talk keeps the room under their name): they are still the one to ring.
-            # Joining a Jarvis call never needs Talk membership, only the ring.
+            # Joining needs Talk membership or this ring (calls.may_join), so the ring is what lets them in.
             opened, why_open = await _talk_detail(request, {"action": "open", "token": token})
             other = _calls.one_to_one_members(opened.get("conversation"))
             people = [*people, *other]
@@ -9073,6 +9079,11 @@ async def _call_recipients(request: Request, token: str, me: str) -> tuple[str, 
         log.warning("[call-notice] could not list the family: identity answered %s", getattr(resp, "status", "?"))
         return None
 
+    if private:
+        if me not in private:
+            return me, set()
+        mine = next((u for u in users if isinstance(u, dict) and u.get("username") == me), {})
+        return _calls._display_name(mine) if mine else me, set(private) - {me}
     display, recipients, unmatched = _calls.talk_recipients(people, users, me)
     if not recipients:
         log.warning(

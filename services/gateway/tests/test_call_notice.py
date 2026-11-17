@@ -330,3 +330,22 @@ def test_talk_recipients_skips_guests_and_the_system_account():
     assert display == "Mum"
     assert recipients == {"jordan"}
     assert unmatched == ["jarvis"]
+
+
+def test_a_private_chat_call_rings_the_other_parent_from_its_own_record(monkeypatch):
+    """The parents' private chat never asks Talk who is in it: its record names the two of them."""
+    from services.gateway import calls
+    from services.gateway import private_chat
+
+    notices = _setup(monkeypatch)
+    monkeypatch.setattr(calls, "hub", calls.CallHub())
+    monkeypatch.setattr(private_chat, "members", lambda token: ["sam", "jordan"] if token == "room-private" else [])
+
+    async def no_talk(request, endpoint, payload=None, *, method="POST", as_user=None):
+        raise AssertionError("a private chat's ring must not read Talk")
+
+    monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", no_talk)
+    _joined("room-private")
+    reply = TestClient(app).post("/api/communication/calls/room-private/ring").json()
+    assert reply["ringing"] == ["jordan"]
+    assert [n["user"] for n in notices] == ["jordan"]

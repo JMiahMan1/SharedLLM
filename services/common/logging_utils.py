@@ -132,7 +132,13 @@ class _RedactQuerySecrets(logging.Filter):
 
 
 def redact_access_log() -> None:
-    """Mask credential query parameters in uvicorn's access log. Call once at import."""
-    access = logging.getLogger("uvicorn.access")
-    if not any(isinstance(f, _RedactQuerySecrets) for f in access.filters):
-        access.addFilter(_RedactQuerySecrets())
+    """Mask credential query parameters in uvicorn's access log. Call once at import.
+
+    WebSocket handshakes are logged on ``uvicorn.error`` (``"WebSocket /path?token=..." [accepted]``),
+    not ``uvicorn.access``, so that logger is filtered too: the calls socket carries the caller's API key
+    as ``?token=``, and it was written there in plain text.
+    """
+    for name in ("uvicorn.access", "uvicorn.error"):
+        logger = logging.getLogger(name)
+        if not any(isinstance(f, _RedactQuerySecrets) for f in logger.filters):
+            logger.addFilter(_RedactQuerySecrets())
