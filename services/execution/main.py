@@ -2748,9 +2748,10 @@ async def execute_ha_service(req: HAServiceRequest):
         )
 
     # Pre-flight check: detect unavailable/unknown entities before calling HA
-    if req.entity_id and ctx.ha_url and ctx.ha_token:
+    login = hardware_router.hub_login(ctx)
+    if req.entity_id and login:
         try:
-            current = await ha_client.get_state(ctx.ha_url, ctx.ha_token, req.entity_id)
+            current = await ha_client.get_state(login[0], login[1], req.entity_id)
             if current:
                 state = current.get("state", "").lower()
                 friendly = current.get("attributes", {}).get("friendly_name", req.entity_id)
