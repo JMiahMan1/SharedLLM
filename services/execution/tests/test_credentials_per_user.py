@@ -53,6 +53,8 @@ def no_hub(monkeypatch):
 
     monkeypatch.setattr(config, "HA_URL", None)
 
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
+
 
 # Home Assistant: announce / entity search
 def test_announce_without_any_hub_says_so_and_does_not_borrow_admin(monkeypatch, no_hub):

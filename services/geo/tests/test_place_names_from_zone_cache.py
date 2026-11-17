@@ -66,3 +66,16 @@ async def test_a_hub_that_does_not_answer_keeps_the_saved_places_and_its_last_zo
     geo._zone_cache.update({"at": 0.0, "hub": []})
     assert [z["name"] for z in await geo._zones_cached()] == ["The Park"]
     assert await geo._closest_ha_zone(10.01, 20.0) == "The Park"
+
+
+def test_geo_sends_the_stack_login_only_to_homehub(monkeypatch):
+    import services.config as config
+    import services.geo.main as geo
+
+    monkeypatch.setattr(geo, "HA_URL", "http://real-ha.test:8123")
+    monkeypatch.setattr(geo, "HA_TOKEN", None)
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test:8123")
+    monkeypatch.setattr(config, "INTERNAL_SECRET", "made-up-secret")
+    assert geo._hub_target() == ("http://hub.test:8123", "made-up-secret")
+    monkeypatch.setattr(geo, "HA_TOKEN", "household-token")
+    assert geo._hub_target() == ("http://real-ha.test:8123", "household-token")

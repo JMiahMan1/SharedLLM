@@ -37,6 +37,7 @@ def _headers() -> dict:
 def hub(monkeypatch):
     """A configured hub; kid1 may use only the den light and the kids' room speaker and TV."""
     monkeypatch.setattr(config, "HA_URL", HUB_URL)
+    monkeypatch.setattr(config, "HOMEHUB_URL", HUB_URL)
     monkeypatch.setattr(config, "INTERNAL_SECRET", HUB_SECRET)
     allowed = frozenset({"light.den", "media_player.kids_room", "lock.kids_window"})
 
@@ -64,12 +65,14 @@ def commands(monkeypatch):
 
 def test_own_login_wins_then_the_hubs_then_none(monkeypatch):
     monkeypatch.setattr(config, "HA_URL", HUB_URL + "/")
+    monkeypatch.setattr(config, "HOMEHUB_URL", HUB_URL + "/")
     monkeypatch.setattr(config, "INTERNAL_SECRET", HUB_SECRET)
     assert hub_login.hub_login({"ha_url": "http://own", "ha_token": "t"}) == ("http://own", "t")
     assert hub_login.hub_login(UserContext(user="kid1")) == (HUB_URL, HUB_SECRET)
     assert hub_login.hub_login({"ha_url": "http://own", "ha_token": None}) == (HUB_URL, HUB_SECRET)
     assert hub_login.hub_login(None) == (HUB_URL, HUB_SECRET)
     monkeypatch.setattr(config, "HA_URL", None)
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     assert hub_login.hub_login({}) is None
     assert hub_login.hub_pair({}) == ("", "")
 
@@ -96,9 +99,10 @@ async def test_a_light_is_switched_with_the_hubs_login(hub, commands, monkeypatc
 
 async def test_without_any_hub_a_light_says_so(monkeypatch, commands):
     monkeypatch.setattr(config, "HA_URL", None)
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     res = await light_handler.handle_light(
         LightControlRequest(user_context=UserContext(**KID), entity_id="light.den", action="turn_on"))
-    assert res.status == "FAILURE" and "HA_URL" in res.message
+    assert res.status == "FAILURE" and "HOMEHUB_URL" in res.message
     assert commands == []
 
 
@@ -209,3 +213,13 @@ async def test_a_timer_tells_its_satellite_with_the_hubs_login(hub, monkeypatch)
     req = TimerRequest(user_context=UserContext(**KID), action="list")
     await timer._tell_satellite({"satellite": "assist_satellite.den"}, "started", req)
     assert sent == [("started", HUB_URL, HUB_SECRET)]
+
+
+def test_the_stack_login_goes_only_to_homehub_never_to_a_real_home_assistant(monkeypatch):
+    """HA stays supported: HA_URL may be a real Home Assistant, which must never get INTERNAL_SECRET."""
+    monkeypatch.setattr(config, "HA_URL", "http://real-ha.test:8123")
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test:8123")
+    url, token = hub_login.hub_login(UserContext(user="kid1"))
+    assert url == "http://hub.test:8123" and token == config.INTERNAL_SECRET
+    # A person's own HA login still goes to their own HA.
+    assert hub_login.hub_login({"ha_url": "http://real-ha.test:8123", "ha_token": "t"}) == ("http://real-ha.test:8123", "t")

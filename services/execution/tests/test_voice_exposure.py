@@ -73,6 +73,8 @@ async def test_without_any_hub_the_check_fails_fast(monkeypatch):
     import services.config as config
 
     monkeypatch.setattr(config, "HA_URL", None)
+
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     with pytest.raises(EntityNotExposed, match="HA_URL"):
         await voice_exposure.require_exposed(_Ctx(via="assistant", ha_url=None), "light.den")
 
@@ -84,6 +86,7 @@ async def test_without_a_login_of_their_own_the_hubs_login_asks(answers, monkeyp
     table, asked = answers
     table["light.den"] = True
     monkeypatch.setattr(config, "HA_URL", "http://hub.test")
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test")
     await voice_exposure.require_exposed(_Ctx(via="assistant", ha_url=None, ha_token=None), "light.den")
     assert asked
 

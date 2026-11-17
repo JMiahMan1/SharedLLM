@@ -38,6 +38,7 @@ def no_login(monkeypatch):
 
     monkeypatch.setattr(gateway_main, "resolve_identity", resolve)
     monkeypatch.setattr(config, "HA_URL", HUB)
+    monkeypatch.setattr(config, "HOMEHUB_URL", HUB)
     monkeypatch.setattr(config, "INTERNAL_SECRET", SECRET)
     monkeypatch.setattr(gw_config, "INTERNAL_SECRET", SECRET)
     monkeypatch.setattr(dashboard_routes, "load_entity_permissions", load)
@@ -125,6 +126,7 @@ def test_a_player_picture_comes_through_the_hub_only_for_a_player_the_caller_may
 
 def test_the_media_stream_uses_the_hubs_login_and_publishes_only_visible_players(monkeypatch):
     monkeypatch.setattr(config, "HA_URL", HUB)
+    monkeypatch.setattr(config, "HOMEHUB_URL", HUB)
     monkeypatch.setattr(config, "INTERNAL_SECRET", SECRET)
     published = []
     hub = media_events.MediaEventHub("kid")
@@ -138,5 +140,6 @@ def test_the_media_stream_uses_the_hubs_login_and_publishes_only_visible_players
 
 def test_without_any_hub_the_media_stream_has_no_hub_source(monkeypatch):
     monkeypatch.setattr(config, "HA_URL", None)
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     hub = media_events.MediaEventHub("kid")
     assert media_events._build_sources(hub, {"user": "kid"}) == []

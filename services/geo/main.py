@@ -181,20 +181,33 @@ def index():
     return FileResponse(_STATIC / "index.html")
 
 
-def _hub_token() -> str | None:
-    """The household HA token while one is configured, else the hub's own login (the internal secret).
+def _hub_target() -> tuple[str, str] | None:
+    """(base URL, token) for zones, people, history and location updates.
 
-    Home Assistant is retired and homehub accepts the stack's internal secret, so
-    removing HA_TOKEN must not take zones, people and arrivals down with it.
+    The household HA token with HA_URL while one is configured; otherwise the
+    hub's own login, which only ever goes to HOMEHUB_URL (never to HA_URL,
+    which may be a real Home Assistant). Removing HA_TOKEN must not take
+    zones, people and arrivals down with it.
     """
-    return HA_TOKEN or INTERNAL_SECRET
+    if HA_URL and HA_TOKEN:
+        return HA_URL.rstrip("/"), HA_TOKEN
+    from services.common.hub_login import stack_login
+
+    return stack_login()
+
+
+def _hub_base() -> str:
+    target = _hub_target()
+    if not target:
+        raise HTTPException(status_code=503, detail="No home hub is set up (HOMEHUB_URL / HA_URL is not configured)")
+    return target[0]
 
 
 def _ha_headers() -> dict:
-    token = _hub_token()
-    if not token:
-        raise HTTPException(status_code=500, detail="Neither HA_TOKEN nor INTERNAL_SECRET is set")
-    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    target = _hub_target()
+    if not target:
+        raise HTTPException(status_code=503, detail="No home hub is set up (HOMEHUB_URL / HA_URL is not configured)")
+    return {"Authorization": f"Bearer {target[1]}", "Content-Type": "application/json"}
 
 
 def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
@@ -233,7 +246,7 @@ def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
 async def _ha_get_states() -> list:
     if not HA_URL:
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
-    async with get_client_insecure() as client, client.get(f"{HA_URL}/api/states", headers=_ha_headers()) as resp:
+    async with get_client_insecure() as client, client.get(f"{_hub_base()}/api/states", headers=_ha_headers()) as resp:
         if resp.status != 200:
             raise HTTPException(status_code=502, detail=f"HA returned {resp.status}")
         return await resp.json()
@@ -255,7 +268,7 @@ def health():
         "service": "geo",
         "git_sha": os.getenv("GIT_SHA", "unknown"),
         "start_time": _START_TIME,
-        "ha_configured": bool(HA_URL and _hub_token()),
+        "ha_configured": _hub_target() is not None,
     }
 
 
@@ -810,7 +823,7 @@ async def get_history(entity_id: str, samples: int = Query(200, ge=1, le=2000)):
     """
     if not HA_URL:
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
-    url = f"{HA_URL}/api/history/period"
+    url = f"{_hub_base()}/api/history/period"
     # Not minimal_response: HA's REST answer then drops the attributes (the position) after the first row.
     params = {"filter_entity_id": entity_id, "significant_changes_only": "true"}
     async with get_client_insecure() as client, client.get(url, headers=_ha_headers(), params=params) as resp:
@@ -1872,7 +1885,7 @@ async def post_see(
         payload["attributes"] = extra
 
     async with get_client_insecure() as client, client.post(
-        f"{HA_URL}/api/services/device_tracker/see", headers=_ha_headers(), json=payload
+        f"{_hub_base()}/api/services/device_tracker/see", headers=_ha_headers(), json=payload
     ) as resp:
         if resp.status >= 300:
             body = await resp.text()
@@ -1920,7 +1933,7 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
     clean_id = entity_id.split(".")[-1].lower()
 
     # 1. Fetch HA states for entities and zones
-    ha_available = bool(HA_URL and _hub_token())
+    ha_available = _hub_target() is not None
     states = []
     if ha_available:
         try:

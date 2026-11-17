@@ -324,6 +324,8 @@ def test_discovery_entities_no_credentials_reads_with_the_hubs_own_login(monkeyp
     import services.execution.main as exec_main
 
     monkeypatch.setattr(config, "HA_URL", "http://hub.test:8123")
+
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test:8123")
     seen = []
 
     async def get_states(url, token, *a, **k):
@@ -344,6 +346,8 @@ def test_discovery_entities_without_any_hub_is_503(monkeypatch):
     import services.config as config
 
     monkeypatch.setattr(config, "HA_URL", None)
+
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     resp = client.get("/discovery/entities", headers={"X-Internal-Secret": "test-secret"})
     assert resp.status_code == 503
     assert "HA_URL" in resp.json()["detail"]

@@ -1,8 +1,9 @@
 """The login a service uses to read or command the home hub for one caller.
 
-Home Assistant is retired: homehub answers its API at ``services.config.HA_URL``
-(redirected from the old host, see ``ha_redirect``) and accepts the stack's
-``INTERNAL_SECRET``. Only people imported from Home Assistant ever had a stored
+Home Assistant is retired: homehub answers its API at ``services.config.HOMEHUB_URL``
+and accepts the stack's ``INTERNAL_SECRET``. That secret goes to ``HOMEHUB_URL``
+and nowhere else, never to ``HA_URL``: Home Assistant stays a supported
+integration, and a real one must not be handed the stack's own login. Only people imported from Home Assistant ever had a stored
 HA token, and those are being removed, so a caller with no token of their own
 reaches the hub with the hub's own login.
 
@@ -20,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 #: Said when neither the caller nor the stack has a hub to talk to.
-NO_HUB_MESSAGE = "No home hub is set up (HA_URL is not configured), so I cannot reach the home's devices."
+NO_HUB_MESSAGE = "No home hub is set up (HOMEHUB_URL / HA_URL is not configured), so I cannot reach the home's devices."
 
 
 def _own(ctx: Any) -> tuple[str, str]:
@@ -47,10 +48,17 @@ def hub_login(ctx: Any) -> tuple[str, str] | None:
     url, token = _own(ctx)
     if url and token:
         return url, token
-    from services.config import HA_URL, INTERNAL_SECRET
+    return stack_login()
 
-    if HA_URL and INTERNAL_SECRET:
-        return str(HA_URL).rstrip("/"), INTERNAL_SECRET
+
+def stack_login() -> tuple[str, str] | None:
+    """(HOMEHUB_URL, INTERNAL_SECRET): the hub's own login, only ever for the hub itself."""
+    from services import config
+
+    url = str(getattr(config, "HOMEHUB_URL", "") or "").rstrip("/")
+    secret = getattr(config, "INTERNAL_SECRET", "") or ""
+    if url and secret:
+        return url, secret
     return None
 
 

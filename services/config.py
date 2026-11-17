@@ -99,6 +99,9 @@ CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
 SEARXNG_URL = os.getenv(f"{NETWORK_MODE.upper()}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
 # A retired HA host answers through homehub (services/common/ha_redirect.py).
 HA_URL = _ha_redirect(os.getenv("HA_URL"))
+# homehub itself. The stack's own login (INTERNAL_SECRET) is only ever sent
+# here: HA_URL may point at a real Home Assistant, which must never receive it.
+HOMEHUB_URL = (os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123") or "").rstrip("/")
 #: Self-hosted OSRM for snapping trip routes to roads (services/geo/map_match.py).
 #: Unset: routes are served as raw breadcrumbs.
 OSRM_URL = os.getenv("OSRM_URL")

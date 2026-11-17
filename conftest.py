@@ -125,6 +125,7 @@ _TEST_ENV_DEFAULTS = {
     # Third-party integrations: dummies. The live URLs and tokens belong in
     # .env, never in a test run.
     "HA_URL": "http://localhost:8123",
+    "HOMEHUB_URL": "http://localhost:8123",
     "OSRM_URL": "",
     "OSRM_FOOT_URL": "",
     "NOMINATIM_URL": "",
