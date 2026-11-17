@@ -12,11 +12,22 @@
 # copy that could catch a half-written page). The copies are tarred together
 # and old archives are pruned.
 #
-# Some data is files, not databases, and is just as irreplaceable: the private
-# chat's folder holds each chat's wrapped key record, and without it the whole
-# encrypted history can never be read again. Those folders (BACKUP_FOLDERS,
-# relative to ./data) are copied into the archive as they are. They hold only
-# ciphertext and key records that are useless without the parents' password.
+# Some data is files, not databases, and is just as irreplaceable. Folders in
+# BACKUP_FOLDERS (relative to ./data) are copied into the archive, except the
+# private chat, which is NEVER archived in clear: its messages are ciphertext,
+# but who wrote, when, how often and who has seen what is readable beside them.
+# Each chat is instead written as one file, private_chat/<token>.jarvis-backup,
+# encrypted to that chat's backup public key by scripts/private_chat_backup.py
+# (the tar is streamed straight into the encryption; no clear copy touches the
+# disk). Only the chat password opens one: scripts/open_private_chat_backup.py,
+# and docs/PRIVATE_CHAT_BACKUP.md for what is in it and how to restore.
+#
+# The encryption needs Python's `cryptography`. It runs with the host's python3
+# when that has it (BACKUP_PYTHON), otherwise inside the gateway image, which
+# always has it (BACKUP_CRYPTO_IMAGE, run with no network, the data read-only
+# and as this user). With neither, the private chat is left out and the run
+# fails. A chat that has no backup key yet (no member has unlocked it since
+# this shipped) is left out, named in the log, and the run exits 3.
 #
 # This file must stay executable: it lost its mode bit on 2026-11-12 and cron
 # answered "Permission denied" every night for weeks while nothing noticed.
@@ -32,7 +43,14 @@
 #   BACKUP_DIR    where the archives go (default: <root>/data/backups)
 #   BACKUP_KEEP   how many archives to keep (default: 14)
 #   BACKUP_ROOT   the SharedLLM checkout (default: the script's parent directory)
-#   BACKUP_FOLDERS  space-separated folders under ./data copied whole (default: private_chat)
+#   BACKUP_FOLDERS  space-separated folders under ./data copied whole (default: private_chat,
+#                   which is always encrypted per chat, never copied)
+#   BACKUP_PYTHON   python3 used for the private chat's encryption (default: python3)
+#   BACKUP_CRYPTO_IMAGE  image to encrypt with when BACKUP_PYTHON lacks `cryptography`
+#                   (default: ghcr.io/jmiahman1/sharedllm-gateway:latest; empty: never use docker)
+#
+# Exit status: 0 all good; 2 a database was copied raw (locked); 3 a private
+# chat could not be backed up encrypted (no key yet, or no way to encrypt).
 
 set -euo pipefail
 
@@ -41,6 +59,10 @@ DEST="${BACKUP_DIR:-$ROOT/data/backups}"
 KEEP="${BACKUP_KEEP:-14}"
 FOLDERS="${BACKUP_FOLDERS-private_chat}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+PYTHON="${BACKUP_PYTHON:-python3}"
+CRYPTO_IMAGE="${BACKUP_CRYPTO_IMAGE-ghcr.io/jmiahman1/sharedllm-gateway:latest}"
+ENCRYPTER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/private_chat_backup.py"
+private_status=0
 
 if ! command -v sqlite3 >/dev/null 2>&1; then
   echo "sqlite3 is not installed; cannot take a consistent copy" >&2
@@ -48,6 +70,8 @@ if ! command -v sqlite3 >/dev/null 2>&1; then
 fi
 
 mkdir -p "$DEST"
+umask 077
+# mktemp -d makes it mode 700; the trap removes it on every exit, failures included.
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
@@ -93,12 +117,42 @@ for db in "${DBS[@]}"; do
   fi
 done
 
+# The private chat, one encrypted file per chat. Never a clear copy.
+encrypt_private_chat() {
+  local src="$1" out="$2"
+  mkdir -p "$out"
+  if "$PYTHON" -c 'import cryptography.hazmat.primitives.ciphers.aead' >/dev/null 2>&1; then
+    "$PYTHON" "$ENCRYPTER" encrypt-all --root "$src" --out "$out"
+    return
+  fi
+  if [ -n "$CRYPTO_IMAGE" ] && command -v docker >/dev/null 2>&1 \
+    && docker image inspect "$CRYPTO_IMAGE" >/dev/null 2>&1; then
+    echo "host python has no cryptography; encrypting inside $CRYPTO_IMAGE"
+    docker run --rm --network none --user "$(id -u):$(id -g)" \
+      -v "$src:/in:ro" -v "$out:/out" -v "$ENCRYPTER:/encrypt.py:ro" \
+      --entrypoint python3 "$CRYPTO_IMAGE" /encrypt.py encrypt-all --root /in --out /out
+    return
+  fi
+  echo "cannot encrypt the private chat: $PYTHON has no cryptography and the image ${CRYPTO_IMAGE:-(none)} is not available; it was NOT backed up" >&2
+  return 3
+}
+
 folders=0
 for folder in $FOLDERS; do
   src="$ROOT/data/$folder"
   # A folder that does not exist yet (a fresh install) is nothing to back up.
   [ -d "$src" ] || continue
   mkdir -p "$STAGE/folders"
+  if [ "$folder" = "private_chat" ]; then
+    if encrypt_private_chat "$src" "$STAGE/folders/private_chat"; then
+      echo "backed up data/private_chat (encrypted per chat)"
+    else
+      private_status=3
+      echo "data/private_chat is incomplete in this archive: see the lines above" >&2
+    fi
+    folders=$((folders + 1))
+    continue
+  fi
   cp -a "$src" "$STAGE/folders/$folder"
   folders=$((folders + 1))
   echo "backed up data/$folder"
@@ -122,7 +176,15 @@ fi
 
 echo "kept: $(ls -1 "$DEST"/sharedllm-*.tar.gz 2>/dev/null | wc -l) archive(s) in $DEST"
 
+status=0
 if [ "${#raw[@]}" -gt 0 ]; then
   echo "raw copies (locked while running): ${raw[*]}" >&2
-  exit 2
+  status=2
 fi
+
+if [ "$private_status" -ne 0 ]; then
+  echo "the private chat was not fully backed up (encrypted); see above" >&2
+  status="$private_status"
+fi
+
+exit "$status"

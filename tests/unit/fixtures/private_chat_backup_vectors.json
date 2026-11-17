@@ -1,0 +1,75 @@
+{
+  "note": "Fake chats made by services/ui/src/lib/privateChatBackupKey.test.ts; fake passwords.",
+  "passwords": {
+    "first": "test password one",
+    "second": "test password two",
+    "v1": "test password v1"
+  },
+  "v2_chat": {
+    "token": "vectorchat2",
+    "members": [
+      "alexfake",
+      "samfake"
+    ],
+    "version": 2,
+    "kdf": {
+      "salt": "u/ummzxtbTAT75pGC8Sg0A==",
+      "iterations": 600000
+    },
+    "wrapped_key": {
+      "iv": "GMDTWEavpV4/aJ/B",
+      "ct": "+YMn4GX9wvs5+1WbOZGiYnFAIzLFy+VB8gyZNWK/dw5Tmuyn4kmXnhsdV+XS6rFP"
+    },
+    "verifier": {
+      "iv": "7jAULKJg5pZdhtnl",
+      "ct": "IEL1ptTamThCKAa3MePoJWTri8KL2W8VBbF7ueR9JkvNIs0lhr3OGh3QDQ5pRb8="
+    },
+    "auth_hash": "not-a-real-hash",
+    "history": [
+      {
+        "version": 2,
+        "kdf": {
+          "salt": "NVw9zR+hFpYDl9s8KzU5fg==",
+          "iterations": 600000
+        },
+        "wrapped_key": {
+          "iv": "ctSmxkUbVT7b/2J5",
+          "ct": "ENymzJgBX4Q7h8IRsKDUeVWktG3l0ENPpQ4aXITMnilNxjMfv28X6ni05qdGPJRA"
+        },
+        "verifier": {
+          "iv": "7jAULKJg5pZdhtnl",
+          "ct": "IEL1ptTamThCKAa3MePoJWTri8KL2W8VBbF7ueR9JkvNIs0lhr3OGh3QDQ5pRb8="
+        },
+        "auth_hash": "old",
+        "replaced_by": "alexfake"
+      }
+    ],
+    "backup_key": {
+      "alg": "X25519",
+      "public_key": "WoSc4rnpLGT44fjUaGOYJzMmQ+Zt1DjbIyFjzPHNK04=",
+      "sealed_private_key": "🔒 Encrypted message\n\n```jarvis-envelope\n{\"kind\":\"sealed\",\"title\":\"Encrypted message\",\"v\":1,\"iv\":\"wxt6yNbPtpWcY9Xn\",\"ct\":\"SSWm+cyMGZcyJQCdFa3wZW2ztvicVtn4Jo4cMBfsGO8Pc7BjLT/MHaI/K6U9TTxCN71ydBQ8EiWf/nlTSZZ55JiFpv0eFqplqfBsk4TlNssMTeC2KwYPnoWocP2Cw1adGQM3EbGGZjYLub5NuHTR5IH3xRJyRKUpGW5d68xJxt1fHcQxQ6sTpRWQbknason+XEobhNhcK5rVaju3HyHRvovfknywM49C5uuaV6HcJbDvUQ5ydk2SO1A+FfiFAccgpg9C9Em/VYHehGiQkVwm/0RtUlbmBvyXfjIWqQ==\"}\n```jarvis-envelope",
+      "key_id": "vectorx",
+      "created_at": 1700000000
+    }
+  },
+  "v1_chat": {
+    "token": "vectorchat1",
+    "members": [
+      "alexfake",
+      "samfake"
+    ],
+    "salt": "2ohNJXvpUOP2hk+5DNgV+w==",
+    "iterations": 600000,
+    "verifier": {
+      "iv": "+qLT6ecFBr5J/8ks",
+      "ct": "/DOSaK1XYXu0n7mSpJc6GGoq85tOFqZEHzssyfKB+b066zZuZWYh0PNRTJ63tGw="
+    },
+    "backup_key": {
+      "alg": "P-256",
+      "public_key": "BFg84kKfDdI8vATRFmbkhiHQ1C+RCrn/W7rArYWh2uva9XMp8VBKPBSHNEMtdxXwc002s+ZvbYPhmLFoxPqYnn8=",
+      "sealed_private_key": "🔒 Encrypted message\n\n```jarvis-envelope\n{\"kind\":\"sealed\",\"title\":\"Encrypted message\",\"v\":1,\"iv\":\"xSZn3thZ2S9Bbaa5\",\"ct\":\"wVt6xiuz9kHkL38MhOgDU2Aue9dYPh3x+We238ZVRg6+m71X4HHntYRcdNTvaYGu3utTzn/+vS9i/FVzweaaK2fYHVhhkTGF1bTGuoS+t9IsJJXDcAIZ58XNWlEoJ7dQRy8czA8kasn23HmDtCknlRv4i0snsgEelnsQ+nZykIzoB8aBtDsSRejXQwjsTrNk2PtWWkTa+cvXcSAC2unLPN5C8NovITK8EeHtXN3d/eCEo1XIaVYBYz8Zp9RPMY1n00wJvB5/nZHAe1z6ANqXmnT1jUOBCpGp4dkSAl/iYNJtIYYJNlGSsa9L4pJPkv0JxlZ/rNdiu9e9zfj69bchIScSMsQv3dCj3Tr8jlG+Sq4uvReokV4Slvq/T3+ltgkQJehjCTD6NyIX7QaAt4VohQHCNAQ5yyzwfnM6mn8gWnhZg5Wic1cmxE7Un2AOpnwmZol+6/wcxT7T33kDvQ1cG3K+OAJ5TfZFh/TxkVWqurypAKfo+rNlEg+j0hhTYBE=\"}\n```jarvis-envelope",
+      "key_id": "vectorp",
+      "created_at": 1700000000
+    }
+  }
+}

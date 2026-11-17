@@ -2,6 +2,7 @@
 // of React so they can be tested directly.
 import { isMine, type TalkMessage } from './chatModel';
 import type { PrivatePayload } from '../../lib/privateChatCrypto';
+import type { BackupKeyInfo } from '../../lib/privateChatBackupKey';
 
 export interface PrivateChatInfo {
   token: string;
@@ -19,6 +20,8 @@ export interface PrivateChatInfo {
   beloved?: boolean;
   /** Where its messages live: the gateway's own store, or Talk for a chat not moved yet (the routes hide which). */
   storage?: 'talk' | 'store';
+  /** The key nightly backups are encrypted to (lib/privateChatBackupKey.ts); null until a member's phone makes it. */
+  backup_key?: BackupKeyInfo | null;
 }
 
 export interface PrivateChatStatus {

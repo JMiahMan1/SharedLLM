@@ -60,6 +60,11 @@ one, and only they can read it:
   reaction. Only the author may edit (checked against the stored message, or
   Talk's record of who sent it for a chat not yet moved); the server sees who reacted to which message and who has seen
   it, never the emoji or the new text.
+* **Backups are encrypted to the chat** (``POST /chats/<token>/backup-key``):
+  a member's phone makes an ECDH key pair the first time the chat is
+  unlocked and seals the private key with DK; the nightly backup encrypts the
+  chat's whole folder to the public key (scripts/private_chat_backup.py), so
+  only the chat password can open a backup (docs/PRIVATE_CHAT_BACKUP.md).
 * **Notices carry no content**: "New private message from Sam" (chat_notify),
   "Sam nudged you in your private chat" (``nudge``), "Sam changed the
   private chat password" (``change_password``) and "Sam reacted in your
@@ -445,6 +450,8 @@ def _public(chat: dict[str, Any], me: str, people: dict[str, dict[str, Any]]) ->
         "beloved": is_couple(chat, people),
         # Where its messages live: "store" (the gateway) or "talk" (a chat not moved yet).
         "storage": "store" if chat.get("storage") == "store" else "talk",
+        # The key nightly backups are encrypted to (public part only), or null until a phone makes it.
+        "backup_key": _public_backup_key(chat),
         **_public_key(chat),
     }
 
@@ -463,6 +470,139 @@ def _public_key(chat: dict[str, Any]) -> dict[str, Any]:
         "kdf": {"name": "PBKDF2-SHA256", "salt": chat["salt"], "iterations": chat["iterations"]},
         "verifier": chat["verifier"],
     }
+
+
+# --- Backup key ---------------------------------------------------------------
+#
+# Nightly backups (scripts/backup_databases.sh -> scripts/private_chat_backup.py)
+# never archive a chat in clear: each chat is encrypted to its backup public
+# key. A member's phone makes the key pair the first time the chat is unlocked
+# (services/ui/src/lib/privateChatBackupKey.ts) and seals the private key with
+# the chat's data key, so only the chat password can open a backup. The server
+# keeps the public key and the sealed private key; it can check their shape,
+# never their contents.
+
+BACKUP_ALGS = ("X25519", "P-256")
+#: A sealed PKCS#8 private key (about 200 bytes once sealed and base64'd) with room to spare.
+MAX_SEALED_BACKUP_KEY = 4096
+#: Retired key pairs kept after a rotation, so a backup made before it can still be matched to its key.
+BACKUP_KEYS_RETIRED_KEEP = 20
+_SEALED_JSON = re.compile(r"```jarvis-envelope\s*(\{.*?\})\s*```", re.S)
+_backup_key_lock = asyncio.Lock()
+
+
+def _public_backup_key(chat: dict[str, Any]) -> dict[str, Any] | None:
+    key = chat.get("backup_key")
+    if not isinstance(key, dict):
+        return None
+    return {k: key.get(k) for k in ("alg", "public_key", "key_id", "created_at")}
+
+
+def _backup_public_key(alg: Any, value: Any) -> bytes:
+    if alg not in BACKUP_ALGS:
+        raise HTTPException(status_code=422, detail=f"alg must be one of {', '.join(BACKUP_ALGS)}.")
+    raw = _b64(value, "public_key")
+    from cryptography.hazmat.primitives.asymmetric import ec, x25519
+
+    try:
+        if alg == "X25519":
+            if len(raw) != 32 or not any(raw):
+                raise ValueError("size")
+            x25519.X25519PublicKey.from_public_bytes(raw)
+        else:
+            if len(raw) != 65 or raw[0] != 4:
+                raise ValueError("size")
+            ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"public_key is not an {alg} public key.") from exc
+    return raw
+
+
+def _sealed_backup_key(value: Any) -> str:
+    """A sealed envelope (the device's sealRecord) of the right size; its contents only DK opens."""
+    if not isinstance(value, str) or not is_sealed(value) or len(value.encode()) > MAX_SEALED_BACKUP_KEY:
+        raise HTTPException(status_code=422, detail="sealed_private_key must be a sealed envelope.")
+    match = _SEALED_JSON.search(value)
+    try:
+        parsed = json.loads(match.group(1)) if match else None
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail="sealed_private_key must be a sealed envelope.")
+    _sealed({"iv": parsed.get("iv"), "ct": parsed.get("ct")}, "sealed_private_key", ct_len=(TAG_BYTES + 32, MAX_SEALED_BACKUP_KEY))
+    return value
+
+
+@router.get("/chats/{token}/backup-key")
+async def get_backup_key(token: str, request: Request):
+    """Whether the chat has a backup key (public part only): members see it here and in the chat itself."""
+    chat = (await _member_chat(request, token))[1]
+    key = _public_backup_key(chat)
+    return {"token": token, "has_backup_key": key is not None, "backup_key": key}
+
+
+@router.get("/backup-keys")
+async def backup_keys(request: Request):
+    """Admin: which private chats have a backup key yet (tokens and public key ids only, never a name)."""
+    from services.gateway import main as gateway
+
+    await gateway._require_admin(request)
+    chats = []
+    for chat in get_store().all():
+        key = _public_backup_key(chat)
+        chats.append({"token": chat["token"], "has_backup_key": key is not None,
+                      **({"alg": key["alg"], "key_id": key["key_id"], "created_at": key["created_at"]} if key else {})})
+    return {"chats": chats}
+
+
+@router.post("/chats/{token}/backup-key")
+async def put_backup_key(token: str, request: Request):
+    """Store the chat's backup key pair (made on a member's phone). Never replaced unless ``rotate`` is true."""
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="A JSON body is required.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="A JSON body is required.")
+    user, _chat, people = await _member_chat(request, token)
+    alg = body.get("alg")
+    raw = _backup_public_key(alg, body.get("public_key"))
+    sealed = _sealed_backup_key(body.get("sealed_private_key"))
+    now = int(time.time())
+    created = body.get("created_at")
+    if not isinstance(created, int) or isinstance(created, bool) or abs(created - now) > 86_400:
+        created = now
+    rotate = body.get("rotate") is True
+    record = {
+        "alg": alg,
+        "public_key": body["public_key"],
+        "sealed_private_key": sealed,
+        "key_id": hashlib.sha256(raw).hexdigest()[:32],
+        "created_at": created,
+        "created_by": user,
+    }
+    async with _backup_key_lock:
+        store = get_store()
+        chat = store.get(token)
+        if not chat or user not in chat.get("members", []):
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE)
+        existing = chat.get("backup_key")
+        if isinstance(existing, dict):
+            if not rotate:
+                return JSONResponse(status_code=409, content={
+                    "detail": "This chat already has a backup key.", "backup_key": _public_backup_key(chat)})
+            if existing.get("key_id") == record["key_id"]:
+                raise HTTPException(status_code=409, detail="That is the backup key the chat already has.")
+            retired = chat.get("backup_keys_retired") if isinstance(chat.get("backup_keys_retired"), list) else []
+            chat["backup_keys_retired"] = [*retired, {**existing, "retired_at": now, "retired_by": user}][-BACKUP_KEYS_RETIRED_KEEP:]
+        chat["backup_key"] = record
+        try:
+            store.save(chat)
+        except OSError as exc:
+            log.error("[private-chat] could not save the backup key for %s: %s", token, exc)
+            raise HTTPException(status_code=500, detail="Could not save the backup key (PRIVATE_CHAT_DIR not writable).") from exc
+    log.info("[private-chat] %s %s the backup key of %s (%s, %s)", user, "rotated" if rotate else "set", token, alg, record["key_id"])
+    return _public(chat, user, people)
 
 
 # --- Talk ---------------------------------------------------------------------
