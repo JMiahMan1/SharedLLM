@@ -7,6 +7,7 @@ import { screenFindings, settle, shot, quietHotReload, type Allowed } from '../f
 import JSZip from 'jszip';
 import { deriveKey, encryptBytes, makeVerifier, openMessage, openRecord, randomBytes, sealMessage, sealRecord, toBase64, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
 import { fakeJpeg } from '../../src/test/fakes/fakeJpeg';
+import { TINY_WEBM_BASE64 } from '../fixtures/tinyVideo';
 
 const expect = baseExpect.configure({ timeout: 20_000 });
 
@@ -49,6 +50,9 @@ interface Server {
   reacted?: string[];
   edited?: string[];
   seen?: string[];
+  /** The blob ids each sent message said it is made of, and the blobs this device deleted. */
+  messageBlobs?: string[][];
+  blobsDeleted?: string[];
 }
 
 interface Mark {
@@ -92,6 +96,14 @@ async function serve(page: Page, server: Server): Promise<void> {
       return route.fulfill({ json: { id, size: body.length } });
     }
     const blob = /^\/api\/private-chat\/chats\/[^/]+\/blobs\/([0-9a-f]+)$/.exec(p);
+    if (blob && req.method() === 'DELETE') {
+      (server.blobsDeleted ??= []).push(blob[1]);
+      delete server.blobs[blob[1]];
+      return route.fulfill({ json: { deleted: blob[1] } });
+    }
+    if (blob && !server.blobs[blob[1]]) {
+      return route.fulfill({ status: 404, json: { detail: 'No such picture.' } });
+    }
     if (blob) {
       return route.fulfill({ body: server.blobs[blob[1]], contentType: 'application/octet-stream', headers: { 'cache-control': 'no-store' } });
     }
@@ -173,8 +185,10 @@ async function serve(page: Page, server: Server): Promise<void> {
       return route.fulfill({ json: { status: 'SUCCESS', source: 'store', detail: { messages: newer } } });
     }
     if (p === `/api/private-chat/chats/${TOKEN}/messages` && req.method() === 'POST') {
-      const posted = String((req.postDataJSON() as { sealed?: string }).sealed);
+      const body = req.postDataJSON() as { sealed?: string; blobs?: string[] };
+      const posted = String(body.sealed);
       server.posted.push(posted);
+      (server.messageBlobs ??= []).push(body.blobs ?? []);
       // Like the gateway: what was sent is in the thread on the next read, with the next id.
       const nextId = Math.max(0, ...server.messages.map((m) => Number(m.id) || 0)) + 1;
       const message = { id: nextId, token: TOKEN, actor_type: 'users', actor_id: 'parent', actor_display_name: 'Parent',
@@ -779,7 +793,7 @@ test.describe('private chat on every form factor', () => {
       data.items.add(new File(['secret notes'], 'notes.txt', { type: 'text/plain' }));
       el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
     });
-    await expect(page.getByText('Only photos can be sent in a private chat')).toBeVisible();
+    await expect(page.getByText('Only photos and videos can be sent in a private chat')).toBeVisible();
     expect(server.uploads).toHaveLength(2);
     expect(page.url()).toContain('/family');
     done(run);
@@ -1003,6 +1017,213 @@ test.describe('private chat on every form factor', () => {
     await expect(page.getByTestId('private-picture')).toHaveCount(0);
     await page.getByTestId('private-lock-now').click();
     expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
+    done(run);
+  });
+
+  test('a video clip from the phone: sent encrypted in pieces with its poster, shown with its length, played, in the gallery, deleted', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    const feed = page.getByTestId('private-feed');
+    await expect(feed.getByText('Sent before any change')).toBeVisible();
+
+    // Picked through the same chooser as photos (on Android, the WebView's file chooser), which offers videos too.
+    const accept = await page.getByTestId('private-file-input').getAttribute('accept');
+    expect(accept).toContain('video/mp4');
+    expect(accept).toContain('video/*');
+    expect(await page.locator('input[capture]').count()).toBe(0);
+    const clip = Buffer.from(TINY_WEBM_BASE64, 'base64');
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByTestId('private-pick').click();
+    await (await chooser).setFiles({ name: 'kids-in-the-garden.webm', mimeType: 'video/webm', buffer: clip });
+    await expect.poll(() => server.posted.length).toBe(1);
+
+    // The server got opaque blobs (the poster and one piece) and a sealed message naming none of it readably.
+    expect(server.uploads).toHaveLength(2);
+    for (const upload of server.uploads!) {
+      expect(upload.includes(clip.subarray(0, 4)), 'no WebM signature on the wire').toBe(false);
+      expect(upload[0] === 0xff && upload[1] === 0xd8, 'no JPEG signature on the wire').toBe(false);
+    }
+    const posted = server.posted[0];
+    expect(posted).toContain('```jarvis-envelope');
+    for (const secret of ['kids-in-the-garden', 'video', 'webm']) expect(posted).not.toContain(secret);
+    const opened = await openMessage(key, posted);
+    expect(opened).toMatchObject({ t: 'video', mime: 'video/webm', size: clip.length, width: 64, height: 36, name: 'kids-in-the-garden.webm', chunk_bytes: 4 * 1024 * 1024 });
+    if (opened?.t !== 'video') throw new Error('not a video');
+    expect(opened.duration).toBeGreaterThan(1.5);
+    expect(opened.duration).toBeLessThan(2.5);
+    expect(opened.chunks).toHaveLength(1);
+    expect(opened.sent_at).toBeGreaterThan(0);
+    // The message names its blobs for the server, so deleting it deletes them too.
+    expect(server.messageBlobs![0].sort()).toEqual([...opened.chunks, opened.poster].sort());
+    // A piece is the clip plus IV and tag; the poster is a picture of its own.
+    expect(server.blobs[opened.chunks[0]].length).toBe(clip.length + 28);
+
+    // The bubble: the decrypted poster, a play button and the length.
+    const bubble = feed.getByTestId('private-video');
+    await expect(bubble).toBeVisible();
+    await expect(bubble).toHaveAttribute('aria-label', 'Play video, 0:02');
+    await expect(bubble.getByTestId('private-video-duration')).toHaveText('0:02');
+    expect(await bubble.getByTestId('private-video-poster').getAttribute('src')).toMatch(/^blob:/);
+    expect(await bubble.getByTestId('private-video-poster').getAttribute('draggable')).toBe('false');
+    await check(page, info, run, 'private video bubble', page.getByTestId('chat-thread'), await overPanel(page, /^private video bubble$/));
+
+    // The player: decrypted into memory, played from a blob: URL, with reactions and delete.
+    await bubble.click();
+    const player = page.getByTestId('private-video-player');
+    const playing = player.getByTestId('private-video-playing');
+    await expect(playing).toBeVisible();
+    const src = (await playing.getAttribute('src'))!;
+    expect(src).toMatch(/^blob:/);
+    expect(await playing.getAttribute('controlslist')).toContain('nodownload');
+    await expect.poll(() => playing.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
+    expect(await playing.evaluate((v: HTMLVideoElement) => [v.videoWidth, v.videoHeight])).toEqual([64, 36]);
+    await expect(player.getByTestId('private-reaction-row')).toBeVisible();
+    await check(page, info, run, 'private video player', player);
+    await player.getByRole('button', { name: 'Close video' }).click();
+    await expect(player).toHaveCount(0);
+    // Closing let go of the decrypted clip at once.
+    expect(await page.evaluate(async (url) => fetch(url).then(() => 'alive', () => 'revoked'), src)).toBe('revoked');
+
+    // A reaction from the player, sealed like any other.
+    await bubble.click();
+    await player.getByTestId('private-react-love').click();
+    await expect(player).toHaveCount(0);
+    await expect.poll(async () => openRecord(key, server.reacted?.at(-1))).toEqual({ t: 'reaction', m: 2, e: '❤️' });
+
+    // The gallery shows the clip beside the photos, with its length, and plays it.
+    await page.getByTestId('private-gallery-open').click();
+    const gallery = page.getByTestId('private-gallery');
+    await expect(gallery.getByTestId('private-gallery-count')).toHaveText('1 video');
+    const tile = gallery.getByTestId('private-gallery-tile');
+    await expect(tile).toHaveAttribute('aria-label', /^Video from Parent, .*0:02/);
+    await expect(tile.getByTestId('private-gallery-video-duration')).toHaveText('0:02');
+    await check(page, info, run, 'private gallery with a video', gallery);
+    await tile.click();
+    const viewer = page.getByTestId('private-gallery-viewer');
+    await viewer.getByTestId('private-gallery-video-play').click();
+    await expect(viewer.getByTestId('private-gallery-video-playing')).toHaveAttribute('src', /^blob:/);
+    await expect(viewer.getByTestId('private-gallery-comment-input')).toHaveAttribute('placeholder', 'Comment on this video');
+    await check(page, info, run, 'private gallery video viewer', viewer);
+    await viewer.getByRole('button', { name: 'Back to the gallery' }).click();
+    await gallery.getByRole('button', { name: 'Close gallery' }).click();
+
+    // Delete for both: the message, then (belt and braces with the server) every piece and the poster.
+    await bubble.click();
+    await player.getByTestId('private-video-delete').click();
+    await expect.poll(() => server.deleted).toEqual([2]);
+    await expect.poll(() => (server.blobsDeleted ?? []).slice().sort()).toEqual([...opened.chunks, opened.poster].sort());
+    await expect(feed.getByTestId('private-video')).toHaveCount(0);
+
+    // Locking leaves nothing decrypted on the page.
+    await page.getByTestId('private-lock-now').click();
+    expect(await page.locator('[src^="blob:"]').count()).toBe(0);
+    expect(server.talk ?? []).toEqual([]);
+    done(run);
+  });
+
+  test('a video recorded in the app: the timer, stop, watch it back, send it encrypted; nothing left running', async ({ page }, info) => {
+    // A stand-in camera and microphone: a drawn stream and a tone, so Chromium's own MediaRecorder records a real clip.
+    await page.addInitScript(() => {
+      const log = { stopped: 0, audio: [] as boolean[] };
+      (window as unknown as { __recLog: typeof log }).__recLog = log;
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          getUserMedia: async (constraints: MediaStreamConstraints) => {
+            log.audio.push(Boolean(constraints.audio));
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = 180;
+            const ctx = canvas.getContext('2d')!;
+            let frame = 0;
+            const draw = () => {
+              frame += 1;
+              ctx.fillStyle = '#7c3aed';
+              ctx.fillRect(0, 0, 320, 180);
+              ctx.fillStyle = '#fde68a';
+              ctx.fillRect((frame * 8) % 320, 60, 60, 60);
+            };
+            draw();
+            const timer = setInterval(draw, 50);
+            const stream = canvas.captureStream(20);
+            if (constraints.audio) {
+              const audio = new AudioContext();
+              const tone = audio.createOscillator();
+              const out = audio.createMediaStreamDestination();
+              tone.connect(out);
+              tone.start();
+              for (const track of out.stream.getAudioTracks()) stream.addTrack(track);
+            }
+            for (const track of stream.getTracks()) {
+              const stop = track.stop.bind(track);
+              track.stop = () => {
+                log.stopped += 1;
+                clearInterval(timer);
+                stop();
+              };
+            }
+            return stream;
+          },
+        },
+      });
+    });
+    const { server, key } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed')).toBeVisible();
+
+    // One camera button: photo first, then switch to video.
+    await page.getByTestId('private-camera-open').click();
+    await page.getByTestId('private-camera').getByTestId('private-mode-video').click();
+    const recorder = page.getByTestId('private-recorder');
+    await expect(recorder.getByTestId('private-recorder-record')).toBeEnabled();
+    await expect(recorder.getByTestId('private-recorder-timer')).toHaveText('0:00 / 3:00');
+    await check(page, info, run, 'private recorder', recorder);
+
+    await recorder.getByTestId('private-recorder-record').click();
+    const stop = recorder.getByTestId('private-recorder-stop');
+    await expect(stop).toBeVisible();
+    // The flip is off while recording; the clock runs.
+    await expect(recorder.getByTestId('private-recorder-flip')).toBeDisabled();
+    await expect(recorder.getByTestId('private-recorder-timer')).toHaveText('0:02 / 3:00', { timeout: 6_000 });
+    await check(page, info, run, 'private recorder recording', recorder);
+    await stop.click();
+
+    // Watch it back from memory, then send.
+    const review = recorder.getByTestId('private-recorder-review');
+    await expect(review).toBeVisible();
+    expect(await review.getAttribute('src')).toMatch(/^blob:/);
+    await expect(recorder.getByTestId('private-recorder-length')).toContainText('0:0');
+    await check(page, info, run, 'private recorder review', recorder);
+    await recorder.getByTestId('private-recorder-send').click();
+    await expect(recorder).toHaveCount(0);
+    await expect.poll(() => server.posted.length).toBe(1);
+
+    const opened = await openMessage(key, server.posted[0]);
+    expect(opened).toMatchObject({ t: 'video', width: 320, height: 180 });
+    if (opened?.t !== 'video') throw new Error('not a video');
+    // MP4 where the browser records and plays it, WebM otherwise.
+    expect(['video/mp4', 'video/webm']).toContain(opened.mime);
+    expect(opened.duration).toBeGreaterThanOrEqual(2);
+    expect(opened.duration).toBeLessThan(10);
+    expect(opened.taken_at).toBeGreaterThan(0);
+    expect(server.uploads).toHaveLength(1 + opened.chunks.length);
+    const log = await page.evaluate(() => (window as unknown as { __recLog: { stopped: number; audio: boolean[] } }).__recLog);
+    // The photo camera asks for no sound; the recorder asks for the microphone.
+    expect(log.audio[0]).toBe(false);
+    expect(log.audio).toContain(true);
+    // Camera and microphone both stopped.
+    expect(log.stopped).toBeGreaterThanOrEqual(2);
+
+    // It plays back for the other parent too: the bubble, then the player.
+    const bubble = page.getByTestId('private-feed').getByTestId('private-video');
+    await expect(bubble).toBeVisible();
+    await bubble.click();
+    await expect(page.getByTestId('private-video-playing')).toHaveAttribute('src', /^blob:/);
+    await page.getByRole('button', { name: 'Close video' }).click();
     done(run);
   });
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Loader2, RefreshCw, RotateCcw, SendHorizontal, X } from 'lucide-react';
+import { Camera, Loader2, RefreshCw, RotateCcw, SendHorizontal, Video, X } from 'lucide-react';
 
 type Facing = 'environment' | 'user';
 
@@ -13,10 +13,13 @@ type Facing = 'environment' | 'user';
 export default function PrivateCamera({
   onCapture,
   onClose,
+  onVideo,
 }: {
   /** The JPEG bytes and when they were taken (seconds); the caller encrypts and zeroes them. */
   onCapture: (jpeg: Uint8Array<ArrayBuffer>, takenAt: number) => Promise<void>;
   onClose: () => void;
+  /** Switch to recording a video clip (PrivateVideoRecorder), when the chat offers it. */
+  onVideo?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -147,6 +150,16 @@ export default function PrivateCamera({
           </p>
         )}
       </div>
+      {onVideo && !captured && (
+        <div className="flex shrink-0 justify-center gap-2 pt-3" role="group" aria-label="Camera mode">
+          <button type="button" aria-pressed="true" className="flex min-h-11 items-center gap-1.5 rounded-full bg-white/15 px-4 text-sm font-semibold text-white" data-testid="private-mode-photo">
+            <Camera size={15} aria-hidden /> Photo
+          </button>
+          <button type="button" onClick={onVideo} className="flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-semibold text-slate-300 hover:bg-white/10" data-testid="private-mode-video">
+            <Video size={15} aria-hidden /> Video
+          </button>
+        </div>
+      )}
       <div className="flex shrink-0 items-center justify-around gap-3 px-4 pb-[max(1rem,var(--safe-bottom))] pt-3">
         {captured ? (
           <>

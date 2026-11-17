@@ -6,7 +6,8 @@ import { useHaptics } from '../../hooks/useHaptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
-import { IMAGE_TYPES, PrivateVault, isSealedMessage, type PrivatePayload } from '../../lib/privateChatCrypto';
+import { IMAGE_TYPES, PrivateVault, VIDEO_CHUNK_BYTES, VIDEO_TYPES, isSealedMessage, type PrivatePayload, type VideoPayload } from '../../lib/privateChatCrypto';
+import { isVideoFile, readClip, videoMimeOf, videoProblem } from '../../lib/privateVideoMedia';
 import { chatLeft, chatShown, lockNow, pickerDone, pickerOpening, vaultFor } from '../../lib/privateChatSession';
 import { sha256Hex } from '../../lib/galleryImport';
 import { secureWindowOff, secureWindowOn, type SecureState } from '../../plugins/secureWindow';
@@ -14,6 +15,8 @@ import { deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../.
 import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
 import PrivateChatSecurity from './PrivateChatSecurity';
 import PrivateCamera from './PrivateCamera';
+import PrivateVideoRecorder from './PrivateVideoRecorder';
+import { PrivateVideoBubble, PrivateVideoPlayer } from './PrivateVideo';
 import PrivateGallery from './PrivateGallery';
 import BelovedPage from './beloved/BelovedPage';
 import { Lily } from './beloved/BelovedArt';
@@ -372,7 +375,10 @@ interface UnlockedChatProps {
 function UnlockedChat({ partnerName, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, onChanged, onAddBelovedToHome }: UnlockedChatProps) {
   const queryClient = useQueryClient();
   const [securityOpen, setSecurityOpen] = useState(false);
-  const [cameraOpen, setCameraOpen] = useState(false);
+  // The in-app camera: a photo, or a video clip (the two share one button and switch modes).
+  const [camera, setCamera] = useState<'photo' | 'video' | null>(null);
+  // A picked or recorded clip on its way: its encrypted pieces sent so far.
+  const [videoSending, setVideoSending] = useState<{ done: number; count: number } | null>(null);
   // The gallery, opened on one picture (a comment's) or on the grid.
   const [gallery, setGallery] = useState<{ blob?: string } | null>(null);
   // A heart or love note notice opens the chat with ?beloved=1: straight to Beloved once unlocked.
@@ -391,6 +397,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
   const { trigger } = useHaptics();
   const [selected, setSelected] = useState<string | null>(null);
   const [viewing, setViewing] = useState<{ url: string; name: string; message: TalkMessage; own: boolean } | null>(null);
+  const [watching, setWatching] = useState<{ video: VideoPayload; message: TalkMessage; own: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -552,9 +559,10 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
     }
   };
 
-  const post = async (payload: PrivatePayload) => {
+  /** Seal and send a message; `blobs` are the encrypted blobs it is made of, deleted with it. */
+  const post = async (payload: PrivatePayload, blobs?: string[]) => {
     const message = await vault.seal(payload);
-    const res = await api.sendPrivateMessage(token, message);
+    const res = await api.sendPrivateMessage(token, message, undefined, blobs);
     if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Message failed to send');
   };
 
@@ -597,7 +605,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
       }
       blob = (await api.uploadPrivateBlob(token, sealed)).id;
       // When it was sent (and taken) travels inside the encryption, for the gallery.
-      await post({ t: 'image', blob, mime, ...(name ? { name } : {}), sent_at: Math.floor(Date.now() / 1000), ...(takenAt ? { taken_at: takenAt } : {}), sha256 });
+      await post({ t: 'image', blob, mime, ...(name ? { name } : {}), sent_at: Math.floor(Date.now() / 1000), ...(takenAt ? { taken_at: takenAt } : {}), sha256 }, [blob]);
       onChanged();
     } catch (error) {
       if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
@@ -605,10 +613,86 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
     }
   };
 
-  /** A photo from the picker, a paste or a drop. Anything that is not a photo is refused. */
+  /**
+   * Send a video clip. Everything about it is read here (length, frame size,
+   * a poster frame drawn to a canvas), then the poster is encrypted like a
+   * picture and the clip in 4 MiB pieces (lib/privateChatCrypto.ts), each its
+   * own opaque blob. The message names them all inside its encryption. If
+   * anything fails, what was uploaded is deleted again.
+   */
+  const sendVideo = async (source: Blob, mime: string, options: { name?: string; takenAt?: number; duration?: number } = {}, onProgress?: (done: number, count: number) => void) => {
+    const uploaded: string[] = [];
+    const upload = async (bytes: Uint8Array<ArrayBuffer>) => {
+      const id = (await api.uploadPrivateBlob(token, bytes)).id;
+      uploaded.push(id);
+      return id;
+    };
+    try {
+      const facts = await readClip(source, options.duration);
+      let sealedPoster: Uint8Array<ArrayBuffer>;
+      try {
+        sealedPoster = await vault.encrypt(facts.poster);
+      } finally {
+        facts.poster.fill(0);
+      }
+      const poster = await upload(sealedPoster);
+      const report = (done: number, count: number) => {
+        setVideoSending({ done, count });
+        onProgress?.(done, count);
+      };
+      report(0, Math.max(1, Math.ceil(source.size / VIDEO_CHUNK_BYTES)));
+      const sealed = await vault.encryptVideo(source, upload, report);
+      const payload: VideoPayload = {
+        t: 'video',
+        mime,
+        size: sealed.size,
+        duration: Math.round(facts.duration * 10) / 10,
+        ...(facts.width && facts.height ? { width: facts.width, height: facts.height } : {}),
+        poster,
+        chunks: sealed.chunks,
+        clip: sealed.clip,
+        chunk_bytes: sealed.chunk_bytes,
+        ...(options.name ? { name: options.name } : {}),
+        sent_at: Math.floor(Date.now() / 1000),
+        ...(options.takenAt ? { taken_at: options.takenAt } : {}),
+      };
+      await post(payload, [...sealed.chunks, poster]);
+      onChanged();
+    } catch (error) {
+      for (const id of uploaded) void api.deletePrivateBlob(token, id).catch(() => {});
+      throw error;
+    } finally {
+      setVideoSending(null);
+    }
+  };
+
+  /** A clip from the picker, a paste or a drop. */
+  const sendPickedVideo = async (file: File) => {
+    const problem = videoProblem(file);
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    setSending(true);
+    try {
+      // When it was taken is the file's own time: the best a picked clip says without reading its container.
+      const takenAt = file.lastModified ? Math.floor(file.lastModified / 1000) : undefined;
+      await sendVideo(file, videoMimeOf(file), { name: file.name || undefined, takenAt });
+    } catch (error) {
+      toast.error(errorText(error, 'Could not send the video'));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  /** A photo or a video from the picker, a paste or a drop. Anything else is refused. */
   const sendPicture = async (file: File) => {
+    if (isVideoFile(file)) {
+      await sendPickedVideo(file);
+      return;
+    }
     if (!IMAGE_TYPES.has(file.type)) {
-      toast.error('Only photos can be sent in a private chat');
+      toast.error('Only photos and videos can be sent in a private chat');
       return;
     }
     if (file.size > MAX_ATTACHMENT_BYTES) {
@@ -629,13 +713,17 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
     for (const file of files) await sendPicture(file);
   };
 
-  /** Delete a message for both of you, and the picture's encrypted blob when it is one. */
-  const removeById = async (messageId: number, blob?: string) => {
+  /**
+   * Delete a message for both of you, and the encrypted blobs it is made of (a
+   * picture's, or a clip's pieces and poster). The gateway deletes them with
+   * the message too; asking again here also covers a chat still on Talk.
+   */
+  const removeById = async (messageId: number, blobs: string[] = []) => {
     setSelected(null);
     try {
       const res = await api.deletePrivateMessage(token, messageId);
       if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Could not delete the message');
-      if (blob) await api.deletePrivateBlob(token, blob);
+      for (const blob of blobs) await api.deletePrivateBlob(token, blob).catch(() => {});
       if (editing?.id === messageId) cancelEdit();
       onChanged();
       // Its edit and reactions went with it on the server.
@@ -647,8 +735,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
 
   const remove = async (message: TalkMessage) => {
     if (typeof message.id !== 'number') return;
-    const payload = opened[String(message.id)];
-    await removeById(message.id, payload && payload !== 'unreadable' && payload.t === 'image' ? payload.blob : undefined);
+    await removeById(message.id, blobsOf(opened[String(message.id)]));
   };
 
   const nudge = async () => {
@@ -666,6 +753,9 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
       setNudging(false);
     }
   };
+
+  // Comments name a picture by its blob; a video's comments name its poster.
+  const videoPosters = new Set(Object.values(opened).flatMap((p) => (p !== 'unreadable' && p.t === 'video' ? [p.poster] : [])));
 
   // The message whose sheet is open: a readable text message, mine or the other parent's.
   const sheetMessage = visible.find((m, index) => String(m.id ?? index) === selected);
@@ -845,7 +935,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
                       data-testid="private-comment-bubble"
                     >
                       <span className="mb-0.5 flex items-center gap-1 text-[11px] font-semibold opacity-80">
-                        <MessageSquare size={11} aria-hidden /> On a photo
+                        <MessageSquare size={11} aria-hidden /> {videoPosters.has(payload.blob) ? 'On a video' : 'On a photo'}
                       </span>
                       {payload.text}
                     </button>
@@ -856,6 +946,8 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
                       vault={vault}
                       onOpen={(url) => setViewing({ url, name: payload.name || 'Picture', message, own })}
                     />
+                  ) : payload.t === 'video' ? (
+                    <PrivateVideoBubble token={token} video={payload} vault={vault} onOpen={() => setWatching({ video: payload, message, own })} />
                   ) : null}
                   {bursting && playing && <ReactionBurst key={playing.id} emoji={playing.emoji} onDone={burstDone} />}
                 </div>
@@ -907,11 +999,18 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
           </button>
         </div>
       )}
+      {videoSending && !camera && (
+        <p className="flex shrink-0 items-center gap-2 border-t border-white/5 bg-slate-900/95 px-3 py-1.5 text-xs text-slate-200" role="status" data-testid="private-video-sending">
+          <Loader2 size={13} className="shrink-0 animate-spin" aria-hidden />
+          Encrypting and sending the video{videoSending.count > 1 ? `: ${videoSending.done} of ${videoSending.count}` : ''}
+        </p>
+      )}
       <form onSubmit={(event) => void sendText(event)} className="flex shrink-0 items-end gap-2 border-t border-white/5 bg-slate-900/95 p-2">
         <input
           ref={fileRef}
           type="file"
-          accept={[...IMAGE_TYPES].join(',')}
+          accept={[...IMAGE_TYPES, ...VIDEO_TYPES, 'video/*'].join(',')}
+          data-testid="private-file-input"
           className="hidden"
           onChange={(event) => {
             pickerDone(token);
@@ -928,16 +1027,17 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
             fileRef.current?.click();
           }}
           disabled={sending}
-          aria-label="Send an encrypted photo"
+          aria-label="Send an encrypted photo or video"
+          data-testid="private-pick"
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 disabled:opacity-50"
         >
           <ImageIcon size={18} />
         </button>
         <button
           type="button"
-          onClick={() => setCameraOpen(true)}
+          onClick={() => setCamera('photo')}
           disabled={sending}
-          aria-label="Take an encrypted photo"
+          aria-label="Take an encrypted photo or video"
           data-testid="private-camera-open"
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 disabled:opacity-50"
         >
@@ -1000,13 +1100,28 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
         />
       )}
       {beloved && belovedAllowed && <BelovedPage token={token} vault={vault} onClose={() => setBeloved(false)} onAddToHome={onAddBelovedToHome} />}
-      {cameraOpen && (
+      {camera === 'photo' && (
         <PrivateCamera
-          onClose={() => setCameraOpen(false)}
+          onClose={() => setCamera(null)}
+          onVideo={() => setCamera('video')}
           onCapture={async (jpeg, takenAt) => {
             setSending(true);
             try {
               await sendImageBytes(jpeg, 'image/jpeg', undefined, takenAt);
+            } finally {
+              setSending(false);
+            }
+          }}
+        />
+      )}
+      {camera === 'video' && (
+        <PrivateVideoRecorder
+          onClose={() => setCamera(null)}
+          onPhoto={() => setCamera('photo')}
+          onSend={async (clip, progress) => {
+            setSending(true);
+            try {
+              await sendVideo(clip.blob, clip.mime, { takenAt: clip.takenAt, duration: clip.duration }, progress);
             } finally {
               setSending(false);
             }
@@ -1019,6 +1134,34 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
           partnerName={partnerName}
           onChanged={() => void queryClient.invalidateQueries({ queryKey: ['private-chat-status'] })}
           onClose={() => setSecurityOpen(false)}
+        />
+      )}
+      {watching && (
+        <PrivateVideoPlayer
+          token={token}
+          vault={vault}
+          video={watching.video}
+          title={watching.video.name || 'Video'}
+          onClose={() => setWatching(null)}
+          mine={new Set((typeof watching.message.id === 'number' ? marks[watching.message.id]?.reactions ?? [] : []).filter((r) => r.own).map((r) => r.emoji))}
+          onReact={
+            typeof watching.message.id === 'number'
+              ? (emoji) => {
+                  const id = watching.message.id as number;
+                  setWatching(null);
+                  void react(id, emoji);
+                }
+              : undefined
+          }
+          onDelete={
+            watching.own
+              ? () => {
+                  const target = watching.message;
+                  setWatching(null);
+                  void remove(target);
+                }
+              : undefined
+          }
         />
       )}
       {viewing && (
@@ -1049,6 +1192,14 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
       )}
     </div>
   );
+}
+
+/** The encrypted blobs a message is made of: a picture's one, or a clip's pieces and its poster. */
+function blobsOf(payload: Opened | undefined): string[] {
+  if (!payload || payload === 'unreadable') return [];
+  if (payload.t === 'image') return [payload.blob];
+  if (payload.t === 'video') return [...payload.chunks, payload.poster];
+  return [];
 }
 
 function Receipt({ read }: { read: boolean }) {

@@ -4,7 +4,7 @@
 // messages). Newest first, by day. Kept free of React so it can be tested
 // directly. Nothing here is stored: it is rebuilt from what was decrypted, and
 // dropped on lock.
-import type { AddedPicture, PrivatePayload } from '../../lib/privateChatCrypto';
+import type { AddedPicture, PrivatePayload, VideoPayload } from '../../lib/privateChatCrypto';
 import { dayLabel, isMine, type TalkMessage } from './chatModel';
 
 export type Opened = PrivatePayload | 'unreadable';
@@ -21,6 +21,8 @@ export interface GalleryComment {
 export interface GalleryItem {
   /** The chat message that sent it (0 for a picture added straight to the gallery). */
   messageId: number;
+  /** A video clip sent in the chat: `blob` is then its poster frame (what the tile shows and comments name). */
+  video?: VideoPayload;
   /** The gallery entry, for a picture added straight to the gallery. */
   entryId?: string;
   blob: string;
@@ -96,6 +98,22 @@ export function buildGallery(
         comments: [],
         ...(payload.sha256 ? { sha256: payload.sha256 } : {}),
       });
+    } else if (payload.t === 'video') {
+      // A clip is placed by when it was sent, like a sent picture, and known by its poster.
+      const at = seconds(payload.sent_at) ?? talkAt;
+      items.set(payload.poster, {
+        messageId: message.id,
+        video: payload,
+        blob: payload.poster,
+        mime: 'image/jpeg',
+        ...(payload.name ? { name: payload.name } : {}),
+        at,
+        ...(seconds(payload.taken_at) ? { takenAt: seconds(payload.taken_at) } : {}),
+        when: at,
+        own,
+        actorName,
+        comments: [],
+      });
     } else if (payload.t === 'comment') {
       comments.push({ blob: payload.blob, messageId: message.id, text: payload.text, at: seconds(payload.sent_at) ?? talkAt, own, actorName });
     }
@@ -131,6 +149,21 @@ export function buildGallery(
   const list = [...items.values()];
   for (const item of list) item.comments.sort((a, b) => a.at - b.at || a.messageId - b.messageId);
   return list.sort((a, b) => b.when - a.when || b.messageId - a.messageId || (b.entryId ?? '').localeCompare(a.entryId ?? ''));
+}
+
+/** The encrypted blobs a gallery item is made of (what deleting it deletes): a picture's one, or a clip's pieces and poster. */
+export function itemBlobs(item: GalleryItem): string[] {
+  return item.video ? [...item.video.chunks, item.video.poster] : [item.blob];
+}
+
+/** "3 photos", "1 video", "3 photos, 2 videos". */
+export function countLabel(items: GalleryItem[]): string {
+  const videos = items.filter((item) => item.video).length;
+  const photos = items.length - videos;
+  const word = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+  if (!videos) return word(photos, 'photo');
+  if (!photos) return word(videos, 'video');
+  return `${word(photos, 'photo')}, ${word(videos, 'video')}`;
 }
 
 /** The gallery by day, newest day first, each labelled like the chat's day separators. */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TalkMessage } from './chatModel';
-import { buildGallery, groupByDay, type Opened, type OpenedEntry } from './privateGalleryModel';
+import { buildGallery, countLabel, groupByDay, itemBlobs, type Opened, type OpenedEntry } from './privateGalleryModel';
+import type { VideoPayload } from '../../lib/privateChatCrypto';
 
 const me = new Set(['alex']);
 const day = (y: number, m: number, d: number, h = 12) => Math.floor(new Date(y, m - 1, d, h).getTime() / 1000);
@@ -82,5 +83,49 @@ describe('the private gallery', () => {
     const days = groupByDay(items, new Date(2026, 10, 3, 18));
     expect(days.map((d) => d.key)).toEqual(['2026-11-03', '2026-11-02', '2026-11-01', '2016-05-12']);
     expect(days[3].label).toMatch(/2016/);
+  });
+});
+
+describe('video clips in the gallery', () => {
+  const clip = (poster: string, extra: Partial<VideoPayload> = {}): VideoPayload => ({
+    t: 'video', mime: 'video/webm', size: 9000, duration: 42, width: 640, height: 360, poster,
+    chunks: ['c1'.padEnd(32, '0'), 'c2'.padEnd(32, '0')], clip: 'AAAAAAAAAAAAAAAAAAAAAA==', chunk_bytes: 4096, ...extra,
+  });
+
+  it('sits beside the pictures by when it was sent, known by its poster, with its comments', () => {
+    const messages = [msg(1, 'sam', day(2026, 11, 1, 9)), msg(2, 'alex', day(2026, 11, 2, 9)), msg(3, 'sam', day(2026, 11, 2, 10))];
+    const opened: Record<string, Opened> = {
+      '1': { t: 'image', blob: 'pic', mime: 'image/jpeg' },
+      '2': clip('poster2', { sent_at: day(2026, 11, 2, 8), taken_at: day(2026, 11, 1, 18), name: 'beach.mp4' }),
+      '3': { t: 'comment', blob: 'poster2', text: 'Play it again' },
+    };
+    const items = buildGallery(messages, opened, me);
+    expect(items.map((i) => i.blob)).toEqual(['poster2', 'pic']);
+    const [video, picture] = items;
+    expect(video).toMatchObject({ messageId: 2, mime: 'image/jpeg', at: day(2026, 11, 2, 8), when: day(2026, 11, 2, 8), takenAt: day(2026, 11, 1, 18), name: 'beach.mp4', own: true });
+    expect(video.video?.chunks).toHaveLength(2);
+    expect(video.comments.map((c) => c.text)).toEqual(['Play it again']);
+    expect(picture.video).toBeUndefined();
+    // Deleting the clip deletes every piece and the poster; a picture, its one blob.
+    expect(itemBlobs(video)).toEqual([...(video.video?.chunks ?? []), 'poster2']);
+    expect(itemBlobs(picture)).toEqual(['pic']);
+  });
+
+  it('a deleted clip is left out', () => {
+    const items = buildGallery([msg(1, 'sam', day(2026, 11, 1), { deleted: true })], { '1': clip('p') }, me);
+    expect(items).toEqual([]);
+  });
+
+  it('counts photos and videos', () => {
+    const items = buildGallery(
+      [msg(1, 'sam', day(2026, 11, 1)), msg(2, 'sam', day(2026, 11, 2)), msg(3, 'sam', day(2026, 11, 3))],
+      { '1': { t: 'image', blob: 'a', mime: 'image/jpeg' }, '2': clip('p2'), '3': { t: 'image', blob: 'b', mime: 'image/jpeg' } },
+      me,
+    );
+    expect(countLabel(items)).toBe('2 photos, 1 video');
+    expect(countLabel(items.filter((i) => !i.video))).toBe('2 photos');
+    expect(countLabel(items.filter((i) => i.video))).toBe('1 video');
+    expect(countLabel([])).toBe('0 photos');
+    expect(countLabel(items.slice(-1))).toBe('1 photo');
   });
 });
