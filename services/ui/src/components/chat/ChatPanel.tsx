@@ -15,6 +15,7 @@ import ConversationInfo from './ConversationInfo';
 import { canSeeBeloved } from '../../lib/beloved/access';
 import NewChatSheet from './NewChatSheet';
 import NewPrivateChatSheet from './NewPrivateChatSheet';
+import { OpenPrivateBackup } from './PrivateChatBackup';
 import PrivateChatThread from './PrivateChatThread';
 import { deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import { privatePreviewPlugin } from '../../plugins/privatePreview';
@@ -98,6 +99,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [historyLimit, setHistoryLimit] = useState<Record<string, number>>({});
   const [newPrivateOpen, setNewPrivateOpen] = useState(false);
+  /** "Open a backup file" from the create sheet: a parent whose chat is not on this server (a new phone or server). */
+  const [backupOpen, setBackupOpen] = useState(false);
   // The key of a private chat just created, handed to its thread once so the creator is not asked again at once.
   const [createdKey, setCreatedKey] = useState<{ token: string; key: CryptoKey } | null>(null);
   const [privateUnlocked, setPrivateUnlocked] = useState(false);
@@ -1163,9 +1166,29 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           }
         />
       )}
+      {backupOpen && (
+        <OpenPrivateBackup
+          names={Object.fromEntries((privateStatus.data?.partners ?? []).map((p) => [p.username, p.display_name]))}
+          onBack={() => {
+            setBackupOpen(false);
+            setNewPrivateOpen(true);
+          }}
+          onClose={() => setBackupOpen(false)}
+          onRestored={(token) => {
+            setBackupOpen(false);
+            void queryClient.invalidateQueries({ queryKey: ['private-chat-status'] });
+            void queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
+            select(token);
+          }}
+        />
+      )}
       {newPrivateOpen && privateStatus.data && (
         <NewPrivateChatSheet
           partners={privateStatus.data.partners}
+          onOpenBackup={() => {
+            setNewPrivateOpen(false);
+            setBackupOpen(true);
+          }}
           onClose={() => setNewPrivateOpen(false)}
           onCreated={(chat, key) => {
             setNewPrivateOpen(false);

@@ -92,6 +92,7 @@ from services.gateway import (
     notices,
     phone_routes,
     private_chat,
+    private_chat_export,
     private_chat_marks,
     private_chat_messages,
     push_routes,
@@ -1002,6 +1003,7 @@ app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sens
 app.include_router(room_presence.router)  # Room detection: phone beacons and the room map
 app.include_router(dashboard_routes.router)  # Rooms, Energy, History, Climate pages
 app.include_router(todo_routes.router)
+app.include_router(private_chat_export.router)  # Export, back up and restore the private chat (only ever encrypted)
 app.include_router(private_chat_marks.router)  # Edits and reactions on private chat messages, sealed on the device
 app.include_router(private_chat_messages.router)  # The private chat's sealed messages, kept here instead of on Talk
 app.include_router(beloved_routes.router)  # Beloved: the couple's page inside the private chat (one father, one mother)
