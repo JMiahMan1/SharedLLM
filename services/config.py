@@ -422,6 +422,9 @@ async def resolve_runtime_config():
                             value = int(float(value))
                         elif var_name == "FAST_PATH_THRESHOLD":
                             value = float(value)
+                        elif var_name == "HA_URL":
+                            # Like the env value: a retired HA host answers through homehub.
+                            value = _ha_redirect(value)
 
                         globals()[var_name] = value
 
