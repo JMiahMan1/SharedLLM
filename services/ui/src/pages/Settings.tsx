@@ -26,6 +26,7 @@ import WeatherSettingsPanel from '../components/settings/WeatherSettingsPanel';
 import Toggle from '../components/ui/Toggle';
 import UserAvatar from '../components/UserAvatar';
 import FamilyDropInSettings from '../components/settings/FamilyDropInSettings';
+import AccountExportPanel from '../components/settings/AccountExportPanel';
 import { isAdminPinSet, setAdminPin, clearAdminPin, verifyAdminPin } from '../lib/adminPin';
 import { disablePush, enablePush, permissionState, pushSupported } from '../lib/push';
 import {
@@ -217,6 +218,8 @@ const Settings = () => {
           </div>
           <ChevronRight size={16} className="text-slate-500" />
         </button>
+
+        <AccountExportPanel />
 
         <button
           onClick={() => { trigger('medium'); logout(); }}

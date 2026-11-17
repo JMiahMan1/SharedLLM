@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import { useDialogFocus } from '../../lib/focusTrap';
 
 /** A bottom sheet on a phone, a centred panel on a wide screen. */
-export default function Sheet({ title, onClose, children, testId }: { title: string; onClose: () => void; children: ReactNode; testId?: string }) {
+export default function Sheet({ title, onClose, children, testId, wide = false }: { title: string; onClose: () => void; children: ReactNode; testId?: string; wide?: boolean }) {
   // A dialog that does not take focus lets Tab walk into the page behind it and
   // leaves the reader with no idea where they are. Take focus on open, keep it
   // inside, and hand it back to whatever opened the sheet on close.
@@ -21,7 +21,7 @@ export default function Sheet({ title, onClose, children, testId }: { title: str
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="relative w-full sm:max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,var(--safe-bottom))] outline-none"
+        className={`relative w-full ${wide ? 'sm:max-w-2xl' : 'sm:max-w-md'} max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,var(--safe-bottom))] outline-none`}
         data-testid={testId}
       >
         <div className="mb-3 flex items-center gap-2">
