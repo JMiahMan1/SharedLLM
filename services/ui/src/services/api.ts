@@ -3622,11 +3622,15 @@ export const api = {
     return resp.data;
   },
 
-  /** Send one sealed message (made on this device; the server refuses anything else). */
-  async sendPrivateMessage(token: string, sealed: string, replyTo?: number): Promise<ExecutionResponse> {
+  /**
+   * Send one sealed message (made on this device; the server refuses anything else). `blobs` names the
+   * encrypted blobs it is made of (a picture, or a clip's pieces and poster), which go with it when it is deleted.
+   */
+  async sendPrivateMessage(token: string, sealed: string, replyTo?: number, blobs?: string[]): Promise<ExecutionResponse> {
     const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/messages`, {
       sealed,
       ...(replyTo ? { reply_to: replyTo } : {}),
+      ...(blobs?.length ? { blobs } : {}),
     });
     return resp.data;
   },
@@ -3676,7 +3680,7 @@ export const api = {
     return resp.data;
   },
 
-  /** Keep one encrypted picture (IV then ciphertext); returns its id. */
+  /** Keep one encrypted picture or piece of a video clip (IV then ciphertext); returns its id. */
   async uploadPrivateBlob(token: string, bytes: Uint8Array<ArrayBuffer>): Promise<{ id: string }> {
     // Sent as a File: in the Android app CapacitorHttp carries a File as base64 and writes the
     // exact bytes, while a typed array reached the server as "{}" (axios turned it into an

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ImagePlus, Images, Loader2, MapPin, MessageSquare, SendHorizontal, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ImagePlus, Images, Loader2, MapPin, MessageSquare, Play, SendHorizontal, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { isSealedMessage, type PrivateVault } from '../../lib/privateChatCrypto';
 import { timeLabel, type TalkMessage } from './chatModel';
-import { buildGallery, groupByDay, stampLabel, type GalleryItem, type Opened, type OpenedEntry } from './privateGalleryModel';
+import { buildGallery, countLabel, groupByDay, itemBlobs, stampLabel, type GalleryItem, type Opened, type OpenedEntry } from './privateGalleryModel';
+import { formatDuration } from '../../lib/privateVideoMedia';
+import { usePrivateVideo } from './usePrivateVideo';
 import { knownFrom } from '../../lib/galleryImport';
 import PrivateGalleryImport from './PrivateGalleryImport';
 import { errorText } from './privateChatModel';
@@ -20,8 +22,9 @@ function detailMessages(response: unknown): TalkMessage[] {
 }
 
 /**
- * The private chat's encrypted gallery: every picture sent in the chat and
- * every picture added straight to it (Add pictures, an import from Between),
+ * The private chat's encrypted gallery: every picture and video clip sent in
+ * the chat and every picture added straight to it (Add pictures, an import
+ * from Between; clips come in only by being sent),
  * newest first and grouped by day: a sent picture by when it was sent, an
  * added one by when it was taken. Either parent can open
  * one full screen and comment on it; a comment is a sealed message naming the
@@ -47,7 +50,7 @@ export default function PrivateGallery({
   initialBlob?: string;
   onClose: () => void;
   onChanged: () => void;
-  onDelete: (messageId: number, blob?: string) => Promise<void>;
+  onDelete: (messageId: number, blobs?: string[]) => Promise<void>;
 }) {
   const history = useQuery({
     queryKey: ['private-gallery', token],
@@ -147,7 +150,7 @@ export default function PrivateGallery({
         </button>
         <h2 className="min-w-0 flex-1 truncate text-base font-bold text-white">Gallery</h2>
         <span className="shrink-0 text-xs text-slate-400" data-testid="private-gallery-count">
-          {items.length} {items.length === 1 ? 'photo' : 'photos'}
+          {countLabel(items)}
         </span>
         <button
           type="button"
@@ -176,8 +179,8 @@ export default function PrivateGallery({
         )}
         {!items.length && !decrypting && (
           <p className="flex flex-col items-center gap-2 py-12 text-center text-sm text-slate-400">
-            <Images size={28} aria-hidden /> No photos yet. Every photo sent in this chat appears here, encrypted, and you can add pictures without
-            sending them.
+            <Images size={28} aria-hidden /> No photos yet. Every photo and video sent in this chat appears here, encrypted, and you can add
+            pictures without sending them.
           </p>
         )}
         {days.map((day) => (
@@ -198,9 +201,9 @@ export default function PrivateGallery({
           item={viewing}
           onClose={() => setChosen(undefined)}
           onChanged={refresh}
-          onDelete={async (messageId, blob) => {
-            await onDelete(messageId, blob);
-            if (blob) setChosen(undefined);
+          onDelete={async (messageId, blobs) => {
+            await onDelete(messageId, blobs);
+            if (blobs?.length) setChosen(undefined);
             void history.refetch();
           }}
           onRemoveEntry={() => void removeEntry(viewing)}
@@ -239,7 +242,7 @@ function Tile({ token, vault, item, onOpen }: { token: string; vault: PrivateVau
       ref={ref}
       type="button"
       onClick={onOpen}
-      aria-label={`Photo from ${item.actorName || 'the chat'}, ${when}${item.comments.length ? `, ${item.comments.length} comments` : ''}`}
+      aria-label={`${item.video ? 'Video' : 'Photo'} from ${item.actorName || 'the chat'}, ${when}${item.video?.duration ? `, ${formatDuration(item.video.duration)}` : ''}${item.comments.length ? `, ${item.comments.length} comments` : ''}`}
       className="relative block aspect-square overflow-hidden rounded-lg bg-white/5"
       data-testid="private-gallery-tile"
     >
@@ -253,6 +256,20 @@ function Tile({ token, vault, item, onOpen }: { token: string; vault: PrivateVau
         </span>
       )}
       <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">{timeLabel(item.when)}</span>
+      {item.video && (
+        <>
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden>
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-white ring-1 ring-white/30">
+              <Play size={16} className="ml-0.5 fill-white" />
+            </span>
+          </span>
+          {item.video.duration > 0 && (
+            <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1 text-[10px] font-medium tabular-nums text-white" data-testid="private-gallery-video-duration">
+              {formatDuration(item.video.duration)}
+            </span>
+          )}
+        </>
+      )}
       {item.comments.length > 0 && (
         <span className="absolute right-1 top-1 flex items-center gap-0.5 rounded bg-black/60 px-1 text-[10px] font-medium text-white">
           <MessageSquare size={10} aria-hidden /> {item.comments.length}
@@ -276,10 +293,14 @@ function Viewer({
   item: GalleryItem;
   onClose: () => void;
   onChanged: () => void;
-  onDelete: (messageId: number, blob?: string) => Promise<void>;
+  onDelete: (messageId: number, blobs?: string[]) => Promise<void>;
   onRemoveEntry: () => void;
 }) {
   const { url, failed } = usePrivatePicture(token, item.blob, item.mime, vault);
+  // A clip is decrypted only once its play button is pressed, and dropped when the viewer closes.
+  const [playing, setPlaying] = useState(false);
+  const clip = usePrivateVideo(token, playing && item.video ? item.video : null, vault);
+  const kind = item.video ? 'video' : 'photo';
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
 
@@ -310,7 +331,7 @@ function Viewer({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex flex-col bg-black" role="dialog" aria-modal="true" aria-label="Photo" data-testid="private-gallery-viewer" {...noSave}>
+    <div className="fixed inset-0 z-[90] flex flex-col bg-black" role="dialog" aria-modal="true" aria-label={item.video ? 'Video' : 'Photo'} data-testid="private-gallery-viewer" {...noSave}>
       <div className="flex shrink-0 items-center gap-2 px-2 pb-2 pt-[max(0.5rem,var(--safe-top))]">
         <button type="button" onClick={onClose} aria-label="Back to the gallery" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white">
           <ChevronLeft size={20} />
@@ -352,8 +373,8 @@ function Viewer({
         {item.own && (
           <button
             type="button"
-            onClick={() => (item.entryId ? onRemoveEntry() : void onDelete(item.messageId, item.blob))}
-            aria-label="Delete this photo for both of you"
+            onClick={() => (item.entryId ? onRemoveEntry() : void onDelete(item.messageId, itemBlobs(item)))}
+            aria-label={`Delete this ${kind} for both of you`}
             data-testid="private-gallery-delete"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-100"
           >
@@ -362,7 +383,42 @@ function Viewer({
         )}
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center px-2">
-        {url ? (
+        {item.video && clip.url ? (
+          <video
+            src={clip.url}
+            poster={url || undefined}
+            controls
+            autoPlay
+            playsInline
+            controlsList="nodownload noremoteplayback"
+            disablePictureInPicture
+            disableRemotePlayback
+            {...noSave}
+            className="h-full w-full select-none object-contain"
+            data-testid="private-gallery-video-playing"
+          />
+        ) : item.video && url ? (
+          <button
+            type="button"
+            onClick={() => setPlaying(true)}
+            disabled={playing}
+            aria-label={item.video.duration ? `Play video, ${formatDuration(item.video.duration)}` : 'Play video'}
+            className="relative flex max-h-full max-w-full items-center justify-center"
+            data-testid="private-gallery-video-play"
+          >
+            <img src={url} alt="" {...noSave} className="pointer-events-none max-h-full max-w-full select-none object-contain [-webkit-touch-callout:none]" />
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden>
+              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/55 text-white ring-1 ring-white/30">
+                {playing ? <Loader2 size={24} className="animate-spin" /> : <Play size={28} className="ml-1 fill-white" />}
+              </span>
+            </span>
+            {playing && (
+              <span className="absolute inset-x-0 bottom-2 text-center text-xs text-white" role={clip.failed ? 'alert' : 'status'}>
+                {clip.failed || (clip.progress.count > 1 ? `Decrypting ${clip.progress.done} of ${clip.progress.count}` : 'Decrypting')}
+              </span>
+            )}
+          </button>
+        ) : url ? (
           <img src={url} alt={item.caption || 'Photo'} {...noSave} className="pointer-events-none max-h-full max-w-full select-none object-contain [-webkit-touch-callout:none]" />
         ) : failed ? (
           <p className="text-sm text-slate-400">This picture could not be opened.</p>
@@ -395,8 +451,8 @@ function Viewer({
         <input
           value={text}
           onChange={(event) => setText(event.target.value)}
-          placeholder="Comment on this photo"
-          aria-label="Comment on this photo"
+          placeholder={`Comment on this ${kind}`}
+          aria-label={`Comment on this ${kind}`}
           data-testid="private-gallery-comment-input"
           className="glass-input min-h-11 min-w-0 flex-1 text-base sm:text-sm"
         />

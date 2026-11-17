@@ -13,10 +13,17 @@ What is stored (all under ``PRIVATE_CHAT_DIR/messages/<token>/``)
   "deleted"}``: the integer id, the author's username, the Unix time it was
   sent, the sealed envelope exactly as the device made it (the same text a
   Talk message carried), the id it replies to and whether it was deleted. What
-  kind of message it is (text, picture, comment on a photo) is inside the
-  encryption, as it was on Talk, so the server does not know it. A deleted
-  message keeps its id, author and time as a tombstone with no ciphertext, so
-  ordering and the ids its marks hang on stay put.
+  kind of message it is (text, picture, video clip, comment on a photo) is
+  inside the encryption, as it was on Talk, so the server does not know it. A
+  deleted message keeps its id, author and time as a tombstone with no
+  ciphertext, so ordering and the ids its marks hang on stay put.
+* ``blobs`` (only on a message that has them): the ids of the encrypted blobs
+  the message is made of, as the sending device listed them: a picture's one
+  blob, or a video clip's pieces and its poster frame. They are opaque ids the
+  server issued minutes before (each must exist in the chat when the message is
+  sent), so the list tells it nothing it did not already see. Deleting the
+  message deletes them with it, so a clip leaves no piece behind even when the
+  deleting device goes away half way.
 * ``meta.json``: ``{"floor": N}``. New ids start above it. A chat moved off
   Talk sets it to the highest id the Talk room had used, so a new message can
   never take an id a migrated one (or its edit or reaction) already has.
@@ -118,6 +125,8 @@ router = APIRouter(prefix="/api/private-chat")
 MAX_MESSAGE_BYTES = 32 * 1024
 #: Messages per chat, so a runaway client cannot fill the disk.
 MAX_MESSAGES = 500_000
+#: Most blobs one message may name: a 50 MiB clip is 13 pieces and a poster, with room to spare.
+MAX_BLOBS_PER_MESSAGE = 32
 #: Most messages one list call returns.
 MAX_PAGE = 200
 #: Longest a wait may hold.
@@ -255,7 +264,8 @@ class MessageStore:
             if floor > current:
                 write_atomic(self._dir(token) / "meta.json", json.dumps({"floor": int(floor)}).encode())
 
-    def append(self, token: str, by: str, sealed: str, reply_to: int | None = None) -> dict[str, Any]:
+    def append(self, token: str, by: str, sealed: str, reply_to: int | None = None,
+               blobs: list[str] | None = None) -> dict[str, Any]:
         with _write_lock:
             ids = self.ids(token)
             if len(ids) >= MAX_MESSAGES:
@@ -263,6 +273,8 @@ class MessageStore:
             new_id = max(ids[-1] if ids else 0, self.floor(token)) + 1
             record = {"id": new_id, "by": by, "at": int(time.time()), "sealed": sealed,
                       "reply_to": reply_to, "deleted": False}
+            if blobs:
+                record["blobs"] = list(blobs)
             write_atomic(self._path(token, new_id), json.dumps(record, sort_keys=True).encode())
             return record
 
@@ -277,14 +289,16 @@ class MessageStore:
             write_atomic(self._path(token, record["id"]), json.dumps(record, sort_keys=True).encode())
             return True
 
-    def tombstone(self, token: str, message_id: int) -> dict[str, Any]:
+    def tombstone(self, token: str, message_id: int) -> tuple[dict[str, Any], list[str]]:
+        """Turn a message into a tombstone. Returns it and the blobs it named (for the caller to delete)."""
         with _write_lock:
             record = self.get(token, message_id)
             if record is None:
                 raise KeyError(message_id)
+            blobs = record.pop("blobs", None)
             record.update({"sealed": None, "deleted": True, "deleted_at": int(time.time())})
             write_atomic(self._path(token, message_id), json.dumps(record, sort_keys=True).encode())
-            return record
+            return record, [b for b in blobs if isinstance(b, str)] if isinstance(blobs, list) else []
 
     def read_markers(self, token: str) -> dict[str, int]:
         try:
@@ -823,6 +837,37 @@ def _int(value: Any, field: str, *, low: int = 0, high: int = 2**53) -> int | No
     return out
 
 
+def _blob_ids(token: str, value: Any) -> list[str]:
+    """The blobs a new message is made of: distinct ids of blobs this chat has. Anything else is refused."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_BLOBS_PER_MESSAGE:
+        raise HTTPException(status_code=422, detail=f"blobs must be a list of at most {MAX_BLOBS_PER_MESSAGE} ids.")
+    if len(set(map(str, value))) != len(value):
+        raise HTTPException(status_code=422, detail="blobs names the same blob twice.")
+    store = private_chat.get_store()
+    for blob_id in value:
+        if not isinstance(blob_id, str) or not private_chat._BLOB_ID.match(blob_id):
+            raise HTTPException(status_code=422, detail="blobs must be blob ids.")
+        if not store.blob_path(token, blob_id).is_file():
+            raise HTTPException(status_code=422, detail="That message names a blob this chat does not have.")
+    return list(value)
+
+
+def _delete_blobs(token: str, blobs: list[str]) -> int:
+    """Delete a deleted message's blobs. Returns how many were there."""
+    store = private_chat.get_store()
+    gone = 0
+    for blob_id in blobs:
+        if not private_chat._BLOB_ID.match(blob_id or ""):
+            continue
+        path = store.blob_path(token, blob_id)
+        if path.is_file():
+            path.unlink(missing_ok=True)
+            gone += 1
+    return gone
+
+
 def _talk_response(status_code: int, result: dict[str, Any], what: str) -> dict[str, Any]:
     if status_code != 200 or result.get("status") != "SUCCESS":
         raise HTTPException(status_code=502, detail=result.get("message") or f"Could not {what}.")
@@ -897,11 +942,16 @@ async def wait_messages(token: str, request: Request, last_id: int = 0, wait: in
 
 @router.post("/chats/{token}/messages")
 async def send_message(token: str, request: Request):
-    """Keep one sealed message (``{"sealed", "reply_to"?}``) and wake everyone waiting on the chat."""
+    """Keep one sealed message (``{"sealed", "reply_to"?, "blobs"?}``) and wake everyone waiting on the chat.
+
+    ``blobs`` lists the encrypted blobs the message is made of (a picture, or a
+    clip's pieces and poster); they are deleted with the message.
+    """
     user, chat, people = await private_chat._member_chat(request, token)
     body = await _body(request)
     sealed = _sealed(body.get("sealed"))
     reply_to = _int(body.get("reply_to"), "reply_to", low=1)
+    blobs = await asyncio.to_thread(_blob_ids, token, body.get("blobs"))
     if not is_store_chat(chat):
         status_code, result = await private_chat._talk(request, {
             "action": "send", "token": token, "message": sealed, **({"reply_to": reply_to} if reply_to else {})})
@@ -910,7 +960,7 @@ async def send_message(token: str, request: Request):
     if reply_to is not None and await asyncio.to_thread(store.get, token, reply_to) is None:
         raise HTTPException(status_code=422, detail="That reply is to a message this chat does not have.")
     try:
-        record = await asyncio.to_thread(store.append, token, user, sealed, reply_to)
+        record = await asyncio.to_thread(store.append, token, user, sealed, reply_to, blobs)
     except OSError as exc:
         log.error("[private-chat] %s: could not store a message: %s", token, type(exc).__name__)
         raise HTTPException(status_code=500, detail="Could not save the message (PRIVATE_CHAT_DIR not writable).") from exc
@@ -923,7 +973,7 @@ async def send_message(token: str, request: Request):
 
 @router.delete("/chats/{token}/messages/{message_id}")
 async def delete_message(token: str, message_id: str, request: Request):
-    """Delete a message for both parents (its author only, at any age): ciphertext gone, a tombstone kept, its marks gone."""
+    """Delete a message for both parents (its author only, at any age): ciphertext gone, a tombstone kept, its marks and blobs gone."""
     user, chat, _people = await private_chat._member_chat(request, token)
     mid = _int(message_id, "message_id", low=1)
     if mid is None:
@@ -939,11 +989,12 @@ async def delete_message(token: str, message_id: str, request: Request):
         raise HTTPException(status_code=404, detail="No such message.")
     if record.get("by") != user:
         raise HTTPException(status_code=403, detail="Only the one who wrote it can delete it.")
-    await asyncio.to_thread(store.tombstone, token, mid)
+    _record, blobs = await asyncio.to_thread(store.tombstone, token, mid)
     await asyncio.to_thread(private_chat_marks.forget_message, token, mid)
+    gone = await asyncio.to_thread(_delete_blobs, token, blobs) if blobs else 0
     _ring(token)
-    log.info("[private-chat] %s: message %s deleted by its author", token, mid)
-    return {"status": "SUCCESS", "message": "Message deleted.", "source": "store", "detail": {"deleted": mid}}
+    log.info("[private-chat] %s: message %s deleted by its author (%d blobs with it)", token, mid, gone)
+    return {"status": "SUCCESS", "message": "Message deleted.", "source": "store", "detail": {"deleted": mid, "blobs_deleted": gone}}
 
 
 @router.post("/chats/{token}/read")

@@ -285,6 +285,126 @@ def test_deleting_takes_the_edit_and_reactions_with_it(chat):
     assert not (chat["root"] / "marks" / TOKEN / "1.json").exists()
 
 
+# --- Video clips and the blobs a message is made of ---------------------------------
+
+
+#: A video piece the way the device uploads one: a 4 MiB piece plus its IV and tag (shortened here).
+PIECE = bytes(range(256)) * 8 + bytes(28)
+
+
+def _upload(ctx, user: str, data: bytes = PIECE) -> str:
+    resp = ctx["client"].post(f"{BASE}/blobs", content=data, headers=_as(user))
+    assert resp.status_code == 200, resp.text
+    return resp.json()["id"]
+
+
+def _blob_file(ctx, blob_id: str):
+    return ctx["root"] / "blobs" / TOKEN / blob_id
+
+
+def test_a_clip_is_pieces_and_a_poster_the_message_names_and_deleting_it_takes_every_one(chat):
+    pieces = [_upload(chat, "alex") for _ in range(3)]
+    poster = _upload(chat, "alex", b"p" * 300)
+    resp = _send(chat, "alex", _sealed(byte=7), blobs=[*pieces, poster])
+    assert resp.status_code == 200, resp.text
+    # The list is kept on the server's record, never shown to the app (it has it inside the encryption).
+    shown = resp.json()["detail"]["message"]
+    assert "blobs" not in shown
+    on_disk = json.loads((chat["root"] / "messages" / TOKEN / "m" / "1.json").read_text())
+    assert on_disk["blobs"] == [*pieces, poster]
+    # Another blob of the chat (a picture in another message) is untouched by this delete.
+    other = _upload(chat, "sam")
+    assert _send(chat, "sam", blobs=[other]).status_code == 200
+    resp = chat["client"].delete(f"{BASE}/messages/1", headers=_as("alex"))
+    assert resp.status_code == 200
+    assert resp.json()["detail"]["blobs_deleted"] == 4
+    for blob_id in [*pieces, poster]:
+        assert not _blob_file(chat, blob_id).exists()
+        assert chat["client"].get(f"{BASE}/blobs/{blob_id}", headers=_as("sam")).status_code == 404
+    assert _blob_file(chat, other).exists()
+    # The tombstone no longer names them.
+    tomb = json.loads((chat["root"] / "messages" / TOKEN / "m" / "1.json").read_text())
+    assert "blobs" not in tomb and tomb["deleted"] is True
+
+
+def test_deleting_a_clip_takes_its_edit_reactions_and_blobs_together(chat):
+    pieces = [_upload(chat, "alex") for _ in range(2)]
+    _send(chat, "alex", blobs=pieces)
+    c = chat["client"]
+    assert c.post(f"{BASE}/messages/1/reactions", json={"sealed": _sealed()}, headers=_as("sam")).status_code == 200
+    # Only the author deletes: the other parent's try leaves every piece in place.
+    assert c.delete(f"{BASE}/messages/1", headers=_as("sam")).status_code == 403
+    assert all(_blob_file(chat, b).exists() for b in pieces)
+    assert c.delete(f"{BASE}/messages/1", headers=_as("alex")).status_code == 200
+    assert not (chat["root"] / "marks" / TOKEN / "1.json").exists()
+    assert not any(_blob_file(chat, b).exists() for b in pieces)
+
+
+def test_a_piece_already_gone_does_not_stop_the_delete(chat):
+    pieces = [_upload(chat, "alex") for _ in range(2)]
+    _send(chat, "alex", blobs=pieces)
+    # The sending device deleted one itself (as a Talk-era client does).
+    assert chat["client"].delete(f"{BASE}/blobs/{pieces[0]}", headers=_as("alex")).status_code == 200
+    resp = chat["client"].delete(f"{BASE}/messages/1", headers=_as("alex"))
+    assert resp.status_code == 200 and resp.json()["detail"]["blobs_deleted"] == 1
+    assert not _blob_file(chat, pieces[1]).exists()
+
+
+@pytest.mark.parametrize("blobs", [
+    "a" * 32,                          # not a list
+    ["../../chats/room123abc.json"],   # not a blob id
+    ["A" * 32],                        # not lower-case hex
+    [7],
+    ["f" * 32],                        # a blob this chat does not have
+])
+def test_a_message_naming_anything_but_this_chats_blobs_is_refused(chat, blobs):
+    assert _send(chat, "alex", blobs=blobs).status_code == 422
+    assert _record_files(chat["root"]) == []
+
+
+def test_the_same_blob_twice_and_too_many_blobs_are_refused(chat, monkeypatch):
+    piece = _upload(chat, "alex")
+    assert _send(chat, "alex", blobs=[piece, piece]).status_code == 422
+    monkeypatch.setattr(private_chat_messages, "MAX_BLOBS_PER_MESSAGE", 2)
+    pieces = [_upload(chat, "alex") for _ in range(3)]
+    assert _send(chat, "alex", blobs=pieces).status_code == 422
+    assert _send(chat, "alex", blobs=pieces[:2]).status_code == 200
+    assert private_chat_messages.MAX_BLOBS_PER_MESSAGE == 2
+
+
+def test_a_clip_message_is_still_only_a_sealed_envelope(chat):
+    piece = _upload(chat, "alex")
+    for value in ["a video of the kids", '{"t": "video", "chunks": []}', None]:
+        assert chat["client"].post(f"{BASE}/messages", json={"sealed": value, "blobs": [piece]}, headers=_as("alex")).status_code == 422
+    assert _record_files(chat["root"]) == []
+    # The piece stays where it was (the device deletes what it uploaded when the send fails).
+    assert _blob_file(chat, piece).exists()
+
+
+def test_the_pieces_stay_inside_the_one_blob_limit(chat):
+    # A 4 MiB piece with its IV and tag is far below the limit, which did not have to move for video.
+    assert private_chat.MAX_BLOB_BYTES == 25 * 1024 * 1024 + 12 + 16
+    assert private_chat.MAX_BLOB_BYTES > 4 * 1024 * 1024 + 28
+    assert private_chat_messages.MAX_BLOBS_PER_MESSAGE >= 14  # 13 pieces of a 50 MiB clip and its poster
+
+
+def test_a_clip_tells_the_other_parent_who_sent_something_and_nothing_else(chat):
+    pieces = [_upload(chat, "alex") for _ in range(2)]
+    _send(chat, "alex", _sealed(byte=8), blobs=pieces)
+    (notice,) = chat["notices"]
+    assert notice["user"] == "sam"
+    text = json.dumps(notice)
+    assert notice["body"] == "New private message from Alex"
+    for secret in [*pieces, "video", "clip"]:
+        assert secret not in text
+
+
+def test_a_message_without_blobs_keeps_the_record_it_always_had(chat):
+    _send(chat, "alex", blobs=[])
+    record = json.loads(_record_files(chat["root"])[0].read_text())
+    assert "blobs" not in record
+
+
 def test_marks_on_a_moved_chat_check_the_stored_author(chat):
     _send(chat, "alex")
     c = chat["client"]

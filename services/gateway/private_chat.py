@@ -46,9 +46,12 @@ one, and only they can read it:
   Talk routes refuse anything that would put readable content into such a
   room (``guard_talk``): plain text, Talk file shares, polls, games, cards,
   reactions and adding members, and once a chat has moved, any new message.
-* **Pictures never touch Nextcloud.** They are encrypted on the device and kept
-  here as opaque blobs (``PRIVATE_CHAT_DIR``), served only to the chat's
-  members, so Nextcloud never makes a preview and nothing scans them.
+* **Pictures and video clips never touch Nextcloud.** They are encrypted on
+  the device and kept here as opaque blobs (``PRIVATE_CHAT_DIR``), served only
+  to the chat's members, so Nextcloud never makes a preview and nothing scans
+  them. A clip is several blobs (its encrypted pieces, 4 MiB each, and its
+  poster frame); which blobs make one clip, its type and its length are inside
+  the message's encryption. The blob limit stays one picture's.
 * **Pictures added straight to the gallery** (an import, never a chat
   message) are sealed entries kept here (``gallery/<token>/<id>.json``): the
   same envelope as a message, so the server sees ciphertext and who added it
@@ -115,7 +118,8 @@ SALT_BYTES = 16
 IV_BYTES = 12
 #: AES-GCM's tag; a ciphertext is never shorter than this.
 TAG_BYTES = 16
-#: One encrypted picture: the 25 MB attachment limit plus its IV and tag.
+#: One encrypted picture (the 25 MB attachment limit) plus its IV and tag. A video clip is uploaded
+#: as 4 MiB pieces (services/ui/src/lib/privateChatCrypto.ts), so it needs no higher limit.
 MAX_BLOB_BYTES = 25 * 1024 * 1024 + IV_BYTES + TAG_BYTES
 #: The data key and the password-derived ``auth``, in bytes.
 KEY_BYTES = 32
