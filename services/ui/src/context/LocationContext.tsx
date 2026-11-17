@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
+import { ensureLocationAccess, highAccuracy } from '../lib/locationPermission';
 import toast from 'react-hot-toast';
 import { storageGet, storageSet } from '../lib/storage';
 import { getServerOrigin } from '../lib/serverUrl';
@@ -776,24 +777,25 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const permission = await Geolocation.checkPermissions();
-        if (permission.location === 'denied') {
-          const request = await Geolocation.requestPermissions();
-          if (request.location === 'denied') {
-            const msg = 'Location permission denied';
-            setState((s) => ({ ...s, error: msg, isTracking: false }));
-            patchSensor('location', { enabled: false, permission: 'denied', message: msg });
-            await storageSet(KEY_LOCATION_ENABLED, 'false');
-            toast.error('Location tracking disabled: permission denied');
-            return;
-          }
+        // Ask once, before any read: the plugin's watch and first-fix calls
+        // each open their own dialog otherwise (see locationPermission.ts).
+        const access = await ensureLocationAccess();
+        if (access === 'denied') {
+          const msg = 'Location permission denied';
+          setState((s) => ({ ...s, error: msg, isTracking: false }));
+          patchSensor('location', { enabled: false, permission: 'denied', message: msg });
+          await storageSet(KEY_LOCATION_ENABLED, 'false');
+          toast.error('Location tracking disabled: permission denied');
+          return;
         }
         patchSensor('location', { permission: 'granted', message: null });
 
         // Start the continuous watch FIRST so a slow first fix never blocks
         // tracking. A one-shot getCurrentPosition timeout used to abort here
         // and surface "Could not obtain location in time" with no watch running.
-        const gpsOptions = { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 };
+        // High accuracy only with precise access: with approximate only, the
+        // plugin would ask for precise again on every read.
+        const gpsOptions = { enableHighAccuracy: highAccuracy(access), timeout: 30000, maximumAge: 5000 };
         watchIdRef.current = await Geolocation.watchPosition(
           gpsOptions,
           (pos, err) => {
