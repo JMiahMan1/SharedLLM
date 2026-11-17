@@ -63,14 +63,34 @@ async def _permissions(creds: dict[str, Any]):
     return await load_entity_permissions(str(creds.get("user") or ""), bool(creds.get("is_admin")))
 
 
-async def _hub_get(creds: dict[str, Any], path: str, params: dict[str, str] | None = None) -> Any:
-    """A read from the hub with the caller's own HA credentials."""
-    from services.gateway.main import shared_http_client
+def _hub_login(creds: dict[str, Any], personal: bool) -> tuple[str, str]:
+    """The hub address and token for one read: the caller's own login, else the hub's internal one.
 
+    Home Assistant is retired and only people imported from it have a stored HA token, so a new
+    family member (or a household device) got "Home Assistant is not set up for your account" on
+    every dashboard and an empty Devices page (2026-11-17). Every read here filters the answer by
+    the caller's entity permissions, so reading as the hub widens nothing. ``personal`` reads are
+    the caller's own data on the hub (their dashboard prefs) and never fall back.
+    """
     base = str(creds.get("ha_url") or "").rstrip("/")
     token = str(creds.get("ha_token") or "")
-    if not base or not token:
-        raise HTTPException(status_code=503, detail="Home Assistant is not set up for your account")
+    if base and token:
+        return base, token
+    if not personal:
+        from services.config import HA_URL
+        from services.gateway.config import INTERNAL_SECRET
+
+        if HA_URL and INTERNAL_SECRET:
+            return str(HA_URL).rstrip("/"), INTERNAL_SECRET
+    raise HTTPException(status_code=503, detail="Home Assistant is not set up for your account")
+
+
+async def _hub_get(creds: dict[str, Any], path: str, params: dict[str, str] | None = None, *,
+                   personal: bool = False) -> Any:
+    """A read from the hub with the caller's own HA credentials (or the hub's, see _hub_login)."""
+    from services.gateway.main import shared_http_client
+
+    base, token = _hub_login(creds, personal)
     try:
         async with shared_http_client() as client, client.get(
             f"{base}{path}", params=params or None, headers={"Authorization": f"Bearer {token}"}, timeout=_TIMEOUT
@@ -367,7 +387,7 @@ async def energy_summary(request: Request, range: str | None = None, date: str |
 @router.get("/prefs")
 async def dashboard_prefs(request: Request):
     creds = await _caller(request)
-    return await _hub_get(creds, "/api/homehub/dashboard/prefs")
+    return await _hub_get(creds, "/api/homehub/dashboard/prefs", personal=True)
 
 
 # -- admin -------------------------------------------------------------------------------------------

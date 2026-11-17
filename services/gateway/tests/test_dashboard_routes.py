@@ -288,3 +288,34 @@ def test_logbook_limits(client, perms):
         "start": "2026-03-01T00:00:00Z", "end": "2026-01-01T00:00:00Z"}).status_code == 400
     many = ",".join(f"sensor.s{i}" for i in range(13))
     assert client.get("/api/dashboard/logbook", params={"entity_ids": many}).status_code == 400
+
+
+def test_a_person_without_a_hub_login_reads_through_the_hub_still_filtered(monkeypatch):
+    """No stored HA token (a new family member): the read goes to the hub with the internal secret."""
+    import services.config as config
+    from services.gateway import config as gw_config
+
+    monkeypatch.setattr(config, "HA_URL", "http://hub.local:8123")
+    monkeypatch.setattr(gw_config, "INTERNAL_SECRET", "internal-test-secret")
+    assert dashboard_routes._hub_login({"user": "newkid"}, personal=False) == ("http://hub.local:8123", "internal-test-secret")
+    # A person's own login still wins.
+    own = {"ha_url": TEST_HA_URL, "ha_token": TEST_HA_TOKEN}
+    assert dashboard_routes._hub_login(own, personal=False) == (TEST_HA_URL.rstrip("/"), TEST_HA_TOKEN)
+
+
+def test_personal_reads_never_borrow_the_hubs_login(monkeypatch):
+    import services.config as config
+
+    monkeypatch.setattr(config, "HA_URL", "http://hub.local:8123")
+    with pytest.raises(HTTPException) as e:
+        dashboard_routes._hub_login({"user": "newkid"}, personal=True)
+    assert e.value.status_code == 503
+
+
+def test_no_hub_configured_is_still_a_clear_503(monkeypatch):
+    import services.config as config
+
+    monkeypatch.setattr(config, "HA_URL", None)
+    with pytest.raises(HTTPException) as e:
+        dashboard_routes._hub_login({"user": "newkid"}, personal=False)
+    assert e.value.status_code == 503
