@@ -193,7 +193,7 @@ final class GuardScreenView {
             switch (reason) {
                 case "bedtime":
                     accent = pal.second;
-                    iconRes = R.drawable.mi_dark_mode;
+                    iconRes = R.drawable.mi_bed;
                     break;
                 case "school":
                     accent = pal.alt;
@@ -232,7 +232,7 @@ final class GuardScreenView {
         story.setOrientation(LinearLayout.VERTICAL);
         story.setGravity(Gravity.CENTER_HORIZONTAL);
         if (locked && roomy && !sideways) {
-            story.addView(clock(context, pal), wrapCentered(context, 0));
+            story.addView(clock(context, pal), fullWidth(context, 0));
         }
         story.addView(hero(context, pal, iconRes, accent, sideways ? 88 : 116), wrapCentered(context, locked && roomy && !sideways ? 28 : 0));
         TextView title = title(context, pal, titleText);
@@ -416,14 +416,16 @@ final class GuardScreenView {
         time.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         time.setTextColor(pal.textPrimary);
         time.setIncludeFontPadding(false);
-        wrap.addView(time);
+        time.setGravity(Gravity.CENTER);
+        wrap.addView(time, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         android.widget.TextClock date = new android.widget.TextClock(context);
         date.setFormat12Hour("EEEE, MMMM d");
         date.setFormat24Hour("EEEE, d MMMM");
         date.setTextSize(15);
         date.setTextColor(pal.textSecondary);
         date.setPadding(0, dp(context, 4), 0, 0);
-        wrap.addView(date);
+        date.setGravity(Gravity.CENTER);
+        wrap.addView(date, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return wrap;
     }
 
@@ -1130,16 +1132,32 @@ final class GuardScreenView {
 
     private static Button tonalButton(Context context, Palette pal, String label, int iconRes) {
         Button button = tonalButton(context, pal, label);
-        android.graphics.drawable.Drawable icon = context.getDrawable(iconRes);
-        if (icon != null) {
-            icon = icon.mutate();
-            icon.setTint(pal.onTonal);
-            int size = dp(context, 20);
-            icon.setBounds(0, 0, size, size);
-            button.setCompoundDrawablesRelative(icon, null, null, null);
-            button.setCompoundDrawablePadding(dp(context, 8));
-        }
+        button.setText(withIcon(context, label, iconRes, pal.onTonal, 20));
+        oneLine(button, 13, 16);
         return button;
+    }
+
+    /**
+     * The label with its icon just before it, so the two are centred together
+     * in the button (a compound drawable sits at the button's far edge instead).
+     */
+    private static CharSequence withIcon(Context context, String label, int iconRes, int tint, int sizeDp) {
+        android.graphics.drawable.Drawable icon = context.getDrawable(iconRes);
+        if (icon == null) return label;
+        icon = icon.mutate();
+        icon.setTint(tint);
+        int size = dp(context, sizeDp);
+        icon.setBounds(0, 0, size, size);
+        android.text.SpannableString text = new android.text.SpannableString("\u00A0\u00A0" + label);
+        text.setSpan(new android.text.style.ImageSpan(icon, android.text.style.DynamicDrawableSpan.ALIGN_CENTER),
+                0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return text;
+    }
+
+    /** Keeps a side-by-side button's label on one line, shrinking it a little on a narrow screen or a big font. */
+    private static void oneLine(Button button, int minSp, int maxSp) {
+        button.setMaxLines(1);
+        button.setAutoSizeTextTypeUniformWithConfiguration(minSp, maxSp, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
     }
 
     /** The child's parents who have a phone number, as {name, number}, from the guard status. */
@@ -1199,15 +1217,8 @@ final class GuardScreenView {
         button.setBackground(rounded(context, withAlpha(pal.card, 0.55f), 999, pal.stroke, 1));
         button.setMinHeight(dp(context, 48));
         button.setPadding(dp(context, 14), dp(context, 8), dp(context, 14), dp(context, 8));
-        android.graphics.drawable.Drawable icon = context.getDrawable(iconRes);
-        if (icon != null) {
-            icon = icon.mutate();
-            icon.setTint(pal.textSecondary);
-            int s = dp(context, 18);
-            icon.setBounds(0, 0, s, s);
-            button.setCompoundDrawablesRelative(icon, null, null, null);
-            button.setCompoundDrawablePadding(dp(context, 8));
-        }
+        button.setText(withIcon(context, label, iconRes, pal.textSecondary, 18));
+        oneLine(button, 11, 14);
         button.setStateListAnimator(null);
         return button;
     }
