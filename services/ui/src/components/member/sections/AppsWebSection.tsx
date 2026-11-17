@@ -5,6 +5,7 @@ import AppControls from '../../health/AppControls';
 import WebFilterControls from '../../health/WebFilterControls';
 import RequestsCard from '../../guardian/RequestsCard';
 import AppsCard from '../../guardian/AppsCard';
+import VideoCallsCard from '../../guardian/VideoCallsCard';
 import { activityQuery, statusQuery } from '../../../lib/memberPage';
 import { relativeTime } from '../../../lib/wanderTrips';
 
@@ -64,6 +65,7 @@ export default function AppsWebSection({ username, name }: { username: string; n
         <>
           <AppControls username={username} name={name} rules={rules} />
           <WebFilterControls username={username} name={name} rules={rules} />
+          <VideoCallsCard username={username} name={name} />
         </>
       )}
       <RecentWebCard username={username} />

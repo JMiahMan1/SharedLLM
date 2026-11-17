@@ -682,6 +682,85 @@ final class GuardApi {
         }
     }
 
+    /**
+     * Video call checks and the Video calls block as the server resolved them
+     * ({@code video_calls} in the status; services/common/video_calls.py).
+     * Nothing is watched before the server has said, or with monitoring off.
+     */
+    static VideoCallRules.Settings videoCalls(Context context) {
+        JSONObject status = lastStatus(context);
+        JSONObject v = status.optJSONObject("video_calls");
+        if (v == null) return VideoCallRules.Settings.off();
+        boolean scan = v.optBoolean("scan", false) && !"off".equals(monitoringMode(context));
+        Map<String, java.util.List<String>> browsers = new HashMap<>();
+        JSONObject b = v.optJSONObject("browsers");
+        if (b != null) {
+            Iterator<String> keys = b.keys();
+            while (keys.hasNext()) {
+                String pkg = keys.next();
+                JSONArray ids = b.optJSONArray(pkg);
+                java.util.List<String> list = new java.util.ArrayList<>();
+                if (ids != null) {
+                    for (int i = 0; i < ids.length(); i++) list.add(ids.optString(i));
+                }
+                browsers.put(pkg, list);
+            }
+        }
+        return new VideoCallRules.Settings(scan, v.optBoolean("block", false),
+                v.optLong("interval_s", 45) * 1000L, v.optInt("max_frames", 20),
+                strings(v.optJSONArray("apps")), new java.util.ArrayList<>(strings(v.optJSONArray("sites"))), browsers);
+    }
+
+    /** The video-call sites the web filter blocks now (none while the Video calls switch is off). */
+    static Set<String> videoCallBlockedSites(Context context) {
+        VideoCallRules.Settings s = videoCalls(context);
+        return s.block ? new HashSet<>(s.sites) : new HashSet<String>();
+    }
+
+    static final String KEY_VIDEO_CAPTURE = "guard_video_capture";
+
+    /**
+     * How the last video call screenshot went ("ok", or why it failed), and
+     * when, for the parents' Devices section: a check that cannot work says
+     * so instead of quietly doing nothing.
+     */
+    static void setVideoCaptureState(Context context, String state) {
+        prefs(context).edit().putString(KEY_VIDEO_CAPTURE, state + "|" + System.currentTimeMillis()).apply();
+    }
+
+    static String videoCaptureState(Context context) {
+        return prefs(context).getString(KEY_VIDEO_CAPTURE, "");
+    }
+
+    /**
+     * Send one downscaled screenshot from a video call to the same scanner
+     * photos use, tagged with the call. Not retried: a frame lives only in
+     * memory and is dropped after this.
+     */
+    static int uploadVideoCallFrame(Context context, String b64, VideoCallRules.Call call, String appLabel,
+                                    int frameIndex) {
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("feature", "video_call");
+            meta.put("app", appLabel == null ? "" : appLabel);
+            meta.put("package", call.source.pkg);
+            meta.put("site", call.source.site);
+            meta.put("call_id", call.id);
+            meta.put("call_started_at", java.time.OffsetDateTime.ofInstant(
+                    java.time.Instant.ofEpochMilli(call.startedAt), java.time.ZoneId.systemDefault()).toString());
+            meta.put("frame_index", frameIndex);
+            JSONObject body = new JSONObject();
+            body.put("media_type", "video_call");
+            body.put("file_name", "video-call-" + frameIndex + ".jpg");
+            body.put("image_b64", b64);
+            body.put("metadata", meta);
+            HttpResult r = send(context, "POST", "/api/guardian/media/scan", body.toString());
+            return r == null ? 0 : r.status;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     /** Tell the parents protection changed. Kept until the server takes it (see {@link #flushTamper}). */
     static void reportTamper(Context context, String event) {
         reportTamper(context, event, null);

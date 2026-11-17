@@ -1,6 +1,12 @@
 package com.jarvisos.app;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.graphics.Bitmap;
+import android.hardware.HardwareBuffer;
+import android.hardware.camera2.CameraManager;
+import android.media.AudioManager;
+import android.view.Display;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -21,9 +27,12 @@ import android.widget.Toast;
 import androidx.core.content.ContextCompat;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -62,6 +71,13 @@ import java.util.concurrent.TimeUnit;
  * every other app so Home and Back cannot dismiss it. A parent's lock that
  * arrives by push is applied at once ({@link #refreshNow()}), not at the next
  * minute's refresh.
+ *
+ * (8) Video calls ({@link VideoCallRules}): while a child is on a video call
+ * in a listed app, or on a listed site in a browser, a screenshot every few
+ * seconds (the parents' interval, capped per call) goes in memory, downscaled,
+ * to the same safety scanner photos use; and a parent's Video calls switch
+ * closes listed sites in the browser (the apps are closed like any blocked
+ * app, from the server's blocked list).
  */
 public class GuardService extends AccessibilityService {
 
@@ -126,12 +142,26 @@ public class GuardService extends AccessibilityService {
      * screen and lock-task mode instead).
      */
     private GuardOverlay lockOverlay;
+    /** How often the guard looks for a video call (cheap: the window list, the audio mode). */
+    private static final long VIDEO_CHECK_SECONDS = 5;
+    private final VideoCallRules.Tracker videoCalls = new VideoCallRules.Tracker();
+    /** The host each browser last showed in its address bar, kept while that browser is in front. */
+    private final Map<String, String> browserHosts = new HashMap<>();
+    /** Cameras another app has open now (CameraManager's availability callback). */
+    private final Set<String> camerasInUse = ConcurrentHashMap.newKeySet();
+    private CameraManager.AvailabilityCallback cameraWatch;
+    /** Encodes and uploads video call frames, one at a time, off the main thread. */
+    private ExecutorService frameSender;
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
         refresher = Executors.newSingleThreadScheduledExecutor();
+        frameSender = Executors.newSingleThreadExecutor();
+        watchCameras();
+        refresher.scheduleWithFixedDelay(() -> main.post(this::checkVideoCall),
+                VIDEO_CHECK_SECONDS, VIDEO_CHECK_SECONDS, TimeUnit.SECONDS);
         refresher.execute(this::checkBoots);
         refresher.scheduleWithFixedDelay(this::tick, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
         refresher.scheduleWithFixedDelay(() -> main.post(this::checkWarning),
@@ -319,6 +349,8 @@ public class GuardService extends AccessibilityService {
             if (isAnApp(pkg, launcher)) lastApp = pkg;
             // The app in front is fine; one beside it or floating over it may not be.
             checkVisibleWindows();
+            // A browser may be showing a video-call site (closed while the Video calls switch is on).
+            checkVideoCall();
             return;
         }
         block(action, pkg, text, GuardRules.clearFor(false, appWindows(visibleWindows())), null);
@@ -427,14 +459,227 @@ public class GuardService extends AccessibilityService {
             default:
                 mode = GuardScreenActivity.MODE_LOCKED;
         }
+        startCover(mode, pkg, UnifiedPushDistributor.label(this, pkg));
+    }
+
+    private void startCover(String mode, String pkg, String label) {
         Intent cover = new Intent(this, GuardScreenActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(GuardScreenActivity.EXTRA_MODE, mode)
                 .putExtra(GuardScreenActivity.EXTRA_PACKAGE, pkg)
-                .putExtra(GuardScreenActivity.EXTRA_APP, UnifiedPushDistributor.label(this, pkg))
+                .putExtra(GuardScreenActivity.EXTRA_APP, label)
                 .putExtra(GuardScreenActivity.EXTRA_DENIED,
                         InstallApprovals.denied(pkg, GuardApi.appApprovals(this)));
         startActivity(cover);
+    }
+
+    // --- video calls (VideoCallRules) -------------------------------------
+
+    /**
+     * Whether a video call screenshot can be taken on this phone now, for the
+     * parents' Devices section: "ready", or why not. Android 11 (API 30) is
+     * the first with Accessibility screenshots; the service must also hold
+     * the screenshot capability (canTakeScreenshot in its configuration,
+     * which Android grants when the guard is switched on).
+     */
+    static String videoCaptureSupport(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "android_too_old";
+        GuardService s = instance;
+        if (s == null) return "guard_off";
+        try {
+            AccessibilityServiceInfo info = s.getServiceInfo();
+            if (info == null || (info.getCapabilities() & AccessibilityServiceInfo.CAPABILITY_CAN_TAKE_SCREENSHOT) == 0) {
+                return "no_screenshot_capability";
+            }
+        } catch (Exception e) {
+            return "no_screenshot_capability";
+        }
+        return "ready";
+    }
+
+    /** Keep track of cameras other apps have open: one sign a call has video. */
+    private void watchCameras() {
+        try {
+            CameraManager cameras = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+            if (cameras == null) return;
+            cameraWatch = new CameraManager.AvailabilityCallback() {
+                @Override
+                public void onCameraAvailable(String cameraId) {
+                    camerasInUse.remove(cameraId);
+                }
+
+                @Override
+                public void onCameraUnavailable(String cameraId) {
+                    camerasInUse.add(cameraId);
+                }
+            };
+            cameras.registerAvailabilityCallback(cameraWatch, main);
+        } catch (Exception ignored) {
+            // No camera service: the audio mode alone says whether a call is on.
+        }
+    }
+
+    /** Audio in communication (WebRTC and every VoIP app set it) or a camera open. */
+    private boolean inCall() {
+        try {
+            AudioManager audio = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (audio != null && audio.getMode() == AudioManager.MODE_IN_COMMUNICATION) return true;
+        } catch (Exception ignored) {
+            // Unreadable: fall through to the cameras.
+        }
+        return !camerasInUse.isEmpty();
+    }
+
+    /** The focused application window's root, or the first one; null when none. */
+    private AccessibilityNodeInfo frontAppRoot() {
+        AccessibilityNodeInfo first = null;
+        for (AccessibilityWindowInfo w : visibleWindows()) {
+            if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+            AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null) continue;
+            if (w.isFocused()) return root;
+            if (first == null) first = root;
+        }
+        return first;
+    }
+
+    /** The host in a browser's address bar, read by the view ids the server lists for it; "" if none. */
+    private static String addressBarHost(AccessibilityNodeInfo root, List<String> viewIds) {
+        if (root == null || viewIds == null) return "";
+        for (String id : viewIds) {
+            try {
+                List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(id);
+                if (found == null) continue;
+                for (AccessibilityNodeInfo node : found) {
+                    CharSequence text = node.getText();
+                    String host = VideoCallRules.host(text == null ? "" : text.toString());
+                    if (!host.isEmpty()) return host;
+                }
+            } catch (Exception ignored) {
+                // A view that went away mid-read: try the next id.
+            }
+        }
+        return "";
+    }
+
+    /**
+     * One look for a video call (every few seconds, and when a window
+     * changes). Closes a listed site while the Video calls switch is on, and
+     * takes a frame of a call when one is due. Main thread.
+     */
+    private void checkVideoCall() {
+        try {
+            if (!GuardApi.isProtected(this) || GuardApi.isUnlocked(this)) {
+                videoCalls.reset();
+                return;
+            }
+            VideoCallRules.Settings settings = GuardApi.videoCalls(this);
+            if (!settings.watching()) {
+                videoCalls.reset();
+                return;
+            }
+            AccessibilityNodeInfo root = frontAppRoot();
+            String front = root == null || root.getPackageName() == null ? "" : root.getPackageName().toString();
+            String host = "";
+            if (settings.browsers.containsKey(front)) {
+                String seen = addressBarHost(root, settings.browsers.get(front));
+                if (!seen.isEmpty()) browserHosts.put(front, seen);
+                host = browserHosts.containsKey(front) ? browserHosts.get(front) : "";
+            }
+            // Only the browser in front keeps its remembered page.
+            browserHosts.keySet().retainAll(Collections.singleton(front));
+            String blocked = VideoCallRules.blockedSite(settings, front, host);
+            if (blocked != null) {
+                long now = System.currentTimeMillis();
+                if (now - lastCoverAt < 700) return;
+                lastCoverAt = now;
+                browserHosts.remove(front);
+                performGlobalAction(GLOBAL_ACTION_HOME);
+                startCover(GuardScreenActivity.MODE_VIDEO_CALL, front, blocked);
+                return;
+            }
+            VideoCallRules.Call due = videoCalls.observe(settings,
+                    VideoCallRules.source(settings, front, host), inCall(), System.currentTimeMillis());
+            if (due != null) captureFrame(due);
+        } catch (Exception ignored) {
+            // Looked at again in a few seconds.
+        }
+    }
+
+    /**
+     * One screenshot of a call: downscaled to a JPEG in memory, sent to the
+     * scanner, and dropped. Never written to disk. A frame counts toward the
+     * call's cap whether or not it could be sent, and every outcome is noted
+     * for the parents' Devices section (a check that cannot work says so).
+     */
+    private void captureFrame(VideoCallRules.Call call) {
+        videoCalls.taken(call, System.currentTimeMillis());
+        final int index = call.frames - 1;
+        final String label = UnifiedPushDistributor.label(this, call.source.pkg);
+        final Context app = getApplicationContext();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            GuardApi.setVideoCaptureState(app, "android_too_old");
+            return;
+        }
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, frameSender, new TakeScreenshotCallback() {
+                @Override
+                public void onSuccess(ScreenshotResult result) {
+                    String b64 = null;
+                    boolean blank = false;
+                    HardwareBuffer buffer = result.getHardwareBuffer();
+                    try {
+                        Bitmap hardware = Bitmap.wrapHardwareBuffer(buffer, result.getColorSpace());
+                        Bitmap frame = hardware == null ? null : hardware.copy(Bitmap.Config.ARGB_8888, false);
+                        if (hardware != null) hardware.recycle();
+                        if (frame != null) {
+                            blank = VideoCallRules.looksBlank(samples(frame));
+                            if (blank) {
+                                frame.recycle();
+                            } else {
+                                b64 = PhotoScan.encode(frame);
+                            }
+                        }
+                    } catch (Exception | OutOfMemoryError e) {
+                        b64 = null;
+                    } finally {
+                        buffer.close();
+                    }
+                    if (blank) {
+                        // The app keeps its window out of screenshots: nothing to check, and the parents are told.
+                        GuardApi.setVideoCaptureState(app, "blank_screen");
+                        return;
+                    }
+                    if (b64 == null) {
+                        GuardApi.setVideoCaptureState(app, "encode_failed");
+                        return;
+                    }
+                    int status = GuardApi.uploadVideoCallFrame(app, b64, call, label, index);
+                    GuardApi.setVideoCaptureState(app, status >= 200 && status < 300 ? "ok" : "upload_failed_" + status);
+                }
+
+                @Override
+                public void onFailure(int errorCode) {
+                    GuardApi.setVideoCaptureState(app, "screenshot_failed_" + errorCode);
+                }
+            });
+        } catch (Exception e) {
+            GuardApi.setVideoCaptureState(app, "screenshot_unavailable");
+        }
+    }
+
+    /** A 6 x 6 grid of pixels, enough to tell a black (secure) screen from a picture. */
+    private static int[] samples(Bitmap frame) {
+        int w = frame.getWidth();
+        int h = frame.getHeight();
+        int[] out = new int[36];
+        int n = 0;
+        for (int y = 0; y < 6; y++) {
+            for (int x = 0; x < 6; x++) {
+                out[n++] = frame.getPixel(Math.min(w - 1, (x * 2 + 1) * w / 12), Math.min(h - 1, (y * 2 + 1) * h / 12));
+            }
+        }
+        return out;
     }
 
     /**
@@ -719,6 +964,15 @@ public class GuardService extends AccessibilityService {
             }
         }
         if (refresher != null) refresher.shutdownNow();
+        if (frameSender != null) frameSender.shutdownNow();
+        if (cameraWatch != null) {
+            try {
+                ((CameraManager) getSystemService(Context.CAMERA_SERVICE)).unregisterAvailabilityCallback(cameraWatch);
+            } catch (Exception ignored) {
+                // Already gone.
+            }
+        }
+        videoCalls.reset();
         if (instance == this) instance = null;
         return super.onUnbind(intent);
     }

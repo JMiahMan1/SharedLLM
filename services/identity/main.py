@@ -30,7 +30,7 @@ from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common import concern_monitor as concern_levels
-from services.common import app_vetting, device_noun, ha_redirect
+from services.common import app_vetting, device_noun, ha_redirect, video_calls
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import (
     LOCKED_SECTIONS,
@@ -5246,6 +5246,12 @@ def _clean_screen_rules(body: dict) -> dict:
         if not isinstance(body["photo_scan"], bool):
             raise HTTPException(status_code=422, detail="photo_scan must be true or false")
         out["photo_scan"] = body["photo_scan"]
+    # Video call checks and the Video calls block (services/common/video_calls.py).
+    if body.get("video_calls") is not None:
+        try:
+            out["video_calls"] = video_calls.clean(body["video_calls"])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     # Geofence presence alerts per child (step 7): {zone_id: {"arrive": bool, "depart": bool}}
     if body.get("geofence_alerts") is not None:
         ga = body["geofence_alerts"]
@@ -6530,6 +6536,8 @@ def internal_guardian_children(session: Session = Depends(get_session), _: None 
             "monitoring": rules.get("monitoring") or concern_levels.DEFAULT_NOTIFY_LEVEL,
             "notify_levels": rules.get("notify_levels") or {},
             "photo_scan": rules.get("photo_scan", True),
+            # Video call checks: whether they run and how many confirmed frames page a parent.
+            "video_calls": {k: v for k, v in video_calls.resolve(rules).items() if k in ("scan", "corroborate_frames")},
             "geofence_alerts": rules.get("geofence_alerts") or {},
             "device_kinds": _device_kinds(session, child.username),
             # App vetting: the age rule's inputs (telemetry works the limit out).

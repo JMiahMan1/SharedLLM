@@ -310,7 +310,7 @@ const CALENDAR_SETTINGS = {
 
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
 
-function memberStatus(username: string) {
+export function memberStatus(username: string) {
   return {
     username, day: day(), rules: {
       daily_limit_min: 120, bedtime_start: '21:00', bedtime_end: '07:00', app_limits: { 'com.roblox.client': 30 },

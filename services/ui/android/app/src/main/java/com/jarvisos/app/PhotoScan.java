@@ -320,7 +320,12 @@ final class PhotoScan {
         return sample;
     }
 
-    private static String encode(Bitmap bitmap) {
+    /**
+     * A downscaled JPEG (about 1024 px, quality 70) of a bitmap, base64, made
+     * in memory and never written anywhere; null when it cannot be made.
+     * Recycles {@code bitmap}. The video call checks send screenshots this way.
+     */
+    static String encode(Bitmap bitmap) {
         if (bitmap == null) return null;
         try {
             Bitmap scaled = bitmap;

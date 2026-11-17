@@ -9,6 +9,7 @@ import { relativeTime } from '../../../lib/wanderTrips';
 import { deviceKindLabel, deviceNoun, isEsphomeDevice } from '../../../lib/deviceKind';
 import type { MemberDevice, MemberDevices, MemberGuardState } from '../../../types/api';
 import { tamperText } from '../../../lib/guardTamper';
+import { captureProblem } from '../../../lib/videoCalls';
 import { confirmDialog } from '../../ui/confirmDialog';
 import { errorText } from '../../../lib/errorText';
 import toast from 'react-hot-toast';
@@ -154,6 +155,20 @@ function DeviceCard({ device, latest }: { device: MemberDevice; latest?: number 
                     <span className="min-w-0 break-words text-right text-amber-300">{guard.bypassApps.join(', ')}</span>
                   ) : (
                     <span className="text-emerald-300">none</span>
+                  )}
+                </li>
+              )}
+              {guard.videoCallCapture !== undefined && (
+                <li className="flex justify-between gap-2" data-testid="member-device-video-calls">
+                  <span className="text-slate-300">Video call checks</span>
+                  {captureProblem(guard.videoCallCapture, guard.videoCallLast) ? (
+                    <span className="min-w-0 break-words text-right text-amber-300">
+                      {captureProblem(guard.videoCallCapture, guard.videoCallLast)}
+                    </span>
+                  ) : (
+                    <span className="text-emerald-300">
+                      ready{guard.videoCallLastAt ? ` · last ${relativeTime(guard.videoCallLastAt)}` : ''}
+                    </span>
                   )}
                 </li>
               )}

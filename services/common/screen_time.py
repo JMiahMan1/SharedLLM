@@ -41,6 +41,8 @@ from collections import Counter
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
+from services.common import video_calls
+
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SCHOOL_DAYS_DEFAULT = ("mon", "tue", "wed", "thu", "fri")
 # Never locked, so a locked phone can still call home, text a parent and ask
@@ -216,10 +218,14 @@ def active_allow(web_filter: dict[str, Any] | None, now: datetime) -> list[str]:
     return out
 
 
-def active_block(web_filter: dict[str, Any] | None) -> list[str]:
-    """The parent's block list plus every domain in their blocked categories."""
+def active_block(web_filter: dict[str, Any] | None, extra: list[str] | None = None) -> list[str]:
+    """The parent's block list plus every domain in their blocked categories
+    (and ``extra``: the video-call sites while that switch is on)."""
     wf = web_filter or {}
     out = list(wf.get("block") or [])
+    for domain in extra or []:
+        if domain not in out:
+            out.append(domain)
     for cat in wf.get("categories") or []:
         for domain in WEB_FILTER_CATEGORIES.get(str(cat)) or ():
             if domain not in out:
@@ -391,6 +397,10 @@ def apps_state(
     used = apps_used_ms or {}
     blocked = [pkg for pkg in rules.get("blocked_apps") or [] if pkg not in allowed]
     for pkg in uninstall_apps(rules):
+        if pkg not in allowed and pkg not in blocked:
+            blocked.append(pkg)
+    # The parents' Video calls switch: every video-call app in their list.
+    for pkg in video_calls.blocked_apps(rules):
         if pkg not in allowed and pkg not in blocked:
             blocked.append(pkg)
     left: dict[str, int] = {}
@@ -679,7 +689,10 @@ def evaluate(
         "locked_sections": locked_sections(rules),
         "permission_gating": [g for g in rules.get("permission_gating") or [] if g in PERMISSION_GROUPS],
         "web_allow": active_allow(rules.get("web_filter"), now),
-        "web_block": active_block(rules.get("web_filter")),
+        "web_block": active_block(rules.get("web_filter"), video_calls.blocked_sites(rules)),
+        # Video call checks and the Video calls block, resolved (the phone's
+        # guard watches and blocks with these; services/common/video_calls.py).
+        "video_calls": video_calls.resolve(rules),
         "os_update_policy": os_update_policy(rules),
         "wifi_networks": wifi_networks(rules),
         "ca_certs": ca_certs(rules),

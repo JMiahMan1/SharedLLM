@@ -424,6 +424,41 @@ export interface ScreenRules {
   chores_first?: boolean;
   /** What Jarvis keeps open while the phone is locked (chat is always in). */
   locked_sections?: string[];
+  /** Video call checks and the Video calls block; keys left out mean the defaults. */
+  video_calls?: VideoCallRules;
+}
+
+/** A parent's video-call choices for one child (services/common/video_calls.py). */
+export interface VideoCallRules {
+  /** Screenshots of video calls go to the safety scanner (follows photo_scan when left out). */
+  scan?: boolean;
+  /** Seconds between screenshots of one call (15 to 600, default 45). */
+  interval_s?: number;
+  /** The most screenshots of one call (1 to 120, default 20). */
+  max_frames?: number;
+  /** Frames, each confirmed by a second check, needed before a parent is told (2 to 10, default 2). */
+  corroborate_frames?: number;
+  /** Blocks every video-call app and site in the lists. */
+  block?: boolean;
+  /** The parent's own app list (packages); left out means the shipped defaults. */
+  apps?: string[];
+  /** The parent's own site list (domains); left out means the shipped defaults. */
+  sites?: string[];
+}
+
+/** The video-call settings as the server resolved them (defaults filled in). */
+export interface VideoCallState {
+  scan: boolean;
+  interval_s: number;
+  max_frames: number;
+  corroborate_frames: number;
+  block: boolean;
+  apps: string[];
+  sites: string[];
+  custom_apps: boolean;
+  custom_sites: boolean;
+  /** App names by package, for the shipped apps. */
+  labels: Record<string, string>;
 }
 
 /** One part of Jarvis a parent can leave open while the phone is locked. */
@@ -485,6 +520,8 @@ export interface ScreenTimeStatus {
   locked_sections?: string[];
   /** Every part a parent can choose from, for the Guardian editor. */
   locked_section_choices?: LockedSectionChoice[];
+  /** Video call checks and the Video calls block, resolved. */
+  video_calls?: VideoCallState;
   limit_min: number | null;
   used_min: number;
   bonus_min: number;
@@ -570,6 +607,11 @@ export interface MemberGuardState {
   smsAccess?: boolean;
   activityAccess?: boolean;
   healthConnect?: string;
+  /** Whether video call screenshots can be taken here: "ready", or why not. */
+  videoCallCapture?: string;
+  /** How the last video call screenshot went ("ok", "blank_screen", "screenshot_failed_N", ...). */
+  videoCallLast?: string;
+  videoCallLastAt?: string;
   reportedAt?: string;
 }
 
@@ -698,6 +740,18 @@ export interface GuardianConcern {
   image_kept_days?: number;
   review?: ConcernReview | null;
   human_review?: HumanConcernReview | null;
+  /** The call a video-call screenshot came from. */
+  video_call?: {
+    app?: string;
+    package?: string;
+    site?: string;
+    call_started_at?: string;
+    frame_index?: number;
+    call_id?: string;
+    label?: string;
+  };
+  /** Whether a video-call flag was corroborated and sent: "unsure" stays in this list, unsent. */
+  alert?: { state: 'unsure' | 'sent' | 'already_sent'; confirmed_frames: number; needed: number };
 }
 
 /** A child asking a parent first: a new app, an app's permission, or a blocked site. */
@@ -2476,9 +2530,11 @@ export type ConcernLevel = 'medium' | 'high' | 'severe';
 /** How a concern was weighed: by the household's local model in context, or by the phrase list alone (and why). */
 export interface ConcernReview {
   by: 'model' | 'phrases' | 'vision';
-  verdict?: 'confirmed' | 'doubted' | 'dismissed';
+  verdict?: 'confirmed' | 'doubted' | 'dismissed' | 'unsure';
   reason: string;
   model?: string;
+  /** A video-call frame's second, stricter look. */
+  second_check?: { confirmed: boolean; reason: string; model?: string };
 }
 
 /** A parent's or administrator's own verdict on a concern. */

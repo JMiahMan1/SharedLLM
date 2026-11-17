@@ -6607,9 +6607,10 @@ async def _raw_data_access(request: Request, subject: str) -> bool:
     return bool((await _raw_access(request, subject)).get("technical"))
 
 
-#: Collected data that is a person's private communication: calls, texts and
-#: message notifications. Only parents see it (identity's ``comms`` answer).
-COMMS_FEATURES = frozenset({"calls", "sms", "social"})
+#: Collected data that is a person's private communication: calls, texts,
+#: message notifications and screenshots from video calls. Only parents see it
+#: (identity's ``comms`` answer).
+COMMS_FEATURES = frozenset({"calls", "sms", "social", "video_call"})
 
 
 def without_comms(data: Any) -> Any:

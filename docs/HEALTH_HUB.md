@@ -1042,6 +1042,32 @@ point.
       messages, and images the app itself shows in a notification are scanned. Tests:
       `services/telemetry/tests/test_guardian.py`, `services/gateway/tests/test_family_member_page.py`,
       `PhotoScanMonitorTest.java`.
+- [x] **Video call checks and the Video calls block (built 2026-11-17).**
+      The apps and sites live in `services/common/data/video_calls.json` (configuration, read once
+      at start; a parent can replace either list per child in Guardian, Video calls), resolved by
+      `services/common/video_calls.py` into the guard status as `video_calls`. On a protected
+      child's phone `GuardService` (via the pure `VideoCallRules`) treats a listed app in front, or
+      a listed browser whose address bar shows a listed site (FaceTime web links in Chrome first),
+      as a call only while Android's audio mode is in communication or a camera is open. Then,
+      after 10 s, it takes `AccessibilityService.takeScreenshot` every `interval_s` (default 45)
+      up to `max_frames` (default 20) per call, downscales it in memory with the photo encoder and
+      sends it to the same `/api/guardian/media/scan` with `media_type: "video_call"` and the call
+      in `metadata` (app, package, site, call id, start, frame index). Nothing is written to disk.
+      **A false positive must never trigger anything:** the server keeps every flagged frame like
+      a flagged photo (same encrypted image, same review and export), but a parent is notified
+      only when a second, stricter vision check (`concern_review.media_verify_messages`, told
+      what to look for and not what the first look said) agrees, on at least `corroborate_frames`
+      (default 2, never fewer) frames of the same category in the same call, and then once per
+      call and category. Anything less is labelled "Unsure, not sent". A flag never blocks or
+      changes a setting. The Video calls switch (`video_calls.block`, a parent's action, also one
+      tap on a video-call concern) adds the apps to `blocked_apps` and the sites to the web
+      filter, and the guard closes a listed site in the browser with its own cover screen.
+      Limits: an app that marks its window secure gives a black frame, which is reported
+      (`videoCallLast: blank_screen`) and not sent; a browser not in the list, or one whose
+      address bar view id changed, is not recognised; the phone reports whether it can take
+      screenshots (`videoCallCapture`) on the Devices section. Video-call concerns are private
+      communication (`COMMS_FEATURES`). Tests: `services/telemetry/tests/test_video_call_scan.py`,
+      `services/tests/test_video_calls.py`, `VideoCallRulesTest.java`, `VideoCallChecks.test.tsx`.
 - [ ] **Alerts and reports.** Only the highest concern pages a parent immediately; a Sunday
       weekly recap (telemetry's report pipeline) with top apps, contacts, sites and standout
       moments; Jarvis chat answers "how was Emma's week?" the way Bark Assistant does.

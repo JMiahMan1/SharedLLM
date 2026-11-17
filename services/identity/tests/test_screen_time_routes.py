@@ -269,6 +269,22 @@ def test_the_guardian_list_names_each_child_their_parents_and_sensitivity(family
     assert children["kid"]["monitoring"] == "all" and children["sib"]["monitoring"] == "high"
     assert children["kid"]["photo_scan"] is True
     assert children["kid"]["geofence_alerts"] == {"zone.school": {"arrive": True, "depart": True}}
+    assert children["kid"]["video_calls"] == {"scan": True, "corroborate_frames": 2}
+
+
+def test_video_call_settings_are_checked_and_reach_the_scanner(family):
+    r = family("dad").put("/api/screen-time/kid/rules", json={"photo_scan": True, "video_calls": {
+        "scan": False, "interval_s": 60, "max_frames": 10, "corroborate_frames": 3, "block": True,
+        "sites": ["*.Example.com"],
+    }})
+    assert r.status_code == 200
+    saved = family("dad").get("/api/screen-time/kid/rules").json()["rules"]["video_calls"]
+    assert saved == {"scan": False, "interval_s": 60, "max_frames": 10, "corroborate_frames": 3,
+                     "block": True, "sites": ["example.com"]}
+    children = {c["username"]: c for c in family("dad").get("/api/internal/guardian/children").json()["children"]}
+    assert children["kid"]["video_calls"] == {"scan": False, "corroborate_frames": 3}
+    for bad in ({"corroborate_frames": 1}, {"interval_s": 1}, {"sites": ["not a domain"]}, {"apps": ["x"]}, "on"):
+        assert family("dad").put("/api/screen-time/kid/rules", json={"video_calls": bad}).status_code == 422
 
 
 def test_the_talk_journal_is_the_authors_unless_shared(family):

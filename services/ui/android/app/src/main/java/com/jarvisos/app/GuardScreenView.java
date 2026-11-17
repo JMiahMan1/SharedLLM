@@ -145,7 +145,8 @@ final class GuardScreenView {
         boolean install = GuardScreenActivity.MODE_INSTALL.equals(mode);
         boolean permission = GuardScreenActivity.MODE_PERMISSION.equals(mode);
         boolean bypass = GuardScreenActivity.MODE_BYPASS.equals(mode);
-        boolean locked = !tamper && !appOff && !install && !permission && !bypass;
+        boolean videoCall = GuardScreenActivity.MODE_VIDEO_CALL.equals(mode);
+        boolean locked = !tamper && !appOff && !install && !permission && !bypass && !videoCall;
         String appName = app == null || app.isEmpty() ? "This app" : app;
 
         int accent;
@@ -169,6 +170,12 @@ final class GuardScreenView {
             bodyText = denied
                     ? "This app stays closed. Everything else still works."
                     : "New apps open once one of your parents says yes. They have been asked.";
+        } else if (videoCall) {
+            accent = pal.brand;
+            iconRes = R.drawable.mi_shield;
+            titleText = "Video calls are off for now";
+            bodyText = (app == null || app.isEmpty() ? "That site" : app)
+                    + " is a video-call site, and your parents turned video calls off. Everything else still works.";
         } else if (bypass) {
             accent = pal.brand;
             iconRes = R.drawable.mi_warning;
@@ -242,7 +249,7 @@ final class GuardScreenView {
             Button askApp = primaryButton(context, pal, "Ask a parent to unblock");
             askApp.setOnClickListener(v -> sheet.show(askAppCard(context, pal, sheet, pkg, appName, pal.brand)));
             addFullWidth(root, askApp, 0);
-        } else if (!tamper && !install && !permission && !bypass) {
+        } else if (!tamper && !install && !permission && !bypass && !videoCall) {
             Button ask = primaryButton(context, pal, "Ask for more time");
             ask.setOnClickListener(v -> sheet.show(askCard(context, pal, sheet, pal.brand)));
             addFullWidth(root, ask, 0);

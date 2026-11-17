@@ -105,6 +105,20 @@ public class GuardPlugin extends Plugin {
         // apps"): without it the background updater can never update this device.
         out.put("installUpdates", android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O
                 || getContext().getPackageManager().canRequestPackageInstalls());
+        // Video call checks: whether a screenshot can be taken here ("ready", or
+        // why not) and how the last one went ("ok", "blank_screen", ...), so a
+        // check that cannot work is reported, never silently skipped.
+        out.put("videoCallCapture", GuardService.videoCaptureSupport(getContext()));
+        String last = GuardApi.videoCaptureState(getContext());
+        int bar = last.lastIndexOf('|');
+        if (bar > 0) {
+            out.put("videoCallLast", last.substring(0, bar));
+            try {
+                out.put("videoCallLastAt", java.time.Instant.ofEpochMilli(Long.parseLong(last.substring(bar + 1))).toString());
+            } catch (NumberFormatException ignored) {
+                // An unreadable time: the state alone is still worth reporting.
+            }
+        }
         call.resolve(out);
     }
 
