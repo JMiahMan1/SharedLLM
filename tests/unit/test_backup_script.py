@@ -51,3 +51,32 @@ def test_a_missing_folder_is_skipped_not_fatal(tmp_path):
         env={**os.environ, "BACKUP_ROOT": str(root), "BACKUP_DIR": str(tmp_path / "out")},
     )
     assert "0 folder(s)" in out.stdout
+
+
+@pytest.mark.skipif(shutil.which("sqlite3") is None, reason="sqlite3 not installed")
+def test_a_locked_database_is_saved_as_files_and_the_rest_still_archived(tmp_path):
+    root = tmp_path / "root"
+    (root / "data" / "a").mkdir(parents=True)
+    (root / "data" / "b").mkdir(parents=True)
+    with sqlite3.connect(root / "data" / "a" / "a.db") as db:
+        db.execute("create table t (x)")
+    locker = sqlite3.connect(root / "data" / "b" / "b.db", isolation_level=None)
+    locker.execute("pragma locking_mode=exclusive")
+    locker.execute("create table t (x)")
+    locker.execute("begin exclusive")
+    try:
+        out = subprocess.run(
+            ["bash", str(SCRIPT)], capture_output=True, text=True,
+            env={**os.environ, "BACKUP_ROOT": str(root), "BACKUP_DIR": str(tmp_path / "out"),
+                 "BACKUP_FOLDERS": ""},
+            timeout=120,
+        )
+    finally:
+        locker.close()
+    assert out.returncode == 2
+    assert "locked" in out.stderr
+    (archive,) = (tmp_path / "out").glob("sharedllm-*.tar.gz")
+    with tarfile.open(archive) as tar:
+        names = tar.getnames()
+    assert "./a-a.db" in names
+    assert "./raw/b-b.db" in names
