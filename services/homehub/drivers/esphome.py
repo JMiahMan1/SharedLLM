@@ -266,6 +266,8 @@ class ESPHomeDriver(Driver):
         self._reconnect_task: asyncio.Task | None = None
         self._was_connected = False
         self._infos: dict[tuple[int, int], Any] = {}         # (device_id, key) -> EntityInfo
+        #: Registry entities in HA's node-entity format that the node's last full listing did not have.
+        self._not_on_node: set[str] = set()
         self._entity_for: dict[tuple[int, int], EntityEntry] = {}
         self._info_for: dict[str, Any] = {}                    # entity_id -> EntityInfo
         self._last: dict[tuple[int, int], Any] = {}            # last EntityState per key
@@ -327,6 +329,10 @@ class ESPHomeDriver(Driver):
                 f"ESPHome {self.device_name or self.host} unreachable: {'; '.join(errors)}")
         self._client = client
         self._api_version = getattr(client, "api_version", None) or APIVersion(1, 10)
+        try:
+            self._register_new(device_info, infos)
+        except Exception:  # registering is a convenience; the node's known entities must still work
+            self.log.exception("ESPHome %s: registering its new entities failed", self.device_name)
         self._index(infos)
         self._device_info = device_info
         self._confirm(device_info)
@@ -499,6 +505,70 @@ class ESPHomeDriver(Driver):
         builder.install(str(getattr(self._device_info, "name", "") or self.device_name))
 
     # -- entity mapping -------------------------------------------------------
+    def _register_new(self, device_info: Any, infos: list[Any]) -> list[EntityEntry]:
+        """Register the node's entities the registry has no entry for, as HA does on every connect.
+
+        Matching is the one :meth:`_index` uses (HA's current unique_id, the name case-insensitively,
+        HA's older ``{node}{platform}{object_id}`` ids), over the entry's registry entities including
+        disabled ones, so a person's disabled entity is never registered a second time. A new entity gets
+        HA's unique_id ``{MAC}/{device_id}/{platform}/{name}``, sits on the node's device and is disabled
+        when the node marks it ``disabled_by_default`` (the flow that adopts a node does the same).
+        """
+        from services.homehub.discovery import norm_mac
+
+        mac = norm_mac(str(getattr(device_info, "mac_address", "") or ""))
+        if mac is None:
+            return []
+        mac_upper = ":".join(mac[i:i + 2] for i in range(0, 12, 2)).upper()
+        mine = [e for e in self.hub.entities.values() if e.config_entry_id == self.entry.entry_id]
+        known_new: set[tuple[str, str]] = set()
+        old_uids: list[str] = []
+        for e in mine:
+            uid = e.unique_id or ""
+            if m := _NEW_UID.match(uid):
+                known_new.add((m.group(3), m.group(4).lower()))
+            else:
+                old_uids.append(uid)
+        missing = []
+        for info in infos:
+            plat = platform_of(info)
+            if (plat, info.name.lower()) in known_new:
+                continue
+            if info.object_id and any(u.endswith(f"{plat}{info.object_id}") for u in old_uids):
+                continue
+            missing.append(info)
+        if not missing:
+            return []
+        fields = device_registry_fields(device_info)
+        connections = fields.pop("connections", None) or None
+        title = getattr(device_info, "friendly_name", "") or getattr(device_info, "name", "") or self.entry.title
+        dev = self.ensure_device(title, connections=connections, **fields)
+        added = []
+        for info in missing:
+            plat = platform_of(info)
+            domain = "sensor" if plat == "text_sensor" else plat
+            info_fields = entity_registry_fields(info)
+            own = info_fields.pop("original_name", None)
+            uid = f"{mac_upper}/{getattr(info, 'device_id', 0) or 0}/{plat}/{info.name}"
+            added.append(self.ensure_entity(domain, uid, own, device=dev,
+                                            disabled=bool(getattr(info, "disabled_by_default", False)),
+                                            **info_fields))
+        self.log.info("ESPHome %s: registered %d new entities: %s", self.device_name, len(added),
+                      ", ".join(e.entity_id for e in added))
+        return added
+
+    def gone_entities(self) -> dict[str, str]:
+        """Registry entities of the node's own kind (``{MAC}/{id}/{platform}/{name}``) its firmware no longer has.
+
+        Only while connected, from this connection's listing; HA's voice-pipeline entities and the
+        builder's firmware update are not the node's, so they are never listed.
+        """
+        if not self.connected:
+            return {}
+        name = self.device_name or self.host
+        return {eid: f"ESPHome {name} no longer has this entity (not in its firmware's entity list)"
+                for eid in sorted(self._not_on_node) if eid in self.hub.entities}
+
     def _index(self, infos: list[Any]) -> None:
         self._infos = {(getattr(i, "device_id", 0) or 0, i.key): i for i in infos}
         exact: dict[tuple[int, str, str], Any] = {}
@@ -533,6 +603,7 @@ class ESPHomeDriver(Driver):
                 continue
             self._entity_for[(getattr(info, "device_id", 0) or 0, info.key)] = e
             self._info_for[e.entity_id] = info
+        self._not_on_node = {e.entity_id for e in unmatched if _NEW_UID.match(e.unique_id or "")}
         if unmatched:
             self.log.info("ESPHome %s: %d registry entities are not on the node: %s", self.device_name,
                           len(unmatched), ", ".join(e.entity_id for e in unmatched))

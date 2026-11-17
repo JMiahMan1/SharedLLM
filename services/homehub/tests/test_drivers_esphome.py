@@ -651,3 +651,44 @@ async def test_assist_satellite_timer_event_drives_the_nodes_timer_display(drive
         await hub.call_service("assist_satellite", "timer_event", {
             "entity_id": sat.entity_id, "event": "updated", "timer_id": "t1", "seconds_left": "soon"})
     assert len(sent) == 3
+
+
+async def test_node_entities_missing_from_the_registry_are_registered_and_published(driver, monkeypatch):
+    hub, drv = driver
+    # A disabled registry entity the node still has: a person's choice, never registered twice.
+    hub.entities["switch.den_den_speaker_mute"].disabled_by = "user"
+    extra = [CoverInfo(object_id="gate", key=40, name="Garage Gate", supports_stop=True, device_class="garage"),
+             SensorInfo(object_id="uptime", key=41, name="Uptime", unit_of_measurement="s",
+                        entity_category=2, disabled_by_default=True),
+             TextSensorInfo(object_id="ver", key=42, name="Version")]
+    monkeypatch.setattr(sys.modules[__name__], "INFOS", INFOS + extra)
+    before = set(hub.entities)
+    await drv.async_setup()
+    new = {e.unique_id: e for eid, e in hub.entities.items() if eid not in before}
+    assert set(new) == {f"{MAC.upper()}/0/cover/Garage Gate", f"{MAC.upper()}/0/sensor/Uptime",
+                        f"{MAC.upper()}/0/text_sensor/Version"}
+    gate = new[f"{MAC.upper()}/0/cover/Garage Gate"]
+    assert gate.entity_id.startswith("cover.") and gate.device_id == "dev1" and gate.platform == "esphome"
+    assert gate.original_device_class == "garage" and gate.disabled_by is None
+    uptime = new[f"{MAC.upper()}/0/sensor/Uptime"]
+    assert uptime.disabled_by == "integration" and uptime.entity_category == "diagnostic"
+    assert new[f"{MAC.upper()}/0/text_sensor/Version"].entity_id.startswith("sensor.")
+    drv._client.on_state(CoverState(key=40, position=1.0, current_operation=CoverOperation.IDLE))
+    hub_state = hub.states.get(gate.entity_id)
+    assert hub_state.state == "open"
+    assert hub_state is not None and hub_state.attributes.get("device_class") == "garage"
+    # A second connect registers nothing more.
+    count = len(hub.entities)
+    await drv._connect()
+    assert len(hub.entities) == count
+
+
+async def test_gone_entities_are_node_style_entities_the_firmware_no_longer_lists(driver):
+    _hub, drv = driver
+    assert drv.gone_entities() == {}  # not connected: nothing is known
+    await drv.async_setup()
+    gone = drv.gone_entities()
+    assert set(gone) == {"sensor.gone"}
+    assert "no longer has this entity" in gone["sensor.gone"]
+    # HA's voice-pipeline entities are not the node's, so they are never called gone.
+    assert not any("assistant" in eid for eid in gone)
