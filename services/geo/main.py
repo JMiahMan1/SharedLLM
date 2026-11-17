@@ -13,7 +13,6 @@ upgrade path if HA's sharing/geofence UX proves insufficient.
 """
 import asyncio
 import contextlib
-from collections import OrderedDict
 import json
 import logging
 import math
@@ -21,6 +20,7 @@ import os
 import re
 import time
 import urllib.parse
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
