@@ -11,6 +11,16 @@ while the media player reports a stream, on for any other app.
 software version, serial and its MACs are confirmed onto the device
 (``device_fields``, shared with the flow that adds one), and ``is-tv`` gives the
 media player's device class.
+
+The remote takes the standard key names (``media_common.STANDARD_REMOTE_KEYS``)
+it has, listed in its ``command_list``, plus every ECP key name: ``menu`` is the
+star (options) key, ``exit`` is Back, ``guide`` is Info, ``play_pause`` is the
+Play key (it toggles). Roku has no generic input key and no digit keys: inputs
+and channels are sources (``select_source``, ``play_media`` with type
+``channel``), so ``input`` and ``0``..``9`` are left out of the list, as is
+``stop`` (ECP has none). The
+remote's ``activity_list`` is the source list, and ``turn_on`` with an
+``activity`` launches it.
 """
 from __future__ import annotations
 
@@ -19,7 +29,16 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, HubError, ServiceCall, ServiceNotFound
-from services.homehub.drivers.media_common import F, Http, clean, mime_for, send_command_list, utc_iso
+from services.homehub.drivers.media_common import (
+    REMOTE_ACTIVITY,
+    F,
+    Http,
+    clean,
+    mime_for,
+    remote_command_list,
+    send_command_list,
+    utc_iso,
+)
 
 ECP_PORT = 8060
 PLAY_ON_ROKU = "15985"
@@ -37,7 +56,10 @@ ROKU_KEYS = {
     # Friendlier spellings Jarvis's own tables use.
     "power_off": "PowerOff", "power_on": "PowerOn", "ok": "Select", "pause": "Play", "fast_forward": "Fwd",
     "rewind": "Rev", "mute": "VolumeMute", "menu": "Info", "next": "Fwd", "previous": "Rev",
+    "play_pause": "Play", "exit": "Back", "guide": "Info",
 }
+#: The remote's ``command_list``: the standard keys a Roku has, then its own ECP names.
+COMMAND_LIST = remote_command_list(lambda k: k in ROKU_KEYS, ROKU_KEYS)
 _ECP_NAMES = {v.lower(): v for v in ROKU_KEYS.values()}
 
 def _fmt_mac(raw: Any) -> str | None:
@@ -223,8 +245,12 @@ class RokuDriver(Driver):
                         }))
                 self.publish(e, self.state, attrs)
             elif e.domain == "remote":
-                self.publish(e, "off" if self.state == "standby" else "on", {"supported_features": 0,
-                                                                             "command_list": sorted(ROKU_KEYS)})
+                on = self.state != "standby"
+                self.publish(e, "on" if on else "off", clean({
+                    "supported_features": REMOTE_ACTIVITY, "command_list": COMMAND_LIST,
+                    "activity_list": source_list,
+                    "current_activity": ("Home" if on_home else app_name) if on else None,
+                }))
             elif e.domain == "binary_sensor":
                 key = uid[len(serial) + 1:] if serial and uid.startswith(serial + "_") else uid.split("_", 1)[-1]
                 field = BINARY_SENSORS.get(key)

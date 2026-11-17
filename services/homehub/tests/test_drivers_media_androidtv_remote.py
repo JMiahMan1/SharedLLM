@@ -155,3 +155,43 @@ def test_key_codes():
     assert key_code("KEYCODE_DPAD_UP") == "DPAD_UP"
     assert key_code("MEDIA_PLAY") == "MEDIA_PLAY"
     assert key_code("ok") == "DPAD_CENTER"
+
+
+async def test_an_entry_with_no_entities_gets_its_media_player_and_remote_back():
+    """HA had both for every Android TV; an entry the import left without them is given them at setup."""
+    data = {"host": "192.0.2.89", "mac": "02:00:00:00:01:02", "name": "Bedroom TV", "cert_pem": CERT, "key_pem": KEY}
+    hub, entry = make_hub("androidtv_remote", data)
+    entry.unique_id = "02:00:00:00:01:02"
+    entry.title = "Bedroom TV"
+    hub.devices["dev1"].config_entries = ["another-entry"]
+    drv = AndroidTVRemoteDriver(hub, entry)
+    drv.remote_factory = FakeRemote
+    await drv.async_setup()
+    mp = drv.registry_entity("media_player", "02:00:00:00:01:02")
+    remote = drv.registry_entity("remote", "02:00:00:00:01:02")
+    assert mp is not None and remote is not None
+    assert mp.entity_id == "media_player.bedroom_tv" and remote.entity_id == "remote.bedroom_tv"
+    dev = hub.devices[mp.device_id]
+    assert remote.device_id == dev.id and ["mac", "02:00:00:00:01:02"] in dev.connections
+    assert hub.states.get(mp.entity_id).state == "on"
+    assert hub.states.get(remote.entity_id).state == "on"
+    await drv.async_setup()  # nothing is registered twice
+    assert len([e for e in hub.entities.values() if e.platform == "androidtv_remote"]) == 2
+
+
+async def test_sources_and_the_standard_remote_keys():
+    from services.homehub.drivers.androidtv_remote import COMMAND_LIST
+    from services.homehub.drivers.media_common import STANDARD_REMOTE_KEYS
+
+    hub, drv, holder = build()
+    await drv.async_setup()
+    attrs = hub.states.get(MP).attributes
+    assert attrs["supported_features"] & F.SELECT_SOURCE
+    assert "Netflix" in attrs["source_list"] and attrs["source"] == "Netflix"
+    assert all(k in COMMAND_LIST for k in STANDARD_REMOTE_KEYS)
+    assert hub.states.get(REMOTE).attributes["command_list"] == COMMAND_LIST
+    await drv.async_call(hub.entities[REMOTE], "remote", "send_command",
+                         {"command": ["input", "exit", "7", "guide", "KEYCODE_PROG_RED"], "delay_secs": 0})
+    assert [k for k, _ in holder["r"].keys[-5:]] == ["TV_INPUT", "BACK", "7", "GUIDE", "PROG_RED"]
+    await drv.async_call(hub.entities[MP], "media_player", "select_source", {"source": "YouTube"})
+    assert holder["r"].launched[-1] == "com.google.android.youtube.tv"

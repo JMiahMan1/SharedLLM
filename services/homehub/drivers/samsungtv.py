@@ -15,6 +15,13 @@ What the TV is comes from the TV: the websocket models' REST ``/api/v2/``
 (model, MAC, firmware) and the UPnP description (maker, model, serial) are
 confirmed onto its device while it is on. The legacy and encrypted protocols
 report nothing about the set, so for those only the UPnP description counts.
+
+The remote takes every standard key name (``media_common.STANDARD_REMOTE_KEYS``,
+all of which Samsung has; ``input`` is KEY_SOURCE, ``play_pause`` sends Play or
+Pause by what was last sent, as the media player does) and any ``KEY_*`` code.
+Sources are TV and HDMI on every model; a websocket model also lists its
+installed apps (``app_list``, as HA's samsungtv does), and selecting one
+launches it. The legacy and encrypted protocols cannot list apps.
 """
 from __future__ import annotations
 
@@ -38,6 +45,7 @@ from services.homehub.drivers.media_common import (
     clean,
     known_macs,
     mime_for,
+    remote_command_list,
     send_command_list,
     wake_on_lan,
 )
@@ -58,19 +66,35 @@ SAMSUNG_KEYS = {
     "poweron": "KEY_POWERON", "up": "KEY_UP", "down": "KEY_DOWN", "left": "KEY_LEFT", "right": "KEY_RIGHT",
     "info": "KEY_INFO", "menu": "KEY_MENU", "tools": "KEY_TOOLS", "exit": "KEY_EXIT", "source": "KEY_SOURCE",
     "guide": "KEY_GUIDE", "red": "KEY_RED", "green": "KEY_GREEN", "yellow": "KEY_YELLOW", "blue": "KEY_BLUE",
-    "tv": "KEY_TV", "hdmi": "KEY_HDMI",
+    "tv": "KEY_TV", "hdmi": "KEY_HDMI", "input": "KEY_SOURCE",
+    **{str(d): f"KEY_{d}" for d in range(10)},
 }
+#: Standard names the driver answers itself rather than with one fixed key.
+PLAY_PAUSE = "playpause"
 SOURCES = {"TV": "KEY_TV", "HDMI": "KEY_HDMI"}
 
 BASE_FEATURES = (F.PAUSE | F.VOLUME_STEP | F.VOLUME_MUTE | F.PREVIOUS_TRACK | F.SELECT_SOURCE | F.NEXT_TRACK
                  | F.TURN_OFF | F.PLAY | F.PLAY_MEDIA | F.STOP)
 
 
+def _norm(command: str) -> str:
+    return command.strip().lower().replace("_", "").replace(" ", "")
+
+
 def samsung_key(command: str) -> str:
     c = command.strip()
     if c.upper().startswith("KEY_"):
         return c.upper()
-    return SAMSUNG_KEYS.get(c.lower().replace("_", "").replace(" ", "")) or "KEY_" + c.upper()
+    return SAMSUNG_KEYS.get(_norm(c)) or "KEY_" + c.upper()
+
+
+def has_key(command: str) -> bool:
+    """Whether a standard or friendly name means a Samsung key (``play_pause`` is answered by the driver)."""
+    return _norm(command) in SAMSUNG_KEYS or _norm(command) == PLAY_PAUSE
+
+
+#: The remote's ``command_list``: every standard key, then Samsung's own friendly names.
+COMMAND_LIST = remote_command_list(has_key, SAMSUNG_KEYS)
 
 
 class LegacyBridge:
@@ -222,6 +246,16 @@ class WebsocketBridge:
     async def launch_app(self, app_id: str, app_type: str = "DEEP_LINK", meta: str = "") -> None:
         await self._send([ChannelEmitCommand.launch_app(app_id, app_type, meta)], 0)
 
+    async def app_list(self) -> list[dict[str, Any]]:
+        """The TV's installed apps (``appId``, ``name``, ``app_type``); empty when the TV will not say."""
+        remote = await self._remote()
+        try:
+            apps = await remote.app_list()
+        except (ConnectionFailure, OSError, TimeoutError) as exc:
+            await self.close()
+            raise DeviceUnavailable(f"Samsung {self.host} dropped the connection: {exc}") from exc
+        return [a for a in apps or [] if isinstance(a, dict) and a.get("appId") and a.get("name")]
+
     async def close(self) -> None:
         if self.remote is not None:
             with contextlib.suppress(Exception):
@@ -253,6 +287,8 @@ class SamsungTVDriver(Driver):
         self.muted: bool | None = None
         self._playing = False
         self._off_until = 0.0
+        #: Installed apps by name -> (appId, launch type), read once from a websocket TV while it is on.
+        self.apps: dict[str, tuple[str, str]] = {}
 
     async def async_setup(self) -> None:
         if not self.host:
@@ -290,7 +326,20 @@ class SamsungTVDriver(Driver):
                 self.volume = self.muted = None
         if on:
             self._confirm_info()
+            await self._load_apps()
         self._publish()
+
+    async def _load_apps(self) -> None:
+        if self.apps or not hasattr(self.bridge, "app_list"):
+            return
+        try:
+            apps = await self.bridge.app_list()
+        except HubError as exc:
+            self.log.debug("Samsung %s did not list its apps: %s", self.host, exc)
+            return
+        # HA's samsungtv: app_type 2 is a deep link, 4 a native app.
+        self.apps = {str(a["name"]): (str(a["appId"]), "NATIVE_LAUNCH" if a.get("app_type") == 4 else "DEEP_LINK")
+                     for a in apps if str(a["name"]) not in SOURCES}
 
     def _confirm_info(self) -> None:
         from services.homehub.drivers.media_common import normalize_mac
@@ -312,14 +361,20 @@ class SamsungTVDriver(Driver):
         sf = self._features()
         for e in self.entities:
             if e.domain == "media_player":
-                attrs: dict[str, Any] = {"source_list": list(SOURCES), "supported_features": sf,
+                attrs: dict[str, Any] = {"source_list": [*SOURCES, *sorted(self.apps)], "supported_features": sf,
                                          "device_class": "tv"}
                 if self.is_on:
                     attrs.update(clean({"volume_level": self.volume, "is_volume_muted": self.muted}))
                 self.publish(e, "on" if self.is_on else "off", attrs)
             elif e.domain == "remote":
                 self.publish(e, "on" if self.is_on else "off", {"supported_features": 0,
-                                                                "command_list": sorted(SAMSUNG_KEYS)})
+                                                                "command_list": COMMAND_LIST})
+
+    async def _remote_key(self, command: str) -> None:
+        if _norm(command) == PLAY_PAUSE:
+            await self._media_call("media_play_pause", {})
+        else:
+            await self._keys(samsung_key(command))
 
     async def _keys(self, *keys: str, delay: float = 0.4) -> None:
         await self.bridge.send_keys(list(keys), delay)
@@ -339,8 +394,7 @@ class SamsungTVDriver(Driver):
         if domain == "remote":
             if service == "send_command":
                 delay = float(data.get("delay_secs") if data.get("delay_secs") is not None else 0.4)
-                await send_command_list(data.get("command"), {**data, "delay_secs": delay},
-                                        lambda c: self._keys(samsung_key(c)))
+                await send_command_list(data.get("command"), {**data, "delay_secs": delay}, self._remote_key)
             elif service == "turn_on":
                 await self._turn_on()
             elif service == "turn_off":
@@ -393,9 +447,12 @@ class SamsungTVDriver(Driver):
             await self._keys("KEY_CHDOWN")
         elif service == "select_source":
             source = str(data.get("source") or "")
-            if source not in SOURCES:
-                raise HubError(f"unknown source {source!r}; choose one of {list(SOURCES)}")
-            await self._keys(SOURCES[source])
+            if source in SOURCES:
+                await self._keys(SOURCES[source])
+            elif source in self.apps:
+                await self.bridge.launch_app(*self.apps[source])
+            else:
+                raise HubError(f"unknown source {source!r}; choose one of {[*SOURCES, *sorted(self.apps)]}")
         elif service == "play_media":
             await self._play_media(data)
         else:

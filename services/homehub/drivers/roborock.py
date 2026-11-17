@@ -19,14 +19,20 @@ consumables, totals, volume, do-not-disturb and the rooms change slowly and are
 re-read every five minutes.
 
 **Maps and rooms.** The library's ``map_content`` trait asks the vacuum for the
-map it is on now and renders it to a PNG; it is fetched when someone looks at it
-(at most every ``MAP_REFRESH_S``), never on a timer. Another saved map is served
+map it is on now and renders it to a PNG. As HA's integration does, it is drawn
+once the vacuum first answers and again at most every ``MAP_REFRESH_S`` while it
+cleans or returns (and when someone looks at an older picture), so an image's
+state is when its picture was drawn. A map image whose unique_id carries no map
+name (``{duid}_map_``, an older HA format) shows the current map. Another saved map is served
 only when the library already holds its picture (``home.home_map_content``):
 drawing it would mean switching the vacuum to that map, which this driver never
 does behind a person's back. The ``rooms`` trait gives the current map's rooms
 (segment id and the name set in the Roborock app); they are published on the
 vacuum as ``segments`` (``[{"id", "name"}]``) and ``vacuum.send_command`` with
-``app_segment_clean`` checks the ids against them.
+``app_segment_clean`` checks the ids against them. When the vacuum's room mapping
+is empty, the rooms the parsed map holds are used instead (segment id = the map
+room's number). ``sensor.*_current_room`` is the room the parsed map places the
+robot in (HA's enum sensor, its options the room names).
 
 What each entity is comes from the vacuum and this driver, never from the
 imported registry: the device's own mappings give the fan speeds, mop
@@ -41,6 +47,7 @@ import contextlib
 import re
 import time
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 from services.homehub.core import UNKNOWN, DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
@@ -157,14 +164,36 @@ def _slug(text: str) -> str:
 
 
 def segments(props: Any) -> list[dict[str, Any]]:
-    """The current map's rooms as ``[{"id", "name"}]`` (the ``rooms`` trait), in the vacuum's order."""
+    """The current map's rooms as ``[{"id", "name"}]``, in the vacuum's order.
+
+    The ``rooms`` trait (the vacuum's room mapping with the names set in the app) first; when it has
+    none, the rooms of the parsed map (``map_content.map_data.rooms``, keyed by segment number).
+    """
     out = []
     for room in _get(props, "rooms", "rooms") or []:
         seg = getattr(room, "segment_id", None)
         if seg is None:
             continue
         out.append({"id": int(seg), "name": str(getattr(room, "name", None) or f"Room {seg}")})
+    if out:
+        return out
+    map_rooms = _get(props, "map_content", "map_data", "rooms")
+    if isinstance(map_rooms, dict):
+        for number, room in sorted(map_rooms.items(), key=lambda kv: int(kv[0])):
+            seg = getattr(room, "number", None)
+            seg = int(number if seg is None else seg)
+            out.append({"id": seg, "name": str(getattr(room, "name", None) or f"Room {seg}")})
     return out
+
+
+def current_room(props: Any) -> str | None:
+    """The room the parsed map places the robot in, by name; None without a map or a position."""
+    data = _get(props, "map_content", "map_data")
+    room = getattr(data, "vacuum_room", None) if data is not None else None
+    if room is None:
+        return None
+    name = next((s["name"] for s in segments(props) if s["id"] == int(room)), None)
+    return name or getattr(data, "vacuum_room_name", None) or f"Room {room}"
 
 
 def segment_ids(params: Any) -> list[int]:
@@ -241,8 +270,12 @@ class RoborockDriver(Driver):
         self._online: dict[str, bool] = {}
         self._unsubs: list[Any] = []
         self._tokens = CameraTokens()
-        #: entity_id -> (monotonic time, UTC time) of the last map picture handed out.
+        #: duid -> (monotonic time, UTC time) the current map was last drawn.
         self._map_drawn: dict[str, tuple[float, datetime]] = {}
+        #: duid -> monotonic time of the last attempt to draw it (successful or not).
+        self._map_tried: dict[str, float] = {}
+        #: (duid, trait) pairs whose refresh failure was already logged as a warning.
+        self._warned: set[tuple[str, str]] = set()
 
     # -- setup ---------------------------------------------------------------
     async def _create_manager(self) -> Any:
@@ -308,8 +341,48 @@ class RoborockDriver(Driver):
                 try:
                     await asyncio.wait_for(trait.refresh(), COMMAND_TIMEOUT)
                 except Exception as exc:  # one slow trait must not hide the status
-                    self.log.debug("Roborock %s %s refresh failed: %s", duid, name, exc)
+                    if name == "rooms" and (duid, name) not in self._warned:
+                        # Without the room mapping room cleaning falls back to the map's rooms (or none).
+                        self._warned.add((duid, name))
+                        self.log.warning("Roborock %s did not send its room mapping: %s", duid, exc)
+                    else:
+                        self.log.debug("Roborock %s %s refresh failed: %s", duid, name, exc)
         self.publish_device(duid)
+        if self._map_due(duid, props):
+            await self.draw_map(duid)
+
+    def _map_due(self, duid: str, props: Any) -> bool:
+        """Draw the map once the vacuum answers, then again while it cleans (HA refreshes it then)."""
+        if getattr(props, "map_content", None) is None or not self._has_map_image(duid):
+            return False
+        now = time.monotonic()
+        tried = self._map_tried.get(duid)
+        if tried is not None and now - tried < MAP_REFRESH_S:
+            return False
+        if duid not in self._map_drawn:
+            return True
+        return activity(_get(props, "status", "state_name")) in ("cleaning", "returning")
+
+    def _has_map_image(self, duid: str) -> bool:
+        return any(e.domain == "image" and self.split(e) == ("map", duid) for e in self.entities)
+
+    async def draw_map(self, duid: str) -> bool:
+        """Ask the vacuum for the map it is on now; publish its images. Never raises."""
+        props = self.devices[duid].v1_properties
+        trait = getattr(props, "map_content", None)
+        if trait is None:
+            return False
+        self._map_tried[duid] = time.monotonic()
+        try:
+            await asyncio.wait_for(trait.refresh(), COMMAND_TIMEOUT)
+        except Exception as exc:
+            self.log.info("Roborock %s did not send its map: %s", duid, exc)
+            return False
+        if not getattr(trait, "image_content", None):
+            return False
+        self._map_drawn[duid] = (time.monotonic(), datetime.now(UTC))
+        self.publish_device(duid)  # the images' state and the current room
+        return True
 
     # -- entities ------------------------------------------------------------
     def split(self, entity: EntityEntry) -> tuple[str, str] | None:
@@ -389,8 +462,11 @@ class RoborockDriver(Driver):
             value = SENSORS[key](props)
             self.publish(ent, UNKNOWN if value is None else value, attrs)
         elif ent.domain == "sensor" and key == "current_room":
-            # Needs the parsed map to place the robot in a room; not drawn here.
-            self.publish(ent, UNKNOWN, attrs)
+            names = [s["name"] for s in segments(props)]
+            if names:
+                attrs.update({"device_class": "enum", "options": names})
+            room = current_room(props)
+            self.publish(ent, UNKNOWN if room is None else room, attrs)
         elif ent.domain == "binary_sensor" and key in BINARY_SENSORS:
             self.publish(ent, _bool(BINARY_SENSORS[key](props)), attrs)
         elif ent.domain == "select" and key in SELECTS:
@@ -408,7 +484,7 @@ class RoborockDriver(Driver):
             value = TIMES[key](props)
             self.publish(ent, UNKNOWN if value is None else value, attrs)
         elif ent.domain == "image" and key == "map":
-            self.publish_map(ent)
+            self.publish_map(ent, props)
         else:
             self.mark_unavailable([ent])
 
@@ -416,22 +492,48 @@ class RoborockDriver(Driver):
     def access_tokens(self, entity_id: str) -> list[str]:
         return self._tokens.valid(entity_id)
 
-    def publish_map(self, ent: EntityEntry) -> None:
+    def publish_map(self, ent: EntityEntry, props: Any = None) -> None:
         if self._tokens.due(ent.entity_id):
             self._tokens.rotate(ent.entity_id)
         token = self._tokens.current(ent.entity_id)
-        drawn = self._map_drawn.get(ent.entity_id)
+        split = self.split(ent)
+        drawn = None
+        if split is not None and split[1] in self.devices:
+            props = props if props is not None else self.devices[split[1]].v1_properties
+            with contextlib.suppress(ServiceNotFound):
+                if self._is_current(self._map_info(ent, props), props):
+                    drawn = self._map_drawn.get(split[1])
         self.publish(ent, drawn[1].isoformat() if drawn else UNKNOWN, {
             "access_token": token, "entity_picture": f"/api/image_proxy/{ent.entity_id}?token={token}",
         })
 
     def _map_info(self, ent: EntityEntry, props: Any) -> Any:
-        """The saved map an image entity shows (its unique_id ends in the map's name, as HA wrote it)."""
+        """The saved map an image entity shows (its unique_id ends in the map's name, as HA wrote it).
+
+        No name after ``_map_`` (an older HA format) means the map the vacuum is on now.
+        """
         wanted = _slug(ent.unique_id.split("_map_", 1)[1]) if "_map_" in ent.unique_id else ""
-        for info in _get(props, "maps", "map_info") or []:
+        current = _get(props, "maps", "current_map")
+        infos = _get(props, "maps", "map_info") or []
+        if not wanted:
+            info = next((i for i in infos if current is not None and i.map_flag == current), None)
+            info = info or _get(props, "maps", "current_map_info")
+            if info is not None:
+                return info
+            if current is not None:
+                return SimpleNamespace(name=None, map_flag=current)
+            raise ServiceNotFound(f"{ent.entity_id} shows the current map, and the vacuum has not said which it is")
+        for info in infos:
             if wanted in (_slug(_map_name(info)), _slug(str(info.map_flag))):
                 return info
         raise ServiceNotFound(f"{ent.entity_id} names a map this vacuum does not have")
+
+    @staticmethod
+    def _is_current(info: Any, props: Any) -> bool:
+        current = _get(props, "maps", "current_map")
+        if current is None:  # a vacuum that never said which map it is on has one map
+            return True
+        return info.map_flag == current
 
     async def async_image(self, entity: EntityEntry) -> tuple[bytes, str]:
         """The map picture (PNG) for an image entity."""
@@ -443,18 +545,20 @@ class RoborockDriver(Driver):
             raise DeviceUnavailable("the vacuum is not answering")
         props = self.devices[duid].v1_properties
         info = self._map_info(entity, props)
-        if info.map_flag == _get(props, "maps", "current_map"):
+        if self._is_current(info, props):
             trait = getattr(props, "map_content", None)
             if trait is None:
                 raise ServiceNotFound("this version of python-roborock cannot draw the map")
-            drawn = self._map_drawn.get(entity.entity_id)
+            drawn = self._map_drawn.get(duid)
             if drawn is None or time.monotonic() - drawn[0] >= MAP_REFRESH_S or not trait.image_content:
+                self._map_tried[duid] = time.monotonic()
                 try:
                     await asyncio.wait_for(trait.refresh(), COMMAND_TIMEOUT)
                 except Exception as exc:
                     raise DeviceUnavailable(f"the vacuum did not send its map: {exc}") from exc
-                self._map_drawn[entity.entity_id] = (time.monotonic(), datetime.now(UTC))
-                self.publish_map(entity)
+                if trait.image_content:
+                    self._map_drawn[duid] = (time.monotonic(), datetime.now(UTC))
+                    self.publish_device(duid)
             image = trait.image_content
         else:
             content = (_get(props, "home", "home_map_content") or {}).get(info.map_flag)

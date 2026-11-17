@@ -116,12 +116,50 @@ async def test_a_command_reaches_a_bulb_that_just_came_back_before_the_next_poll
     assert hub.states.get(drv.light.entity_id).state == "off"
 
 
-async def test_an_entry_without_entities_loads_without_touching_the_network():
+async def test_an_entry_without_entities_gets_them_from_the_bulb_like_the_flow_makes_them():
     bulb = FakeBulb()
-    _, drv = make_driver(bulb, entities=[])
+    hub, drv = make_driver(bulb, entities=[])
+    hub.devices["dev1"].config_entries = ["another-entry"]
+    drv.entry.unique_id = MAC
     await drv.async_setup()
-    await drv.async_poll()
-    assert bulb.calls == []
+    by_uid = {e.unique_id: e for e in hub.entities.values() if e.config_entry_id == drv.entry.entry_id}
+    assert set(by_uid) == {MAC, f"{MAC}_effect_speed", f"{MAC}_power"}
+    light = by_uid[MAC]
+    assert light.entity_id.startswith("light.") and light.device_id
+    dev = hub.devices[light.device_id]
+    assert dev.manufacturer == "WiZ" and ["mac", "02:00:00:00:01:0a"] in dev.connections
+    assert by_uid[f"{MAC}_power"].original_device_class == "power"
+    assert by_uid[f"{MAC}_effect_speed"].entity_category == "config"
+    assert hub.states.get(light.entity_id).state == "on"
+    assert hub.states.get(by_uid[f"{MAC}_power"].entity_id).state == "8.5"
+
+
+async def test_an_unmetered_bulb_gets_no_power_sensor_and_a_silent_one_retries_setup():
+    bulb = FakeBulb()
+    bulb.online = False
+    hub, drv = make_driver(bulb, entities=[])
+    with pytest.raises(DeviceUnavailable, match="cannot be made"):
+        await drv.async_setup()
+    assert not [e for e in hub.entities.values() if e.config_entry_id == drv.entry.entry_id]
+    bulb.online = True
+    real = bulb.__call__
+
+    async def unmetered(method, params=None):
+        if method == "getPower":
+            return {}
+        return await real(method, params)
+
+    drv._request = unmetered  # type: ignore[method-assign]
+    await drv.async_setup()
+    uids = {e.unique_id for e in hub.entities.values() if e.config_entry_id == drv.entry.entry_id}
+    assert uids == {MAC, f"{MAC}_effect_speed"}
+
+
+async def test_disabled_entities_are_not_made_again():
+    bulb = FakeBulb()
+    hub, drv = make_driver(bulb, entities=[{"entity_id": "light.kept", "unique_id": MAC, "disabled_by": "user"}])
+    await drv.async_setup()
+    assert [e.entity_id for e in hub.entities.values()] == ["light.kept"]
 
 
 async def test_poll_marks_a_vanished_bulb_unavailable_and_recovers(caplog):

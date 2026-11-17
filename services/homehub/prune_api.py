@@ -4,6 +4,8 @@
 |---|---|
 | ``GET /hub/prune/plan?days=365&drop_history=0`` | Dry run: what would be removed and why, what was kept and why, ``plan_id`` and ``cutoff``. Changes nothing |
 | ``POST /hub/prune/apply`` | ``{"plan_id", "cutoff", "drop_history"?}`` from a dry run: removes exactly that plan, 409 when the hub changed since |
+| ``GET /hub/prune/undo`` | The applied plans that can still be restored (newest first, the last ten) |
+| ``POST /hub/prune/restore`` | ``{"plan_id"}``: puts back that plan's devices and entities where their ids are free and their entry exists |
 
 Admins only, like the rest of ``/hub/*``. HA's registry timestamps are read
 (read-only) from ``$HOMEHUB_IMPORT_DIR/homeassistant`` when it is there.
@@ -73,6 +75,25 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
             return await prune.apply_plan(runtime, plan_id=body.get("plan_id"), cutoff=body.get("cutoff"),
                                           drop_history=_flag(body.get("drop_history", False), "drop_history"),
                                           import_dir=ha_config_dir())
+        except HubError as exc:
+            return failure(exc)
+
+    @router.get("/hub/prune/undo")
+    async def undo_list(request: Request) -> Any:
+        admin(request)
+        return {"undo": prune.list_undo(runtime)}
+
+    @router.post("/hub/prune/restore")
+    async def restore(request: Request) -> Any:
+        admin(request)
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="The body must be a JSON object with plan_id")
+        try:
+            return await prune.restore_plan(runtime, body.get("plan_id"))
         except HubError as exc:
             return failure(exc)
 
