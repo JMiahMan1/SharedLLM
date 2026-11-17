@@ -8996,3 +8996,9 @@ def report_capabilities(
     session.commit()
     session.refresh(device)
     return _device_to_read(device)
+
+
+# The account export and restore (docs/ACCOUNT_EXPORT.md): internal routes the gateway calls.
+from services.identity import account_export as _account_export  # noqa: E402
+
+app.include_router(_account_export.build_router(get_session, require_internal, _audit))

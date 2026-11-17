@@ -3648,6 +3648,39 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * Export my data (docs/ACCOUNT_EXPORT.md): the person's data as the server
+   * streams it, for the device to encrypt as it arrives. An admin may name
+   * another person they manage. axios buffers whole responses, so this is fetch.
+   */
+  async streamAccountExport(user?: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    const { baseURL, headers } = directRequestConfig();
+    const resp = await fetch(`${baseURL || ''}/api/account/export`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(user ? { user } : {}),
+      signal,
+      cache: 'no-store',
+    });
+    if (!resp.ok || !resp.body) {
+      const detail = await resp.json().catch(() => ({}));
+      throw new Error((detail as { detail?: string }).detail || `The export could not start (${resp.status})`);
+    }
+    return resp.body;
+  },
+
+  /** One service's part of an opened export, merged into the account (dry_run for the summary). */
+  async importAccountPart(body: {
+    service: string;
+    collections: Record<string, unknown[]>;
+    dry_run: boolean;
+    replace_conflicts?: boolean;
+    user?: string;
+  }): Promise<{ service: string; dry_run: boolean; collections: Record<string, Record<string, number | string[]>> }> {
+    const resp = await apiClient.post('/api/account/import', body, { timeout: 300_000 });
+    return resp.data;
+  },
+
   async getPrivateChatStatus(): Promise<PrivateChatStatus> {
     const resp = await apiClient.get('/api/private-chat/status');
     return resp.data;

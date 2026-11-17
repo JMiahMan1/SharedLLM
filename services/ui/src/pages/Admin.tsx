@@ -36,8 +36,10 @@ import {
   Sparkles,
   BookMarked,
   Wifi,
+  Archive,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { ExportSheet } from '../components/settings/AccountExportPanel';
 import SecretInput from '../components/ui/SecretInput';
 import SystemValueHint from '../components/ui/SystemValueHint';
 import AccountAuditPanel from '../components/admin/AccountAuditPanel';
@@ -222,6 +224,7 @@ const Admin = () => {
   const [discoveryFilter, setDiscoveryFilter] = useState('');
   const [passwordModalUser, setPasswordModalUser] = useState<string | null>(null);
   const [sharesUser, setSharesUser] = useState<string | null>(null);
+  const [exportUser, setExportUser] = useState<{ username: string; name: string } | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [inspectingCollection, setInspectingCollection] = useState<string | null>(null);
   const [inspectLimit, setInspectLimit] = useState(50);
@@ -836,6 +839,15 @@ const Admin = () => {
                         aria-label={`Change password for ${user.username}`}
                       >
                         <KeyRound size={16} />
+                      </button>
+                      <button
+                        onClick={() => setExportUser({ username: user.username, name: user.full_name || user.username })}
+                        className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-purple-500/10 hover:text-purple-300"
+                        aria-label={`Export ${user.username}'s data`}
+                        title="Export this person's data (encrypted)"
+                        data-testid={`admin-export-${user.username}`}
+                      >
+                        <Archive size={16} />
                       </button>
                       <button
                         onClick={() => setSharesUser(user.username)}
@@ -2318,6 +2330,7 @@ const Admin = () => {
           )}
         </div>
       </Modal>
+      {exportUser && <ExportSheet person={exportUser} onClose={() => setExportUser(null)} />}
 
       <Modal
         isOpen={Boolean(inspectingCollection)}
