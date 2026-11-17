@@ -17,6 +17,9 @@ class FakeRedis:
         self.zsets = {}
         self.hashes = {}
 
+    async def mget(self, keys):
+        return [await self.get(k) for k in keys]
+
     async def get(self, key):
         return self.data.get(key)
 
@@ -1108,3 +1111,54 @@ async def test_a_phone_that_says_it_is_driving_starts_a_trip_from_5_mph(fake_red
     await geo.process_trip_point(user_id="alex", lat=39.7392, lon=-104.9903, speed_mps=3.0, timestamp=now + 5,
                                  activity="driving")
     assert await fake_redis.get("geo:active_trip:alex") is not None
+
+
+def test_a_slow_place_lookup_cannot_hold_up_the_trip_list(monkeypatch):
+    """Street-only labels are improved within a time budget; the rest finish later."""
+    import asyncio
+
+    calls = []
+
+    async def slow(stored, lat, lon):
+        calls.append((lat, lon))
+        await asyncio.sleep(0.5 if lat > 10 else 0)
+        return f"Place {lat}", "osm"
+
+    monkeypatch.setattr(geo, "_resolve_place_if_better", slow)
+    monkeypatch.setattr(geo, "_is_street_only_name", lambda name: True)
+    trips = [
+        {"start_location": {"lat": 1.0, "lon": 1.0, "name": "Main Street"},
+         "end_location": {"lat": 20.0, "lon": 2.0, "name": "Oak Street"}},
+        {"start_location": {"lat": 1.0, "lon": 1.0, "name": "Main Street"}},
+    ]
+
+    async def go():
+        started = asyncio.get_running_loop().time()
+        await geo._upgrade_trip_place_names(trips, budget=0.1)
+        return asyncio.get_running_loop().time() - started
+
+    took = asyncio.run(go())
+    assert took < 0.4
+    # The quick one is filled in everywhere it appears and resolved once; the slow one keeps its label.
+    assert trips[0]["start_location"]["name"] == "Place 1.0" == trips[1]["start_location"]["name"]
+    assert trips[0]["end_location"]["name"] == "Oak Street"
+    assert calls.count((1.0, 1.0)) == 1
+
+
+def test_the_place_name_cache_drops_the_oldest_name_not_all_of_them(monkeypatch):
+    import asyncio
+
+    async def resolve(lat, lon):
+        return f"{lat}"
+
+    monkeypatch.setattr(geo, "_resolve_place_name", resolve)
+    monkeypatch.setattr(geo, "_PLACE_NAME_CACHE_MAX", 3)
+    geo._PLACE_NAME_CACHE.clear()
+
+    async def go():
+        for lat in (1.0, 2.0, 3.0, 4.0):
+            await geo._resolve_place_name_cached(lat, 0.0)
+
+    asyncio.run(go())
+    assert list(geo._PLACE_NAME_CACHE) == ["2.0:0.0", "3.0:0.0", "4.0:0.0"]
+    geo._PLACE_NAME_CACHE.clear()
