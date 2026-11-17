@@ -86,3 +86,10 @@ def test_the_calls_and_messages_tab_is_refused_to_a_non_parent(monkeypatch):
 def test_the_calls_and_messages_tab_for_a_parent(monkeypatch):
     c = _client(monkeypatch, {"allowed": True, "technical": False, "comms": True})
     assert c.get("/api/guardian/comms/kid", params={"days": 7}).status_code == 200
+
+
+def test_activity_counts_drop_calls_and_messages_for_a_non_parent():
+    from services.gateway.main import without_comms
+
+    out = without_comms({"counts": {"sms": 40, "calls": 3, "social": 2, "media": 5}})
+    assert out["counts"] == {"media": 5}

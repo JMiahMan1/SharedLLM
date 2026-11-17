@@ -1466,8 +1466,18 @@ export const api = {
     return resp.data;
   },
 
-  async getGuardianActivity(username: string, limit = 100): Promise<{ events: ActivityEvent[] }> {
-    const resp = await apiClient.get(`/api/guardian/activity/${encodeURIComponent(username)}`, { params: { limit } });
+  async getGuardianActivity(
+    username: string,
+    limit = 100,
+    window?: { since: string; until: string },
+  ): Promise<{ events: ActivityEvent[]; truncated?: boolean }> {
+    const resp = await apiClient.get(`/api/guardian/activity/${encodeURIComponent(username)}`, { params: { limit, ...window } });
+    return resp.data;
+  },
+
+  /** How many events of each feature a person recorded between two moments, over their whole record. */
+  async getGuardianActivityCounts(username: string, since: string, until: string): Promise<{ counts: Record<string, number> }> {
+    const resp = await apiClient.get(`/api/guardian/activity/${encodeURIComponent(username)}/counts`, { params: { since, until } });
     return resp.data;
   },
 

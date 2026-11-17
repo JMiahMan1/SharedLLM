@@ -401,6 +401,11 @@ function memberAnswer(p: string, url: URL): unknown {
       concerns: [], highlights: [] } };
   }
   if (p.startsWith('/api/guardian/journal/')) return { notes: [] };
+  if (p.startsWith('/api/guardian/activity/') && p.endsWith('/counts')) {
+    const counts: Record<string, number> = {};
+    for (const e of MEMBER_ACTIVITY.events as { feature: string }[]) counts[e.feature] = (counts[e.feature] || 0) + 1;
+    return { status: 'SUCCESS', counts };
+  }
   if (p.startsWith('/api/guardian/activity/')) return MEMBER_ACTIVITY;
   if (p.startsWith('/api/guardian/apps/')) return appVettingAnswer(p, 'GET');
   if (p.startsWith('/api/recommendation-lanes/')) {
