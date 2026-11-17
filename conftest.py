@@ -203,6 +203,10 @@ _TEST_ENV_DEFAULTS = {
     # DST), so day-boundary tests stay deterministic without naming a place.
     "APP_TIMEZONE": "Etc/GMT+7",
     "ANNOUNCEMENT_BLACKLIST": "test-announcement",
+    # The speech server is optional: empty means "not set up", never the
+    # developer's real one.
+    "SPEECH_SERVER_URL": "",
+    "KOKORO_GPU_URL": "",
 }
 
 # Load real env config (.env.test > .env) first, then pin on top of it.

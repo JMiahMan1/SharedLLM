@@ -66,6 +66,8 @@ async def test_gateway_skips_llm_on_high_confidence(mocker):
         yield mock_client
 
     mocker.patch("services.gateway.main.shared_http_client", side_effect=mock_shared_client)
+    # No hub automation owns this sentence (that lookup is not what this test is about).
+    mocker.patch("services.gateway.sentence_triggers.ask_hub", new_callable=AsyncMock, return_value=None)
 
     # Mock update_history
     mocker.patch("services.gateway.main.update_history", new_callable=AsyncMock)
