@@ -71,3 +71,12 @@ def test_disabled_registers_the_entity_disabled_by_the_integration():
     assert ent.disabled_by == "integration"
     assert ent not in drv.entities
     assert isinstance(ent, EntityEntry)
+
+
+def test_another_integrations_device_with_the_same_mac_is_joined_as_ha_merges_them():
+    hub, drv = _driver()
+    hub.devices["dev1"].config_entries = ["cast-entry"]
+    hub.devices["dev1"].connections = [["mac", "aa:bb:cc:dd:ee:ff"]]
+    dev = drv.ensure_device("Bedroom TV", connections=[["mac", "aa:bb:cc:dd:ee:ff"]])
+    assert dev.id == "dev1" and dev.config_entries == ["cast-entry", "entry1"]
+    assert set(hub.store.devices) == {"dev1"}

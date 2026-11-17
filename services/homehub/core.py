@@ -458,13 +458,23 @@ class Driver:
         """The device this entry's entities belong to, registering it the first time (HA's device_info).
 
         A device of this entry sharing one of the ``identifiers`` or ``connections`` is reused, else
-        the entry's only device. ``info`` (manufacturer, model...) is confirmed as the device's own.
+        the entry's only device, else (as HA's device registry merges them) another integration's
+        device with one of those ``connections``, which this entry then joins. ``info`` (manufacturer,
+        model...) is confirmed as the device's own.
         """
         pairs = {tuple(map(str, p)) for p in (identifiers or []) + (connections or [])}
         mine = [d for d in self.hub.devices.values() if self.entry.entry_id in d.config_entries]
         dev = next((d for d in mine if pairs & {tuple(map(str, p)) for p in d.identifiers + d.connections}), None)
         if dev is None and len(mine) == 1:
             dev = mine[0]
+        conns = {tuple(map(str, p)) for p in connections or []}
+        if dev is None and conns:
+            dev = next((d for d in self.hub.devices.values()
+                        if conns & {tuple(map(str, p)) for p in d.connections}), None)
+            if dev is not None:
+                dev.config_entries.append(self.entry.entry_id)
+                self.hub._save("device", dev)
+                self.hub.bus.fire("device_registry_updated", {"action": "update", "device_id": dev.id})
         if dev is None:
             dev = DeviceEntry(id=uuid.uuid4().hex, name=name, config_entries=[self.entry.entry_id])
             self.hub.devices[dev.id] = dev
