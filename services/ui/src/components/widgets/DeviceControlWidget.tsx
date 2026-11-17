@@ -754,7 +754,6 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                 <span className="text-2xl">{getDeviceIcon(selectedDevice.domain)}</span>
                 <div>
                   <h3 className="text-sm font-bold text-white">{selectedDevice.friendly_name || selectedDevice.entity_id}</h3>
-                  <p className="text-[10px] font-mono text-slate-500 truncate max-w-xs">{selectedDevice.entity_id}</p>
                 </div>
               </div>
               <p className="text-[10px] text-slate-400 mt-2 flex items-center gap-2">
@@ -768,19 +767,23 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
             {/* Quick Actions */}
             <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/40 border border-white/5">
               <div>
-                <p className="text-xs font-semibold text-slate-400">Power Status</p>
+                <p className="text-xs font-semibold text-slate-400">{['climate', 'cover'].includes(selectedDevice.domain) ? 'Power Status' : 'Favourite'}</p>
                 <p className={`text-xs font-bold mt-0.5 ${isActive(selectedDevice.state) ? 'text-green-400' : 'text-slate-500'}`}>
-                  Currently {selectedDevice.state}
+                  {['climate', 'cover'].includes(selectedDevice.domain) ? `Currently ${selectedDevice.state}`
+                    : pinnedDevices.includes(selectedDevice.entity_id) ? 'Shown first on the dashboard' : 'Star it to show it first'}
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => toggleFavorite(selectedDevice.entity_id)}
+                  aria-label={pinnedDevices.includes(selectedDevice.entity_id) ? 'Remove from favourites' : 'Add to favourites'}
+                  aria-pressed={pinnedDevices.includes(selectedDevice.entity_id)}
                   className="p-2 max-sm:min-h-11 max-sm:min-w-11 max-sm:flex max-sm:items-center max-sm:justify-center hover:bg-white/5 rounded-lg text-slate-400 hover:text-amber-400 transition-colors"
                 >
                   <Star size={16} className={pinnedDevices.includes(selectedDevice.entity_id) ? 'fill-amber-400 text-amber-400' : ''} />
                 </button>
-                {selectedToggleAction ? (
+                {/* The control library below has its own power switch; this one stays for thermostats and covers. */}
+                {!['climate', 'cover'].includes(selectedDevice.domain) ? null : selectedToggleAction ? (
                   <button
                     onClick={() => toggleDevice(selectedDevice.entity_id, selectedDevice.state)}
                     className={`text-xs font-bold px-3 py-1.5 max-sm:min-h-11 rounded-lg border transition-all ${
