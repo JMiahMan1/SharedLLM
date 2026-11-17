@@ -218,23 +218,15 @@ final class GuardScreenView {
                     : "You can still call your parents or 911, and use Jarvis. Texts wait until it unlocks.";
         }
 
-        android.util.DisplayMetrics dm = context.getResources().getDisplayMetrics();
-        float widthDp = dm.widthPixels / dm.density;
-        float heightDp = dm.heightPixels / dm.density;
-        // A phone on its side: the reason on the left, the buttons on the right.
-        boolean sideways = widthDp > heightDp && heightDp < 600;
-        // Only a tall screen has room for the clock above the reason.
-        boolean roomy = heightDp >= 700;
-
         Sheet sheet = new Sheet(context);
 
         LinearLayout story = new LinearLayout(context);
         story.setOrientation(LinearLayout.VERTICAL);
         story.setGravity(Gravity.CENTER_HORIZONTAL);
-        if (locked && roomy && !sideways) {
-            story.addView(clock(context, pal), fullWidth(context, 0));
-        }
-        story.addView(hero(context, pal, iconRes, accent, sideways ? 88 : 116), wrapCentered(context, locked && roomy && !sideways ? 28 : 0));
+        View clock = locked ? clock(context, pal) : null;
+        if (clock != null) story.addView(clock, fullWidth(context, 0));
+        FrameLayout hero = hero(context, pal, iconRes, accent, 116);
+        story.addView(hero, wrapCentered(context, clock != null ? 28 : 0));
         TextView title = title(context, pal, titleText);
         title.setPadding(0, dp(context, 20), 0, 0);
         story.addView(title, fullWidth(context, 0));
@@ -317,22 +309,10 @@ final class GuardScreenView {
         if (quiet.getChildCount() > 0) actions.addView(quiet, fullWidth(context, 12));
 
         // One column, never wider than a phone, centred on a tablet; two
-        // columns on a phone turned on its side.
-        CappedColumn content = new CappedColumn(context, dp(context, sideways ? 820 : 440));
-        content.setOrientation(sideways ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-        content.setGravity(Gravity.CENTER);
-        if (sideways) {
-            LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            left.rightMargin = dp(context, 20);
-            content.addView(story, left);
-            LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            right.leftMargin = dp(context, 20);
-            content.addView(actions, right);
-        } else {
-            content.addView(story, fullWidth(context, 0));
-            content.addView(actions, fullWidth(context, 28));
-        }
-
+        // columns on a phone on its side. Decided from the size the lock is
+        // actually given, every time it changes, so turning the phone with the
+        // lock up never leaves a layout made for the other way round.
+        CappedColumn content = new CappedColumn(context, story, actions, clock, hero);
         // Swallow touches so nothing behind the lock is used (the overlay has no
         // activity to take input for it).
         FrameLayout page = new FrameLayout(context);
@@ -341,6 +321,7 @@ final class GuardScreenView {
         page.setPadding(side, dp(context, 24), side, dp(context, 24));
         page.addView(content, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        content.adaptTo(dm(context).widthPixels, dm(context).heightPixels);
 
         ScrollView scroller = new ScrollView(context);
         scroller.setFillViewport(true);
@@ -356,6 +337,11 @@ final class GuardScreenView {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         frame.addView(sheet.layer, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        frame.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol || b - t != ob - ot) {
+                v.post(() -> content.adaptTo(r - l, b - t));
+            }
+        });
         keepClearOfBars(context, frame, scroller, sheet.layer);
         return frame;
     }
@@ -385,23 +371,92 @@ final class GuardScreenView {
         frame.requestApplyInsets();
     }
 
-    /** A vertical or horizontal column that never grows wider than {@code maxWidth}. */
+    /**
+     * The lock's content: the reason (story) above the buttons (actions) in one
+     * column no wider than a phone, or side by side when the screen is wide and
+     * short (a phone on its side). The clock only shows when there is height for it.
+     */
     private static final class CappedColumn extends LinearLayout {
-        private final int maxWidth;
+        private final View story;
+        private final View actions;
+        private final View clock;
+        private final View hero;
+        private int maxWidth;
+        private Boolean sideways;
+        private Boolean roomy;
 
-        CappedColumn(Context context, int maxWidth) {
+        CappedColumn(Context context, View story, View actions, View clock, View hero) {
             super(context);
-            this.maxWidth = maxWidth;
+            this.story = story;
+            this.actions = actions;
+            this.clock = clock;
+            this.hero = hero;
+            setGravity(Gravity.CENTER);
+            addView(story);
+            addView(actions);
+        }
+
+        /** Lay out for a screen of this many pixels; does nothing when nothing changes. */
+        void adaptTo(int widthPx, int heightPx) {
+            if (widthPx <= 0 || heightPx <= 0) return;
+            float density = getResources().getDisplayMetrics().density;
+            float widthDp = widthPx / density;
+            float heightDp = heightPx / density;
+            boolean side = widthDp > heightDp && heightDp < 600;
+            boolean tall = heightDp >= 700;
+            if (Boolean.valueOf(side).equals(sideways) && Boolean.valueOf(tall).equals(roomy)) return;
+            sideways = side;
+            roomy = tall;
+            Context c = getContext();
+            maxWidth = dp(c, side ? 820 : 440);
+            setOrientation(side ? HORIZONTAL : VERTICAL);
+            if (side) {
+                LayoutParams left = new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                left.rightMargin = dp(c, 20);
+                left.gravity = Gravity.CENTER_VERTICAL;
+                story.setLayoutParams(left);
+                LayoutParams right = new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                right.leftMargin = dp(c, 20);
+                right.gravity = Gravity.CENTER_VERTICAL;
+                actions.setLayoutParams(right);
+            } else {
+                story.setLayoutParams(new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                LayoutParams below = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                below.topMargin = dp(c, 28);
+                actions.setLayoutParams(below);
+            }
+            boolean showClock = clock != null && tall && !side;
+            if (clock != null) clock.setVisibility(showClock ? VISIBLE : GONE);
+            int heroSize = dp(c, side ? 88 : 116);
+            LinearLayout.LayoutParams heroLp = new LinearLayout.LayoutParams(heroSize, heroSize);
+            heroLp.gravity = Gravity.CENTER_HORIZONTAL;
+            heroLp.topMargin = showClock ? dp(c, 28) : 0;
+            hero.setLayoutParams(heroLp);
+            if (hero instanceof ViewGroup && ((ViewGroup) hero).getChildCount() > 0) {
+                View disc = ((ViewGroup) hero).getChildAt(0);
+                int discSize = Math.round(heroSize * 0.74f);
+                disc.setLayoutParams(new FrameLayout.LayoutParams(discSize, discSize, Gravity.CENTER));
+                if (disc instanceof ViewGroup && ((ViewGroup) disc).getChildCount() > 0) {
+                    int iconSize = Math.round(heroSize * 0.40f);
+                    ((ViewGroup) disc).getChildAt(0).setLayoutParams(
+                            new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER));
+                }
+            }
+            requestLayout();
         }
 
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             int size = MeasureSpec.getSize(widthMeasureSpec);
-            if (size > maxWidth) {
+            if (maxWidth > 0 && size > maxWidth) {
                 widthMeasureSpec = MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.getMode(widthMeasureSpec));
             }
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);
         }
+    }
+
+    private static android.util.DisplayMetrics dm(Context context) {
+        return context.getResources().getDisplayMetrics();
     }
 
     /** The time and date, like the phone's own lock screen. */
