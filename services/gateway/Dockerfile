@@ -29,4 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-CMD ["uvicorn", "services.gateway.main:app", "--host", "0.0.0.0", "--port", "11435"]
+# A deploy stops this container with requests in flight. The push stream and
+# the chat long polls never finish on their own, so uvicorn used to wait for
+# them until Docker killed it 10 s later, and only then could the new gateway
+# start: every phone's requests hung for 15-25 s. Those streams reconnect by
+# design, so 3 s is enough for ordinary requests to finish.
+CMD ["uvicorn", "services.gateway.main:app", "--host", "0.0.0.0", "--port", "11435", "--timeout-graceful-shutdown", "3"]

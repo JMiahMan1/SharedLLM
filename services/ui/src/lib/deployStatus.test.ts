@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { STALE_AFTER_S, getDeployStatus, nextPhase } from './deployStatus';
+import {
+  DEPLOY_CHECK_TTL_MS, STALE_AFTER_S, deployUnderway, getDeployStatus, isUpdating, nextPhase, resetDeployCheck,
+} from './deployStatus';
 import { apiClient } from '../services/api';
 
 vi.mock('../services/api', () => ({ apiClient: { get: vi.fn() } }));
@@ -40,5 +42,37 @@ describe('getDeployStatus', () => {
     expect(await getDeployStatus()).toBeNull();
     vi.mocked(apiClient.get).mockResolvedValue({ data: '<html>' });
     expect(await getDeployStatus()).toBeNull();
+  });
+});
+
+describe('deployUnderway', () => {
+  beforeEach(() => {
+    vi.mocked(apiClient.get).mockReset();
+    resetDeployCheck();
+  });
+
+  it('is true only while a fresh flag is up', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { updating: true, at: Date.now() / 1000, app: false } });
+    expect(await deployUnderway(1_000)).toBe(true);
+    resetDeployCheck();
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { updating: true, at: Date.now() / 1000 - STALE_AFTER_S - 5, app: false } });
+    expect(await deployUnderway(1_000)).toBe(false);
+    resetDeployCheck();
+    vi.mocked(apiClient.get).mockRejectedValue(new Error('404'));
+    expect(await deployUnderway(1_000)).toBe(false);
+  });
+
+  it('reads the flag once for every request that fails in the same few seconds', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { updating: true, at: Date.now() / 1000, app: false } });
+    await Promise.all([deployUnderway(10_000), deployUnderway(10_500), deployUnderway(10_000 + DEPLOY_CHECK_TTL_MS - 1)]);
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    await deployUnderway(10_000 + DEPLOY_CHECK_TTL_MS);
+    expect(apiClient.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('agrees with the banner on what counts as updating', () => {
+    expect(isUpdating({ updating: true, at: at(20), app: false }, NOW)).toBe(true);
+    expect(isUpdating({ updating: false, at: at(20), app: false }, NOW)).toBe(false);
+    expect(isUpdating(null, NOW)).toBe(false);
   });
 });
