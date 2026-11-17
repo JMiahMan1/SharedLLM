@@ -209,7 +209,11 @@ def _sealed(value: Any, max_bytes: int) -> str:
             or len(ct) <= private_chat.TAG_BYTES:
         raise HTTPException(status_code=422, detail="Only an encrypted record can be kept.")
     # Nothing beside the envelope: a sealed record carries only the standard locked line before it.
-    outside = (value[:start] + value[end + 3:]).strip()
+    # The app closes the block with the full fence (privateChatCrypto.ts sealRecord/sealMessage), so a
+    # closing "```jarvis-envelope" is part of the envelope, not text beside it. Treating its tail as
+    # outside text refused every real message, edit and reaction (only bare-``` test fixtures passed).
+    close = len(_FENCE) if value.startswith(_FENCE, end) else 3
+    outside = (value[:start] + value[end + close:]).strip()
     if outside and outside not in {"Encrypted message", "\U0001f512 Encrypted message"}:
         raise HTTPException(status_code=422, detail="Only an encrypted record can be kept.")
     return value
