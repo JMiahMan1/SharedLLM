@@ -3728,3 +3728,10 @@ async def admin_import_upload(
 from services.bible import book_routes  # noqa: E402
 
 app.include_router(book_routes.router)
+
+
+# The account export and restore (docs/ACCOUNT_EXPORT.md), behind the middleware above.
+from services.bible import account_export as _account_export  # noqa: E402
+from services.common.account_data import account_router as _account_router  # noqa: E402
+
+app.include_router(_account_router("bible", _account_export.specs, get_session))

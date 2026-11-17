@@ -3068,3 +3068,10 @@ def health():
         "uptime_seconds": round(time.time() - _START_TIME, 1),
         "database": "sqlite" if _database_url().startswith("sqlite") else "other",
     }
+
+
+# The account export and restore (docs/ACCOUNT_EXPORT.md), behind the middleware above.
+from services.common.account_data import account_router as _account_router  # noqa: E402
+from services.health import account_export as _account_export  # noqa: E402
+
+app.include_router(_account_router("health", _account_export.specs, get_session))
