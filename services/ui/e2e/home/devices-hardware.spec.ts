@@ -414,6 +414,52 @@ test.describe('Devices: every kind gets its control', () => {
     clean(run);
   });
 
+  test('big sliders keep their labels clear of the fill and the marker at 0, 20, 50 and 100%', async ({ page }, info) => {
+    const run = await open(page);
+    const shot = async (loc: Locator, name: string) => {
+      const dir = process.env.SNAP_DIR;
+      await loc.screenshot({ path: dir ? `${dir}/${name}-${info.project.name}.png` : info.outputPath(`${name}.png`) });
+    };
+    /** The label row sits wholly above the bar, so nothing on the bar can cover it. */
+    const clear = async (slider: Locator) => {
+      const bar = await slider.boundingBox();
+      const row = await slider.locator('xpath=preceding-sibling::div[1]').boundingBox();
+      expect(row && bar && row.y + row.height <= bar.y + 0.5, 'label row above the bar').toBe(true);
+    };
+    const setTo = async (slider: Locator, keys: string[], want: string) => {
+      await slider.focus();
+      for (const k of keys) await page.keyboard.press(k);
+      await expect(slider).toHaveAttribute('aria-valuenow', want);
+      // Let the change be sent (the slider waits for a pause in key presses) and the answer drawn.
+      await page.waitForTimeout(900);
+      await expect(slider).toHaveAttribute('aria-valuenow', want);
+    };
+    let { dialog, control } = await kind(page, 'Desk bulb');
+    const brightness = control.getByRole('slider', { name: 'Desk bulb brightness' });
+    const white = control.getByRole('slider', { name: 'Desk bulb colour temperature' });
+    for (const [keys, want, label] of [[['Home'], '1', '0'], [Array(19).fill('ArrowRight'), '20', '20'],
+      [Array(3).fill('PageUp'), '50', '50'], [['End'], '100', '100']] as const) {
+      await setTo(brightness, [...keys], want);
+      await clear(brightness);
+      await shot(brightness.locator('..'), `slider-brightness-${label}`);
+    }
+    for (const [key, label] of [['Home', 'warmest'], ['End', 'coolest']] as const) {
+      await setTo(white, [key], key === 'Home' ? '2000' : '6535');
+      await clear(white);
+      await shot(white.locator('..'), `slider-white-${label}`);
+    }
+    await expect.poll(() => run.devices.commands.length).toBeGreaterThan(0);
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    ({ dialog, control } = await kind(page, 'Den TV'));
+    const volume = control.getByRole('slider', { name: 'Den TV volume' });
+    for (const [keys, want] of [[['Home'], '0'], [Array(2).fill('PageUp'), '20'], [Array(3).fill('PageUp'), '50'], [['End'], '100']] as const) {
+      await setTo(volume, [...keys], want);
+      await clear(volume);
+      await shot(volume.locator('..'), `slider-volume-${want}`);
+    }
+    clean(run);
+  });
+
   test('the Rooms page opens the same controls from a name', async ({ page }, info) => {
     const run = await open(page);
     await page.goto('/rooms');

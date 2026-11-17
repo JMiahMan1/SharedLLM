@@ -83,9 +83,9 @@ function VolumeRow({ e, name, send, disabled }: Pick<ControlProps, 'e' | 'name' 
   const muted = e.attributes?.is_volume_muted === true;
   if (!f.volume && !f.mute) return null;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-end gap-2">
       {f.mute && (
-        <button type="button" className={`${ROUND} rounded-2xl`} aria-label={muted ? `Unmute ${name}` : `Mute ${name}`}
+        <button type="button" className={`${ROUND.replace("h-14 w-14", "h-12 w-12")} rounded-2xl`} aria-label={muted ? `Unmute ${name}` : `Mute ${name}`}
           aria-pressed={muted} disabled={disabled} onClick={() => void send('volume_mute', { is_volume_muted: !muted })}>
           {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
         </button>

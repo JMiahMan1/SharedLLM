@@ -78,7 +78,14 @@ export default function BigSlider({
   };
 
   const style: CSSProperties = track ? { backgroundImage: track } : {};
+  // The label and value sit above the bar, never on it: on the bar they collided with the white
+  // marker and straddled the fill's edge at low values.
   return (
+    <div className="w-full min-w-0">
+    <div className="mb-1.5 flex items-baseline justify-between gap-3 px-1 text-sm" aria-hidden>
+      <span className="truncate font-medium text-slate-300">{label}</span>
+      <span className="shrink-0 font-semibold tabular-nums text-white" data-testid={testId ? `${testId}-value` : undefined}>{format(shown)}</span>
+    </div>
     <div
       ref={bar}
       role="slider"
@@ -96,7 +103,7 @@ export default function BigSlider({
       onPointerCancel={() => setDraft(null)}
       onKeyDown={onKey}
       style={style}
-      className={`relative h-14 w-full touch-none select-none overflow-hidden rounded-2xl border border-white/10 outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+      className={`relative h-12 w-full touch-none select-none overflow-hidden rounded-2xl border border-white/10 outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
         track ? '' : 'bg-white/[0.06]'} ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
     >
       {fill && !track && (
@@ -104,13 +111,10 @@ export default function BigSlider({
           style={{ width: `${Math.max(ratio * 100, 4)}%`, backgroundColor: fill }} aria-hidden />
       )}
       {track && (
-        <div className="absolute inset-y-1.5 w-1.5 -translate-x-1/2 rounded-full bg-white shadow-[0_0_0_2px_rgba(0,0,0,0.35)]"
+        <div className="absolute inset-y-1 w-2 -translate-x-1/2 rounded-full bg-white shadow-[0_0_0_2px_rgba(0,0,0,0.4)]"
           style={{ left: `${Math.min(97, Math.max(3, ratio * 100))}%` }} aria-hidden />
       )}
-      <div className="pointer-events-none relative flex h-full items-center justify-between px-4 text-sm font-semibold">
-        <span className={track ? 'text-slate-900/80' : 'text-white drop-shadow'}>{label}</span>
-        <span className={`tabular-nums ${track ? 'text-slate-900/80' : 'text-white drop-shadow'}`}>{format(shown)}</span>
-      </div>
+    </div>
     </div>
   );
 }
