@@ -464,3 +464,44 @@ def test_the_clear_route_needs_ids(wired):
     client, _fake, _sent = wired
     assert client.post("/api/telemetry/concerns/kid/clear", headers=HEADERS, json={"ids": []}).status_code == 422
     assert client.post("/api/telemetry/concerns/kid/clear", headers=HEADERS, json={"ids": ["x"]}).json()["cleared"] == []
+
+
+@pytest.mark.parametrize("failure", [TimeoutError(), RuntimeError("vision model failed HTTP 500")])
+def test_a_photo_the_model_could_not_check_is_sent_back_not_passed_as_clean(wired, monkeypatch, failure):
+    client, _fake, sent = wired
+    async def _vision_settings(_session):
+        return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "qwen2.5-vl:7b"}
+    async def _vision_chat(_session, url, payload, timeout):
+        assert timeout == guardian.MEDIA_MODEL_TIMEOUT_SECONDS
+        raise failure
+    monkeypatch.setattr(guardian, "_model_settings", _vision_settings)
+    monkeypatch.setattr("services.telemetry.llm.chat_content", _vision_chat)
+
+    resp = client.post(
+        "/api/telemetry/media/scan",
+        headers=HEADERS,
+        json={"user": "kid", "file_name": "photo_9.jpg", "media_type": "image", "image_b64": "ZXNwaG9tZQ=="},
+    )
+    # 503 (not 200 "no concern") keeps the phone's place, so it sends the photo again.
+    assert resp.status_code == 503
+    assert "try again" in resp.json()["detail"]
+    assert sent == []
+    assert client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"] == []
+
+
+def test_unreadable_model_settings_also_mean_try_again(wired, monkeypatch):
+    client, _fake, _sent = wired
+    async def _broken(_session):
+        raise RuntimeError("identity unreachable")
+    monkeypatch.setattr(guardian, "_model_settings", _broken)
+    resp = client.post(
+        "/api/telemetry/media/scan",
+        headers=HEADERS,
+        json={"user": "kid", "file_name": "photo_9.jpg", "media_type": "image", "image_b64": "ZXNwaG9tZQ=="},
+    )
+    assert resp.status_code == 503
+
+
+def test_the_photo_check_waits_long_enough_for_the_vision_model_to_load():
+    # About 25 s to load the model back onto the card, then about 10 s to answer.
+    assert guardian.MEDIA_MODEL_TIMEOUT_SECONDS >= 45

@@ -208,3 +208,11 @@ def test_a_flag_never_changes_the_childs_settings_or_blocks_anything(wired):
         assert key.startswith(("tel:concerns:", "tel:concern-image:", "tel:video_call:")), key
     for concern in _concerns(client):
         assert "block" not in json.dumps(concern)
+
+
+def test_a_first_look_that_cannot_answer_is_quietly_skipped_for_a_live_call(wired):
+    client, _fake, sent, _kids, looks = wired
+    looks["first"] = TimeoutError()
+    resp = _frame(client, 0)
+    assert resp.status_code == 200 and resp.json()["concern"] is False
+    assert sent == [] and _concerns(client) == []

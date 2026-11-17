@@ -674,7 +674,7 @@ final class GuardApi {
             body.put("media_type", mediaType);
             body.put("file_name", fileName);
             body.put("image_b64", thumbnailB64);
-            HttpResult r = send(context, "POST", "/api/guardian/media/scan", body.toString());
+            HttpResult r = send(context, "POST", "/api/guardian/media/scan", body.toString(), MEDIA_SCAN_READ_TIMEOUT_MS);
             return r == null ? 0 : r.status;
         } catch (Exception e) {
             // Best effort: media scanning never blocks the phone.
@@ -903,8 +903,22 @@ final class GuardApi {
         }
     }
 
+    static final int READ_TIMEOUT_MS = 15_000;
+    /**
+     * A photo check runs the vision model, which may first have to be loaded
+     * back onto the server's card: about 25 s, plus 10 s to answer. The server
+     * gives the model 60 s, so the phone waits a little longer than that. Every
+     * caller is off the main thread (the scan worker, or its own thread).
+     */
+    static final int MEDIA_SCAN_READ_TIMEOUT_MS = 75_000;
+
     /** Null when the phone has no credentials yet. Also used for the crash SOS ({@link CrashAlert}). */
     static HttpResult send(Context context, String method, String path, String json) throws Exception {
+        return send(context, method, path, json, READ_TIMEOUT_MS);
+    }
+
+    static HttpResult send(Context context, String method, String path, String json, int readTimeoutMs)
+            throws Exception {
         SharedPreferences p = prefs(context);
         String token = p.getString(TokenBridgePlugin.KEY_API_KEY, null);
         String server = p.getString(TokenBridgePlugin.KEY_SERVER_URL, null);
@@ -913,7 +927,7 @@ final class GuardApi {
         try {
             conn.setRequestMethod(method);
             conn.setConnectTimeout(10_000);
-            conn.setReadTimeout(15_000);
+            conn.setReadTimeout(readTimeoutMs);
             conn.setRequestProperty("Authorization", "Bearer " + token);
             if (json != null) {
                 conn.setDoOutput(true);

@@ -622,9 +622,14 @@ def create_app():
                 "alert": (found.get("alert") or {}).get("state"),
             }
 
-        concern = await guardian.scan_media_item(
-            client, child, media_type, file_name, image_b64, metadata
-        )
+        try:
+            concern = await guardian.scan_media_item(
+                client, child, media_type, file_name, image_b64, metadata
+            )
+        except guardian.MediaScanUnavailable as exc:
+            # Not checked is not clean: 503 keeps the phone's place so it sends
+            # this picture again later instead of marking it done.
+            raise HTTPException(status_code=503, detail=f"photo check unavailable, try again later: {exc}") from exc
         if concern:
             if await store.save_concern_image(rc, user, str(concern.get("id") or ""), image_b64):
                 concern["has_image"] = True

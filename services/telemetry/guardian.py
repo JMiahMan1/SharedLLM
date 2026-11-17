@@ -39,6 +39,14 @@ BLOCKED_SITE_ALERT_THRESHOLD = 5  # blocked attempts on one domain in a day befo
 _children_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
 SETTINGS_CACHE_SECONDS = 60
 MODEL_TIMEOUT_SECONDS = 25
+# A photo check can wait for the vision model to be loaded back onto the card
+# (about 25 s after a chat model displaced it) and then answer (about 10 s).
+MEDIA_MODEL_TIMEOUT_SECONDS = 60
+
+
+class MediaScanUnavailable(Exception):
+    """The vision check could not run (settings unreadable, the model failed or
+    timed out). Not the same as a clean picture: the phone must try it again."""
 _settings_cache: tuple[float, dict[str, str]] | None = None
 
 #: media_type and concern feature of a screenshot taken during a video call.
@@ -186,7 +194,7 @@ async def scan_media_item(
         settings = await _model_settings(session)
     except Exception as exc:
         log.warning("media scan: model settings could not be read: %s", exc)
-        return None
+        raise MediaScanUnavailable(f"model settings could not be read: {exc}") from exc
 
     url = settings.get("vision_ocr_proxy_url") or settings.get("llm_local_url") or ""
     model = settings.get("vision_ocr_model") or settings.get("guardian_monitor_model") or "qwen2.5-vl:7b"
@@ -203,8 +211,12 @@ async def scan_media_item(
     }
     try:
         content = await llm.chat_content(
-            session, f"{url.rstrip('/')}/v1/chat/completions", payload, MODEL_TIMEOUT_SECONDS
+            session, f"{url.rstrip('/')}/v1/chat/completions", payload, MEDIA_MODEL_TIMEOUT_SECONDS
         )
+    except Exception as exc:
+        log.warning("media scan: the vision model did not answer for %s (%s): %r", child.get("username"), file_name, exc)
+        raise MediaScanUnavailable(f"the vision model did not answer: {exc!r}") from exc
+    try:
         verdict = concern_review.parse_media_verdict(content)
         if not verdict["concern"]:
             return None
@@ -356,7 +368,10 @@ async def scan_video_call_frame(
     except (TypeError, ValueError):
         needed = video_calls.CORROBORATE_DEFAULT
     call = _video_call_meta(metadata or {})
-    concern = await scan_media_item(session, child, VIDEO_CALL, file_name, image_b64, call)
+    try:
+        concern = await scan_media_item(session, child, VIDEO_CALL, file_name, image_b64, call)
+    except MediaScanUnavailable:
+        return None  # a live call sends the next frame anyway; nothing to retry
     if not concern:
         return None
     category = concern["category"]
