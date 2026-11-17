@@ -22,7 +22,7 @@ import SharedFilesPanel from '../components/mdm/SharedFilesPanel';
 import { DeviceDetailSheet } from '../components/settings/DeviceDetailSheet';
 import NotificationLockCard from '../components/guardian/NotificationLockCard';
 import NewDevicesPanel from '../components/devices/NewDevicesPanel';
-import PageHeader, { HEADER_ACTION } from '../components/ui/PageHeader';
+import PageHeader from '../components/ui/PageHeader';
 import { CardSkeletons } from '../components/ui/StateViews';
 import IntegrationsPanel from '../components/devices/IntegrationsPanel';
 import HardwarePanel from '../components/devices/HardwarePanel';
@@ -81,8 +81,8 @@ function State({ on }: { on: boolean | undefined }) {
 function Panel({ title, icon: Icon, children, aside }: { title: string; icon: LucideIcon; children: React.ReactNode; aside?: React.ReactNode }) {
   return (
     <section className="glass-panel overflow-hidden rounded-2xl border border-white/10">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-sky-500/5 px-4 py-3">
-        <span className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase tracking-widest text-sky-400">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 px-4 py-3">
+        <span className="flex min-w-0 items-center gap-2.5 text-base font-semibold text-white [&>svg]:h-[18px] [&>svg]:w-[18px] [&>svg]:shrink-0 [&>svg]:text-sky-400">
           <Icon size={14} /> {title}
         </span>
         {aside}
@@ -1368,7 +1368,7 @@ function AuditLogPanel() {
 /** The admin's tabs, and which old "#devices-..." link opens which. */
 const DEVICE_TABS = [
   { id: 'devices', label: 'Your devices', anchors: ['devices-hardware'] },
-  { id: 'add', label: 'Add & fix', anchors: ['devices-new'] },
+  { id: 'add', label: 'Add devices', anchors: ['devices-new', 'add-fix'] },
   { id: 'places', label: 'Rooms & places', anchors: ['devices-areas', 'devices-labels', 'devices-zones'] },
   { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-persons', 'devices-rooms'] },
   { id: 'family', label: 'Family', anchors: ['devices-family', 'devices-folders', 'devices-activity'] },
@@ -1386,6 +1386,7 @@ export default function Devices() {
   const queryClient = useQueryClient();
   const [detailDevice, setDetailDevice] = useState<MdmDevice | null>(null);
   const [tab, setTab] = useState<DeviceTab>(() => tabForHash(typeof window === 'undefined' ? '' : window.location.hash));
+  const openTab = (id: DeviceTab) => { setTab(id); window.history.replaceState(null, '', `#${id}`); };
   const inventory = useQuery({ queryKey: ['mdm-devices'], queryFn: () => api.getMdmDevices(), enabled: isAdmin, retry: false });
   const myDevices = useQuery({ queryKey: ['my-companion-devices'], queryFn: () => api.getCompanionDevices(), enabled: !isAdmin, retry: false });
   const files = useQuery({ queryKey: ['mdm-files'], queryFn: () => api.getMdmFiles(), enabled: isAdmin, retry: false });
@@ -1456,15 +1457,17 @@ export default function Devices() {
     <div className={PAGE}>
       <PageHeader icon={Smartphone} tone="text-violet-400" title="Devices and integrations"
         subtitle="The house's devices by room, adding and fixing them, their setup, and the family's phones and folders.">
-        {/* Admins: four tabs instead of one long page. Old #devices-... links open the right tab. */}
+        {/* Admins: tabs instead of one long page. Old #devices-... links open the right tab. */}
         {user?.is_admin && (
-          <div role="tablist" aria-label="Parts of this page" className="flex gap-2 overflow-x-auto touch-pan-x pb-1"
+          <div role="tablist" aria-label="Parts of this page"
+            className="-mx-1 flex gap-1 overflow-x-auto touch-pan-x rounded-2xl border border-white/10 bg-black/20 p-1 sm:mx-0 sm:inline-flex sm:max-w-full"
             data-testid="devices-sections">
             {DEVICE_TABS.map((t) => (
               <button key={t.id} type="button" role="tab" aria-selected={tab === t.id}
                 aria-controls={`devices-tab-${t.id}`}
-                className={`${HEADER_ACTION} shrink-0 whitespace-nowrap ${tab === t.id ? 'border-sky-400/50 bg-sky-500/15 text-sky-100' : ''}`}
-                onClick={() => { setTab(t.id); window.history.replaceState(null, '', `#${t.id}`); }}>{t.label}</button>
+                className={`min-h-11 shrink-0 whitespace-nowrap rounded-xl px-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                  tab === t.id ? 'bg-white/10 font-semibold text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+                onClick={() => openTab(t.id)}>{t.label}</button>
             ))}
           </div>
         )}
@@ -1526,7 +1529,7 @@ export default function Devices() {
 
       {/* The hub's discovery API is for admins only (parents without the admin flag get 403). */}
       {user?.is_admin && tab === 'devices' && (
-        <div id="devices-tab-devices" role="tabpanel"><div id="devices-hardware" className="scroll-mt-4"><HardwarePanel /></div></div>
+        <div id="devices-tab-devices" role="tabpanel"><div id="devices-hardware" className="scroll-mt-4"><HardwarePanel onAdd={() => openTab('add')} /></div></div>
       )}
       {user?.is_admin && tab === 'add' && (
         <div id="devices-tab-add" role="tabpanel"><div id="devices-new" className="scroll-mt-4"><NewDevicesPanel /></div></div>

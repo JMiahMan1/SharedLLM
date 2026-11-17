@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
+import { MoreControlsContext } from './moreControls';
 import { Link } from 'react-router-dom';
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CameraOff, Cctv, ChevronDown, ChevronUp, Circle, DoorOpen, ExternalLink,
@@ -53,12 +54,21 @@ function Toggle({ on, label, disabled, onClick }: { on: boolean; label: string; 
 }
 
 function Row({ entity, children, detail }: { entity: HubEntity; children?: React.ReactNode; detail?: React.ReactNode }) {
+  const more = useContext(MoreControlsContext);
+  const text = (
+    <>
+      <span className="block truncate text-sm text-slate-200" title={entity.entity_id}>{entity.name}</span>
+      {detail && <span className="block text-xs text-slate-500">{detail}</span>}
+    </>
+  );
   return (
     <div className="flex items-center justify-between gap-2 py-1" data-testid="entity-row" data-entity={entity.entity_id}>
-      <div className="min-w-0">
-        <p className="truncate text-sm text-slate-200" title={entity.entity_id}>{entity.name}</p>
-        {detail && <div className="text-xs text-slate-500">{detail}</div>}
-      </div>
+      {more ? (
+        <button type="button" onClick={() => more(entity)} data-testid="more-controls"
+          className="min-h-11 min-w-0 flex-1 rounded-lg text-left outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-sky-400">
+          <span className="sr-only">All controls: </span>{text}
+        </button>
+      ) : <div className="min-w-0">{text}</div>}
       <div className="flex items-center gap-1 shrink-0">{children}</div>
     </div>
   );
@@ -202,7 +212,7 @@ const CHIP = 'min-h-11 rounded-lg border px-3 text-xs';
 const chipTone = (on: boolean) => (on ? 'border-amber-400/60 bg-amber-500/15 text-amber-100' : 'border-white/10 bg-white/5 text-slate-200');
 
 /** Clean the rooms you pick: the vacuum's own rooms (`segments`), sent with `vacuum.send_command`. */
-function VacuumRooms({ entity, onChanged }: { entity: HubEntity; onChanged?: () => void }) {
+export function VacuumRooms({ entity, onChanged }: { entity: HubEntity; onChanged?: () => void }) {
   const rooms = vacuumSegments(entity);
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<number[]>([]);

@@ -12,6 +12,16 @@
 # copy that could catch a half-written page). The copies are tarred together
 # and old archives are pruned.
 #
+# Some data is files, not databases, and is just as irreplaceable: the private
+# chat's folder holds each chat's wrapped key record, and without it the whole
+# encrypted history can never be read again. Those folders (BACKUP_FOLDERS,
+# relative to ./data) are copied into the archive as they are. They hold only
+# ciphertext and key records that are useless without the parents' password.
+#
+# This file must stay executable: it lost its mode bit on 2026-11-12 and cron
+# answered "Permission denied" every night for weeks while nothing noticed.
+# tests/unit/test_backup_script.py checks the bit.
+#
 # Run it by hand:
 #   ./scripts/backup_databases.sh
 #
@@ -22,12 +32,14 @@
 #   BACKUP_DIR    where the archives go (default: <root>/data/backups)
 #   BACKUP_KEEP   how many archives to keep (default: 14)
 #   BACKUP_ROOT   the SharedLLM checkout (default: the script's parent directory)
+#   BACKUP_FOLDERS  space-separated folders under ./data copied whole (default: private_chat)
 
 set -euo pipefail
 
 ROOT="${BACKUP_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DEST="${BACKUP_DIR:-$ROOT/data/backups}"
 KEEP="${BACKUP_KEEP:-14}"
+FOLDERS="${BACKUP_FOLDERS-private_chat}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 if ! command -v sqlite3 >/dev/null 2>&1; then
@@ -57,23 +69,45 @@ if [ "${#DBS[@]}" -eq 0 ]; then
 fi
 
 count=0
+raw=()
 for db in "${DBS[@]}"; do
   name="$(basename "$(dirname "$db")")-$(basename "$db")"
-  if sqlite3 "$db" ".backup '$STAGE/$name'"; then
+  rel="$(realpath --relative-to="$ROOT" "$db" 2>/dev/null || echo "$db")"
+  # Wait up to 20 s for a writer to let go before giving up on a clean copy.
+  if sqlite3 -cmd ".timeout 20000" "$db" ".backup '$STAGE/$name'"; then
     count=$((count + 1))
-    echo "backed up $(realpath --relative-to="$ROOT" "$db" 2>/dev/null || echo "$db")"
+    echo "backed up $rel"
   else
-    # A database we cannot read is worth failing on: a backup that quietly
-    # skipped the user table would be worse than no backup at all.
-    echo "could not back up $db" >&2
-    exit 1
+    # Some services hold their database in exclusive mode (Music Assistant's
+    # auth.db), so SQLite's own copy is always refused. One locked database
+    # used to abort the whole archive, so nothing was saved at all. Copy its
+    # files as they are instead (the WAL too), mark the copy, keep going, and
+    # still fail at the end so the log says something needs a look.
+    mkdir -p "$STAGE/raw"
+    cp -p "$db" "$STAGE/raw/$name"
+    for side in -wal -shm; do
+      [ -f "$db$side" ] && cp -p "$db$side" "$STAGE/raw/$name$side"
+    done
+    raw+=("$rel")
+    echo "could not take a clean copy of $rel (locked); saved its files as they are" >&2
   fi
+done
+
+folders=0
+for folder in $FOLDERS; do
+  src="$ROOT/data/$folder"
+  # A folder that does not exist yet (a fresh install) is nothing to back up.
+  [ -d "$src" ] || continue
+  mkdir -p "$STAGE/folders"
+  cp -a "$src" "$STAGE/folders/$folder"
+  folders=$((folders + 1))
+  echo "backed up data/$folder"
 done
 
 ARCHIVE="$DEST/sharedllm-$STAMP.tar.gz"
 tar -czf "$ARCHIVE" -C "$STAGE" .
 
-echo "wrote $ARCHIVE ($count database(s), $(du -h "$ARCHIVE" | cut -f1))"
+echo "wrote $ARCHIVE ($count database(s), $folders folder(s), $(du -h "$ARCHIVE" | cut -f1))"
 
 # Keep the newest $KEEP archives.
 pruned=0
@@ -87,3 +121,8 @@ if [ "$pruned" -gt 0 ]; then
 fi
 
 echo "kept: $(ls -1 "$DEST"/sharedllm-*.tar.gz 2>/dev/null | wc -l) archive(s) in $DEST"
+
+if [ "${#raw[@]}" -gt 0 ]; then
+  echo "raw copies (locked while running): ${raw[*]}" >&2
+  exit 2
+fi

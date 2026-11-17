@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import HardwarePanel from './HardwarePanel';
 import * as hardware from '../../lib/hardware';
 import * as discovered from '../../lib/discoveredDevices';
+import * as dashboards from '../../lib/dashboards';
+import { api } from '../../services/api';
+import toast from 'react-hot-toast';
 import type { HardwareDetail, HardwareDevice } from '../../lib/hardware';
 
 vi.mock('../../lib/hardware', async (importOriginal) => ({
@@ -21,7 +24,13 @@ vi.mock('../../lib/discoveredDevices', async (importOriginal) => ({
 vi.mock('../../lib/dashboards', async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   runService: vi.fn().mockResolvedValue({}),
+  getRooms: vi.fn(),
+  getHistory: vi.fn().mockResolvedValue({}),
 }));
+vi.mock('../../services/api', async (importOriginal) => {
+  const real = (await importOriginal()) as { api: Record<string, unknown> };
+  return { ...real, api: { ...real.api, callHaService: vi.fn() } };
+});
 vi.mock('react-hot-toast', () => {
   const toast = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() });
   return { default: toast };
@@ -60,90 +69,115 @@ const wrap = () => render(
   </QueryClientProvider>,
 );
 
+const lampState = detail.entity_list[0].state!;
+const rooms = (lamp = lampState) => ({ floors: [], unassigned: [], areas: [
+  { area_id: 'porch', name: 'Porch', floor_id: null, icon: null, entities: [lamp] },
+] });
+
 describe('HardwarePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(hardware.getHardware).mockResolvedValue({ devices: [base, tv],
+    vi.mocked(hardware.getHardware).mockResolvedValue({ devices: [{ ...base, kind: 'light' }, { ...tv, kind: 'media' }],
       areas: [{ area_id: 'den', name: 'Den' }, { area_id: 'porch', name: 'Porch' }] });
     vi.mocked(hardware.getHardwareDevice).mockResolvedValue(detail);
+    vi.mocked(dashboards.getRooms).mockResolvedValue(rooms());
   });
 
-  it('lists devices from the registry, grouped by room, with status and abilities', async () => {
+  it('draws devices as tiles by room, each with a plain state line', async () => {
     wrap();
-    const rows = await screen.findAllByTestId('hardware-device');
-    expect(rows).toHaveLength(2);
+    await screen.findByRole('button', { name: 'Porch lamp, On, 50%' });
+    expect(screen.getAllByTestId('device-tile')).toHaveLength(2);
     expect(screen.getAllByTestId('hardware-group').map((g) => within(g).getByRole('heading', { level: 3 }).textContent))
       .toEqual(['Den 1', 'Porch 1']);
-    expect(screen.getByRole('button', { name: 'Den TV, Offline' })).toBeInTheDocument();
-    expect(within(rows[1]).getByText('Dim')).toBeInTheDocument();
-    expect(within(rows[1]).getByText(/192\.0\.2\.21/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Den TV, Offline/ })).toBeInTheDocument();
+    // No capability words or addresses on a tile.
+    expect(screen.queryByText('Dim')).toBeNull();
+    expect(screen.queryByText(/192\.0\.2\.21/)).toBeNull();
   });
 
-  it('searches, filters by chip and regroups', async () => {
+  it('searches, filters by type and needs attention, and regroups', async () => {
     wrap();
-    await screen.findAllByTestId('hardware-device');
+    await screen.findByRole('button', { name: 'Porch lamp, On, 50%' });
     fireEvent.change(screen.getByLabelText('Search devices'), { target: { value: 'roku' } });
-    expect(screen.getAllByTestId('hardware-device')).toHaveLength(1);
+    expect(screen.getAllByTestId('device-tile')).toHaveLength(1);
     fireEvent.change(screen.getByLabelText('Search devices'), { target: { value: '' } });
-    fireEvent.click(within(screen.getByTestId('hardware-filters')).getByRole('button', { name: /Offline 1/ }));
-    expect(screen.getAllByTestId('hardware-device')).toHaveLength(1);
-    fireEvent.click(within(screen.getByTestId('hardware-filters')).getByRole('button', { name: 'All' }));
-    fireEvent.change(screen.getByLabelText('Group devices by'), { target: { value: 'integration' } });
+    const filters = screen.getByTestId('hardware-filters');
+    fireEvent.click(within(filters).getByRole('button', { name: 'Needs attention (1)' }));
+    expect(screen.getAllByTestId('device-tile')).toHaveLength(1);
+    fireEvent.click(within(filters).getByRole('button', { name: /^All/ }));
+    fireEvent.click(within(filters).getByRole('button', { name: /^Lights/ }));
+    expect(screen.getAllByTestId('device-tile')).toHaveLength(1);
+    fireEvent.click(within(filters).getByRole('button', { name: /^All/ }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Integrations' }));
     expect(screen.getAllByTestId('hardware-group').map((g) => within(g).getByRole('heading').textContent))
       .toEqual(['Roku 1', 'WiZ 1']);
   });
 
-  it('opens a device with its entities and controls, and renames and disables an entity', async () => {
+  it('toggles from a tile, drawing the change at once', async () => {
+    vi.mocked(api.callHaService).mockResolvedValue({ status: 'SUCCESS' });
+    wrap();
+    const power = await screen.findByRole('switch', { name: 'Porch lamp power' });
+    expect(power).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(power);
+    expect(power).toHaveAttribute('aria-checked', 'false');
+    await waitFor(() => expect(api.callHaService).toHaveBeenCalledWith('light', 'turn_off', 'light.porch_lamp', null));
+  });
+
+  it('rolls a refused command back and shows the hub\'s words', async () => {
+    vi.mocked(api.callHaService).mockRejectedValue(new Error('Porch lamp did not answer'));
+    wrap();
+    const power = await screen.findByRole('switch', { name: 'Porch lamp power' });
+    fireEvent.click(power);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Porch lamp did not answer', expect.anything()));
+    expect(power).toHaveAttribute('aria-checked', 'true');
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('opens a device with its control first and renames an entity under Device info', async () => {
     vi.mocked(hardware.updateEntity).mockResolvedValue(detail.entity_list[0]);
     wrap();
-    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, Online' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, On, 50%' }));
     const sheet = await screen.findByTestId('hardware-detail');
-    expect(within(sheet).getByText('1.36')).toBeInTheDocument();
-    expect(within(sheet).getByText('02:00:00:00:00:21')).toBeInTheDocument();
     expect(within(sheet).getByRole('slider', { name: 'Porch lamp brightness' })).toBeInTheDocument();
-    expect(within(sheet).getAllByTestId('hardware-entity')).toHaveLength(1);
-    fireEvent.click(within(sheet).getByRole('button', { name: /Show settings, diagnostics/ }));
-    expect(within(sheet).getAllByTestId('hardware-entity')).toHaveLength(2);
+    expect(within(sheet).getByText('02:00:00:00:00:21')).not.toBeVisible();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Rename Porch lamp' }));
     fireEvent.change(within(sheet).getByLabelText('New name for Porch lamp'), { target: { value: 'Front lamp' } });
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Save' }));
+    fireEvent.click(within(within(sheet).getByTestId('device-info')).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledWith('light.porch_lamp', { name: 'Front lamp' }));
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Disable Porch lamp Power' }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Hide Porch lamp Power' }));
     await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledWith('sensor.porch_lamp_power', { disabled: true }));
   });
 
   it('switches whether voice and chat may control an entity', async () => {
     vi.mocked(hardware.updateEntity).mockResolvedValue(detail.entity_list[0]);
     wrap();
-    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, Online' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, On, 50%' }));
     const sheet = await screen.findByTestId('hardware-detail');
-    const toggle = within(sheet).getByRole('button', { name: 'Voice can control Porch lamp' });
-    expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    expect(toggle).toHaveAttribute('title', 'The default for this kind of entity');
+    const toggle = within(sheet).getByRole('switch', { name: 'Voice can control Porch lamp' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(toggle);
     await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledWith('light.porch_lamp', { voice: false }));
     // An entity the hub reports no setting for (an older hub) shows no switch.
-    fireEvent.click(within(sheet).getByRole('button', { name: /Show settings, diagnostics/ }));
-    expect(within(sheet).queryByRole('button', { name: 'Voice can control Porch lamp Power' })).toBeNull();
+    expect(within(sheet).queryByRole('switch', { name: 'Voice can control Porch lamp Power' })).toBeNull();
   });
 
-  it('moves, disables and removes the device from its sheet', async () => {
+  it('moves, turns off and removes the device from its sheet, asking before removing', async () => {
     vi.mocked(discovered.updateHubDevice).mockResolvedValue({} as never);
     vi.mocked(hardware.setDeviceDisabled).mockResolvedValue(base);
     vi.mocked(discovered.removeHubDevice).mockResolvedValue({ status: 'removed' });
     wrap();
-    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, Online' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, On, 50%' }));
     const sheet = await screen.findByTestId('hardware-detail');
     fireEvent.change(within(sheet).getByLabelText('Room of Porch lamp'), { target: { value: 'den' } });
     await waitFor(() => expect(discovered.updateHubDevice).toHaveBeenCalledWith('d-lamp', { area_id: 'den' }));
-    fireEvent.click(within(sheet).getByRole('button', { name: /^Disable$/ }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Turn off in the hub' }));
     await waitFor(() => expect(hardware.setDeviceDisabled).toHaveBeenCalledWith('d-lamp', true));
-    fireEvent.click(within(sheet).getByRole('button', { name: /^Remove$/ }));
-    fireEvent.click(within(sheet).getByRole('button', { name: /Yes, remove it/ }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Remove device' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(discovered.removeHubDevice).toHaveBeenCalledWith('d-lamp', false));
   });
 
-  it('shows one row per physical device, with every integration that sees it', async () => {
+  it('shows one tile per physical device, and folds away what is not a device', async () => {
     const roku: HardwareDevice = { ...tv, id: 'd-roku', status: 'online', unavailable: 0, kind: 'media', group_id: 'd-roku' };
     const player: HardwareDevice = { ...tv, id: 'd-player', domain: 'music_assistant', label: 'Music Assistant',
       area_id: null, area: null, status: 'partial', kind: 'media', group_id: 'd-roku' };
@@ -152,37 +186,28 @@ describe('HardwarePanel', () => {
     vi.mocked(hardware.getHardware).mockResolvedValue({ devices: [{ ...base, kind: 'light' }, roku, player, addon],
       areas: [{ area_id: 'den', name: 'Den' }, { area_id: 'porch', name: 'Porch' }] });
     wrap();
-    await screen.findAllByTestId('hardware-device');
-    const listed = screen.getAllByTestId('hardware-group').flatMap((g) => within(g).queryAllByTestId('hardware-device'));
-    expect(listed).toHaveLength(2);
-    const tvRow = screen.getByRole('button', { name: 'Den TV, Online' });
-    expect(tvRow).toHaveTextContent('Roku · Music Assistant');
-    // Within a room, devices are split by type.
-    expect(screen.getAllByTestId('hardware-kind').map((k) => k.querySelector('h4')?.textContent)).toEqual(['TVs & speakers', 'Lights']);
-    // Add-ons and assistants are not devices in the house: folded away, still reachable.
-    expect(within(screen.getByTestId('hardware-services')).getByText(/Not devices.*\(1\)/)).toBeInTheDocument();
-    fireEvent.click(within(screen.getByTestId('hardware-filters')).getByRole('button', { name: /Lights 1/ }));
-    expect(screen.getAllByTestId('hardware-group').flatMap((g) => within(g).queryAllByTestId('hardware-device'))).toHaveLength(1);
+    await screen.findByRole('button', { name: 'Porch lamp, On, 50%' });
+    expect(screen.getAllByTestId('device-tile')).toHaveLength(2);
+    expect(within(screen.getByTestId('hardware-services')).getByText(/Not devices/)).toBeInTheDocument();
   });
 
-  it('puts a device with no room into one from the needs-attention list, every view of it', async () => {
+  it('puts a device with no room into one from Needs attention, every view of it', async () => {
     vi.mocked(discovered.updateHubDevice).mockResolvedValue({} as never);
     const lost: HardwareDevice = { ...base, id: 'd-a', name: 'Hall bulb', area_id: null, area: null, kind: 'light', group_id: 'd-a' };
     const lostToo: HardwareDevice = { ...lost, id: 'd-b', domain: 'matter', label: 'Matter', group_id: 'd-a' };
     vi.mocked(hardware.getHardware).mockResolvedValue({ devices: [lost, lostToo, tv],
       areas: [{ area_id: 'den', name: 'Den' }, { area_id: 'porch', name: 'Porch' }] });
     wrap();
-    const attention = await screen.findByTestId('needs-attention');
-    expect(within(attention).getByRole('button', { name: 'Not answering 1' })).toBeInTheDocument();
-    fireEvent.click(within(attention).getByRole('button', { name: 'No room 1' }));
-    fireEvent.change(within(attention).getByLabelText('Room for Hall bulb'), { target: { value: 'porch' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Needs attention (2)' }));
+    const list = screen.getByTestId('no-room-list');
+    fireEvent.change(within(list).getByLabelText('Room for Hall bulb'), { target: { value: 'porch' } });
     await waitFor(() => expect(discovered.updateHubDevice).toHaveBeenCalledWith('d-b', { area_id: 'porch' }));
     expect(discovered.updateHubDevice).toHaveBeenCalledWith('d-a', { area_id: 'porch' });
   });
 
-  it('says when the hub has nothing or cannot answer', async () => {
+  it('says when the hub has nothing', async () => {
     vi.mocked(hardware.getHardware).mockResolvedValue({ devices: [], areas: [] });
     wrap();
-    expect(await screen.findByTestId('hardware-empty')).toHaveTextContent('no devices yet');
+    expect(await screen.findByTestId('hardware-empty')).toHaveTextContent('No devices yet');
   });
 });

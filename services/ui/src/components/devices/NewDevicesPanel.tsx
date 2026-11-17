@@ -78,7 +78,7 @@ export default function NewDevicesPanel() {
   const move = useMutation({
     mutationFn: (d: DiscoveredDevice) => updateAddress(d.id),
     onSuccess: (r, d) => {
-      toast.success(`${d.moved?.entry_title || 'The device'} now uses ${r.new_host}.`);
+      toast.success(`${d.moved?.entry_title || 'The device'} now uses ${r.new_host || d.moved?.new_host || "its new address"}.`);
       void refresh();
       void queryClient.invalidateQueries({ queryKey: ['homehub-entries'] });
       void queryClient.invalidateQueries({ queryKey: ['homehub-hardware'] });
@@ -104,8 +104,8 @@ export default function NewDevicesPanel() {
   return (
     <>
     <section className="glass-panel overflow-hidden rounded-2xl border border-white/10" data-testid="new-devices">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-sky-500/5 px-4 py-3">
-        <span className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase tracking-widest text-sky-400">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 px-4 py-3">
+        <span className="flex min-w-0 items-center gap-2.5 text-base font-semibold text-white [&>svg]:h-[18px] [&>svg]:w-[18px] [&>svg]:shrink-0 [&>svg]:text-sky-400">
           <Radar size={14} /> New devices
         </span>
         <span className="flex flex-wrap gap-2">
