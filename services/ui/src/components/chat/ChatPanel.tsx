@@ -640,7 +640,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
   const openCall = (video = false) => {
     if (!activeToken) return;
-    void startCall(activeToken, activeConversation?.display_name || 'Family call', { video });
+    void startCall(activeToken, activeConversation?.display_name || 'Family call', { video, private: isPrivate });
   };
 
   const react = async (message: TalkMessage, emoji: string) => {

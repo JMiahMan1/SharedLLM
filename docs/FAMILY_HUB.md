@@ -426,9 +426,8 @@ Calls are a mesh: each participant encodes one stream per other participant.
 `CALL_MAX_PEERS` (default 8) refuses a room beyond that, rather than melting
 the family's phones.
 
-**TURN relay.** Public STUN alone is enough on the home Wi-Fi, but a phone on
-mobile data usually cannot reach another phone directly (carrier NAT), and the
-call connects with no audio. The `coturn` service in `docker-compose.yml` is
+**TURN relay.** A phone on mobile data usually cannot reach another phone
+directly (carrier NAT), and the call connects with no audio without a relay. The `coturn` service in `docker-compose.yml` is
 the relay. The gateway gives every caller a short-lived credential in the
 socket's `welcome` (coturn's `use-auth-secret` scheme:
 `username = "<expiry>:<user>"`, `credential = base64(HMAC-SHA1(TURN_SECRET,
@@ -447,17 +446,66 @@ username))`, valid six hours), so no TURN password is stored or shared. Set in
 
 The router must forward `TURN_PORT` (UDP and TCP) and the relay range (UDP)
 to the host. coturn refuses to relay to private addresses other than its own,
-so it cannot be used to reach the rest of the LAN. Without `TURN_SECRET`/`TURN_URLS`
-the gateway sends STUN only, and `CALL_ICE_SERVERS` (a JSON list) can still
-replace the STUN list.
+so it cannot be used to reach the rest of the LAN.
+
+**STUN stays at home.** coturn answers STUN on the same listener as TURN, so
+with `TURN_SECRET`/`TURN_URLS` set the gateway hands out `stun:<host>:<port>`
+for each `turn:` URL and no public STUN server at all: no third party learns
+that a family device is starting a call, or from where. Public STUN (Google,
+Cloudflare) is only the fallback when neither TURN nor `CALL_ICE_SERVERS` is
+set, and the gateway logs a warning once when it uses it. `CALL_ICE_SERVERS`
+(a JSON list) replaces the STUN list as given.
 Rooms live in the gateway's memory, so restarting the gateway ends active
 calls; signalling reconnects are not preserved across a deploy.
+
+### Privacy
+
+- **Who can join.** A call's room is a conversation, and only its members join
+  its call; anyone else is refused (WebSocket close code 1008, with the reason).
+  The parents' private chat: exactly its two members, never anyone else, an
+  admin included. A Talk conversation: someone Talk lists the room to (one of
+  their own conversations, asked of Talk as them, a yes kept for a minute), or
+  someone the call rang (a ring is built from the conversation's members, so a
+  drop-in reaches exactly the people it rang, and a one-to-one chat still
+  reaches the other person after they left it). The call list shows a call only
+  to its members and the people in it; a call nobody has rung yet is shown only
+  to the people in it.
+- **What the server sees.** The gateway relays SDP offers and answers and ICE
+  candidates, so it sees who is in which call and when, and the addresses in
+  those candidates. It never logs them, or the API key (the WebSocket
+  handshake's `?token=` is masked on `uvicorn.error` too), and the app's
+  console warnings print an error's name and message, never the SDP or
+  candidate.
+- **Media path.** Audio and video are DTLS-SRTP, sent directly between the
+  devices, or through the home coturn when they cannot reach each other. The
+  relay forwards encrypted packets and cannot decrypt them. Nothing is
+  recorded anywhere.
+- **The private chat is verified end to end.** A compromised gateway could swap
+  the DTLS fingerprints in the SDP it relays and sit in the middle. So in the
+  parents' private chat each device derives an HMAC key from the chat's data
+  key on the device (HKDF-SHA256, label `jarvis-call-fingerprint-v1`), sends a
+  fresh nonce, then proves its own fingerprints and the ones it received, bound
+  to the room and both nonces (`services/ui/src/lib/callVerify.ts`). The other
+  device checks that against its own view and hangs up with "This call could
+  not be verified" when it fails, is missing (20 s) or reuses a nonce. Until a
+  peer is verified no audio or video is sent to it and nothing it sends is
+  played. The chat must be unlocked to call or answer: a locked chat shows
+  **Unlock to call** with a button that opens the chat, and never connects
+  unverified. The key, and anything derived from it, never leaves the device.
+- **Relay-only was considered and not chosen** for the private chat: direct
+  connections show each device's address only to the other parent's device
+  (and to the gateway, which relays the candidates anyway), and the media is
+  end-to-end encrypted either way, so forcing every call through the relay
+  would cost quality and the home upload for no privacy gain.
 
 Nextcloud Talk still owns the chat and its conversations. Talk calls are not
 used by this surface; the room token is only the shared name both people join.
 Audio-capable ESP devices can join the same rooms as WebRTC clients; a native
 ESP client is still a separate piece of work. Tests:
 `services/gateway/tests/test_calls.py`,
+`services/gateway/tests/test_call_privacy.py`,
+`services/ui/src/lib/callVerify.test.ts`,
+`services/ui/src/test/PrivateCalls.test.tsx`,
 `services/ui/src/test/FamilyCalls.test.tsx`,
 `services/ui/src/test/CallContext.test.ts`,
 `services/ui/src/test/ChatManage.test.tsx`.

@@ -10,7 +10,7 @@ import {
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
-import { Loader2, Mic, MicOff, Phone, PhoneOff, Video, VideoOff, X } from 'lucide-react';
+import { Loader2, Lock, Mic, MicOff, Phone, PhoneOff, ShieldAlert, ShieldCheck, Video, VideoOff, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { ActiveCall, CallParticipant } from '../types/api';
@@ -28,6 +28,15 @@ import { listenForDropIn, nativeDropInStatus, reportDropInEnded, reportDropInJoi
 import UserAvatar from '../components/UserAvatar';
 import { useFamilyDirectory } from '../components/chat/familyDirectory';
 import { setApkUpdateBusyCheck } from '../lib/appUpdater';
+import {
+  PeerVerifier,
+  UNVERIFIED_MESSAGE,
+  VERIFY_TIMEOUT_MS,
+  isKnownPrivateRoom,
+  rememberPrivateRoom,
+  sdpFingerprints,
+} from '../lib/callVerify';
+import { vaultFor } from '../lib/privateChatSession';
 
 /** How often the app looks for a family drop-in call started elsewhere. */
 const ACTIVE_CALL_REFRESH_MS = 5_000;
@@ -45,11 +54,25 @@ const DROP_IN_MIC_ATTEMPTS = 10;
 const RING_MAX_MS = 60_000;
 
 export type CallStatus = 'connecting' | 'connected' | 'ended' | 'error';
+/** Why a private chat call did not connect: a peer failed verification, or the chat is locked. */
+export type CallProblem = 'unverified' | 'locked';
+
+export const LOCKED_MESSAGE =
+  'Unlock your private chat to join this call. Its calls are checked with the chat\'s key, so they cannot connect while it is locked.';
 
 export interface CallPeer extends CallParticipant {
   stream: MediaStream | null;
   hasVideo: boolean;
   connection: RTCPeerConnectionState;
+  /** A private chat call: this peer proved its connection with the chat's key. */
+  verified?: boolean;
+}
+
+/** An error that says which private-call problem it is, so the panel can explain it. */
+class CallProblemError extends Error {
+  constructor(message: string, readonly problem: CallProblem) {
+    super(message);
+  }
 }
 
 export interface CallInfo {
@@ -66,6 +89,17 @@ export interface CallInfo {
   video?: boolean;
   /** This phone joined by itself (Drop In); when it ends the app goes back to chat. */
   dropIn?: boolean;
+  /** The parents' private chat: every peer is verified with the chat's key. */
+  private?: boolean;
+  /** Why it did not connect (a private chat call). */
+  problem?: CallProblem;
+}
+
+export interface StartCallOptions {
+  auto?: boolean;
+  video?: boolean;
+  /** The room is the parents' private chat (the caller knows it): verify the call with its key. */
+  private?: boolean;
 }
 
 interface CallContextValue {
@@ -76,7 +110,7 @@ interface CallContextValue {
   muted: boolean;
   cameraOn: boolean;
   /** Join or start a call; ``video`` turns the camera on with it (and rings it as a video call). */
-  startCall: (room: string, name: string, options?: { auto?: boolean; video?: boolean }) => Promise<void>;
+  startCall: (room: string, name: string, options?: StartCallOptions) => Promise<void>;
   endCall: () => void;
   toggleMute: () => void;
   toggleCamera: () => Promise<void>;
@@ -124,6 +158,15 @@ export function callSocketUrl(baseUrl: string, token: string, room: string, name
   url.searchParams.set('room', room);
   url.searchParams.set('name', name);
   return url.toString();
+}
+
+/**
+ * What a console warning may say about an error: its name and message, never the object. A WebRTC error can
+ * carry the SDP or candidate it choked on, and those name the device's addresses.
+ */
+function errorName(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`.slice(0, 200).replace(/\d{1,3}(?:\.\d{1,3}){3}/g, '<address>');
+  return 'unknown error';
 }
 
 function messageError(error: unknown): string {
@@ -176,12 +219,17 @@ interface PeerConnection {
   stream: MediaStream | null;
   pc: RTCPeerConnection;
   pendingIce: RTCIceCandidateInit[];
+  /** A private chat call: proves this peer's fingerprints; null elsewhere. */
+  verifier: PeerVerifier | null;
+  /** Tracks held back from an unverified peer: its sender carries nothing until it is verified. */
+  held: Map<RTCRtpSender, MediaStreamTrack>;
+  verifyTimer: number | null;
 }
 
 interface CallEvents {
   onPeers: (peers: CallPeer[]) => void;
   onLocalStream: (stream: MediaStream | null) => void;
-  onEnded: (message: string) => void;
+  onEnded: (message: string, problem?: CallProblem) => void;
   onDeclined?: (name: string) => void;
 }
 
@@ -218,7 +266,8 @@ function participant(value: unknown): CallParticipant | null {
  * RTCPeerConnection and the browser's perfect-negotiation pattern keeps the
  * two sides from deadlocking when both happen to offer at once.
  */
-class CallSession {
+// eslint-disable-next-line react-refresh/only-export-components
+export class CallSession {
   roomName: string;
   /** How many people were already in the call when this browser joined. */
   peersAtJoin = 0;
@@ -235,12 +284,21 @@ class CallSession {
   private camera = false;
   private closed = false;
   private pingTimer: number | null = null;
+  /** The private chat's call key (derived on this device from the chat's key), or null. */
+  private readonly callKey: CryptoKey | null;
+  /** Verify every peer with ``callKey`` (the parents' private chat). */
+  privateRoom: boolean;
 
-  constructor(token: string, room: string, name: string, events: CallEvents) {
+  constructor(
+    token: string, room: string, name: string, events: CallEvents,
+    options: { private?: boolean; callKey?: CryptoKey | null } = {},
+  ) {
     this.token = token;
     this.room = room;
     this.roomName = name || 'Family call';
     this.events = events;
+    this.callKey = options.callKey ?? null;
+    this.privateRoom = Boolean(options.private);
   }
 
   /**
@@ -262,7 +320,7 @@ class CallSession {
       } catch (error) {
         if (this.closed) throw new Error('The call ended.', { cause: error });
         if (attempt >= micAttempts) {
-          console.warn('[calls] microphone refused', error);
+          console.warn('[calls] microphone refused', errorName(error));
           throw new Error('Microphone permission is needed to join a family call.', { cause: error });
         }
         await new Promise((resolve) => window.setTimeout(resolve, DROP_IN_MIC_RETRY_MS));
@@ -287,6 +345,7 @@ class CallSession {
     this.localStream = null;
 
     for (const peer of this.peers.values()) {
+      if (peer.verifyTimer !== null) window.clearTimeout(peer.verifyTimer);
       peer.pc.onicecandidate = null;
       peer.pc.onnegotiationneeded = null;
       peer.pc.ontrack = null;
@@ -340,7 +399,7 @@ class CallSession {
       if (!this.localStream) this.localStream = new MediaStream();
       this.localStream.addTrack(track);
       for (const peer of this.peers.values()) {
-        peer.pc.addTrack(track, this.localStream);
+        this.attachTrack(peer, track);
       }
       this.camera = true;
       this.events.onLocalStream(new MediaStream(this.localStream.getTracks()));
@@ -353,6 +412,11 @@ class CallSession {
       for (const peer of this.peers.values()) {
         const sender = peer.pc.getSenders().find((candidate) => candidate.track === track);
         if (sender) peer.pc.removeTrack(sender);
+        for (const [heldSender, heldTrack] of peer.held) {
+          if (heldTrack !== track) continue;
+          peer.held.delete(heldSender);
+          peer.pc.removeTrack(heldSender);
+        }
       }
       this.localStream?.removeTrack(track);
       track.stop();
@@ -383,10 +447,10 @@ class CallSession {
         window.clearTimeout(timer);
         resolve();
       };
-      const fail = (message: string) => {
+      const fail = (message: string, problem?: CallProblem) => {
         if (settled) {
           if (!this.closed) {
-            this.events.onEnded(message);
+            this.events.onEnded(message, problem);
             this.close();
           }
           return;
@@ -403,7 +467,7 @@ class CallSession {
         } catch {
           // The socket may already be closed.
         }
-        reject(new Error(message));
+        reject(problem ? new CallProblemError(message, problem) : new Error(message));
       };
 
       ws.onmessage = (event) => {
@@ -420,6 +484,15 @@ class CallSession {
             ? String((message.self as Record<string, unknown>).id)
             : '';
           if (typeof message.name === 'string' && message.name) this.roomName = message.name;
+          if (message.private === true) {
+            // The gateway says this is the parents' private chat: never connect unverified.
+            rememberPrivateRoom(this.room);
+            this.privateRoom = true;
+          }
+          if (this.privateRoom && !this.callKey) {
+            fail(LOCKED_MESSAGE, 'locked');
+            return;
+          }
           this.iceServers = Array.isArray(message.ice_servers)
             ? (message.ice_servers as RTCIceServer[])
             : [];
@@ -500,7 +573,78 @@ class CallSession {
 
     if (type === 'ice' && message.candidate) {
       void this.handleIce(from, message.candidate as RTCIceCandidateInit);
+      return;
     }
+
+    if (type === 'auth' && this.privateRoom) {
+      let peer = this.peers.get(from);
+      if (!peer) {
+        this.addPeer({ id: from, username: '', name: 'Family member', muted: false, camera: false });
+        peer = this.peers.get(from);
+      }
+      if (!peer?.verifier) return;
+      if (peer.verifier.receive(message.auth) !== 'ok') {
+        this.unverified();
+        return;
+      }
+      void this.advanceAuth(peer);
+    }
+  }
+
+  /** Add a local track for a peer. An unverified private-call peer gets an empty sender until it is verified. */
+  private attachTrack(peer: PeerConnection, track: MediaStreamTrack): void {
+    const stream = this.localStream as MediaStream;
+    if (peer.verifier && !peer.verifier.verified) {
+      const transceiver = peer.pc.addTransceiver(track.kind, { direction: 'sendrecv', streams: [stream] });
+      peer.held.set(transceiver.sender, track);
+      return;
+    }
+    peer.pc.addTrack(track, stream);
+  }
+
+  /**
+   * Move a private call's verification on: send this side's proof once both descriptions are known, check
+   * the peer's, and refuse the call when it fails or a later description names another certificate.
+   */
+  private async advanceAuth(peer: PeerConnection): Promise<void> {
+    const verifier = peer.verifier;
+    if (!verifier || this.closed) return;
+    const local = sdpFingerprints(peer.pc.localDescription?.sdp);
+    const remote = sdpFingerprints(peer.pc.remoteDescription?.sdp);
+    try {
+      const proof = await verifier.prove(local, remote);
+      if (proof) this.send({ type: 'auth', to: peer.id, auth: proof });
+      const wasVerified = verifier.verified;
+      const result = await verifier.check(local, remote);
+      if (result === 'failed') {
+        this.unverified();
+        return;
+      }
+      if (result === 'verified' && !wasVerified) await this.release(peer);
+    } catch {
+      this.unverified();
+    }
+  }
+
+  /** A verified peer: send it the held tracks and show what it sends. */
+  private async release(peer: PeerConnection): Promise<void> {
+    if (peer.verifyTimer !== null) {
+      window.clearTimeout(peer.verifyTimer);
+      peer.verifyTimer = null;
+    }
+    const held = [...peer.held];
+    peer.held.clear();
+    for (const [sender, track] of held) {
+      if (this.closed) return;
+      await sender.replaceTrack(track);
+    }
+    this.emitPeers();
+  }
+
+  private unverified(): void {
+    if (this.closed) return;
+    this.events.onEnded(UNVERIFIED_MESSAGE, 'unverified');
+    this.close();
   }
 
   private addPeer(info: CallParticipant): void {
@@ -529,12 +673,20 @@ class CallSession {
       stream: null,
       pc,
       pendingIce: [],
+      verifier: this.privateRoom && this.callKey ? new PeerVerifier(this.callKey, this.room) : null,
+      held: new Map(),
+      verifyTimer: null,
     };
     this.peers.set(info.id, peer);
 
-    this.localStream?.getTracks().forEach((track) => {
-      pc.addTrack(track, this.localStream as MediaStream);
-    });
+    this.localStream?.getTracks().forEach((track) => this.attachTrack(peer, track));
+    if (peer.verifier) {
+      this.send({ type: 'auth', to: info.id, auth: peer.verifier.hello() });
+      peer.verifyTimer = window.setTimeout(() => {
+        peer.verifyTimer = null;
+        if (!peer.verifier?.verified) this.unverified();
+      }, VERIFY_TIMEOUT_MS);
+    }
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -575,6 +727,7 @@ class CallSession {
   private removePeer(id: string): void {
     const peer = this.peers.get(id);
     if (!peer) return;
+    if (peer.verifyTimer !== null) window.clearTimeout(peer.verifyTimer);
     peer.pc.close();
     this.peers.delete(id);
     this.emitPeers();
@@ -589,10 +742,11 @@ class CallSession {
         this.send({ type: 'offer', to: peer.id, sdp: peer.pc.localDescription });
       }
     } catch (error) {
-      console.warn('[call] could not create an offer:', error);
+      console.warn('[call] could not create an offer:', errorName(error));
     } finally {
       peer.makingOffer = false;
     }
+    void this.advanceAuth(peer);
   }
 
   private async handleOffer(from: string, description: RTCSessionDescriptionInit): Promise<void> {
@@ -618,8 +772,9 @@ class CallSession {
         this.send({ type: 'answer', to: from, sdp: peer.pc.localDescription });
       }
     } catch (error) {
-      console.warn('[call] could not answer:', error);
+      console.warn('[call] could not answer:', errorName(error));
     }
+    void this.advanceAuth(peer);
   }
 
   private async handleAnswer(from: string, description: RTCSessionDescriptionInit): Promise<void> {
@@ -629,8 +784,9 @@ class CallSession {
       await peer.pc.setRemoteDescription(description);
       await this.flushIce(peer);
     } catch (error) {
-      console.warn('[call] could not use the answer:', error);
+      console.warn('[call] could not use the answer:', errorName(error));
     }
+    void this.advanceAuth(peer);
   }
 
   private async handleIce(from: string, candidate: RTCIceCandidateInit): Promise<void> {
@@ -643,7 +799,7 @@ class CallSession {
     try {
       await peer.pc.addIceCandidate(candidate);
     } catch (error) {
-      if (!peer.ignoreOffer) console.warn('[call] could not add an ICE candidate:', error);
+      if (!peer.ignoreOffer) console.warn('[call] could not add an ICE candidate:', errorName(error));
     }
   }
 
@@ -653,23 +809,28 @@ class CallSession {
       try {
         await peer.pc.addIceCandidate(candidate);
       } catch (error) {
-        if (!peer.ignoreOffer) console.warn('[call] could not add a queued ICE candidate:', error);
+        if (!peer.ignoreOffer) console.warn('[call] could not add a queued ICE candidate:', errorName(error));
       }
     }
   }
 
   private emitPeers(): void {
     this.events.onPeers(
-      Array.from(this.peers.values()).map((peer) => ({
-        id: peer.id,
-        username: peer.username,
-        name: peer.name,
-        muted: peer.muted,
-        camera: peer.camera,
-        stream: peer.stream,
-        hasVideo: Boolean(peer.stream?.getVideoTracks().some((track) => track.readyState === 'live' && !track.muted)),
-        connection: peer.connection,
-      })),
+      Array.from(this.peers.values()).map((peer) => {
+        // Nothing an unverified private-call peer sends is played or shown.
+        const stream = peer.verifier && !peer.verifier.verified ? null : peer.stream;
+        return {
+          id: peer.id,
+          username: peer.username,
+          name: peer.name,
+          muted: peer.muted,
+          camera: peer.camera,
+          stream,
+          hasVideo: Boolean(stream?.getVideoTracks().some((track) => track.readyState === 'live' && !track.muted)),
+          connection: peer.connection,
+          ...(peer.verifier ? { verified: peer.verifier.verified } : {}),
+        };
+      }),
     );
   }
 
@@ -756,6 +917,7 @@ function CallOverlay({
   onMute,
   onCamera,
   onHangup,
+  onOpenChat,
 }: {
   call: CallInfo;
   peers: CallPeer[];
@@ -766,9 +928,14 @@ function CallOverlay({
   onMute: () => void;
   onCamera: () => void;
   onHangup: () => void;
+  /** Open the private chat to unlock it (shown when a private call needs the chat unlocked). */
+  onOpenChat?: () => void;
 }) {
   const connecting = call.status === 'connecting';
   const finished = call.status === 'ended' || call.status === 'error';
+  const unverified = call.problem === 'unverified';
+  const locked = call.problem === 'locked';
+  const allVerified = Boolean(call.private && peers.length > 0 && peers.every((peer) => peer.verified));
   const talking = peers.some((peer) => peer.connection === 'connected');
   // Calling and nobody has picked up yet.
   const calling = call.status === 'connected' && call.outgoing && peers.length === 0;
@@ -787,8 +954,9 @@ function CallOverlay({
           className="flex items-center gap-3 border-b border-white/10 px-4 pb-3"
           style={{ paddingTop: 'max(0.75rem, var(--safe-top))' }}
         >
-          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${finished ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
-            <Phone size={18} />
+          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+            locked ? 'bg-amber-500/15 text-amber-300' : finished ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
+            {locked ? <Lock size={18} /> : unverified ? <ShieldAlert size={18} /> : <Phone size={18} />}
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate font-semibold text-white">{call.name || 'Family call'}</p>
@@ -798,15 +966,17 @@ function CallOverlay({
               {call.status === 'connected' && !calling && (
                 `${peers.length + 1} in the call · ${elapsed(call.startedAt, now)}`
               )}
-              {call.status === 'ended' && 'Call ended'}
-              {call.status === 'error' && 'Call could not start'}
+              {call.status === 'ended' && !call.problem && 'Call ended'}
+              {call.status === 'error' && !call.problem && 'Call could not start'}
+              {unverified && 'Call could not be verified'}
+              {locked && 'Unlock to call'}
             </p>
           </div>
           <button
             type="button"
             onClick={onHangup}
             aria-label={finished ? 'Close the call panel' : 'Hang up'}
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
           >
             <X size={18} />
           </button>
@@ -814,18 +984,39 @@ function CallOverlay({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {finished ? (
-            <div className="flex h-full min-h-48 flex-col items-center justify-center gap-3 text-center" data-testid="call-finished">
-              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-rose-500/15 text-rose-300">
-                <PhoneOff size={24} />
+            <div
+              className="flex h-full min-h-48 flex-col items-center justify-center gap-3 text-center"
+              data-testid={locked ? 'call-locked' : unverified ? 'call-unverified' : 'call-finished'}
+            >
+              <span className={`flex h-14 w-14 items-center justify-center rounded-full ${
+                locked ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'}`}>
+                {locked ? <Lock size={24} /> : unverified ? <ShieldAlert size={24} /> : <PhoneOff size={24} />}
               </span>
-              <p className="text-sm leading-relaxed text-slate-300">{call.error || 'The call has ended.'}</p>
-              <button
-                type="button"
-                onClick={onHangup}
-                className="mt-1 min-h-10 rounded-xl bg-white/[0.08] px-4 text-sm font-semibold text-white hover:bg-white/[0.14]"
-              >
-                Close
-              </button>
+              {(locked || unverified) && (
+                <p className="text-base font-semibold text-white">
+                  {locked ? 'Unlock your private chat first' : 'This call could not be verified'}
+                </p>
+              )}
+              <p className="max-w-sm text-sm leading-relaxed text-slate-300">{call.error || 'The call has ended.'}</p>
+              <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+                {locked && onOpenChat && (
+                  <button
+                    type="button"
+                    onClick={onOpenChat}
+                    className="min-h-11 rounded-xl bg-amber-400 px-4 text-sm font-bold text-amber-950 hover:bg-amber-300"
+                    data-testid="call-open-private-chat"
+                  >
+                    Open the private chat
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onHangup}
+                  className="min-h-11 rounded-xl bg-white/[0.08] px-4 text-sm font-semibold text-white hover:bg-white/[0.14]"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           ) : connecting ? (
             <div className="flex h-full min-h-48 flex-col items-center justify-center gap-3 text-center" data-testid="call-connecting">
@@ -875,7 +1066,17 @@ function CallOverlay({
                   </span>
                 </div>
               </div>
-              {talking && (
+              {call.private ? (
+                <p
+                  className={`mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] ${allVerified ? 'text-emerald-300' : 'text-slate-400'}`}
+                  data-testid="call-private-status"
+                >
+                  {allVerified ? <ShieldCheck size={13} aria-hidden /> : <Loader2 size={13} className="animate-spin" aria-hidden />}
+                  {allVerified
+                    ? 'Verified with your private chat key. Runs directly between your devices. Nothing is recorded.'
+                    : peers.length > 0 ? 'Checking this call with your private chat key…' : 'Private chat call. Nothing is recorded.'}
+                </p>
+              ) : talking && (
                 <p className="mt-3 text-center text-[11px] text-slate-500">
                   Audio runs directly between your devices. Nothing is recorded.
                 </p>
@@ -1177,7 +1378,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [token]);
 
-  const startCall = useCallback(async (room: string, name: string, options?: { auto?: boolean; video?: boolean }) => {
+  const startCall = useCallback(async (room: string, name: string, options?: StartCallOptions) => {
     const apiToken = tokenRef.current;
     if (!apiToken) {
       if (!options?.auto) {
@@ -1198,6 +1399,36 @@ export function CallProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // The parents' private chat: this device must hold the chat's key, or the call cannot be verified.
+    const privateRoom = Boolean(options?.private)
+      || isKnownPrivateRoom(room)
+      || activeCallsRef.current.some((active) => active.token === room && active.private);
+    if (privateRoom) rememberPrivateRoom(room);
+    const vault = vaultFor(room);
+    let callKey: CryptoKey | null = null;
+    if (vault.unlocked) {
+      try {
+        callKey = await vault.callKey();
+      } catch {
+        callKey = null;
+      }
+    }
+    if (privateRoom && !callKey) {
+      // Never connect unverified, a drop-in included: ask to unlock first. A phone that answered by itself
+      // ends its native call, which would otherwise hold the microphone.
+      if (options?.auto) reportDropInEnded();
+      setCall({
+        room,
+        name: name || 'Private chat',
+        status: 'error',
+        error: LOCKED_MESSAGE,
+        problem: 'locked',
+        private: true,
+        startedAt: Date.now(),
+      });
+      return;
+    }
+
     setCall({
       room,
       name: name || 'Family call',
@@ -1206,6 +1437,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       startedAt: Date.now(),
       ...(options?.auto ? { dropIn: true } : {}),
       ...(options?.video ? { video: true } : {}),
+      ...(privateRoom ? { private: true } : {}),
     });
     setPeers([]);
     setLocalStream(null);
@@ -1217,11 +1449,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const session = new CallSession(apiToken, room, name, {
       onPeers: setPeers,
       onLocalStream: setLocalStream,
-      onEnded: (message) => {
+      onEnded: (message, problem) => {
         if (sessionRef.current === session) sessionRef.current = null;
         setPeers([]);
         setLocalStream(null);
-        setCall((current) => current ? { ...current, status: 'ended', error: message } : current);
+        setCall((current) => current ? { ...current, status: 'ended', error: message, ...(problem ? { problem } : {}) } : current);
       },
       onDeclined: (who) => {
         if (sessionRef.current !== session) return;
@@ -1229,7 +1461,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           ? { ...current, declined: [...(current.declined ?? []).filter((n) => n !== who), who] }
           : current);
       },
-    });
+    }, { private: privateRoom, callKey });
     sessionRef.current = session;
 
     try {
@@ -1249,7 +1481,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
       // a Drop In by itself never rings anyone.
       const outgoing = !options?.auto && session.peersAtJoin === 0;
       setCall((current) => current
-        ? { ...current, status: 'connected', name: session.roomName || current.name, outgoing, startedAt: Date.now() }
+        ? {
+          ...current, status: 'connected', name: session.roomName || current.name, outgoing, startedAt: Date.now(),
+          ...(session.privateRoom ? { private: true } : {}),
+        }
         : current);
       if (options?.video) {
         // A video call: the camera comes on with it. Without one the call goes on with sound.
@@ -1276,12 +1511,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
       session.close();
       setPeers([]);
       setLocalStream(null);
+      const problem = error instanceof CallProblemError ? error.problem : undefined;
       if (options?.auto) {
         setCall(null);
-        toast.error('Could not drop in automatically. Tap the call banner to join.');
+        toast.error(problem === 'locked'
+          ? 'Unlock your private chat to answer this call.'
+          : 'Could not drop in automatically. Tap the call banner to join.');
       } else {
         setCall((current) => current && current.status === 'connecting'
-          ? { ...current, status: 'error', error: messageError(error) }
+          ? { ...current, status: 'error', error: messageError(error), ...(problem ? { problem, private: true } : {}) }
           : current);
       }
     }
@@ -1388,6 +1626,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // The provider sits above the router, so it moves the router the way a link would.
+  const openPrivateChat = useCallback((room: string) => {
+    setCall(null);
+    window.history.pushState({}, '', `/family?chat=${encodeURIComponent(room)}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, []);
+
   const decline = useCallback((room: string) => {
     setDismissed((current) => current.includes(room) ? current : [...current, room]);
     void api.declineCall(room).catch(() => {
@@ -1444,7 +1689,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       {incomingCall && typeof document !== 'undefined' && createPortal(
         <IncomingCall
           call={incomingCall}
-          onAnswer={(video) => void startCall(incomingCall.token, incomingCall.name || 'Family call', { video })}
+          onAnswer={(video) => void startCall(incomingCall.token, incomingCall.name || 'Family call', { video, private: incomingCall.private })}
           onDecline={() => decline(incomingCall.token)}
         />,
         document.body,
@@ -1469,7 +1714,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           </div>
           <button
             type="button"
-            onClick={() => void startCall(bannerCall.token, bannerCall.name || 'Family call')}
+            onClick={() => void startCall(bannerCall.token, bannerCall.name || 'Family call', { private: bannerCall.private })}
             className="min-h-9 shrink-0 rounded-xl bg-emerald-500 px-3 text-xs font-bold text-emerald-950 hover:bg-emerald-400"
           >
             Join
@@ -1496,6 +1741,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           onMute={toggleMute}
           onCamera={() => void toggleCamera()}
           onHangup={endCall}
+          onOpenChat={call.problem === 'locked' ? () => openPrivateChat(call.room) : undefined}
         />,
         document.body,
       )}
