@@ -389,7 +389,7 @@ test.describe('home pages', () => {
     }
     await expectNoHorizontalOverflow(page);
     await snap(page, info, 'devices-phones');
-    await page.getByRole('tab', { name: 'Add & fix' }).click();
+    await page.getByRole('tab', { name: 'Add devices' }).click();
     await page.getByRole('button', { name: /Add Matter device/ }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByTestId('adopt-dialog')).toBeVisible();

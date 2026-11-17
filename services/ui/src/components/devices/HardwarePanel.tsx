@@ -1,75 +1,69 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronRight, Cpu, Search } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Plus, Search, X } from 'lucide-react';
+import DeviceTile from './DeviceTile';
 import HubDeviceSheet from './HubDeviceSheet';
+import { getRooms, type HubEntity } from '../../lib/dashboards';
 import { failureText, updateHubDevice } from '../../lib/discoveredDevices';
 import {
-  STATUS_LABEL, STATUS_TONE, abilityLabel, ago, filterDevices, getHardware, groupDevices, headlineAbilities,
-  integrationsIn, kindSections, kindsIn, needsAttention, physicalDevices,
-  type GroupBy, type HardwareDevice, type PhysicalDevice,
+  STATUS_LABEL, filterDevices, getHardware, needsAttention, physicalDevices, type HardwareDevice, type PhysicalDevice,
 } from '../../lib/hardware';
+import { TYPE_FILTERS, primaryEntity, tileKind, typeFilterOf, type TileKind } from '../../lib/deviceTiles';
 
-export const HARDWARE_KEY = ['homehub-hardware'];
-
-const CHIP = 'inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs';
-const CHIP_OFF = `${CHIP} border-white/10 text-slate-300 hover:bg-white/5`;
-const CHIP_ON = `${CHIP} border-sky-400/50 bg-sky-500/15 text-sky-100`;
-const SELECT = 'min-h-11 min-w-0 rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-white';
-const ROOM_HEAD = 'sticky top-0 z-[1] border-y border-white/5 bg-slate-900/80 px-4 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400 backdrop-blur';
-const KIND_HEAD = 'px-4 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500';
-
-/** "Roku · Music Assistant" for a device several integrations see; its own integration otherwise. */
-function seenBy(device: PhysicalDevice): string {
-  const labels = [...new Set(device.views.map((v) => v.label).filter(Boolean))];
-  return labels.join(' · ');
-}
-
-function DeviceRow({ device, onOpen }: { device: PhysicalDevice | HardwareDevice; onOpen: () => void }) {
-  const ip = device.connections.find((c) => c.type === 'ip')?.value;
-  const via = 'views' in device ? seenBy(device) : device.label;
-  const where = [device.area, via, ip].filter(Boolean).join(' · ');
-  const make = [device.manufacturer, device.model].filter(Boolean).join(' ');
-  const chips = headlineAbilities(device.abilities, 3);
-  return (
-    <li>
-      <button type="button" onClick={onOpen} data-testid="hardware-device"
-        className="flex min-h-14 w-full min-w-0 items-center gap-3 px-4 py-2.5 text-left hover:bg-white/5"
-        aria-label={`${device.name}, ${STATUS_LABEL[device.status] || device.status}`}>
-        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_TONE[device.status] || 'bg-slate-500'}`} aria-hidden />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-white">{device.name}</span>
-          <span className="block truncate text-xs text-slate-400">{make || where}</span>
-          {make && where && <span className="block truncate text-[11px] text-slate-500">{where}</span>}
-          {chips.length > 0 && (
-            <span className="mt-1 flex flex-wrap gap-1" aria-label="Can">
-              {chips.map((a) => (
-                <span key={a} className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-300">{abilityLabel(a)}</span>
-              ))}
-            </span>
-          )}
-        </span>
-        <span className="hidden shrink-0 text-right text-[11px] text-slate-500 sm:block">
-          {device.status === 'online' || device.status === 'partial'
-            ? (device.last_seen ? ago(device.last_seen) : '')
-            : STATUS_LABEL[device.status]}
-          {device.unavailable > 0 && device.status !== 'disabled' && (
-            <span className="block text-amber-300/80">{device.unavailable} of {device.entities} unavailable</span>
-          )}
-        </span>
-        <ChevronRight size={16} className="shrink-0 text-slate-500" aria-hidden />
-      </button>
-    </li>
-  );
-}
-
-/**
- * What needs a person, above the list: devices in no room (each with a room picker, so a
- * whole house can be sorted in a few minutes) and devices that stopped answering.
+/*
+ * Design note (Devices > Your devices, November 2026).
+ *
+ * Looked at: Home Assistant (Settings > Devices: a data table with search, filters and group-by
+ * area; the device page with Controls / Sensors / Configuration / Diagnostic cards; the tile
+ * card; the more-info dialog with its big brightness slider, colour temperature and colour
+ * wheel), Google Home (rooms of square tiles, one tap toggles, the tile tinted by the light's
+ * colour, a long press opens a panel with one big slider), Apple Home (tiles grouped by room,
+ * plain status lines like "Off" or "21°", accessory details behind a settings cog) and Homey
+ * (type filters across the top).
+ *
+ * Taken: rooms of tiles, two across on a phone and more on wider screens (Google and Apple);
+ * one plain state line and a one-tap toggle per tile, a lit light tinted with its own colour
+ * (Google); Home Assistant's split of a device's entities into Controls, Readings, Configuration
+ * and Diagnostics; its big sliders; type chips in one row (Homey).
+ *
+ * Done differently from Home Assistant, where it is clumsy for a family: the device page leads
+ * with the device's control, not with its integration and configuration; entity ids, MAC and IP
+ * live under a folded "Device info", never on a tile; entity names drop the device's name ("Default
+ * fade", not "Kauf Bulb Default fade"); offline devices say how long they have been offline and
+ * their controls are disabled with the reason, instead of a greyed "Unavailable"; a command the
+ * hub refuses is drawn back and its own message shown, never a success it did not get.
  */
-function NeedsAttention({ noRoom, offline, areas, onShowOffline }: {
-  noRoom: PhysicalDevice[]; offline: number; areas: { area_id: string; name: string }[]; onShowOffline: () => void;
-}) {
-  const [open, setOpen] = useState(false);
+
+const HARDWARE_KEY = ['homehub-hardware'];
+const STATES_KEY = ['dashboard', 'rooms'];
+
+type GroupMode = 'area' | 'type' | 'integration';
+
+const CHIP = 'inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-400';
+const CHIP_OFF = `${CHIP} border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]`;
+const CHIP_ON = `${CHIP} border-sky-400/50 bg-sky-500/15 text-sky-100`;
+const SEG = 'min-h-11 flex-1 rounded-lg px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-400 md:flex-none';
+
+interface Row {
+  device: PhysicalDevice;
+  entities: HubEntity[];
+  kind: TileKind;
+  type: string;
+}
+
+/** Every room's live entities by device, from the Rooms page's own feed (one request for the grid). */
+function statesByDevice(rooms: Awaited<ReturnType<typeof getRooms>> | undefined): Map<string, HubEntity[]> {
+  const out = new Map<string, HubEntity[]>();
+  if (!rooms) return out;
+  for (const e of [...rooms.areas.flatMap((a) => a.entities), ...rooms.unassigned]) {
+    if (!e.device_id) continue;
+    out.set(e.device_id, [...(out.get(e.device_id) ?? []), e]);
+  }
+  return out;
+}
+
+/** Devices in no room, each with a room picker, so a whole house can be sorted in a few minutes. */
+function NoRoom({ devices, areas }: { devices: PhysicalDevice[]; areas: { area_id: string; name: string }[] }) {
   const qc = useQueryClient();
   const move = useMutation({
     // Every integration's view of the device moves together, so they never disagree on the room.
@@ -78,180 +72,201 @@ function NeedsAttention({ noRoom, offline, areas, onShowOffline }: {
     },
     onSettled: () => qc.invalidateQueries({ queryKey: HARDWARE_KEY }),
   });
-  if (noRoom.length === 0 && offline === 0) return null;
+  if (!devices.length) return null;
   return (
-    <div className="border-b border-white/5 bg-amber-500/5 px-4 py-2" data-testid="needs-attention">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-amber-300">
-          <AlertTriangle size={12} aria-hidden /> Needs attention
-        </span>
-        {noRoom.length > 0 && (
-          <button type="button" className={open ? CHIP_ON : CHIP_OFF} aria-expanded={open}
-            onClick={() => setOpen(!open)}>No room {noRoom.length}</button>
-        )}
-        {offline > 0 && (
-          <button type="button" className={CHIP_OFF} onClick={onShowOffline}>Not answering {offline}</button>
-        )}
-      </div>
-      {open && (
-        <ul className="mt-2 divide-y divide-white/5" data-testid="no-room-list">
-          {noRoom.map((d) => (
-            <li key={d.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2 py-1.5">
-              <span className="min-w-0 flex-1 truncate text-sm text-slate-200" title={d.name}>{d.name}</span>
-              <select className={SELECT} defaultValue="" aria-label={`Room for ${d.name}`}
-                disabled={move.isPending} onChange={(e) => e.target.value && move.mutate({ device: d, area: e.target.value })}>
-                <option value="" disabled>Choose a room</option>
-                {areas.map((a) => <option key={a.area_id} value={a.area_id}>{a.name}</option>)}
-              </select>
-            </li>
-          ))}
-        </ul>
-      )}
-      {move.isError && <p className="mt-1 text-xs text-amber-300/90">{failureText(move.error)}</p>}
-    </div>
+    <section className="rounded-2xl border border-amber-400/25 bg-amber-500/[0.06] p-3 sm:p-4" data-testid="no-room-list"
+      aria-label="Devices in no room">
+      <h3 className="text-sm font-semibold text-amber-100">Put these in a room</h3>
+      <p className="mt-0.5 text-xs text-slate-400">A device in a room can be found by room, and voice can say &quot;the kitchen lights&quot;.</p>
+      <ul className="mt-2 divide-y divide-white/5">
+        {devices.map((d) => (
+          <li key={d.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2 py-2">
+            <span className="min-w-0 flex-1 truncate text-sm text-slate-200" title={d.name}>{d.name}</span>
+            <select className="min-h-11 min-w-0 rounded-xl border border-white/10 bg-black/30 px-2 text-sm text-white"
+              defaultValue="" aria-label={`Room for ${d.name}`} disabled={move.isPending}
+              onChange={(e) => e.target.value && move.mutate({ device: d, area: e.target.value })}>
+              <option value="" disabled>Choose a room</option>
+              {areas.map((a) => <option key={a.area_id} value={a.area_id}>{a.name}</option>)}
+            </select>
+          </li>
+        ))}
+      </ul>
+      {move.isError && <p className="mt-1 text-xs text-amber-300/90" role="alert">{failureText(move.error)}</p>}
+    </section>
   );
 }
 
 /**
- * Devices > Your devices (admins): one row per physical device, however many integrations see
- * it (a TV that Roku, Cast and Music Assistant all register is one TV), by room and then by
- * kind. Needs attention first; search, type chips, an integration menu and other groupings;
- * add-ons and assistants, which are not devices in the house, folded away at the end.
+ * Devices > Your devices (admins): every physical device as a tile, by room (or by type or
+ * integration), however many integrations see it (a TV that Roku, Cast and Music Assistant all
+ * register is one TV). Search, type chips and "Needs attention" in one row; add-ons and
+ * assistants, which are not devices in the house, folded away at the end.
  */
-export default function HardwarePanel() {
+export default function HardwarePanel({ onAdd }: { onAdd?: () => void }) {
   const [query, setQuery] = useState('');
-  const [groupBy, setGroupBy] = useState<GroupBy>('area');
-  const [integration, setIntegration] = useState('');
-  const [status, setStatus] = useState('');
-  const [kind, setKind] = useState('');
+  const [group, setGroup] = useState<GroupMode>('area');
+  const [type, setType] = useState('');
+  const [attention, setAttention] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const list = useQuery({ queryKey: HARDWARE_KEY, queryFn: getHardware, retry: false, refetchInterval: 30_000 });
+  const states = useQuery({ queryKey: STATES_KEY, queryFn: getRooms, retry: false, refetchInterval: 15_000,
+    refetchIntervalInBackground: false });
 
   const raw = useMemo(() => list.data?.devices ?? [], [list.data]);
   const { devices, services } = useMemo(() => physicalDevices(raw), [raw]);
-  const shown = useMemo(() => filterDevices(devices, { query, integration, status, kind }),
-    [devices, query, integration, status, kind]);
-  const groups = useMemo(() => groupDevices(shown, groupBy), [shown, groupBy]);
-  const integrations = useMemo(() => integrationsIn(raw.filter((d) => !d.service)), [raw]);
-  const kinds = useMemo(() => kindsIn(devices), [devices]);
-  const attention = useMemo(() => needsAttention(devices), [devices]);
-  const offline = devices.filter((d) => d.status === 'offline').length;
-  const partial = devices.filter((d) => d.status === 'partial').length;
+  const byDevice = useMemo(() => statesByDevice(states.data), [states.data]);
+  const rows: Row[] = useMemo(() => devices.map((device) => {
+    const entities = device.views.flatMap((v) => byDevice.get(v.id) ?? []);
+    const kind = tileKind(device, primaryEntity(device.kind, entities));
+    return { device, entities, kind, type: typeFilterOf(kind) };
+  }), [devices, byDevice]);
+  const attn = useMemo(() => needsAttention(devices), [devices]);
+  const attnIds = useMemo(() => new Set([...attn.offline, ...attn.noRoom].map((d) => d.id)), [attn]);
+  const typeCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(r.type, (m.get(r.type) ?? 0) + 1);
+    return TYPE_FILTERS.filter((f) => m.has(f.id)).map((f) => ({ ...f, count: m.get(f.id)! }));
+  }, [rows]);
+
+  const shown = useMemo(() => {
+    const matching = new Set(filterDevices(devices, { query }).map((d) => d.id));
+    return rows.filter((r) => matching.has(r.device.id) && (!type || r.type === type)
+      && (!attention || attnIds.has(r.device.id)));
+  }, [rows, devices, query, type, attention, attnIds]);
+
+  const groups = useMemo(() => {
+    const out = new Map<string, { key: string; label: string; rows: Row[] }>();
+    for (const r of shown) {
+      const [key, label] = group === 'area' ? [r.device.area_id || '', r.device.area || 'No room']
+        : group === 'type' ? [r.type, TYPE_FILTERS.find((f) => f.id === r.type)?.label ?? 'Other']
+          : [r.device.domain || '', r.device.label || 'Other'];
+      if (!out.has(key)) out.set(key, { key, label, rows: [] });
+      out.get(key)!.rows.push(r);
+    }
+    const order = TYPE_FILTERS.map((f) => f.id);
+    return [...out.values()].sort((a, b) => {
+      if (group === 'type') return order.indexOf(a.key) - order.indexOf(b.key);
+      if (!a.key) return 1;
+      if (!b.key) return -1;
+      return a.label.localeCompare(b.label);
+    });
+  }, [shown, group]);
+
   const areas = list.data?.areas ?? [];
-  const clear = () => { setIntegration(''); setStatus(''); setKind(''); };
+  const openRow = rows.find((r) => r.device.id === open);
+  const openService = services.find((s) => s.id === open);
+  const filtered = Boolean(query || type || attention);
 
   return (
-    <>
-    <section className="glass-panel overflow-hidden rounded-2xl border border-white/10" data-testid="hardware">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-emerald-500/5 px-4 py-3">
-        <span className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase tracking-widest text-emerald-300">
-          <Cpu size={14} /> Your devices
-          {list.data && <span className="font-semibold normal-case tracking-normal text-slate-400">{devices.length} devices</span>}
-        </span>
-        <span className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
-          {/* A row of its own on a phone: beside both dropdowns it was squeezed to "Searc". */}
-          <label className="relative min-w-0 flex-1 basis-full sm:w-56 sm:flex-none sm:basis-auto">
-            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden />
+    <div className="space-y-4" data-testid="hardware">
+      <div className="glass-panel space-y-3 rounded-2xl border border-white/10 p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="relative min-w-0 flex-1 sm:basis-60">
+            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden />
             <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search devices"
               aria-label="Search devices"
-              className="min-h-11 w-full rounded-lg border border-white/10 bg-black/30 pl-8 pr-3 text-xs text-white" />
+              className="min-h-11 w-full rounded-xl border border-white/10 bg-black/30 pl-9 pr-3 text-sm text-white placeholder:text-slate-500" />
           </label>
-          <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} aria-label="Group devices by"
-            className={SELECT}>
-            <option value="area">By room</option>
-            <option value="kind">By type</option>
-            <option value="integration">By integration</option>
-            <option value="status">By status</option>
-            <option value="none">No groups</option>
-          </select>
-          {integrations.length > 1 && (
-            <select value={integration} onChange={(e) => setIntegration(e.target.value)} aria-label="Filter by integration"
-              className={SELECT}>
-              <option value="">All integrations</option>
-              {integrations.map((i) => <option key={i.domain} value={i.domain}>{i.label} ({i.count})</option>)}
-            </select>
+          <div role="radiogroup" aria-label="Group devices by" className="order-last flex w-full min-w-0 gap-1 rounded-xl border border-white/10 bg-black/20 p-1 md:order-none md:w-auto">
+            {([['area', 'Rooms'], ['type', 'Types'], ['integration', 'Integrations']] as const).map(([id, label]) => (
+              <button key={id} type="button" role="radio" aria-checked={group === id} onClick={() => setGroup(id)}
+                className={`${SEG} ${group === id ? 'bg-white/10 font-semibold text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {onAdd && (
+            <button type="button" onClick={onAdd} data-testid="add-device"
+              aria-label="Add device"
+              className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-sky-500 px-3 text-sm font-semibold text-slate-950 hover:bg-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:px-4">
+              <Plus size={18} aria-hidden /> <span className="max-sm:sr-only">Add device</span>
+            </button>
           )}
-        </span>
-      </header>
+        </div>
+        {list.data && devices.length > 0 && (
+          <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-0.5 touch-pan-x sm:-mx-4 sm:px-4" role="group"
+            aria-label="Filter devices" data-testid="hardware-filters">
+            <button type="button" className={!type && !attention ? CHIP_ON : CHIP_OFF} aria-pressed={!type && !attention}
+              onClick={() => { setType(''); setAttention(false); }}>All <span className="text-slate-500">{devices.length}</span></button>
+            {attnIds.size > 0 && (
+              <button type="button" aria-pressed={attention} onClick={() => setAttention(!attention)}
+                className={attention ? `${CHIP} border-amber-400/60 bg-amber-500/15 text-amber-100` : `${CHIP_OFF} text-amber-200`}>
+                <AlertTriangle size={14} className="text-amber-300" aria-hidden /> Needs attention ({attnIds.size})
+              </button>
+            )}
+            {typeCounts.length > 1 && typeCounts.map((t) => (
+              <button key={t.id} type="button" className={type === t.id ? CHIP_ON : CHIP_OFF} aria-pressed={type === t.id}
+                onClick={() => setType(type === t.id ? '' : t.id)}>
+                {t.label} <span className="text-slate-500">{t.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
-      {list.data && (
-        <NeedsAttention noRoom={attention.noRoom} offline={attention.offline.length} areas={areas}
-          onShowOffline={() => { clear(); setStatus('offline'); }} />
-      )}
+      {attention && <NoRoom devices={attn.noRoom} areas={areas} />}
 
-      {list.data && devices.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto touch-pan-x border-b border-white/5 px-4 py-2" role="group"
-          aria-label="Filter devices" data-testid="hardware-filters">
-          <button type="button" className={!integration && !status && !kind ? CHIP_ON : CHIP_OFF}
-            aria-pressed={!integration && !status && !kind} onClick={clear}>All</button>
-          {offline > 0 && (
-            <button type="button" className={status === 'offline' ? CHIP_ON : CHIP_OFF} aria-pressed={status === 'offline'}
-              onClick={() => setStatus(status === 'offline' ? '' : 'offline')}>
-              <span className="h-2 w-2 rounded-full bg-rose-400" aria-hidden /> Offline {offline}
-            </button>
-          )}
-          {partial > 0 && (
-            <button type="button" className={status === 'partial' ? CHIP_ON : CHIP_OFF} aria-pressed={status === 'partial'}
-              onClick={() => setStatus(status === 'partial' ? '' : 'partial')}>
-              <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden /> Partly offline {partial}
-            </button>
-          )}
-          {kinds.length > 1 && kinds.map((k) => (
-            <button key={k.kind} type="button" className={kind === k.kind ? CHIP_ON : CHIP_OFF}
-              aria-pressed={kind === k.kind} onClick={() => setKind(kind === k.kind ? '' : k.kind)}>
-              {k.label} <span className="text-slate-500">{k.count}</span>
-            </button>
-          ))}
+      {list.isLoading && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5" role="status" aria-label="Loading devices">
+          {[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="skeleton h-[7.25rem] rounded-2xl" />)}
         </div>
       )}
-
-      {list.isLoading && <div className="space-y-2 p-4" role="status" aria-label="Loading devices">
-        {[0, 1, 2].map((i) => <div key={i} className="skeleton h-14 w-full rounded-xl" />)}
-      </div>}
-      {list.error && <p className="p-4 text-sm text-amber-300/90" data-testid="hardware-error">{failureText(list.error)}</p>}
+      {list.error && <p className="glass-panel rounded-2xl border border-white/10 p-4 text-sm text-amber-300/90" role="alert"
+        data-testid="hardware-error">{failureText(list.error)}</p>}
       {list.data && shown.length === 0 && (
-        <p className="p-4 text-sm text-slate-500" data-testid="hardware-empty">
-          {devices.length === 0 ? 'The hub has no devices yet. Add one under Add & fix.' : 'No device matches.'}
-        </p>
-      )}
-
-      {groups.map((g) => g.devices.length > 0 && (
-        <div key={g.key} data-testid="hardware-group">
-          {groupBy !== 'none' && (
-            <h3 className={ROOM_HEAD}>
-              {g.label} <span className="font-semibold text-slate-500">{g.devices.length}</span>
-            </h3>
+        <div className="glass-panel rounded-2xl border border-white/10 p-6 text-center" data-testid="hardware-empty">
+          <p className="text-sm text-slate-300">
+            {devices.length === 0 ? 'No devices yet.' : attention ? 'Nothing needs attention.' : 'No device matches.'}
+          </p>
+          {devices.length === 0 && onAdd && (
+            <button type="button" onClick={onAdd} className="mt-3 inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-sky-500 px-4 text-sm font-semibold text-slate-950">
+              <Plus size={18} aria-hidden /> Add your first device
+            </button>
           )}
-          {groupBy === 'area' && !kind ? (
-            kindSections(g.devices).map((s) => (
-              <div key={s.kind} data-testid="hardware-kind">
-                <h4 className={KIND_HEAD}>{s.label}</h4>
-                <ul className="divide-y divide-white/5">
-                  {s.devices.map((d) => <DeviceRow key={d.id} device={d} onOpen={() => setOpen(d.id)} />)}
-                </ul>
-              </div>
-            ))
-          ) : (
-            <ul className="divide-y divide-white/5">
-              {g.devices.map((d) => <DeviceRow key={d.id} device={d} onOpen={() => setOpen(d.id)} />)}
-            </ul>
+          {devices.length > 0 && filtered && (
+            <button type="button" onClick={() => { setQuery(''); setType(''); setAttention(false); }}
+              className="mt-3 inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-white/10 px-4 text-sm text-slate-200 hover:bg-white/5">
+              <X size={16} aria-hidden /> Clear filters
+            </button>
           )}
         </div>
+      )}
+
+      {groups.map((g) => (
+        <section key={g.key || 'none'} data-testid="hardware-group" aria-label={g.label}>
+          <h3 className="mb-2 flex items-baseline gap-2 px-1 text-base font-semibold text-white">
+            {g.label} <span className="text-sm font-normal text-slate-500">{g.rows.length}</span>
+          </h3>
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+            {g.rows.map((r) => <DeviceTile key={r.device.id} device={r.device} entities={r.entities} onOpen={() => setOpen(r.device.id)} />)}
+          </ul>
+        </section>
       ))}
 
-      {services.length > 0 && (
-        <details className="border-t border-white/5" data-testid="hardware-services">
-          <summary className="flex min-h-11 cursor-pointer items-center px-4 text-xs text-slate-400">
-            Not devices: add-ons, assistants and accounts ({services.length})
+      {services.length > 0 && !filtered && (
+        <details className="glass-panel group rounded-2xl border border-white/10" data-testid="hardware-services">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 px-4 text-sm text-slate-300 [&::-webkit-details-marker]:hidden">
+            <span>Not devices: add-ons, assistants and accounts <span className="text-slate-500">({services.length})</span></span>
+            <ChevronRight size={16} className="text-slate-500 motion-safe:transition-transform group-open:rotate-90" aria-hidden />
           </summary>
-          <ul className="divide-y divide-white/5">
-            {services.map((d) => <DeviceRow key={d.id} device={d} onOpen={() => setOpen(d.id)} />)}
+          <ul className="divide-y divide-white/5 border-t border-white/5">
+            {services.map((d) => (
+              <li key={d.id}>
+                <button type="button" onClick={() => setOpen(d.id)} data-testid="hardware-service"
+                  className="flex min-h-12 w-full items-center justify-between gap-3 px-4 text-left hover:bg-white/5">
+                  <span className="min-w-0 truncate text-sm text-slate-200">{d.name}</span>
+                  <span className="shrink-0 text-xs text-slate-500">{d.label || STATUS_LABEL[d.status]}</span>
+                </button>
+              </li>
+            ))}
           </ul>
         </details>
       )}
-    </section>
-    {/* Outside the panel: its backdrop blur would otherwise be the fixed sheet's containing block. */}
-    {open && <HubDeviceSheet deviceId={open} areas={areas} onClose={() => setOpen(null)} />}
-    </>
+
+      {open && (
+        <HubDeviceSheet deviceId={open} summary={(openRow?.device ?? openService ?? null) as HardwareDevice | null}
+          areas={areas} onClose={() => setOpen(null)} />
+      )}
+    </div>
   );
 }

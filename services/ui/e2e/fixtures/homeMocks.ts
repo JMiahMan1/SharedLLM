@@ -1,6 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import { isServerCall } from './serverCalls';
-import { FLOWS, HARDWARE, HARDWARE_DETAIL, MOVED_FINDING } from './hardwareMocks';
+import { FLOWS, HARDWARE, MOVED_FINDING, detailFor, initialStates } from './hardwareMocks';
 import { TINY_WEBM_BASE64 } from './tinyVideo';
 import { registryMocks } from './registryMocks';
 
@@ -598,8 +598,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (registry) return json(registry.body, registry.status);
     if (p === '/api/homehub/hardware') return json(HARDWARE);
     if (p.startsWith('/api/homehub/hardware/')) {
-      return json({ ...HARDWARE_DETAIL, entity_list: HARDWARE_DETAIL.entity_list.map((e) => (voices.has(e.entity_id)
-        ? { ...e, voice: { ...e.voice, exposed: voices.get(e.entity_id), chosen: true } } : e)) });
+      return json(detailFor(decodeURIComponent(p.split('/').pop() || ''), initialStates(), voices));
     }
     if (p === '/api/homehub/entries') return json(ENTRIES);
     if (p === '/api/homehub/esphome-builder') return json({ configured: false });

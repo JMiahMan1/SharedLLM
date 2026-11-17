@@ -97,6 +97,8 @@ export async function expectFits(page: Page, panel: Locator): Promise<void> {
 export async function snap(page: Page, info: TestInfo, name: string): Promise<void> {
   const path = info.outputPath(`${name}-${info.project.name}.png`);
   await page.screenshot({ path });
+  // SNAP_DIR=<folder> keeps a copy of every screenshot, passed tests included, for a person to look at.
+  if (process.env.SNAP_DIR) await page.screenshot({ path: `${process.env.SNAP_DIR}/${name}-${info.project.name}.png` });
   await info.attach(`${name} (${info.project.name})`, { path, contentType: 'image/png' });
 }
 

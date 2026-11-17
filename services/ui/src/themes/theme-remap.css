@@ -44,7 +44,6 @@
 [data-site-theme-active] .bg-violet-500 { background-color: var(--site-accent) !important; }
 [data-site-theme-active] .bg-violet-500\/15 { background-color: color-mix(in srgb, var(--site-accent) 15%, transparent) !important; }
 [data-site-theme-active] .bg-violet-500\/20 { background-color: color-mix(in srgb, var(--site-accent) 20%, transparent) !important; }
-[data-site-theme-active] .bg-violet-500\/5 { background-color: color-mix(in srgb, var(--site-accent) 5%, transparent) !important; }
 [data-site-theme-active] .bg-violet-500\/70 { background-color: color-mix(in srgb, var(--site-accent) 70%, transparent) !important; }
 [data-site-theme-active] .bg-violet-600\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .border-indigo-300\/10 { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
@@ -189,6 +188,7 @@
 
 /* Light themes: dark surfaces, pale text and white text follow the theme. */
 [data-theme-scheme="light"] .active\:bg-white\/15:active { background-color: rgba(17, 24, 39, 0.09) !important; }
+[data-theme-scheme="light"] .active\:bg-white\/20:active { background-color: rgba(17, 24, 39, 0.12) !important; }
 [data-theme-scheme="light"] .bg-\[\#0a0e1a\] { background-color: var(--ht-surface) !important; }
 [data-theme-scheme="light"] .bg-\[\#0b0f1a\] { background-color: var(--ht-surface) !important; }
 [data-theme-scheme="light"] .bg-\[\#0c1120\] { background-color: var(--ht-surface) !important; }
@@ -404,6 +404,7 @@
 [data-theme-scheme="light"] .text-green-300 { color: oklch(52.7% 0.154 150.069) !important; }
 [data-theme-scheme="light"] .text-green-400 { color: oklch(52.7% 0.154 150.069) !important; }
 [data-theme-scheme="light"] .text-lime-300 { color: oklch(53.2% 0.157 131.589) !important; }
+[data-theme-scheme="light"] .text-orange-100 { color: oklch(55.3% 0.195 38.402) !important; }
 [data-theme-scheme="light"] .text-orange-300 { color: oklch(55.3% 0.195 38.402) !important; }
 [data-theme-scheme="light"] .text-orange-400 { color: oklch(55.3% 0.195 38.402) !important; }
 [data-theme-scheme="light"] .text-pink-200 { color: oklch(52.5% 0.223 3.958) !important; }
@@ -421,9 +422,11 @@
 [data-theme-scheme="light"] .text-red-500 { color: oklch(50.5% 0.213 27.518) !important; }
 [data-theme-scheme="light"] .text-red-500\/40 { color: color-mix(in srgb, oklch(50.5% 0.213 27.518) 40%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-100 { color: oklch(51.4% 0.222 16.935) !important; }
+[data-theme-scheme="light"] .text-rose-100\/80 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-200 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-rose-200\/70 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 70%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-200\/80 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 80%, transparent) !important; }
+[data-theme-scheme="light"] .text-rose-200\/90 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-300 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-rose-300\/30 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 30%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-300\/40 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 40%, transparent) !important; }

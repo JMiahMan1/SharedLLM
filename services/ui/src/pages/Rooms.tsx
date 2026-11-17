@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, House, MapPin, RefreshCw, Thermometer, Zap } from 'lucide-react';
 import { CameraTile, EntityControl, SensorChip } from '../components/dashboards/EntityControls';
+import { MoreControlsContext } from '../components/dashboards/moreControls';
+import ControlSheet from '../components/devices/controls/ControlSheet';
 import PageHeader, { HEADER_ACTION } from '../components/ui/PageHeader';
 import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
 import HomeOverview from '../components/home/HomeOverview';
@@ -59,11 +61,16 @@ export default function Rooms() {
     queryKey: ROOMS_KEY, queryFn: getRooms, refetchInterval: ROOMS_POLL_MS, refetchIntervalInBackground: false,
   });
   const [otherOpen, setOtherOpen] = useState(false);
+  // A name tapped on a room card opens that entity's full control, with its device's other entities.
+  const [more, setMore] = useState<string | null>(null);
+  const everything = data ? [...data.areas.flatMap((a) => a.entities), ...data.unassigned] : [];
+  const moreEntity = everything.find((e) => e.entity_id === more) ?? null;
   // A control's change shows up on the next poll; ask a little sooner than that.
   const onChanged = () => window.setTimeout(() => void queryClient.invalidateQueries({ queryKey: ROOMS_KEY }), 1500);
   const empty = data && data.areas.every((a) => a.entities.length === 0) && data.unassigned.length === 0;
 
   return (
+    <MoreControlsContext.Provider value={(e) => setMore(e.entity_id)}>
     <div className="mx-auto w-full max-w-7xl space-y-4 pb-24" data-testid="rooms-page">
       <PageHeader
         icon={House}
@@ -117,6 +124,12 @@ export default function Rooms() {
           {otherOpen && <div className="mt-3"><RoomBody entities={data.unassigned} onChanged={onChanged} /></div>}
         </article>
       )}
+      {moreEntity && (
+        <ControlSheet entity={moreEntity} onClose={() => setMore(null)}
+          area={data?.areas.find((a) => a.area_id === moreEntity.area_id)?.name}
+          siblings={moreEntity.device_id ? everything.filter((x) => x.device_id === moreEntity.device_id) : []} />
+      )}
     </div>
+    </MoreControlsContext.Provider>
   );
 }

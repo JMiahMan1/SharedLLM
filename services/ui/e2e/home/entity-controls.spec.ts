@@ -136,21 +136,23 @@ test.describe('entity controls', () => {
     const run = await open(page, '/devices');
     const panel = page.getByTestId('hardware');
     await panel.scrollIntoViewIfNeeded();
-    await panel.getByTestId('hardware-device').filter({ hasText: 'Reading lamp' }).click();
+    await panel.getByTestId('device-tile').filter({ hasText: 'Reading lamp' }).getByTestId('hardware-device').click();
     const dialog = page.getByRole('dialog');
     const detail = dialog.getByTestId('hardware-detail');
     await expect(detail).toBeVisible();
-    // Firmware, restart and the LED level are settings: in the sheet, folded away.
-    await detail.getByRole('button', { name: /Show settings, diagnostics and disabled \(4\)/ }).click();
+    // Firmware, restart and the LED level are settings: the sheet's Configuration.
 
-    const fw = detail.locator('[data-testid="update-control"][data-entity="update.porch_node_firmware"]');
+    const fw = detail.locator('[data-testid="firmware-control"][data-entity="update.porch_node_firmware"]');
     await expect(fw).toContainText('2026.10.2 available (2026.9.0 installed)');
     await expect(fw.getByRole('link', { name: 'Release notes' })).toHaveAttribute('href', 'https://example.com/changelog/');
     await expectTapTargets(fw);
     await fw.getByRole('button', { name: 'Install 2026.10.2 on Porch node Firmware' }).click();
+    // Installing restarts the device: it asks first.
+    await page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Cancel' }) })
+      .getByRole('button', { name: 'Install', exact: true }).click();
     await expect.poll(() => calls(run).find((c) => c.service === 'install')?.entity_id).toBe('update.porch_node_firmware');
 
-    const bulb = detail.locator('[data-testid="update-control"][data-entity="update.porch_node_bulb_firmware"]');
+    const bulb = detail.locator('[data-testid="firmware-control"][data-entity="update.porch_node_bulb_firmware"]');
     await expect(bulb).toContainText('1.1.0 available (1.0.0 installed)');
     await expect(bulb.getByRole('button', { name: /^Install/ })).toHaveCount(0);
     await expect(bulb).toContainText('Install it from the device');
