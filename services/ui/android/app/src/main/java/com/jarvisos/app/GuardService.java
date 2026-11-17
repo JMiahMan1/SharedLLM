@@ -85,6 +85,8 @@ public class GuardService extends AccessibilityService {
     private static final long WARNING_CHECK_SECONDS = 10;
     /** How long Android takes to end a split screen before going home works on the whole screen. */
     private static final long SPLIT_SETTLE_MS = 400;
+    /** How long Home takes to settle before a cover goes up over it. */
+    private static final long COVER_AFTER_HOME_MS = 400;
     private ScheduledExecutorService refresher;
     private final Handler main = new Handler(Looper.getMainLooper());
     /**
@@ -595,7 +597,12 @@ public class GuardService extends AccessibilityService {
                 lastCoverAt = now;
                 browserHosts.remove(front);
                 performGlobalAction(GLOBAL_ACTION_HOME);
-                startCover(GuardScreenActivity.MODE_VIDEO_CALL, front, blocked);
+                // Home is asynchronous: started at once, the cover was put up and
+                // then buried by the launcher about 100 ms later, so the child saw
+                // only the home screen (seen on the emulator, 2026-11-17).
+                final String site = blocked;
+                final String browser = front;
+                main.postDelayed(() -> startCover(GuardScreenActivity.MODE_VIDEO_CALL, browser, site), COVER_AFTER_HOME_MS);
                 return;
             }
             VideoCallRules.Call due = videoCalls.observe(settings,
