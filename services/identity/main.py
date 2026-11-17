@@ -1969,6 +1969,15 @@ def update_credential_shares(
     )
 
 
+#: Redis keys a deleted user's phone and telemetry leave behind, as
+#: ``<prefix><username>`` or ``<prefix><username>:...``.
+_DELETED_USER_KEY_PREFIXES = (
+    "tel:activity:", "tel:usage:", "tel:usagedev:", "tel:concerns:", "tel:concern-image:",
+    "tel:concern-reviews:", "tel:recap:", "tel:night:", "tel:apps:devices:", "tel:apps:mb-state:",
+    "tel:apps:inv:", "phone_beacon:",
+)
+
+
 @app.delete("/api/users/{username}")
 def delete_user(username: str, request: Request, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     if not admin.is_admin:
@@ -2000,6 +2009,15 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
                 f"tel:notify:{username.lower()}",
                 f"tel:push:sub:{username.lower()}",
             )
+            # What their phone reported: activity, screen time, concerns and
+            # their kept images, recaps, the app inventory and the beacon.
+            # Each is ``<prefix><user>`` or ``<prefix><user>:<more>``.
+            for prefix in _DELETED_USER_KEY_PREFIXES:
+                exact = f"{prefix}{username.lower()}"
+                r.delete(exact)
+                stale = list(r.scan_iter(match=f"{exact}:*", count=500))
+                if stale:
+                    r.delete(*stale)
         finally:
             r.close()
     except Exception as e:  # cleanup is best-effort; deletion must still succeed
@@ -2011,6 +2029,18 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
         session.delete(row)
     for row in session.exec(select(DeviceAssignment).where(DeviceAssignment.user_id == (user.id or 0))).all():
         session.delete(row)
+    # Rows kept by username, not id: their widgets, sharing choice, screen
+    # rules, the phones they own and those phones' events. Deleting a test
+    # account left all five behind (2026-11-17).
+    for model, column in (
+        (UserWidget, UserWidget.username),
+        (UserActivitySharing, UserActivitySharing.username),
+        (ScreenRules, ScreenRules.username),
+        (DeviceEvent, DeviceEvent.username),
+        (Device, Device.owner_username),
+    ):
+        for row in session.exec(select(model).where(column == user.username)).all():
+            session.delete(row)
     session.delete(user)
     session.commit()
 
