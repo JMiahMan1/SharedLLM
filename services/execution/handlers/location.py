@@ -122,10 +122,11 @@ async def _eta(target_name: str, to: str | None, caller: str, is_admin: bool) ->
 async def _room_answer(target_name: str, caller: str, ctx: UserContext | None) -> tuple[ExecutionResult | None, str]:
     """``(answer, note)``: the room answer when room detection knows it, else a note saying
     why it could not answer (empty when it is not set up, or the asker may not see it)."""
-    from services.execution import room_presence
+    from services.execution import hardware_router, room_presence
 
-    ha_url = (ctx.ha_url if ctx else "") or ""
-    ha_token = (ctx.ha_token if ctx else "") or ""
+    # The caller's own hub login, else the hub's: who may see whose room is
+    # Jarvis's rule (may_see_room), not the login's.
+    ha_url, ha_token = hardware_router.hub_pair(ctx) if ctx else ("", "")
     if not ha_url or not ha_token:
         return None, ""
     if not await room_presence.may_see_room(caller, target_name):

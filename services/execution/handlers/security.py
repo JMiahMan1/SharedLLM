@@ -18,6 +18,29 @@ class SecurityRequest(BaseModel):
     entity_id: str
     action: Literal["lock", "unlock", "open", "close", "status"]
 
+async def _hub_context(ctx: UserContext, entity_id: str, service: str) -> UserContext | ExecutionResult:
+    """The context with the hub login to use: the caller's own, else the hub's.
+
+    On the hub's login the caller must be allowed this entity (it used to be an
+    assertion, a 500 for everyone without a stored Home Assistant token).
+    """
+    from services.execution import hardware_router
+    from services.execution.entity_access import can_view, load_entity_permissions, verify_entity_access
+
+    hub_ctx = hardware_router.with_hub_login(ctx)
+    if hub_ctx is None:
+        return ExecutionResult(status="FAILURE", message=hardware_router.NO_HUB_MESSAGE, service="security")
+    if hub_ctx is not ctx:
+        if service == "status":
+            allowed = can_view(await load_entity_permissions(ctx.user, ctx.is_admin), entity_id)
+        else:
+            allowed = await verify_entity_access(ctx, entity_id, service=service)
+        if not allowed:
+            return ExecutionResult(status="FAILURE", service="security",
+                                   message=f"Access Denied: {ctx.user} may not use {entity_id}.")
+    return hub_ctx
+
+
 async def handle_security(req: SecurityRequest) -> ExecutionResult:
     ctx = req.user_context
     # Resolve and sanitize entity_id based on prefix or default to 'lock'/'cover'
@@ -27,6 +50,10 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
     log.info(f"[security] user={ctx.user} entity={full_entity_id} action={req.action} (original={req.entity_id})")
 
     if req.action == "status":
+        hub = await _hub_context(ctx, full_entity_id, "status")
+        if isinstance(hub, ExecutionResult):
+            return hub
+        ctx = hub
         assert ctx.ha_url is not None and ctx.ha_token is not None
         state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
         if state:
@@ -59,6 +86,10 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
 
     await voice_exposure.require_exposed(ctx, full_entity_id, service=service)
 
+    hub = await _hub_context(ctx, full_entity_id, service)
+    if isinstance(hub, ExecutionResult):
+        return hub
+    ctx = hub
     assert ctx.ha_url is not None and ctx.ha_token is not None
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,

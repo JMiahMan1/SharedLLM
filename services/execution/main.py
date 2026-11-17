@@ -245,12 +245,13 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
     while True:
         try:
             await asyncio.sleep(interval_seconds)
-            # The system account (user 1) owns the stored HA login; an empty
-            # payload would be refused by identity and leave the loop blind.
+            # The system account (user 1) may still hold an HA login; without
+            # one the hub's own login reads the enrolled sensors (household data).
             creds = await resolve_internal_user(user_id=1)
-            ha_url = creds.get("ha_url") if creds else None
-            ha_token = creds.get("ha_token") if creds else None
+            ha_url, ha_token = hardware_router.hub_pair(creds or {})
             if not ha_url or not ha_token:
+                warn_periodically(log, "execution.telemetry_no_hub",
+                                  "[telemetry] %s", hardware_router.NO_HUB_MESSAGE)
                 continue
 
             # Fetch enrollments (those flagged for power tracking)
@@ -1023,6 +1024,11 @@ async def execute_media_transport(req: MediaTransportRequest):
 
 @app.post("/execute/tv_cast", response_model=ExecutionResult)
 async def execute_tv_cast(req: TVCastRequest):
+    # The caller's own hub login, else the hub's (it used to die on an assertion
+    # without one), and the TV is checked like every other media command.
+    req = _with_hub_login(req)
+    if not await verify_entity_access(req.user_context, req.media_player_entity_id):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
     return await media.handle_tv_cast(req)
 
 @app.post("/execute/climate", response_model=ExecutionResult)
@@ -1230,10 +1236,13 @@ async def list_timers(user_id: str | None = None):
 
 
 async def _stage_ha_creds(user_id: str | None) -> tuple[str, str]:
-    """HA credentials for the TV stage: the caller's, else the household default.
+    """Hub login for the TV stage: the caller's, else the household default, else the hub's own.
 
     Same resolution as ``/execute/timers/devices``: the screens are the
-    household's, and a guest on a phone has no HA account of their own.
+    household's, and a guest on a phone has no HA account of their own. The
+    raw ``HA_URL`` env is never used: it is the retired HA host, and only
+    ``services.config.HA_URL`` is redirected to the hub (it failed to connect
+    to the old host at every start, 2026-11-17).
     """
     creds: dict[str, Any] | None = None
     if user_id:
@@ -1242,9 +1251,7 @@ async def _stage_ha_creds(user_id: str | None) -> tuple[str, str]:
     if not creds or not creds.get("ha_url") or not creds.get("ha_token"):
         with suppress(Exception):
             creds = await resolve_internal_user(user_id=1) or creds
-    ha_url = (creds or {}).get("ha_url") or os.environ.get("HA_URL", "")
-    ha_token = (creds or {}).get("ha_token") or os.environ.get("HA_TOKEN", "")
-    return str(ha_url or ""), str(ha_token or "")
+    return hardware_router.hub_pair(creds or {})
 
 
 @app.get("/execute/stage/screens")
@@ -1357,11 +1364,10 @@ async def list_timer_devices(user_id: str | None = None):
         )
 
     # 2. Home Assistant TVs & Speakers classified via Unified Communication Layer
-    ha_url = (creds or {}).get("ha_url") or os.environ.get("HA_URL", "")
-    ha_token = (creds or {}).get("ha_token") or os.environ.get("HA_TOKEN", "")
+    ha_url, ha_token = hardware_router.hub_pair(creds or {})
     if ha_url and ha_token:
         try:
-            states = await ha_client.get_states(ha_url, ha_token)
+            states = await ha_client.get_states(ha_url, ha_token, strict=True)
             classified = await classify_communication_devices(ha_url, ha_token, all_states=states or [])
             for item in classified:
                 devices.append({
@@ -1419,7 +1425,9 @@ async def execute_trigger(payload: dict[str, Any]):
     await timer.notify_timer_done(effective_user, timer_data)
     # A timer set by voice rings on the satellite that heard it (satellite_timers.py).
     from services.execution import satellite_timers
-    await satellite_timers.send(timer_data, "finished", creds.get("ha_url"), creds.get("ha_token"))
+    # The person's own hub login, else the hub's: the ringing devices are the household's.
+    hub_url, hub_token = hardware_router.hub_pair(creds)
+    await satellite_timers.send(timer_data, "finished", hub_url, hub_token)
     await timer.remember_fired_satellite(timer_data)  # a Stop or Snooze from a phone still reaches it
 
     # Execute the actual alert across all assigned hardware devices (ESPHome + TVs + Home Assistant Speakers)
@@ -1478,8 +1486,7 @@ async def execute_trigger(payload: dict[str, Any]):
         except Exception:
             configured_esphome = {}
 
-        ha_url = creds.get("ha_url")
-        ha_token = creds.get("ha_token")
+        ha_url, ha_token = hub_url, hub_token
         esphome_triggered: list[str] = []
         media_triggered: list[str] = []
         dispatched: list[str] = []
@@ -2260,19 +2267,16 @@ async def execute_announce(req: AnnouncementRequest):
     ctx = req.user_context
     target_player = req.entity_id
 
-    # Resolve HA credentials via Identity service
-    ha_url = ctx.ha_url
-    ha_token = ctx.ha_token
+    # The caller's own hub login, else the hub's (hardware_router.hub_login). On the
+    # hub's login the chosen speaker is checked against what the caller may control.
+    on_hub_login = not _has_own_hub_login(ctx)
+    ha_url, ha_token = hardware_router.hub_pair(ctx)
     if not ha_url or not ha_token:
         if ctx.mass_url and ctx.mass_token and (req.entity_id or req.device_name):
-            # No HA at all, but a speaker can still be reached directly.
+            # No hub at all, but a speaker can still be reached directly.
             ha_url, ha_token = "", ""
         else:
-            return _fail(
-                f"Home Assistant URL or token not configured for user '{ctx.user}' "
-                "(Identity -> Services, or ask an admin to grant the shared ones).",
-                "announce",
-            )
+            return _fail(hardware_router.NO_HUB_MESSAGE, "announce")
 
     # The hub's capability index decides which device a room means and which entities belong
     # together; a plain HA (no index) is the logged fallback, any other index failure is reported.
@@ -2315,6 +2319,9 @@ async def execute_announce(req: AnnouncementRequest):
         target_player = by_object_id[0]
     elif announce_idx is None and not target_player.startswith("media_player."):
         target_player = f"media_player.{target_player}"
+
+    if on_hub_login and ha_url and not await verify_entity_access(ctx, target_player):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
 
     log.info(f"[announce] START user={ctx.user} target={target_player} msg='{req.message}'")
 
@@ -2633,15 +2640,10 @@ async def execute_announce(req: AnnouncementRequest):
 async def execute_entity_search(req: EntitySearchRequest):
     """Search for HA entities by name, domain, area, or state."""
     ctx = req.user_context
-    ha_url = ctx.ha_url
-    ha_token = ctx.ha_token
-
+    # The caller's own hub login, else the hub's: results are filtered by can_view below.
+    ha_url, ha_token = hardware_router.hub_pair(ctx)
     if not ha_url or not ha_token:
-        return _fail(
-            f"Home Assistant URL or token not configured for user '{ctx.user}' "
-            "(Identity -> Services, or ask an admin to grant the shared ones).",
-            "entity_search",
-        )
+        return _fail(hardware_router.NO_HUB_MESSAGE, "entity_search")
 
     # Non-admins only ever see entities they may control. `None` means Identity
     # is unreachable and we have no cached answer: allow rather than hide the
@@ -2859,10 +2861,22 @@ def _detect_media_platform(entity_id: str, attrs: dict) -> str:
                 return platform
     return "unknown"
 
+def _discovery_login(ha_url: str, ha_token: str) -> tuple[str, str]:
+    """The login for a /discovery/* call: the one the gateway passed, else the hub's own.
+
+    The gateway passes a person's own HA login when they have one and nothing
+    otherwise; the hub's login is resolved here so the internal secret never
+    travels in a query string. These routes answer only internal callers, and
+    the gateway filters what a person sees by their entity permissions.
+    """
+    return hardware_router.hub_pair({"ha_url": ha_url, "ha_token": ha_token})
+
+
 @app.get("/discovery/entities")
 async def discovery_entities(request: Request, ha_url: str = "", ha_token: str = ""):
-    if not ha_url or not ha_token:
-        raise HTTPException(status_code=400, detail="Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials).")
+    ha_url, ha_token = _discovery_login(ha_url, ha_token)
+    if not ha_url:
+        raise HTTPException(status_code=503, detail=hardware_router.NO_HUB_MESSAGE)
     states = await ha_client.get_states(ha_url, ha_token) or []
     areas = await ha_client.get_areas(ha_url, ha_token) or {}
     registry = await device_registry.list_devices()
@@ -2887,8 +2901,9 @@ async def discovery_entities(request: Request, ha_url: str = "", ha_token: str =
 
 @app.get("/discovery/history")
 async def discovery_history(entity_id: str, days: int = 1, ha_url: str = "", ha_token: str = ""):
-    if not ha_url or not ha_token:
-        raise HTTPException(status_code=400, detail="Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials).")
+    ha_url, ha_token = _discovery_login(ha_url, ha_token)
+    if not ha_url:
+        raise HTTPException(status_code=503, detail=hardware_router.NO_HUB_MESSAGE)
     return await ha_client.get_history(ha_url, ha_token, entity_id, days)
 
 @app.get("/discovery/devices")
@@ -2912,8 +2927,9 @@ async def discovery_device_refresh(entity_id: str, request: Request, ha_url: str
     device_type = body.get("device_type")
     subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
 
-    if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials)."}
+    ha_url, ha_token = _discovery_login(ha_url, ha_token)
+    if not ha_url:
+        return {"status": "FAILURE", "message": hardware_router.NO_HUB_MESSAGE}
 
     await device_registry.invalidate_device(entity_id, reason="manual_refresh")
     result = await device_discovery.discover_device(
@@ -2930,8 +2946,9 @@ async def discovery_bulk_scan(request: Request, ha_url: str = "", ha_token: str 
     body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
     subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
 
-    if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials)."}
+    ha_url, ha_token = _discovery_login(ha_url, ha_token)
+    if not ha_url:
+        return {"status": "FAILURE", "message": hardware_router.NO_HUB_MESSAGE}
 
     discovered = await device_discovery.bulk_scan(ha_url, ha_token, subnet)
     return {"status": "SUCCESS", "discovered": discovered, "count": len(discovered)}
@@ -2949,8 +2966,9 @@ async def discovery_device_profile(entity_id: str, subnet: str | None = None, ha
     """Generate a complete device profile with network info, HA data, and control methods."""
     import device_discovery
     import device_profiler
-    if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials)."}
+    ha_url, ha_token = _discovery_login(ha_url, ha_token)
+    if not ha_url:
+        return {"status": "FAILURE", "message": hardware_router.NO_HUB_MESSAGE}
     subnet = subnet or device_discovery.DEFAULT_SUBNET
     profile = await device_profiler.profile_device(entity_id, ha_url, ha_token, subnet)
     return profile
@@ -2960,8 +2978,9 @@ async def discovery_profile_all(subnet: str | None = None, ha_url: str = "", ha_
     """Profile all media_player entities."""
     import device_discovery
     import device_profiler
-    if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials)."}
+    ha_url, ha_token = _discovery_login(ha_url, ha_token)
+    if not ha_url:
+        return {"status": "FAILURE", "message": hardware_router.NO_HUB_MESSAGE}
     subnet = subnet or device_discovery.DEFAULT_SUBNET
     profiles = await device_profiler.profile_all_media_devices(ha_url, ha_token, subnet)
     return {"profiles": profiles, "count": len(profiles)}
@@ -3164,7 +3183,12 @@ async def execute_ha_logbook(req: LogbookRequest):
     full_entity_id = ha_client.sanitize_entity_id("sensor", req.entity_id)
     log.info(f"[ha_logbook] user={ctx.user} entity={full_entity_id}")
 
-    entries = await ha_client.get_logbook(ctx.ha_url or "", ctx.ha_token or "", full_entity_id, days=req.days)
+    if not can_view(await load_entity_permissions(ctx.user, ctx.is_admin), full_entity_id):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
+    hub_url, hub_token = hardware_router.hub_pair(ctx)
+    if not hub_url:
+        return _fail(hardware_router.NO_HUB_MESSAGE, "ha_logbook")
+    entries = await ha_client.get_logbook(hub_url, hub_token, full_entity_id, days=req.days)
 
     if entries:
         return ExecutionResult(
@@ -3211,6 +3235,10 @@ async def _load_mass_ha_creds(user_id: str) -> dict[str, Any]:
     HA's `music_assistant.*` services when `ha_url`/`ha_token` are. The MA config
     entry id (needed by the HA path) is discovered from HA when it is missing.
 
+    The hub pair is the user's own login, else the hub's (``hardware_router.hub_login``):
+    homehub answers ``music_assistant.*`` itself, and only people imported from
+    Home Assistant have a stored token. The library is the household's.
+
     Raises ServiceNotConfiguredError when the user has neither pair; callers
     surface that instead of borrowing someone else's.
     """
@@ -3219,15 +3247,14 @@ async def _load_mass_ha_creds(user_id: str) -> dict[str, Any]:
         raise ServiceNotConfiguredError(
             f"Identity returned no credentials for user '{user_id}'."
         )
-    ha_url = creds.get("ha_url") or ""
-    ha_token = creds.get("ha_token") or ""
+    ha_url, ha_token = hardware_router.hub_pair(creds)
+    creds = {**creds, "ha_url": ha_url, "ha_token": ha_token}
     mass_url = creds.get("mass_url") or ""
     mass_token = creds.get("mass_token") or ""
     if not (ha_url and ha_token) and not (mass_url and mass_token):
         raise ServiceNotConfiguredError(
-            f"User '{user_id}' has no Music Assistant credentials and no Home Assistant "
-            "credentials. Add them under Identity -> Services, or ask an admin to grant "
-            "access to the shared ones."
+            f"User '{user_id}' has no Music Assistant credentials and no home hub is set up "
+            "(HA_URL). Add Music Assistant under Identity -> Services, or configure the hub."
         )
     # If mass_config_entry_id is missing, discover it from HA
     if ha_url and ha_token and not creds.get("mass_config_entry_id"):
@@ -3528,6 +3555,13 @@ async def execute_execution_logs(req: ExecutionLogRequest):
 @app.post("/execute/video/play", response_model=ExecutionResult)
 async def execute_video_play(req: VideoPlayRequest):
     log.info(f"[video/play] user={req.user_context.user} entity={req.entity_id} query='{req.query}'")
+    # The caller's own hub login, else the hub's: on the hub's the screen is checked
+    # like any media command (it used to die on an assertion without a login).
+    own_login = _has_own_hub_login(req.user_context)
+    req = _with_hub_login(req)
+    if not own_login and not await verify_entity_access(
+            req.user_context, ha_client.sanitize_entity_id("media_player", req.entity_id)):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
     return await video.handle_video_play(req)
 
 @app.post("/execute/diagnostics", response_model=ExecutionResult)
@@ -4064,6 +4098,18 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
         return {"status": "FAILURE", "message": "Empty transcript"}
 
     log.info(f"[voice] user={user_id} transcript='{transcript}'")
+
+    # Every branch below acts on one named device: it must be the caller's to
+    # control (this route used to check nothing), and it is reached with the
+    # caller's own hub login, else the hub's (hardware_router.hub_login).
+    named = str(req.get("entity_id") or "")
+    if named and named.lower() not in LOCAL_PLAYER_ALIASES:
+        if not await verify_entity_access(ctx, named):
+            return {"status": "FAILURE", "message": f"Access denied to {named}"}
+        hub_ctx = hardware_router.with_hub_login(ctx)
+        if hub_ctx is None:
+            return {"status": "FAILURE", "message": hardware_router.NO_HUB_MESSAGE}
+        ctx = hub_ctx
 
     # Light commands
     light_keywords = ["light", "lights", "lamp", "brightness", "dim", "turn on", "turn off"]

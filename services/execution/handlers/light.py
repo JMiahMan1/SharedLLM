@@ -36,18 +36,13 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
             service="light_control"
         )
 
-    # 2. CREDENTIAL RESOLUTION & STATE CHECK
-    #    Strictly this user's own HA credentials; a grant may have supplied them
-    #    in Identity, but the execution service never borrows another account's.
-    if not ctx.ha_url or not ctx.ha_token:
-        return ExecutionResult(
-            status="FAILURE",
-            message=(
-                f"Home Assistant URL or token not configured for user '{ctx.user}' "
-                "(Identity -> Services)."
-            ),
-            service="light_control"
-        )
+    # 2. HUB LOGIN & STATE CHECK
+    #    The caller's own login, else the hub's (never another person's token).
+    #    The route checked the caller may control this entity before we got here.
+    hub_ctx = hardware_router.with_hub_login(ctx)
+    if hub_ctx is None:
+        return ExecutionResult(status="FAILURE", message=hardware_router.NO_HUB_MESSAGE, service="light_control")
+    ctx = hub_ctx
 
     current = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
     if current:

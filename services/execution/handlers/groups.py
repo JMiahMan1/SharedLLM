@@ -160,10 +160,10 @@ async def _apply_light_pattern(req, ctx: UserContext) -> ExecutionResult:
     if not ha_client.authorize_action(ctx.model_dump(), "light", "turn_on"):
         return ExecutionResult(status="FAILURE", message="Access Denied: you may not control these lights.",
                                service=service)
-    if not ctx.ha_url or not ctx.ha_token:
-        return ExecutionResult(status="FAILURE", service=service,
-                               message=f"Home Assistant URL or token not configured for user '{ctx.user}' "
-                                       "(Identity -> Services).")
+    hub_ctx = hardware_router.with_hub_login(ctx)
+    if hub_ctx is None:
+        return ExecutionResult(status="FAILURE", service=service, message=hardware_router.NO_HUB_MESSAGE)
+    ctx = hub_ctx
 
     transition_s = max(0, int(pattern.get("transition_ms", req.transition_ms))) / 1000
     targets: dict[str, dict] = {}

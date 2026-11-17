@@ -69,9 +69,23 @@ async def test_a_get_service_only_reads_and_is_not_gated(answers):
     assert asked == []
 
 
-async def test_without_hub_credentials_the_check_fails_fast():
-    with pytest.raises(EntityNotExposed, match="no home hub credentials"):
+async def test_without_any_hub_the_check_fails_fast(monkeypatch):
+    import services.config as config
+
+    monkeypatch.setattr(config, "HA_URL", None)
+    with pytest.raises(EntityNotExposed, match="HA_URL"):
         await voice_exposure.require_exposed(_Ctx(via="assistant", ha_url=None), "light.den")
+
+
+async def test_without_a_login_of_their_own_the_hubs_login_asks(answers, monkeypatch):
+    """A person with no stored HA token (every family member, once HA is gone) is checked with the hub's login."""
+    import services.config as config
+
+    table, asked = answers
+    table["light.den"] = True
+    monkeypatch.setattr(config, "HA_URL", "http://hub.test")
+    await voice_exposure.require_exposed(_Ctx(via="assistant", ha_url=None, ha_token=None), "light.den")
+    assert asked
 
 
 async def test_a_dict_context_works_too(answers):

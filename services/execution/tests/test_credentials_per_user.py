@@ -2,10 +2,12 @@
 
 Identity now hands each user their own HA / Music Assistant / Audiobookshelf
 credentials and leaves unconfigured services empty (shared credentials require
-an explicit grant). Execution must therefore fail loudly instead of filling the
-gap from user 1 -- a user with no HA credentials must not drive the admin's
-house, and a user with no Music Assistant credentials must not see the admin's
-library presented as their own empty one.
+an explicit grant). Execution never fills the gap from user 1 or an admin.
+
+Home Assistant is retired: a caller with no HA login of their own reaches the
+hub with the hub's own login (``services.common.hub_login``), never another
+person's token, and only what their entity permissions allow. With no hub
+configured at all, every route says so plainly.
 """
 import os
 
@@ -44,8 +46,16 @@ def _forbid_first_user(monkeypatch) -> list:
     return called
 
 
+@pytest.fixture
+def no_hub(monkeypatch):
+    """No hub anywhere: HA_URL unset."""
+    import services.config as config
+
+    monkeypatch.setattr(config, "HA_URL", None)
+
+
 # Home Assistant: announce / entity search
-def test_announce_without_ha_credentials_does_not_borrow_admin(monkeypatch):
+def test_announce_without_any_hub_says_so_and_does_not_borrow_admin(monkeypatch, no_hub):
     called = _forbid_first_user(monkeypatch)
 
     resp = client.post(
@@ -57,10 +67,10 @@ def test_announce_without_ha_credentials_does_not_borrow_admin(monkeypatch):
     assert not called, "announce must not fall back to the first user"
     body = resp.json()
     assert body.get("status") != "SUCCESS"
-    assert "casey" in json_text(body)
+    assert "HA_URL" in json_text(body)
 
 
-def test_entity_search_without_ha_credentials_does_not_borrow_admin(monkeypatch):
+def test_entity_search_without_any_hub_says_so_and_does_not_borrow_admin(monkeypatch, no_hub):
     called = _forbid_first_user(monkeypatch)
 
     resp = client.post(
@@ -72,7 +82,7 @@ def test_entity_search_without_ha_credentials_does_not_borrow_admin(monkeypatch)
     assert not called, "entity search must not fall back to the first user"
     body = resp.json()
     assert body.get("status") != "SUCCESS"
-    assert "casey" in json_text(body)
+    assert "HA_URL" in json_text(body)
 
 
 def json_text(body) -> str:
@@ -91,7 +101,7 @@ def _stub_resolve(monkeypatch, creds: dict | None) -> None:
     monkeypatch.setattr(exec_main, "resolve_internal_user", fake)
 
 
-def test_ma_playlists_without_credentials_reports_the_missing_setup(monkeypatch):
+def test_ma_playlists_without_credentials_reports_the_missing_setup(monkeypatch, no_hub):
     called = _forbid_first_user(monkeypatch)
     _stub_resolve(monkeypatch, {"user": "casey", "ha_url": None, "ha_token": None,
                                 "mass_url": None, "mass_token": None})
@@ -110,7 +120,7 @@ def test_ma_playlists_without_credentials_reports_the_missing_setup(monkeypatch)
     assert not called
 
 
-def test_ma_browse_without_credentials_reports_the_missing_setup(monkeypatch):
+def test_ma_browse_without_credentials_reports_the_missing_setup(monkeypatch, no_hub):
     _forbid_first_user(monkeypatch)
     _stub_resolve(monkeypatch, {"user": "casey", "ha_url": None, "ha_token": None})
 
@@ -215,7 +225,7 @@ def test_discovery_entities_uses_the_creds_the_caller_passed(monkeypatch):
     assert not called
 
 
-def test_discovery_entities_without_credentials_names_the_missing_setup(monkeypatch):
+def test_discovery_entities_without_any_hub_names_the_missing_setup(monkeypatch, no_hub):
     called = _forbid_first_user(monkeypatch)
 
     resp = client.get(
@@ -224,8 +234,8 @@ def test_discovery_entities_without_credentials_names_the_missing_setup(monkeypa
         params={},
     )
 
-    assert resp.status_code == 400
-    assert "Home Assistant" in resp.text
+    assert resp.status_code == 503
+    assert "HA_URL" in resp.text
     assert not called
 
 

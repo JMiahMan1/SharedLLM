@@ -42,7 +42,7 @@ async def handle_climate(req: ClimateRequest) -> ExecutionResult:
     # call when HA is unreachable (the router already translates
     # climate.set_temperature). Calling HA directly here meant a thermostat on
     # an ESPHome board was out of reach whenever HA was down.
-    assert ctx.ha_url is not None and ctx.ha_token is not None
+    # execute_device_command sends with the caller's own hub login, else the hub's.
     result = await hardware_router.execute_device_command(
         ctx, "climate", "set_temperature", req.entity_id,
         {"temperature": req.temperature}, service_name="climate",

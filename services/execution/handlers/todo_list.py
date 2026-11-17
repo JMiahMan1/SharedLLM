@@ -22,7 +22,7 @@ import logging
 import re
 from typing import Any
 
-from services.execution import ha_client
+from services.execution import ha_client, hardware_router
 from services.execution.entity_access import EntityPermissions, load_entity_permissions
 from services.execution.schemas import ExecutionResult, TodoListRequest
 
@@ -143,9 +143,11 @@ async def _run(ctx: Any, service: str, entity_id: str, data: dict[str, Any]) -> 
 
 
 async def handle_todo_list(req: TodoListRequest) -> ExecutionResult:
-    ctx = req.user_context
-    if not ctx.ha_url or not ctx.ha_token:
-        return _fail("Home Assistant is not set up for your account, so I cannot reach the lists.")
+    # The caller's own hub login, else the hub's: the lists are filtered by the
+    # caller's entity permissions below, so the hub's login widens nothing.
+    ctx = hardware_router.with_hub_login(req.user_context)
+    if ctx is None:
+        return _fail(hardware_router.NO_HUB_MESSAGE)
     try:
         states = await ha_client.get_states(ctx.ha_url, ctx.ha_token, account=ctx.user, strict=True)
     except Exception as exc:

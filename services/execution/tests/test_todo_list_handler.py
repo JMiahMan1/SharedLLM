@@ -129,8 +129,19 @@ async def test_an_unreachable_hub_or_missing_credentials_says_so(hub):
     hub.fail_states = True
     res = await run(action="list", list_name="reminders")
     assert res.status == "FAILURE" and "could not reach the home hub" in res.message
-    res = await run(action="list", ctx={"ha_url": None})
-    assert res.status == "FAILURE" and "not set up for your account" in res.message
+
+
+
+async def test_without_a_login_of_their_own_the_hubs_login_reads_the_lists(hub, monkeypatch):
+    import services.config as config
+
+    monkeypatch.setattr(config, "HA_URL", "http://hub.test:8123")
+    res = await run(action="lists", ctx={"ha_url": None, "ha_token": None})
+    assert res.status == "SUCCESS", res.message
+    assert "Workshop" not in res.message  # the hub's login sees it; the caller still may not
+    monkeypatch.setattr(config, "HA_URL", None)
+    res = await run(action="lists", ctx={"ha_url": None, "ha_token": None})
+    assert res.status == "FAILURE" and "HA_URL" in res.message
 
 
 async def test_lists_names_every_list_the_caller_may_use(hub):

@@ -8,11 +8,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 from types import SimpleNamespace
 
 import aiohttp
 
+from services.execution import hardware_router
 from services.execution.schemas import ExecutionResult, UserContext
 from services.shared.rag_client import push_conversation
 
@@ -143,8 +143,9 @@ async def handle_intercom_start(req, user_context: UserContext) -> ExecutionResu
         custom_message = (getattr(req, "message", None) or "").strip()
         volume = getattr(req, "volume", None)
 
-        ha_url = user_context.ha_url or os.environ.get("HA_URL", "")
-        ha_token = user_context.ha_token or os.environ.get("HA_TOKEN", "")
+        # The caller's own hub login, else the hub's. Never the raw HA_URL env: that
+        # is the retired HA host (only services.config.HA_URL is redirected to the hub).
+        ha_url, ha_token = hardware_router.hub_pair(user_context)
 
         # "The room <person> is in" (target_room "room_of:<person>", or a person and no room):
         # the hub's Bluetooth room detection; unknown or stale is said, never guessed.
@@ -299,8 +300,7 @@ async def handle_intercom_end(req, user_context: UserContext | None = None) -> E
 
         await _call_identity("DELETE", f"/api/intercom/sessions/{session_id}")
 
-        ha_url = (user_context.ha_url if user_context else None) or os.environ.get("HA_URL", "")
-        ha_token = (user_context.ha_token if user_context else None) or os.environ.get("HA_TOKEN", "")
+        ha_url, ha_token = hardware_router.hub_pair(user_context or {})
         stopped: list[str] = []
         if target_entities and ha_url and ha_token:
             for eid in target_entities:

@@ -20,7 +20,14 @@ AnnounceFn = Callable[[AnnouncementRequest], Awaitable[Any]]
 
 
 def _ha_creds(user_context: UserContext) -> tuple[str, str]:
-    return (user_context.ha_url or "", user_context.ha_token or "")
+    """The caller's own hub login, else the hub's; ("", "") when no hub is configured.
+
+    Each target is announced through ``execute_announce``, which checks a caller on
+    the hub's login may control that speaker.
+    """
+    from services.execution import hardware_router
+
+    return hardware_router.hub_pair(user_context)
 
 
 async def _resolve_for_request(
@@ -32,7 +39,6 @@ async def _resolve_for_request(
 ) -> list[str]:
     ha_url, ha_token = _ha_creds(user_context)
     if not ha_url or not ha_token:
-        # No borrowing: a user without Home Assistant credentials has no targets.
         return []
     return await resolve_targets(
         entity_ids=entity_ids,
@@ -56,10 +62,7 @@ async def run_announcement(
     if not ha_url or not ha_token:
         return {
             "status": "FAILURE",
-            "message": (
-                f"Home Assistant URL or token not configured for user "
-                f"'{user_context.user}' (Identity -> Services)."
-            ),
+            "message": "No home hub is set up (HA_URL is not configured), so there is nothing to announce on.",
             "detail": {"resolved": []},
         }
 

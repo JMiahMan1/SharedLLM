@@ -5,7 +5,8 @@ These are "macro-actions" that combine existing capabilities.
 """
 import logging
 
-from services.execution import ha_client
+from services.execution import ha_client, hardware_router
+from services.execution.entity_access import verify_entity_access
 from services.execution.handlers import storage
 from services.execution.media_links import media_file_url
 from services.execution.schemas import ExecutionResult
@@ -97,6 +98,15 @@ async def handle_document_broadcast(req) -> ExecutionResult:
 
     full_entity_id = ha_client.sanitize_entity_id("media_player", entity_id)
 
+    # The caller's own hub login, else the hub's; on the hub's the caller must be allowed the speaker.
+    hub_ctx = hardware_router.with_hub_login(ctx)
+    if hub_ctx is None:
+        return ExecutionResult(status="FAILURE", message=hardware_router.NO_HUB_MESSAGE, service="composite_broadcast")
+    if hub_ctx is not ctx and not await verify_entity_access(ctx, full_entity_id):
+        return ExecutionResult(status="FAILURE", message=f"Access Denied: you may not use {full_entity_id}.",
+                               service="composite_broadcast")
+    ctx = hub_ctx
+
     # Power on if off
     state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
     if state and state.get("state") == "off":
@@ -151,11 +161,19 @@ async def handle_night_mode(req) -> ExecutionResult:
     if lights:
         try:
             from services.execution.schemas import LightControlRequest
+            # The caller's own hub login, else the hub's; on the hub's only the lights
+            # the caller may control are touched.
+            hub_ctx = hardware_router.with_hub_login(ctx)
+            if hub_ctx is None:
+                raise RuntimeError(hardware_router.NO_HUB_MESSAGE)
             if lights == "all":
-                all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
+                all_states = await ha_client.get_states(hub_ctx.ha_url, hub_ctx.ha_token)
                 light_entities = [s["entity_id"] for s in all_states if s["entity_id"].startswith("light.") and s.get("state") == "on"]
             else:
                 light_entities = lights if isinstance(lights, list) else [lights]
+            if hub_ctx is not ctx:
+                light_entities = [e for e in light_entities
+                                  if await verify_entity_access(ctx, ha_client.sanitize_entity_id("light", e))]
 
             for light_id in light_entities:
                 light_req = LightControlRequest(user_context=ctx, entity_id=light_id, action="turn_off", brightness_pct=0)
