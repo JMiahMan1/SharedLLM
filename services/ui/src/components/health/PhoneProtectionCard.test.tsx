@@ -14,7 +14,7 @@ vi.mock('@capacitor/core', async (importOriginal) => {
   return { ...actual, Capacitor: { ...(actual.Capacitor as object), getPlatform: () => platform.name } };
 });
 vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: { username: 'kid' } }) }));
-vi.mock('../../plugins/guard', () => ({ default: { status: vi.fn(), enableAdmin: vi.fn(), openGuardSettings: vi.fn(), openAppInfo: vi.fn() } }));
+vi.mock('../../plugins/guard', () => ({ default: { status: vi.fn(), enableAdmin: vi.fn(), openGuardSettings: vi.fn(), openAppInfo: vi.fn(), allowCallFilter: vi.fn() } }));
 vi.mock('../../plugins/phoneUsage', () => ({ default: { hasAccess: vi.fn(), openSettings: vi.fn() } }));
 vi.mock('../../plugins/mediaSession', () => ({ default: { hasAccess: vi.fn(), openSettings: vi.fn() } }));
 vi.mock('../../plugins/comms', () => ({ default: { hasAccess: vi.fn(), requestAccess: vi.fn() } }));
@@ -93,5 +93,33 @@ describe('PhoneProtectionCard', () => {
     const { container } = renderCard();
     await new Promise((r) => setTimeout(r, 30));
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('asks once for the lock call filter and counts it as setup', async () => {
+    vi.mocked(Guard.allowCallFilter).mockResolvedValue(undefined);
+    vi.mocked(Guard.status).mockResolvedValue({
+      adminActive: true, deviceOwner: true, guardEnabled: true, callFilterAvailable: true, callFilter: false,
+    });
+    renderCard();
+    const step = await screen.findByTestId('phone-protection-call-filter');
+    expect(screen.queryByTestId('phone-protection-on')).toBeNull();
+    expect(step.textContent).toContain('911 only');
+    fireEvent.click(step.querySelector('button')!);
+    expect(Guard.allowCallFilter).toHaveBeenCalled();
+  });
+
+  it('is fully on once the call filter is held', async () => {
+    vi.mocked(Guard.status).mockResolvedValue({
+      adminActive: true, deviceOwner: true, guardEnabled: true, callFilterAvailable: true, callFilter: true,
+    });
+    renderCard();
+    expect(await screen.findByTestId('phone-protection-on')).toBeTruthy();
+  });
+
+  it('does not hold back a phone that has no call filter role', async () => {
+    vi.mocked(Guard.status).mockResolvedValue({ adminActive: true, deviceOwner: false, guardEnabled: true });
+    renderCard();
+    expect(await screen.findByTestId('phone-protection-on')).toBeTruthy();
+    expect(screen.queryByTestId('phone-protection-call-filter')).toBeNull();
   });
 });

@@ -28,6 +28,7 @@ const GUARD_ROWS: Array<{ key: keyof MemberGuardState; label: string }> = [
   { key: 'adminActive', label: 'Device admin (no plain uninstall)' },
   { key: 'deviceOwner', label: 'Device owner' },
   { key: 'guardEnabled', label: 'Accessibility screen guard' },
+  { key: 'callFilter', label: 'Lock call filter (parents and 911 only)' },
   { key: 'webFilterAllowed', label: 'Web filter VPN allowed' },
   { key: 'webFilterActive', label: 'Web filter running' },
   { key: 'usageAccess', label: 'Usage access' },

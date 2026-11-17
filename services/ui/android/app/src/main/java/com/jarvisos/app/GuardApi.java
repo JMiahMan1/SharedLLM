@@ -44,6 +44,8 @@ final class GuardApi {
     static final String KEY_FILTER_PROMPT_AT = "guard_filter_prompt_at";
     static final String KEY_GUARD_BOOT = "guard_boot_count";
     static final String KEY_SUSPENDED_PACKAGES = "guard_suspended_packages";
+    /** Whether Jarvis set DISALLOW_OUTGOING_CALLS for a lock (so only Jarvis's own is ever lifted). */
+    static final String KEY_OUTGOING_CALLS_BLOCKED = "guard_outgoing_calls_blocked";
     static final int TAMPER_QUEUE_MAX = 30;
     private static final Object TAMPER_LOCK = new Object();
     private static final java.util.concurrent.atomic.AtomicBoolean FLUSHING = new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -405,6 +407,27 @@ final class GuardApi {
     /** Apps allowed alongside Jarvis and always_allowed when kiosk mode is on. */
     static Set<String> kioskApps(Context context) {
         return strings(lastStatus(context).optJSONArray("kiosk_apps"));
+    }
+
+    /**
+     * The numbers a locked phone may still call (the parents', E.164; the
+     * server's {@code lock_call_allow}). Emergency numbers always go through.
+     */
+    static Set<String> lockCallAllow(Context context) {
+        return strings(lastStatus(context).optJSONArray("lock_call_allow"));
+    }
+
+    /** Extra packages to suspend while locked, on top of LockCommsRules' own lists. */
+    static Set<String> lockSuspendApps(Context context) {
+        return strings(lastStatus(context).optJSONArray("lock_suspend_apps"));
+    }
+
+    static boolean outgoingCallsBlocked(Context context) {
+        return prefs(context).getBoolean(KEY_OUTGOING_CALLS_BLOCKED, false);
+    }
+
+    static void setOutgoingCallsBlocked(Context context, boolean blocked) {
+        prefs(context).edit().putBoolean(KEY_OUTGOING_CALLS_BLOCKED, blocked).apply();
     }
 
     /** Packages Jarvis suspended on the last device-owner sync. */

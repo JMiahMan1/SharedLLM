@@ -112,6 +112,8 @@ export type FamilyRole = 'father' | 'mother' | 'child' | 'teen' | 'adult_child' 
 
 export interface UserProfileRaw {
   mail_user?: string;
+  /** The member's own mobile number (E.164). A parent's is what their locked child may still call. */
+  phone_number?: string | null;
   id: string | number;
   username: string;
   display_name?: string;
@@ -590,6 +592,10 @@ export interface MemberGuardState {
   adminActive?: boolean;
   deviceOwner?: boolean;
   guardEnabled?: boolean;
+  /** The lock's call filter role is granted: while locked, calls go only to the parents and 911. */
+  callFilter?: boolean;
+  /** Whether this phone offers the call filter role at all. */
+  callFilterAvailable?: boolean;
   webFilterAllowed?: boolean;
   webFilterActive?: boolean;
   /** Android's strict Private DNS hostname ("" when none): it gets around the web filter. */

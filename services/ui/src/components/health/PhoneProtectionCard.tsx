@@ -54,7 +54,11 @@ export default function PhoneProtectionCard() {
   const filterWanted = Boolean(status.rules?.web_filter?.enabled);
   const filterReady = !filterWanted || Boolean(guard.webFilterAllowed);
   const reportingOn = Boolean(access && access.usage && access.notifications && access.calls && access.sms);
-  const allOn = guard.adminActive && guard.guardEnabled && filterReady && reportingOn;
+  // The lock's call filter (parents and 911 only while locked). An APK too
+  // old to report it, or a phone without the role, is not held back for it.
+  const callFilterReady = !guard.callFilterAvailable || Boolean(guard.callFilter);
+  const allOn = guard.adminActive && guard.guardEnabled && filterReady && reportingOn && callFilterReady;
+  const askCallFilter = () => void Guard.allowCallFilter().catch(() => undefined);
   const askComms = () => void Comms.requestAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
 
   return (
@@ -146,6 +150,24 @@ export default function PhoneProtectionCard() {
                 </button>
               )}
             </li>
+            {guard.callFilterAvailable && (
+              <li className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5" data-testid="phone-protection-call-filter">
+                Calls while locked{' '}
+                {guard.callFilter ? (
+                  <span className="font-medium text-emerald-300">go only to a parent or 911.</span>
+                ) : (
+                  <>
+                    <button type="button" className="glass-button ml-1 rounded-xl px-3 py-1.5 min-h-11 font-medium" onClick={askCallFilter}>
+                      Allow
+                    </button>
+                    <span className="block mt-1.5 leading-relaxed text-slate-400">
+                      While this phone is locked, calls go only to a parent or 911, from the phone or a watch or car paired with it.
+                      Android asks once: choose <b>Jarvis</b>.{guard.deviceOwner ? ' Until then a locked phone can call 911 only.' : ''}
+                    </span>
+                  </>
+                )}
+              </li>
+            )}
             {filterWanted && (
               <li className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5">
                 Web filter{' '}

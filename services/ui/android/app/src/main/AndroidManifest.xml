@@ -559,6 +559,18 @@
                 <action android:name="android.telecom.ConnectionService" />
             </intent-filter>
         </service>
+        <!-- The lock's call filter: while a child's phone is locked, outgoing
+             calls (from the phone, a watch or a car) go only to a parent;
+             emergency calls never reach it. Needs the call redirection role
+             (the guard setup step). See LockCallFilterService. -->
+        <service
+            android:name=".LockCallFilterService"
+            android:exported="true"
+            android:permission="android.permission.BIND_CALL_REDIRECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallRedirectionService" />
+            </intent-filter>
+        </service>
         <!-- Android's answer to Jarvis installing its own update (SelfUpdate). -->
         <receiver
             android:name=".SelfUpdate$Receiver"

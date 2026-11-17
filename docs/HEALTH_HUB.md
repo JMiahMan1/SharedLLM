@@ -987,6 +987,33 @@ point.
       cover the notification shade or the power menu; and the restrictions cannot be lifted while
       the phone cannot reach the server. To retire a device-owner phone, change the child's family role so the server reports
       it not protected and the guard clears the restrictions, then reset.
+      **No way around the lock with a watch, a car or a messenger (built 2026-11-17).** While a
+      lock is in force (protected, locked for any reason including bedtime, no parent unlock
+      window; `LockCommsRules`): (1) on a device owner, every watch companion app (Galaxy Wearable
+      and its per-model plugins, the Wear OS and Pixel Watch apps, Fitbit, Garmin Connect and
+      Garmin Messenger; future `com.samsung.wearable.watch*` plugins by prefix) and every
+      messaging app (the default SMS app, the known SMS/RCS apps and messengers, even ones on the
+      always-allowed list, plus the parents' `rules.lock_suspend_apps`) is suspended. A suspended
+      app cannot open and Android hides its notifications from the shade and from notification
+      listeners, which is how a watch mirrors them, so nothing reaches the wrist to read or answer.
+      Incoming texts still arrive: measured on Android 17, a text sent while the default SMS app
+      was suspended was stored in the SMS provider with its notification hidden, and the
+      notification came back on unsuspend. The suspension shares one set with the blocked-app
+      suspension, so lifting the lock unsuspends exactly what it added. The dialers, Telecom,
+      in-call and emergency packages and Jarvis are never suspended, and Bluetooth is never
+      switched off. (2) Outgoing calls go only to the parents (`lock_call_allow`, from each
+      parent's own `phone_number`, E.164; `HOUSEHOLD_PHONE_COUNTRY_CODE` completes a number saved
+      without one) or to an emergency number: `LockCallFilterService` holds Android's call
+      redirection role and cancels anything else. Telecom hands it every outgoing call, from the
+      phone or from a watch or car over Bluetooth, and never an emergency call, so 911 always works.
+      The role is a one-time consent in the guard setup card and shows as "Lock call filter" in
+      the parents' device status. Until it is granted, a locked device owner sets
+      `DISALLOW_OUTGOING_CALLS` (emergency calls still go out) and lifts only its own on unlock.
+      The lock-task allowlist includes the default dialer and the in-call screens, so the lock's
+      "Call a parent" (`parent_contacts`) opens the dialer. Texting a parent goes through Jarvis's
+      family chat: Android gives no app but the default SMS app a way to let some outgoing texts
+      through and stop others. Out of scope: LTE watches (they have their own number and
+      connection); incoming calls are not filtered, so a call can always be answered.
 
 ### Watching (Bark parity)
 

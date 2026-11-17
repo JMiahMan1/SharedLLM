@@ -30,6 +30,7 @@ import { api } from '../services/api';
 import type { UserProfile, APIKey } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
+import { errorText } from '../lib/errorText';
 import SecretInput from '../components/ui/SecretInput';
 import SystemValueHint from '../components/ui/SystemValueHint';
 import { credentialPayload, inUse, integrationFor, isSecretKey, missingFields, prefill, type Defaults } from '../lib/credentialForm';
@@ -618,6 +619,17 @@ const Identity = () => {
     onError: () => toast.error('Could not save your name'),
   });
 
+  // A parent's own number is what their locked child may still call.
+  const updatePhoneMutation = useMutation({
+    mutationFn: (phone: string) =>
+      api.updateProfile(phone ? { phone_number: phone } : ({ clear_fields: ['phone_number'] } as never)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['me'] });
+      toast.success('Number saved');
+    },
+    onError: (err) => toast.error(errorText(err, 'Could not save your number')),
+  });
+
   return (
     <div className="space-y-8 md:space-y-12 pb-12">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -885,6 +897,29 @@ const Identity = () => {
                         className="glass-input w-full text-sm"
                         placeholder="Display name"
                       />
+                   </div>
+                   <div>
+                      <label htmlFor="identity-phone-number" className="text-[9px] text-slate-500 uppercase font-black block mb-2 tracking-widest">Mobile number</label>
+                      <input id="identity-phone-number"
+                        key={fullUser ? `phone-${fullUser.phone_number ?? ''}` : 'phone-loading'}
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        aria-label="Mobile number"
+                        defaultValue={fullUser?.phone_number ?? ''}
+                        disabled={!fullUser}
+                        onBlur={(e) => {
+                          const next = e.target.value.trim();
+                          if (fullUser && next !== (fullUser.phone_number ?? '')) {
+                            updatePhoneMutation.mutate(next);
+                          }
+                        }}
+                        className="glass-input w-full text-sm"
+                        placeholder="+1 555 010 0100"
+                      />
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                        A parent's number is the one their children's phones can still call while locked (with 911).
+                      </p>
                    </div>
                 </div>
              </div>

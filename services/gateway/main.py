@@ -57,6 +57,8 @@ from services.common.screen_time import (
 from services.common.screen_time import (
     chore_answer_tag,
     chore_answer_words,
+    lock_call_allow,
+    parent_contacts,
 )
 from services.common.screen_time import (
     evaluate as evaluate_screen_time,
@@ -7695,6 +7697,12 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
         # A parent queued a remote wipe (Phase 12 MDM): the phone's guard reads
         # this and erases itself. False unless one was explicitly queued.
         "wipe_requested": mdm.wipe_requested(username),
+        # The parents, for the lock screen's "Call a parent" (phone is E.164
+        # or ""), and the same numbers as the list a locked phone may still
+        # call; emergency numbers always go through. The phone's call filter
+        # enforces it.
+        "parent_contacts": parent_contacts(body.get("parent_contacts")),
+        "lock_call_allow": lock_call_allow([c["phone"] for c in parent_contacts(body.get("parent_contacts"))]),
         # Notices queued for this one phone (an app-update push aimed at it).
         # Only present when the phone named a key that is really its own, so a
         # push to one phone is never announced on another, and "not

@@ -183,6 +183,9 @@ class UserUpdate(BaseModel):
     #: The family chat conversation to open on launch (clear with clear_fields).
     chat_default_token: str | None = None
     preferred_tts_voice: str | None = None
+    #: The member's own mobile number; a parent's is what their locked child
+    #: may still call. Normalised on save, refused when it is not a number.
+    phone_number: str | None = None
     is_admin: bool | None = None
     is_system_default: bool | None = None
     # Erase these fields. A blank value never erases anything (it means "leave
@@ -305,6 +308,7 @@ class UserRead(BaseModel):
     abuse_ch_status: str | None = None
     voice_fingerprint: str | None = None
     preferred_tts_voice: str | None = None
+    phone_number: str | None = None
     calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
     api_key: str | None = None
     # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses.
