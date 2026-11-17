@@ -184,6 +184,7 @@ export default function PrivateChatThread({
   return (
     <UnlockedChat
       partnerName={info?.partner_name || 'your partner'}
+      partner={info?.partner}
       token={token}
       conversation={conversation}
       messages={messages}
@@ -359,6 +360,8 @@ function LockScreen({
 
 interface UnlockedChatProps {
   partnerName: string;
+  /** The other parent's username (for a backup's keepsake), when known. */
+  partner?: string;
   token: string;
   conversation: TalkConversation;
   messages: TalkMessage[];
@@ -372,7 +375,7 @@ interface UnlockedChatProps {
   onAddBelovedToHome?: () => void;
 }
 
-function UnlockedChat({ partnerName, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, onChanged, onAddBelovedToHome }: UnlockedChatProps) {
+function UnlockedChat({ partnerName, partner, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, onChanged, onAddBelovedToHome }: UnlockedChatProps) {
   const queryClient = useQueryClient();
   const [securityOpen, setSecurityOpen] = useState(false);
   // The in-app camera: a photo, or a video clip (the two share one button and switch modes).
@@ -1131,7 +1134,9 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
       {securityOpen && (
         <PrivateChatSecurity
           token={token}
+          partner={partner}
           partnerName={partnerName}
+          vault={vault}
           onChanged={() => void queryClient.invalidateQueries({ queryKey: ['private-chat-status'] })}
           onClose={() => setSecurityOpen(false)}
         />

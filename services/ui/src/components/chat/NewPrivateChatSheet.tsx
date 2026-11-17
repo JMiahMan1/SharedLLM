@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { KeyRound, Loader2, Lock, TriangleAlert } from 'lucide-react';
+import { FolderOpen, KeyRound, Loader2, Lock, TriangleAlert } from 'lucide-react';
 import { newChatSecrets } from '../../lib/privateChatCrypto';
 import { api } from '../../services/api';
 import Sheet from './Sheet';
@@ -15,10 +15,13 @@ import { errorText, MIN_PASSWORD_LENGTH, passwordProblem, type PrivateChatInfo, 
 export default function NewPrivateChatSheet({
   partners,
   onCreated,
+  onOpenBackup,
   onClose,
 }: {
   partners: PrivateChatStatus['partners'];
   onCreated: (chat: PrivateChatInfo, key: CryptoKey) => void;
+  /** Put a chat back from its backup file instead (a new phone or a new server). */
+  onOpenBackup?: () => void;
   onClose: () => void;
 }) {
   const [partner, setPartner] = useState(partners.length === 1 ? partners[0].username : '');
@@ -157,6 +160,16 @@ export default function NewPrivateChatSheet({
           {busy ? 'Encrypting…' : 'Start private chat'}
         </button>
         <p className="text-center text-xs text-slate-500">At least {MIN_PASSWORD_LENGTH} characters. A short sentence is easy to share and hard to guess.</p>
+        {onOpenBackup && (
+          <button
+            type="button"
+            onClick={onOpenBackup}
+            data-testid="private-open-backup"
+            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-white/10 text-sm font-semibold text-slate-200"
+          >
+            <FolderOpen size={15} aria-hidden /> Have a backup? Open it
+          </button>
+        )}
       </form>
     </Sheet>
   );

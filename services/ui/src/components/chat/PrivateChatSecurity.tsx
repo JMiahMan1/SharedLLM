@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { BellRing, ChevronRight, Fingerprint, KeyRound, Loader2, Timer, TriangleAlert } from 'lucide-react';
+import { BellRing, ChevronRight, Download, Fingerprint, FolderOpen, KeyRound, Loader2, Timer, TriangleAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { changePasswordRequest } from '../../lib/privateChatCrypto';
@@ -8,9 +8,11 @@ import { enableDeviceUnlock, giveKeyTo } from '../../lib/privateChatDeviceUnlock
 import { privatePreviewPlugin, privatePreviewState } from '../../plugins/privatePreview';
 import { deviceUnlockAvailable, deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import Sheet from './Sheet';
+import { OpenPrivateBackup, PrivateChatExportSheet } from './PrivateChatBackup';
+import type { PrivateVault } from '../../lib/privateChatCrypto';
 import { errorText, MIN_PASSWORD_LENGTH, passwordProblem } from './privateChatModel';
 
-type Mode = 'menu' | 'password' | 'phone' | 'preview';
+type Mode = 'menu' | 'password' | 'phone' | 'preview' | 'backup' | 'open';
 
 const inputClass = 'glass-input min-h-11 w-full text-base sm:text-sm';
 
@@ -48,12 +50,18 @@ function PasswordField({ label, value, onChange, testId, autoComplete, autoFocus
  */
 export default function PrivateChatSecurity({
   token,
+  partner,
   partnerName,
+  vault,
   onChanged,
   onClose,
 }: {
   token: string;
+  /** The other parent's username, so a backup's keepsake shows names. */
+  partner?: string;
   partnerName: string;
+  /** The open chat's vault: an export makes sure the chat has its backup key first. */
+  vault?: PrivateVault;
   /** The password changed: the chat's key record is new. */
   onChanged: () => void;
   onClose: () => void;
@@ -198,6 +206,22 @@ export default function PrivateChatSecurity({
       setBusy(false);
     }
   };
+
+  if (mode === 'backup') {
+    return <PrivateChatExportSheet token={token} vault={vault} onBack={() => reset('menu')} onClose={onClose} />;
+  }
+
+  if (mode === 'open') {
+    return (
+      <OpenPrivateBackup
+        token={token}
+        names={partner ? { [partner]: partnerName } : {}}
+        onBack={() => reset('menu')}
+        onClose={onClose}
+        onRestored={() => onChanged()}
+      />
+    );
+  }
 
   if (mode === 'password') {
     return (
@@ -370,6 +394,26 @@ export default function PrivateChatSecurity({
         >
           <KeyRound size={16} className="shrink-0 text-rose-200" aria-hidden />
           <span className="min-w-0 flex-1">Change password</span>
+          <ChevronRight size={16} className="shrink-0 text-slate-400" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={() => reset('backup')}
+          data-testid="private-backup-open-export"
+          className="flex min-h-12 w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-left text-sm font-semibold text-white"
+        >
+          <Download size={16} className="shrink-0 text-rose-200" aria-hidden />
+          <span className="min-w-0 flex-1">Back up and export</span>
+          <ChevronRight size={16} className="shrink-0 text-slate-400" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={() => reset('open')}
+          data-testid="private-backup-open-file"
+          className="flex min-h-12 w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-left text-sm font-semibold text-white"
+        >
+          <FolderOpen size={16} className="shrink-0 text-rose-200" aria-hidden />
+          <span className="min-w-0 flex-1">Open a backup file</span>
           <ChevronRight size={16} className="shrink-0 text-slate-400" aria-hidden />
         </button>
         {phone.available && (

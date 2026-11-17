@@ -11,6 +11,7 @@ import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { MessageMark, PrivateChatInfo, PrivateChatStatus } from '../components/chat/privateChatModel';
 import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto';
 import { configureBackupKeys, type BackupKeyUpload } from '../lib/privateChatBackupKey';
+import type { RestoreBatch, RestoreClient, RestoreCounts } from '../lib/privateChatBackupFile';
 import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
 import type { FreshPosition } from '../lib/freshPosition';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
@@ -3675,6 +3676,58 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * The chat's encrypted backup file, made by the gateway on demand (only the chat password opens it).
+   * The server's reasons (429, 409) come back as an Error with the server's own words.
+   */
+  async exportPrivateChat(token: string): Promise<{ blob: Blob; filename: string }> {
+    try {
+      const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/export`, {
+        responseType: 'arraybuffer',
+        timeout: 600_000,
+      });
+      const filename = String(resp.headers?.['x-backup-filename'] || '');
+      return { blob: new Blob([resp.data as ArrayBuffer], { type: 'application/octet-stream' }), filename };
+    } catch (error) {
+      const data = (error as { response?: { data?: unknown } })?.response?.data;
+      const detail = data instanceof ArrayBuffer ? arrayBufferDetail(data) : '';
+      if (detail) throw new Error(detail, { cause: error });
+      throw error;
+    }
+  },
+
+  /** Open a restore of a chat from its backup's registry record (public key material only). 409 asks to merge. */
+  async beginPrivateChatRestore(registry: Record<string, unknown>, merge: boolean): Promise<PrivateChatInfo & { created: boolean; merge: boolean }> {
+    const resp = await apiClient.post('/api/private-chat/restore', { registry, merge });
+    return resp.data;
+  },
+
+  async privateChatRestoreHave(token: string): Promise<{ blobs: string[] }> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/restore/have`);
+    return resp.data;
+  },
+
+  /** One encrypted blob from a backup, under its own id (sent as a File for the Android bridge, like uploadPrivateBlob). */
+  async restorePrivateChatBlob(token: string, id: string, data: Blob): Promise<{ id: string; result: string }> {
+    const body = new File([data], 'sealed.bin', { type: 'application/octet-stream' });
+    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/restore/blobs/${encodeURIComponent(id)}`, body, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+      timeout: 180_000,
+    });
+    return resp.data;
+  },
+
+  /** A batch of sealed records from a backup (messages, gallery, edits and reactions, Beloved). */
+  async restorePrivateChatRecords(token: string, batch: RestoreBatch): Promise<{ result: Record<string, RestoreCounts> }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/restore/records`, batch, { timeout: 120_000 });
+    return resp.data;
+  },
+
+  async finishPrivateChatRestore(token: string): Promise<{ counts: Record<string, number> }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/restore/finish`);
+    return resp.data;
+  },
+
   async deletePrivateChat(token: string): Promise<ExecutionResponse> {
     const resp = await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}`);
     return resp.data;
@@ -6016,6 +6069,24 @@ export const api = {
     const resp = await apiClient.get('/api/recommendations/book');
     return resp.data;
   },
+};
+
+/** The server's `detail` in an error that came back as bytes (a download's error), or ''. */
+function arrayBufferDetail(data: ArrayBuffer): string {
+  try {
+    return String((JSON.parse(new TextDecoder().decode(data)) as { detail?: unknown }).detail ?? '');
+  } catch {
+    return '';
+  }
+}
+
+/** The restore routes, as lib/privateChatBackupFile.ts restoreBackup wants them. */
+export const privateChatRestoreClient: RestoreClient = {
+  begin: (registry, merge) => api.beginPrivateChatRestore(registry, merge),
+  have: (token) => api.privateChatRestoreHave(token),
+  putBlob: (token, id, data) => api.restorePrivateChatBlob(token, id, data),
+  records: (token, batch) => api.restorePrivateChatRecords(token, batch),
+  finish: (token) => api.finishPrivateChatRestore(token),
 };
 
 // Unlocking a private chat anywhere makes its backup key if it has none (lib/privateChatBackupKey.ts).

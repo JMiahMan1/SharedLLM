@@ -58,6 +58,116 @@ server holds, never `auth_hash` or anyone's name).
 
 The file format is described in full at the top of `scripts/private_chat_backup.py`.
 
+## In the app: back up, export, open and restore
+
+Everything below needs the chat password, and nothing below ever produces a
+copy that can be read without it.
+
+### Back up and export (Lock and password, Back up and export)
+
+A member of the unlocked chat asks the gateway for the chat's backup file
+(`GET /api/private-chat/chats/<token>/export`, services/gateway/private_chat_export.py).
+It is made by the nightly encrypter's own code (`write_backup` from
+`scripts/private_chat_backup.py`, loaded as a module, so the format is the
+same file for file): the chat's folder is streamed as a tar straight through
+the encryption into the response. No clear tar is written anywhere, and the
+response is ciphertext from its first byte. The file is named
+`private-chat-<date>.jarvis-backup`, with no names in it.
+
+* Members only (anyone else gets the chat's usual 404), the chat must have its
+  backup key (it is made the first time the chat is unlocked), and at most
+  `EXPORT_LIMIT` exports per chat per hour, one at a time (429 with
+  `Retry-After`).
+* The phone saves it where the person chooses: in the Android app the system
+  "Save to" picker (`lib/saveFile.ts`, the `JarvisSaveFile` plugin), in a
+  browser a normal download.
+* **Save as an encrypted page** wraps the same file in one HTML page that asks
+  for the password (below). There is no plain readable export: the rule is
+  that a copy is never readable without the password.
+* Not offered: copying it to Nextcloud Files from here. The person can upload
+  the saved file there themselves; it stays encrypted wherever it goes.
+
+### Open a backup file (Lock and password, or "Have a backup? Open it" on the start screen)
+
+Pick a `.jarvis-backup` (or an encrypted page saved earlier) and enter the
+chat password. The device does everything (`lib/privateChatBackupCore.js`,
+WebCrypto, never the network):
+
+1. The password opens the data key DK from the header's key records (v1 and
+   v2, the current one and the password history; when opened from a chat, that
+   chat's current record is tried too, for a password set after the backup).
+2. DK unseals the backup private key; ECDH with the header's ephemeral key and
+   HKDF give the file key.
+3. Every 1 MiB chunk is decrypted and checked (its place, the header, the
+   final flag) as it is read; a changed, moved, dropped or added chunk, a cut
+   or extra bytes refuse the whole file and nothing is shown.
+4. The tar inside is read into memory (only this chat's paths are accepted)
+   and the **keepsake** opens: read-only, the thread with dates, authors,
+   edits, reactions, replies, deleted messages marked, pictures and video
+   clips (decrypted when shown), the gallery and every Beloved section. It
+   closes, and its decrypted pictures are dropped, when it is closed or the
+   app goes to the background.
+
+**The encrypted page** (`lib/privateChatBackupFile.ts` `buildKeepsakePage`) is
+one self-contained HTML file: the backup, still encrypted, as base64, and the
+same decryptor (the very text of `privateChatBackupCore.js`) with a small
+viewer. Its content security policy lets it load nothing and send nothing. It
+opens in any current browser from a file, asks for the password, and shows
+the same keepsake; Lock forgets everything. Opening it needs X25519 in the
+browser for a chat whose phone made an X25519 key (Chrome 133+, Safari 17+,
+Firefox 130+); P-256 keys open everywhere.
+
+### Restore into Jarvis (from the keepsake)
+
+The device has opened and checked the file; it then sends the chat's records
+back exactly as they were in it, sealed, never decrypted:
+
+1. `POST /api/private-chat/restore` with the registry record from the backup
+   (members, key records, the backup key: what the server keeps for any chat,
+   reduced to those fields).
+   * **The chat exists here**: the caller must be in it, the members must be
+     the backup's, and the verifier must match (otherwise nothing in the
+     backup would open with this chat's key). If it already has data the
+     server answers 409 with counts and the app asks: **merge**? Merging adds
+     only what is missing.
+   * **It does not**: it is made again for the two people the backup names,
+     if both are parents with a chat account here and have no other private
+     chat together. Otherwise the 409 says who is missing and what to do.
+   * Either way a restore session opens for the caller (two hours), and the
+     other parent gets a notice with no content ("Sam restored the private
+     chat from a backup").
+2. `GET .../restore/have`, then `PUT .../restore/blobs/<id>` for each blob not
+   here yet (opaque ciphertext under its own id; one already here is never
+   replaced).
+3. `POST .../restore/records` in batches: messages with their ids, authors,
+   times, replies, tombstones and blob lists; gallery entries; edits and
+   reactions; Beloved records; read markers and the id floor. Every record
+   must be a well-formed sealed envelope by one of the two members; one bad
+   record refuses its whole batch.
+4. `POST .../restore/finish` closes the session.
+
+Merge rules (by id, never duplicated): a message already here is kept as it
+is (a deletion here stays deleted); a reaction is added if its id is new
+(who has seen it is united); an edit is added only to a message with none; a
+Beloved record keeps whichever version was changed last. The Talk migration
+exports a backup may hold are not restored.
+
+What the server sees during all this: the same ciphertext, ids, authors and
+times it held before, never a password, a key or a word. What it cannot
+check: who really wrote a sealed record. A member could add records in the
+other's name during a restore session, which is why a session is short, only
+for the member who opened it, and announced to the other parent.
+
+### Limits worth knowing
+
+* The whole backup is held in the device's memory while it is opened (and,
+  in the Android app, once more as base64 while it is saved). A chat with
+  many videos can be hundreds of MB; a phone may run out of memory on a very
+  large one. The nightly backups and `scripts/open_private_chat_backup.py` on
+  a computer have no such limit.
+* The Android "Save to" picker and opening the encrypted page from a phone's
+  Files app were not checked on a device for this change.
+
 ## Checking that a chat has a key
 
 * Members: `GET /api/private-chat/chats/<token>/backup-key` answers
