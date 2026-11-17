@@ -10,6 +10,7 @@
  * manual lock wipes it.
  */
 import { PrivateVault } from './privateChatCrypto';
+import { watchVaultForBackupKey } from './privateChatBackupKey';
 
 export type LockAfter = 'leave' | '1m' | '5m' | '15m' | 'close';
 
@@ -80,6 +81,8 @@ export function vaultFor(token: string): PrivateVault {
   if (!vault) {
     vault = new PrivateVault();
     vaults.set(token, vault);
+    // Any unlock (thread, Beloved, gallery, a call) makes the chat's backup key if it has none yet.
+    watchVaultForBackupKey(token, vault);
   }
   return vault;
 }

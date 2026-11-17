@@ -10,6 +10,7 @@ import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type Of
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { MessageMark, PrivateChatInfo, PrivateChatStatus } from '../components/chat/privateChatModel';
 import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto';
+import { configureBackupKeys, type BackupKeyUpload } from '../lib/privateChatBackupKey';
 import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
 import type { FreshPosition } from '../lib/freshPosition';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
@@ -3658,6 +3659,12 @@ export const api = {
     return resp.data;
   },
 
+  /** Store the chat's backup key (made on this device; never replaces one unless `rotate`). 409 when it already has one. */
+  async putPrivateChatBackupKey(token: string, body: BackupKeyUpload): Promise<PrivateChatInfo> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/backup-key`, body);
+    return resp.data;
+  },
+
   /** Re-wrap the chat's key under a new password (the body is made on this device). */
   async changePrivateChatPassword(token: string, body: PasswordChangeBody): Promise<PrivateChatInfo & { notified: string[] }> {
     const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/password`, body);
@@ -6006,6 +6013,9 @@ export const api = {
     return resp.data;
   },
 };
+
+// Unlocking a private chat anywhere makes its backup key if it has none (lib/privateChatBackupKey.ts).
+configureBackupKeys({ getChat: (token) => api.getPrivateChat(token), putBackupKey: (token, body) => api.putPrivateChatBackupKey(token, body) });
 
 /** Notice category to on/off; a category that is absent is on. */
 /** One waiting place reminder, as geo keeps it (docs/NOTES.md, Reminders (place)). */
