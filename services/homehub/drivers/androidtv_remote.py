@@ -9,6 +9,15 @@ They are written to a private 0600 directory because the library opens files.
 Entities: media_player and remote, both with unique_id = the TV's MAC. State is
 on/off as in HA (the protocol reports power, the foreground app and volume, not
 playback). A TV that cannot be reached is ``unavailable`` and the poll retries.
+An entry whose registry has neither (HA lost them, or the TV was added without
+them) gets both registered at setup, on a device carrying the MAC, as HA's
+integration creates them; existing or disabled ones are left alone.
+
+The remote takes every standard key name (``media_common.STANDARD_REMOTE_KEYS``,
+listed in its ``command_list``) as well as any Android key name with or without
+``KEYCODE_``: ``exit`` is BACK (Android has no exit key), ``input`` is TV_INPUT,
+digits are KEYCODE_0..9. Sources (``source_list``, and the remote's
+``activity_list``) are the known apps; selecting one launches it.
 
 Once connected, the TV's own ``device_info`` (maker, model, software version)
 is confirmed onto its device; the MAC is the entities' unique_id, which pairing
@@ -27,14 +36,24 @@ from typing import Any
 from androidtvremote2 import AndroidTVRemote, CannotConnect, ConnectionClosed, InvalidAuth
 
 from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
-from services.homehub.drivers.media_common import REMOTE_ACTIVITY, F, as_list, clamp01, clean, known_macs, wake_on_lan
+from services.homehub.drivers.media_common import (
+    REMOTE_ACTIVITY,
+    F,
+    as_list,
+    clamp01,
+    clean,
+    known_macs,
+    normalize_mac,
+    remote_command_list,
+    wake_on_lan,
+)
 
 #: The client name HA used; the TV shows it in its list of paired remotes.
 CLIENT_NAME = "Home Assistant"
 CONNECT_TIMEOUT_S = 10.0
 
 BASE_FEATURES = (F.PAUSE | F.VOLUME_STEP | F.VOLUME_MUTE | F.PREVIOUS_TRACK | F.NEXT_TRACK | F.TURN_ON
-                 | F.TURN_OFF | F.PLAY_MEDIA | F.STOP | F.PLAY | F.BROWSE_MEDIA)
+                 | F.TURN_OFF | F.PLAY_MEDIA | F.STOP | F.PLAY | F.BROWSE_MEDIA | F.SELECT_SOURCE)
 
 #: Friendly command names -> Android key codes (androidtvremote2 accepts names with or without KEYCODE_).
 KEYS = {
@@ -45,7 +64,8 @@ KEYS = {
     "rewind": "MEDIA_REWIND", "volume_up": "VOLUME_UP", "volume_down": "VOLUME_DOWN", "mute": "VOLUME_MUTE",
     "volume_mute": "VOLUME_MUTE", "power": "POWER", "power_on": "POWER", "power_off": "POWER",
     "channel_up": "CHANNEL_UP", "channel_down": "CHANNEL_DOWN", "info": "INFO", "search": "SEARCH",
-    "settings": "SETTINGS", "guide": "GUIDE",
+    "settings": "SETTINGS", "guide": "GUIDE", "input": "TV_INPUT", "exit": "BACK", "next_track": "MEDIA_NEXT",
+    "previous_track": "MEDIA_PREVIOUS", **{str(d): str(d) for d in range(10)},
 }
 
 #: A few common apps so ``app_name``/``source`` read like HA's (HA used the user's app list option).
@@ -64,6 +84,10 @@ def key_code(command: str) -> str:
     if up.startswith("KEYCODE_"):
         return up[8:]
     return KEYS.get(c.lower()) or up
+
+
+#: The remote's ``command_list``: the standard keys (every one has an Android key), then the extras.
+COMMAND_LIST = remote_command_list(lambda k: k in KEYS, KEYS)
 
 
 class AndroidTVRemoteDriver(Driver):
@@ -102,9 +126,25 @@ class AndroidTVRemoteDriver(Driver):
         return paths[0], paths[1]
 
     # -- lifecycle ----------------------------------------------------------------
+    def _ensure_entities(self) -> None:
+        """Register the media_player and remote HA creates for every Android TV, when the registry lacks them."""
+        mac = normalize_mac(str(self.entry.unique_id or "")) or normalize_mac(str(self.entry.data.get("mac") or ""))
+        if not mac:
+            return
+        if self.registry_entity("media_player", mac) and self.registry_entity("remote", mac):
+            return
+        known = self.registry_entity("media_player", mac) or self.registry_entity("remote", mac)
+        dev = self.hub.devices.get(known.device_id or "") if known else None
+        if dev is None:
+            dev = self.ensure_device(str(self.entry.data.get("name") or self.entry.title or self.host),
+                                     connections=[["mac", mac]])
+        self.ensure_entity("media_player", mac, None, device=dev, original_device_class="tv")
+        self.ensure_entity("remote", mac, None, device=dev)
+
     async def async_setup(self) -> None:
         if not self.host:
             raise HubError("androidtv_remote entry has no host")
+        self._ensure_entities()
         certfile, keyfile = await asyncio.to_thread(self._cert_files)
         self.api = self.remote_factory(CLIENT_NAME, certfile, keyfile, self.host)
         self.api.add_is_on_updated_callback(lambda _v: self._publish())
@@ -170,10 +210,11 @@ class AndroidTVRemoteDriver(Driver):
         sf = BASE_FEATURES | (F.VOLUME_SET if vol.get("max") else 0)
         for e in self.entities:
             if e.domain == "media_player":
-                attrs: dict[str, Any] = {"supported_features": sf, "device_class": "tv"}
+                attrs: dict[str, Any] = {"supported_features": sf, "device_class": "tv",
+                                         "source_list": sorted(set(APP_NAMES.values()))}
                 if is_on:
                     attrs.update(clean({
-                        "app_id": app, "app_name": app_name,
+                        "app_id": app, "app_name": app_name, "source": app_name,
                         "volume_level": (vol["level"] / vol["max"]) if vol.get("max") else None,
                         "is_volume_muted": vol.get("muted"),
                     }))
@@ -183,7 +224,7 @@ class AndroidTVRemoteDriver(Driver):
                     "supported_features": REMOTE_ACTIVITY,
                     "current_activity": app_name if is_on else None,
                     "activity_list": sorted(set(APP_NAMES.values())),
-                    "command_list": sorted(KEYS),
+                    "command_list": COMMAND_LIST,
                 }))
 
     # -- services -----------------------------------------------------------------

@@ -60,6 +60,10 @@ class FakeWSRemote:
     async def send_commands(self, commands, key_press_delay=None):
         self.sent.extend(c.as_dict() if hasattr(c, "as_dict") else c for c in commands)
 
+    async def app_list(self):
+        return [{"appId": "3201907018807", "name": "Netflix", "app_type": 2},
+                {"appId": "111299001912", "name": "YouTube", "app_type": 4}]
+
     async def close(self):
         self.alive = False
 
@@ -229,3 +233,40 @@ def test_key_names():
     assert samsung_key("Return") == "KEY_RETURN"
     assert samsung_key("3d") == "KEY_3D"
     assert LegacyBridge.power_key == "KEY_POWEROFF"
+
+
+def test_samsung_takes_every_standard_key():
+    from services.homehub.drivers.media_common import STANDARD_REMOTE_KEYS
+    from services.homehub.drivers.samsungtv import COMMAND_LIST
+
+    assert all(k in COMMAND_LIST for k in STANDARD_REMOTE_KEYS)
+    assert samsung_key("input") == "KEY_SOURCE"
+    assert samsung_key("4") == "KEY_4"
+    assert samsung_key("channel_down") == "KEY_CHDOWN"
+    assert samsung_key("fast_forward") == "KEY_FF"
+
+
+async def test_websocket_tv_lists_and_launches_its_apps_and_play_pause_toggles():
+    FakeWSRemote.instances.clear()
+    hub, drv, http = build(WS)
+    rc_http(http, "/dmr")
+    await drv.async_setup()
+    st = hub.states.get("media_player.tv")
+    assert st.attributes["source_list"] == ["TV", "HDMI", "Netflix", "YouTube"]
+    assert hub.states.get("remote.tv").attributes["command_list"][:4] == ["up", "down", "left", "right"]
+    await drv.async_call(hub.entities["media_player.tv"], "media_player", "select_source", {"source": "Netflix"})
+    r = FakeWSRemote.instances[-1]
+    assert r.sent[-1]["params"]["data"]["appId"] == "3201907018807"
+    assert r.sent[-1]["params"]["data"]["action_type"] == "DEEP_LINK"
+    await drv.async_call(hub.entities["media_player.tv"], "media_player", "select_source", {"source": "YouTube"})
+    assert r.sent[-1]["params"]["data"]["action_type"] == "NATIVE_LAUNCH"
+    await drv.async_call(hub.entities["remote.tv"], "remote", "send_command",
+                         {"command": ["play_pause", "play_pause", "input"], "delay_secs": 0})
+    assert [c["params"]["DataOfCmd"] for c in r.sent[-3:]] == ["KEY_PLAY", "KEY_PAUSE", "KEY_SOURCE"]
+
+
+async def test_legacy_tv_keeps_tv_and_hdmi_only():
+    hub, drv, http = build(LEGACY)
+    rc_http(http, "/smp_18_")
+    await drv.async_setup()
+    assert hub.states.get("media_player.tv").attributes["source_list"] == ["TV", "HDMI"]
