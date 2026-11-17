@@ -250,39 +250,66 @@ final class GuardScreenView {
         LinearLayout actions = new LinearLayout(context);
         actions.setOrientation(LinearLayout.VERTICAL);
         actions.setGravity(Gravity.CENTER_HORIZONTAL);
-        Button parentButton;
+        boolean chores = "chores".equals(reason);
+        // The child's one clear next step, as the big button.
         if (tamper) {
             Button signIn = primaryButton(context, pal, "Parent sign in");
             signIn.setOnClickListener(v -> sheet.show(parentCard(context, pal, sheet, host)));
             actions.addView(signIn, fullWidth(context, 0));
-            parentButton = null;
-        } else {
-            if (appOff && pkg != null && !pkg.isEmpty()) {
-                Button askApp = primaryButton(context, pal, "Ask a parent to unblock");
-                askApp.setOnClickListener(v -> sheet.show(askAppCard(context, pal, sheet, pkg, appName, pal.brand)));
-                actions.addView(askApp, fullWidth(context, 0));
-            } else if (locked || appOff) {
-                Button ask = primaryButton(context, pal, "Ask for more time");
-                ask.setOnClickListener(v -> sheet.show(askCard(context, pal, sheet, pal.brand)));
-                actions.addView(ask, fullWidth(context, 0));
-            }
-            parentButton = quietButton(context, pal, "Parent unlock", R.drawable.mi_key);
-            parentButton.setOnClickListener(v -> sheet.show(parentCard(context, pal, sheet, host)));
+        } else if (appOff && pkg != null && !pkg.isEmpty()) {
+            Button askApp = primaryButton(context, pal, "Ask a parent to unblock");
+            askApp.setOnClickListener(v -> sheet.show(askAppCard(context, pal, sheet, pkg, appName, pal.brand)));
+            actions.addView(askApp, fullWidth(context, 0));
+        } else if (locked && chores) {
+            Button tick = primaryButton(context, pal, "Check off chores");
+            tick.setOnClickListener(v -> host.onOpenJarvis());
+            actions.addView(tick, fullWidth(context, 0));
+        } else if (locked || appOff) {
+            Button ask = primaryButton(context, pal, "Ask for more time");
+            ask.setOnClickListener(v -> sheet.show(askCard(context, pal, sheet, pal.brand)));
+            actions.addView(ask, fullWidth(context, 0));
         }
-        Button message = tonalButton(context, pal, "Message a parent");
-        message.setOnClickListener(v -> sheet.show(messageCard(context, pal, sheet, pal.brand)));
-        actions.addView(message, fullWidth(context, actions.getChildCount() == 0 ? 0 : 12));
 
-        // The two quiet ways out, side by side: Jarvis itself, and a parent.
+        // A parent is always reachable: a message, and a call when the
+        // server knows their number (calls to parents and 911 still go through).
+        java.util.List<String[]> parents = parentPhones(context);
+        LinearLayout reach = new LinearLayout(context);
+        reach.setOrientation(LinearLayout.HORIZONTAL);
+        Button message = tonalButton(context, pal, parents.isEmpty() ? "Message a parent" : "Message", R.drawable.mi_chat);
+        message.setOnClickListener(v -> sheet.show(messageCard(context, pal, sheet, pal.brand)));
+        reach.addView(message, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (!parents.isEmpty()) {
+            Button call = tonalButton(context, pal, "Call", R.drawable.mi_call);
+            call.setOnClickListener(v -> {
+                if (parents.size() == 1) {
+                    dial(context, parents.get(0)[1]);
+                } else {
+                    sheet.show(callCard(context, pal, sheet, parents));
+                }
+            });
+            LinearLayout.LayoutParams callLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            callLp.leftMargin = dp(context, 10);
+            reach.addView(call, callLp);
+        }
+        actions.addView(reach, fullWidth(context, actions.getChildCount() == 0 ? 0 : 12));
+
+        // The quiet ways out, side by side: Jarvis (chores, chat, the parts a
+        // parent left open), more time on a chores lock, and a parent's unlock.
         LinearLayout quiet = new LinearLayout(context);
         quiet.setOrientation(LinearLayout.HORIZONTAL);
         quiet.setGravity(Gravity.CENTER);
-        if (locked) {
-            Button jarvis = quietButton(context, pal, "Open Jarvis", R.drawable.mi_home);
+        if (locked && chores) {
+            Button more = quietButton(context, pal, "More time", R.drawable.mi_hourglass);
+            more.setOnClickListener(v -> sheet.show(askCard(context, pal, sheet, pal.brand)));
+            quiet.addView(more, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        } else if (locked) {
+            Button jarvis = quietButton(context, pal, "Chores & Jarvis", R.drawable.mi_home);
             jarvis.setOnClickListener(v -> host.onOpenJarvis());
             quiet.addView(jarvis, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         }
-        if (parentButton != null) {
+        if (!tamper) {
+            Button parentButton = quietButton(context, pal, "Parent unlock", R.drawable.mi_key);
+            parentButton.setOnClickListener(v -> sheet.show(parentCard(context, pal, sheet, host)));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             if (quiet.getChildCount() > 0) lp.leftMargin = dp(context, 10);
             quiet.addView(parentButton, lp);
@@ -1099,6 +1126,66 @@ final class GuardScreenView {
         button.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return button;
+    }
+
+    private static Button tonalButton(Context context, Palette pal, String label, int iconRes) {
+        Button button = tonalButton(context, pal, label);
+        android.graphics.drawable.Drawable icon = context.getDrawable(iconRes);
+        if (icon != null) {
+            icon = icon.mutate();
+            icon.setTint(pal.onTonal);
+            int size = dp(context, 20);
+            icon.setBounds(0, 0, size, size);
+            button.setCompoundDrawablesRelative(icon, null, null, null);
+            button.setCompoundDrawablePadding(dp(context, 8));
+        }
+        return button;
+    }
+
+    /** The child's parents who have a phone number, as {name, number}, from the guard status. */
+    private static java.util.List<String[]> parentPhones(Context context) {
+        java.util.List<String[]> out = new java.util.ArrayList<>();
+        org.json.JSONArray list = GuardApi.lastStatus(context).optJSONArray("parent_contacts");
+        if (list == null) return out;
+        for (int i = 0; i < list.length(); i++) {
+            org.json.JSONObject p = list.optJSONObject(i);
+            if (p == null) continue;
+            String phone = p.optString("phone", "").trim();
+            if (phone.isEmpty()) continue;
+            String name = p.optString("name", "").trim();
+            out.add(new String[]{name.isEmpty() ? "Parent" : name, phone});
+        }
+        return out;
+    }
+
+    /** Opens the phone's dialer on a parent's number; the child presses call. */
+    private static void dial(Context context, String number) {
+        try {
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_DIAL,
+                    android.net.Uri.fromParts("tel", number, null));
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception ignored) {
+            // No dialer on this device (a tablet): the message button is still there.
+        }
+    }
+
+    /** "Call a parent" with more than one parent: one row each. */
+    private static View callCard(Context context, Palette pal, Sheet sheet, java.util.List<String[]> parents) {
+        LinearLayout card = sheetPanel(context, pal);
+        card.addView(cardHeader(context, pal, R.drawable.mi_call, pal.brand, "Call a parent"));
+        for (String[] parent : parents) {
+            Button call = tonalButton(context, pal, "Call " + parent[0], R.drawable.mi_call);
+            call.setOnClickListener(v -> {
+                sheet.hide();
+                dial(context, parent[1]);
+            });
+            addFullWidth(card, call, 10);
+        }
+        Button back = textButton(context, pal, sheet.backLabel);
+        back.setOnClickListener(v -> sheet.hide());
+        addFullWidth(card, back, 8);
+        return card;
     }
 
     /** A low-key outlined pill with a small icon, for the ways out that are not the child's next step. */

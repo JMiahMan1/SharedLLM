@@ -55,16 +55,20 @@ export const LOCKED_SECTIONS: LockedSection[] = [
 ];
 
 const KNOWN = new Map(LOCKED_SECTIONS.map((s) => [s.id, s]));
-/** What the lock's own button opens, so it is open whatever the list says. */
-const ALWAYS_OPEN: LockedSectionId = 'chat';
+/**
+ * Open whatever the list says: the family chat and calls (a child can always
+ * reach a parent), their own time (to ask for more), and chores (a chores lock
+ * lifts once they are ticked off).
+ */
+const ALWAYS_OPEN: readonly LockedSectionId[] = ['chat', 'calls', 'time', 'chores'];
 
 /**
  * The server's list as this app can use it: known ids, each once, in the
- * server's order, with chat first. An empty list (an older server, or none
- * synced yet) leaves chat alone.
+ * server's order, after the sections that are always open. An empty list (an
+ * older server, or none synced yet) leaves just those.
  */
 export function normalizeSections(ids: readonly string[] | null | undefined): LockedSectionId[] {
-  const out: LockedSectionId[] = [ALWAYS_OPEN];
+  const out: LockedSectionId[] = [...ALWAYS_OPEN];
   for (const id of ids || []) {
     if (KNOWN.has(id as LockedSectionId) && !out.includes(id as LockedSectionId)) out.push(id as LockedSectionId);
   }
