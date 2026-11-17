@@ -28,7 +28,7 @@ def _sealed(n: int = 40) -> str:
     iv = base64.b64encode(bytes(range(12))).decode()
     ct = base64.b64encode(bytes([9]) * n).decode()
     envelope = json.dumps({"kind": "sealed", "title": "Encrypted message", "v": 1, "iv": iv, "ct": ct})
-    return f"\U0001f512 Encrypted message\n\n```jarvis-envelope\n{envelope}\n```"
+    return f"\U0001f512 Encrypted message\n\n```jarvis-envelope\n{envelope}\n```jarvis-envelope"
 
 
 @pytest.fixture
@@ -248,3 +248,20 @@ def test_talk_reactions_stay_refused_in_a_private_room(chat):
     resp = chat["client"].post("/api/communication/talk/react",
                                json={"token": TOKEN, "message_id": 7, "reaction": "❤️"}, headers=_as("alex"))
     assert resp.status_code == 403
+
+
+def test_the_apps_own_envelope_format_is_accepted_and_text_after_it_is_not():
+    """The app closes the block with the full fence; that is the envelope, not text beside it."""
+    import base64
+
+    from services.gateway import private_chat_marks as pcm
+    iv, ct = base64.b64encode(b"\x01" * 12).decode(), base64.b64encode(b"\x02" * 40).decode()
+    body = f'{{"kind":"sealed","title":"Encrypted message","v":1,"iv":"{iv}","ct":"{ct}"}}'
+    app_format = f"\U0001f512 Encrypted message\n\n```jarvis-envelope\n{body}\n```jarvis-envelope"
+    assert pcm._sealed(app_format, 32 * 1024) == app_format
+    bare_close = f"\U0001f512 Encrypted message\n\n```jarvis-envelope\n{body}\n```"
+    assert pcm._sealed(bare_close, 32 * 1024) == bare_close
+    import pytest
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):
+        pcm._sealed(app_format + "\nsee you at eight", 32 * 1024)
