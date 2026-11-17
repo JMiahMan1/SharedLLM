@@ -7142,3 +7142,10 @@ async def vehicle_lookup_vin(vin: str):
             await r.set(cache_key, json.dumps(out), ex=86400 * 30)
 
     return out
+
+
+# The account export and restore (docs/ACCOUNT_EXPORT.md), behind the middleware above.
+# get_redis is looked up at call time, so tests can swap it.
+from services.geo import account_export as _account_export  # noqa: E402
+
+app.include_router(_account_export.build_router(lambda: get_redis()))
