@@ -79,12 +79,14 @@ test.describe('Devices: rooms, floors, labels, zones and people', () => {
     await expectTapTargets(labels);
 
     await page.getByRole('tab', { name: 'Your devices' }).click();
-    await page.getByTestId('hardware').getByTestId('hardware-device').filter({ hasText: 'Reading lamp' }).click();
+    await page.getByTestId('hardware').getByTestId('device-tile').filter({ hasText: 'Reading lamp' }).getByTestId('hardware-device').click();
     const dialog = page.getByRole('dialog');
     const chips = dialog.getByRole('group', { name: /^Labels of Reading lamp with/ });
     await chips.getByRole('button', { name: 'Kids' }).click();
     await expect.poll(() => sent(run.mocks, 'PATCH', '/api/homehub/devices/hw-lamp')).toEqual({ labels: ['kids'] });
     await expectTapTargets(chips);
+    // An entity's own labels are with its id, under Device info.
+    await dialog.getByTestId('device-info').locator('summary').click();
     await dialog.getByRole('button', { name: 'Labels of Reading lamp', exact: true }).click();
     await dialog.getByRole('group', { name: 'Labels of Reading lamp', exact: true }).getByRole('button', { name: 'Night lights' }).click();
     await expect.poll(() => sent(run.mocks, 'PATCH', '/api/homehub/entities/light.reading_lamp')).toEqual({ labels: ['night_lights'] });

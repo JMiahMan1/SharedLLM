@@ -50,7 +50,7 @@ test.describe('every home page on every form factor', () => {
   test('Devices: every tab, with the reconfigure and add-device dialogs', async ({ page }, info) => {
     const run = await open(page, '/devices', 'devices-sections');
     await expect(page.getByTestId('hardware')).toBeVisible();
-    for (const tab of ['Your devices', 'Add & fix', 'Rooms & places', 'Setup', 'Family']) {
+    for (const tab of ['Your devices', 'Add devices', 'Rooms & places', 'Setup', 'Family']) {
       await page.getByTestId('devices-sections').getByRole('tab', { name: tab }).click();
       await page.waitForLoadState('networkidle').catch(() => {});
       await check(page, info, run, `devices ${tab}`);
@@ -59,7 +59,7 @@ test.describe('every home page on every form factor', () => {
     await page.getByRole('button', { name: 'Reconfigure Music server' }).click();
     await check(page, info, run, 'devices reconfigure', page.getByTestId('reconfigure-dialog'));
     await page.getByTestId('reconfigure-dialog').getByRole('button', { name: 'Cancel' }).click();
-    await page.getByTestId('devices-sections').getByRole('tab', { name: 'Add & fix' }).click();
+    await page.getByTestId('devices-sections').getByRole('tab', { name: 'Add devices' }).click();
     await page.getByRole('button', { name: /Add Matter device/ }).click();
     await expect(page.getByTestId('adopt-dialog')).toBeVisible();
     await check(page, info, run, 'devices add', page.getByRole('dialog').last());

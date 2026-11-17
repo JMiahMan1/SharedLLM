@@ -281,8 +281,8 @@ export default function PhonesPanel() {
 
   return (
     <section className="glass-panel overflow-hidden rounded-2xl border border-white/10" data-testid="phones">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-emerald-500/5 px-4 py-3">
-        <span className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase tracking-widest text-emerald-400">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 px-4 py-3">
+        <span className="flex min-w-0 items-center gap-2.5 text-base font-semibold text-white [&>svg]:h-[18px] [&>svg]:w-[18px] [&>svg]:shrink-0 [&>svg]:text-emerald-400">
           <Smartphone size={14} /> Phones
         </span>
         <button type="button" className={button} onClick={() => setSettingsOpen((v) => !v)} aria-expanded={settingsOpen}>

@@ -97,8 +97,8 @@ export default function IntegrationsPanel() {
   return (
     <>
     <section className="glass-panel overflow-hidden rounded-2xl border border-white/10" data-testid="integrations">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-violet-500/5 px-4 py-3">
-        <span className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase tracking-widest text-violet-300">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 px-4 py-3">
+        <span className="flex min-w-0 items-center gap-2.5 text-base font-semibold text-white [&>svg]:h-[18px] [&>svg]:w-[18px] [&>svg]:shrink-0 [&>svg]:text-violet-300">
           <Plug size={14} /> Integrations
         </span>
         <span className="flex flex-wrap items-center gap-2">

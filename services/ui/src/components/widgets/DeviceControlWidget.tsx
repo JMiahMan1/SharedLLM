@@ -8,13 +8,7 @@ import type { DeviceEntry, IWidgetProps } from '../../types/widget';
 import { WidgetCard } from './WidgetCard';
 import { 
   Star, 
-  Power, 
-  Tv, 
-  Volume2, 
-  Play, 
-  Pause, 
-  SkipForward, 
-  SkipBack, 
+  Power,       
   X, 
   Shield, 
   RefreshCw, 
@@ -22,7 +16,6 @@ import {
   Thermometer,
   ArrowUp,
   ArrowDown,
-  Info,
   Sliders,
   LayoutGrid
 } from 'lucide-react';
@@ -30,6 +23,8 @@ import toast from 'react-hot-toast';
 import TokenBridge from '../../plugins/tokenBridge';
 import { confirmDialog } from '../ui/confirmDialog';
 import { errorText } from '../../lib/errorText';
+import DeviceControl from '../devices/controls/registry';
+import type { HubEntity } from '../../lib/dashboards';
 
 const DEVICE_ICONS: Record<string, string> = {
   light: '💡',
@@ -138,9 +133,6 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   } | null>(null);
   const [updatingAssignment, setUpdatingAssignment] = useState(false);
 
-  // Local attribute state for controls inside modal
-  const [brightness, setBrightness] = useState<number>(100);
-  const [volume, setVolume] = useState<number>(50);
 
   // Escape closes the device dialog, matching every other sheet in the app.
   // The visible close button is sticky too: on a long thermostat panel it must
@@ -346,28 +338,21 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   );
 
   // Open modal & load detailed settings
-  const handleOpenDetail = async (device: DeviceEntry) => {
+  const handleOpenDetail = (device: DeviceEntry) => {
     setSelectedDevice(device);
-
-    // Initialize sliders from actual device attributes when available
-    const attrs = device.attributes;
-    if (device.domain === 'light') {
-      const brightnessAttr = typeof attrs?.brightness === 'number' ? attrs.brightness : null;
-      setBrightness(
-        brightnessAttr != null
-          ? Math.max(1, Math.round(brightnessAttr / 2.55))
-          : isActive(device.state) ? 100 : 1
-      );
-    } else if (device.domain === 'media_player') {
-      const volAttr = typeof attrs?.volume_level === 'number' ? attrs.volume_level : null;
-      setVolume(volAttr != null ? Math.round(volAttr * 100) : 50);
-    }
   };
 
   const selectedToggleAction = selectedDevice
     ? getToggleAction(selectedDevice.domain, selectedDevice.state)
     : null;
 
+  // The open device in the shape the control library takes; kept stable so a drawn change survives renders.
+  const selectedHubEntity = useMemo<HubEntity | null>(() => (selectedDevice ? {
+    entity_id: selectedDevice.entity_id, domain: selectedDevice.domain, name: selectedDevice.friendly_name || selectedDevice.entity_id,
+    state: selectedDevice.state, attributes: { ...(selectedDevice.attributes ?? {}) },
+    device_class: typeof selectedDevice.attributes?.device_class === 'string' ? selectedDevice.attributes.device_class : null,
+    unit: null, icon: null, area_id: null, device_id: null, last_changed: '',
+  } : null), [selectedDevice]);
   const selectedClimate = selectedDevice?.domain === 'climate' ? climateAttrs(selectedDevice) : null;
   const targetTemperature = numberAttr(selectedClimate?.temperature);
   const lowSetpoint = numberAttr(selectedClimate?.target_temp_low);
@@ -819,52 +804,10 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
 
             {/* Custom controls depending on device domain */}
             <div className="space-y-4 py-2 border-t border-b border-white/5">
-              {selectedDevice.domain === 'light' && (
-                <div className="space-y-3">
-                  <h4 className="text-xs font-bold text-slate-400 flex items-center gap-1">
-                    <Sliders size={12} /> Light Controls
-                  </h4>
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs text-slate-500">
-                      <label htmlFor="device-sheet-brightness">Brightness</label>
-                      <span>{brightness}%</span>
-                    </div>
-                    <input
-                      id="device-sheet-brightness"
-                      type="range"
-                      min="1"
-                      max="100"
-                      value={brightness}
-                      onChange={(e) => setBrightness(Number(e.target.value))}
-                      onMouseUp={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { brightness: Math.round(brightness * 2.55) })}
-                      onTouchEnd={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { brightness: Math.round(brightness * 2.55) })}
-                      className="w-full accent-purple-500 bg-slate-800 h-1 rounded-lg cursor-pointer"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-slate-500">Quick Color Temperature Presets</p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp_kelvin: 2700 })}
-                        className="text-[10px] font-semibold px-2 py-1 max-sm:min-h-11 rounded bg-orange-400/10 border border-orange-400/20 text-orange-400"
-                      >
-                        Warm (2700K)
-                      </button>
-                      <button
-                        onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp_kelvin: 4000 })}
-                        className="text-[10px] font-semibold px-2 py-1 max-sm:min-h-11 rounded bg-yellow-400/10 border border-yellow-400/20 text-yellow-400"
-                      >
-                        Natural (4000K)
-                      </button>
-                      <button
-                        onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp_kelvin: 6500 })}
-                        className="text-[10px] font-semibold px-2 py-1 max-sm:min-h-11 rounded bg-blue-400/10 border border-blue-400/20 text-blue-400"
-                      >
-                        Cool (6500K)
-                      </button>
-                    </div>
-                  </div>
-                </div>
+              {/* Lights, media and everything else: the device control library (components/devices/controls). */}
+              {selectedHubEntity && !['climate', 'cover'].includes(selectedDevice.domain) && (
+                <DeviceControl entity={selectedHubEntity} name={selectedDevice.friendly_name || selectedDevice.entity_id}
+                  disabled={selectedDevice.state === 'unavailable'} onChanged={() => void loadDevices()} />
               )}
 
               {selectedDevice.domain === 'climate' && (
@@ -1018,53 +961,6 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                 </div>
               )}
 
-              {selectedDevice.domain === 'media_player' && (
-                <div className="space-y-3">
-                  <h4 className="text-xs font-bold text-slate-400 flex items-center gap-1">
-                    <Tv size={12} /> Media Controls
-                  </h4>
-                  {/* Playback bar */}
-                  <div className="flex items-center justify-center gap-4 bg-slate-950/30 border border-white/5 py-3 rounded-xl">
-                    <button
-                      onClick={() => callHAService('media_player', 'media_previous_track', selectedDevice.entity_id)}
-                      className="p-2 max-sm:min-h-11 max-sm:min-w-11 max-sm:flex max-sm:items-center max-sm:justify-center hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
-                    >
-                      <SkipBack size={16} />
-                    </button>
-                    <button
-                      onClick={() => callHAService('media_player', isActive(selectedDevice.state) ? 'media_pause' : 'media_play', selectedDevice.entity_id)}
-                      className="p-3 max-sm:min-h-11 max-sm:min-w-11 bg-purple-600 hover:bg-purple-500 text-white rounded-full transition-colors flex items-center justify-center shadow-lg"
-                    >
-                      {isActive(selectedDevice.state) ? <Pause size={18} /> : <Play size={18} />}
-                    </button>
-                    <button
-                      onClick={() => callHAService('media_player', 'media_next_track', selectedDevice.entity_id)}
-                      className="p-2 max-sm:min-h-11 max-sm:min-w-11 max-sm:flex max-sm:items-center max-sm:justify-center hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
-                    >
-                      <SkipForward size={16} />
-                    </button>
-                  </div>
-                  {/* Volume Slider */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs text-slate-500">
-                      <label htmlFor="device-sheet-volume" className="flex items-center gap-1"><Volume2 size={12} /> Volume</label>
-                      <span>{volume}%</span>
-                    </div>
-                    <input
-                      id="device-sheet-volume"
-                      type="range"
-                      min="1"
-                      max="100"
-                      value={volume}
-                      onChange={(e) => setVolume(Number(e.target.value))}
-                      onMouseUp={() => callHAService('media_player', 'volume_set', selectedDevice.entity_id, { volume_level: volume / 100 })}
-                      onTouchEnd={() => callHAService('media_player', 'volume_set', selectedDevice.entity_id, { volume_level: volume / 100 })}
-                      className="w-full accent-purple-500 bg-slate-800 h-1 rounded-lg cursor-pointer"
-                    />
-                  </div>
-                </div>
-              )}
-
               {selectedDevice.domain === 'cover' && (
                 <div className="space-y-3">
                   <h4 className="text-xs font-bold text-slate-400 flex items-center gap-1">
@@ -1093,12 +989,6 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                 </div>
               )}
 
-              {!['light', 'climate', 'media_player', 'cover'].includes(selectedDevice.domain) && (
-                <div className="py-2 text-center text-xs text-slate-500 flex items-center justify-center gap-1.5 bg-slate-950/20 rounded-xl p-3">
-                  <Info size={14} />
-                  <span>No custom settings available for {getDomainLabel(selectedDevice.domain)}. Use standard toggle button.</span>
-                </div>
-              )}
             </div>
 
             {/* Who may use this device: anyone whose role can assign devices */}
