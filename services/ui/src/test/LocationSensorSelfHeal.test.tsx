@@ -174,7 +174,10 @@ describe('LocationContext sensor self-heal', () => {
   });
 
   it('does NOT persist a location disable for an uncoded permission-sounding error', async () => {
+    // Not answered yet: the provider asks once, the person allows it, and
+    // only then does the watch fail with an uncoded error.
     checkPermissions.mockResolvedValue({ location: 'prompt' });
+    requestPermissions.mockResolvedValue({ location: 'granted' });
     watchPosition.mockRejectedValue(new Error('Access denied by the platform bridge'));
 
     renderProvider();

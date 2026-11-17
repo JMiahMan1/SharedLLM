@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
+import { ensureLocationAccess, highAccuracy } from './locationPermission';
 
 /** A position the phone just took, for an SOS or a check-in. */
 export interface FreshPosition {
@@ -19,7 +20,11 @@ export async function freshPosition(timeoutMs = 8000): Promise<FreshPosition | n
   const opts = { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60_000 };
   const read = async (): Promise<FreshPosition | null> => {
     if (Capacitor.isNativePlatform()) {
-      const pos = await Geolocation.getCurrentPosition(opts);
+      // One shared permission request, and never ask for precise when only
+      // approximate was allowed (the plugin would open another dialog).
+      const access = await ensureLocationAccess();
+      if (access === 'denied') return null;
+      const pos = await Geolocation.getCurrentPosition({ ...opts, enableHighAccuracy: highAccuracy(access) });
       return { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null, at: pos.timestamp };
     }
     if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
