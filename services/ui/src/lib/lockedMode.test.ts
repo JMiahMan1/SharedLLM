@@ -16,14 +16,14 @@ const ALL = normalizeSections(['chat', 'calls', 'devices', 'time', 'chores', 'bi
 
 describe('locked mode sections', () => {
   it('keeps chat first, drops unknown ids and repeats, and falls back to chat alone', () => {
-    expect(normalizeSections(['bible', 'settings', 'bible', 'chat'])).toEqual(['chat', 'bible']);
-    expect(normalizeSections([])).toEqual(['chat']);
-    expect(normalizeSections(undefined)).toEqual(['chat']);
+    expect(normalizeSections(['bible', 'settings', 'bible', 'chat'])).toEqual(['chat', 'calls', 'time', 'chores', 'bible']);
+    expect(normalizeSections([])).toEqual(['chat', 'calls', 'time', 'chores']);
+    expect(normalizeSections(undefined)).toEqual(['chat', 'calls', 'time', 'chores']);
   });
 
   it('offers navigation only to the open sections that have a page', () => {
     expect(lockedNav(ALL).map((s) => s.id)).toEqual(['chat', 'calls', 'devices', 'bible']);
-    expect(lockedNav(normalizeSections(['music'])).map((s) => s.to)).toEqual(['/family', '/media']);
+    expect(lockedNav(normalizeSections(['music'])).map((s) => s.to)).toEqual(['/family', '/family?tab=calls', '/media']);
   });
 });
 
@@ -100,7 +100,7 @@ describe('locked mode state', () => {
     const { result } = renderHook(() => useLockedMode());
     expect(result.current.active).toBe(false);
     act(() => setLockedMode({ active: true, sections: ['bible', 'chores'] }));
-    expect(result.current).toEqual({ active: true, sections: ['chat', 'bible', 'chores'] });
+    expect(result.current).toEqual({ active: true, sections: ['chat', 'calls', 'time', 'chores', 'bible'] });
     act(() => setLockedMode({ active: false, sections: [] }));
     expect(result.current.active).toBe(false);
   });
