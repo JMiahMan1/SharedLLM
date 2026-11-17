@@ -89,7 +89,9 @@ class RelaySocket {
 }
 
 class FakeSender {
-  constructor(public track: unknown) {}
+  track: unknown;
+
+  constructor(track: unknown) { this.track = track; }
   replaceTrack(track: unknown) { this.track = track; return Promise.resolve(); }
 }
 

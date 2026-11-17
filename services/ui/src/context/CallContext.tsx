@@ -70,8 +70,11 @@ export interface CallPeer extends CallParticipant {
 
 /** An error that says which private-call problem it is, so the panel can explain it. */
 class CallProblemError extends Error {
-  constructor(message: string, readonly problem: CallProblem) {
+  readonly problem: CallProblem;
+
+  constructor(message: string, problem: CallProblem) {
     super(message);
+    this.problem = problem;
   }
 }
 

@@ -158,11 +158,15 @@ export class PeerVerifier {
   /** The peer's fingerprints as verified: a later SDP naming others is refused. */
   verifiedRemote: string[] = [];
 
-  constructor(
-    private readonly key: CryptoKey,
-    private readonly room: string,
-    private readonly seen: Set<string> = seenPeerNonces,
-  ) {}
+  private readonly key: CryptoKey;
+  private readonly room: string;
+  private readonly seen: Set<string>;
+
+  constructor(key: CryptoKey, room: string, seen: Set<string> = seenPeerNonces) {
+    this.key = key;
+    this.room = room;
+    this.seen = seen;
+  }
 
   hello(): AuthMessage {
     return { v: CALL_AUTH_VERSION, step: 'hello', nonce: this.nonce };
