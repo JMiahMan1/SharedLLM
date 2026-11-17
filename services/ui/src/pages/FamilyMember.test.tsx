@@ -34,6 +34,7 @@ vi.mock('../services/api', async (importOriginal) => {
       getGuardianJournal: vi.fn(),
       addGuardianJournal: vi.fn(),
       getGuardianActivity: vi.fn(),
+      getGuardianActivityCounts: vi.fn(),
       getRecommendationLanes: vi.fn(),
       getHealthFamily: vi.fn(),
       getMyParents: vi.fn(),
@@ -109,6 +110,7 @@ describe('The family member page (a parent)', () => {
     vi.mocked(api.getGuardianJournal).mockResolvedValue({ notes: [] });
     vi.mocked(api.addGuardianJournal).mockResolvedValue({} as never);
     vi.mocked(api.getGuardianActivity).mockResolvedValue({ events: [] });
+    vi.mocked(api.getGuardianActivityCounts).mockResolvedValue({ counts: {} });
     vi.mocked(api.getRecommendationLanes).mockResolvedValue({ username: 'sam', lanes: {} as never, can_manage: false });
     vi.mocked(api.getHealthFamily).mockResolvedValue({ viewer: 'dad', day: localDay(), people: [] });
     vi.mocked(api.getGuardRequests).mockResolvedValue({ requests: [] });

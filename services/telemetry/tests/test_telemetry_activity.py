@@ -132,3 +132,58 @@ def test_comms_returns_a_weeks_calls_and_messages_newest_first(client, rc):
     post("social", 0, "Snapchat")
     body = client.get("/api/telemetry/comms/kid", params={"days": 7}, headers=HEADERS).json()
     assert [e["item"] for e in body["events"]] == ["Snapchat", "Mom", "Leo"]
+
+
+def _post_days_ago(client, feature, days_ago, item, hours=0):
+    from datetime import UTC, datetime, timedelta
+
+    at = int((datetime.now(UTC) - timedelta(days=days_ago, hours=hours)).timestamp() * 1000)
+    assert client.post("/api/telemetry/activity", json={"user": "kid", "feature": feature, "item": item, "detail": {"at": at}},
+                       headers=HEADERS).status_code == 200
+
+
+def test_a_window_reads_an_earlier_day_past_the_newest_200(client, rc):
+    """A busy texter records ~200 things a day; an earlier day must still be readable."""
+    from datetime import UTC, datetime, timedelta
+
+    _post_days_ago(client, "sms", 3, "three days ago")
+    for i in range(250):
+        _post_days_ago(client, "sms", 0, f"today {i}")
+    day = (datetime.now(UTC) - timedelta(days=3)).replace(hour=0, minute=0, second=0, microsecond=0)
+    body = client.get(
+        "/api/telemetry/activity/kid",
+        params={"since": (day - timedelta(days=1)).isoformat(), "until": (day + timedelta(days=2)).isoformat(), "limit": 2000},
+        headers=HEADERS,
+    ).json()
+    assert [e["item"] for e in body["events"]] == ["three days ago"]
+    assert body["truncated"] is False
+    # Without a window it is still the newest 200.
+    plain = client.get("/api/telemetry/activity/kid", params={"limit": 200}, headers=HEADERS).json()
+    assert len(plain["events"]) == 200 and "three days ago" not in [e["item"] for e in plain["events"]]
+
+
+def test_a_window_says_when_it_was_cut_short(client, rc):
+    from datetime import UTC, datetime, timedelta
+
+    for i in range(5):
+        _post_days_ago(client, "sms", 0, f"m{i}")
+    since = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    body = client.get("/api/telemetry/activity/kid", params={"since": since, "limit": 3}, headers=HEADERS).json()
+    assert len(body["events"]) == 3 and body["truncated"] is True
+
+
+def test_counts_cover_the_whole_record(client, rc):
+    from datetime import UTC, datetime, timedelta
+
+    for _ in range(3):
+        _post_days_ago(client, "sms", 5, "old text")
+    _post_days_ago(client, "calls", 1, "Mom")
+    _post_days_ago(client, "sms", 40, "outside")
+    since = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    body = client.get("/api/telemetry/activity/kid/counts", params={"since": since}, headers=HEADERS).json()
+    assert body["counts"] == {"sms": 3, "calls": 1}
+
+
+def test_an_unreadable_window_is_refused(client, rc):
+    assert client.get("/api/telemetry/activity/kid", params={"since": "yesterday"}, headers=HEADERS).status_code == 422
+    assert client.get("/api/telemetry/activity/kid/counts", params={"since": "soon"}, headers=HEADERS).status_code == 422

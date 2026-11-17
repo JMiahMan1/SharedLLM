@@ -67,6 +67,43 @@ export const activityQuery = (username: string) => ({
   retry: false,
 });
 
+/** Most events one day of the timeline loads (a busy texter's day is a few hundred). */
+export const DAY_ACTIVITY_LIMIT = 2000;
+
+/** The start and end of a local day (YYYY-MM-DD), as ISO moments the server can compare. */
+export function localDayBounds(day: string): { since: string; until: string } {
+  const [y, m, d] = day.split('-').map(Number);
+  return { since: new Date(y, m - 1, d).toISOString(), until: new Date(y, m - 1, d + 1).toISOString() };
+}
+
+/**
+ * One local day of a person's activity, read from their whole record. The
+ * timeline used to filter the newest 200 events, and a busy texter records
+ * about that many a day, so every earlier day came up empty.
+ */
+export const dayActivityQuery = (username: string, day: string) => ({
+  queryKey: ['guardian-activity-day', username, day] as const,
+  queryFn: () => api.getGuardianActivity(username, DAY_ACTIVITY_LIMIT, localDayBounds(day)),
+  retry: false,
+});
+
+/** How many of each kind over the last ``days`` local days, counted on the server over the whole record. */
+export const activityCountsQuery = (username: string, days: number, today = localDay()) => ({
+  queryKey: ['guardian-activity-counts', username, days, today] as const,
+  queryFn: async () => {
+    const { since } = localDayBounds(shiftDay(today, -(days - 1)));
+    const { until } = localDayBounds(today);
+    const { counts } = await api.getGuardianActivityCounts(username, since, until);
+    const out: Record<string, number> = {};
+    for (const [feature, n] of Object.entries(counts || {})) {
+      const kind = kindOf(feature);
+      out[kind] = (out[kind] || 0) + n;
+    }
+    return out;
+  },
+  retry: false,
+});
+
 /** A child's requests (more time; apps, permissions and sites), open or answered: one cache each. */
 export const timeRequestsQuery = (history: boolean) => ({
   queryKey: ['screen-time-requests', history ? 'history' : 'pending'] as const,

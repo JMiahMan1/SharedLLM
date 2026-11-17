@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Activity, BookOpen, ChevronLeft, ChevronRight, Gamepad2, Globe, ListOrdered, MessageSquare, Music, Phone, Smartphone } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import MemberCard from '../MemberCard';
-import { ACTIVITY_KINDS, ACTIVITY_LIMIT, activityQuery, commsLine, kindOf, kindTotals } from '../../../lib/memberPage';
+import { ACTIVITY_KINDS, DAY_ACTIVITY_LIMIT, activityCountsQuery, commsLine, dayActivityQuery, kindOf } from '../../../lib/memberPage';
 import { formatDayLabel, localDay, shiftDay } from '../../../lib/healthHub';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -16,9 +16,9 @@ const chip = (on: boolean) =>
 
 /** Qustodio's timeline: one day at a time, filterable by kind, newest first. */
 function TimelineCard({ username, name }: { username: string; name: string }) {
-  const { data, isLoading, isError } = useQuery(activityQuery(username));
   const today = localDay();
   const [day, setDay] = useState(today);
+  const { data, isLoading, isError } = useQuery(dayActivityQuery(username, day));
   const [kinds, setKinds] = useState<string[]>([]);
   /** Messages opened to their full text, by event. */
   const [expanded, setExpanded] = useState<string[]>([]);
@@ -91,20 +91,20 @@ function TimelineCard({ username, name }: { username: string; name: string }) {
           })}
         </ol>
       )}
+      {data?.truncated && (
+        <p className="text-[11px] text-slate-500">Showing the latest {DAY_ACTIVITY_LIMIT} things from that day.</p>
+      )}
     </MemberCard>
   );
 }
 
 /** How much of each kind over 7, 15 or 30 days. */
 function TotalsCard({ username }: { username: string }) {
-  const { data, isLoading, isError } = useQuery(activityQuery(username));
   const [days, setDays] = useState(7);
-  const events = data?.events || [];
-  const totals = kindTotals(events, days);
+  const { data, isLoading, isError } = useQuery(activityCountsQuery(username, days));
+  const totals = data || {};
   const rows = [...ACTIVITY_KINDS.map((k) => ({ id: k.id, label: k.label })), { id: 'other', label: 'Other' }].filter((k) => totals[k.id]);
   const top = Math.max(1, ...rows.map((r) => totals[r.id]));
-  const oldest = events.length ? localDay(new Date(events[events.length - 1].at)) : null;
-  const short = events.length >= ACTIVITY_LIMIT && oldest && oldest > shiftDay(localDay(), -(days - 1));
   return (
     <MemberCard
       title="Totals"
@@ -139,7 +139,6 @@ function TotalsCard({ username }: { username: string }) {
           ))}
         </ul>
       )}
-      {short && <p className="text-[11px] text-slate-500">The record keeps the latest {ACTIVITY_LIMIT} things, back to {formatDayLabel(oldest)}.</p>}
     </MemberCard>
   );
 }

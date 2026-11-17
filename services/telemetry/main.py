@@ -50,6 +50,37 @@ log = logging.getLogger("telemetry")
 
 #: Most calls and messages the Calls & messages tab gets in one read.
 COMMS_MAX = 3000
+#: Most events one windowed activity read returns (a day of a busy texter is ~400).
+ACTIVITY_WINDOW_MAX = 2000
+
+
+def _when(value: Any) -> datetime | None:
+    try:
+        when = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=UTC)
+
+
+def _window(since: str | None, until: str | None) -> tuple[datetime | None, datetime | None]:
+    """The window's bounds; an unreadable bound is a 422, never ignored."""
+    bounds = []
+    for name, value in (("since", since), ("until", until)):
+        if value is None:
+            bounds.append(None)
+            continue
+        when = _when(value)
+        if when is None:
+            raise HTTPException(status_code=422, detail=f"{name} must be an ISO date and time")
+        bounds.append(when)
+    return bounds[0], bounds[1]
+
+
+def _in_window(event: dict[str, Any], start: datetime | None, end: datetime | None) -> bool:
+    when = _when(event.get("at"))
+    if when is None:
+        return False
+    return (start is None or when >= start) and (end is None or when < end)
 
 _http: aiohttp.ClientSession | None = None
 
@@ -648,10 +679,35 @@ def create_app():
 
     @application.get("/api/telemetry/activity/{user}")
     async def get_activity(
-        user: str, limit: int = Query(default=50, le=200), _: bool = Depends(require_internal)
+        user: str,
+        limit: int = Query(default=50, ge=1, le=ACTIVITY_WINDOW_MAX),
+        since: str | None = None,
+        until: str | None = None,
+        _: bool = Depends(require_internal),
     ):
+        """The newest events, or with ``since``/``until`` the events in that
+        window (newest first). A busy texter records ~200 things a day, so the
+        timeline's earlier days were past the newest 200 and showed nothing."""
         rc = _redis()
-        return {"status": "SUCCESS", "events": await store.list_activity(rc, user, limit)}
+        if since is None and until is None:
+            return {"status": "SUCCESS", "events": await store.list_activity(rc, user, min(limit, 200))}
+        start, end = _window(since, until)
+        out = [e for e in await store.list_activity(rc, user, store.ACTIVITY_MAX) if _in_window(e, start, end)]
+        return {"status": "SUCCESS", "events": out[:limit], "truncated": len(out) > limit}
+
+    @application.get("/api/telemetry/activity/{user}/counts")
+    async def get_activity_counts(
+        user: str, since: str, until: str | None = None, _: bool = Depends(require_internal)
+    ):
+        """How many events of each feature in a window, over the whole record."""
+        rc = _redis()
+        start, end = _window(since, until)
+        counts: dict[str, int] = {}
+        for e in await store.list_activity(rc, user, store.ACTIVITY_MAX):
+            if _in_window(e, start, end):
+                feature = str(e.get("feature") or "other")
+                counts[feature] = counts.get(feature, 0) + 1
+        return {"status": "SUCCESS", "counts": counts}
 
     @application.get("/api/telemetry/use/{user}")
     async def get_use(

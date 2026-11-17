@@ -6623,6 +6623,8 @@ def without_comms(data: Any) -> Any:
         out["events"] = [e for e in out["events"] if not (isinstance(e, dict) and e.get("feature") in COMMS_FEATURES)]
     if isinstance(out.get("concerns"), list):
         out["concerns"] = [c for c in out["concerns"] if not (isinstance(c, dict) and c.get("feature") in COMMS_FEATURES)]
+    if isinstance(out.get("counts"), dict):
+        out["counts"] = {k: v for k, v in out["counts"].items() if k not in COMMS_FEATURES}
     if isinstance(out.get("recap"), dict):
         recap = dict(out["recap"])
         recap.pop("comms", None)
@@ -7088,9 +7090,29 @@ async def guardian_comms(request: Request, user: str, days: int = 7):
 
 
 @app.get("/api/guardian/activity/{user}")
-async def guardian_activity(request: Request, user: str, limit: int = 100):
-    """A child's activity feed (music, videos, pages, verses, calls, messages, sites)."""
-    return await _parents_only_telemetry(request, user, f"/api/telemetry/activity/{user}", {"limit": max(1, min(limit, 200))})
+async def guardian_activity(
+    request: Request, user: str, limit: int = 100, since: str | None = None, until: str | None = None
+):
+    """A child's activity feed (music, videos, pages, verses, calls, messages, sites).
+
+    With ``since``/``until`` (ISO date and time) it is that window, e.g. one
+    local day of the timeline, read from the whole record rather than the
+    newest 200."""
+    params: dict[str, Any] = {"limit": max(1, min(limit, 200))}
+    if since is not None or until is not None:
+        params = {"limit": max(1, min(limit, 2000))}
+        if since is not None:
+            params["since"] = since
+        if until is not None:
+            params["until"] = until
+    return await _parents_only_telemetry(request, user, f"/api/telemetry/activity/{user}", params)
+
+
+@app.get("/api/guardian/activity/{user}/counts")
+async def guardian_activity_counts(request: Request, user: str, since: str, until: str | None = None):
+    """How many of each kind of thing a child did in a window (the Totals card)."""
+    params = {"since": since} if until is None else {"since": since, "until": until}
+    return await _parents_only_telemetry(request, user, f"/api/telemetry/activity/{user}/counts", params)
 
 
 @app.post("/api/guardian/media/scan")
