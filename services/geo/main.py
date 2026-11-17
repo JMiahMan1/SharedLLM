@@ -13,6 +13,7 @@ upgrade path if HA's sharing/geofence UX proves insufficient.
 """
 import asyncio
 import contextlib
+from collections import OrderedDict
 import json
 import logging
 import math
@@ -2896,25 +2897,98 @@ def _resolve_zone_name(lat: float, lon: float):
     return _resolve_place_name_cached(lat, lon)
 
 # Short-lived cache so get_trips / trip locations don't hammer Nominatim + HA.
-_PLACE_NAME_CACHE: dict[str, tuple[float, str]] = {}
+# Least recently used, and sized for a family's whole trip history: it used to
+# hold 512 names and was wiped whole when full, and one family Wander view has
+# more start and end points than that, so every view resolved them all again
+# (one at a time, Nominatim allows one request a second) and took ~8 s, right
+# at the gateway's limit.
+_PLACE_NAME_CACHE: OrderedDict[str, tuple[float, str]] = OrderedDict()
 _PLACE_NAME_CACHE_TTL = 600.0
+_PLACE_NAME_CACHE_MAX = 8192
 
 
 def _place_cache_key(lat: float, lon: float) -> str:
     return f"{round(float(lat), 4)}:{round(float(lon), 4)}"
 
 
-async def _resolve_place_name_cached(lat: float, lon: float) -> str:
+def _cached_place_name(lat: float, lon: float, now: float | None = None) -> str | None:
     key = _place_cache_key(lat, lon)
     hit = _PLACE_NAME_CACHE.get(key)
-    now = time.time()
-    if hit and (now - hit[0]) < _PLACE_NAME_CACHE_TTL:
+    if hit and ((now or time.time()) - hit[0]) < _PLACE_NAME_CACHE_TTL:
+        _PLACE_NAME_CACHE.move_to_end(key)
         return hit[1]
+    return None
+
+
+async def _resolve_place_name_cached(lat: float, lon: float) -> str:
+    cached = _cached_place_name(lat, lon)
+    if cached is not None:
+        return cached
     name = await _resolve_place_name(lat, lon)
-    if len(_PLACE_NAME_CACHE) > 512:
-        _PLACE_NAME_CACHE.clear()
-    _PLACE_NAME_CACHE[key] = (now, name)
+    key = _place_cache_key(lat, lon)
+    _PLACE_NAME_CACHE[key] = (time.time(), name)
+    _PLACE_NAME_CACHE.move_to_end(key)
+    while len(_PLACE_NAME_CACHE) > _PLACE_NAME_CACHE_MAX:
+        _PLACE_NAME_CACHE.popitem(last=False)
     return name
+
+
+#: How long a trip list may spend improving place names before it answers.
+#: Names not resolved in time keep their stored label for this answer and are
+#: finished in the background, so the next view has them.
+TRIP_NAME_BUDGET_S = 2.0
+_TRIP_NAME_CONCURRENCY = 4
+_background_name_tasks: set[asyncio.Task] = set()
+
+
+async def _upgrade_trip_place_names(trips: list[dict], budget: float = TRIP_NAME_BUDGET_S) -> None:
+    """Replace street-only stored labels with a better place name, within ``budget``.
+
+    Each distinct point is resolved once, a few at a time; whatever is not done
+    when the budget runs out keeps resolving in the background.
+    """
+    wanted: dict[str, list[tuple[dict, str | None, float, float]]] = {}
+    for trip in trips:
+        for loc_key in ("start_location", "end_location"):
+            entry = trip.get(loc_key)
+            if not isinstance(entry, dict):
+                continue
+            lat = entry.get("latitude", entry.get("lat"))
+            lon = entry.get("longitude", entry.get("lon"))
+            if lat is None or lon is None:
+                continue
+            stored_name = entry.get("name") or entry.get("zone")
+            if stored_name and not _is_street_only_name(stored_name):
+                continue
+            try:
+                flat, flon = float(lat), float(lon)
+            except (TypeError, ValueError):
+                continue
+            wanted.setdefault(_place_cache_key(flat, flon), []).append((entry, stored_name, flat, flon))
+    if not wanted:
+        return
+
+    gate = asyncio.Semaphore(_TRIP_NAME_CONCURRENCY)
+
+    async def one(key: str) -> None:
+        entries = wanted[key]
+        _entry, stored, lat, lon = entries[0]
+        async with gate:
+            name, _src = await _resolve_place_if_better(stored, lat, lon)
+        for entry, stored_name, _la, _lo in entries:
+            if name and name != stored_name:
+                entry["name"] = name
+
+    tasks = [asyncio.create_task(one(key)) for key in wanted]
+    _done, pending = await asyncio.wait(tasks, timeout=budget)
+    for task in tasks:
+        if task.done() and not task.cancelled() and task.exception() is not None:
+            log.debug("[Geo] place name for a trip failed: %s", task.exception())
+    if pending:
+        log.info("[Geo] trip list answered with %s place names still resolving", len(pending))
+        for task in pending:
+            _background_name_tasks.add(task)
+            task.add_done_callback(_background_name_tasks.discard)
 
 
 async def _resolve_place_details(lat: float, lon: float) -> dict:
@@ -3666,11 +3740,10 @@ async def get_trips(
     trips = []
     seen: set[str] = set()
     for key in index_keys:
-        for tid in await r.zrevrange(key, 0, limit - 1):
-            if tid in seen:
-                continue
-            seen.add(tid)
-            raw = await r.get(f"geo:trip:{tid}")
+        ids = [tid for tid in await r.zrevrange(key, 0, limit - 1) if tid not in seen]
+        seen.update(ids)
+        # One round trip per index, not one per trip (a family view reads hundreds).
+        for raw in (await r.mget([f"geo:trip:{tid}" for tid in ids]) if ids else []):
             if raw:
                 with contextlib.suppress(ValueError):
                     trip = json.loads(raw)
@@ -3680,25 +3753,8 @@ async def get_trips(
     trips = _drop_contained_trips(trips)[:limit]
 
     # Upgrade street-only stored labels (e.g. "North Maple Trail") to the
-    # closest HA zone or business so the card Destination is useful.
-    for trip in trips:
-        for loc_key in ("start_location", "end_location"):
-            entry = trip.get(loc_key)
-            if not isinstance(entry, dict):
-                continue
-            lat = entry.get("latitude", entry.get("lat"))
-            lon = entry.get("longitude", entry.get("lon"))
-            if lat is None or lon is None:
-                continue
-            stored_name = entry.get("name") or entry.get("zone")
-            if stored_name and not _is_street_only_name(stored_name):
-                continue
-            try:
-                name, _src = await _resolve_place_if_better(stored_name, float(lat), float(lon))
-                if name and name != stored_name:
-                    entry["name"] = name
-            except Exception:
-                pass
+    # closest family place or business so the card Destination is useful.
+    await _upgrade_trip_place_names(trips)
 
     # Also check active trips in progress
     active_keys = (
