@@ -22,7 +22,7 @@ up from the Devices page without HA:
 | nws | contact email, location, station | weather ``{lat}_{lon}`` and the observation sensors ``{lat}_{lon}_{key}`` |
 | local_todo | a list name | todo ``{slug}`` |
 | shopping_list | nothing | todo ``shopping_list`` (one per hub) |
-| switch_as_x | a switch, a kind | the switch shown as a light, fan, cover, lock, siren or valve (unique_id = entry_id) |
+| switch_as_x | a switch, a kind (a cover: optional door sensor, momentary, kind) | the switch shown as a light, fan, cover, lock, siren or valve (unique_id = entry_id) |
 
 The device transports are module functions so the tests can replace them.
 ``mobile_app`` is not here on purpose: a phone adds itself when its app signs in.
@@ -71,6 +71,16 @@ def _zone_options(hub: Any) -> list[dict[str, str]]:
 def _switch_options(hub: Any) -> list[dict[str, str]]:
     return [{"value": eid, "label": hub.states.get(eid).name if hub.states.get(eid) else eid}
             for eid in sorted(hub.entities) if eid.startswith("switch.")]
+
+
+def _binary_sensor_options(hub: Any) -> list[dict[str, str]]:
+    return [{"value": eid, "label": hub.states.get(eid).name if hub.states.get(eid) else eid}
+            for eid in sorted(hub.entities) if eid.startswith("binary_sensor.")]
+
+
+#: HA's cover device classes a switch shown as a cover may take (a garage door opener: ``garage``).
+COVER_CLASSES = ("garage", "door", "gate", "awning", "blind", "curtain", "damper", "shade", "shutter", "window")
+YES_NO = [{"value": "", "label": "No"}, {"value": "1", "label": "Yes"}]
 
 
 #: ``{domain: {label, kind, fields, single?}}``. ``fields`` may be a function of the hub
@@ -133,7 +143,15 @@ SPECS: dict[str, dict[str, Any]] = {
         {"key": "target_domain", "label": "Show it as", "type": "select",
          "options": [{"value": d, "label": d.title()} for d in SWITCH_AS_X_DOMAINS]},
         {"key": "invert", "label": "Inverted", "type": "select", "optional": True,
-         "options": [{"value": "", "label": "No"}, {"value": "1", "label": "Yes"}]}]},
+         "options": [{"value": "", "label": "No"}, {"value": "1", "label": "Yes"}]},
+        {"key": "state_entity_id", "label": "Door sensor", "type": "select", "optional": True,
+         "options": [{"value": "", "label": "None"}, *_binary_sensor_options(hub)],
+         "help": "Covers only: a contact sensor that is on when open (Inverted: on when closed)."},
+        {"key": "momentary", "label": "Momentary", "type": "select", "optional": True, "options": YES_NO,
+         "help": "Covers only: the switch is a push button (a garage door opener's relay)."},
+        {"key": "device_class", "label": "Kind", "type": "select", "optional": True,
+         "options": [{"value": "", "label": "Not set"}, *[{"value": c, "label": c.title()} for c in COVER_CLASSES]],
+         "help": "Covers only: garage door, gate, blind..."}]},
 }
 #: Domains whose devices need no address (the finding is a placeholder).
 NO_ADDRESS = {"matter", "ibeacon", "emporia_vue", "srp_energy", "roborock", "sun", "open_meteo", "nws", "local_todo",
@@ -744,12 +762,24 @@ async def adopt_switch_as_x(runtime: Any, finding: dict[str, Any], name: str | N
     for e in hub.config_entries.values():
         if e.domain == "switch_as_x" and {**e.data, **e.options}.get("entity_id") == source:
             raise FlowError(f"{source} is already shown as another device", 409)
+    options: dict[str, Any] = {"entity_id": source, "target_domain": v["target_domain"], "invert": bool(v["invert"])}
+    cover_opts = {k: v[k] for k in ("state_entity_id", "momentary", "device_class") if v[k]}
+    if cover_opts and v["target_domain"] != "cover":
+        raise NeedsInput(fields, "Choose the switch and what to show it as.",
+                         "A door sensor, momentary and kind are for covers only.")
+    sensor = cover_opts.get("state_entity_id")
+    if sensor and (sensor not in hub.entities or not sensor.startswith("binary_sensor.")):
+        raise NeedsInput(fields, "Choose the switch and what to show it as.", f"There is no binary sensor {sensor}.")
+    if cover_opts.get("device_class") and cover_opts["device_class"] not in COVER_CLASSES:
+        raise NeedsInput(fields, "Choose the switch and what to show it as.", "Choose what kind of cover it is.")
+    if "momentary" in cover_opts:
+        cover_opts["momentary"] = True
+    options.update(cover_opts)
     wrapped = hub.entities[source]
     entry_id = _new_entry_id()
     title = name or hub.friendly_name(wrapped)
     entry = ConfigEntry(entry_id=entry_id, domain="switch_as_x", title=title, source="user",
-                        data={}, options={"entity_id": source, "target_domain": v["target_domain"],
-                                          "invert": bool(v["invert"])})
+                        data={}, options=options)
     plan = Plan(hub, entry)
     dev = hub.devices.get(wrapped.device_id or "")
     ent = plan.add_entity(v["target_domain"], entry_id, None, device=dev)
