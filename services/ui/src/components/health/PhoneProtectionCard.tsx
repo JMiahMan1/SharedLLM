@@ -58,7 +58,12 @@ export default function PhoneProtectionCard() {
   // old to report it, or a phone without the role, is not held back for it.
   const callFilterReady = !guard.callFilterAvailable || Boolean(guard.callFilter);
   const allOn = guard.adminActive && guard.guardEnabled && filterReady && reportingOn && callFilterReady;
-  const askCallFilter = () => void Guard.allowCallFilter().catch(() => undefined);
+  // The role prompt is a dialog, so no visibilitychange: read the status again when it closes.
+  const askCallFilter = () =>
+    void Guard.allowCallFilter()
+      .then(() => Guard.status())
+      .then(setGuard)
+      .catch(() => undefined);
   const askComms = () => void Comms.requestAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
 
   return (
@@ -162,7 +167,7 @@ export default function PhoneProtectionCard() {
                     </button>
                     <span className="block mt-1.5 leading-relaxed text-slate-400">
                       While this phone is locked, calls go only to a parent or 911, from the phone or a watch or car paired with it.
-                      Android asks once: choose <b>Jarvis</b>.{guard.deviceOwner ? ' Until then a locked phone can call 911 only.' : ''}
+                      Android asks once: choose <b>Jarvis OS</b>, then <b>Set as default</b>.{guard.deviceOwner ? ' Until then a locked phone can call 911 only.' : ''}
                     </span>
                   </>
                 )}

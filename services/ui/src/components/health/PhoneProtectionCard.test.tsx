@@ -96,7 +96,7 @@ describe('PhoneProtectionCard', () => {
   });
 
   it('asks once for the lock call filter and counts it as setup', async () => {
-    vi.mocked(Guard.allowCallFilter).mockResolvedValue(undefined);
+    vi.mocked(Guard.allowCallFilter).mockResolvedValue({ held: true });
     vi.mocked(Guard.status).mockResolvedValue({
       adminActive: true, deviceOwner: true, guardEnabled: true, callFilterAvailable: true, callFilter: false,
     });
@@ -106,6 +106,8 @@ describe('PhoneProtectionCard', () => {
     expect(step.textContent).toContain('911 only');
     fireEvent.click(step.querySelector('button')!);
     expect(Guard.allowCallFilter).toHaveBeenCalled();
+    // The prompt is a dialog: the card reads the status again when it closes.
+    await vi.waitFor(() => expect(vi.mocked(Guard.status).mock.calls.length).toBeGreaterThan(1));
   });
 
   it('is fully on once the call filter is held', async () => {

@@ -43,7 +43,7 @@ export interface GuardPluginInterface {
   openAppInfo(): Promise<void>;
   allowWebFilter(): Promise<void>;
   /** Android's one-time prompt to let Jarvis check outgoing calls while the phone is locked. */
-  allowCallFilter(): Promise<void>;
+  allowCallFilter(): Promise<{ held: boolean }>;
 }
 
 // Off Android nothing is guarded: report it plainly, never a fake "on".
@@ -55,7 +55,7 @@ const webFallback: GuardPluginInterface = {
   openGuardSettings: async () => undefined,
   openAppInfo: async () => undefined,
   allowWebFilter: async () => undefined,
-  allowCallFilter: async () => undefined,
+  allowCallFilter: async () => ({ held: false }),
 };
 
 const Guard = registerPlugin<GuardPluginInterface>('JarvisGuard', { web: () => webFallback });

@@ -137,12 +137,11 @@ public class GuardPlugin extends Plugin {
         call.resolve();
     }
 
-    /** Request code for Android's one-time call redirection role prompt. */
-    private static final int CALL_FILTER_REQUEST = 7341;
-
     /**
      * Android's one-time prompt to let Jarvis check outgoing calls (the call
      * redirection role), so a locked phone calls only its parents and 911.
+     * Resolves when the prompt closes, with {@code held}: the prompt is a
+     * dialog, so the page underneath never sees a visibility change to tell it.
      */
     @PluginMethod
     public void allowCallFilter(PluginCall call) {
@@ -150,14 +149,23 @@ public class GuardPlugin extends Plugin {
             android.app.role.RoleManager rm = getContext().getSystemService(android.app.role.RoleManager.class);
             if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_REDIRECTION)
                     && !rm.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_REDIRECTION)) {
-                getActivity().startActivityForResult(
-                        rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_REDIRECTION), CALL_FILTER_REQUEST);
+                startActivityForResult(call,
+                        rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_REDIRECTION), "onCallFilter");
+                return;
             }
         } catch (Exception e) {
             call.reject("This phone does not offer a call filter");
             return;
         }
-        call.resolve();
+        onCallFilter(call, null);
+    }
+
+    @com.getcapacitor.annotation.ActivityCallback
+    private void onCallFilter(PluginCall call, androidx.activity.result.ActivityResult result) {
+        if (call == null) return;
+        JSObject out = new JSObject();
+        out.put("held", LockCallFilterService.held(getContext()));
+        call.resolve(out);
     }
 
     @PluginMethod
