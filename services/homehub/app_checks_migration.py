@@ -1,25 +1,25 @@
-"""Moving the app vetting settings from identity's global settings to the hub's integrations, once.
+"""Moving the Common Sense switch from identity's global settings to the hub's integrations, once.
 
-The two outside sources app vetting asks (docs/APP_VETTING.md) used to be
-identity global settings edited in an Admin box: ``malwarebazaar_auth_key``
-and ``app_vetting_common_sense_enabled``. They are integrations now
-(manual_flows: ``malwarebazaar``, ``common_sense_media``), set up on the
-Devices page. On the first start after the change the hub:
+Common Sense Media lookups (docs/APP_VETTING.md) used to be switched by the
+identity global setting ``app_vetting_common_sense_enabled``, edited in an
+Admin box. It is an integration now (manual_flows: ``common_sense_media``),
+set up on the Devices page. On the first start after the change the hub:
 
 * creates the Common Sense Media entry unless the old switch was turned off
   ("false" and the like), because Common Sense lookups were on by default and
   the household must not lose them without a word;
-* creates the MalwareBazaar entry with the stored key, when there was one
-  (no lookup to check it: telemetry already used it, and says so if
-  abuse.ch refuses it);
-* empties both settings in identity, which deletes the emptied rows when it
+* empties the setting in identity, which deletes the emptied row when it
   next starts (``services/identity/main.py`` ``_RETIRED_SETTINGS``).
 
+The old abuse.ch key setting (``malwarebazaar_auth_key``) is not the hub's any
+more: identity moves it to the household default abuse.ch key in Accounts &
+Integrations itself, and ``abuse_ch_move`` moves the key of the hub's own
+former abuse.ch integration there.
+
 The store's ``app_checks_moved`` marker makes it run once: an admin who later
-removes either entry keeps it removed. Until identity has answered and the
-settings are emptied the marker is not set, so a hub that started before
-identity tries again (an entry already there is never made twice). The key is
-never logged.
+removes the entry keeps it removed. Until identity has answered and the
+setting is emptied the marker is not set, so a hub that started before
+identity tries again (an entry already there is never made twice).
 """
 from __future__ import annotations
 
@@ -34,7 +34,6 @@ from typing import Any
 log = logging.getLogger("homehub.app_checks_migration")
 
 MARKER = "app_checks_moved"
-OLD_KEY = "malwarebazaar_auth_key"
 OLD_SWITCH = "app_vetting_common_sense_enabled"
 _OFF = ("false", "0", "no", "off")
 #: Seconds between tries while identity cannot be asked (the last one repeats).
@@ -58,7 +57,7 @@ def read_identity_settings() -> dict[str, Any] | None:
 
 
 def clear_identity_settings(keys: list[str]) -> None:
-    """Empty the old settings (identity deletes empty retired rows when it starts)."""
+    """Empty the old setting (identity deletes empty retired rows when it starts)."""
     url, secret = _identity()
     if not url or not keys:
         return
@@ -91,11 +90,7 @@ async def migrate(runtime: Any) -> dict[str, Any]:
     if switch not in _OFF and not _has(hub, "common_sense_media"):
         await commit(runtime, manual_flows.common_sense_plan(hub))
         created.append("common_sense_media")
-    key = str(settings.get(OLD_KEY) or "").strip()
-    if key and key != "***" and not _has(hub, "malwarebazaar"):
-        await commit(runtime, manual_flows.malwarebazaar_plan(hub, key))
-        created.append("malwarebazaar")
-    old = [k for k in (OLD_KEY, OLD_SWITCH) if settings.get(k) not in (None, "")]
+    old = [k for k in (OLD_SWITCH,) if settings.get(k) not in (None, "")]
     if old:
         await asyncio.to_thread(clear_identity_settings, old)
     record = {"at": datetime.now(UTC).isoformat(), "created": created, "cleared": old,

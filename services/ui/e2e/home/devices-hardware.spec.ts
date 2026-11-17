@@ -135,23 +135,19 @@ test.describe('Devices: the hardware list', () => {
     clean(run);
   });
 
-  test('the app check accounts are cloud accounts; MalwareBazaar asks for its key as a password', async ({ page }, info) => {
+  test('Common Sense Media is a cloud account; the abuse.ch key is not a hub integration', async ({ page }, info) => {
     const run = await open(page);
     await page.getByRole('tab', { name: 'Add & fix' }).click();
     await page.getByRole('button', { name: /Add by address/ }).click();
     const picker = page.getByTestId('add-by-address');
     const cloud = picker.locator('div', { has: page.getByText('Cloud accounts', { exact: true }) }).last();
-    const mb = cloud.getByRole('button', { name: 'abuse.ch MalwareBazaar (app malware check)' });
-    await expect(mb).toBeVisible();
-    await expect(cloud.getByRole('button', { name: 'Common Sense Media (app age ratings)' })).toBeVisible();
+    const csm = cloud.getByRole('button', { name: 'Common Sense Media (app age ratings)' });
+    await expect(csm).toBeVisible();
+    await expect(picker.getByRole('button', { name: /MalwareBazaar|abuse\.ch/ })).toHaveCount(0);
     await expectTapTargets(picker);
     await expectNoHorizontalOverflow(page);
-    await mb.click();
+    await csm.click();
     const dialog = page.getByRole('dialog');
-    const key = dialog.getByLabel('Auth-Key');
-    await expect(key).toBeVisible();
-    await expect(key).toHaveAttribute('type', 'password');
-    await expect(dialog).toContainText('auth.abuse.ch');
     await expect(dialog).toContainText('An online account');
     await expect(dialog.getByLabel('Room (optional)')).toHaveCount(0); // an account has no room
     await settled(page, dialog);
@@ -160,7 +156,7 @@ test.describe('Devices: the hardware list', () => {
     // The dialog's close button is 44px under a finger (pointer-coarse) and 36px under a mouse.
     if (info.project.use.hasTouch) await expectTapTargets(dialog);
     await expectNoHorizontalOverflow(page);
-    await snap(page, info, 'devices-add-malwarebazaar');
+    await snap(page, info, 'devices-add-common-sense');
     clean(run);
   });
 });

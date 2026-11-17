@@ -41,7 +41,7 @@ from services.common.screen_time import (
 from services.common.secrets import secret_matches
 from services.common.sqlite import apply_sqlite_pragmas
 from services.config import IDENTITY_CORS_ORIGINS, IDENTITY_DATABASE_URL, INTERNAL_SECRET
-from services.identity import audit, battery_alerts, push, roles, voice
+from services.identity import abuse_ch, audit, battery_alerts, push, roles, voice
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
@@ -84,6 +84,7 @@ from services.identity.models import (
 )
 from services.identity.schemas import (
     CREDENTIAL_COLUMNS,
+    WRITE_ONLY_CREDENTIALS,
     BatteryReading,
     ChangePasswordRequest,
     CredentialSharesRead,
@@ -243,6 +244,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "router_cert_sha256", "ALTER TABLE user ADD COLUMN router_cert_sha256 VARCHAR")
         _add_column("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR")
         _add_column("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR")
+        _add_column("user", "malwarebazaar_key_enc", "ALTER TABLE user ADD COLUMN malwarebazaar_key_enc VARCHAR")
 
     if _table_exists("apikey"):
         _add_column("apikey", "key_hash", "ALTER TABLE apikey ADD COLUMN key_hash VARCHAR")
@@ -354,6 +356,12 @@ SHARED_CREDENTIAL_SERVICES = (
     "nextcloud",
 )
 
+# Services whose system default user's credentials are the household default:
+# every user who has not set their own uses them, with no admin grant. Only
+# the abuse.ch Auth-Key app vetting looks app file hashes up with
+# (services/identity/abuse_ch.py): a lookup key, not a personal account.
+HOUSEHOLD_DEFAULT_SERVICES = (abuse_ch.SERVICE,)
+
 
 #: The identity a kiosk or voice satellite acts as when it names no person
 #: (resolve_credentials' household mode). It has no User row.
@@ -434,7 +442,50 @@ def _own_service_creds(user: User, service: str) -> dict[str, str | None]:
             "nextcloud_user": user.nextcloud_user,
             "nextcloud_pass": _decrypt_field(user.nextcloud_pass_enc),
         }
+    if service == abuse_ch.SERVICE:
+        return {abuse_ch.FIELD: _decrypt_field(user.malwarebazaar_key_enc)}
     raise ValueError(f"Unknown credential service: {service}")
+
+
+def _resolve_household_default_creds(
+    session: Session, user: User, service: str
+) -> tuple[dict[str, str | None], str]:
+    """(values, source) for a HOUSEHOLD_DEFAULT_SERVICES service: the user's
+    own ("own"), else the system default user's ("household"), else "absent".
+    No grant is involved; the default user itself has only its own."""
+    own = _own_service_creds(user, service)
+    if any(own.values()):
+        return own, "own"
+    if _is_system_default_user(user):
+        return own, "absent"
+    default_user = _system_default_user(session)
+    if default_user is None:
+        return own, "absent"
+    shared = _own_service_creds(default_user, service)
+    if any(shared.values()):
+        return shared, "household"
+    return own, "absent"
+
+
+def abuse_ch_status(session: Session, user: User) -> str:
+    """"own", "household" or "not_set_up" for the account page; never the key."""
+    if user.malwarebazaar_key_enc:
+        return "own"
+    default_user = None if _is_system_default_user(user) else _system_default_user(session)
+    return abuse_ch.status_for(None, default_user.malwarebazaar_key_enc if default_user else None)
+
+
+def _check_abuse_ch_key(update_data: dict) -> None:
+    """Refuse to save an abuse.ch Auth-Key abuse.ch does not accept (or cannot be asked about)."""
+    value = update_data.get(abuse_ch.FIELD)
+    if not isinstance(value, str) or not value.strip():
+        return
+    try:
+        abuse_ch.check_key(value.strip())
+    except abuse_ch.KeyRefused as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except abuse_ch.Unreachable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
 
 
 def _resolve_service_creds(
@@ -496,14 +547,39 @@ async def _ensure_default_settings(session: Session) -> None:
     _drop_retired_settings(session)
 
 
-#: Settings that moved elsewhere. The app vetting checks are homehub integrations now
-#: (services/homehub/app_checks_migration.py): the hub copies these once and empties them,
-#: and an emptied row is deleted here on the next start. A row that still holds a value has
-#: not been moved yet and is kept for the hub to read.
+#: Settings that moved elsewhere. The Common Sense switch is a homehub integration now
+#: (services/homehub/app_checks_migration.py: the hub copies it once and empties it); the
+#: abuse.ch key is the household default in Accounts & Integrations, moved here at start
+#: (_move_retired_abuse_ch_key). An emptied row is deleted; one that still holds a value
+#: has not been moved yet and is kept.
 _RETIRED_SETTINGS = ("malwarebazaar_auth_key", "app_vetting_common_sense_enabled")
 
 
+def _move_retired_abuse_ch_key(session: Session) -> None:
+    """The oldest home of the abuse.ch key, a global setting, goes to the household default.
+
+    An install that never ran the hub's move (app_checks_migration) still has
+    it here. It becomes the system default user's key when that user has none,
+    and the setting is emptied (then deleted below). Never logged.
+    """
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == "malwarebazaar_auth_key")).first()
+    value = (row.value or "").strip() if row else ""
+    if not row or not value or value == "***":
+        return
+    user = _system_default_user(session)
+    if user is None:
+        return  # kept for a later start, once the default user exists
+    if not user.malwarebazaar_key_enc:
+        user.malwarebazaar_key_enc = encrypt(value)
+        session.add(user)
+        log.info("[identity] the old abuse.ch key setting moved to %s's Accounts & Integrations", user.username)
+    row.value = ""
+    session.add(row)
+    session.commit()
+
+
 def _drop_retired_settings(session: Session) -> None:
+    _move_retired_abuse_ch_key(session)
     rows = session.exec(select(GlobalSetting).where(GlobalSetting.key.in_(_RETIRED_SETTINGS))).all()
     gone = [r for r in rows if not (r.value or "").strip()]
     for row in gone:
@@ -981,6 +1057,12 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         ) else "absent"
     credential_sources["skylight"] = skylight_source
 
+    household_default: dict[str, dict[str, str | None]] = {}
+    for service in HOUSEHOLD_DEFAULT_SERVICES:
+        values, source = _resolve_household_default_creds(session, user, service)
+        household_default[service] = values
+        credential_sources[service] = source
+
     if household:
         # These are the system default's shared accounts, not the caller's own.
         credential_sources = {
@@ -990,6 +1072,8 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         credential_sources["skylight"] = (
             "shared" if skylight_source in ("own", "shared") else skylight_source
         )
+        for service, values in household_default.items():
+            credential_sources[service] = "household" if any(values.values()) else "absent"
 
     log.info(
         f"[resolve] Returning credentials for user={user.username}, "
@@ -1041,6 +1125,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         huggingface_token=None if household else (
             decrypt(user.huggingface_token_enc) if user.huggingface_token_enc else None
         ),
+        malwarebazaar_key=household_default[abuse_ch.SERVICE][abuse_ch.FIELD],
         skylight_url=skylight_user.skylight_url if skylight_user else None,
         skylight_email=(skylight_user.skylight_email if skylight_user else None) or user.username,
         skylight_pass=(
@@ -1122,6 +1207,7 @@ def health():
 def get_me(user: User = Depends(require_api_key), session: Session = Depends(get_session)):
     me = _user_read(session, user)
     me.skylight_status = skylight_status(session, user)
+    me.abuse_ch_status = abuse_ch_status(session, user)
     return me
 
 
@@ -1687,6 +1773,7 @@ def update_me(body: UserUpdate, request: Request, session: Session = Depends(get
     if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]) and user.id != 1 and user.username != "default":
         raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
+    _check_abuse_ch_key(update_data)
     before = audit.snapshot(user)
     _apply_user_update(user, update_data, clear_fields)
     session.add(user)
@@ -1711,6 +1798,7 @@ def update_user(username: str, body: UserUpdate, request: Request, session: Sess
     if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]) and user.id != 1 and user.username != "default":
         raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
+    _check_abuse_ch_key(update_data)
     before = audit.snapshot(user)
     _apply_user_update(user, update_data, clear_fields)
     session.add(user)
@@ -1735,6 +1823,8 @@ def reveal_credential(username: str, body: dict, request: Request, session: Sess
     field = str(body.get("field") or "")
     if field not in CREDENTIAL_COLUMNS:
         raise HTTPException(status_code=422, detail=f"field must be one of {', '.join(sorted(CREDENTIAL_COLUMNS))}")
+    if field in WRITE_ONLY_CREDENTIALS:
+        raise HTTPException(status_code=422, detail=f"{field} is never shown once saved; enter a new one to replace it")
     stored = getattr(target, CREDENTIAL_COLUMNS[field], None)
     value = decrypt(stored) if stored else ""
     _audit(request, session, "credential.reveal", target.username, actor=caller, changes=[{"field": field, "change": "revealed", "secret": True}])
@@ -2296,6 +2386,7 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
         raise HTTPException(status_code=422, detail="A mother link only applies to a child or teen")
     if body.mother_username:
         _check_mother(session, body.username.lower(), body.mother_username)
+    _check_abuse_ch_key({abuse_ch.FIELD: body.malwarebazaar_key})
 
     user = User(
         username=body.username.lower(),
@@ -2327,6 +2418,7 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
         mass_url=_coerce(body.mass_url),
         mass_token_enc=encrypt(_coerce(body.mass_token)) if _coerce(body.mass_token) else None,
         huggingface_token_enc=encrypt(_coerce(body.huggingface_token)) if _coerce(body.huggingface_token) else None,
+        malwarebazaar_key_enc=encrypt(_coerce(body.malwarebazaar_key)) if _coerce(body.malwarebazaar_key) else None,
         skylight_url=_coerce(body.skylight_url),
         skylight_email=_coerce(body.skylight_email),
         skylight_pass_enc=encrypt(_coerce(body.skylight_pass)) if _coerce(body.skylight_pass) else None,
@@ -3205,6 +3297,34 @@ def seed_credential(body: dict, request: Request, session: Session = Depends(get
         "has_value": bool(value)
     }
 
+@app.post("/api/internal/household-abuse-ch-key")
+def set_household_abuse_ch_key(body: dict, request: Request, session: Session = Depends(get_session),
+                               _: None = Depends(require_internal)):
+    """Give the household default abuse.ch Auth-Key (the system default user's) a value, unless it has one.
+
+    The hub's one-time move of its old abuse.ch integration calls this
+    (services/homehub/abuse_ch_move.py). It never overwrites a key already
+    set, and does not ask abuse.ch: the hub checked the key when it was
+    entered, and telemetry says so if abuse.ch refuses it later. The key is
+    never logged or returned.
+    """
+    key = str(body.get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=422, detail="key is required")
+    user = _system_default_user(session)
+    if user is None:
+        raise HTTPException(status_code=404, detail="No system default user")
+    if user.malwarebazaar_key_enc:
+        return {"status": "kept", "user": user.username}
+    user.malwarebazaar_key_enc = encrypt(key)
+    session.add(user)
+    session.commit()
+    _audit(request, session, "credential.seed", user.username,
+           changes=[{"field": abuse_ch.FIELD, "change": "set", "secret": True}],
+           note="moved from the hub's abuse.ch integration")
+    log.info("[credentials] the household abuse.ch Auth-Key was moved to %s", user.username)
+    return {"status": "set", "user": user.username}
+
 # API Key Management
 
 @app.get("/api/users/me/keys")
@@ -3696,8 +3816,8 @@ def get_settings(
 
 #: Global settings that are secrets: shown to the UI as "***" only, and a
 #: write of "***" back (an editor saving the masked value) keeps the secret.
-#: malwarebazaar_auth_key moved to the hub's integrations, but its row stays
-#: until the hub has copied it (_RETIRED_SETTINGS), so it stays masked.
+#: malwarebazaar_auth_key is the household default abuse.ch key now, but its row
+#: stays until identity has moved it (_RETIRED_SETTINGS), so it stays masked.
 _MASKED_SETTINGS = {"spotify_client_secret", "malwarebazaar_auth_key"}
 
 

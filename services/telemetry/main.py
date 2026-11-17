@@ -751,7 +751,8 @@ def create_app():
         """A child's apps across their devices, each with what is known about
         it; the gateway adds the policy and decides who may see it."""
         rc = _redis()
-        apps, devices = await app_catalog.merged_apps(rc, user.strip().lower())
+        user = user.strip().lower()
+        apps, devices = await app_catalog.merged_apps(rc, user)
         backoff = await app_catalog.backoff_state(rc)
         return {
             "status": "SUCCESS",
@@ -762,7 +763,7 @@ def create_app():
                 "enabled": app_catalog.APP_CATALOG_ENABLED,
                 "paused_until": (backoff or {}).get("until_iso"),
                 "paused_reason": (backoff or {}).get("reason"),
-                **await app_catalog.checks_state(rc),
+                **await app_catalog.checks_state(rc, user),
             },
         }
 

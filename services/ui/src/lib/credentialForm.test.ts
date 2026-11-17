@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INTEGRATIONS, credentialPayload, missingFields, prefill, validateIntegrations } from './credentialForm';
+import { INTEGRATIONS, canReveal, credentialPayload, householdKeyLine, isSecretKey, missingFields, prefill, validateIntegrations } from './credentialForm';
 
 const nextcloud = INTEGRATIONS.find((i) => i.id === 'nextcloud')!;
 const abs = INTEGRATIONS.find((i) => i.id === 'audiobookshelf')!;
@@ -59,5 +59,36 @@ describe('prefilled household URLs', () => {
       nextcloud_user: 'sam',
       nextcloud_pass: 'app-pw',
     });
+  });
+});
+
+describe('the abuse.ch key', () => {
+  const abuse = INTEGRATIONS.find((i) => i.id === 'abuse_ch')!;
+
+  it('is one write-only secret with its own help, a household default', () => {
+    expect(abuse.fields).toEqual([{ key: 'malwarebazaar_key', label: 'abuse.ch Auth-Key', secret: true, writeOnly: true }]);
+    expect(abuse.help).toContain('auth.abuse.ch');
+    expect(abuse.help).toContain('SHA-256');
+    expect(abuse.householdDefault).toBe(true);
+    expect(isSecretKey('malwarebazaar_key')).toBe(true);
+    expect(canReveal('malwarebazaar_key')).toBe(false);
+    expect(canReveal('ha_token')).toBe(true);
+  });
+
+  it('sends a typed key, keeps a saved one when blank, and is removed by name', () => {
+    expect(credentialPayload({ malwarebazaar_key: '  made-up-key ' }, ['malwarebazaar_key'])).toEqual({ malwarebazaar_key: 'made-up-key' });
+    expect(credentialPayload({ malwarebazaar_key: '' }, ['malwarebazaar_key'])).toEqual({});
+    expect(credentialPayload({}, ['malwarebazaar_key'], ['malwarebazaar_key'])).toEqual({ clear_fields: ['malwarebazaar_key'] });
+    expect(missingFields(abuse, { malwarebazaar_key: '' }, new Set(['malwarebazaar_key']))).toEqual([]);
+    expect(validateIntegrations({ malwarebazaar_key: '' }, none)).toEqual([]);
+  });
+
+  it('says where the key comes from', () => {
+    expect(householdKeyLine('household')).toBe('Using the household key');
+    expect(householdKeyLine('own')).toBe('Using your own key');
+    expect(householdKeyLine('not_set_up')).toBe('Not set up');
+    expect(householdKeyLine('own', true)).toBe('Household key set');
+    expect(householdKeyLine('not_set_up', true)).toBe('No household key yet');
+    expect(householdKeyLine(undefined)).toBe('Not set up');
   });
 });

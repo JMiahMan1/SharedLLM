@@ -77,6 +77,10 @@ class User(SQLModel, table=True):  # type: ignore
     skylight_pass_enc: str | None = None
     git_token_enc: str | None = None
     huggingface_token_enc: str | None = None
+    # abuse.ch Auth-Key for app vetting's MalwareBazaar lookups (docs/APP_VETTING.md).
+    # The system default user's key is the household default: it applies to
+    # everyone who has not set their own, with no grant needed.
+    malwarebazaar_key_enc: str | None = None
     # The home router (system user only; docs/NETWORK.md): a read-only rpcd
     # login, and the SHA-256 of its self-signed certificate, pinned on first use.
     router_url: str | None = None

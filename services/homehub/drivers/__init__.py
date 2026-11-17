@@ -41,7 +41,6 @@ DRIVERS: dict[str, str] = {
     "local_todo": "services.homehub.drivers.todo:LocalTodoDriver",
     "shopping_list": "services.homehub.drivers.todo:ShoppingListDriver",
     # Accounts other services read (app vetting): nothing to drive, the entry is the setting.
-    "malwarebazaar": "services.homehub.drivers.accounts:AccountDriver",
     "common_sense_media": "services.homehub.drivers.accounts:AccountDriver",
     # Bluetooth: one driver for every BLE sensor parser (services/homehub/bluetooth_parsers.py), and iBeacon tags.
     **{d: "services.homehub.drivers.ble:BLESensorDriver" for d in (
