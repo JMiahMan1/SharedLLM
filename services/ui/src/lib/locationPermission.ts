@@ -34,8 +34,12 @@ let inFlight: Promise<LocationAccess> | null = null;
  */
 export async function ensureLocationAccess(opts: { ask?: boolean } = {}): Promise<LocationAccess> {
   const current = accessFrom(await Geolocation.checkPermissions());
-  if (current) return current;
+  if (current === 'precise' || current === 'approximate') return current;
   if (opts.ask === false) return 'denied';
+  // Ask even when the state reads "denied": Capacitor reports any permission
+  // it has asked for before as denied, so treating that as final meant turning
+  // location back on in Settings could never show the dialog again. After a
+  // permanent "Don't allow" Android answers without showing anything.
   if (!inFlight) {
     inFlight = Geolocation.requestPermissions()
       .then((status) => accessFrom(status) ?? 'denied')

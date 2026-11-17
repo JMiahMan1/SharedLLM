@@ -45,6 +45,13 @@ describe('location permission', () => {
     expect(geo.requestPermissions).not.toHaveBeenCalled();
   });
 
+  it('asks again when the state reads denied, so turning location back on can work', async () => {
+    geo.checkPermissions.mockResolvedValue(status('denied', 'denied'));
+    geo.requestPermissions.mockResolvedValue(status('granted', 'granted'));
+    expect(await ensureLocationAccess()).toBe('precise');
+    expect(geo.requestPermissions).toHaveBeenCalledTimes(1);
+  });
+
   it('never shows a dialog when told not to ask', async () => {
     geo.checkPermissions.mockResolvedValue(status('prompt', 'prompt'));
     expect(await ensureLocationAccess({ ask: false })).toBe('denied');
