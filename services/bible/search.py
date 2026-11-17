@@ -217,7 +217,7 @@ _STRONGS = re.compile(r"^([GHgh])0*(\d{1,5})[a-z]?$")
 _NEAR = re.compile(r"^NEAR(?:/(\d+))?$")
 _HAS = {"note": "note", "notes": "note", "highlight": "highlight", "highlights": "highlight",
         "bookmark": "bookmark", "bookmarks": "bookmark", "mark": "any", "marks": "any"}
-_MODES = ("all", "any", "exact")
+_MODES = ("all", "any", "exact", "meaning")
 
 
 def _strongs(value: str) -> str | None:
@@ -324,7 +324,7 @@ def parse(query: str, *, mode: str = "all") -> ParsedQuery:
         # "Lord's" is one typed word but two tokens; FTS reads it as a phrase.
         add(Term(words, prefix=word.endswith("*") and " " not in words), negative)
 
-    if mode == "any" and len(parsed.clauses) > 1:
+    if mode in ("any", "meaning") and len(parsed.clauses) > 1:
         parsed.clauses = [[t for clause in parsed.clauses for t in clause]]
     elif mode == "exact" and parsed.clauses:
         plain = [t for clause in parsed.clauses for t in clause]
@@ -605,6 +605,80 @@ def _positions_marks(session: Session, username: str, kinds: list[str]) -> set[t
     return found
 
 
+def _display(
+    conn,
+    chosen: list[tuple[tuple[str, int, int], str, list[str]]],
+    *,
+    stemmed: str | None,
+    strongs_words: list[str] | None = None,
+    col: str = "v.",
+    fallback_version: str | None = None,
+) -> list[dict]:
+    """The result rows for a page: each verse's text in its chosen translation,
+    with the matched words marked. A verse the word expression does not match
+    (a meaning-only hit) gets its plain text; one missing from the chosen
+    translation falls back to ``fallback_version``."""
+    shown: dict[tuple[str, tuple[str, int, int]], tuple[str, list[list[int]]]] = {}
+
+    def where(items) -> tuple[str, dict[str, object]]:
+        clauses = []
+        lookup: dict[str, object] = {}
+        for i, ((osis, chapter, verse), code) in enumerate(items):
+            clauses.append(
+                f"({col}version_code = :c{i} AND {col}osis = :o{i} AND {col}chapter = :h{i} AND {col}verse = :v{i})"
+            )
+            lookup.update({f"c{i}": code, f"o{i}": osis, f"h{i}": chapter, f"v{i}": verse})
+        return " OR ".join(clauses), lookup
+
+    if chosen and stemmed:
+        clause, lookup = where([(pos, code) for pos, code, _m in chosen])
+        got = conn.execute(
+            text(
+                f"SELECT v.version_code, v.osis, v.chapter, v.verse, "
+                f"highlight({STEMMED}, 0, char(2), char(3)) FROM {STEMMED} "
+                f"JOIN bibleverse v ON v.rowid = {STEMMED}.rowid WHERE {STEMMED} MATCH :stemmed AND ({clause})"
+            ),
+            {**lookup, "stemmed": stemmed},
+        ).all()
+        for code, osis, chapter, verse, marked in got:
+            shown[(code, (osis, chapter, verse))] = _highlights(marked)
+    for attempt in ("chosen", "fallback"):
+        wanted = [
+            (pos, code if attempt == "chosen" else fallback_version)
+            for pos, code, _m in chosen
+            if (code, pos) not in shown and not any((c, pos) in shown for c in (code, fallback_version))
+        ]
+        wanted = [(pos, code) for pos, code in wanted if code]
+        if not wanted:
+            continue
+        clause, lookup = where(wanted)
+        got = conn.execute(
+            text(f"SELECT v.version_code, v.osis, v.chapter, v.verse, v.text FROM bibleverse v WHERE {clause}"),
+            lookup,
+        ).all()
+        for code, osis, chapter, verse, body in got:
+            shown[(code, (osis, chapter, verse))] = (body, _word_spans(body, strongs_words or []))
+
+    results = []
+    for position, code, matched in chosen:
+        used = code if (code, position) in shown else fallback_version
+        body, spans = shown.get((used or code, position), ("", []))
+        osis, chapter, verse = position
+        name = BOOK_BY_OSIS.get(osis, {}).get("name", osis)
+        results.append({
+            "version": used or code,
+            "osis": osis,
+            "book_name": name,
+            "chapter": chapter,
+            "verse": verse,
+            "reference": f"{name} {chapter}:{verse}",
+            "text": body,
+            "highlights": spans,
+            "versions": matched,
+        })
+    return results
+
+
 def run(
     session: Session,
     query: str,
@@ -617,9 +691,12 @@ def run(
     offset: int = 0,
     book: str | None = None,
     username: str | None = None,
+    rag_url: str = "",
+    secret: str = "",
 ) -> dict:
     """Search the corpus. ``version`` is the reader's translation; ``installed``
-    is every installed code (``ver:`` is checked against it)."""
+    is every installed code (``ver:`` is checked against it). ``mode`` "meaning"
+    needs ``rag_url`` and ``secret`` to embed the question."""
     parsed = parse(query, mode=mode)
     if book:
         scope = resolve_scope(book)
@@ -638,6 +715,12 @@ def run(
     primary = version if version in versions else versions[0]
     if parsed.has and not username:
         raise QueryError("has: searches your own notes and highlights; sign in to use it")
+
+    if mode == "meaning":
+        return _run_meaning(
+            session, parsed, version=primary, limit=limit, offset=offset, username=username,
+            rag_url=rag_url, secret=secret,
+        )
 
     stemmed, exact = match_expressions(parsed)
     use_fts = ensure(session)
@@ -727,52 +810,7 @@ def run(
         matched = sorted(set(str(vers).split(",")), key=lambda c: preference.index(c) if c in preference else 99)
         chosen.append(((osis, chapter, verse), matched[0], matched))
 
-    shown: dict[tuple[str, tuple[str, int, int]], tuple[str, list[list[int]]]] = {}
-    if chosen:
-        clauses = []
-        lookup: dict[str, object] = {}
-        for i, ((osis, chapter, verse), code, _m) in enumerate(chosen):
-            clauses.append(
-                f"({col}version_code = :c{i} AND {col}osis = :o{i} AND {col}chapter = :h{i} AND {col}verse = :v{i})"
-            )
-            lookup.update({f"c{i}": code, f"o{i}": osis, f"h{i}": chapter, f"v{i}": verse})
-        if stemmed:
-            got = conn.execute(
-                text(
-                    f"SELECT v.version_code, v.osis, v.chapter, v.verse, "
-                    f"highlight({STEMMED}, 0, char(2), char(3)) FROM {STEMMED} "
-                    f"JOIN bibleverse v ON v.rowid = {STEMMED}.rowid WHERE {STEMMED} MATCH :stemmed AND ("
-                    + " OR ".join(clauses) + ")"
-                ),
-                {**lookup, "stemmed": stemmed},
-            ).all()
-            for code, osis, chapter, verse, marked in got:
-                shown[(code, (osis, chapter, verse))] = _highlights(marked)
-        else:
-            got = conn.execute(
-                text("SELECT v.version_code, v.osis, v.chapter, v.verse, v.text FROM bibleverse v WHERE "
-                     + " OR ".join(clauses)),
-                lookup,
-            ).all()
-            for code, osis, chapter, verse, body in got:
-                shown[(code, (osis, chapter, verse))] = (body, _word_spans(body, strongs_words))
-
-    results = []
-    for position, code, matched in chosen:
-        body, spans = shown.get((code, position), ("", []))
-        osis, chapter, verse = position
-        name = BOOK_BY_OSIS.get(osis, {}).get("name", osis)
-        results.append({
-            "version": code,
-            "osis": osis,
-            "book_name": name,
-            "chapter": chapter,
-            "verse": verse,
-            "reference": f"{name} {chapter}:{verse}",
-            "text": body,
-            "highlights": spans,
-            "versions": matched,
-        })
+    results = _display(conn, chosen, stemmed=stemmed, strongs_words=strongs_words, col=col)
 
     return {
         "version": primary,
@@ -787,6 +825,91 @@ def run(
             for o in _ORDER if o in counts
         ],
         "parsed": parsed.describe(),
+        "results": results,
+    }
+
+
+def _run_meaning(
+    session: Session,
+    parsed: ParsedQuery,
+    *,
+    version: str,
+    limit: int,
+    offset: int,
+    username: str | None,
+    rag_url: str,
+    secret: str,
+) -> dict:
+    """Closest in meaning, blended with the word index (see ``meaning.py``).
+
+    The question is embedded as typed (less the filters); the word half uses
+    only its content words, as any-word, in the reader's translation.
+    """
+    from services.bible import meaning
+
+    question = " ".join(
+        (t.left.words + " " + t.right.words) if isinstance(t, Near) else t.words
+        for clause in parsed.clauses for t in clause
+    ).strip()
+    if not question:
+        raise QueryError("Type what you are looking for, for example: verses about worry")
+    if not rag_url:
+        raise meaning.MeaningUnavailable("Meaning search is not configured (no RAG service URL).")
+    books = parsed.books()
+    ranked, matrix = meaning.closest(session, question, rag_url=rag_url, secret=secret, books=books)
+    by_meaning = [pos for pos, _score in ranked]
+
+    words = meaning.content_words(question)
+    stemmed = None
+    by_words: list[tuple[str, int, int]] = []
+    if words and ensure(session):
+        stemmed = "(" + " OR ".join(_fts_term(Term(w)) for w in dict.fromkeys(words)) + ")"
+        params: dict[str, object] = {"stemmed": stemmed, "ver": version}
+        scope = ""
+        if books is not None:
+            scope = " AND +v.osis IN (" + ", ".join(f":bk{i}" for i in range(len(books))) + ")"
+            params.update({f"bk{i}": o for i, o in enumerate(books)})
+        rows = session.connection().execute(
+            text(
+                f"SELECT v.osis, v.chapter, v.verse FROM {STEMMED} JOIN bibleverse v ON v.rowid = {STEMMED}.rowid "
+                f"WHERE {STEMMED} MATCH :stemmed AND +v.version_code = :ver{scope} "
+                f"ORDER BY bm25({STEMMED}) LIMIT 100"
+            ),
+            params,
+        ).all()
+        by_words = [(r[0], int(r[1]), int(r[2])) for r in rows]
+
+    fused = meaning.fuse(by_meaning, by_words)
+    allowed: set[tuple[str, int, int]] | None = None
+    if parsed.strongs:
+        allowed, _ = _positions_strongs(session, parsed.strongs)
+    if parsed.has:
+        mine = _positions_marks(session, username or "", parsed.has)
+        allowed = mine if allowed is None else allowed & mine
+    if allowed is not None:
+        fused = [p for p in fused if p in allowed]
+    fused = fused[: meaning.MAX_RESULTS]
+
+    counts: dict[str, int] = {}
+    for osis, _c, _v in fused:
+        counts[osis] = counts.get(osis, 0) + 1
+    chosen = [(pos, version, [version]) for pos in fused[offset : offset + limit]]
+    results = _display(session.connection(), chosen, stemmed=stemmed, fallback_version=matrix.version)
+    for row in results:
+        row["versions"] = [row["version"]]
+    return {
+        "version": version,
+        "versions": [version],
+        "index": "meaning",
+        "mode": "meaning",
+        "sort": "rank",
+        "total": len(fused),
+        "count": len(results),
+        "offset": offset,
+        "by_book": [{"osis": o, "name": BOOK_BY_OSIS[o]["name"], "count": counts[o]} for o in _ORDER if o in counts],
+        "parsed": parsed.describe(),
+        "meaning_version": matrix.version,
+        "meaning_coverage": meaning.coverage(session, matrix.version),
         "results": results,
     }
 

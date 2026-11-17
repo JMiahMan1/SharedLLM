@@ -2,11 +2,11 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import BibleSearchResults from './BibleSearchResults';
-import { effectiveQuery, highlighted } from './searchText';
+import { effectiveQuery, highlighted, questionText, scopeIn } from './searchText';
 import { api } from '../../services/api';
 import type { BibleSearchResult, BibleVersionInfo } from '../../types/api';
 
-vi.mock('../../services/api', () => ({ api: { searchBible: vi.fn(), getBiblePassage: vi.fn() } }));
+vi.mock('../../services/api', () => ({ api: { searchBible: vi.fn(), getBiblePassage: vi.fn(), askBibleSearch: vi.fn() } }));
 const mocked = vi.mocked(api);
 
 const VERSIONS = [
@@ -53,6 +53,7 @@ beforeEach(() => {
   localStorage.clear();
   mocked.searchBible.mockReset().mockResolvedValue(page());
   mocked.getBiblePassage.mockReset();
+  mocked.askBibleSearch.mockReset();
 });
 
 describe('BibleSearchResults', () => {
@@ -134,10 +135,65 @@ describe('BibleSearchResults', () => {
   });
 });
 
+describe('meaning search and Ask Jarvis', () => {
+  it('searches by meaning with one translation and says when the index is still being prepared', async () => {
+    localStorage.setItem('jarvis_bible_search_prefs', JSON.stringify({ match: 'all', every: true }));
+    mocked.searchBible.mockResolvedValue(page({ mode: 'meaning', index: 'meaning', meaning_coverage: 0.4 }));
+    renderResults({ term: 'verses about worry' });
+    fireEvent.click(await screen.findByTestId('bible-search-match-meaning'));
+    await waitFor(() =>
+      expect(mocked.searchBible).toHaveBeenLastCalledWith(
+        'verses about worry',
+        expect.objectContaining({ match: 'meaning', sort: undefined }),
+      ),
+    );
+    expect(await screen.findByTestId('bible-search-summary')).toHaveTextContent('closest in meaning');
+    expect(screen.getByTestId('bible-search-summary')).toHaveTextContent('40% of verses');
+    // One translation and one order in meaning mode.
+    expect(screen.queryByTestId('bible-search-every')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bible-search-sort')).not.toBeInTheDocument();
+  });
+
+  it('asks Jarvis with the search as the question and shows only real references', async () => {
+    mocked.askBibleSearch.mockResolvedValue({
+      question: 'faith', version: 'kjv', depth: 'teen', retrieval: 'meaning',
+      answer: 'Faith rests on God (Romans 1:17).',
+      verses: page().results,
+      references: [{ reference: 'Romans 1:17', in_results: true }],
+    });
+    const { onOpen } = renderResults();
+    fireEvent.click(await screen.findByTestId('bible-search-ask-toggle'));
+    expect(screen.getByTestId('bible-search-ask-input')).toHaveValue('faith');
+    fireEvent.click(screen.getByRole('button', { name: 'Teen' }));
+    fireEvent.click(screen.getByTestId('bible-search-ask-go'));
+    const answer = await screen.findByTestId('bible-search-ask-answer');
+    expect(answer).toHaveTextContent('Faith rests on God');
+    expect(answer).toHaveTextContent('From 2 verses found by meaning');
+    expect(mocked.askBibleSearch).toHaveBeenCalledWith('faith', { version: 'kjv', scope: undefined, depth: 'teen' });
+    expect(within(answer).getByText('Romans 1:17')).toBeInTheDocument();
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("shows why Jarvis could not answer", async () => {
+    mocked.askBibleSearch.mockRejectedValue({ response: { data: { detail: 'Study help could not reach the language model' } } });
+    renderResults();
+    fireEvent.click(await screen.findByTestId('bible-search-ask-toggle'));
+    fireEvent.click(screen.getByTestId('bible-search-ask-go'));
+    expect(await screen.findByTestId('bible-search-ask-error')).toHaveTextContent('could not reach');
+  });
+});
+
 describe('search text helpers', () => {
   it('adds the filters once', () => {
     expect(effectiveQuery(' faith ', 'nt', true)).toBe('faith in:nt ver:all');
     expect(effectiveQuery('faith ver:esv', '', true)).toBe('faith ver:esv');
+  });
+
+  it('turns a search into a question and its scope', () => {
+    expect(questionText('faith in:1thess ver:all')).toBe('faith');
+    expect(questionText('what about worry? has:note')).toBe('what about worry?');
+    expect(scopeIn('faith in:"1 Cor" ver:all')).toBe('1 Cor');
+    expect(scopeIn('faith')).toBe('');
   });
 
   it('merges overlapping highlights', () => {

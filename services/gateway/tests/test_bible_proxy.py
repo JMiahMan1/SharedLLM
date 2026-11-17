@@ -959,3 +959,15 @@ def test_search_forwards_its_options_and_searches_as_the_caller(make_client, mon
     sent = captured["calls"][-1]["params"]
     assert sent["username"] == "sam"
     assert (sent["q"], sent["match"], sent["sort"], sent["offset"]) == ("grace in:Rom", "any", "canon", 50)
+
+
+def test_search_ask_is_asked_as_the_caller_with_only_its_own_fields(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"answer": "x"})
+    resp = make_client(user="sam").post(
+        "/api/bible/search/ask",
+        json={"question": "What about worry?", "scope": "nt", "username": "alex", "extra": 1},
+    )
+    assert resp.status_code == 200
+    sent = captured["calls"][-1]
+    assert sent["params"]["username"] == "sam"
+    assert sent["json"] == {"question": "What about worry?", "version": None, "scope": "nt", "depth": "adult"}

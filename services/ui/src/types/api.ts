@@ -3342,7 +3342,7 @@ export interface BibleSearchHit {
   versions?: string[];
 }
 
-export type BibleSearchMatch = 'all' | 'any' | 'exact';
+export type BibleSearchMatch = 'all' | 'any' | 'exact' | 'meaning';
 export type BibleSearchSort = 'rank' | 'canon';
 
 /** How the server read the search text, for the summary line. */
@@ -3365,10 +3365,27 @@ export interface BibleSearchResult {
   offset?: number;
   versions?: string[];
   sort?: BibleSearchSort;
-  /** `like` while the full-text index is still being built. */
-  index?: 'fts' | 'like';
+  /** `like` while the full-text index is still being built; `meaning` for a meaning search. */
+  index?: 'fts' | 'like' | 'meaning';
+  mode?: 'meaning';
+  /** The translation whose verses were embedded, and how much of it is ready (0..1). */
+  meaning_version?: string;
+  meaning_coverage?: number;
   by_book?: Array<{ osis: string; name: string; count: number }>;
   parsed?: BibleSearchParsed;
+}
+
+/** Jarvis's answer to a question of the whole Bible, from the verses search found. */
+export interface BibleSearchAnswer {
+  question: string;
+  version: string;
+  depth: BibleStudyDepth;
+  /** How the verses were found: by meaning, or by words when meaning search was unavailable. */
+  retrieval: 'meaning' | 'words';
+  answer: string;
+  verses: BibleSearchHit[];
+  /** References in the answer that exist, and whether the model was given each one. */
+  references: Array<{ reference: string; in_results: boolean }>;
 }
 
 /**

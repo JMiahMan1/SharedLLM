@@ -28,11 +28,12 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, suppress
-from typing import Any
+from typing import Any, Literal
 
 import redis
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from services.common.entity_ids import usable_entity_id as _usable_entity_id
 from services.common.secrets import secret_matches
@@ -804,6 +805,47 @@ async def search(req: SearchRequest):
     except Exception as e:
         log.error(f"Hybrid search failed: {e}")
         return SearchResponse(results=[])
+
+
+#: Limits for /rag/embed: enough for a batch of verses, small enough that one
+#: request cannot occupy the embedder for minutes.
+EMBED_ENDPOINT_MAX_TEXTS = 128
+EMBED_ENDPOINT_MAX_CHARS = 2_000
+#: nomic-embed-text is trained with task prefixes; without them a query and a
+#: document are embedded as if they were the same kind of text.
+_TASK_PREFIX = {"query": "search_query: ", "document": "search_document: "}
+
+
+class EmbedRequest(BaseModel):
+    texts: list[str]
+    kind: Literal["query", "document"] = "document"
+
+
+@app.post("/rag/embed", dependencies=[Depends(require_internal)])
+async def embed_texts(req: EmbedRequest):
+    """Vectors for other services (the Bible's meaning search) from the model
+    already loaded here, so no second copy of it is needed anywhere.
+
+    Returns the model name and dimension with the vectors, so a caller can tell
+    when stored vectors came from a different model and must be redone.
+    """
+    if not req.texts:
+        raise HTTPException(status_code=400, detail="texts is empty")
+    if len(req.texts) > EMBED_ENDPOINT_MAX_TEXTS:
+        raise HTTPException(
+            status_code=400, detail=f"at most {EMBED_ENDPOINT_MAX_TEXTS} texts per request"
+        )
+    if any(len(t) > EMBED_ENDPOINT_MAX_CHARS for t in req.texts):
+        raise HTTPException(
+            status_code=400, detail=f"each text must be at most {EMBED_ENDPOINT_MAX_CHARS} characters"
+        )
+    if embedder is None:
+        raise HTTPException(status_code=503, detail="The embedding model is still loading")
+    prefix = _TASK_PREFIX[req.kind] if "nomic" in EMBEDDING_MODEL.lower() else ""
+    # embed_batched, never embed(): its cost bound is what keeps a large
+    # request from pushing the service out of memory (see embed_batched).
+    vectors = await asyncio.to_thread(embed_batched, [prefix + t for t in req.texts])
+    return {"model": EMBEDDING_MODEL, "dim": len(vectors[0]) if vectors else EMBEDDING_DIM, "vectors": vectors}
 
 
 @app.post("/rag/ingest", dependencies=[Depends(require_internal)])

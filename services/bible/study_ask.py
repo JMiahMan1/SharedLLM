@@ -233,6 +233,44 @@ def build_prompt(
     return "\n".join(parts)
 
 
+#: Verses found by the search that are put in front of the model for a question.
+SEARCH_ASK_VERSES = 12
+
+
+def build_search_prompt(*, question: str, verses: list[dict], retrieval: str) -> str:
+    """A question about the whole Bible, with the verses search found for it.
+
+    The model answers from those verses and names each one it relies on by
+    reference; it may point to other passages by reference but quotes only the
+    verses given, the same rule as a passage question.
+    """
+    cleaned = str(question or "").strip()
+    if not cleaned:
+        raise StudyAskError("Ask a question.")
+    if len(cleaned) > MAX_QUESTION_CHARACTERS:
+        raise StudyAskError(
+            f"That question is {len(cleaned)} characters; the limit is "
+            f"{MAX_QUESTION_CHARACTERS}. Ask a shorter one."
+        )
+    if not verses:
+        raise StudyAskError("No verses were found for that question. Try other words.")
+    how = "closest in meaning to the question" if retrieval == "meaning" else "that use the question's words"
+    lines = [f"{v['reference']} ({str(v.get('version', '')).upper()}): {v['text']}" for v in verses]
+    return "\n".join([
+        f"These verses were found by searching the whole Bible for the passages {how}:",
+        "",
+        *lines,
+        "",
+        "Question:",
+        cleaned,
+        "",
+        "Answer the question from these verses. Name each verse you rely on by its "
+        "reference (Book Chapter:Verse). Quote only the verses above; any other "
+        "passage you mention, name by reference without quoting it. If these verses "
+        "do not answer the question, say so plainly rather than stretching them.",
+    ])
+
+
 def _extract_answer(data: object) -> str:
     """Read the answer out of an OpenAI-shaped or gateway-native reply."""
     if not isinstance(data, dict):
