@@ -990,20 +990,30 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
         if action == "messages":
             if not req.token:
                 return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_messages")
+            params = {"lookIntoFuture": "0", "limit": str(req.limit)}
+            if req.export:
+                # A page of history for an export (the private chat's move off Talk): older than the
+                # lowest id already read, and reading it must not mark anything read or clear a notification.
+                params.update({"setReadMarker": "0", "markNotificationsAsRead": "0", "includeLastKnown": "0"})
+                if req.last_known_id:
+                    params["lastKnownMessageId"] = str(req.last_known_id)
             ok, data, message = await _talk_request_with_retry(
                 provider,
                 "GET",
                 f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
-                params={"lookIntoFuture": "0", "limit": str(req.limit)},
+                params=params,
             )
             if not ok:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to load messages.", service="talk_messages")
             messages = [_message_summary(item) for item in (data or [])]
+            detail: dict[str, Any] = {"messages": messages}
+            if req.export:
+                detail.update({"export": True, "raw": [item for item in (data or []) if isinstance(item, dict)]})
             return ExecutionResult(
                 status="SUCCESS",
                 message=f"Loaded {len(messages)} message(s).",
                 service="talk_messages",
-                detail={"messages": messages},
+                detail=detail,
             )
 
         if action == "wait":
@@ -1358,6 +1368,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             ok, _data, message = await _talk_request_with_retry(provider, "DELETE", room)
             if ok:
                 return ExecutionResult(status="SUCCESS", message="Conversation deleted.", service="talk_delete", detail={"deleted": True})
+            if req.delete_only:
+                return ExecutionResult(status="FAILURE", message=message or "Could not delete the conversation.", service="talk_delete")
             # Only owners and moderators may delete; anyone else leaves, which
             # removes it from their list and leaves it for everyone else.
             left, _d, why = await _talk_request_with_retry(provider, "DELETE", f"{room}/participants/self")
