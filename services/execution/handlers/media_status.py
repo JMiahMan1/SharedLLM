@@ -8,6 +8,8 @@ except ImportError:
     from .. import ha_client
     from ..schemas import ExecutionResult, MediaStatusRequest
 
+from services.execution.entity_access import EntityPermissions, can_view
+from services.execution.hardware_router import hub_login
 from services.shared.ma_player import is_music_assistant_player, ma_player_id
 
 log = logging.getLogger("execution.media_status")
@@ -16,22 +18,31 @@ _TV_ICON_KINDS = frozenset({
     "android_tv", "webos", "samsung", "roku", "bravia", "generic_tv",
 })
 
-async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
+async def handle_media_status(req: MediaStatusRequest, perms: EntityPermissions | None = None) -> ExecutionResult:
+    """The hub's media players, as seen by the caller.
+
+    ``perms``: only players these permissions may view are listed (None: unfiltered, as for an
+    admin or while Identity is unreachable with nothing cached).
+    """
     ctx = req.user_context
-    assert ctx.ha_url is not None and ctx.ha_token is not None
+    login = hub_login(ctx)
+    if login is None:
+        return ExecutionResult(status="FAILURE", message="No home hub is set up (HA_URL is not configured).",
+                               service="media_status")
+    ha_url, ha_token = login
     from ..announce_handlers import detect_tv_type
     from ..capability_index import CapabilityIndexError, UnknownAreaError, routing_index
 
     # The hub's capability index says which entities can play media, which drive a screen and
     # which area each is in; a plain HA (no index, logged) keeps the domain and area-name matching.
     try:
-        idx = await routing_index(ctx.ha_url, ctx.ha_token, "media status")
+        idx = await routing_index(ha_url, ha_token, "media status")
         area_id = idx.require_area(req.area) if idx is not None and req.area else None
     except (CapabilityIndexError, UnknownAreaError) as e:
         return ExecutionResult(status="FAILURE", message=f"Could not read the media players: {e}",
                                service="media_status")
 
-    all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
+    all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
         return ExecutionResult(status="FAILURE", message="Could not retrieve HA states.", service="media_status")
 
@@ -40,6 +51,8 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
 
     for state in all_states:
         entity_id = state.get("entity_id", "")
+        if not can_view(perms, entity_id):
+            continue
         if idx is not None:
             if not idx.is_media_target(entity_id):
                 continue
@@ -140,8 +153,7 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
     # Filter by area if requested (the index already did, by the hub's area registry)
     if req.area and idx is None:
         log.warning("[media_status] area %r matched by Home Assistant area names (no capability index)", req.area)
-        assert ctx.ha_url is not None and ctx.ha_token is not None
-        area_map = await ha_client.get_areas(ctx.ha_url, ctx.ha_token)
+        area_map = await ha_client.get_areas(ha_url, ha_token)
         area_lower = req.area.lower()
         active_players = [
             mp for mp in active_players

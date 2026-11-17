@@ -897,10 +897,50 @@ from services.execution.entity_access import (  # noqa: E402
 )
 
 
-def _ensure_ha_creds(ctx: UserContext) -> None:
-    """BUG-02: media commands require explicit HA creds; never fall back to another user's."""
-    if not ctx.ha_url or not ctx.ha_token:
-        raise HTTPException(status_code=400, detail="Missing Home Assistant credentials in user_context")
+def _with_hub_login(req):
+    """The request with the hub login its media command or read is sent with.
+
+    The caller's own login when they have one, else the hub with the internal
+    secret (``hardware_router.hub_login``). Never another person's token (BUG-02).
+    Only people imported from Home Assistant have a stored token, so every other
+    family member got a 400 here for every media call, the Android media widget
+    included (2026-11-17). The fallback widens nothing: commands still pass
+    ``verify_entity_access`` and listings are filtered by ``can_view``.
+    """
+    ctx = req.user_context
+    login = hardware_router.hub_login(ctx)
+    if login is None:
+        raise HTTPException(status_code=503, detail="No home hub is set up (HA_URL is not configured)")
+    url, token = login
+    if ctx.ha_url == url and ctx.ha_token == token:
+        return req
+    return req.model_copy(update={"user_context": ctx.model_copy(update={"ha_url": url, "ha_token": token})})
+
+
+def _has_own_hub_login(ctx: UserContext) -> bool:
+    return bool(ctx.ha_url and ctx.ha_token)
+
+
+async def _pick_permitted_player(req: MediaPlayRequest) -> MediaPlayRequest | ExecutionResult:
+    """Choose the player for a play request that names none, among those the caller may use.
+
+    For a caller on the hub's login, which can reach every player: the choice is
+    limited to what they may view, and the chosen player is checked like a named one.
+    """
+    from services.execution.handlers import media as media_handler
+
+    ctx = req.user_context
+    perms = await load_entity_permissions(ctx.user, ctx.is_admin)
+    media_type = media_handler.detect_media_type(req.query or req.media_content_id or "", req.media_type)
+    try:
+        entity_id = await media_handler.resolve_entity(
+            req, ctx.ha_url or "", ctx.ha_token or "", media_type, may_use=lambda eid: can_view(perms, eid),
+        )
+    except ValueError as e:
+        return _fail(str(e), "media_play")
+    if not await verify_entity_access(ctx, entity_id):
+        raise HTTPException(status_code=403, detail="Access denied to this device")
+    return req.model_copy(update={"entity_id": entity_id})
 
 
 # Domain Endpoints
@@ -924,10 +964,18 @@ async def execute_esphome_pair(req: EsphomePairRequest):
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
     is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
-    if req.entity_id and not is_local and not await verify_entity_access(req.user_context, req.entity_id):
-        raise HTTPException(status_code=403, detail="Access denied to this device")
     if not is_local:
-        _ensure_ha_creds(req.user_context)
+        # The login first: a voice request's exposure check reads the hub with it.
+        own_login = _has_own_hub_login(req.user_context)
+        req = _with_hub_login(req)
+        if req.entity_id:
+            if not await verify_entity_access(req.user_context, req.entity_id):
+                raise HTTPException(status_code=403, detail="Access denied to this device")
+        elif not own_login:
+            picked = await _pick_permitted_player(req)
+            if isinstance(picked, ExecutionResult):
+                return picked
+            req = picked
     return await MediaPlaybackService.play(req)
 
 
@@ -968,9 +1016,9 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
 async def execute_media_transport(req: MediaTransportRequest):
     is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
     if req.entity_id and not is_local:
+        req = _with_hub_login(req)
         if not await verify_entity_access(req.user_context, req.entity_id):
             raise HTTPException(status_code=403, detail="Access denied to this device")
-        _ensure_ha_creds(req.user_context)
     return await MediaPlaybackService.transport(req)
 
 @app.post("/execute/tv_cast", response_model=ExecutionResult)
@@ -3133,9 +3181,13 @@ async def execute_ha_logbook(req: LogbookRequest):
 
 @app.post("/execute/media/status", response_model=ExecutionResult)
 async def execute_media_status(req: MediaStatusRequest):
-    _ensure_ha_creds(req.user_context)
-    log.info(f"[media/status] user={req.user_context.user} area={req.area} entity={req.entity_id}")
-    return await MediaPlaybackService.status(req)
+    req = _with_hub_login(req)
+    ctx = req.user_context
+    log.info(f"[media/status] user={ctx.user} area={req.area} entity={req.entity_id}")
+    # Visibility follows control, as in every other listing: a non-admin sees only the
+    # players they may use, whichever login read the hub (None: Identity unreachable, unfiltered).
+    perms = None if ctx.is_admin else await load_entity_permissions(ctx.user, ctx.is_admin)
+    return await MediaPlaybackService.status(req, perms=perms)
 
 
 @app.post("/execute/media/state/sync", response_model=ExecutionResult)
@@ -3560,10 +3612,12 @@ async def execute_audiobookshelf(req: AudiobookshelfRequest):
     # execute_media_play does. Without this, any resolved user could name an
     # arbitrary media_player.* and make the house play audio on it.
     is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
-    if req.entity_id and not is_local and not await verify_entity_access(ctx, ha_client.sanitize_entity_id("media_player", req.entity_id)):
-        raise HTTPException(status_code=403, detail="Access denied to this device")
     if not is_local:
-        _ensure_ha_creds(ctx)
+        req = _with_hub_login(req)
+        if req.entity_id and not await verify_entity_access(
+            req.user_context, ha_client.sanitize_entity_id("media_player", req.entity_id)
+        ):
+            raise HTTPException(status_code=403, detail="Access denied to this device")
     return await audiobookshelf.handle_audiobookshelf(req)
 
 @app.post("/execute/bible", response_model=ExecutionResult)
