@@ -81,11 +81,19 @@ async function serve(page: Page, server: Server): Promise<void> {
     if (p === '/api/communication/talk/conversations') {
       const own = [{ token: TOKEN, display_name: 'Private chat', type: 2, private: true, last_message: 'Encrypted message',
         last_message_actor: 'Robin', last_message_actor_id: 'robin', last_message_timestamp: SEC - 30, last_activity: SEC - 30,
-        unread_messages: 0, last_common_read: 0, last_read: 0, can_moderate: true }];
+        unread_messages: 0, last_common_read: 0, last_read: 0, can_moderate: true, storage: 'store' }];
       return route.fulfill({ json: { status: 'SUCCESS', detail: { conversations: [...own, ...CONVERSATIONS] } } });
     }
-    if (p === '/api/communication/talk/messages' && url.searchParams.get('token') === TOKEN) {
-      return route.fulfill({ json: { status: 'SUCCESS', detail: { messages: [] } } });
+    // The private chat's messages are the gateway's own, never Talk's.
+    if (p === `/api/private-chat/chats/${TOKEN}/messages`) {
+      return route.fulfill({ json: { status: 'SUCCESS', source: 'store', detail: { messages: [] } } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/messages/wait`) {
+      await new Promise((r) => setTimeout(r, 1500));
+      return route.fulfill({ json: { status: 'SUCCESS', source: 'store', detail: { messages: [] } } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/read`) {
+      return route.fulfill({ json: { status: 'SUCCESS', source: 'store', detail: { token: TOKEN, last_read: 0, unread_messages: 0 } } });
     }
     return route.fallback();
   });

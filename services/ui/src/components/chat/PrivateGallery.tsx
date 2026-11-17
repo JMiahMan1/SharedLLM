@@ -11,7 +11,7 @@ import PrivateGalleryImport from './PrivateGalleryImport';
 import { errorText } from './privateChatModel';
 import { noSave, useNearScreen, usePrivatePicture } from './usePrivatePicture';
 
-/** Talk answers at most this many messages a page; the gallery reads one page. */
+/** The gateway answers at most this many messages a page; the gallery reads one page. */
 const GALLERY_HISTORY = 200;
 
 function detailMessages(response: unknown): TalkMessage[] {
@@ -51,7 +51,7 @@ export default function PrivateGallery({
 }) {
   const history = useQuery({
     queryKey: ['private-gallery', token],
-    queryFn: () => api.getTalkMessages(token, GALLERY_HISTORY),
+    queryFn: () => api.getPrivateMessages(token, GALLERY_HISTORY),
     staleTime: 0,
   });
   const all = useMemo(() => {
@@ -298,7 +298,7 @@ function Viewer({
     setSending(true);
     try {
       const message = await vault.seal({ t: 'comment', blob: item.blob, text: body, sent_at: Math.floor(Date.now() / 1000) });
-      const res = await api.sendTalkMessage({ token, message });
+      const res = await api.sendPrivateMessage(token, message);
       if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'The comment was not sent');
       setText('');
       onChanged();

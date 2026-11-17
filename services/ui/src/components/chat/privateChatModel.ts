@@ -17,6 +17,8 @@ export interface PrivateChatInfo {
   verifier: { iv: string; ct: string };
   /** The chat is one father and one mother, so it has Beloved, the couple's page (the server checks again). */
   beloved?: boolean;
+  /** Where its messages live: the gateway's own store, or Talk for a chat not moved yet (the routes hide which). */
+  storage?: 'talk' | 'store';
 }
 
 export interface PrivateChatStatus {
@@ -51,7 +53,7 @@ export function passwordProblem(password: string, confirm: string): string | nul
 
 /**
  * Whether a nudge makes sense: the latest message in the chat is mine and the
- * other parent has not read it (Talk's everyone-has-read marker is behind it).
+ * other parent has not read it (the everyone-has-read marker is behind it).
  */
 export function canNudge(messages: TalkMessage[], myActorIds: ReadonlySet<string>, lastCommonRead?: number): boolean {
   const sent = messages.filter((m) => typeof m.id === 'number' && !m.deleted && !m.system_message);
@@ -71,7 +73,7 @@ export function errorText(error: unknown, fallback: string): string {
 
 /**
  * The messages the thread shows. A picture added straight to the gallery is a
- * gallery entry, never a Talk message; should one ever arrive as a message
+ * gallery entry, never a chat message; should one ever arrive as a message
  * (an old or a misbehaving client) it still stays out of the thread, so the
  * thread only ever shows what was said in it.
  */

@@ -20,10 +20,11 @@
  * with this phone's lock") ever holds DK as bytes, and it overwrites them with
  * zeros when it is done; the key a chat is unlocked with is never extractable.
  *
- * Every message is a fresh 12-byte IV and its ciphertext, posted to Talk as a
- * `sealed` envelope after a short line other clients show instead
- * ("🔒 Encrypted message"). A picture is encrypted the same way (IV first,
- * then the ciphertext) and kept by the gateway as an opaque blob.
+ * Every message is a fresh 12-byte IV and its ciphertext, kept by the gateway
+ * (not Talk, since the private chat moved off it) as a `sealed` envelope after
+ * a short line ("🔒 Encrypted message"), the same text a Talk message carried.
+ * A picture is encrypted the same way (IV first, then the ciphertext) and kept
+ * by the gateway as an opaque blob.
  *
  * `PrivateVault` holds the key for one open chat. `lock()` drops the key, every
  * decrypted message and every picture's object URL; nothing survives a lock.
@@ -91,7 +92,7 @@ export type PrivatePayload =
   | { t: 'image'; blob: string; mime: string; name?: string; caption?: string; sent_at?: number; taken_at?: number; sha256?: string }
   /**
    * A picture added straight to the gallery (never a chat message): kept as a
-   * sealed gallery entry, not in Talk. The original bytes are in the blob
+   * sealed gallery entry, not in the thread. The original bytes are in the blob
    * untouched; these are the facts read from them, for placing it in time.
    */
   | AddedPicture
@@ -337,7 +338,7 @@ export async function newChatSecrets(password: string): Promise<WrappedRecord & 
   }
 }
 
-/** A message as Talk carries it: a short readable line and the sealed envelope. */
+/** A message as the gateway keeps it (and Talk once carried it): a short readable line and the sealed envelope. */
 export async function sealMessage(key: CryptoKey, payload: PrivatePayload): Promise<string> {
   const { iv, ct } = await encrypt(key, encoder.encode(JSON.stringify(payload)));
   const envelope = { kind: 'sealed', title: 'Encrypted message', v: SEALED_VERSION, iv: toBase64(iv), ct: toBase64(ct) };
@@ -365,7 +366,7 @@ export async function openRecord(key: CryptoKey, raw: string | null | undefined)
   }
 }
 
-/** The sealed envelope in a raw Talk message, or null when it carries none. */
+/** The sealed envelope in a raw message, or null when it carries none. */
 export function readSealed(raw: string | null | undefined): Sealed | null {
   const message = String(raw ?? '');
   const start = message.indexOf(FENCE);

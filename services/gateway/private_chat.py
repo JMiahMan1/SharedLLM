@@ -36,10 +36,16 @@ one, and only they can read it:
   remove that entry, and save the file. The old password works again at once.
   Because DK never changes, the history holds nothing that could decrypt a
   message without a password.
-* **Messages ride on Talk as ciphertext.** Each is a ``sealed`` envelope
-  (services/common/sealed.py) with a fresh IV. The Talk routes refuse anything
-  else in a private room (``guard_talk``): plain text, Talk file shares, polls,
-  games, cards, reactions, and adding members.
+* **Messages are kept here, not on Talk.** Each is a ``sealed`` envelope
+  (services/common/sealed.py) with a fresh IV, stored by the gateway
+  (services/gateway/private_chat_messages.py: one file per message, read
+  markers, a long poll for live updates). A new chat never gets a Talk room.
+  The first chats were made on Talk; on start the gateway moves each one's
+  history into the store (keeping every message id, writing a full export
+  first, and leaving the Talk room in place until an admin deletes it). The
+  Talk routes refuse anything that would put readable content into such a
+  room (``guard_talk``): plain text, Talk file shares, polls, games, cards,
+  reactions and adding members, and once a chat has moved, any new message.
 * **Pictures never touch Nextcloud.** They are encrypted on the device and kept
   here as opaque blobs (``PRIVATE_CHAT_DIR``), served only to the chat's
   members, so Nextcloud never makes a preview and nothing scans them.
@@ -51,16 +57,18 @@ one, and only they can read it:
 * **Edits and reactions are sealed too** (services/gateway/private_chat_marks.py):
   an overlay kept here per message, not Talk's own edit (24-hour limit, and a
   room moderator could edit the other parent's words) and never a Talk
-  reaction. Only the author may edit (checked against Talk's record of who
-  sent it); the server sees who reacted to which message and who has seen
+  reaction. Only the author may edit (checked against the stored message, or
+  Talk's record of who sent it for a chat not yet moved); the server sees who reacted to which message and who has seen
   it, never the emoji or the new text.
 * **Notices carry no content**: "New private message from Sam" (chat_notify),
   "Sam nudged you in your private chat" (``nudge``), "Sam changed the
   private chat password" (``change_password``) and "Sam reacted in your
   private chat" (a reaction).
 
-The registry is one JSON file per chat (``chats/<token>.json``); pictures are
-``blobs/<token>/<id>``. Both are ciphertext or public parameters only.
+The registry is one JSON file per chat (``chats/<token>.json``; ``storage``
+is ``"store"`` once its messages live here); pictures are ``blobs/<token>/<id>``
+and messages ``messages/<token>/``. All of it is ciphertext or public
+parameters only.
 """
 from __future__ import annotations
 
@@ -121,8 +129,13 @@ MAX_GALLERY_ENTRY_BYTES = 16 * 1024
 MAX_GALLERY_ENTRIES = 50_000
 #: One nudge per chat per sender in this many seconds.
 NUDGE_INTERVAL_S = 300
-#: The Talk room's name, which is all Nextcloud ever shows about the chat.
+#: The chat's name in the inbox (and the old Talk rooms' name, all Nextcloud ever showed about one).
 ROOM_NAME = "Private chat"
+#: Talk actions still allowed on a moved chat's leftover room: reading it, calls, and deleting it.
+_MOVED_ACTIONS = frozenset({
+    "list", "open", "messages", "wait", "mark_read", "delete_conversation", "participants", "mentions",
+    "call_join", "call_leave",
+})
 
 _TOKEN = re.compile(r"^[A-Za-z0-9]{4,64}$")
 _BLOB_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -193,6 +206,9 @@ class Store:
         shutil.rmtree(self.root / "marks" / token, ignore_errors=True)
         # Beloved, the couple's page (services/gateway/beloved.py), goes with the chat.
         shutil.rmtree(self.root / "beloved" / token, ignore_errors=True)
+        # Its messages (services/gateway/private_chat_messages.py) and the export made when it moved off Talk.
+        shutil.rmtree(self.root / "messages" / token, ignore_errors=True)
+        shutil.rmtree(self.root / "migration" / token, ignore_errors=True)
 
     def _gallery_dir(self, token: str) -> Path:
         self._chat_path(token)  # validates the token
@@ -427,6 +443,8 @@ def _public(chat: dict[str, Any], me: str, people: dict[str, dict[str, Any]]) ->
         "created_at": chat["created_at"],
         # Whether this chat may open Beloved (one father and one mother); the routes check it again.
         "beloved": is_couple(chat, people),
+        # Where its messages live: "store" (the gateway) or "talk" (a chat not moved yet).
+        "storage": "store" if chat.get("storage") == "store" else "talk",
         **_public_key(chat),
     }
 
@@ -473,6 +491,10 @@ def guard_talk(token: str | None, action: str, message: str | None = None) -> No
     if not token or not is_private(token):
         return
     if action not in _ALLOWED_ACTIONS:
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
+    chat = get_store().get(str(token)) or {}
+    if chat.get("storage") == "store" and action not in _MOVED_ACTIONS:
+        # Moved off Talk: a message or edit posted to the old room would be missing from the chat.
         raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
     if action in ("send", "edit_message") and not is_sealed(message):
         # Generic on purpose: someone outside the chat who knows its token learns nothing.
@@ -526,7 +548,7 @@ async def status(request: Request):
 
 @router.post("/chats")
 async def create_chat(request: Request):
-    """Start a private chat with the other parent.
+    """Start a private chat with the other parent. Its messages are kept here; Talk never hears of it.
 
     The body is a v2 key record the creator's device made: the KEK's ``kdf``,
     the ``wrapped_key``, the ``verifier`` and ``auth`` (stored only as its
@@ -557,28 +579,19 @@ async def create_chat(request: Request):
         if existing:
             return JSONResponse(status_code=409, content={
                 "detail": "You already have a private chat together.", "token": existing["token"]})
-        status_code, result = await _talk(request, {
-            "action": "create_group", "message": ROOM_NAME, "participants": [other["nextcloud_user"]],
-        })
-        detail = result.get("detail") if isinstance(result.get("detail"), dict) else {}
-        token = str(((detail.get("conversation") or {}).get("token")) or "")
-        if status_code != 200 or result.get("status") != "SUCCESS" or not _TOKEN.match(token):
-            raise HTTPException(status_code=502, detail=result.get("message") or "Could not create the chat room.")
-        if detail.get("not_added"):
-            await _talk(request, {"action": "delete_conversation", "token": token})
-            raise HTTPException(status_code=502, detail=f"Could not add {_display(other)} to the chat.")
+        token = _new_token()
         chat = {
             "token": token,
             "members": members,
             "created_by": user,
             "created_at": int(time.time()),
+            "storage": "store",
             **params,
         }
         try:
             get_store().save(chat)
         except OSError as exc:
             log.error("[private-chat] could not save the registry for %s: %s", token, exc)
-            await _talk(request, {"action": "delete_conversation", "token": token})
             raise HTTPException(status_code=500, detail="Could not save the private chat (PRIVATE_CHAT_DIR not writable).") from exc
     log.info("[private-chat] %s started a private chat with %s (%s)", user, partner, token)
     return _public(chat, user, people)
@@ -597,8 +610,22 @@ async def delete_chat(token: str, request: Request):
     return await delete_room(request, token)
 
 
+def _new_token() -> str:
+    """A fresh chat id: the same shape as a Talk token, so calls and links keyed by it need nothing new."""
+    alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+    while True:
+        token = "".join(secrets.choice(alphabet) for _ in range(16))
+        if not get_store().get(token):
+            return token
+
+
 async def delete_room(request: Request, token: str) -> dict[str, Any]:
-    """Delete the Talk room as the caller; on success forget the chat and its pictures."""
+    """Delete the chat for both parents: its Talk room if it still has one (as the caller), then everything here."""
+    chat = get_store().get(token) or {}
+    if chat.get("storage") == "store" and not chat.get("talk_room"):
+        get_store().remove(token)
+        log.info("[private-chat] %s deleted", token)
+        return {"status": "SUCCESS", "message": "Deleted.", "detail": {"deleted": True}}
     status_code, result = await _talk(request, {"action": "delete_conversation", "token": token})
     detail = result.get("detail") if isinstance(result.get("detail"), dict) else {}
     if status_code != 200 or result.get("status") != "SUCCESS":
@@ -710,13 +737,25 @@ async def nudge(token: str, request: Request):
     """
     user, chat, people = await _member_chat(request, token)
     me = people[user]
-    status_code, result = await _talk(request, {"action": "open", "token": token})
-    conv = ((result.get("detail") or {}).get("conversation")) if isinstance(result.get("detail"), dict) else None
-    if status_code != 200 or not isinstance(conv, dict):
-        raise HTTPException(status_code=502, detail=result.get("message") or "Could not read the chat.")
-    last_id = int(conv.get("last_message_id") or 0)
-    read_up_to = int(conv.get("last_common_read") or 0)
-    mine = str(conv.get("last_message_actor_id") or "").lower() == str(me.get("nextcloud_user") or "").lower()
+    if chat.get("storage") == "store":
+        from services.gateway import private_chat_messages
+
+        try:
+            latest = await asyncio.to_thread(private_chat_messages.latest, token)
+            markers = await asyncio.to_thread(private_chat_messages.get_store().read_markers, token)
+        except private_chat_messages.StoreUnreadable as exc:
+            raise HTTPException(status_code=503, detail="Could not read the chat; try again.") from exc
+        last_id = int((latest or {}).get("id") or 0)
+        mine = bool(latest) and (latest or {}).get("by") == user
+        read_up_to = min((markers.get(m, 0) for m in chat["members"] if m != user), default=0)
+    else:
+        status_code, result = await _talk(request, {"action": "open", "token": token})
+        conv = ((result.get("detail") or {}).get("conversation")) if isinstance(result.get("detail"), dict) else None
+        if status_code != 200 or not isinstance(conv, dict):
+            raise HTTPException(status_code=502, detail=result.get("message") or "Could not read the chat.")
+        last_id = int(conv.get("last_message_id") or 0)
+        read_up_to = int(conv.get("last_common_read") or 0)
+        mine = str(conv.get("last_message_actor_id") or "").lower() == str(me.get("nextcloud_user") or "").lower()
     if not last_id or not mine or read_up_to >= last_id:
         raise HTTPException(status_code=409, detail="Nothing of yours is waiting to be read.")
 

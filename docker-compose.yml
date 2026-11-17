@@ -362,7 +362,8 @@ services:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
       - ./data/app_updates:/app/data/app_updates
       - ./data/mdm_files:/app/data/mdm_files
-      # Private chat: salts, verifiers and encrypted pictures only (no keys).
+      # Private chat: salts, verifiers, sealed messages and encrypted pictures only (no keys).
+      # PRIVATE_CHAT_DELETE_TALK_ROOM=1 in .env lets the move off Talk delete each old room (default: kept).
       - ./data/private_chat:/app/data/private_chat
       - huggingface_cache:/home/sharedllm/.cache/huggingface
       - qdrant_cache:/home/sharedllm/.cache/qdrant

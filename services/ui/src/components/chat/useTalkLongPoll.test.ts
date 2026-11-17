@@ -51,6 +51,20 @@ describe('useTalkLongPoll', () => {
     expect(api.waitTalkMessages).toHaveBeenCalledTimes(2);
   });
 
+  it('waits on the private chat\'s own store when given its waiter, never on Talk', async () => {
+    const waitPrivate = vi.fn()
+      .mockResolvedValueOnce({ status: 'SUCCESS', detail: { messages: [{ id: 152 }] } })
+      .mockImplementation(never);
+    const onNews = vi.fn();
+
+    renderHook(() => useTalkLongPoll('private-1', 151, onNews, undefined, waitPrivate));
+
+    await waitFor(() => expect(onNews).toHaveBeenCalledTimes(1));
+    expect(waitPrivate.mock.calls[0].slice(0, 3)).toEqual(['private-1', 151, 25]);
+    await waitFor(() => expect(waitPrivate.mock.calls[1]?.[1]).toBe(152));
+    expect(api.waitTalkMessages).not.toHaveBeenCalled();
+  });
+
   it('stops when the conversation closes', async () => {
     vi.mocked(api.waitTalkMessages).mockImplementation(never);
     const { unmount } = renderHook(() => useTalkLongPoll('room-1', 10, vi.fn()));

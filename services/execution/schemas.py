@@ -621,6 +621,14 @@ class TalkRequest(BaseRequest):
     attendee_id: int | None = Field(None, description="remove_participant: the attendee to remove")
     last_known_id: int | None = Field(None, description="wait: the newest message id the caller has")
     wait_s: int = Field(25, ge=1, le=30, description="wait: how long Nextcloud may hold the request")
+    export: bool = Field(
+        False,
+        description="messages: read a page for an export (older than last_known_id when given), without moving the "
+        "caller's read marker or clearing notifications, and return Talk's raw records too",
+    )
+    delete_only: bool = Field(
+        False, description="delete_conversation: delete the room or fail; never fall back to leaving it",
+    )
 
 # File Operations (Workspace vs Storage)
 class WorkspaceFileReadRequest(BaseRequest):

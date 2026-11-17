@@ -26,6 +26,28 @@ describe('api service', () => {
     vi.clearAllMocks();
   });
 
+  it('the private chat reads, sends, deletes and marks read through its own routes, never Talk', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { status: 'SUCCESS', detail: { messages: [] } } } as AxiosResponse);
+    vi.mocked(apiClient.post).mockResolvedValue({ data: { status: 'SUCCESS' } } as AxiosResponse);
+    vi.mocked(apiClient.delete).mockResolvedValue({ data: { status: 'SUCCESS' } } as AxiosResponse);
+
+    await api.getPrivateMessages('abc123', 80);
+    expect(apiClient.get).toHaveBeenCalledWith('/api/private-chat/chats/abc123/messages', { params: { limit: 80 } });
+    await api.waitPrivateMessages('abc123', 151, 25);
+    expect(vi.mocked(apiClient.get).mock.calls[1][0]).toBe('/api/private-chat/chats/abc123/messages/wait');
+    expect(vi.mocked(apiClient.get).mock.calls[1][1]).toMatchObject({ params: { last_id: 151, wait: 25 }, timeout: 45_000 });
+    await api.sendPrivateMessage('abc123', 'sealed', 104);
+    expect(apiClient.post).toHaveBeenCalledWith('/api/private-chat/chats/abc123/messages', { sealed: 'sealed', reply_to: 104 });
+    await api.sendPrivateMessage('abc123', 'sealed');
+    expect(apiClient.post).toHaveBeenLastCalledWith('/api/private-chat/chats/abc123/messages', { sealed: 'sealed' });
+    await api.deletePrivateMessage('abc123', 104);
+    expect(apiClient.delete).toHaveBeenCalledWith('/api/private-chat/chats/abc123/messages/104');
+    await api.markPrivateChatRead('abc123');
+    expect(apiClient.post).toHaveBeenLastCalledWith('/api/private-chat/chats/abc123/read', {});
+    const urls = [...vi.mocked(apiClient.get).mock.calls, ...vi.mocked(apiClient.post).mock.calls].map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes('/talk/'))).toBe(false);
+  });
+
   it('login should call /api/auth/login', async () => {
     const mockData = { api_key: 'test-token', username: 'testuser', is_admin: true };
     vi.mocked(apiClient.post).mockResolvedValue({ data: mockData } as AxiosResponse);

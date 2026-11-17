@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from services.gateway import main as gateway_main
 from services.gateway import private_chat, private_chat_marks
-from services.gateway.tests.test_private_chat import _as, _create, env  # noqa: F401  (env is a fixture)
+from services.gateway.tests.test_private_chat import _as, _create, _legacy, env  # noqa: F401  (env is a fixture)
 
 TOKEN = "room123abc"
 BASE = f"/api/private-chat/chats/{TOKEN}"
@@ -33,7 +33,8 @@ def _sealed(n: int = 40) -> str:
 
 @pytest.fixture
 def chat(env, monkeypatch):  # noqa: F811
-    assert _create(env).status_code == 200
+    """A chat still on Talk: Talk's record says who wrote each message (a moved chat is tested in test_private_chat_messages)."""
+    _legacy(env)
     talk = private_chat._talk
 
     async def with_messages(request, payload):
