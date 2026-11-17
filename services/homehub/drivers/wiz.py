@@ -172,10 +172,13 @@ class WizDriver(Driver):
 
     # -- lifecycle ------------------------------------------------------------
     async def async_setup(self) -> None:
-        if not self.entities:
-            return  # an entry whose entities were all removed has nothing to drive
         if not self.host:
             raise DeviceUnavailable("WiZ entry has no host")
+        if not any(e.config_entry_id == self.entry.entry_id for e in self.hub.entities.values()):
+            # HA creates a bulb's entities when it sets the entry up; an entry that came over with none
+            # (HA never reached the bulb, or they were deleted) gets them once the bulb answers. Entities
+            # a person disabled are still in the registry and are left alone.
+            await self._register_entities()
         # Bathroom bulbs sit behind a wall switch and lose power many times a
         # day (HA logged 125-160 drops each in ten days). A bulb that is off
         # now is not a broken entry: load it unavailable and keep checking.
@@ -188,6 +191,38 @@ class WizDriver(Driver):
         await self._identify()
         self._came_online()
         await self._publish_all()
+
+    async def _register_entities(self) -> None:
+        """The light, its effect speed and (metered bulbs) its power, as the flow that adds a bulb makes them.
+
+        Raises ``DeviceUnavailable`` while the bulb does not answer, so the entry shows ``setup_retry``
+        (the bulb is missing) instead of loading with nothing to drive.
+        """
+        from services.homehub.discovery import norm_mac, wiz_type_label
+
+        try:
+            cfg = await self._request("getSystemConfig")
+        except DeviceUnavailable as exc:
+            raise DeviceUnavailable(f"WiZ {self.entry.title} ({self.host}) has no entities yet and does not "
+                                    f"answer, so they cannot be made: {exc}") from exc
+        mac = norm_mac(cfg.get("mac")) or norm_mac(self.entry.unique_id)
+        if mac is None:
+            raise DeviceUnavailable(f"WiZ {self.host} did not report its MAC address")
+        module = str(cfg.get("moduleName") or "")
+        metered = False
+        with contextlib.suppress(DeviceUnavailable):
+            metered = (await self._request("getPower")).get("power") is not None
+        dev = self.ensure_device(self.entry.title or f"WiZ {wiz_type_label(module)} {mac[-6:].upper()}",
+                                 connections=[["mac", ":".join(mac[i:i + 2] for i in range(0, 12, 2))]],
+                                 manufacturer="WiZ", model=module or None)
+        self.light = self.ensure_entity("light", mac, None, device=dev, supported_features=FEATURE_EFFECT)
+        self.speed = self.ensure_entity("number", f"{mac}_effect_speed", "Effect speed", device=dev,
+                                        entity_category="config",
+                                        capabilities={"min": 10, "max": 200, "step": 1, "mode": "slider"})
+        if metered:
+            self.power = self.ensure_entity("sensor", f"{mac}_power", "Power", device=dev,
+                                            original_device_class="power", unit_of_measurement="W",
+                                            capabilities={"state_class": "measurement"})
 
     async def _identify(self) -> None:
         """Model details, read from the bulb until it has answered them; all best effort."""
