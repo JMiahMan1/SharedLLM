@@ -208,6 +208,27 @@ async def _direct_esphome_fallback(
         )
 
 
+def hub_login(ctx) -> tuple[str, str] | None:
+    """The hub address and token to send this caller's device command with.
+
+    A person's own login when they have one. Otherwise the hub itself with the
+    stack's internal secret: Home Assistant is retired, and homehub accepts the
+    internal secret, but only a person ever had a stored HA token, so a caller
+    resolved as the household (a shared or registered device) arrived with
+    none and the command died on an assertion with a 500 (2026-11-16, a Kauf
+    bulb from the Devices page). This widens nothing: the caller's access to
+    the entity is checked before any command is sent. None: no hub configured.
+    """
+    url, token = getattr(ctx, "ha_url", None), getattr(ctx, "ha_token", None)
+    if url and token:
+        return url, token
+    from services.config import HA_URL, INTERNAL_SECRET
+
+    if HA_URL and INTERNAL_SECRET:
+        return HA_URL, INTERNAL_SECRET
+    return None
+
+
 async def execute_device_command(
     ctx,
     domain: str,
@@ -217,8 +238,15 @@ async def execute_device_command(
     service_name: str = "ha_service",
 ) -> ExecutionResult:
     """Route one device command: HA first, direct ESPHome when HA is down."""
-    assert ctx.ha_url is not None and ctx.ha_token is not None
-    ha_result = await _call_ha(ctx, domain, service, entity_id, service_data)
+    login = hub_login(ctx)
+    if login is None:
+        return ExecutionResult(
+            status="FAILURE",
+            message="No home hub is set up to send this command to (HA_URL is not configured).",
+            service=service_name,
+            detail={"route": "none"},
+        )
+    ha_result = await _call_ha(login, domain, service, entity_id, service_data)
     if ha_result.get("ok"):
         return ExecutionResult(
             status="SUCCESS",
@@ -242,14 +270,13 @@ async def execute_device_command(
     )
 
 
-async def _call_ha(ctx, domain: str, service: str, entity_id: str, service_data: dict | None) -> dict:
+async def _call_ha(login: tuple[str, str], domain: str, service: str, entity_id: str,
+                   service_data: dict | None) -> dict:
     """Call HA, tolerating a missing client session dependency at import time."""
     from services.execution import ha_client
 
     try:
-        return await ha_client.call_service(
-            ctx.ha_url or "", ctx.ha_token or "", domain, service, entity_id, service_data
-        )
+        return await ha_client.call_service(login[0], login[1], domain, service, entity_id, service_data)
     except aiohttp.ClientError as e:
         # ha_client already converts these, but keep the router self-sufficient
         return {"ok": False, "error": f"Home Assistant is unreachable: {e}"}

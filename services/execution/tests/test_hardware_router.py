@@ -226,3 +226,39 @@ def test_ha_service_route_uses_router(one_mapped_device):
     assert resp.json()["detail"]["route"] == "ha"
     args = router_mock.await_args
     assert args.args[1:4] == ("switch", "turn_on", "switch.plug")
+
+
+# a caller with no hub login of their own (the household, a shared device)
+HOUSEHOLD = SimpleNamespace(user="household", is_admin=False, ha_url=None, ha_token=None)
+
+
+@pytest.mark.asyncio
+async def test_a_caller_without_a_login_uses_the_hub_with_the_internal_secret(monkeypatch):
+    import services.config as config
+
+    monkeypatch.setattr(config, "HA_URL", "http://hub.local:8123")
+    monkeypatch.setattr(config, "INTERNAL_SECRET", "internal-test-secret")
+    with patch.object(hardware_router, "_call_ha", AsyncMock(return_value={"ok": True})) as ha:
+        result = await hardware_router.execute_device_command(HOUSEHOLD, "light", "turn_on", "light.lamp")
+    assert result.status == "SUCCESS"
+    assert ha.await_args.args[0] == ("http://hub.local:8123", "internal-test-secret")
+
+
+@pytest.mark.asyncio
+async def test_a_persons_own_login_is_used_when_they_have_one(monkeypatch):
+    import services.config as config
+
+    monkeypatch.setattr(config, "INTERNAL_SECRET", "internal-test-secret")
+    with patch.object(hardware_router, "_call_ha", AsyncMock(return_value={"ok": True})) as ha:
+        await hardware_router.execute_device_command(CTX, "light", "turn_on", "light.lamp")
+    assert ha.await_args.args[0] == ("http://ha.local:8123", "tok")
+
+
+@pytest.mark.asyncio
+async def test_no_hub_at_all_is_a_plain_failure_not_a_crash(monkeypatch):
+    import services.config as config
+
+    monkeypatch.setattr(config, "HA_URL", None)
+    result = await hardware_router.execute_device_command(HOUSEHOLD, "light", "turn_on", "light.lamp")
+    assert result.status == "FAILURE"
+    assert "No home hub" in result.message
