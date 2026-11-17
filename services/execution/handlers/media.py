@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from typing import cast
 
 from services.config import MASS_CONFIG_ENTRY_ID
@@ -67,7 +68,8 @@ async def _routing_index(ha_url: str, ha_token: str, purpose: str):
     return await capability_index.routing_index(ha_url, ha_token, purpose)
 
 
-async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, media_type: str | None = None) -> str:
+async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, media_type: str | None = None,
+                         may_use: Callable[[str], bool] | None = None) -> str:
     """Resolve entity_id from device_name if needed.
 
     With the hub's capability index a device name that names a room ("the den",
@@ -75,7 +77,11 @@ async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, medi
     there that can do the job; with no device named, the choice is among the
     players the index says can play media. A plain Home Assistant (no index)
     keeps the old name and domain matching, logged.
+
+    ``may_use``: with no device named, choose only among the players it allows
+    (a caller on the hub's own login must not be handed someone else's player).
     """
+    allowed = may_use or (lambda _eid: True)
     if req.entity_id:
         return ha_client.sanitize_entity_id("media_player", req.entity_id)
 
@@ -102,9 +108,10 @@ async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, medi
             return ha_client.sanitize_entity_id("media_player", req.device_name)
 
     if idx is not None:
-        players = idx.media_targets()
+        players = [e for e in idx.media_targets() if allowed(e)]
         if not players:
-            raise ValueError("The hub has no device that can play media")
+            raise ValueError("No device you may use can play media" if may_use
+                             else "The hub has no device that can play media")
         from services.execution.capability_index import state_rank
 
         by_state = {s.get("entity_id"): s.get("state") for s in states}
@@ -113,6 +120,7 @@ async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, medi
 
     # Fallback to active or available media_player from Home Assistant
     states = await ha_client.get_states(ha_url, ha_token)
+    states = [s for s in states or [] if allowed(s.get("entity_id", ""))]
     if states:
         for s in states:
             eid = s.get("entity_id", "")

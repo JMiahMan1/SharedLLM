@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from services.execution import media_playback_registry as registry
+from services.execution.entity_access import EntityPermissions
 from services.execution.handlers import media as media_handler
 from services.execution.handlers import media_status as media_status_handler
 from services.execution.schemas import ExecutionResult, MediaPlayRequest, MediaStateSyncRequest, MediaStatusRequest, MediaTransportRequest
@@ -194,8 +195,11 @@ class MediaPlaybackService:
             return await media_handler.handle_media_transport(req)
 
     @staticmethod
-    async def status(req: MediaStatusRequest) -> ExecutionResult:
-        """Get media status, merging local state with HA/MA active players."""
+    async def status(req: MediaStatusRequest, perms: EntityPermissions | None = None) -> ExecutionResult:
+        """Get media status, merging local state with HA/MA active players.
+
+        ``perms``: list only the hub players these permissions may view (None: unfiltered).
+        """
         ctx = req.user_context
         username = ctx.user or "default"
 
@@ -208,7 +212,7 @@ class MediaPlaybackService:
         log.debug(f"[MediaPlaybackService] Status request user={username}, active_target={active_target} (is_local={is_local})")
 
         # Get standard HA players status
-        ha_res = await media_status_handler.handle_media_status(req)
+        ha_res = await media_status_handler.handle_media_status(req, perms=perms)
 
         # If the active target choice is local, override the 'active' player with local state
         if is_local and db_state:

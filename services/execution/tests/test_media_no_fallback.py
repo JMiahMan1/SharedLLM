@@ -1,7 +1,8 @@
 """BUG-02: execution media endpoints must not fall back to the first user.
 
-With the first-user fallback removed, a request whose user_context lacks HA
-credentials must error, never silently execute with user 1's credentials.
+A request whose user_context lacks a hub login is sent with the hub's own
+login (hardware_router.hub_login), never with user 1's credentials; with no
+hub configured at all it errors.
 """
 import os
 
@@ -17,8 +18,10 @@ def _secret() -> str:
 
 
 def test_media_status_missing_credentials_errors(monkeypatch):
+    import services.config as config
     import services.execution.main as exec_main
 
+    monkeypatch.setattr(config, "HA_URL", None)
     called = []
 
     async def mock_first_user():
@@ -38,8 +41,10 @@ def test_media_status_missing_credentials_errors(monkeypatch):
 
 
 def test_media_play_missing_credentials_errors(monkeypatch):
+    import services.config as config
     import services.execution.main as exec_main
 
+    monkeypatch.setattr(config, "HA_URL", None)
     called = []
 
     async def mock_first_user():
