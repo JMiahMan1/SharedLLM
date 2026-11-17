@@ -29,6 +29,36 @@ export async function getDeployStatus(): Promise<DeployStatus | null> {
   }
 }
 
+/** Whether `status` is a fresh "updating" flag (one a dead deploy left behind does not count). */
+export function isUpdating(status: DeployStatus | null, nowMs: number): boolean {
+  return Boolean(status?.updating && nowMs / 1000 - status.at < STALE_AFTER_S);
+}
+
+/** How long one read of the flag answers for every request that fails in the meantime. */
+export const DEPLOY_CHECK_TTL_MS = 3_000;
+let lastCheck: { atMs: number; updating: Promise<boolean> } | null = null;
+
+/**
+ * Whether Jarvis is being updated right now, for the request interceptor.
+ *
+ * A deploy restarts the gateway for 15 to 25 seconds, and Caddy holds each
+ * request while it waits for it, so the app's requests time out. That is an
+ * update, not a lost connection: the interceptor asks this before it tells
+ * anyone the server cannot be reached. A page with many polls fails many
+ * requests at once, so one read serves them all for a few seconds.
+ */
+export function deployUnderway(nowMs: number = Date.now()): Promise<boolean> {
+  if (lastCheck && nowMs - lastCheck.atMs < DEPLOY_CHECK_TTL_MS) return lastCheck.updating;
+  const updating = getDeployStatus().then((status) => isUpdating(status, Date.now()));
+  lastCheck = { atMs: nowMs, updating };
+  return updating;
+}
+
+/** Forget the cached read (tests). */
+export function resetDeployCheck(): void {
+  lastCheck = null;
+}
+
 export type DeployBannerPhase = 'none' | 'updating' | 'updated';
 
 /**
@@ -37,7 +67,7 @@ export type DeployBannerPhase = 'none' | 'updating' | 'updated';
  * dismisses it. The phone app updates itself (appUpdater), so it is never asked to reload.
  */
 export function nextPhase(prev: DeployBannerPhase, status: DeployStatus | null, nowMs: number, native: boolean): DeployBannerPhase {
-  if (status?.updating && nowMs / 1000 - status.at < STALE_AFTER_S) return 'updating';
+  if (isUpdating(status, nowMs)) return 'updating';
   if (prev === 'updating' && status && !status.updating && status.app && !native) return 'updated';
   if (prev === 'updated') return 'updated';
   return 'none';

@@ -359,6 +359,8 @@ export type {
 declare module 'axios' {
   export interface InternalAxiosRequestConfig {
     __retryCount?: number;
+    /** Set once this request has shown the "Reconnecting" toast, so only it announces recovery. */
+    __announced?: boolean;
     /**
      * Set for pre-auth / optional calls. A 401 on these must NOT clear the
      * stored session or redirect to /login; otherwise a call that races
@@ -581,8 +583,58 @@ export function isRetryableRequest(
   if (!['GET', 'HEAD', 'OPTIONS'].includes(verb)) return false;
   return Boolean(
     (status && [408, 503, 504].includes(status)) ||
-      (code && ['ECONNABORTED', 'ERR_NETWORK', 'ECONNREFUSED', 'ENOTFOUND'].includes(code)),
+      (code && CONNECTIVITY_CODES.includes(code)),
   );
+}
+
+/** axios codes for a request that never got an answer: timed out, refused, no network. */
+const CONNECTIVITY_CODES = ['ECONNABORTED', 'ERR_NETWORK', 'ECONNREFUSED', 'ENOTFOUND'];
+
+/** Whether a failure means the server was not reached (or did not answer in time). */
+export function isUnreachableFailure(status: number | undefined, code: string | undefined): boolean {
+  return Boolean((status && [502, 503, 504].includes(status)) || (code && CONNECTIVITY_CODES.includes(code)));
+}
+
+/** Retries for an idempotent request; more while Jarvis is updating, which takes up to a minute. */
+export const RETRY_LIMIT = 3;
+export const RETRY_LIMIT_WHILE_UPDATING = 8;
+
+export function retryLimit(updating: boolean): number {
+  return updating ? RETRY_LIMIT_WHILE_UPDATING : RETRY_LIMIT;
+}
+
+/** Wait before retry `attempt` (0-based): 1s, 2s, 4s, then 8s at most, plus up to 1s of jitter. */
+export function retryDelayMs(attempt: number, random: () => number = Math.random): number {
+  return Math.min(2 ** attempt * 1000, 8000) + random() * 1000;
+}
+
+/**
+ * Whether retry `attempt` (0-based) shows the "Reconnecting" toast.
+ *
+ * Never while Jarvis is updating: the update banner already says so, and a
+ * deploy made every open page shout "Reconnecting to Gateway" at once. Never on
+ * the first retry either: one slow answer that a retry fixes is not a
+ * connection problem worth telling a person about.
+ */
+export function shouldShowReconnecting(attempt: number, updating: boolean): boolean {
+  return !updating && attempt >= 1;
+}
+
+/** What a request that could not reach the server tells the person. */
+export function unreachableMessage(target: string, updating: boolean): string {
+  return updating
+    ? 'Jarvis is updating, so that did not go through. Try again in a minute.'
+    : `Cannot reach ${target}. Check your network or that the service is running.`;
+}
+
+/** Whether a deploy is under way, asked only after a request failed to reach the server. */
+async function deployUnderwayNow(): Promise<boolean> {
+  try {
+    const { deployUnderway } = await import('../lib/deployStatus');
+    return await deployUnderway();
+  } catch {
+    return false;
+  }
 }
 
 export type ImageEditResult = {
@@ -754,31 +806,41 @@ apiClient.interceptors.response.use(
     const code = error.code;
     const silent = config?.silent === true;
     const isRetryable = !silent && isAxiosError && isRetryableRequest(config?.method, status, code);
+    // A deploy restarts the gateway for 15-25 s and Caddy holds requests
+    // meanwhile, so they time out here. Asked only when the server was not
+    // reached, and never for a background (silent) call such as the deploy
+    // flag itself.
+    const updating = !silent && isAxiosError && isUnreachableFailure(status, code)
+      ? await deployUnderwayNow()
+      : false;
 
     if (config && isRetryable) {
       const currentRetry = config.__retryCount || 0;
-      if (currentRetry < 3) {
+      const limit = retryLimit(updating);
+      if (currentRetry < limit) {
         config.__retryCount = currentRetry + 1;
 
         const toastId = 'api-reconnecting';
         const { toast: t } = await import('react-hot-toast');
         const target = describeFailedTarget(config, status, code);
-        t.loading(`Reconnecting to ${target} (attempt ${currentRetry + 1}/3)...`, {
-          id: toastId,
-          style: {
-            background: 'rgba(59, 130, 246, 0.2)',
-            color: '#93c5fd',
-            border: '1px solid rgba(59, 130, 246, 0.3)',
-            fontSize: '12px',
-          },
-        });
+        if (shouldShowReconnecting(currentRetry, updating)) {
+          config.__announced = true;
+          t.loading(`Reconnecting to ${target} (attempt ${currentRetry + 1}/${limit})...`, {
+            id: toastId,
+            style: {
+              background: 'rgba(59, 130, 246, 0.2)',
+              color: '#93c5fd',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              fontSize: '12px',
+            },
+          });
+        }
 
-        // 1s, 2s, 4s backoff + 0-1s random jitter
-        const delay = Math.pow(2, currentRetry) * 1000 + Math.random() * 1000;
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs(currentRetry)));
 
         try {
           const res = await apiClient(config);
+          if (!config.__announced) return res;
           t.dismiss(toastId);
           // Announce recovery once per outage, not once per request. A page
           // with several polling queries has many in flight, and they all
@@ -822,7 +884,7 @@ apiClient.interceptors.response.use(
       if (now - lastConnectivityToast > 15000) {
         lastConnectivityToast = now;
         const { toast: t } = await import('react-hot-toast');
-        t.error(`Cannot reach ${lastFailedTarget}. Check your network or that the service is running.`, {
+        t.error(unreachableMessage(lastFailedTarget, updating), {
           duration: 8000,
           style: {
             background: 'rgba(239, 68, 68, 0.2)',

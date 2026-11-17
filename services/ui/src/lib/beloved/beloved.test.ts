@@ -206,7 +206,12 @@ describe('records', () => {
     expect(sealed).not.toContain('2014');
     expect(readRecord('day', await openRecord(key, sealed))).toEqual(record);
     expect(await openRecord(other, sealed)).toBeNull();
-    expect(await openRecord(key, sealed.replace(/"ct":"(.)/, '"ct":"A'))).toBeNull();
+    // Change the first ciphertext character to a different one (replacing it
+    // with a fixed letter left it unchanged whenever it already was that
+    // letter, about one run in 64, and the test failed at random).
+    const tampered = sealed.replace(/"ct":"(.)/, (_m, c: string) => `"ct":"${c === 'A' ? 'B' : 'A'}`);
+    expect(tampered).not.toBe(sealed);
+    expect(await openRecord(key, tampered)).toBeNull();
 
     const vault = new PrivateVault();
     vault.adopt(key);

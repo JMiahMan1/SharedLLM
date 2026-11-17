@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { AlertCircle, WifiOff, X, Server, Check } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import { checkConnectivity, normalizeServerUrl } from '../../lib/connectivity';
+import { RECHECK_AFTER_FAILURE_MS, checkConnectivity, normalizeServerUrl, showUnreachable } from '../../lib/connectivity';
+import { deployUnderway } from '../../lib/deployStatus';
 import { storageGet, storageSet } from '../../lib/storage';
 import { DEFAULT_SERVER_URL, SERVER_URL_EXAMPLE } from '../../lib/serverUrl';
 
@@ -15,23 +16,41 @@ const ServerConfigBanner = () => {
   const [saving, setSaving] = useState(false);
   const intervalRef = useRef<number | null>(null);
   const mountedRef = useRef(false);
+  const failuresRef = useRef(0);
+  const recheckRef = useRef<number | null>(null);
 
-  const check = useCallback(async () => {
-    if (!mountedRef.current) return;
+  /** One check; true when it failed without settling anything, so worth repeating soon. */
+  const check = useCallback(async (): Promise<boolean> => {
+    if (!mountedRef.current) return false;
     const storedUrl = await storageGet('jarvis_server_url');
 
     if (!storedUrl) {
       setStatus('no-config');
-      return;
+      return false;
     }
 
     const url = normalizeServerUrl(storedUrl);
     setServerUrl(url);
 
     const result = await checkConnectivity(url);
-    if (mountedRef.current) {
-      setStatus(result.ok ? 'connected' : 'disconnected');
+    if (!mountedRef.current) return false;
+    if (result.ok) {
+      failuresRef.current = 0;
+      setStatus('connected');
+      return false;
     }
+    failuresRef.current += 1;
+    const updating = await deployUnderway();
+    if (!mountedRef.current) return false;
+    if (showUnreachable(failuresRef.current, updating)) {
+      setStatus('disconnected');
+    } else {
+      // Not yet: an update or a phone waking up. Hide the "checking" strip;
+      // the caller looks again soon rather than in half a minute.
+      setStatus((prev) => (prev === 'checking' ? 'connected' : prev));
+      return true;
+    }
+    return false;
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -40,7 +59,7 @@ const ServerConfigBanner = () => {
     setSaving(true);
     await storageSet('jarvis_server_url', normalizeServerUrl(raw));
     setSaving(false);
-    check();
+    void check();
   }, [serverInput, check]);
 
   useEffect(() => {
@@ -49,12 +68,19 @@ const ServerConfigBanner = () => {
       mountedRef.current = false;
       return;
     }
-    intervalRef.current = window.setInterval(check, 30000);
+    const run = async () => {
+      if (await check() && mountedRef.current) {
+        if (recheckRef.current) clearTimeout(recheckRef.current);
+        recheckRef.current = window.setTimeout(() => { recheckRef.current = null; void run(); }, RECHECK_AFTER_FAILURE_MS);
+      }
+    };
+    intervalRef.current = window.setInterval(() => void run(), 30000);
     // Defer initial check to avoid setState-in-effect
-    const id = setTimeout(() => { if (mountedRef.current) check(); }, 0);
+    const id = setTimeout(() => { if (mountedRef.current) void run(); }, 0);
     return () => {
       mountedRef.current = false;
       clearTimeout(id);
+      if (recheckRef.current) clearTimeout(recheckRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [check]);

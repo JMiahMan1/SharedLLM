@@ -317,6 +317,8 @@ const telemetryNotifications: Array<{
 
 export const server = setupServer(
   ...mediaHandlers,
+  // No deploy under way: Caddy answers 404 when there is no status file.
+  http.get('/api/deploy-status', () => new HttpResponse(null, { status: 404 })),
   http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
   // Signed media token for cover art (lib/mediaToken.ts).
