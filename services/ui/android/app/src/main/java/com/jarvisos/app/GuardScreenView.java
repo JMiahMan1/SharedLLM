@@ -560,6 +560,7 @@ final class GuardScreenView {
         TextView error = text(context, "", 13, pal.error);
         error.setGravity(Gravity.START);
         error.setPadding(dp(context, 2), dp(context, 8), dp(context, 2), 0);
+        hideWhenEmpty(error);
 
         Handler main = new Handler(Looper.getMainLooper());
         Button unlock = primaryButton(context, pal, "Unlock");
@@ -865,7 +866,7 @@ final class GuardScreenView {
             }).start();
         });
         addFullWidth(card, send, 10);
-        card.addView(ghostButton(context, pal, sheet, sheet.backLabel));
+        addFullWidth(card, ghostButton(context, pal, sheet, sheet.backLabel), 10);
         return card;
     }
 
@@ -909,7 +910,7 @@ final class GuardScreenView {
             }).start();
         });
         addFullWidth(card, send, 10);
-        card.addView(ghostButton(context, pal, sheet, sheet.backLabel));
+        addFullWidth(card, ghostButton(context, pal, sheet, sheet.backLabel), 10);
         return card;
     }
 
@@ -959,7 +960,7 @@ final class GuardScreenView {
             }).start();
         });
         addFullWidth(card, send, 10);
-        card.addView(ghostButton(context, pal, sheet, sheet.backLabel));
+        addFullWidth(card, ghostButton(context, pal, sheet, sheet.backLabel), 10);
         return card;
     }
 
@@ -1332,7 +1333,25 @@ final class GuardScreenView {
         TextView view = text(context, "", 13, pal.textFaint);
         view.setGravity(Gravity.START);
         view.setPadding(dp(context, 2), dp(context, 10), dp(context, 2), 0);
+        hideWhenEmpty(view);
         return view;
+    }
+
+    /** An empty status or error line takes no room, so it leaves no gap above the button. */
+    private static void hideWhenEmpty(TextView view) {
+        view.setVisibility(View.GONE);
+        view.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence text, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(android.text.Editable text) {
+                view.setVisibility(text.length() == 0 ? View.GONE : View.VISIBLE);
+            }
+        });
     }
 
     private static TextView text(Context context, String value, int sizeSp, int color) {
