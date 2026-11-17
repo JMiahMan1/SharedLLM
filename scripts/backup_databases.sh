@@ -69,16 +69,27 @@ if [ "${#DBS[@]}" -eq 0 ]; then
 fi
 
 count=0
+raw=()
 for db in "${DBS[@]}"; do
   name="$(basename "$(dirname "$db")")-$(basename "$db")"
-  if sqlite3 "$db" ".backup '$STAGE/$name'"; then
+  rel="$(realpath --relative-to="$ROOT" "$db" 2>/dev/null || echo "$db")"
+  # Wait up to 20 s for a writer to let go before giving up on a clean copy.
+  if sqlite3 -cmd ".timeout 20000" "$db" ".backup '$STAGE/$name'"; then
     count=$((count + 1))
-    echo "backed up $(realpath --relative-to="$ROOT" "$db" 2>/dev/null || echo "$db")"
+    echo "backed up $rel"
   else
-    # A database we cannot read is worth failing on: a backup that quietly
-    # skipped the user table would be worse than no backup at all.
-    echo "could not back up $db" >&2
-    exit 1
+    # Some services hold their database in exclusive mode (Music Assistant's
+    # auth.db), so SQLite's own copy is always refused. One locked database
+    # used to abort the whole archive, so nothing was saved at all. Copy its
+    # files as they are instead (the WAL too), mark the copy, keep going, and
+    # still fail at the end so the log says something needs a look.
+    mkdir -p "$STAGE/raw"
+    cp -p "$db" "$STAGE/raw/$name"
+    for side in -wal -shm; do
+      [ -f "$db$side" ] && cp -p "$db$side" "$STAGE/raw/$name$side"
+    done
+    raw+=("$rel")
+    echo "could not take a clean copy of $rel (locked); saved its files as they are" >&2
   fi
 done
 
@@ -110,3 +121,8 @@ if [ "$pruned" -gt 0 ]; then
 fi
 
 echo "kept: $(ls -1 "$DEST"/sharedllm-*.tar.gz 2>/dev/null | wc -l) archive(s) in $DEST"
+
+if [ "${#raw[@]}" -gt 0 ]; then
+  echo "raw copies (locked while running): ${raw[*]}" >&2
+  exit 2
+fi
