@@ -15,7 +15,6 @@ up from the Devices page without HA:
 | emporia_vue | email, password | entry ``{email, password, enable_*}``; per circuit ``sensor.emporia_vue.{scale}.{gid}-{channel}`` |
 | srp_energy | account, login, time-of-use | entry ``{id, is_tou, name, username, password}``; sensor ``{entry_id}_total_usage`` |
 | roborock | email, then the emailed code | entry ``{username, user_data, base_url}``; one vacuum ``{duid}`` per vacuum, read once it connects |
-| malwarebazaar | abuse.ch Auth-Key (checked with one lookup) | entry ``{auth_key}`` (one per hub); telemetry's app malware check reads it |
 | common_sense_media | nothing | entry ``{}`` (one per hub); while it exists telemetry looks apps up on Common Sense Media |
 | sun | nothing | ``sun.sun`` and HA's sun sensors ``{entry_id}-{key}`` (one per hub) |
 | open_meteo | a zone | weather ``{zone}`` for that zone |
@@ -26,8 +25,10 @@ up from the Devices page without HA:
 
 The device transports are module functions so the tests can replace them.
 ``mobile_app`` is not here on purpose: a phone adds itself when its app signs in.
-The two app vetting accounts (docs/APP_VETTING.md) have no entities: other
-services read their data through ``GET /hub/integrations/{domain}``.
+The app vetting account (``common_sense_media``, docs/APP_VETTING.md) has no
+entities: telemetry reads it through ``GET /hub/integrations/{domain}``. The
+abuse.ch Auth-Key is not a hub integration: it is in Accounts & Integrations
+(identity), moved there once by ``abuse_ch_move``.
 """
 from __future__ import annotations
 
@@ -56,9 +57,6 @@ PASSWORD_OPT = {"key": "password", "label": "Password", "type": "password", "opt
 EMAIL = {"key": "email", "label": "Email", "type": "text"}
 PASSWORD = {"key": "password", "label": "Password", "type": "password"}
 
-MB_AUTH_KEY = {"key": "auth_key", "label": "Auth-Key", "type": "password",
-               "help": "Free at auth.abuse.ch. Only the fingerprints (SHA-256) of app files on children's devices "
-                       "are sent to abuse.ch."}
 
 SWITCH_AS_X_DOMAINS = ("light", "fan", "cover", "lock", "siren", "valve")
 
@@ -113,8 +111,6 @@ SPECS: dict[str, dict[str, Any]] = {
         {"key": "is_tou", "label": "Time-of-use plan", "type": "select", "optional": True,
          "options": [{"value": "", "label": "No"}, {"value": "1", "label": "Yes"}]}]},
     "roborock": {"label": "Roborock account", "kind": "cloud", "fields": [EMAIL]},
-    "malwarebazaar": {"label": "abuse.ch MalwareBazaar (app malware check)", "kind": "cloud", "single": True,
-                      "fields": [MB_AUTH_KEY]},
     "common_sense_media": {"label": "Common Sense Media (app age ratings)", "kind": "cloud", "single": True,
                            "fields": []},
     "ibeacon": {"label": "iBeacon tracker (room presence)", "kind": "local", "fields": [
@@ -155,8 +151,7 @@ SPECS: dict[str, dict[str, Any]] = {
 }
 #: Domains whose devices need no address (the finding is a placeholder).
 NO_ADDRESS = {"matter", "ibeacon", "emporia_vue", "srp_energy", "roborock", "sun", "open_meteo", "nws", "local_todo",
-              "shopping_list", "switch_as_x", "music_assistant", "go2rtc", "mjpeg", "malwarebazaar",
-              "common_sense_media"}
+              "shopping_list", "switch_as_x", "music_assistant", "go2rtc", "mjpeg", "common_sense_media"}
 #: Discovery labels its findings with these when it has one.
 KINDS = {"local": "On the network", "service": "Servers and services", "cloud": "Cloud accounts", "helper": "Helpers"}
 
@@ -291,23 +286,6 @@ async def roborock_code_login(email: str, code: str) -> tuple[dict[str, Any], st
     user_data = await client.code_login(code)
     base_url = await client.base_url  # an async property: the region the account lives in
     return user_data.as_dict(), base_url
-
-
-async def malwarebazaar_query(auth_key: str, sha256: str) -> tuple[int, Any]:
-    """POST one hash to MalwareBazaar: ``(status, JSON body or None)``. The key is never logged."""
-    import aiohttp
-
-    from services.common import malwarebazaar
-
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20),
-                                     cookie_jar=aiohttp.DummyCookieJar()) as session, \
-            session.post(malwarebazaar.API_URL, data=malwarebazaar.request_form(sha256),
-                         headers=malwarebazaar.request_headers(auth_key), allow_redirects=False) as resp:
-        try:
-            body = await resp.json(content_type=None)
-        except Exception:
-            body = None
-        return resp.status, body
 
 
 # -- the flows ---------------------------------------------------------------------------
@@ -573,36 +551,6 @@ async def adopt_roborock(runtime: Any, finding: dict[str, Any], name: str | None
     return {**result, "entities": [*result["entities"], *sync.get("entities", [])], "sync": sync}
 
 
-async def check_malwarebazaar_key(auth_key: str) -> None:
-    """One real lookup with the key (``malwarebazaar.KEY_CHECK_SHA256``, the empty file's hash, so nothing
-    about the family goes out). Raises NeedsInput when abuse.ch refuses the key, FlowError when it cannot be asked."""
-    from services.common import malwarebazaar
-
-    try:
-        status, body = await malwarebazaar_query(auth_key, malwarebazaar.KEY_CHECK_SHA256)
-        malwarebazaar.parse_response(status, body, malwarebazaar.KEY_CHECK_SHA256)
-    except malwarebazaar.AuthKeyRejected as exc:
-        raise NeedsInput([MB_AUTH_KEY], "Enter your abuse.ch Auth-Key.",
-                         f"{exc}. Check the key at auth.abuse.ch.") from exc
-    except LookupError as exc:
-        raise FlowError(f"MalwareBazaar could not check the key: {exc}", 502) from exc
-    except Exception as exc:
-        # Only the exception's type: its text could carry the request's headers.
-        raise FlowError(f"MalwareBazaar did not answer ({type(exc).__name__})", 502) from exc
-
-
-def malwarebazaar_plan(hub: Any, auth_key: str, name: str | None = None) -> Plan:
-    """The entry and its service device; shared by the flow and the one-time move from identity."""
-    entry_id = _new_entry_id()
-    title = name or "MalwareBazaar"
-    entry = ConfigEntry(entry_id=entry_id, domain="malwarebazaar", title=title, data={"auth_key": auth_key},
-                        source="user", unique_id="malwarebazaar")
-    plan = Plan(hub, entry)
-    plan.set_device(title, name_by_user=None, area_id=None, manufacturer="abuse.ch", model="MalwareBazaar",
-                    entry_type="service", identifiers=[["malwarebazaar", entry_id]])
-    return plan
-
-
 def common_sense_plan(hub: Any, name: str | None = None) -> Plan:
     entry_id = _new_entry_id()
     title = name or "Common Sense Media"
@@ -614,15 +562,6 @@ def common_sense_plan(hub: Any, name: str | None = None) -> Plan:
     return plan
 
 
-async def adopt_malwarebazaar(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
-                              user_input: dict[str, Any]) -> dict[str, Any]:
-    hub = runtime.hub
-    _single(hub, "malwarebazaar", "abuse.ch MalwareBazaar")
-    v = _required(user_input, [MB_AUTH_KEY], "Enter your abuse.ch Auth-Key.")
-    await check_malwarebazaar_key(v["auth_key"])
-    return await commit(runtime, malwarebazaar_plan(hub, v["auth_key"], name))
-
-
 async def adopt_common_sense(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
                              user_input: dict[str, Any]) -> dict[str, Any]:
     hub = runtime.hub
@@ -630,12 +569,8 @@ async def adopt_common_sense(runtime: Any, finding: dict[str, Any], name: str | 
     return await commit(runtime, common_sense_plan(hub, name))
 
 
-async def _recheck_malwarebazaar(data: dict[str, Any]) -> None:
-    await check_malwarebazaar_key(str(data.get("auth_key") or ""))
-
-
 #: Settings checked before a reconfigure saves them: ``{domain: (keys that trigger it, async check(new data))}``.
-RECONFIGURE_CHECKS = {"malwarebazaar": (("auth_key",), _recheck_malwarebazaar)}
+RECONFIGURE_CHECKS: dict[str, tuple[tuple[str, ...], Any]] = {}
 
 
 SUN_SENSORS = (("next_dawn", "Next dawn", "timestamp"), ("next_dusk", "Next dusk", "timestamp"),
@@ -798,7 +733,6 @@ FLOWS = {
     "emporia_vue": adopt_emporia,
     "srp_energy": adopt_srp,
     "roborock": adopt_roborock,
-    "malwarebazaar": adopt_malwarebazaar,
     "common_sense_media": adopt_common_sense,
     "sun": adopt_sun,
     "open_meteo": adopt_open_meteo,

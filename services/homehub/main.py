@@ -15,6 +15,7 @@ from typing import Any
 import uvicorn
 
 from services.homehub import (
+    abuse_ch_move,
     app_checks_migration,
     automation_api,
     builtin,
@@ -94,8 +95,10 @@ class Service:
         await self._start_people()
         await self._start_bluetooth()  # before the drivers: ESPHome proxies and BLE sensors attach to it
         await self.runtime.start_all()
-        # Once: the app vetting accounts move from identity's settings to integrations.
+        # Once: the Common Sense switch moves from identity's settings to an integration.
         self._bg.append(asyncio.create_task(app_checks_migration.run(self.runtime)))
+        # Once: the abuse.ch integration's key moves to identity's household default and the entry goes.
+        self._bg.append(asyncio.create_task(abuse_ch_move.run(self.runtime)))
         # Automations wait (in the background, so the API is up at once) for
         # every integration's first setup attempt, as HA starts them only once
         # it has started.

@@ -161,6 +161,9 @@ export interface UserProfileRaw {
   avatar?: string | null;
   /** Skylight for this user: household account set up and switched on for them. */
   skylight_status?: 'connected' | 'off' | 'not_set_up' | null;
+  /** Whose abuse.ch Auth-Key this person's app checks use (GET /api/users/me): their own, the
+   *  household default (the default user's), or none. Never the key. */
+  abuse_ch_status?: 'own' | 'household' | 'not_set_up' | null;
   [key: string]: unknown;
 }
 
@@ -964,8 +967,10 @@ export interface GuardianApps {
     paused_until?: string | null;
     paused_reason?: string | null;
     common_sense?: { enabled: boolean; paused_until: string | null; paused_reason: string | null };
-    /** state: ready, not_set_up (reason says to add an abuse.ch Auth-Key), key_rejected, or checking. */
+    /** state: ready, not_set_up (reason says to add an abuse.ch Auth-Key), key_rejected, or checking.
+     *  key_source: whose key this person's lookups use (their own, or the household default). */
     malware?: { state: 'ready' | 'not_set_up' | 'key_rejected' | 'checking'; reason: string | null;
+      key_source?: 'own' | 'household' | 'absent' | null;
       paused_until: string | null; paused_reason: string | null };
   };
   /** Where the bundled stalkerware list came from (CC BY 4.0; shown as attribution). */

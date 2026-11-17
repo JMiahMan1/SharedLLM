@@ -464,8 +464,10 @@ export default function AppsCard({ username, name }: { username: string; name: s
           {(data.lookups.malware?.state === 'not_set_up' || data.lookups.malware?.state === 'key_rejected') && (
             <p className="rounded-xl border border-white/10 bg-white/[0.02] p-2.5 text-[11px] text-slate-400" data-testid="apps-malware-setup">
               {data.lookups.malware.state === 'key_rejected'
-                ? 'abuse.ch refused the malware check key. An admin can replace it in Devices > Setup > Integrations (Reconfigure abuse.ch MalwareBazaar).'
-                : 'The malware check is not set up. An admin adds abuse.ch MalwareBazaar with its key in Devices > Add & fix > Add by address > Cloud accounts.'}
+                ? data.lookups.malware.key_source === 'own'
+                  ? `abuse.ch refused ${name}'s own abuse.ch Auth-Key. ${name} can replace or remove it in Settings > Accounts & Integrations; without it the household key is used.`
+                  : 'abuse.ch refused the household abuse.ch Auth-Key. An admin can replace it in Admin > Users & Devices by editing the default user.'
+                : 'The malware check is not set up. An admin adds the household abuse.ch Auth-Key in Admin > Users & Devices (edit the default user), or a person adds their own in Settings > Accounts & Integrations.'}
             </p>
           )}
           {data.devices.length === 0 ? (

@@ -38,6 +38,7 @@ import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
 import VoiceSignaturePanel from '../components/settings/VoiceSignaturePanel';
 import SpotifyLinkPanel from '../components/settings/SpotifyLinkPanel';
+import AbuseChKeyTile from '../components/settings/AbuseChKeyTile';
 import UserAvatar from '../components/UserAvatar';
 import AvatarPicker from '../components/AvatarPicker';
 import Modal from '../components/ui/Modal';
@@ -740,6 +741,7 @@ const Identity = () => {
                   "Password": "skylight_pass"
                 }}
               />
+              <AbuseChKeyTile userData={fullUser} />
             </div>
           </section>
 

@@ -53,8 +53,10 @@ def wired(monkeypatch):
     csm_calls: list[str] = []
     mb: dict[str, tuple[int, object]] = {}
     mb_calls: list[tuple[str, str]] = []
-    # Common Sense off and no MalwareBazaar key unless a test turns them on.
-    checks = {"settings": {"common_sense": False, "malwarebazaar_key": ""}}
+    # Common Sense off and no abuse.ch key for anyone unless a test turns them on.
+    checks = {"settings": {"common_sense": False}}
+    #: Each person's abuse.ch key as identity resolves it: username (None = household) -> (key, source).
+    keys: dict = {}
 
     async def _children(_session):
         return KIDS
@@ -89,6 +91,12 @@ def wired(monkeypatch):
             raise answer
         return answer
 
+    async def _abuse_ch_key(_session, user):
+        found = keys.get(user, ("", "absent"))
+        if isinstance(found, Exception):
+            raise found
+        return found
+
     async def _check_settings(_session):
         if isinstance(checks["settings"], Exception):
             raise checks["settings"]
@@ -110,13 +118,14 @@ def wired(monkeypatch):
     monkeypatch.setattr(app_catalog, "fetch_common_sense", _csm)
     monkeypatch.setattr(app_catalog, "query_malwarebazaar", _mb)
     monkeypatch.setattr(app_catalog, "check_settings", _check_settings)
+    monkeypatch.setattr(app_catalog, "abuse_ch_key", _abuse_ch_key)
     monkeypatch.setattr(app_catalog, "_now", lambda: clock["now"])
     monkeypatch.setattr(llm, "chat_content", _chat)
     with TestClient(app) as client:
         yield {"client": client, "redis": fake, "sent": sent, "fetched": fetched, "pages": pages,
                "model": model, "clock": clock, "deliver": _deliver, "reviews": reviews,
                "review_calls": review_calls, "csm": csm, "csm_calls": csm_calls, "mb": mb, "mb_calls": mb_calls,
-               "checks": checks}
+               "checks": checks, "keys": keys}
 
 
 def _inventory(*packages, device="phone-key-0000000001", usage_access=True):
@@ -511,29 +520,51 @@ async def test_without_a_key_the_check_says_it_is_not_set_up_and_asks_nothing(wi
     await _step(wired)
     data = client.get("/api/telemetry/apps/kid", headers=HEADERS).json()
     check = data["apps"][0]["malware_check"]
-    assert check["state"] == "not_set_up" and "abuse.ch MalwareBazaar integration" in check["reason"]
+    assert check["state"] == "not_set_up" and "Accounts & Integrations" in check["reason"]
     assert data["lookups"]["malware"]["state"] == "not_set_up"
     assert wired["mb_calls"] == []
 
 
-async def test_a_known_sample_is_severe_and_every_parent_hears(wired, caplog):
-    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-secret-key"}
+async def test_the_household_key_checks_a_childs_apps(wired, caplog):
+    wired["keys"]["kid"] = ("made-up-household-key", "household")
     wired["mb"][SHA] = (200, {"query_status": "ok", "data": [{"sha256_hash": SHA, "signature": "ExampleFamily"}]})
     wired["pages"]["com.example.tool"] = (404, "")
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
     for _ in range(3):
         await _step(wired)
-    assert wired["mb_calls"] == [(SHA, "made-up-secret-key")]
+    assert wired["mb_calls"] == [(SHA, "made-up-household-key")]
     malware = [n for n in wired["sent"] if "malware" in n["body"]]
     assert sorted(n["user"] for n in malware) == ["dad", "mom"]  # severe reaches the severe-only parent too
     assert malware[0]["priority"] == 4
     data = wired["client"].get("/api/telemetry/apps/kid", headers=HEADERS).json()
     assert data["apps"][0]["malware_check"]["state"] == "malware"
-    assert "made-up-secret-key" not in json.dumps(data) and "made-up-secret-key" not in caplog.text
+    assert data["lookups"]["malware"]["state"] == "ready" and data["lookups"]["malware"]["key_source"] == "household"
+    assert "made-up-household-key" not in json.dumps(data) and "made-up-household-key" not in caplog.text
+
+
+async def test_a_persons_own_key_is_used_for_their_devices(wired):
+    wired["keys"]["kid"] = ("made-up-own-key", "own")
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
+    await _step(wired)
+    assert wired["mb_calls"] == [(SHA, "made-up-own-key")]
+    data = wired["client"].get("/api/telemetry/apps/kid", headers=HEADERS).json()
+    assert data["lookups"]["malware"]["key_source"] == "own"
+
+
+async def test_a_hash_on_several_peoples_devices_is_looked_up_once(wired):
+    wired["keys"].update({"kid": ("", "absent"), "sib": ("made-up-sib-key", "own")})
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
+    await app_catalog.save_inventory(wired["redis"], "sib", "phone-key-0000000002", _hashed_inventory("com.example.tool"))
+    for _ in range(3):
+        await _step(wired)
+    # kid has no key at all, sib has one: one lookup with sib's, and its answer serves both.
+    assert wired["mb_calls"] == [(SHA, "made-up-sib-key")]
+    apps, _ = await app_catalog.merged_apps(wired["redis"], "kid")
+    assert apps[0]["malware_check"]["state"] == "not_known"
 
 
 async def test_an_unknown_hash_is_not_known_and_is_checked_again_after_the_ttl(wired):
-    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-secret-key"}
+    wired["keys"]["kid"] = ("made-up-secret-key", "household")
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
     await _step(wired)
     apps, _ = await app_catalog.merged_apps(wired["redis"], "kid")
@@ -543,26 +574,51 @@ async def test_an_unknown_hash_is_not_known_and_is_checked_again_after_the_ttl(w
     assert await app_catalog.queue_hashes(wired["redis"], [SHA]) == [SHA]
 
 
-async def test_a_refused_key_is_an_error_that_a_new_key_clears(wired, caplog):
-    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-wrong-key"}
+@pytest.mark.parametrize(("source", "whose", "where"), [
+    ("household", "the household's abuse.ch Auth-Key", "Admin > Users & Devices"),
+    ("own", "this person's own abuse.ch Auth-Key", "Settings > Accounts & Integrations"),
+])
+async def test_a_refused_key_says_whose_it_was_and_a_new_key_clears_it(wired, caplog, source, whose, where):
+    wired["keys"]["kid"] = ("made-up-wrong-key", source)
     wired["mb"][SHA] = (401, None)
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
     await _step(wired)
-    apps, _ = await app_catalog.merged_apps(wired["redis"], "kid")
-    assert apps[0]["malware_check"]["state"] == "error" and "Auth-Key" in apps[0]["malware_check"]["reason"]
-    assert await app_catalog.backoff_state(wired["redis"], app_catalog.MB_BACKOFF_KEY)
-    assert "made-up-wrong-key" not in caplog.text
-    # A new key lifts the pause and the hash is asked again.
-    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-right-key"}
+    await _step(wired)  # the refused key is not tried again while it backs off
+    assert wired["mb_calls"] == [(SHA, "made-up-wrong-key")]
+    data = wired["client"].get("/api/telemetry/apps/kid", headers=HEADERS).json()
+    check = data["apps"][0]["malware_check"]
+    assert check["state"] == "error" and whose in check["reason"] and where in check["reason"]
+    assert data["lookups"]["malware"]["state"] == "key_rejected"
+    assert data["lookups"]["malware"]["key_source"] == source and data["lookups"]["malware"]["paused_until"]
+    # A refusal is the key's, not abuse.ch's: other people's lookups are not paused.
+    assert not await app_catalog.backoff_state(wired["redis"], app_catalog.MB_BACKOFF_KEY)
+    assert "made-up-wrong-key" not in caplog.text and "made-up-wrong-key" not in json.dumps(data)
+    # A new key is used at once.
+    wired["keys"]["kid"] = ("made-up-right-key", source)
     del wired["mb"][SHA]
+    wired["clock"]["now"] += app_catalog.MB_NO_KEY_WAIT_S
     await _step(wired)
     assert wired["mb_calls"][-1] == (SHA, "made-up-right-key")
+    data = wired["client"].get("/api/telemetry/apps/kid", headers=HEADERS).json()
+    assert data["apps"][0]["malware_check"]["state"] == "not_known"
+    assert data["lookups"]["malware"]["state"] == "ready"
+
+
+async def test_a_refused_key_is_tried_again_after_its_backoff(wired):
+    wired["keys"]["kid"] = ("made-up-revoked-key", "household")
+    wired["mb"][SHA] = (200, {"query_status": "unknown_auth_key"})
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
+    await _step(wired)
+    wired["clock"]["now"] += app_catalog.MALWAREBAZAAR_BACKOFF_BASE_S + app_catalog.MB_NO_KEY_WAIT_S
+    del wired["mb"][SHA]
+    await _step(wired)
+    assert wired["mb_calls"] == [(SHA, "made-up-revoked-key")] * 2
     apps, _ = await app_catalog.merged_apps(wired["redis"], "kid")
     assert apps[0]["malware_check"]["state"] == "not_known"
 
 
 async def test_a_failed_lookup_backs_off_without_naming_the_key(wired, caplog):
-    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-secret-key"}
+    wired["keys"]["kid"] = ("made-up-secret-key", "own")
     wired["mb"][SHA] = OSError("connection reset")
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
     await _step(wired)
@@ -571,6 +627,21 @@ async def test_a_failed_lookup_backs_off_without_naming_the_key(wired, caplog):
     assert await app_catalog.backoff_state(wired["redis"], app_catalog.MB_BACKOFF_KEY)
     assert await wired["redis"].zrangebyscore(app_catalog.MB_DUE, 0, wired["clock"]["now"]) == [SHA]
     assert "made-up-secret-key" not in caplog.text
+
+
+async def test_identity_down_asks_nothing(wired):
+    wired["keys"]["kid"] = RuntimeError("identity down")
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
+    await _step(wired)
+    assert wired["mb_calls"] == []
+    assert await wired["redis"].zrangebyscore(app_catalog.MB_DUE, 0, wired["clock"]["now"]) == [SHA]
+
+
+async def test_a_hash_queued_before_holders_were_kept_uses_the_household_key(wired):
+    wired["keys"][None] = ("made-up-household-key", "household")
+    await app_catalog.queue_hashes(wired["redis"], [SHA])
+    await _step(wired)
+    assert wired["mb_calls"] == [(SHA, "made-up-household-key")]
 
 
 async def test_an_app_the_device_could_not_hash_says_why(wired):
@@ -584,7 +655,8 @@ async def test_an_app_the_device_could_not_hash_says_why(wired):
 
 
 async def test_settings_that_cannot_be_read_ask_nothing(wired):
-    wired["checks"]["settings"] = RuntimeError("identity down")
+    wired["checks"]["settings"] = RuntimeError("hub down")
+    wired["keys"]["kid"] = RuntimeError("identity down")
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
     await _step(wired)
     assert wired["mb_calls"] == [] and wired["csm_calls"] == []
@@ -594,8 +666,8 @@ async def test_settings_that_cannot_be_read_ask_nothing(wired):
 
 
 async def test_jarvis_is_never_looked_up_anywhere(wired):
-    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-secret-key",
-                                   "common_sense": True}
+    wired["checks"]["settings"] = {"common_sense": True}
+    wired["keys"]["kid"] = ("made-up-secret-key", "own")
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001",
                                      _hashed_inventory(app_catalog.JARVIS_ANDROID_PACKAGE, sha="cd" * 32))
     assert await app_catalog.queue_lookups(wired["redis"], [app_catalog.JARVIS_ANDROID_PACKAGE]) == []

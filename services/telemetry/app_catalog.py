@@ -23,13 +23,21 @@ listings, the local model's review of each, and the parents' notices.
   for by the app's Play title, on its own interval, backoff and TTL, while
   the hub's Common Sense Media integration is set up.
 * The SHA-256 of each app file a device reports is looked up on abuse.ch
-  MalwareBazaar (``malwarebazaar``) with the Auth-Key of the hub's abuse.ch
-  MalwareBazaar integration, on its own interval and backoff; without one
-  every app says the check is not set up.
-* Both integrations are read from the hub (``GET /hub/integrations/{domain}``
-  with the internal secret) for each round of lookups, cached a minute, so a
-  change on the Devices page applies within a minute. While the hub cannot be
-  asked both count as not set up, which is logged once until it answers.
+  MalwareBazaar (``malwarebazaar``) with an abuse.ch Auth-Key from Accounts &
+  Integrations, on its own interval and backoff. Whose key: the device's
+  user's, resolved by identity (``POST /api/resolve``, internal secret, cached
+  a minute per person): their own, else the household default (the system
+  default user's). A hash several people's devices report is looked up once,
+  with the first of them (by username) whose key is usable, and the answer
+  serves everyone. A person with no key, own or household, sees "not set up"
+  and nothing is asked for them. A key abuse.ch refuses backs off on its own
+  (other people's keys go on working) and the card says whose it was ("their
+  own" or "the household's"), never the key.
+* The Common Sense Media integration is read from the hub
+  (``GET /hub/integrations/{domain}`` with the internal secret) for each round
+  of lookups, cached a minute, so a change on the Devices page applies within a
+  minute. While the hub cannot be asked it counts as not set up, which is
+  logged once until it answers.
 * After each lookup the child's apps are assessed (``app_vetting.assess``) and
   each parent hears about newly flagged ones at their own notify level, once
   per app and verdict. A request waiting on the lookup gets its notice again,
@@ -65,6 +73,7 @@ from services.telemetry.config import (
     COMMON_SENSE_MIN_INTERVAL_S,
     COMMON_SENSE_TTL_DAYS,
     HOMEHUB_URL,
+    IDENTITY_SVC,
     INTERNAL_SECRET,
     JARVIS_ANDROID_PACKAGE,
     MALWAREBAZAAR_BACKOFF_BASE_S,
@@ -97,13 +106,20 @@ MB_PREFIX = "tel:apps:mb:"
 MB_DUE = "tel:apps:mb-due"
 MB_BACKOFF_KEY = "tel:apps:mb-backoff"
 MB_LAST_FETCH_KEY = "tel:apps:mb-last-fetch"
-MB_STATE_KEY = "tel:apps:mb-state"
+#: Per person: whose abuse.ch key their lookups use and how it stands (``{state, source, reason}``).
+MB_STATE_PREFIX = "tel:apps:mb-state:"
+#: Per hash: the people whose devices reported it (so the lookup uses one of their keys).
+MB_USERS_PREFIX = "tel:apps:mb-users:"
+#: Per key fingerprint: abuse.ch refused it; not used again until ``until`` (doubling).
+MB_REJECTED_PREFIX = "tel:apps:mb-rejected:"
 
-#: The hub integrations these checks read (homehub; cached for a minute).
-MB_DOMAIN = "malwarebazaar"
+#: The hub integration this reads (homehub; cached for a minute).
 CSM_DOMAIN = "common_sense_media"
 SETTINGS_CACHE_S = 60.0
 HUB_TIMEOUT_S = 5.0
+IDENTITY_TIMEOUT_S = 10.0
+#: A due hash none of whose holders has a usable key waits this long before it is looked at again.
+MB_NO_KEY_WAIT_S = 600.0
 #: Where an admin turns Common Sense lookups on (the Devices page).
 CSM_NOT_SET_UP = ("Common Sense Media lookups are off: add the Common Sense Media integration "
                   "(Devices > Add & fix > Add by address > Cloud accounts)")
@@ -122,6 +138,10 @@ _fetch_session: aiohttp.ClientSession | None = None
 _settings_cache: tuple[float, dict[str, Any]] | None = None
 #: The hub could not be asked last time (so the next failure is not logged again).
 _hub_down = False
+#: Per person (None = the household): (expires, (key, source)) from identity's resolve.
+_key_cache: dict[str | None, tuple[float, tuple[str, str]]] = {}
+#: Identity could not be asked for a key last time (logged once until it answers).
+_identity_down = False
 
 
 def _now() -> float:
@@ -168,7 +188,7 @@ async def save_inventory(rc, user: str, device: str, body: dict[str, Any]) -> di
     await rc.set(f"{INVENTORY_PREFIX}{user}:{device}", json.dumps(record), ex=ttl)
     await rc.sadd(f"{DEVICES_PREFIX}{user}", device)
     queued = await queue_lookups(rc, [a["package"] for a in apps])
-    await queue_hashes(rc, [a["apk_sha256"] for a in apps if a.get("apk_sha256")])
+    await queue_hashes(rc, [a["apk_sha256"] for a in apps if a.get("apk_sha256")], user)
     return {"device": device, "apps": len(apps), "queued": queued}
 
 
@@ -264,30 +284,69 @@ async def hub_integration(session, domain: str) -> dict[str, Any]:
 
 
 async def check_settings(session) -> dict[str, Any]:
-    """``{"malwarebazaar_key": str, "common_sense": bool}`` from the hub's integrations (cached a minute).
+    """``{"common_sense": bool}`` from the hub's integrations (cached a minute).
 
-    The key is the abuse.ch MalwareBazaar integration's Auth-Key, empty without one; Common Sense
-    is on while its integration is set up. A hub that cannot be asked counts as neither set up for
-    this pass, logged once until it answers again; never raises."""
+    Common Sense is on while its integration is set up. A hub that cannot be asked counts as not
+    set up for this pass, logged once until it answers again; never raises."""
     global _settings_cache, _hub_down
     if _settings_cache and _settings_cache[0] > time.monotonic():
         return _settings_cache[1]
     try:
-        mb = await hub_integration(session, MB_DOMAIN)
         csm = await hub_integration(session, CSM_DOMAIN)
     except Exception as exc:
         if not _hub_down:
-            log.warning("homehub could not be asked for the app check integrations (%s); "
-                        "treating them as not set up until it answers", type(exc).__name__)
+            log.warning("homehub could not be asked for the Common Sense Media integration (%s); "
+                        "treating it as not set up until it answers", type(exc).__name__)
         _hub_down = True
-        found: dict[str, Any] = {"malwarebazaar_key": "", "common_sense": False, "hub_down": True}
+        found: dict[str, Any] = {"common_sense": False, "hub_down": True}
     else:
         if _hub_down:
-            log.info("homehub answers again; the app check integrations are read from it")
+            log.info("homehub answers again; the Common Sense Media integration is read from it")
         _hub_down = False
-        key = str((mb.get("data") or {}).get("auth_key") or "").strip() if mb.get("configured") else ""
-        found = {"malwarebazaar_key": key, "common_sense": bool(csm.get("configured"))}
+        found = {"common_sense": bool(csm.get("configured"))}
     _settings_cache = (time.monotonic() + SETTINGS_CACHE_S, found)
+    return found
+
+
+async def identity_resolve(session, body: dict[str, Any]) -> dict[str, Any] | None:
+    """Identity's ``POST /api/resolve`` with the internal secret; None for a person identity does not
+    know (401/404). Raises when identity cannot be asked. The answer holds secrets: never logged."""
+    async with session.post(
+        f"{IDENTITY_SVC}/api/resolve", json=body, headers={"X-Internal-Secret": INTERNAL_SECRET},
+        timeout=aiohttp.ClientTimeout(total=IDENTITY_TIMEOUT_S),
+    ) as resp:
+        if resp.status in (401, 404):
+            return None
+        if resp.status != 200:
+            raise RuntimeError(f"identity answered HTTP {resp.status}")
+        answer = await resp.json(content_type=None)
+    return answer if isinstance(answer, dict) else None
+
+
+async def abuse_ch_key(session, user: str | None) -> tuple[str, str]:
+    """``(key, source)`` for one person's lookups (None: the household's), cached a minute.
+
+    source is "own", "household" or "absent" (identity's ``credential_sources["abuse_ch"]``).
+    Raises when identity cannot be asked."""
+    global _identity_down
+    cached = _key_cache.get(user)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    try:
+        answer = await identity_resolve(session, {"rag_user": user} if user else {"household": True})
+    except Exception as exc:
+        if not _identity_down:
+            log.warning("identity could not be asked for the abuse.ch keys (%s); "
+                        "MalwareBazaar lookups wait until it answers", type(exc).__name__)
+        _identity_down = True
+        raise
+    if _identity_down:
+        log.info("identity answers again; MalwareBazaar lookups go on")
+    _identity_down = False
+    key = str((answer or {}).get("malwarebazaar_key") or "").strip()
+    source = str(((answer or {}).get("credential_sources") or {}).get("abuse_ch") or "")
+    found = (key, source if key and source in ("own", "household") else ("own" if key else "absent"))
+    _key_cache[user] = (time.monotonic() + SETTINGS_CACHE_S, found)
     return found
 
 
@@ -556,11 +615,15 @@ async def common_sense_entry(rc, package: str) -> dict[str, Any] | None:
 # --- MalwareBazaar -----------------------------------------------------------
 
 
-async def queue_hashes(rc, hashes: list[str]) -> list[str]:
-    """Queue app file hashes with no recent MalwareBazaar answer."""
+async def queue_hashes(rc, hashes: list[str], user: str | None = None) -> list[str]:
+    """Queue app file hashes with no recent MalwareBazaar answer, noting ``user`` as one who holds
+    each (their key, else the household's, is what the lookup uses)."""
     now = _now()
     queued = []
     for sha in dict.fromkeys(hashes):
+        if user:
+            await rc.sadd(f"{MB_USERS_PREFIX}{sha}", user)
+            await rc.expire(f"{MB_USERS_PREFIX}{sha}", APP_INVENTORY_TTL_DAYS * 86400)
         result = await _get_json(rc, f"{MB_PREFIX}{sha}")
         if result and result.get("status") == "malware":
             continue
@@ -577,22 +640,60 @@ def _key_fingerprint(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
-async def refresh_malware(rc, auth_key: str) -> str:
-    """Look the next due hash up (one request). Returns "fetched" or "idle"."""
+#: How a refused key is named on a card: whose it is, never the key.
+_WHOSE = {"own": "this person's own abuse.ch Auth-Key", "household": "the household's abuse.ch Auth-Key"}
+
+
+def _refused_reason(source: str, why: str) -> str:
+    where = ("Settings > Accounts & Integrations" if source == "own"
+             else "Admin > Users & Devices, on the default user")
+    return f"abuse.ch refused {_WHOSE.get(source, 'the abuse.ch Auth-Key')} ({why}); replace it in {where}"
+
+
+async def _rejection(rc, key: str) -> dict[str, Any] | None:
+    return await _get_json(rc, f"{MB_REJECTED_PREFIX}{_key_fingerprint(key)}")
+
+
+async def _reject(rc, key: str, source: str, why: str) -> None:
+    """abuse.ch refused ``key``: it is not used again until its own backoff ends (doubling)."""
+    fp = _key_fingerprint(key)
+    previous = await _rejection(rc, key) or {}
+    failures = int(previous.get("failures") or 0) + 1
+    wait = min(MALWAREBAZAAR_BACKOFF_BASE_S * 2 ** (failures - 1), MALWAREBAZAAR_BACKOFF_MAX_S)
+    until = _now() + wait
+    await rc.set(f"{MB_REJECTED_PREFIX}{fp}", json.dumps({
+        "failures": failures, "until": until, "until_iso": _iso(until), "why": why, "source": source}),
+        ex=int(MALWAREBAZAAR_BACKOFF_MAX_S * 2))
+    log.warning("abuse.ch refused %s (key %s); not used for %ss after %s refusal(s)",
+                _WHOSE.get(source, "an Auth-Key"), fp, wait, failures)
+
+
+async def _user_state(rc, user: str | None, key: str, source: str) -> dict[str, Any]:
+    """Record and return how one person's key stands: not_set_up, key_rejected or ready."""
+    if not key:
+        state: dict[str, Any] = {"state": "not_set_up", "source": "absent"}
+    else:
+        rejected = await _rejection(rc, key)
+        state = ({"state": "key_rejected", "source": source,
+                  "reason": _refused_reason(source, rejected.get("why") or "refused"),
+                  "retry_at": rejected.get("until_iso"), "retry_ts": rejected.get("until")}
+                 if rejected else {"state": "ready", "source": source})
+    if user:
+        await rc.set(f"{MB_STATE_PREFIX}{user}", json.dumps({**state, "at": _iso(_now())}))
+    return state
+
+
+async def refresh_malware(rc, sha: str, auth_key: str, source: str = "own") -> str:
+    """Look one hash up with ``auth_key`` (one request). Returns "fetched"."""
     now = _now()
-    due = await rc.zrangebyscore(MB_DUE, 0, now, start=0, num=1)
-    if not due:
-        return "idle"
-    sha = due[0]
     await rc.zrem(MB_DUE, sha)
     await rc.set(MB_LAST_FETCH_KEY, str(now))
     try:
         status, body = await query_malwarebazaar(sha, auth_key)
         result = malwarebazaar.parse_response(status, body, sha)
     except malwarebazaar.AuthKeyRejected as exc:
-        await rc.set(MB_STATE_KEY, json.dumps({"state": "key_rejected", "reason": str(exc),
-                                               "key_fp": _key_fingerprint(auth_key), "at": _iso(now)}))
-        await _back_off(rc, str(exc), MB_BACKOFF_KEY)
+        why = str(exc).rpartition("(")[2].rstrip(")") or "refused"
+        await _reject(rc, auth_key, source, why)
         await rc.zadd(MB_DUE, {sha: now})
         return "fetched"
     except Exception as exc:
@@ -604,7 +705,7 @@ async def refresh_malware(rc, auth_key: str) -> str:
         await rc.zadd(MB_DUE, {sha: now})
         return "fetched"
     await _clear_backoff(rc, MB_BACKOFF_KEY)
-    await rc.set(MB_STATE_KEY, json.dumps({"state": "ready", "key_fp": _key_fingerprint(auth_key), "at": _iso(now)}))
+    await rc.delete(f"{MB_REJECTED_PREFIX}{_key_fingerprint(auth_key)}")
     await rc.set(f"{MB_PREFIX}{sha}", json.dumps({**result, "checked_ts": now, "checked_at": _iso(now)}))
     return "fetched"
 
@@ -613,7 +714,8 @@ async def malware_check(rc, app: dict[str, Any], state: dict[str, Any] | None = 
     """One app's MalwareBazaar state for the card and the verdict:
     ``{"state", "reason", ...}`` where state is malware, not_known, checking,
     not_set_up, error, skipped (the device did not hash it) or no_hash (the
-    device's app is older than the check)."""
+    device's app is older than the check). ``state`` is the person's key state
+    (``MB_STATE_PREFIX``)."""
     hashes = app.get("apk_hashes") or ([app["apk_sha256"]] if app.get("apk_sha256") else [])
     if not hashes:
         why = {
@@ -632,7 +734,7 @@ async def malware_check(rc, app: dict[str, Any], state: dict[str, Any] | None = 
     if all(r.get("status") == "not_known" for r in results):
         return {"state": "not_known", "reason": "Not a known malware sample on MalwareBazaar",
                 "checked_at": min(r.get("checked_at") or "" for r in results) or None}
-    state = state if state is not None else (await _get_json(rc, MB_STATE_KEY) or {})
+    state = state or {}
     if state.get("state") == "not_set_up":
         return {"state": "not_set_up", "reason": malwarebazaar.NOT_SET_UP}
     if state.get("state") == "key_rejected":
@@ -728,14 +830,17 @@ async def catalog(rc, packages: list[str]) -> dict[str, dict[str, Any]]:
     return {p: await catalog_entry(rc, p) for p in dict.fromkeys(packages) if app_vetting.is_package(p)}
 
 
-async def checks_state(rc) -> dict[str, Any]:
+async def checks_state(rc, user: str | None = None) -> dict[str, Any]:
     """How the extra checks stand, for the card's header: Common Sense on or
-    off and paused, MalwareBazaar set up or not and paused."""
+    off and paused; MalwareBazaar for ``user``: whose key ("own",
+    "household", "absent"), set up or not, refused, and paused."""
     csm = await _get_json(rc, CSM_STATE_KEY) or {}
     csm_backoff = await backoff_state(rc, CSM_BACKOFF_KEY)
-    mb = await _get_json(rc, MB_STATE_KEY) or {}
+    mb = (await _get_json(rc, f"{MB_STATE_PREFIX}{user}") or {}) if user else {}
     mb_backoff = await backoff_state(rc, MB_BACKOFF_KEY)
     mb_state = mb.get("state") or "checking"
+    if mb_state == "key_rejected" and not mb_backoff:
+        mb_backoff = {"until_iso": mb.get("retry_at"), "reason": mb.get("reason")}
     return {
         "common_sense": {
             "enabled": csm.get("enabled", True),
@@ -744,6 +849,7 @@ async def checks_state(rc) -> dict[str, Any]:
         },
         "malware": {
             "state": mb_state,
+            "key_source": mb.get("source"),
             "reason": malwarebazaar.NOT_SET_UP if mb_state == "not_set_up" else mb.get("reason"),
             "paused_until": (mb_backoff or {}).get("until_iso"),
             "paused_reason": (mb_backoff or {}).get("reason"),
@@ -771,7 +877,7 @@ async def merged_apps(rc, user: str, usage_days: int = 60) -> tuple[list[dict[st
             last = row.get("last_use")
             if isinstance(row, dict) and isinstance(last, (int, float)) and not isinstance(last, bool):
                 last_seen[row.get("package")] = max(last_seen.get(row.get("package"), 0), int(last))
-    state = await _get_json(rc, MB_STATE_KEY) or {}
+    state = await _get_json(rc, f"{MB_STATE_PREFIX}{user}") or {}
     for app in apps:
         seen = last_seen.get(app["package"])
         if seen and (app.get("last_used") is None or seen > app["last_used"]):
@@ -996,35 +1102,65 @@ async def _common_sense_step(rc, session, deliver: Deliver, settings: dict[str, 
     return True
 
 
-async def _malware_step(rc, session, deliver: Deliver, settings: dict[str, Any] | None) -> bool:
-    """One MalwareBazaar request when a key is set and allowed. Without a key
-    the state says "not set up" and nothing is asked."""
-    if settings is None:
-        return False
-    key = str(settings.get("malwarebazaar_key") or "").strip()
-    state = await _get_json(rc, MB_STATE_KEY) or {}
-    if not key:
-        if state.get("state") != "not_set_up":
-            await rc.set(MB_STATE_KEY, json.dumps({"state": "not_set_up", "reason": malwarebazaar.NOT_SET_UP,
-                                                   "at": _iso(_now())}))
-        return False
-    if state.get("state") == "not_set_up" or (state.get("key_fp") and state.get("key_fp") != _key_fingerprint(key)):
-        # A key was added or changed: a refusal of the old one no longer holds.
-        await rc.set(MB_STATE_KEY, json.dumps({"state": "ready", "key_fp": _key_fingerprint(key), "at": _iso(_now())}))
-        await _clear_backoff(rc, MB_BACKOFF_KEY)
+async def _holders_keys(rc, session, holders: list[str]) -> dict[str | None, tuple[str, str]]:
+    """Each holder's (key, source), their key state recorded; a hash nobody is noted for is the
+    household's (it was queued before holders were kept)."""
+    out: dict[str | None, tuple[str, str]] = {}
+    for user in holders or [None]:
+        key, source = await abuse_ch_key(session, user)
+        await _user_state(rc, user, key, source)
+        out[user] = (key, source)
+    return out
+
+
+async def _refresh_people(rc, session) -> None:
+    """Keep every child's key state current (a key added, changed or removed shows within a minute),
+    even when none of their hashes is due."""
+    try:
+        people = sorted(await guardian.children(session))
+    except Exception as exc:
+        log.debug("children could not be read for the abuse.ch key states: %s", type(exc).__name__)
+        return
+    for user in people:
+        key, source = await abuse_ch_key(session, user)
+        await _user_state(rc, user, key, source)
+
+
+async def _malware_step(rc, session, deliver: Deliver) -> bool:
+    """One MalwareBazaar request when a hash is due, the interval and backoff allow, and one of the
+    people holding it has a usable key. Nobody's key goes to abuse.ch for anyone else's sake: the
+    lookup uses a holder's own or household key, and its answer serves every holder."""
+    try:
+        await _refresh_people(rc, session)
+    except Exception:
+        return False  # identity cannot be asked; logged once by abuse_ch_key
     if await backoff_state(rc, MB_BACKOFF_KEY):
         return False
     if not await _interval_ok(rc, MB_LAST_FETCH_KEY, MALWAREBAZAAR_MIN_INTERVAL_S):
         return False
-    due = await rc.zrangebyscore(MB_DUE, 0, _now(), start=0, num=1)
-    if not due:
-        return False
-    sha = due[0]
-    await refresh_malware(rc, key)
-    result = await _get_json(rc, f"{MB_PREFIX}{sha}") or {}
-    if result.get("status") == "malware":
-        await _after_hash(rc, session, sha, deliver)
-    return True
+    now = _now()
+    for sha in await rc.zrangebyscore(MB_DUE, 0, now, start=0, num=20):
+        holders = sorted(await rc.smembers(f"{MB_USERS_PREFIX}{sha}") or [])
+        try:
+            keys = await _holders_keys(rc, session, holders)
+        except Exception:
+            return False
+        usable: tuple[str, str] | None = None
+        for key, source in keys.values():
+            refused = await _rejection(rc, key) if key else None
+            if key and (refused is None or float(refused.get("until") or 0) <= now):
+                usable = (key, source)  # a refused key is tried again once its own backoff ends
+                break
+        if usable is None:
+            # Nobody holding it can look it up now: it waits, and the next due hash gets its turn.
+            await rc.zadd(MB_DUE, {sha: now + MB_NO_KEY_WAIT_S})
+            continue
+        await refresh_malware(rc, sha, *usable)
+        result = await _get_json(rc, f"{MB_PREFIX}{sha}") or {}
+        if result.get("status") == "malware":
+            await _after_hash(rc, session, sha, deliver)
+        return True
+    return False
 
 
 async def _after_hash(rc, session, sha: str, deliver: Deliver) -> None:
@@ -1056,7 +1192,7 @@ async def step(rc, session, deliver: Deliver) -> str:
         log.warning("app check settings could not be read: %s", type(exc).__name__)
         settings = None
     fetched = await _common_sense_step(rc, session, deliver, settings) or fetched
-    fetched = await _malware_step(rc, session, deliver, settings) or fetched
+    fetched = await _malware_step(rc, session, deliver) or fetched
     return "fetched" if fetched else "idle"
 
 

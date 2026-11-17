@@ -103,6 +103,24 @@ One household account, set up by an admin on the system default user. Everyone
 else can only turn Skylight chores and rewards on or off for themselves; the
 fields are read-only for them.
 
+## abuse.ch
+
+The Auth-Key app checks use to look up app files on abuse.ch MalwareBazaar
+(docs/APP_VETTING.md). Free at auth.abuse.ch. Only the fingerprints (SHA-256)
+of app files on children's devices are sent to abuse.ch.
+
+- **abuse.ch Auth-Key**: the household default applies to everyone. The
+  default user's key is the household key: everyone who has not set their own
+  uses it, with no admin grant. An admin sets it in Admin > Users & Devices by
+  editing the default user. Anyone may add their own here, and their own wins;
+  remove it to go back to the household key.
+
+The card says which key applies ("Using the household key", "Using your own
+key" or "Not set up"). A key is checked with abuse.ch before it is saved: one
+lookup of the empty file's fingerprint. A key abuse.ch refuses is not saved,
+and abuse.ch not answering means try again. A saved key is never shown again,
+not even with the eye; enter a new one to replace it.
+
 ## Cloud Providers (OpenRouter / ClinePass)
 
 A cloud provider is configured once for the whole household, not per user: pick
