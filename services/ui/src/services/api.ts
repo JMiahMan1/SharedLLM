@@ -224,6 +224,7 @@ import type {
   BibleBookInfo,
   BibleSearchResult,
   BibleSearchMatch,
+  BibleSearchAnswer,
   BibleSearchSort,
   BibleVerseContext,
   BibleVerseOfDay,
@@ -5539,6 +5540,15 @@ export const api = {
     } = {},
   ): Promise<BibleSearchResult> {
     const resp = await apiClient.get('/api/bible/search', { params: { q, ...options } });
+    return resp.data;
+  },
+
+  /** A question of the whole Bible; slow on purpose (a model answers), so no short timeout. */
+  async askBibleSearch(
+    question: string,
+    options: { version?: string; scope?: string; depth?: BibleStudyDepth } = {},
+  ): Promise<BibleSearchAnswer> {
+    const resp = await apiClient.post('/api/bible/search/ask', { question, ...options }, { timeout: 300_000 });
     return resp.data;
   },
 

@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { ChevronDown, HelpCircle, Loader2, Search, X } from 'lucide-react';
+import { ChevronDown, HelpCircle, Loader2, Search, Sparkles, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
-import { SEARCH_PAGE, effectiveQuery, highlighted } from './searchText';
+import { SEARCH_PAGE, effectiveQuery, highlighted, questionText, scopeIn } from './searchText';
+import BibleSearchAsk from './BibleSearchAsk';
 import type { BibleSearchHit, BibleSearchMatch, BibleSearchResult, BibleSearchSort, BibleVersionInfo } from '../../types/api';
 
 
@@ -29,9 +30,11 @@ const MATCHES: Array<{ id: BibleSearchMatch; label: string }> = [
   { id: 'all', label: 'All words' },
   { id: 'any', label: 'Any word' },
   { id: 'exact', label: 'Exact phrase' },
+  { id: 'meaning', label: 'Meaning' },
 ];
 
 const TIPS: Array<[string, string]> = [
+  ['Meaning: verses about worry', 'finds verses by what they mean, even ones that never use your words'],
   ['grace faith', 'verses with both words, in any form (love finds loved and loveth)'],
   ['"living water"', 'the exact phrase'],
   ['faith OR works', 'either word'],
@@ -122,16 +125,18 @@ export default function BibleSearchResults({ term, version, versions, onOpen, on
   const [where, setWhere] = useState('');
   const [sort, setSort] = useState<BibleSearchSort | undefined>(undefined);
   const [tips, setTips] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const installed = versions.filter((v) => v.installed !== false);
   const multiple = installed.length > 1;
-  const q = effectiveQuery(term, where, prefs.every && multiple);
+  const byMeaning = prefs.match === 'meaning';
+  const q = effectiveQuery(term, where, prefs.every && multiple && !byMeaning);
   const ready = term.trim().length >= 2;
 
   const search = useInfiniteQuery({
-    queryKey: ['bible-search', q, version, prefs.match, sort],
+    queryKey: ['bible-search', q, version, prefs.match, byMeaning ? undefined : sort],
     queryFn: ({ pageParam }) =>
-      api.searchBible(q, { version, limit: SEARCH_PAGE, offset: pageParam, match: prefs.match, sort }),
+      api.searchBible(q, { version, limit: SEARCH_PAGE, offset: pageParam, match: prefs.match, sort: byMeaning ? undefined : sort }),
     initialPageParam: 0,
     getNextPageParam: (last) => {
       const next = (last.offset ?? 0) + last.count;
@@ -164,7 +169,18 @@ export default function BibleSearchResults({ term, version, versions, onOpen, on
     <section className="glass-panel rounded-2xl p-4 border border-white/10" data-testid="bible-search-results">
       <div className="flex items-center gap-2 mb-1">
         <Search size={15} className="text-sky-300 shrink-0" />
-        <h2 className="min-w-0 flex-1 text-sm font-bold text-white truncate">Results for “{term}”</h2>
+        <h2 className="min-w-0 flex-1 text-sm font-bold text-white break-words line-clamp-2">Results for “{term}”</h2>
+        <button
+          type="button"
+          onClick={() => setAsking((a) => !a)}
+          aria-expanded={asking}
+          aria-label="Ask Jarvis"
+          title="Ask Jarvis"
+          data-testid="bible-search-ask-toggle"
+          className="min-h-11 min-w-11 shrink-0 flex items-center justify-center rounded-xl text-sky-300 hover:text-white aria-expanded:bg-sky-500/15"
+        >
+          <Sparkles size={16} />
+        </button>
         <button
           type="button"
           onClick={() => setTips((t) => !t)}
@@ -189,8 +205,18 @@ export default function BibleSearchResults({ term, version, versions, onOpen, on
           <span className="font-semibold text-slate-200">
             {total.toLocaleString()} {total === 1 ? 'verse' : 'verses'}
           </span>
-          {describe(first) ? ` · ${describe(first)}` : ''}
+          {first.mode === 'meaning' ? ' closest in meaning' : describe(first) ? ` · ${describe(first)}` : ''}
+          {first.mode === 'meaning' && (first.meaning_coverage ?? 1) < 1 ? (
+            <span className="block text-amber-200/80">
+              Meaning search is still being prepared ({Math.round((first.meaning_coverage ?? 0) * 100)}% of verses
+              ready), so some verses may be missing.
+            </span>
+          ) : null}
         </p>
+      ) : null}
+
+      {asking ? (
+        <BibleSearchAsk question={questionText(term)} version={version} scope={where || scopeIn(term)} onOpen={onOpen} />
       ) : null}
 
       {tips ? (
@@ -238,7 +264,7 @@ export default function BibleSearchResults({ term, version, versions, onOpen, on
           </select>
           <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
         </label>
-        {multiple ? (
+        {multiple && !byMeaning ? (
           <button
             type="button"
             aria-pressed={prefs.every}
@@ -249,6 +275,7 @@ export default function BibleSearchResults({ term, version, versions, onOpen, on
             All translations
           </button>
         ) : null}
+        {byMeaning ? null : (
         <button
           type="button"
           onClick={() => setSort(sortShown === 'rank' ? 'canon' : 'rank')}
@@ -257,6 +284,7 @@ export default function BibleSearchResults({ term, version, versions, onOpen, on
         >
           {sortShown === 'rank' ? 'Best match first' : 'Bible order'}
         </button>
+        )}
       </div>
 
       {byBook.length > 1 || onBook ? (
@@ -320,7 +348,7 @@ export default function BibleSearchResults({ term, version, versions, onOpen, on
                     >
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <span className="text-xs font-semibold text-amber-300">{hit.reference}</span>
-                        {prefs.every && hit.versions?.length ? (
+                        {prefs.every && !byMeaning && hit.versions?.length ? (
                           <span className="flex flex-wrap gap-1">
                             {hit.versions.map((code) => (
                               <span

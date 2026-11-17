@@ -15662,6 +15662,27 @@ async def proxy_bible_study_ask(request: Request):
     )
 
 
+@app.post("/api/bible/search/ask")
+async def proxy_bible_search_ask(request: Request):
+    """Ask a question of the whole Bible: the verses come from search, the
+    answer from the model, as the caller (never a username from the body)."""
+    username = await _bible_caller(request)
+    body = await request.json()
+    return await _bible_json(
+        "POST",
+        "/search/ask",
+        label="Bible questions unavailable",
+        params={"username": username},
+        json={
+            "question": body.get("question"),
+            "version": body.get("version"),
+            "scope": body.get("scope"),
+            "depth": body.get("depth") or "adult",
+        },
+        timeout=_BIBLE_STUDY_TIMEOUT,
+    )
+
+
 def _study_ask_body(body: dict) -> dict:
     """Only the fields a study question carries; never a username."""
     return {

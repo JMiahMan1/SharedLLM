@@ -35,3 +35,16 @@ export function highlighted(text: string, spans: number[][] | undefined): ReactN
   return out;
 }
 
+
+const FILTER = /(^|\s)-?[a-z]+:("[^"]*"|\S+)/gi;
+
+/** The search text as a question: the filters (`in:`, `ver:`, `has:`) taken out. */
+export function questionText(term: string): string {
+  return term.replace(FILTER, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** The first `in:` value of a search, so a question looks in the same place. */
+export function scopeIn(term: string): string {
+  const match = /(?:^|\s)in:("[^"]*"|\S+)/i.exec(term);
+  return match ? match[1].replace(/"/g, '') : '';
+}

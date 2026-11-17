@@ -66,6 +66,11 @@ export async function mockBible(page: Page) {
     const url = new URL(route.request().url());
     const p = url.pathname.replace(/^\/api\/bible/, '');
     const json = (body: unknown) => route.fulfill({ json: body });
+    if (p === '/search/ask') {
+      return json({ question: 'faith', version: 'tst', depth: 'adult', retrieval: 'meaning',
+        answer: 'A made-up answer that runs long enough to wrap over several lines on a small phone, naming Genesis 1:1 and 1 Thessalonians 4:1 as the verses it rests on.',
+        verses: [], references: [{ reference: 'Genesis 1:1', in_results: true }, { reference: '1 Thessalonians 4:1', in_results: false }] });
+    }
     if (route.request().method() !== 'GET') return json({ status: 'ok' });
     if (p === '/versions') {
       return json({ versions: [{ code: 'tst', name: 'Test Translation', language: 'en', license_class: 'public_domain',

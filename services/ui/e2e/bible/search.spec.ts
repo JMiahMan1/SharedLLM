@@ -41,6 +41,16 @@ test('Bible search fits the screen with its filters, chart, tips and context ope
   await page.getByLabel('Verses around Genesis 4:1').click();
   await expect(page.getByTestId('bible-search-context')).toBeVisible();
   await expectSound(page, '[data-testid="bible-search-results"]', 'search with tips and context');
+
+  await page.getByTestId('bible-search-match-meaning').click();
+  await page.getByTestId('bible-search-ask-toggle').click();
+  await page.getByTestId('bible-search-ask-go').click();
+  await expect(page.getByTestId('bible-search-ask-answer')).toContainText('A made-up answer');
+  await expectSound(page, '[data-testid="bible-search-results"]', 'meaning search with an answer');
+  await page.getByTestId('bible-search-ask').scrollIntoViewIfNeeded();
+  const asked = info.outputPath(`bible-search-ask-${info.project.name}.png`);
+  await page.screenshot({ path: asked });
+  await info.attach(`bible search ask (${info.project.name})`, { path: asked, contentType: 'image/png' });
   const shot = info.outputPath(`bible-search-${info.project.name}.png`);
   await page.screenshot({ path: shot, fullPage: true });
   await info.attach(`bible search (${info.project.name})`, { path: shot, contentType: 'image/png' });

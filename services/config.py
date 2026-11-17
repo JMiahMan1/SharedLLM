@@ -234,6 +234,9 @@ BLB_BASE_URL = os.getenv("BLB_BASE_URL")
 # empty library and reads like "we have no Bibles".
 CALIBRE_LIBRARY_PATH = os.getenv("CALIBRE_LIBRARY_PATH")
 BIBLE_DEVOTIONAL_DIR = os.getenv("BIBLE_DEVOTIONAL_DIR")
+# The translation whose verses are embedded for meaning search. Unset: the
+# installed translation whose wording is most modern (see bible/meaning.py).
+BIBLE_MEANING_VERSION = os.getenv("BIBLE_MEANING_VERSION")
 # Where uploaded Bibles and fetched provider text are staged. No code default:
 # the admin import page refuses to accept a file until an operator says where
 # they want it kept, rather than scattering copies across the container.

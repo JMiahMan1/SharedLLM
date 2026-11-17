@@ -61,6 +61,7 @@ from services.bible import (
     votd,
 )
 from services.bible import books as book_table
+from services.bible import meaning as meaning_mod
 from services.bible import search as verse_search
 from services.bible import (
     narration as narration_mod,
@@ -92,6 +93,7 @@ from services.common.sqlite import apply_sqlite_pragmas
 from services.config import (
     BIBLE_DATABASE_URL,
     BIBLE_DEVOTIONAL_DIR,
+    BIBLE_MEANING_VERSION,
     BLB_BASE_URL,
     EXECUTION_SVC_URL,
     GATEWAY_INTERNAL_URL,
@@ -144,6 +146,15 @@ async def lifespan(app: FastAPI):
     # scan until the rebuild is done.
     stale = verse_search.prepare(engine)
     search_task = asyncio.create_task(asyncio.to_thread(verse_search.rebuild, engine, stale)) if stale else None
+    meaning_task = asyncio.create_task(
+        meaning_mod.index_loop(
+            _db,
+            installed_versions=_installed_codes,
+            configured=BIBLE_MEANING_VERSION,
+            rag_url=RAG_SVC_URL,
+            secret=INTERNAL_SECRET,
+        )
+    )
     log.info(
         "[Bible] ready db=%s devotional_dir=%s blb=%s",
         _database_url(),
@@ -159,6 +170,7 @@ async def lifespan(app: FastAPI):
     reminder_task.cancel()
     tagged_task.cancel()
     context_task.cancel()
+    meaning_task.cancel()
     if search_task is not None and not search_task.done():
         log.info("[Bible] shutting down while the search index is still building")
 
@@ -189,6 +201,11 @@ app.include_router(info_router)
 
 
 # database
+
+
+def _installed_codes() -> list[str]:
+    with Session(_db()) as session:
+        return [v["code"] for v in corpus.list_versions(session)]
 
 
 def _database_url() -> str:
@@ -681,6 +698,87 @@ async def study_ask_route(
     }
 
 
+class SearchAskPayload(BaseModel):
+    question: str = Field(..., min_length=2, max_length=2000)
+    version: str | None = None
+    #: A book, range or section (the search's in:), e.g. "nt" or "John".
+    scope: str | None = Field(default=None, max_length=60)
+    depth: str = Field(default="adult", pattern="^(child|teen|adult)$")
+
+
+@app.post("/search/ask")
+async def search_ask_route(
+    payload: SearchAskPayload,
+    username: str = Query(...),
+    session: Session = Depends(get_session),
+):
+    """Ask a question of the whole Bible: search finds the verses, the model
+    answers from them, and every reference in the answer is checked.
+
+    Meaning search finds the verses; when it is not available (the verses are
+    still being embedded, or the RAG service is down) word search does, and
+    ``retrieval`` says which. References the answer names are kept only when
+    they exist in the corpus, and each says whether it was among the verses the
+    model was given.
+    """
+    resolved = _require_version(session, payload.version) if payload.version else _default_version(session)
+    installed = [v["code"] for v in corpus.list_versions(session)]
+    query = payload.question + (f" in:{payload.scope}" if payload.scope else "")
+    retrieval = "meaning"
+    try:
+        found = await run_in_threadpool(
+            verse_search.run, session, query, version=resolved, installed=installed, mode="meaning",
+            limit=study_ask.SEARCH_ASK_VERSES, rag_url=RAG_SVC_URL, secret=INTERNAL_SECRET,
+        )
+    except verse_search.QueryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except meaning_mod.MeaningUnavailable as exc:
+        log.info("[Bible] ask falls back to word search: %s", exc)
+        retrieval = "words"
+        words = " ".join(meaning_mod.content_words(payload.question)) or payload.question
+        try:
+            found = verse_search.run(
+                session, words + (f" in:{payload.scope}" if payload.scope else ""), version=resolved,
+                installed=installed, mode="any", limit=study_ask.SEARCH_ASK_VERSES,
+            )
+        except verse_search.QueryError as exc2:
+            raise HTTPException(status_code=400, detail=str(exc2)) from exc2
+    verses = found["results"]
+    try:
+        prompt = study_ask.build_search_prompt(question=payload.question, verses=verses, retrieval=retrieval)
+        answer = await study_ask.ask(
+            prompt=prompt,
+            user=username,
+            gateway_url=GATEWAY_INTERNAL_URL,
+            internal_secret=INTERNAL_SECRET,
+            depth=payload.depth,
+        )
+    except study_ask.StudyAskError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except study_ask.StudyAskUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    given = {v["reference"] for v in verses}
+    references = []
+    for ref in study_ask.find_references(answer):
+        try:
+            exists = bool(corpus.fetch_passage(session, resolved, parse_reference(ref)))
+        except Exception:
+            exists = False
+        if exists:
+            references.append({"reference": ref, "in_results": ref in given})
+    _record_event(session, username, "assistant_ask", ref="")
+    return {
+        "question": payload.question,
+        "version": resolved,
+        "depth": payload.depth,
+        "retrieval": retrieval,
+        "answer": answer,
+        "verses": verses,
+        "references": references,
+    }
+
+
 def _edition_name(session: Session, edition: str, version: str) -> str:
     for entry in corpus.list_editions(session, version):
         if entry["code"] == edition:
@@ -879,7 +977,7 @@ def search(
     q: str = Query(..., min_length=2, max_length=500),
     version: str | None = Query(default=None),
     book: str | None = Query(default=None),
-    match: str = Query(default="all", pattern="^(all|any|exact)$"),
+    match: str = Query(default="all", pattern="^(all|any|exact|meaning)$"),
     sort: str | None = Query(default=None, pattern="^(rank|canon)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=100_000),
@@ -894,9 +992,12 @@ def search(
         body = verse_search.run(
             session, q, version=resolved, installed=installed, mode=match, sort=sort,
             limit=limit, offset=offset, book=book, username=username,
+            rag_url=RAG_SVC_URL, secret=INTERNAL_SECRET,
         )
     except verse_search.QueryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except meaning_mod.MeaningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     body["query"] = q
     return body
 

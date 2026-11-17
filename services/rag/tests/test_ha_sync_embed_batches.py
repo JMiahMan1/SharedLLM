@@ -150,12 +150,13 @@ def test_no_batch_endpoint_still_embeds_one_giant_list():
     """Structural pin: every batch endpoint must go through embed_batched.
 
     `to_thread(embed, [...])` with a caller-supplied list is the exact shape
-    that OOM-killed the service; the four callers (dream re-embed, file sync,
-    HA sync, capability sync) are allowed to use only the chunked helper.
+    that OOM-killed the service; the five callers (dream re-embed, file sync,
+    HA sync, capability sync, and /rag/embed for the Bible's meaning search)
+    are allowed to use only the chunked helper.
     """
     source = Path(inspect.getsourcefile(rag_main)).read_text()
     assert "asyncio.to_thread(embed," not in source
-    assert source.count("asyncio.to_thread(embed_batched,") == 4
+    assert source.count("asyncio.to_thread(embed_batched,") == 5
 
 
 class _CountingConn:
