@@ -101,9 +101,12 @@ public class WebFilterService extends VpnService {
         try {
             JSONObject wf = webFilter();
             String name = DnsMessage.questionName(query);
+            // The parent's block list, plus the video-call sites while that switch is on.
+            java.util.Set<String> block = GuardApi.strings(wf.optJSONArray("block"));
+            block.addAll(GuardApi.videoCallBlockedSites(this));
             WebFilterRules.Decision d = WebFilterRules.decide(name,
                     wf.optBoolean("adult", true), wf.optBoolean("safe_search", true),
-                    WebFilterRules.activeBlock(GuardApi.strings(wf.optJSONArray("block")), GuardApi.strings(wf.optJSONArray("categories"))),
+                    WebFilterRules.activeBlock(block, GuardApi.strings(wf.optJSONArray("categories"))),
                     WebFilterRules.activeAllow(GuardApi.strings(wf.optJSONArray("allow")), untilMs(wf.optJSONObject("allow_until")),
                             System.currentTimeMillis()));
             if (d.kind == WebFilterRules.Kind.BLOCK) {

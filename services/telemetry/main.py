@@ -573,6 +573,24 @@ def create_app():
         if not child:
             return {"status": "SUCCESS", "scanned": False, "reason": "not_a_monitored_child"}
 
+        if media_type == guardian.VIDEO_CALL or metadata.get("feature") == guardian.VIDEO_CALL:
+            # A screenshot from a video call: kept like a photo concern, but a
+            # parent hears only once two checks agree on enough frames.
+            found = await guardian.scan_video_call_frame(
+                rc, client, child, file_name, image_b64, metadata, deliver_notice
+            )
+            if not found:
+                return {"status": "SUCCESS", "concern": False}
+            return {
+                "status": "SUCCESS",
+                "concern": True,
+                "category": found["category"],
+                "level": found["level"],
+                "label": found["label"],
+                "has_image": bool(found.get("has_image")),
+                "alert": (found.get("alert") or {}).get("state"),
+            }
+
         concern = await guardian.scan_media_item(
             client, child, media_type, file_name, image_b64, metadata
         )

@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The screen guard only needs window changes and the text on them: enough to
      see "Jarvis OS" on an uninstall or Settings page, and which apps are on
-     screen (every window, so split screen and picture-in-picture count too). -->
+     screen (every window, so split screen and picture-in-picture count too).
+     canTakeScreenshot: the video call checks take a screenshot of a call now
+     and then (Android 11+), kept in memory and sent to the safety scanner. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="false"
+    android:canTakeScreenshot="true"
     android:notificationTimeout="200"
     android:description="@string/guard_accessibility_description" />

@@ -174,3 +174,62 @@ def parse_media_verdict(content: str) -> dict[str, Any]:
         "reason": str(data.get("reason") or "").strip()[:200],
     }
 
+
+#: What each category means to the second check, in plain words. Stricter than
+#: the first look: a video call is mostly faces, a camera preview and buttons.
+VERIFY_DEFINITIONS = {
+    "sexual": "nudity, exposed private parts, sexual acts or clearly sexual posing",
+    "violence": "a real weapon being used or shown as a threat, real injury, gore or physical violence",
+    "drugs": "illegal drugs, drug use or drug paraphernalia in plain view",
+    "self_harm": "self-harm injuries, cutting, or an act of self-harm or suicide",
+    "bullying": "hate symbols, or written harassment or threats aimed at a person",
+}
+
+VERIFY_PROMPT = (
+    "You are a careful second reviewer for parents. You will see one screenshot taken during a video "
+    "call on a child's phone. Video call screenshots normally show faces, the child's own camera "
+    "preview, call buttons, ordinary clothing, rooms and everyday objects; none of those are a "
+    "concern. Answer whether the screenshot CLEARLY and UNMISTAKABLY shows: {definition}. "
+    "If it is blurry, dark, partly visible, could be innocent, or you are not sure, answer false. "
+    'Answer with JSON only: {{"confirmed": true or false, "reason": "one short sentence"}}.'
+)
+
+
+def media_verify_messages(category: str, image_b64: str) -> list[dict[str, Any]]:
+    """The second, stricter vision check on one frame for one category.
+
+    It is told only what to look for, never what the first look said, so its
+    answer is an independent reading of the same picture.
+    """
+    definition = VERIFY_DEFINITIONS.get(category) or VERIFY_DEFINITIONS["sexual"]
+    clean_b64 = image_b64.split(",", 1)[1] if "," in image_b64 else image_b64
+    return [
+        {"role": "system", "content": VERIFY_PROMPT.format(definition=definition)},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Does this screenshot clearly show that? JSON only."},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_b64.strip()}"}},
+            ],
+        },
+    ]
+
+
+def parse_media_check(content: str) -> dict[str, Any]:
+    """The second check's answer as {"confirmed": bool, "reason": str}.
+
+    Raises ValueError for anything else; the caller then treats the frame as
+    not confirmed (a check that could not answer never pages a parent).
+    """
+    raw = (content or "").strip()
+    fenced = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not fenced:
+        raise ValueError("the second check did not answer with JSON")
+    try:
+        data = json.loads(fenced.group(0))
+    except json.JSONDecodeError as exc:
+        raise ValueError("the second check's JSON could not be read") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("confirmed"), bool):
+        raise ValueError("the second check's answer had no true/false confirmed")
+    return {"confirmed": data["confirmed"], "reason": str(data.get("reason") or "").strip()[:200]}
+

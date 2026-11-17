@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
-from services.common import concern_monitor, concern_review, device_noun, guardian_recap
+from services.common import concern_monitor, concern_review, device_noun, guardian_recap, video_calls
 from services.telemetry import app_updates, llm, notices, store
 
 log = logging.getLogger("telemetry.guardian")
@@ -39,6 +40,12 @@ _children_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
 SETTINGS_CACHE_SECONDS = 60
 MODEL_TIMEOUT_SECONDS = 25
 _settings_cache: tuple[float, dict[str, str]] | None = None
+
+#: media_type and concern feature of a screenshot taken during a video call.
+VIDEO_CALL = "video_call"
+#: How long one call's confirmed-frame tally and "parents told" mark are kept.
+VIDEO_CALL_STATE_SECONDS = 12 * 3600
+_CALL_ID = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
 
 Deliver = Callable[[dict[str, Any]], Awaitable[Any]]
 
@@ -169,7 +176,11 @@ async def scan_media_item(
     The image is never displayed or written to disk; its encoded payload is
     held encrypted for a parent/admin export (see store.save_concern_image).
     """
-    if child.get("monitoring") == "off" or child.get("photo_scan") is False:
+    if child.get("monitoring") == "off":
+        return None
+    # A video call frame has its own switch (video_calls.scan, checked by the
+    # caller); everything else follows photo scanning.
+    if media_type != VIDEO_CALL and child.get("photo_scan") is False:
         return None
     try:
         settings = await _model_settings(session)
@@ -231,6 +242,175 @@ async def scan_media_item(
     except Exception as exc:
         log.warning("media scan error for %s (%s): %s", child.get("username"), file_name, exc)
         return None
+
+
+async def verify_media_frame(session, category: str, image_b64: str) -> dict[str, Any]:
+    """The second, stricter look at a flagged frame (concern_review.media_verify_messages).
+
+    Returns {"confirmed": bool, "reason": str, "model": str}. Anything that
+    keeps it from answering (no endpoint, an error, a reply that is not the
+    expected JSON) is ``confirmed: False`` with the reason: a frame that was
+    not confirmed never pages anyone.
+    """
+    try:
+        settings = await _model_settings(session)
+    except Exception as exc:
+        return {"confirmed": False, "reason": f"second check unavailable: model settings could not be read ({exc})", "model": ""}
+    url = settings.get("vision_ocr_proxy_url") or settings.get("llm_local_url") or ""
+    model = settings.get("vision_ocr_model") or settings.get("guardian_monitor_model") or "qwen2.5-vl:7b"
+    if not url:
+        return {"confirmed": False, "reason": "second check unavailable: no vision endpoint configured", "model": model}
+    payload = {
+        "model": model,
+        "messages": concern_review.media_verify_messages(category, image_b64),
+        "temperature": 0,
+        "max_tokens": 120,
+        "stream": False,
+    }
+    try:
+        content = await llm.chat_content(
+            session, f"{url.rstrip('/')}/v1/chat/completions", payload, MODEL_TIMEOUT_SECONDS
+        )
+        check = concern_review.parse_media_check(content)
+    except Exception as exc:
+        log.warning("video call second check failed: %s", exc)
+        return {"confirmed": False, "reason": f"second check unavailable: {exc or type(exc).__name__}", "model": model}
+    return {**check, "model": model}
+
+
+def _video_call_meta(metadata: dict[str, Any]) -> dict[str, Any]:
+    """The call a frame came from, cleaned: app, package, site, when it
+    started, the frame's number and the phone's id for the call."""
+    m = metadata if isinstance(metadata, dict) else {}
+    site = video_calls.normalize_site(str(m.get("site") or ""))
+    package = str(m.get("package") or "").strip()
+    started = str(m.get("call_started_at") or "").strip()[:40]
+    try:
+        frame = max(0, int(m.get("frame_index") or 0))
+    except (TypeError, ValueError):
+        frame = 0
+    call_id = str(m.get("call_id") or "").strip()
+    if not _CALL_ID.fullmatch(call_id):
+        # A phone that sent no id: the app or site and the start time name the call.
+        call_id = re.sub(r"[^A-Za-z0-9_.:-]", "", f"{package or site or 'call'}:{started}")[:80] or "call"
+    return {
+        "app": str(m.get("app") or "").strip()[:60],
+        "package": package if video_calls.PACKAGE.match(package) else "",
+        "site": site if video_calls.DOMAIN.match(site) else "",
+        "call_started_at": started,
+        "frame_index": frame,
+        "call_id": call_id,
+        "label": video_calls.call_label(m),
+    }
+
+
+def _video_call_notice(parent: str, child: dict[str, Any], concern: dict[str, Any], day: str) -> dict[str, Any]:
+    """The photo concern notice, reworded for a call and sent once per call and category."""
+    notice = _concern_notice(parent, child, concern, day)
+    call = concern.get("video_call") or {}
+    name = child.get("display_name") or child["username"]
+    alert = concern.get("alert") or {}
+    notice["title"] = f"{concern['label']} on a video call on {name}'s {_device(child)}"
+    notice["body"] = (
+        f"Video call · {call.get('label') or 'a video call'}. {concern.get('excerpt') or ''} "
+        f"Seen on {alert.get('confirmed_frames') or 0} frames, each checked twice. Review it in Jarvis."
+    ).strip()
+    notice["tag"] = f"concern:{child['username']}:video_call:{call.get('call_id')}"
+    notice["once"] = f"concern:{child['username']}:video_call:{call.get('call_id')}:{concern['category']}"
+    notice["data"] = {**notice["data"], "feature": VIDEO_CALL, "concern_id": concern.get("id")}
+    return notice
+
+
+async def scan_video_call_frame(
+    rc,
+    session,
+    child: dict[str, Any],
+    file_name: str,
+    image_b64: str,
+    metadata: dict[str, Any] | None,
+    deliver: Deliver,
+) -> dict[str, Any] | None:
+    """One screenshot from a child's video call: scanned like a photo, but a
+    parent is only notified when the flag is corroborated.
+
+    The owner's rule: a false positive must never trigger anything. So:
+
+    1. the first vision look flags the frame (``scan_media_item``), or nothing happens;
+    2. a second, stricter look at the same frame (``verify_media_frame``) must agree;
+    3. at least ``corroborate_frames`` (default 2) frames of the same category in
+       the same call must each pass both looks;
+    4. then each parent is notified once for that call and category (at their
+       chosen level), and never again for later frames of it.
+
+    Anything short of that is kept in the review queue, silently, marked
+    "Unsure, not sent". Nothing here blocks, locks or changes a setting: a
+    flag only ever informs.
+    """
+    cfg = child.get("video_calls") if isinstance(child.get("video_calls"), dict) else {}
+    if child.get("monitoring") == "off" or cfg.get("scan") is False:
+        return None
+    if cfg.get("scan") is None and child.get("photo_scan") is False:
+        return None  # an identity too old to say: follow photo scanning
+    try:
+        needed = max(video_calls.CORROBORATE_MIN, int(cfg.get("corroborate_frames") or video_calls.CORROBORATE_DEFAULT))
+    except (TypeError, ValueError):
+        needed = video_calls.CORROBORATE_DEFAULT
+    call = _video_call_meta(metadata or {})
+    concern = await scan_media_item(session, child, VIDEO_CALL, file_name, image_b64, call)
+    if not concern:
+        return None
+    category = concern["category"]
+    check = await verify_media_frame(session, category, image_b64)
+    user = child["username"]
+    confirmed_frames = 0
+    if check["confirmed"]:
+        tally = f"tel:video_call:frames:{user}:{call['call_id']}:{category}"
+        await rc.sadd(tally, str(call["frame_index"]))
+        await rc.expire(tally, VIDEO_CALL_STATE_SECONDS)
+        confirmed_frames = len(await rc.smembers(tally))
+    corroborated = check["confirmed"] and confirmed_frames >= needed
+    concern.update({
+        "feature": VIDEO_CALL,
+        "action": "video_call_frame",
+        "item": call["label"],
+        "video_call": call,
+        "context": " · ".join(
+            p for p in (
+                f"Video call · {call['label']}",
+                f"started {call['call_started_at']}" if call["call_started_at"] else "",
+                f"frame {call['frame_index'] + 1}",
+                concern.get("excerpt") or "",
+            ) if p
+        )[:500],
+    })
+    review = dict(concern.get("review") or {})
+    review["second_check"] = {"confirmed": check["confirmed"], "reason": check.get("reason") or "", "model": check.get("model") or ""}
+    if not corroborated:
+        # Kept for a parent to look at, but nobody is told.
+        review["verdict"] = "unsure"
+    concern["review"] = review
+    state = "unsure"
+    if corroborated:
+        state = "already_sent"
+        sent_key = f"tel:video_call:told:{user}:{call['call_id']}:{category}"
+        if await rc.set(sent_key, "1", nx=True, ex=VIDEO_CALL_STATE_SECONDS):
+            state = "sent"
+    concern["alert"] = {"state": state, "confirmed_frames": confirmed_frames, "needed": needed}
+    if await store.save_concern_image(rc, user, str(concern.get("id") or ""), image_b64):
+        concern["has_image"] = True
+        concern["image_kept_days"] = store.CONCERN_IMAGE_TTL_SECONDS // 86400
+    await store.add_concerns(rc, user, [concern])
+    if state == "sent":
+        day = household_now().date().isoformat()
+        for parent in child.get("parents") or []:
+            # Each parent chose how serious a concern must be to hear now.
+            if not concern_monitor.pages_parent(concern, concern_monitor.parent_level(child, parent)):
+                continue
+            try:
+                await deliver(_video_call_notice(parent, child, concern, day))
+            except Exception as exc:  # one parent's failure never blocks the other
+                log.warning("video call notice to %s failed: %s", parent, exc)
+    return concern
 
 
 async def _ask_model(session, url: str, model: str, concern: dict[str, Any], text: str) -> dict[str, Any]:

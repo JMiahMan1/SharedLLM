@@ -34,6 +34,7 @@ import ChoresCard from '../components/guardian/ChoresCard';
 import LockedSectionsCard from '../components/guardian/LockedSectionsCard';
 import TalkRequestCard from '../components/guardian/TalkRequestCard';
 import GeofenceAlertsCard from '../components/guardian/GeofenceAlertsCard';
+import VideoCallsCard from '../components/guardian/VideoCallsCard';
 import NotificationLockCard from '../components/guardian/NotificationLockCard';
 import DevicePolicyCard from '../components/guardian/DevicePolicyCard';
 import ConcernsCard from '../components/member/ConcernsCard';
@@ -561,6 +562,7 @@ function GuardianChildren() {
           />}
           <div className={GRID}>
             <GeofenceAlertsCard username={child.username} name={name} />
+            <VideoCallsCard username={child.username} name={name} />
             <NotificationLockCard username={child.username} name={name} />
             {/* Guard state, MDM device policies, and tamper reports: the father and admins only (the
                 server refuses anyone else, the mother included). */}

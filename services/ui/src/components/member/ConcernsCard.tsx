@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertOctagon, AlertTriangle, Check, Download, Info, ShieldAlert, Trash2, X } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, Ban, Check, Download, Info, ShieldAlert, Trash2, Video, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { imageKindOf, saveBlob } from '../../lib/saveFile';
@@ -10,6 +10,8 @@ import MemberCard from './MemberCard';
 import type { ConcernLevel, GuardianConcern, NotifyLevel } from '../../types/api';
 import { statusQuery } from '../../lib/memberPage';
 import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
+import { videoCallAlertText, videoCallLine, withVideoCalls } from '../../lib/videoCalls';
+import { confirmDialog } from '../ui/confirmDialog';
 
 const LEVEL: Record<ConcernLevel, { word: string; icon: typeof AlertTriangle; style: string }> = {
   severe: { word: 'Severe', icon: AlertOctagon, style: 'border-red-400/40 bg-red-400/10 text-red-200' },
@@ -32,6 +34,7 @@ const WHERE: Record<string, string> = {
   media_scan: 'a photo or video',
   page: 'an app',
   calls: 'a call',
+  video_call: 'a video call',
 };
 
 function whereText(feature?: string, action?: string): string {
@@ -98,6 +101,30 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
     (user?.username && rules?.notify_levels?.[user.username]) || rules?.monitoring || 'high';
   const [levelError, setLevelError] = useState<string | null>(null);
   const [levelSaving, setLevelSaving] = useState(false);
+  const [blocking, setBlocking] = useState(false);
+  const videoBlocked = Boolean(status.data?.video_calls?.block);
+
+  /** A parent's own action: one switch that blocks every video-call app and site. Never done for them. */
+  async function blockVideoCalls() {
+    const ok = await confirmDialog({
+      title: `Block video calls for ${name}?`,
+      body: `Every video-call app and site in ${name}'s list closes on their ${device} until you switch it back on in Video calls.`,
+      confirmLabel: 'Block video calls',
+      danger: true,
+    });
+    if (!ok) return;
+    setBlocking(true);
+    setReviewError(null);
+    try {
+      await api.setScreenRules(username, withVideoCalls(rules, { block: true }));
+      await queryClient.invalidateQueries({ queryKey: ['screen-time', username] });
+      setReviewNote(`Video calls are blocked for ${name}.`);
+    } catch (err) {
+      setReviewError(errorText(err, 'Video calls could not be blocked.'));
+    } finally {
+      setBlocking(false);
+    }
+  }
 
   async function chooseLevel(level: NotifyLevel) {
     setLevelSaving(true);
@@ -300,6 +327,8 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
           const when = whenText(c.at);
           const context = c.context && c.context !== c.excerpt ? c.context : '';
           const currentNote = c.id ? (notes[c.id] ?? c.human_review?.note ?? '') : '';
+          const callLine = videoCallLine(c);
+          const alertText = videoCallAlertText(c);
           return (
             <li key={c.id || `${c.category}-${c.at}-${i}`} className={`rounded-xl border p-3.5 text-xs space-y-2 ${level.style}`} data-testid="concern">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -308,6 +337,23 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                 </p>
                 {c.at && <span className="rounded-full bg-black/20 px-2 py-0.5 font-normal text-[10px] opacity-80" title={when}>{relativeTime(c.at)}</span>}
               </div>
+              {callLine && (
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="concern-video-call">
+                  <span className="inline-flex min-w-0 items-center gap-1 break-words font-semibold">
+                    <Video size={12} className="shrink-0" aria-hidden /> {callLine}
+                  </span>
+                  {alertText && (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        c.alert?.state === 'unsure' ? 'bg-black/25 text-slate-200' : 'bg-white/15 text-white'
+                      }`}
+                      data-testid="concern-alert-state"
+                    >
+                      {alertText}
+                    </span>
+                  )}
+                </div>
+              )}
               <p className="rounded-lg bg-black/20 px-2.5 py-2 leading-relaxed opacity-95">
                 In {whereText(c.feature, c.action)}{c.item ? ` from ${c.item}` : ''}: “{c.excerpt}”
               </p>
@@ -327,7 +373,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                   type="button"
                   onClick={() => void downloadImage(c)}
                   disabled={imageBusy !== null}
-                  className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-200 transition hover:border-sky-300/40 hover:text-white disabled:cursor-wait disabled:opacity-50"
+                  className="inline-flex min-h-11 items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-200 transition hover:border-sky-300/40 hover:text-white sm:min-h-8 disabled:cursor-wait disabled:opacity-50"
                   data-testid="concern-image-export"
                   title="Images are never shown in Jarvis. Download the file to review it safely."
                 >
@@ -340,6 +386,28 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                   {dismissed ? <span className="font-semibold text-emerald-300">Probably fine: </span> : ''}
                   {c.review.reason}
                 </p>
+              )}
+              {c.review?.second_check && (
+                <p className="text-[11px] leading-relaxed opacity-85" data-testid="concern-second-check">
+                  <span className="font-semibold">Second check: </span>
+                  {c.review.second_check.confirmed ? 'agreed' : 'did not agree'}
+                  {c.review.second_check.reason ? `. ${c.review.second_check.reason}` : ''}
+                </p>
+              )}
+              {c.feature === 'video_call' && isParent && rules && (
+                videoBlocked ? (
+                  <p className="text-[11px] opacity-85" data-testid="concern-video-blocked">Video calls are blocked for {name}.</p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void blockVideoCalls()}
+                    disabled={blocking}
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-red-300/40 bg-red-400/15 px-3 text-[11px] font-semibold text-red-100 transition hover:border-red-200/70 disabled:cursor-wait disabled:opacity-50"
+                    data-testid="concern-block-video-calls"
+                  >
+                    <Ban size={13} aria-hidden /> {blocking ? 'Blocking…' : `Block video calls for ${name}`}
+                  </button>
+                )
               )}
               {c.human_review && (
                 <p className="rounded-lg border border-emerald-300/20 bg-emerald-300/5 px-2.5 py-2 text-[11px] leading-relaxed text-emerald-100" data-testid="concern-human-review">
@@ -357,7 +425,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                     type="button"
                     onClick={() => void reviewConcern(c.id!, 'confirmed')}
                     disabled={reviewing !== null}
-                    className="inline-flex items-center gap-1 rounded-md border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-[10px] font-semibold text-emerald-100 transition hover:border-emerald-200/60 disabled:cursor-wait disabled:opacity-50"
+                    className="inline-flex min-h-11 items-center gap-1 rounded-md border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 sm:min-h-8 text-[10px] font-semibold text-emerald-100 transition hover:border-emerald-200/60 disabled:cursor-wait disabled:opacity-50"
                   >
                     <Check size={11} /> Confirm
                   </button>
@@ -365,7 +433,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                     type="button"
                     onClick={() => void reviewConcern(c.id!, 'dismissed')}
                     disabled={reviewing !== null}
-                    className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-200 transition hover:border-sky-300/40 disabled:cursor-wait disabled:opacity-50"
+                    className="inline-flex min-h-11 items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-200 transition hover:border-sky-300/40 sm:min-h-8 disabled:cursor-wait disabled:opacity-50"
                   >
                     <X size={11} /> False alarm
                   </button>
@@ -394,7 +462,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                     placeholder="Note (optional)"
                     aria-label="Review note (optional)"
                     maxLength={500}
-                    className="min-w-[8rem] flex-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-slate-100 placeholder:text-slate-400 focus:border-sky-300/40 focus:outline-none"
+                    className="min-h-11 min-w-[8rem] flex-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] sm:min-h-8 text-slate-100 placeholder:text-slate-400 focus:border-sky-300/40 focus:outline-none"
                   />
                 </div>
               )}

@@ -73,6 +73,11 @@ def test_the_recap_and_concerns_lose_them_too():
     assert without_comms({"concerns": [{"feature": "social"}, {"feature": "media"}]})["concerns"] == [{"feature": "media"}]
 
 
+def test_video_call_screenshots_are_for_parents_only():
+    concerns = {"concerns": [{"feature": "video_call", "item": "Chrome (facetime.apple.com)"}, {"feature": "media"}]}
+    assert without_comms(concerns)["concerns"] == [{"feature": "media"}]
+
+
 def test_the_calls_and_messages_tab_is_refused_to_a_non_parent(monkeypatch):
     c = _client(monkeypatch, {"allowed": True, "technical": True, "comms": False})
     assert c.get("/api/guardian/comms/kid").status_code == 403
