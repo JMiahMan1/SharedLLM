@@ -197,15 +197,15 @@ async def run_actions(actions: list[dict], event: dict) -> int:
         if action["type"] == "call":
             done += await call_service(action, {"event": "alert.started", "data": event, "ts": time.time()})
             continue
-        from services.execution import ha_client
+        from services.execution import ha_client, hardware_router
         from services.execution.main import resolve_first_user
 
-        creds = await resolve_first_user() or {}
-        if not creds.get("ha_url") or not creds.get("ha_token"):
-            log.warning("[weather] no Home Assistant login for the system account; action skipped")
+        hub_url, hub_token = hardware_router.hub_pair(await resolve_first_user() or {})
+        if not hub_url or not hub_token:
+            log.warning("[weather] %s Action skipped.", hardware_router.NO_HUB_MESSAGE)
             continue
         domain, service = action["service"].split(".", 1)
-        result = await ha_client.call_service(creds["ha_url"], creds["ha_token"], domain, service,
+        result = await ha_client.call_service(hub_url, hub_token, domain, service,
                                               action["entity_id"], service_data=action.get("data") or None)
         if (result or {}).get("ok"):
             done += 1

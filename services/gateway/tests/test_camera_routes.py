@@ -85,13 +85,36 @@ def test_list_says_when_the_hub_is_down(client, upstream, perms):
     assert resp.status_code == 502 and TEST_HA_URL not in resp.text
 
 
-def test_list_needs_ha_credentials(client, monkeypatch, perms):
+def test_without_any_hub_the_list_says_so(client, monkeypatch, perms):
+    import services.config as config
+
     async def resolve(body):
         return {**DEFAULT_IDENTITY, "ha_url": None, "ha_token": None}
 
     monkeypatch.setattr(gateway_main, "resolve_identity", resolve)
+    monkeypatch.setattr(config, "HA_URL", None)
     resp = client.get("/api/cameras")
-    assert resp.status_code == 503 and "not set up" in resp.json()["detail"]
+    assert resp.status_code == 503 and "HA_URL" in resp.json()["detail"]
+
+
+def test_without_an_ha_login_the_hubs_login_lists_only_the_callers_cameras(client, upstream, monkeypatch, perms):
+    """Home Assistant is retired: a family member with no stored HA token still sees their cameras."""
+    import services.config as config
+    from services.gateway import config as gw_config
+
+    async def resolve(body):
+        return {**DEFAULT_IDENTITY, "is_admin": False, "ha_url": None, "ha_token": None}
+
+    monkeypatch.setattr(gateway_main, "resolve_identity", resolve)
+    monkeypatch.setattr(config, "HA_URL", "http://hub.test:8123")
+    monkeypatch.setattr(gw_config, "INTERNAL_SECRET", "hub-secret")
+    mock_upstream(upstream, "GET", "http://hub.test:8123/api/homehub/cameras", payload=CAMERAS)
+    resp = client.get("/api/cameras")
+    assert resp.status_code == 200
+    assert [c["entity_id"] for c in resp.json()["cameras"]] == ["camera.garage_door_camera"]
+    (_url, kwargs), = _sent(upstream, "GET", "http://hub.test:8123/api/homehub/cameras")
+    assert kwargs["headers"]["Authorization"] == "Bearer hub-secret"
+    assert "hub-secret" not in resp.text
 
 
 def test_anonymous_callers_get_nothing(perms):

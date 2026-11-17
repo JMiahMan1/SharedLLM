@@ -244,16 +244,19 @@ async def check_once(watcher: Watcher | None = None) -> int:
     entries = await _entries()
     if not entries:
         return 0
-    creds = await resolve_first_user() or {}
-    if not creds.get("ha_url") or not creds.get("ha_token"):
-        log.warning("[home_alerts] the system account has no Home Assistant login; no home notices")
+    from services.execution import hardware_router
+
+    # The system account's login, else the hub's own (Home Assistant is retired).
+    hub_url, hub_token = hardware_router.hub_pair(await resolve_first_user() or {})
+    if not hub_url or not hub_token:
+        log.warning("[home_alerts] %s No home notices.", hardware_router.NO_HUB_MESSAGE)
         return 0
-    states = {s.get("entity_id"): s for s in await ha_client.get_all_states(creds["ha_url"], creds["ha_token"], account="system account") or []
+    states = {s.get("entity_id"): s for s in await ha_client.get_all_states(hub_url, hub_token, account="system account") or []
               if isinstance(s, dict)}
     if not states:
         from services.execution import ha_health
 
-        if not ha_health.is_down(creds["ha_url"]):
+        if not ha_health.is_down(hub_url):
             return 0
         # HA down: the sensors that live on ESPHome boards can still be read
         # directly, so a leak or the doorbell is not missed during the outage.

@@ -44,6 +44,7 @@ def _headers() -> dict:
 def hub(monkeypatch):
     """A configured hub, kid1 allowed only the kids' room player, and a record of hub reads."""
     monkeypatch.setattr(config, "HA_URL", HUB_URL)
+    monkeypatch.setattr(config, "HOMEHUB_URL", HUB_URL)
     monkeypatch.setattr(config, "INTERNAL_SECRET", HUB_SECRET)
 
     async def permissions(username, is_admin=False):
@@ -154,6 +155,7 @@ def test_a_caller_with_their_own_login_plays_as_before(hub, sent):
 ])
 def test_no_hub_configured_is_a_clear_503(hub, sent, monkeypatch, path, body):
     monkeypatch.setattr(config, "HA_URL", None)
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     resp = client.post(path, headers=_headers(), json={"user_context": NO_LOGIN, **body})
     assert resp.status_code == 503
     assert "No home hub" in resp.json()["detail"]

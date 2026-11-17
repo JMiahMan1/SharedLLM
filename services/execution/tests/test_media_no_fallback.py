@@ -22,6 +22,8 @@ def test_media_status_missing_credentials_errors(monkeypatch):
     import services.execution.main as exec_main
 
     monkeypatch.setattr(config, "HA_URL", None)
+
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     called = []
 
     async def mock_first_user():
@@ -45,6 +47,8 @@ def test_media_play_missing_credentials_errors(monkeypatch):
     import services.execution.main as exec_main
 
     monkeypatch.setattr(config, "HA_URL", None)
+
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     called = []
 
     async def mock_first_user():

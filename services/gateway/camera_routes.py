@@ -63,10 +63,14 @@ async def _caller(request: Request, *, media: bool = False) -> dict[str, Any]:
 
 
 def _hub(creds: dict[str, Any]) -> tuple[str, dict[str, str]]:
-    base = str(creds.get("ha_url") or "").rstrip("/")
-    token = str(creds.get("ha_token") or "")
-    if not base or not token:
-        raise HTTPException(status_code=503, detail="Home Assistant is not set up for your account")
+    """The caller's own HA login, else the hub's (``dashboard_routes._hub_login``).
+
+    The camera list is filtered by ``can_view`` and every per-camera route goes
+    through ``_camera_for`` first, so the hub's login widens nothing.
+    """
+    from services.gateway.dashboard_routes import _hub_login
+
+    base, token = _hub_login(creds, personal=False)
     return base, {"Authorization": f"Bearer {token}"}
 
 

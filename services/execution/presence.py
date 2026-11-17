@@ -222,9 +222,12 @@ class PresenceTracker:
 
         try:
             import services.config as config
-            from services.execution import ha_client
-            if config.HA_URL and config.HA_TOKEN:
-                ha_cfg = await ha_client.get_config(config.HA_URL, config.HA_TOKEN)
+            from services.execution import ha_client, hardware_router
+
+            # The household token when one is still configured, else the hub's own login.
+            hub_url, hub_token = hardware_router.hub_pair({"ha_url": config.HA_URL, "ha_token": config.HA_TOKEN})
+            if hub_url and hub_token:
+                ha_cfg = await ha_client.get_config(hub_url, hub_token)
                 lat = ha_cfg.get("latitude")
                 lon = ha_cfg.get("longitude")
                 if lat is not None and lon is not None:

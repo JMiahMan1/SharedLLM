@@ -2786,12 +2786,22 @@ async def _proxy_execution_with_identity(
     return JSONResponse(status_code=resp.status, content=resp_json)
 
 async def fetch_ha_entities(creds: dict) -> list:
+    """The hub's entities as this caller may see them, synced to their RAG.
+
+    On their own HA login, as before. Without one (hub_access.py) execution
+    reads with the hub's login and the list is trimmed to what they may view,
+    and nothing is auto-assigned: that grant was only ever made from a
+    person's own login, and the hub's login would hand them the whole house.
+    """
+    from services.gateway.hub_access import discovery_params, visible_entities
+
+    own_login = bool(discovery_params(creds))
     try:
         url = f"{EXECUTION_SVC}/discovery/entities"
         async with shared_http_client() as client:
             resp = await client.get(
                 url,
-                params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
+                params=discovery_params(creds),
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
 
@@ -2807,6 +2817,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                 return []
 
             entities = data.get("entities", []) if isinstance(data, dict) else []
+            entities = await visible_entities(creds, entities)
             if entities:
                 user_id = creds.get("user") or ""
                 # Update IntentEngine cache for fuzzy matching
@@ -2850,7 +2861,8 @@ async def fetch_ha_entities(creds: dict) -> list:
                     except Exception as ae:
                         log.error(f"Auto-assign failed: {ae}")
 
-                _ =                 _ = asyncio.create_task(auto_assign())
+                if own_login:
+                    _run_in_background(auto_assign())
 
             return entities
     except Exception as e:
@@ -2858,12 +2870,13 @@ async def fetch_ha_entities(creds: dict) -> list:
         return []
 
 async def fetch_device_history(creds: dict, entity_id: str, days: int = 1) -> list:
+    from services.gateway.hub_access import discovery_params
+
     try:
       resp = await get_http_client().get(
           f"{EXECUTION_SVC}/discovery/history",
           params={
-            "ha_url": creds.get("ha_url") or "",
-            "ha_token": creds.get("ha_token") or "",
+            **discovery_params(creds),
             "entity_id": entity_id,
             "days": days
           },
@@ -2900,26 +2913,27 @@ async def discovery_sync(request: Request):
 
 @app.get("/api/entities")
 async def get_entities(request: Request):
-    """Return all Home Assistant entities for searchable dropdowns."""
+    """Return the hub's entities for searchable dropdowns: the caller's own HA login, else the hub's.
+
+    On the hub's login (hub_access.py) a non-admin sees only what they may view.
+    With no hub configured execution answers 503, said as a FAILURE below.
+    """
+    from services.gateway.hub_access import discovery_params, visible_entities
+
     creds = await _resolve_identity_from_request(request)
-    ha_url = creds.get("ha_url") if creds else None
-    ha_token = creds.get("ha_token") if creds else None
-    if not ha_url or not ha_token:
-        return {
-            "entities": [],
-            "status": "FAILURE",
-            "message": (
-                f"Home Assistant credentials not configured for user "
-                f"'{creds.get('user') if creds else 'unknown'}' (Identity -> Services)."
-            ),
-        }
+    if not creds or not creds.get("user"):
+        raise HTTPException(status_code=401, detail="Authentication required")
     try:
         resp = await get_http_client().get(
             f"{EXECUTION_SVC}/discovery/entities",
-            params={"ha_url": ha_url, "ha_token": ha_token},
+            params=discovery_params(creds),
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=15.0),
         )
+        if resp.status == 503:
+            return {"entities": [], "status": "FAILURE",
+                    "message": (await resp.json(content_type=None) or {}).get("detail")
+                    or "No home hub is set up (HA_URL is not configured)."}
         if resp.status != 200:
             # An empty list here made a Home Assistant outage look like a house
             # with no entities, in the dropdown an admin uses to add an alert or
@@ -2933,7 +2947,7 @@ async def get_entities(request: Request):
         # carried a media_player whose id was a serialized user record; it
         # should never reach a dropdown (or a caller's log).
         entities = [
-            e for e in data.get("entities", [])
+            e for e in await visible_entities(creds, data.get("entities", []))
             if usable_entity_id(e.get("entity_id"))
         ]
         # Return lightweight format for UI dropdown
@@ -5751,16 +5765,15 @@ async def proxy_ingest_telemetry_snapshot(request: Request):
 async def proxy_trigger_telemetry_snapshot(entity_id: str, request: Request):
     """Trigger a manual snapshot for a specific entity (UI calls this for instant updates)."""
     await _require_admin(request)
+    from services.gateway.hub_access import discovery_params
+
+    # Admin only (above): the caller's own HA login, else execution reads with the hub's.
     creds = await _resolve_identity_from_request(request)
-    ha_url = creds.get("ha_url") if creds else None
-    ha_token = creds.get("ha_token") if creds else None
-    if not ha_url or not ha_token:
-        return {"status": "ERROR", "message": "Home Assistant credentials not configured"}
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/discovery/entities",
-            params={"ha_url": ha_url, "ha_token": ha_token},
+            params=discovery_params(creds or {}),
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
@@ -20117,6 +20130,25 @@ def _is_public_image_url(parsed) -> bool:
     return not path.startswith(_SERVICE_IMAGE_PATH_PREFIXES)
 
 
+#: Hub picture paths a caller without their own HA login may fetch with the hub's login:
+#: an entity's picture (checked against the caller's permissions) or a served image.
+_HUB_ENTITY_IMAGE = re.compile(r"^/api/(?:media_player_proxy|image_proxy|camera_proxy)/([a-z_]+\.[a-z0-9_]+)$")
+_HUB_SERVED_IMAGE = re.compile(r"^/api/image/serve/[A-Za-z0-9_-]+/[A-Za-z0-9_.x-]+$")
+
+
+async def _require_hub_image_path(creds: dict, rel: str) -> None:
+    """403 unless ``rel`` is a picture the caller may see (see the patterns above)."""
+    from services.execution.entity_access import can_view, load_entity_permissions
+
+    if _HUB_SERVED_IMAGE.match(rel):
+        return
+    match = _HUB_ENTITY_IMAGE.match(rel)
+    if match and can_view(await load_entity_permissions(str(creds.get("user") or ""), bool(creds.get("is_admin"))),
+                          match.group(1)):
+        return
+    raise HTTPException(status_code=403, detail="That picture is not available")
+
+
 @app.get("/api/media/imageproxy")
 async def media_imageproxy(path: str, request: Request, service: str = "", w: int | None = None):
     """Proxy image requests (entity pictures/covers) from Home Assistant, Music Assistant, or Audiobookshelf.
@@ -20227,11 +20259,20 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
         if token:
             headers["Authorization"] = f"Bearer {token}"
     else:
+        rel = parsed.path if is_full else (path if path.startswith("/") else "/" + path)
         base = creds.get("ha_url") or ""
         token = creds.get("ha_token") or ""
-        if not base:
-            raise HTTPException(status_code=400, detail="Home Assistant not configured")
-        rel = parsed.path if is_full else (path if path.startswith("/") else "/" + path)
+        if not (base and token):
+            # No HA login of their own: the hub's login, but only for a picture of an
+            # entity the caller may view (the path is the client's choice, and the hub's
+            # login can read anything on the hub).
+            from services.common.hub_login import hub_login
+
+            login = hub_login({})
+            if login is None:
+                raise HTTPException(status_code=400, detail="No home hub is set up (HA_URL is not configured)")
+            await _require_hub_image_path(creds, parsed.path or rel)
+            base, token = login
         target_url = f"{base.rstrip('/')}{rel}"
         if parsed.query:
             target_url += "?" + parsed.query

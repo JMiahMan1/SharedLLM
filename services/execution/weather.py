@@ -227,13 +227,14 @@ async def home_location(cfg: dict | None = None) -> dict | None:
         return {**chosen, "name": chosen["name"] or "Home"}
     if time.time() - _home_cache[0] < HOME_TTL_S and _home_cache[1]:
         return _home_cache[1]
-    from services.execution import ha_client
+    from services.execution import ha_client, hardware_router
     from services.execution.main import resolve_first_user
 
-    creds = await resolve_first_user() or {}
-    if not creds.get("ha_url") or not creds.get("ha_token"):
+    hub_url, hub_token = hardware_router.hub_pair(await resolve_first_user() or {})
+    if not hub_url or not hub_token:
+        log.warning("[weather] no weather_location set and %s", hardware_router.NO_HUB_MESSAGE)
         return _home_cache[1]
-    state = await ha_client.get_state(creds["ha_url"], creds["ha_token"], "zone.home", account="system account")
+    state = await ha_client.get_state(hub_url, hub_token, "zone.home", account="system account")
     attrs = (state or {}).get("attributes") or {}
     loc = parse_location({"name": "Home", "latitude": attrs.get("latitude"), "longitude": attrs.get("longitude")})
     if loc:
@@ -592,9 +593,11 @@ async def sample(now: float | None = None, forecast: dict | None = None) -> bool
     cfg = await settings()
     states: dict[str, dict] = {}
     power: float | None = None
-    creds = await resolve_first_user() or {}
-    if creds.get("ha_url") and creds.get("ha_token"):
-        all_states = await ha_client.get_all_states(creds["ha_url"], creds["ha_token"], account="system account") or []
+    from services.execution import hardware_router
+
+    hub_url, hub_token = hardware_router.hub_pair(await resolve_first_user() or {})
+    if hub_url and hub_token:
+        all_states = await ha_client.get_all_states(hub_url, hub_token, account="system account") or []
         states = {s.get("entity_id"): s for s in all_states if isinstance(s, dict)}
         try:
             power = await _household_power(states)

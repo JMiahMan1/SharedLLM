@@ -82,7 +82,8 @@ def _hub_login(creds: dict[str, Any], personal: bool) -> tuple[str, str]:
 
         if HA_URL and INTERNAL_SECRET:
             return str(HA_URL).rstrip("/"), INTERNAL_SECRET
-    raise HTTPException(status_code=503, detail="Home Assistant is not set up for your account")
+    raise HTTPException(status_code=503, detail="No home hub is set up (HA_URL is not configured)"
+                        if not personal else "Home Assistant is not set up for your account")
 
 
 async def _hub_get(creds: dict[str, Any], path: str, params: dict[str, str] | None = None, *,
@@ -386,8 +387,24 @@ async def energy_summary(request: Request, range: str | None = None, date: str |
 
 @router.get("/prefs")
 async def dashboard_prefs(request: Request):
+    """The household's dashboard settings, trimmed to the entities the caller may see.
+
+    They are the hub's one set for everyone (admins change them), not the
+    caller's own, so a caller without an HA login reads them with the hub's
+    login. It was a 503 for every family member without a stored token.
+    """
     creds = await _caller(request)
-    return await _hub_get(creds, "/api/homehub/dashboard/prefs", personal=True)
+    data = await _hub_get(creds, "/api/homehub/dashboard/prefs")
+    perms = await _permissions(creds)
+    if not isinstance(data, dict) or perms is None:
+        return data
+    climate_power = data.get("climate_power") if isinstance(data.get("climate_power"), dict) else {}
+    return {
+        **data,
+        "climate_power": {k: [s for s in v if isinstance(s, str) and can_view(perms, s)]
+                          for k, v in climate_power.items() if can_view(perms, k) and isinstance(v, list)},
+        "hidden": [e for e in data.get("hidden") or [] if isinstance(e, str) and can_view(perms, e)],
+    }
 
 
 # -- admin -------------------------------------------------------------------------------------------

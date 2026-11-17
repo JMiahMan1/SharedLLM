@@ -78,10 +78,18 @@ async def handle_ha_config(req_data: dict) -> ExecutionResult:
     keyword = req_data.get("keyword")
 
     ha_url, ha_token = await _get_ha_credentials(user_context)
+    if (not ha_url or not ha_token) and (user_context or {}).get("is_admin"):
+        # The hub's whole integration and entity registry is admin information:
+        # an admin without a stored HA token reads it with the hub's own login.
+        from services.execution import hardware_router
+
+        ha_url, ha_token = hardware_router.hub_pair({})
     if not ha_url or not ha_token:
         return ExecutionResult(
             status="FAILURE",
-            message="Could not resolve Home Assistant credentials. Ensure HA URL and token are configured in identity settings.",
+            message=("No home hub is set up (HA_URL is not configured)." if (user_context or {}).get("is_admin")
+                     else "The hub's integration settings are for admins, and this account has no hub login "
+                          "of its own."),
             service="ha_config"
         )
 

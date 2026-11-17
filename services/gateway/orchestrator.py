@@ -940,10 +940,9 @@ async def _fetch_weather_entities(creds: ResolvedCredentials) -> list[dict]:
     settings = await get_all_settings()
     exec_svc = _get(settings, "execution_svc_url")
 
-    ha_url = getattr(creds, "ha_url", None)
-    ha_token = getattr(creds, "ha_token", None)
-    if not ha_url or not ha_token:
-        return []
+    # The caller's own HA login, else none and execution reads with the hub's own (hub_access.py).
+    # Weather is household information: the weather entities are not trimmed per person.
+    from services.gateway.hub_access import discovery_params
 
     try:
         # Fetch all entities to find weather domain
@@ -951,7 +950,7 @@ async def _fetch_weather_entities(creds: ResolvedCredentials) -> list[dict]:
         async with shared_http_client() as client:
             resp = await client.get(
                 f"{exec_svc}/discovery/entities",
-                params={"ha_url": ha_url, "ha_token": ha_token},
+                params=discovery_params(creds),
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=10.0),
             )
@@ -1158,10 +1157,10 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     """
     from services.gateway.ha_state_cache import fetch_live_states, get_cached_state
 
-    ha_url = getattr(creds, "ha_url", None)
-    ha_token = getattr(creds, "ha_token", None)
-    if not ha_url or not ha_token:
-        return hits
+    # The caller's own HA login, else empty and execution reads with the hub's own: only the
+    # states of entities already in the caller's hits are added.
+    ha_url = getattr(creds, "ha_url", None) or ""
+    ha_token = getattr(creds, "ha_token", None) or ""
 
     # Collect entity_ids from RAG hits
     entity_ids = [h.get("entity_id", "") for h in hits if h.get("entity_id")]

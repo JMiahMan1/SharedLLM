@@ -7977,7 +7977,15 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
                 ha_token = os.getenv("HA_TOKEN") or os.getenv("HOME_ASSISTANT_TOKEN")
 
         if not ha_url or not ha_token:
-            log.warning("[location] Cannot forward location to Home Assistant: HA_URL or HA_TOKEN not configured")
+            # No stored HA login anywhere: the hub's own (services.common.hub_login), which
+            # only ever goes to the configured hub, never to a stored URL.
+            from services.common.hub_login import hub_login
+
+            login = hub_login({})
+            if login is not None:
+                ha_url, ha_token = login
+        if not ha_url or not ha_token:
+            log.warning("[location] Cannot forward location to the hub: HA_URL is not configured")
             return
         ha_url = ha_redirect.redirect(ha_url)
 

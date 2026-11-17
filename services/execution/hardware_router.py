@@ -28,6 +28,8 @@ import logging
 
 import aiohttp
 
+from services.common import hub_login as _hub_login
+
 try:
     import esphome_client
     from schemas import ExecutionResult
@@ -219,14 +221,32 @@ def hub_login(ctx) -> tuple[str, str] | None:
     bulb from the Devices page). This widens nothing: the caller's access to
     the entity is checked before any command is sent. None: no hub configured.
     """
-    url, token = getattr(ctx, "ha_url", None), getattr(ctx, "ha_token", None)
-    if url and token:
-        return url, token
-    from services.config import HA_URL, INTERNAL_SECRET
+    return _hub_login.hub_login(ctx)
 
-    if HA_URL and INTERNAL_SECRET:
-        return HA_URL, INTERNAL_SECRET
-    return None
+
+#: Said when neither the caller nor the stack has a hub to talk to.
+NO_HUB_MESSAGE = _hub_login.NO_HUB_MESSAGE
+hub_pair = _hub_login.hub_pair
+
+
+def with_hub_login(ctx):
+    """A copy of ``ctx`` that carries the hub login (own, else the hub's); ``ctx`` itself when unchanged.
+
+    Only for contexts whose login is used against the hub. Never hand the result
+    to anything that leaves the stack (a workspace sandbox, an external agent):
+    it may carry the internal secret. None when no hub is configured.
+    """
+    login = hub_login(ctx)
+    if login is None:
+        return None
+    url, token = login
+    if isinstance(ctx, dict):
+        if ctx.get("ha_url") == url and ctx.get("ha_token") == token:
+            return ctx
+        return {**ctx, "ha_url": url, "ha_token": token}
+    if getattr(ctx, "ha_url", None) == url and getattr(ctx, "ha_token", None) == token:
+        return ctx
+    return ctx.model_copy(update={"ha_url": url, "ha_token": token})
 
 
 async def execute_device_command(

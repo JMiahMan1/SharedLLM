@@ -289,9 +289,19 @@ async def test_the_hub_is_reached_with_the_right_credentials(monkeypatch):
     await automation_routes._hub("GET", "/api/homehub/automations", creds=creds)
     assert sent[-1]["url"] == "http://hub.example:8123/api/homehub/automations"
     assert sent[-1]["headers"] == {"Authorization": "Bearer made-up-token"}
+    # No HA login of their own: the hub's own login (the routes filter or check first).
+    import services.config as config
+    from services.gateway import config as gw_config
+
+    monkeypatch.setattr(config, "HA_URL", "http://hub.example:8123")
+    monkeypatch.setattr(gw_config, "INTERNAL_SECRET", "made-up-secret")
+    await automation_routes._hub("GET", "/api/homehub/automations", creds={"ha_url": "", "ha_token": ""})
+    assert sent[-1]["headers"] == {"Authorization": "Bearer made-up-secret"}
+    # No hub at all: a clear 503.
+    monkeypatch.setattr(config, "HA_URL", None)
     with pytest.raises(HTTPException) as err:
         await automation_routes._hub("GET", "/x", creds={"ha_url": "", "ha_token": ""})
-    assert err.value.status_code == 503
+    assert err.value.status_code == 503 and "HA_URL" in err.value.detail
 
 
 def test_a_blueprint_path_cannot_climb_out(client, hub, perms):

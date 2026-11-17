@@ -689,13 +689,11 @@ async def stop_ringing_devices(
     ha_token: str | None = None,
 ) -> list[str]:
     """Stop any active ESPHome screen flash / alarm AND any ringing TV / HA media_player."""
-    import os
-
-    from services.execution import esphome_client
+    # The caller's hub login, else the hub's (never the raw HA_URL env: the retired HA host).
+    from services.execution import esphome_client, hardware_router
     from services.execution.announce_handlers import stop_tv_or_media_alert
 
-    eff_ha_url = ha_url or os.environ.get("HA_URL", "")
-    eff_ha_token = ha_token or os.environ.get("HA_TOKEN", "")
+    eff_ha_url, eff_ha_token = hardware_router.hub_pair({"ha_url": ha_url, "ha_token": ha_token})
 
     # Whether the named device is a speaker/TV (or a room of them) is the hub's index's answer;
     # a plain HA (no index, logged) goes by the media_player domain. An index failure raises.
@@ -1030,7 +1028,11 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
 
 async def _tell_satellite(timer: dict, event: str, req: TimerRequest) -> dict | None:
     """Send ``event`` to the voice satellite that set this timer (satellite_timers.py); None when none did."""
-    return await satellite_timers.send(timer, event, req.user_context.ha_url, req.user_context.ha_token)
+    # The caller's own hub login, else the hub's: the satellite that heard the timer is the household's.
+    from services.execution import hardware_router
+
+    hub_url, hub_token = hardware_router.hub_pair(req.user_context)
+    return await satellite_timers.send(timer, event, hub_url, hub_token)
 
 
 def _fired_key(timer_id: str) -> str:

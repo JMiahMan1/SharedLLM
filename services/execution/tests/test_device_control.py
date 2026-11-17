@@ -318,11 +318,39 @@ def test_ha_service_without_service_data(mocker):
 
 
 # Entity Discovery
-def test_discovery_entities_no_credentials():
-    """Entity discovery is 400 without credentials; it never borrows another account's HA."""
+def test_discovery_entities_no_credentials_reads_with_the_hubs_own_login(monkeypatch):
+    """No login passed: the hub's own login is resolved here, never another account's token."""
+    import services.config as config
+    import services.execution.main as exec_main
+
+    monkeypatch.setattr(config, "HA_URL", "http://hub.test:8123")
+
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test:8123")
+    seen = []
+
+    async def get_states(url, token, *a, **k):
+        seen.append((url, token))
+        return [{"entity_id": "light.den", "state": "on", "attributes": {}}]
+
+    async def get_areas(url, token, *a, **k):
+        return {}
+
+    monkeypatch.setattr(exec_main.ha_client, "get_states", get_states)
+    monkeypatch.setattr(exec_main.ha_client, "get_areas", get_areas)
     resp = client.get("/discovery/entities", headers={"X-Internal-Secret": "test-secret"})
-    assert resp.status_code == 400
-    assert "ha_url" in resp.json()["detail"]
+    assert resp.status_code == 200
+    assert seen == [("http://hub.test:8123", config.INTERNAL_SECRET)]
+
+
+def test_discovery_entities_without_any_hub_is_503(monkeypatch):
+    import services.config as config
+
+    monkeypatch.setattr(config, "HA_URL", None)
+
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
+    resp = client.get("/discovery/entities", headers={"X-Internal-Secret": "test-secret"})
+    assert resp.status_code == 503
+    assert "HA_URL" in resp.json()["detail"]
 
 
 def test_discovery_entities_with_credentials():

@@ -1656,25 +1656,28 @@ class RavenWorker:
                 log.warning(f"Cleanup: failed to resolve creds for {username}: {e}")
                 continue
 
-            ha_url = creds.get("ha_url")
-            ha_token = creds.get("ha_token")
-            if not ha_url or not ha_token:
-                log.debug(f"Cleanup: no HA credentials for {username}, skipping sync.")
-                continue
+            # The person's own HA login, else none and execution reads with the hub's own;
+            # then only what they may view goes into their RAG (hub_access.py). Without
+            # this, everyone's home knowledge stopped refreshing once the tokens went.
+            from services.gateway.hub_access import discovery_params, visible_entities
 
             try:
-                # Fetch live entities from HA
+                # Fetch live entities from the hub
                 async with _shared_http_client() as client:
                     resp = await client.get(
                         f"{EXECUTION_SVC}/discovery/entities",
-                        params={"ha_url": ha_url, "ha_token": ha_token},
+                        params=discovery_params(creds),
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
                     if resp.status != 200:
+                        if resp.status == 503:
+                            log.warning("Cleanup: no home hub is set up (HA_URL); HA sync skipped.")
+                            break
                         continue
                     resp_text = await resp.text()
                     data = json.loads(resp_text) if resp_text else {}
                     entities = data.get("entities", []) if isinstance(data, dict) else []
+                entities = await visible_entities(creds, entities)
 
                 if not entities:
                     continue

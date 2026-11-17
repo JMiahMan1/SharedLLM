@@ -182,10 +182,33 @@ def index():
     return FileResponse(_STATIC / "index.html")
 
 
+def _hub_target() -> tuple[str, str] | None:
+    """(base URL, token) for zones, people, history and location updates.
+
+    The household HA token with HA_URL while one is configured; otherwise the
+    hub's own login, which only ever goes to HOMEHUB_URL (never to HA_URL,
+    which may be a real Home Assistant). Removing HA_TOKEN must not take
+    zones, people and arrivals down with it.
+    """
+    if HA_URL and HA_TOKEN:
+        return HA_URL.rstrip("/"), HA_TOKEN
+    from services.common.hub_login import stack_login
+
+    return stack_login()
+
+
+def _hub_base() -> str:
+    target = _hub_target()
+    if not target:
+        raise HTTPException(status_code=503, detail="No home hub is set up (HOMEHUB_URL / HA_URL is not configured)")
+    return target[0]
+
+
 def _ha_headers() -> dict:
-    if not HA_TOKEN:
-        raise HTTPException(status_code=500, detail="HA_TOKEN not resolved from Identity")
-    return {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+    target = _hub_target()
+    if not target:
+        raise HTTPException(status_code=503, detail="No home hub is set up (HOMEHUB_URL / HA_URL is not configured)")
+    return {"Authorization": f"Bearer {target[1]}", "Content-Type": "application/json"}
 
 
 def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
@@ -224,7 +247,7 @@ def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
 async def _ha_get_states() -> list:
     if not HA_URL:
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
-    async with get_client_insecure() as client, client.get(f"{HA_URL}/api/states", headers=_ha_headers()) as resp:
+    async with get_client_insecure() as client, client.get(f"{_hub_base()}/api/states", headers=_ha_headers()) as resp:
         if resp.status != 200:
             raise HTTPException(status_code=502, detail=f"HA returned {resp.status}")
         return await resp.json()
@@ -246,7 +269,7 @@ def health():
         "service": "geo",
         "git_sha": os.getenv("GIT_SHA", "unknown"),
         "start_time": _START_TIME,
-        "ha_configured": bool(HA_URL and HA_TOKEN),
+        "ha_configured": _hub_target() is not None,
     }
 
 
@@ -801,7 +824,7 @@ async def get_history(entity_id: str, samples: int = Query(200, ge=1, le=2000)):
     """
     if not HA_URL:
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
-    url = f"{HA_URL}/api/history/period"
+    url = f"{_hub_base()}/api/history/period"
     # Not minimal_response: HA's REST answer then drops the attributes (the position) after the first row.
     params = {"filter_entity_id": entity_id, "significant_changes_only": "true"}
     async with get_client_insecure() as client, client.get(url, headers=_ha_headers(), params=params) as resp:
@@ -1097,7 +1120,7 @@ TIGHT_ZONE_RADIUS_M = 75.0
 #: The old per-person switch (hash viewer -> "off"), now the family_presence
 #: preference in identity; ``_migrate_presence_switches`` moves it over.
 LEGACY_PRESENCE_ALERTS_KEY = "geo:presence_alerts"
-_zone_cache: dict = {"at": 0.0, "zones": []}
+_zone_cache: dict = {"at": 0.0, "zones": [], "hub": []}
 
 
 async def _saved_places() -> list[dict]:
@@ -1114,14 +1137,21 @@ async def _saved_places() -> list[dict]:
 
 
 async def _zones_cached() -> list[dict]:
+    """The hub's zones plus the saved places, refreshed every five minutes.
+
+    The two are read independently: a hub that does not answer keeps its last
+    zones and never takes the saved places down with it (they used to be
+    dropped together, so a hub outage emptied every place name).
+    """
     if time.time() - _zone_cache["at"] > 300:
         try:
-            _zone_cache["zones"] = await _zones() + await _saved_places()
-            _zone_cache["at"] = time.time()
+            _zone_cache["hub"] = await _zones()
         except Exception as e:
-            # Zones refresh on a timer; a Home Assistant outage should be
-            # visible without a warning per refresh.
-            warn_periodically(log, "geo.zones", "[Geo] Zones unavailable: %s", e)
+            # Zones refresh on a timer; a hub outage should be visible without
+            # a warning per refresh.
+            warn_periodically(log, "geo.zones", "[Geo] Hub zones unavailable: %s", e)
+        _zone_cache["zones"] = list(_zone_cache["hub"]) + await _saved_places()
+        _zone_cache["at"] = time.time()
     return _zone_cache["zones"]
 
 
@@ -1856,7 +1886,7 @@ async def post_see(
         payload["attributes"] = extra
 
     async with get_client_insecure() as client, client.post(
-        f"{HA_URL}/api/services/device_tracker/see", headers=_ha_headers(), json=payload
+        f"{_hub_base()}/api/services/device_tracker/see", headers=_ha_headers(), json=payload
     ) as resp:
         if resp.status >= 300:
             body = await resp.text()
@@ -1904,7 +1934,7 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
     clean_id = entity_id.split(".")[-1].lower()
 
     # 1. Fetch HA states for entities and zones
-    ha_available = bool(HA_URL and HA_TOKEN)
+    ha_available = _hub_target() is not None
     states = []
     if ha_available:
         try:
@@ -2830,26 +2860,19 @@ async def _nominatim_reverse(lat: float, lon: float) -> str | None:
 
 
 async def _closest_ha_zone(lat: float, lon: float) -> str | None:
-    """Nearest HA zone that contains the point (within its configured radius)."""
-    try:
-        states = await _ha_get_states()
-    except Exception:
-        return None
+    """Nearest family place that contains the point: a hub zone or a saved place.
+
+    From the same cached source as ``/place-name`` and presence
+    (``_zones_cached``), not a read of every hub state per lookup: trip lists
+    resolve many points, and each one used to ask the hub (or a Home Assistant
+    that was down) first.
+    """
     best_name = None
     best_dist = None
-    for z in _filter_entities(states, "zone"):
-        attrs = z.get("attributes", {})
-        zlat = attrs.get("latitude")
-        zlon = attrs.get("longitude")
-        zrad = attrs.get("radius", 100)
-        if zlat is None or zlon is None:
-            continue
-        dist = _haversine_distance(lat, lon, float(zlat), float(zlon))
-        if dist <= float(zrad):
-            name = attrs.get("friendly_name") or z.get("entity_id", "").replace("zone.", "").title()
-            if best_dist is None or dist < best_dist:
-                best_dist = dist
-                best_name = name
+    for z in await _zones_cached():
+        dist = _haversine_distance(lat, lon, z["latitude"], z["longitude"])
+        if dist <= z["radius"] and (best_dist is None or dist < best_dist):
+            best_dist, best_name = dist, z["name"]
     return best_name
 
 
@@ -3126,25 +3149,18 @@ async def _overpass_nearby_pois(lat: float, lon: float) -> list[dict]:
 
 
 async def _ha_zones_containing(lat: float, lon: float) -> list[dict]:
-    """HA zones whose configured radius contains the point, nearest first."""
-    try:
-        states = await _ha_get_states()
-    except Exception:
-        return []
+    """The hub's zones whose radius contains the point, nearest first (from the zone cache)."""
     out: list[dict] = []
-    for z in _filter_entities(states, "zone"):
-        attrs = z.get("attributes", {})
-        zlat = attrs.get("latitude")
-        zlon = attrs.get("longitude")
-        if zlat is None or zlon is None:
-            continue
-        dist = _haversine_distance(lat, lon, float(zlat), float(zlon))
-        if dist <= float(attrs.get("radius", 100)):
+    for z in await _zones_cached():
+        if z.get("custom"):
+            continue  # the hub's zones only, as before (saved places are ``custom``)
+        dist = _haversine_distance(lat, lon, z["latitude"], z["longitude"])
+        if dist <= z["radius"]:
             out.append({
-                "name": attrs.get("friendly_name") or z.get("entity_id", "").replace("zone.", "").title(),
+                "name": z["name"],
                 "kind": "zone",
-                "latitude": float(zlat),
-                "longitude": float(zlon),
+                "latitude": z["latitude"],
+                "longitude": z["longitude"],
                 "distance_m": round(dist),
             })
     out.sort(key=lambda c: c["distance_m"])

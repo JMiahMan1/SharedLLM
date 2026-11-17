@@ -70,10 +70,14 @@ async def require_exposed(ctx: Any, entity_id: str, *, service: str | None = Non
     """Raise EntityNotExposed unless this request may control ``entity_id`` (see the module docstring)."""
     if not entity_id or not gated(ctx, service):
         return
-    ha_url, ha_token = _field(ctx, "ha_url"), _field(ctx, "ha_token")
+    # The caller's own hub login, else the hub's: the exposure flag is the same for everyone,
+    # and a person with no stored HA token used to be refused every voice command here.
+    from services.execution import hardware_router
+
+    ha_url, ha_token = hardware_router.hub_pair(ctx)
     if not ha_url or not ha_token:
-        raise EntityNotExposed(f"Could not check whether voice may control {entity_id}: no home hub "
-                               "credentials for this request")
+        raise EntityNotExposed(f"Could not check whether voice may control {entity_id}: "
+                               f"{hardware_router.NO_HUB_MESSAGE}")
     if not await fetch_exposed(ha_url, ha_token, entity_id):
         log.info("voice control of %s refused for %s: not exposed to voice", entity_id, _field(ctx, "user"))
         raise EntityNotExposed(

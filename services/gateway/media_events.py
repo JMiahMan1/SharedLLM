@@ -444,12 +444,27 @@ class MediaEventHub:
 _MEDIA_HUBS: dict[str, MediaEventHub] = {}
 
 
-def _build_sources(hub: MediaEventHub, creds: Mapping[str, Any]) -> list[MediaSource]:
+def _build_sources(hub: MediaEventHub, creds: Mapping[str, Any],
+                   may_view: Callable[[str], bool] | None = None) -> list[MediaSource]:
+    """The hub's players with the caller's own HA login, else the hub's own (``hub_login``).
+
+    On the hub's login only the players the caller may view are published
+    (``may_view``); before, a person without a stored HA token got no hub
+    players at all, silently.
+    """
+    from services.common.hub_login import hub_login
+
     sources: list[MediaSource] = []
-    ha_url = creds.get("ha_url")
-    ha_token = creds.get("ha_token")
-    if ha_url and ha_token:
-        sources.append(HAEntitySource(str(ha_url), str(ha_token), hub.ingest_ha_state))
+    login = hub_login(dict(creds))
+    if login is not None:
+        on_state = hub.ingest_ha_state
+        if may_view is not None:
+            def on_state(state: Mapping[str, Any], _ingest=hub.ingest_ha_state) -> None:
+                if may_view(str(state.get("entity_id") or "")):
+                    _ingest(state)
+        sources.append(HAEntitySource(login[0], login[1], on_state))
+    else:
+        log.warning("[media_events] no home hub is set up (HA_URL): hub players are left out")
     mass_url = creds.get("mass_url")
     mass_token = creds.get("mass_token")
     if mass_url and mass_token:
@@ -469,8 +484,16 @@ async def acquire_media_hub(user: str, creds: Mapping[str, Any]) -> MediaEventHu
         if _MEDIA_HUBS.get(user) is hub:
             _MEDIA_HUBS.pop(user, None)
 
+    may_view = None
+    from services.common.hub_login import has_own_login
+
+    if not has_own_login(creds) and not creds.get("is_admin"):
+        from services.execution.entity_access import can_view, load_entity_permissions
+
+        perms = await load_entity_permissions(user, False)
+        may_view = lambda entity_id: can_view(perms, entity_id)  # noqa: E731
     hub = MediaEventHub(user, on_stop=_remove)
-    hub._sources = _build_sources(hub, creds)
+    hub._sources = _build_sources(hub, creds, may_view)
     _MEDIA_HUBS[user] = hub
     return hub
 
