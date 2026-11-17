@@ -156,6 +156,9 @@ def _json_request(payload: dict) -> Request:
             "method": "POST",
             "path": "/",
             "headers": [(b"content-type", b"application/json")],
+            # Inside the house: a keyless chat from outside is refused.
+            "client": ("127.0.0.1", 50000),
+            "query_string": b"",
         },
         receive,
     )

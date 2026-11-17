@@ -27,7 +27,8 @@ def client_fixture(monkeypatch):
     # Disable background tasks for testing
     main.background_tasks = None  # pyright: ignore[reportAttributeAccessIssue]
 
-    return TestClient(app)
+    # A keyless chat is only answered inside the house; these tests are the house.
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 def test_health_check(client: TestClient):
     resp = client.get("/health")

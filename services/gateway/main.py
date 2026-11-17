@@ -102,6 +102,7 @@ from services.gateway import (
     weather_routes,
 )
 from services.gateway import beloved as beloved_routes
+from services.gateway import client_origin
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -3442,6 +3443,16 @@ async def chat_handler(request: Request, background_tasks=None):
         body = {}
     if not isinstance(body, dict):
         body = {}
+    # Without an API key a caller is a kiosk, a voice satellite or a shared
+    # device, and that only exists inside the house. From the internet it was
+    # answered as the household, with the household's devices and data
+    # (2026-11-17), so a keyless request from outside is refused first.
+    if not _presented_api_key(request) and not body.get("api_key") and not client_origin.request_is_inside(request):
+        log.warning("[ChatHandler] refused a request without an API key from outside the home network")
+        msg = "Authentication failed. Please log in or provide a valid API key."
+        if "/v1/chat/completions" in str(request.url):
+            return JSONResponse(status_code=401, content={"error": {"message": msg, "type": "unauthorized"}})
+        return JSONResponse(status_code=401, content={"error": msg})
     voice_context = _voice_context_from(request, body)
 
     auth_header = request.headers.get("Authorization")
