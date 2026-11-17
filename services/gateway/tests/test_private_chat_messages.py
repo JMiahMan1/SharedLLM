@@ -33,7 +33,7 @@ def _sealed(n: int = 40, byte: int = 9) -> str:
     iv = base64.b64encode(bytes(range(12))).decode()
     ct = base64.b64encode(bytes([byte]) * n).decode()
     envelope = json.dumps({"kind": "sealed", "title": "Encrypted message", "v": 1, "iv": iv, "ct": ct})
-    return f"\U0001f512 Encrypted message\n\n```jarvis-envelope\n{envelope}\n```"
+    return f"\U0001f512 Encrypted message\n\n```jarvis-envelope\n{envelope}\n```jarvis-envelope"
 
 
 @pytest.fixture
