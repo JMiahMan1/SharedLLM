@@ -47,6 +47,8 @@ async function serve(page: Page, server: Server): Promise<void> {
       return route.fulfill({ json: { eligible: true, chats: [server.chat], min_iterations: PBKDF2_ITERATIONS, partners: [] } });
     }
     if (p === `/api/private-chat/chats/${TOKEN}` && req.method() === 'GET') return route.fulfill({ json: server.chat });
+    // The thread's edits and reactions (none here).
+    if (p === `/api/private-chat/chats/${TOKEN}/marks`) return route.fulfill({ json: { marks: [] } });
     const beloved = new RegExp(`^/api/private-chat/chats/${TOKEN}/beloved(?:/([a-z]+))?(?:/([0-9a-f]{32}))?$`).exec(p);
     if (beloved) {
       server.belovedCalls += 1;

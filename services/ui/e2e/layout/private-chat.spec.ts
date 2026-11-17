@@ -5,7 +5,7 @@ import { mockBible } from '../fixtures/bibleMocks';
 import { mockFamilyPages, CONVERSATIONS } from '../fixtures/familyPagesMocks';
 import { screenFindings, settle, shot, quietHotReload, type Allowed } from '../fixtures/pageAudit';
 import JSZip from 'jszip';
-import { deriveKey, encryptBytes, makeVerifier, openMessage, randomBytes, sealMessage, toBase64, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
+import { deriveKey, encryptBytes, makeVerifier, openMessage, openRecord, randomBytes, sealMessage, sealRecord, toBase64, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
 import { fakeJpeg } from '../../src/test/fakes/fakeJpeg';
 
 const expect = baseExpect.configure({ timeout: 20_000 });
@@ -38,6 +38,18 @@ interface Server {
   nudges: number;
   /** Pictures added straight to the gallery: sealed entries, never Talk messages. */
   entries?: Array<{ id: string; at: number; own: boolean; by_name: string; sealed: string }>;
+  /** Sealed edits and reactions per message, as the gateway lists them to this parent. */
+  marks?: Mark[];
+  /** What this device sent: sealed reactions and edits, and the reaction ids it marked seen. */
+  reacted?: string[];
+  edited?: string[];
+  seen?: string[];
+}
+
+interface Mark {
+  message_id: number;
+  edit: { at: number; by: string; own: boolean; sealed: string } | null;
+  reactions: Array<{ id: string; by: string; by_name: string; own: boolean; at: number; seen: boolean; sealed: string }>;
 }
 
 async function serve(page: Page, server: Server): Promise<void> {
@@ -92,6 +104,46 @@ async function serve(page: Page, server: Server): Promise<void> {
     if (entry && req.method() === 'DELETE') {
       server.entries = (server.entries ?? []).filter((e) => e.id !== entry[1]);
       return route.fulfill({ json: { deleted: entry[1] } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/marks` && req.method() === 'GET') {
+      return route.fulfill({ json: { marks: server.marks ?? [] } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/marks/seen` && req.method() === 'POST') {
+      const ids = (req.postDataJSON() as { ids: string[] }).ids;
+      (server.seen ??= []).push(...ids);
+      for (const mark of server.marks ?? []) for (const r of mark.reactions) if (ids.includes(r.id)) r.seen = true;
+      return route.fulfill({ json: { seen: ids } });
+    }
+    const markOf = (id: number): Mark => {
+      const marks = (server.marks ??= []);
+      let mark = marks.find((m) => m.message_id === id);
+      if (!mark) {
+        mark = { message_id: id, edit: null, reactions: [] };
+        marks.push(mark);
+      }
+      return mark;
+    };
+    const edit = new RegExp(`^/api/private-chat/chats/${TOKEN}/messages/(\\d+)/edit$`).exec(p);
+    if (edit && req.method() === 'PUT') {
+      const sealed = String((req.postDataJSON() as { sealed?: string }).sealed);
+      (server.edited ??= []).push(sealed);
+      const mark = markOf(Number(edit[1]));
+      mark.edit = { at: Math.floor(Date.now() / 1000), by: 'parent', own: true, sealed };
+      return route.fulfill({ json: mark });
+    }
+    const reactions = new RegExp(`^/api/private-chat/chats/${TOKEN}/messages/(\\d+)/reactions(?:/([0-9a-f]{32}))?$`).exec(p);
+    if (reactions && req.method() === 'POST') {
+      const sealed = String((req.postDataJSON() as { sealed?: string }).sealed);
+      (server.reacted ??= []).push(sealed);
+      const mark = markOf(Number(reactions[1]));
+      const id = (server.reacted.length).toString(16).padStart(32, 'a');
+      mark.reactions.push({ id, by: 'parent', by_name: 'Parent', own: true, at: Math.floor(Date.now() / 1000), seen: true, sealed });
+      return route.fulfill({ json: { ...mark, reaction_id: id, notified: true } });
+    }
+    if (reactions?.[2] && req.method() === 'DELETE') {
+      const mark = markOf(Number(reactions[1]));
+      mark.reactions = mark.reactions.filter((r) => r.id !== reactions[2]);
+      return route.fulfill({ json: mark });
     }
     if (/\/nudge$/.test(p)) {
       server.nudges += 1;
@@ -412,6 +464,136 @@ test.describe('private chat on every form factor', () => {
     await page.getByTestId('private-use-password').click();
     await unlockWith(page, PASSWORD);
     await expect(page.getByTestId('private-feed')).toBeVisible();
+    done(run);
+  });
+
+  test('react, edit and see the other parent\'s reaction play once: the sheet, the burst, the chips, "Edited"', async ({ page }, info) => {
+    const secrets = await v1Chat(PASSWORD);
+    const blobId = 'cd'.repeat(16);
+    const text = async (id: number, actor: string, name: string, body: string, ago: number) => ({
+      id, token: TOKEN, actor_type: 'users', actor_id: actor, actor_display_name: name, timestamp: SEC - ago, message_type: 'comment',
+      message: await sealMessage(secrets.key, { t: 'text', text: body }),
+    });
+    const heartId = 'f'.repeat(32);
+    const server: Server = {
+      chats: [{ token: TOKEN, members: ['parent', 'robin'], partner: 'robin', partner_name: 'Robin', created_by: 'robin',
+        created_at: SEC - 86400, kdf: { name: 'PBKDF2-SHA256', salt: secrets.salt, iterations: secrets.iterations }, verifier: secrets.verifier }],
+      messages: [
+        await text(1, 'robin', 'Robin', 'Made it home. The kids are asleep and I saved you some soup.', 3600),
+        { id: 2, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 1800, message_type: 'comment',
+          message: await sealMessage(secrets.key, { t: 'image', blob: blobId, mime: 'image/png', name: 'sunset.png' }) },
+        await text(3, 'parent', 'Parent', 'Dinner at seven, just us?', 60),
+      ],
+      blobs: { [blobId]: Buffer.from(await encryptBytes(secrets.key, new Uint8Array(PNG))) },
+      posted: [], created: [], nudges: 0,
+      // Robin loved my message while I was away: it waits, unseen, to play when I open the chat.
+      marks: [{ message_id: 3, edit: null, reactions: [{ id: heartId, by: 'robin', by_name: 'Robin', own: false, at: SEC - 30, seen: false,
+        sealed: await sealRecord(secrets.key, { t: 'reaction', m: 3, e: '\u2764\ufe0f' }) }] }],
+    };
+    const run = await open(page, server);
+    // A phone with a home indicator: the sheet must sit clear of it.
+    await page.evaluate(() => document.documentElement.style.setProperty('--safe-area-inset-bottom', '34px'));
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    const feed = page.getByTestId('private-feed');
+    await expect(feed.getByText('Dinner at seven, just us?')).toBeVisible();
+
+    // The waiting heart plays on open (a running animation over my bubble), then is marked seen.
+    const burst = page.getByTestId('reaction-animation');
+    await expect(burst).toHaveAttribute('data-kind', 'love');
+    expect(await burst.evaluate((el) => el.getAnimations({ subtree: true }).length)).toBeGreaterThan(0);
+    await shot(page, info, 'private reaction animation');
+    await expect.poll(() => server.seen ?? []).toEqual([heartId]);
+    await expect(burst).toHaveCount(0);
+    const mine = feed.locator('[data-message-id="3"]').locator('..');
+    await expect(mine.getByTestId('private-reaction-chip')).toHaveAttribute('aria-label', /from Robin/);
+    // Seen: it does not play again on the next refresh.
+    await page.waitForTimeout(5_600);
+    await expect(burst).toHaveCount(0);
+
+    // Robin's message: react only (no Edit or Delete for the other parent's words).
+    await feed.getByText('Made it home.', { exact: false }).click();
+    const sheet = page.getByTestId('private-message-actions');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByTestId('private-message-edit')).toHaveCount(0);
+    await expect(sheet.getByTestId('private-message-delete')).toHaveCount(0);
+    await check(page, info, run, 'private message sheet partner', sheet);
+    await sheet.getByTestId('private-react-like').click();
+    await expect(sheet).toHaveCount(0);
+    await expect(burst).toHaveAttribute('data-kind', 'like');
+    await expect.poll(() => server.reacted?.length ?? 0).toBe(1);
+    // Sealed on the device: the emoji never reaches the server, and it opens to this message only.
+    expect(server.reacted![0]).toContain('```jarvis-envelope');
+    expect(server.reacted![0]).not.toContain('\ud83d\udc4d');
+    expect(await openRecord(secrets.key, server.reacted![0])).toEqual({ t: 'reaction', m: 1, e: '\ud83d\udc4d' });
+    const theirs = feed.locator('[data-message-id="1"]').locator('..');
+    await expect(theirs.getByTestId('private-reaction-chip')).toHaveAttribute('aria-label', /from You/);
+
+    // Tapping the same emoji again takes it back.
+    await feed.getByText('Made it home.', { exact: false }).click();
+    await expect(sheet.getByTestId('private-react-like')).toHaveAttribute('aria-pressed', 'true');
+    await sheet.getByTestId('private-react-like').click();
+    await expect(theirs.getByTestId('private-reaction-chip')).toHaveCount(0);
+
+    // My message: every action, each a full-size target clear of the home indicator.
+    await feed.getByText('Dinner at seven, just us?').click();
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByTestId('private-message-edit')).toBeVisible();
+    await expect(sheet.getByTestId('private-message-delete')).toBeVisible();
+    await page.waitForTimeout(250); // the sheet's slide-up
+    const viewport = page.viewportSize()!;
+    for (const button of await sheet.locator('button:visible').all()) {
+      const label = (await button.getAttribute('aria-label')) ?? (await button.innerText());
+      if (label === 'Close') continue; // the backdrop behind the panel
+      const box = (await button.boundingBox())!;
+      expect(box.height, `${label} is a 44px target`).toBeGreaterThanOrEqual(44);
+      expect(box.width, `${label} is a 44px target`).toBeGreaterThanOrEqual(44);
+      expect(box.y + box.height, `${label} clears the home indicator`).toBeLessThanOrEqual(viewport.height - 34);
+      expect(box.x, `${label} is on screen`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${label} is on screen`).toBeLessThanOrEqual(viewport.width);
+    }
+    await check(page, info, run, 'private message sheet', sheet);
+
+    // Edit: the composer takes the text, the new version is sealed, and the bubble says it was edited.
+    await sheet.getByTestId('private-message-edit').click();
+    await expect(page.getByTestId('private-editing')).toBeVisible();
+    await expect(page.getByTestId('private-input')).toHaveValue('Dinner at seven, just us?');
+    await check(page, info, run, 'private editing', page.getByTestId('chat-thread'), await overPanel(page, /^private editing$/));
+    await page.getByTestId('private-input').fill('Dinner at eight, just us?');
+    await page.getByTestId('private-edit-save').click();
+    await expect(feed.getByText('Dinner at eight, just us?')).toBeVisible();
+    await expect(page.getByTestId('private-editing')).toHaveCount(0);
+    expect(server.posted).toEqual([]); // an edit is not a new message
+    expect(server.edited![0]).not.toContain('Dinner at eight');
+    expect(await openRecord(secrets.key, server.edited![0])).toEqual({ t: 'edit', m: 3, text: 'Dinner at eight, just us?' });
+    await expect(mine.getByTestId('private-edited')).toBeVisible();
+    await feed.getByText('Dinner at eight, just us?').click();
+    await expect(sheet.getByTestId('private-edited-at')).toContainText('Edited at');
+    await sheet.getByTestId('private-message-cancel').click();
+    await check(page, info, run, 'private edited and reacted', page.getByTestId('chat-thread'), await overPanel(page, /^private edited and reacted$/));
+
+    // A reaction from Robin while the chat is open and on screen plays at once, on the next refresh.
+    server.marks!.push({ message_id: 1, edit: null, reactions: [{ id: 'e'.repeat(32), by: 'robin', by_name: 'Robin', own: false, at: SEC, seen: false,
+      sealed: await sealRecord(secrets.key, { t: 'reaction', m: 1, e: '\ud83d\ude4f' }) }] });
+    await expect(burst).toHaveAttribute('data-kind', 'pray', { timeout: 12_000 });
+    await expect.poll(() => server.seen).toEqual([heartId, 'e'.repeat(32)]);
+
+    // A picture takes reactions in its viewer.
+    await feed.getByRole('button', { name: 'View picture' }).click();
+    const viewer = page.getByRole('dialog', { name: 'sunset.png' });
+    await expect(viewer.getByTestId('private-reaction-row')).toBeVisible();
+    await check(page, info, run, 'private picture viewer reactions', viewer);
+    await viewer.getByTestId('private-react-laugh').click();
+    await expect(viewer).toHaveCount(0);
+    await expect(burst).toHaveAttribute('data-kind', 'laugh');
+    await expect.poll(async () => openRecord(secrets.key, server.reacted!.at(-1))).toEqual({ t: 'reaction', m: 2, e: '\ud83d\ude02' });
+
+    // With reduced motion the reaction only fades.
+    await expect(burst).toHaveCount(0);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await feed.getByText('Made it home.', { exact: false }).click();
+    await sheet.getByTestId('private-react-wow').click();
+    await expect(burst).toHaveAttribute('data-kind', 'calm');
     done(run);
   });
 

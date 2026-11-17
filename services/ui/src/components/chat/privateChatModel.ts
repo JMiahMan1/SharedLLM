@@ -82,3 +82,180 @@ export function threadMessages(messages: TalkMessage[], opened: Record<string, P
     return !(payload && payload !== 'unreadable' && payload.t === 'added');
   });
 }
+
+// --- Edits and reactions (sealed overlays kept by the gateway, services/gateway/private_chat_marks.py) ---
+
+/** The reactions a message can take, each with its own animation. */
+export const REACTIONS = [
+  { emoji: '❤️', kind: 'love', label: 'Love' },
+  { emoji: '👍', kind: 'like', label: 'Thumbs up' },
+  { emoji: '😂', kind: 'laugh', label: 'Haha' },
+  { emoji: '😮', kind: 'wow', label: 'Wow' },
+  { emoji: '😢', kind: 'sad', label: 'Sad' },
+  { emoji: '🙏', kind: 'pray', label: 'Praying' },
+] as const;
+
+export type ReactionKind = (typeof REACTIONS)[number]['kind'];
+
+const KIND_BY_EMOJI = new Map<string, ReactionKind>(REACTIONS.map((r) => [r.emoji, r.kind]));
+
+/** The animation an emoji plays, or null for one this version does not know. */
+export function reactionKind(emoji: string): ReactionKind | null {
+  return KIND_BY_EMOJI.get(emoji) ?? null;
+}
+
+/** One reaction as the server lists it: who and when are in the clear, the emoji is sealed. */
+export interface MarkReaction {
+  id: string;
+  by: string;
+  by_name: string;
+  own: boolean;
+  at: number;
+  /** I have seen it (played its animation), or it is mine. */
+  seen: boolean;
+  sealed: string;
+}
+
+/** One message's sealed overlays. */
+export interface MessageMark {
+  message_id: number;
+  edit: { at: number; by: string; own: boolean; sealed: string } | null;
+  reactions: MarkReaction[];
+}
+
+/** What a sealed edit or reaction says inside: always bound to the message it belongs to. */
+export type MarkRecord = { t: 'edit'; m: number; text: string } | { t: 'reaction'; m: number; e: string };
+
+/** The longest edited message accepted on a device (the server caps the sealed size too). */
+export const MAX_EDIT_CHARS = 8000;
+
+/**
+ * An opened sealed record, checked: the right kind, the right message (a record
+ * the server moved onto another message is refused) and a known emoji.
+ */
+export function readMarkRecord(value: unknown, messageId: number, expected: MarkRecord['t']): MarkRecord | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (record.t !== expected || record.m !== messageId) return null;
+  if (expected === 'edit') {
+    return typeof record.text === 'string' && record.text.trim() && record.text.length <= MAX_EDIT_CHARS
+      ? { t: 'edit', m: messageId, text: record.text }
+      : null;
+  }
+  return typeof record.e === 'string' && reactionKind(record.e) ? { t: 'reaction', m: messageId, e: record.e } : null;
+}
+
+/** A reaction once its emoji is opened. */
+export interface OpenedReaction {
+  id: string;
+  messageId: number;
+  by: string;
+  byName: string;
+  own: boolean;
+  at: number;
+  seen: boolean;
+  emoji: string;
+}
+
+/** A message's overlays once opened: its latest text (when edited) and its readable reactions. */
+export interface OpenedMark {
+  edit?: { text: string; at: number };
+  reactions: OpenedReaction[];
+}
+
+/**
+ * Open every mark with `open` (the vault's openRecord). What fails to open,
+ * or opens to the wrong message, is left out: never shown, never played.
+ */
+export async function openMarks(marks: MessageMark[], open: (sealed: string) => Promise<unknown>): Promise<Record<number, OpenedMark>> {
+  const out: Record<number, OpenedMark> = {};
+  await Promise.all(
+    marks.map(async (mark) => {
+      const id = mark.message_id;
+      const opened: OpenedMark = { reactions: [] };
+      if (mark.edit) {
+        const record = readMarkRecord(await open(mark.edit.sealed).catch(() => null), id, 'edit');
+        if (record?.t === 'edit') opened.edit = { text: record.text, at: mark.edit.at };
+      }
+      const reactions = await Promise.all(
+        mark.reactions.map(async (r) => {
+          const record = readMarkRecord(await open(r.sealed).catch(() => null), id, 'reaction');
+          return record?.t === 'reaction'
+            ? { id: r.id, messageId: id, by: r.by, byName: r.by_name, own: r.own, at: r.at, seen: r.seen, emoji: record.e }
+            : null;
+        }),
+      );
+      opened.reactions = reactions.filter((r): r is OpenedReaction => r !== null).sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+      if (opened.edit || opened.reactions.length) out[id] = opened;
+    }),
+  );
+  return out;
+}
+
+/** One chip under a bubble: an emoji, how many people, who, and whether one of them is me. */
+export interface ReactionChip {
+  emoji: string;
+  count: number;
+  names: string[];
+  mine: boolean;
+}
+
+/**
+ * The chips under a bubble. Each person counts once per emoji (the server
+ * cannot tell emoji apart, so a double tap racing itself is folded here), in
+ * the order each emoji first arrived.
+ */
+export function reactionChips(reactions: OpenedReaction[]): ReactionChip[] {
+  const chips = new Map<string, { emoji: string; people: Map<string, string>; mine: boolean }>();
+  for (const r of [...reactions].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))) {
+    const chip = chips.get(r.emoji) ?? { emoji: r.emoji, people: new Map<string, string>(), mine: false };
+    chip.people.set(r.by, r.own ? 'You' : r.byName);
+    chip.mine ||= r.own;
+    chips.set(r.emoji, chip);
+  }
+  return [...chips.values()].map((c) => ({ emoji: c.emoji, count: c.people.size, names: [...c.people.values()], mine: c.mine }));
+}
+
+/** My reactions with this emoji on a message: tapping it again takes back every one of them. */
+export function myReactionIds(reactions: OpenedReaction[] | undefined, emoji: string): string[] {
+  return (reactions ?? []).filter((r) => r.own && r.emoji === emoji).map((r) => r.id);
+}
+
+/** A reaction waiting to play its animation on this device. */
+export interface PendingAnimation {
+  id: string;
+  messageId: number;
+  emoji: string;
+}
+
+/**
+ * The other parent's reactions I have not seen yet, oldest first, leaving out
+ * ones already played on this device (the server may not have caught up).
+ * One person's several taps of one emoji on one message play once.
+ */
+export function pendingAnimations(marks: Record<number, OpenedMark>, played: ReadonlySet<string>): PendingAnimation[] {
+  const all = Object.values(marks).flatMap((m) => m.reactions);
+  const waiting = all.filter((r) => !r.own && !r.seen && !played.has(r.id)).sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+  const once = new Set<string>();
+  const out: PendingAnimation[] = [];
+  for (const r of waiting) {
+    const key = `${r.messageId}:${r.by}:${r.emoji}`;
+    if (once.has(key)) continue;
+    once.add(key);
+    out.push({ id: r.id, messageId: r.messageId, emoji: r.emoji });
+  }
+  return out;
+}
+
+/** Every unseen reaction from the other parent that shares a played one's message, person and emoji (marked seen together). */
+export function sameReactionIds(marks: Record<number, OpenedMark>, played: PendingAnimation): string[] {
+  const mark = marks[played.messageId];
+  const first = mark?.reactions.find((r) => r.id === played.id);
+  if (!mark || !first) return [played.id];
+  return mark.reactions.filter((r) => !r.own && !r.seen && r.by === first.by && r.emoji === first.emoji).map((r) => r.id);
+}
+
+/** Whether this device asks for less motion: reactions then fade instead of bursting. */
+export function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+}
