@@ -43,6 +43,8 @@ public class LockCallFilterService extends CallRedirectionService {
             allowed = !LockCommsRules.active(GuardApi.isProtected(this),
                     GuardApi.isLocked(this), GuardApi.isUnlocked(this));
         }
+        // The outcome only, never the number.
+        android.util.Log.i(DeviceOwnerGuard.TAG, allowed ? "call filter: placed" : "call filter: cancelled while locked");
         if (allowed) {
             placeCallUnmodified();
         } else {

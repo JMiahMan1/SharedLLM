@@ -26,6 +26,9 @@ import java.util.Set;
  */
 final class DeviceOwnerGuard {
 
+    /** Logcat tag for what the device-owner enforcement changed (package names only, no personal data). */
+    static final String TAG = "JarvisGuard";
+
     private DeviceOwnerGuard() {}
 
     /** Whether this app is the phone's device owner. */
@@ -123,8 +126,13 @@ final class DeviceOwnerGuard {
             nowSuspended.addAll(LockCommsRules.lockSuspensions(owner, prot, locked, unlocked,
                     installedPackages(context), GuardApi.lockSuspendApps(context),
                     defaultSmsPackage(context), defaultDialerPackage(context), ownPkg));
+            Set<String> previously = GuardApi.suspendedPackages(context);
             Set<String> toUnsuspend = DeviceOwnerRules.packagesToUnsuspend(
-                    owner, known, GuardApi.suspendedPackages(context), nowSuspended);
+                    owner, known, previously, nowSuspended);
+            if (!previously.equals(nowSuspended)) {
+                // Only on a change, so the log says when a lock took or gave back apps.
+                android.util.Log.i(TAG, "suspended " + nowSuspended + " unsuspending " + toUnsuspend);
+            }
             if (!nowSuspended.isEmpty()) {
                 try {
                     dpm.setPackagesSuspended(admin, nowSuspended.toArray(new String[0]), true);
@@ -265,9 +273,11 @@ final class DeviceOwnerGuard {
             if (block && !ours) {
                 dpm.addUserRestriction(admin, DISALLOW_OUTGOING_CALLS);
                 GuardApi.setOutgoingCallsBlocked(context, true);
+                android.util.Log.i(TAG, "locked without the call filter: outgoing calls off (emergency still allowed)");
             } else if (!block && ours) {
                 dpm.clearUserRestriction(admin, DISALLOW_OUTGOING_CALLS);
                 GuardApi.setOutgoingCallsBlocked(context, false);
+                android.util.Log.i(TAG, "outgoing calls back on");
             }
         } catch (Exception ignored) {
             // Not device owner any more: nothing to set or lift; tried again next tick.
@@ -393,9 +403,9 @@ final class DeviceOwnerGuard {
         DevicePolicyManager dpm = dpm(context);
         if (dpm == null) return;
         try {
-            dpm.setLockTaskPackages(new ComponentName(context, GuardAdminReceiver.class),
-                    LockCommsRules.lockTaskPackages(context.getPackageName(), defaultDialerPackage(context))
-                            .toArray(new String[0]));
+            Set<String> allow = LockCommsRules.lockTaskPackages(context.getPackageName(), defaultDialerPackage(context));
+            dpm.setLockTaskPackages(new ComponentName(context, GuardAdminReceiver.class), allow.toArray(new String[0]));
+            android.util.Log.i(TAG, "lock task allowlist " + allow);
         } catch (Exception ignored) {
             // Not device owner, or no lock task on this Android: the overlay still runs.
         }
