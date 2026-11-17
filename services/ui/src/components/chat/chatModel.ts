@@ -64,6 +64,8 @@ export interface TalkConversation {
   can_moderate?: boolean;
   /** The parents' end-to-end encrypted chat: no preview, opened with a password. */
   private?: boolean;
+  /** A private chat whose messages the gateway keeps (not Talk): counted and listed by the gateway. */
+  storage?: 'talk' | 'store';
 }
 
 export interface TalkParticipant {

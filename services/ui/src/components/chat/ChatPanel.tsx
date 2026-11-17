@@ -29,7 +29,7 @@ import { verseShareText } from '../../lib/verseShare';
 import { useFamilyDirectory } from './familyDirectory';
 import { useCall } from '../../context/CallContext';
 import MessageThread from './MessageThread';
-import { useTalkLongPoll } from './useTalkLongPoll';
+import { useTalkLongPoll, type LongPollWait } from './useTalkLongPoll';
 import Composer from './Composer';
 import PollStrip, { type TalkPoll } from './PollStrip';
 import {
@@ -66,11 +66,16 @@ interface ChatPanelProps {
  * iMessage): an inbox and a thread, which on a phone are two screens with a
  * back button and on a wide screen sit side by side. Text, photos, files,
  * voice notes, replies, reactions, edits and polls go through Talk, so these
- * are the same conversations the family uses in Nextcloud. Calls are different:
+ * are the same conversations the family uses in Nextcloud. The parents' private
+ * chat is the exception: its sealed messages are kept by the gateway, not Talk
+ * (services/gateway/private_chat_messages.py). Calls are different:
  * the phone button starts a peer-to-peer call inside Jarvis, signalled by the
  * gateway. Starting a message with @Jarvis asks the assistant, which answers in
  * the thread.
  */
+/** The private chat waits on the gateway's store, not on Talk. */
+const waitPrivate: LongPollWait = (token, lastId, wait, signal) => api.waitPrivateMessages(token, lastId, wait, signal);
+
 export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps) {
   const queryClient = useQueryClient();
   const [selectedToken, setSelectedToken] = useState('');
@@ -182,6 +187,10 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     enabled: mayUsePrivateChat(me),
   });
   const privateInfo = privateStatus.data?.chats.find((c) => c.token === activeToken);
+  // Whose messages are the gateway's own: a private chat, known from the inbox, the status, or the
+  // creation just made (before the inbox is fetched again). Its messages never go through Talk.
+  const [startedPrivate, setStartedPrivate] = useState<ReadonlySet<string>>(() => new Set());
+  const privateMessages = isPrivate || Boolean(privateInfo) || startedPrivate.has(activeToken);
   const privateInfoError = !isPrivate
     ? undefined
     : privateStatus.isError
@@ -270,7 +279,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const { data: polls = EMPTY_ARRAY, refetch: refetchPolls } = useQuery<ExecutionResponse, Error, TalkPoll[]>({
     queryKey: ['talk-polls', activeToken],
     queryFn: () => api.getTalkPolls(activeToken),
-    enabled: Boolean(activeToken),
+    // A private chat has no polls (and, once its messages moved off Talk, maybe no Talk room).
+    enabled: Boolean(activeToken) && !privateMessages,
     refetchInterval: 30000,
     select: (response) => detailList<TalkPoll>(response, 'polls'),
   });
@@ -283,6 +293,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     newestId,
     () => void queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] }),
     asUser,
+    // The private chat's messages are the gateway's own, never Talk's.
+    privateMessages ? waitPrivate : undefined,
   );
   const {
     data: fetched = EMPTY_ARRAY,
@@ -295,7 +307,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     // A FAILURE body used to render as an empty thread ("No messages yet"),
     // which reads as "nobody has said anything" rather than "the fetch failed".
     queryFn: async () => {
-      const response = await api.getTalkMessages(activeToken, limit);
+      const response = privateMessages ? await api.getPrivateMessages(activeToken, limit) : await api.getTalkMessages(activeToken, limit);
       if (response.status === 'FAILURE') {
         throw new Error(response.message || 'Could not load messages');
       }
@@ -348,7 +360,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   }, [jarvisThinking]);
 
   const markRead = useMutation({
-    mutationFn: (token: string) => api.markTalkRead(token, asUser),
+    mutationFn: (token: string) =>
+      conversations.find((c) => c.token === token)?.private ? api.markPrivateChatRead(token) : api.markTalkRead(token, asUser),
     // Remember where you were before this visit, for the "New messages" line.
     onMutate: (token: string) => {
       const conversation = conversations.find((c) => c.token === token);
@@ -1157,6 +1170,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           onCreated={(chat, key) => {
             setNewPrivateOpen(false);
             setCreatedKey({ token: chat.token, key });
+            setStartedPrivate((current) => new Set([...current, chat.token]));
             toast.success('Private chat started');
             void queryClient.invalidateQueries({ queryKey: ['private-chat-status'] });
             void queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });

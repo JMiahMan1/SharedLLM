@@ -3602,6 +3602,46 @@ export const api = {
 
   // --- Private chat (the parents' end-to-end encrypted conversation) ---
 
+  /**
+   * The private chat's thread, oldest first, in the shape of a Talk message list. The gateway keeps
+   * these messages itself (a chat not yet moved off Talk is passed through to Talk by the same route).
+   */
+  async getPrivateMessages(token: string, limit = 50): Promise<ExecutionResponse> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/messages`, { params: { limit } });
+    return resp.data;
+  },
+
+  /** Long poll: answers once a message newer than `lastId` is stored, or empty after `wait` s. */
+  async waitPrivateMessages(token: string, lastId: number, wait = 25, signal?: AbortSignal): Promise<ExecutionResponse> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/messages/wait`, {
+      params: { last_id: lastId, wait },
+      timeout: (wait + 20) * 1000,
+      signal,
+    });
+    return resp.data;
+  },
+
+  /** Send one sealed message (made on this device; the server refuses anything else). */
+  async sendPrivateMessage(token: string, sealed: string, replyTo?: number): Promise<ExecutionResponse> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/messages`, {
+      sealed,
+      ...(replyTo ? { reply_to: replyTo } : {}),
+    });
+    return resp.data;
+  },
+
+  /** Delete my message for both of us (its edit and reactions go with it). */
+  async deletePrivateMessage(token: string, messageId: number): Promise<ExecutionResponse> {
+    const resp = await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}/messages/${messageId}`);
+    return resp.data;
+  },
+
+  /** I have read the chat (up to `lastId`, or all of it). */
+  async markPrivateChatRead(token: string, lastId?: number): Promise<ExecutionResponse> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/read`, lastId ? { last_id: lastId } : {});
+    return resp.data;
+  },
+
   async getPrivateChatStatus(): Promise<PrivateChatStatus> {
     const resp = await apiClient.get('/api/private-chat/status');
     return resp.data;
@@ -3680,7 +3720,7 @@ export const api = {
     return resp.data;
   },
 
-  /** Replace my message's text with a new sealed version (only the author may; the server checks Talk). */
+  /** Replace my message's text with a new sealed version (only the author may; the server checks who sent it). */
   async editPrivateMessage(token: string, messageId: number, sealed: string): Promise<MessageMark> {
     const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/messages/${messageId}/edit`, { sealed });
     return resp.data;

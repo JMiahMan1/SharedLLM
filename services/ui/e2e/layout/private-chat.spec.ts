@@ -34,6 +34,11 @@ interface Server {
   messages: Array<Record<string, unknown>>;
   blobs: Record<string, Buffer>;
   posted: string[];
+  /** Talk calls that named the private chat: there must be none, its messages are the gateway's. */
+  talk?: string[];
+  /** Read markers this device moved, and messages it deleted. */
+  read?: number;
+  deleted?: number[];
   created: Array<Record<string, unknown>>;
   nudges: number;
   /** Pictures added straight to the gallery: sealed entries, never Talk messages. */
@@ -53,7 +58,7 @@ interface Mark {
 }
 
 async function serve(page: Page, server: Server): Promise<void> {
-  await page.route(/\/api\/(private-chat\/|communication\/talk\/(conversations|messages)(\?|$))/, async (route: Route) => {
+  await page.route(/\/api\/(private-chat\/|communication\/talk\/(conversations|messages|read)(\?|$|\/))/, async (route: Route) => {
     const req = route.request();
     const url = new URL(req.url());
     const p = url.pathname;
@@ -153,21 +158,44 @@ async function serve(page: Page, server: Server): Promise<void> {
       const own = server.chats.length
         ? [{ token: TOKEN, display_name: 'Private chat', type: 2, private: true, last_message: 'Encrypted message',
           last_message_actor: 'Parent', last_message_actor_id: 'parent', last_message_timestamp: SEC - 30, last_activity: SEC - 30,
-          unread_messages: 0, last_common_read: 2, last_read: 3, can_moderate: true }]
+          unread_messages: 0, last_common_read: 2, last_read: 3, can_moderate: true, storage: 'store' }]
         : [];
       return route.fulfill({ json: { status: 'SUCCESS', detail: { conversations: [...own, ...CONVERSATIONS] } } });
     }
-    if (p === '/api/communication/talk/messages' && req.method() === 'GET' && url.searchParams.get('token') === TOKEN) {
-      return route.fulfill({ json: { status: 'SUCCESS', detail: { messages: server.messages } } });
+    // The private chat's messages are the gateway's own (never Talk's): read, sent, waited for and deleted there.
+    if (p === `/api/private-chat/chats/${TOKEN}/messages` && req.method() === 'GET') {
+      return route.fulfill({ json: { status: 'SUCCESS', source: 'store', detail: { messages: server.messages } } });
     }
-    if (p === '/api/communication/talk/messages' && req.method() === 'POST') {
-      const posted = String((req.postDataJSON() as { message?: string }).message);
+    if (p === `/api/private-chat/chats/${TOKEN}/messages/wait`) {
+      const after = Number(url.searchParams.get('last_id')) || 0;
+      const newer = server.messages.filter((m) => Number(m.id) > after);
+      if (!newer.length) await new Promise((r) => setTimeout(r, 1500));
+      return route.fulfill({ json: { status: 'SUCCESS', source: 'store', detail: { messages: newer } } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/messages` && req.method() === 'POST') {
+      const posted = String((req.postDataJSON() as { sealed?: string }).sealed);
       server.posted.push(posted);
-      // Like Talk: what was sent is in the room on the next read.
+      // Like the gateway: what was sent is in the thread on the next read, with the next id.
       const nextId = Math.max(0, ...server.messages.map((m) => Number(m.id) || 0)) + 1;
-      server.messages.push({ id: nextId, token: TOKEN, actor_type: 'users', actor_id: 'parent', actor_display_name: 'Parent',
-        timestamp: Math.floor(Date.now() / 1000), message_type: 'comment', message: posted });
-      return route.fulfill({ json: { status: 'SUCCESS', message: 'Chat message sent.' } });
+      const message = { id: nextId, token: TOKEN, actor_type: 'users', actor_id: 'parent', actor_display_name: 'Parent',
+        timestamp: Math.floor(Date.now() / 1000), message_type: 'comment', message: posted, deleted: false };
+      server.messages.push(message);
+      return route.fulfill({ json: { status: 'SUCCESS', message: 'Sent.', source: 'store', detail: { message } } });
+    }
+    const removed = new RegExp(`^/api/private-chat/chats/${TOKEN}/messages/(\\d+)$`).exec(p);
+    if (removed && req.method() === 'DELETE') {
+      const id = Number(removed[1]);
+      server.deleted = [...(server.deleted ?? []), id];
+      server.messages = server.messages.map((m) => (Number(m.id) === id ? { ...m, deleted: true, message: '', message_type: 'comment_deleted' } : m));
+      return route.fulfill({ json: { status: 'SUCCESS', message: 'Message deleted.', source: 'store', detail: { deleted: id } } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/read` && req.method() === 'POST') {
+      server.read = Math.max(0, ...server.messages.map((m) => Number(m.id) || 0));
+      return route.fulfill({ json: { status: 'SUCCESS', source: 'store', detail: { token: TOKEN, last_read: server.read, unread_messages: 0 } } });
+    }
+    if (/^\/api\/communication\/talk\/messages/.test(p) && (url.searchParams.get('token') === TOKEN || req.postData()?.includes(TOKEN))) {
+      server.talk = [...(server.talk ?? []), `${req.method()} ${p}`];
+      return route.fulfill({ status: 500, json: { detail: 'The private chat must not go through Talk' } });
     }
     return route.fallback();
   });
@@ -270,6 +298,7 @@ test.describe('private chat on every form factor', () => {
     await expect.poll(() => server.posted.length).toBe(1);
     expect(server.posted[0]).toContain('```jarvis-envelope');
     expect(server.posted[0]).not.toContain('Date night');
+    expect(server.talk ?? []).toEqual([]);
     await check(page, info, run, 'private new chat', page.getByTestId('chat-thread'), await overPanel(page, /^private new chat$/));
 
     await page.getByTestId('private-lock-now').click();
@@ -594,6 +623,15 @@ test.describe('private chat on every form factor', () => {
     await feed.getByText('Made it home.', { exact: false }).click();
     await sheet.getByTestId('private-react-wow').click();
     await expect(burst).toHaveAttribute('data-kind', 'calm');
+    await expect(burst).toHaveCount(0);
+
+    // Delete my message for both of us: it goes to the gateway's store, and leaves the thread.
+    await feed.getByText('Dinner at eight, just us?').click();
+    await sheet.getByTestId('private-message-delete').click();
+    await expect.poll(() => server.deleted).toEqual([3]);
+    await expect(feed.getByText('Dinner at eight, just us?')).toHaveCount(0);
+    // Nothing about this chat ever went through Talk.
+    expect(server.talk ?? []).toEqual([]);
     done(run);
   });
 

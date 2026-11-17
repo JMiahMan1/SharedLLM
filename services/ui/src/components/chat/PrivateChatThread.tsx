@@ -57,7 +57,7 @@ interface PrivateChatThreadProps {
   info?: PrivateChatInfo;
   /** Why `info` is missing (the server's reason), if it is. */
   infoError?: string;
-  /** The raw Talk messages, oldest first: ciphertext until unlocked. */
+  /** The chat's messages (sealed envelopes, in Talk's message shape), oldest first: ciphertext until unlocked. */
   messages: TalkMessage[];
   myActorIds: ReadonlySet<string>;
   /** A key made moments ago for a chat just created, so its creator is not asked again at once. */
@@ -554,7 +554,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
 
   const post = async (payload: PrivatePayload) => {
     const message = await vault.seal(payload);
-    const res = await api.sendTalkMessage({ token, message });
+    const res = await api.sendPrivateMessage(token, message);
     if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Message failed to send');
   };
 
@@ -633,7 +633,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
   const removeById = async (messageId: number, blob?: string) => {
     setSelected(null);
     try {
-      const res = await api.deleteTalkMessage({ token, message_id: messageId });
+      const res = await api.deletePrivateMessage(token, messageId);
       if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Could not delete the message');
       if (blob) await api.deletePrivateBlob(token, blob);
       if (editing?.id === messageId) cancelEdit();

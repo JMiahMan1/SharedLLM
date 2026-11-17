@@ -9,6 +9,13 @@ const HIDDEN_PAUSE_MS = 2000;
 const BACKOFF_START_MS = 3000;
 const BACKOFF_MAX_MS = 30000;
 
+/** One held request: answers with any messages newer than `lastId`, or none after `wait` s. */
+export type LongPollWait = (token: string, lastId: number, wait: number, signal: AbortSignal) => Promise<{
+  status?: string;
+  message?: string;
+  detail?: unknown;
+}>;
+
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve) => {
     const timer = window.setTimeout(resolve, ms);
@@ -35,13 +42,17 @@ export function useTalkLongPoll(
   newestId: number,
   onNews: () => void,
   asUser?: 'admin',
+  /** Where to wait: Talk by default; the private chat waits on the gateway's own store. */
+  waitFor?: LongPollWait,
 ): boolean {
   const [healthy, setHealthy] = useState(false);
   const newestRef = useRef(newestId);
   const onNewsRef = useRef(onNews);
+  const waitRef = useRef(waitFor);
   useEffect(() => {
     newestRef.current = Math.max(newestRef.current, newestId);
     onNewsRef.current = onNews;
+    waitRef.current = waitFor;
   });
 
   useEffect(() => {
@@ -60,7 +71,9 @@ export function useTalkLongPoll(
         }
         const startedAt = Date.now();
         try {
-          const res = await api.waitTalkMessages(token, after, HOLD_S, asUser, signal);
+          const res = waitRef.current
+            ? await waitRef.current(token, after, HOLD_S, signal)
+            : await api.waitTalkMessages(token, after, HOLD_S, asUser, signal);
           if (signal.aborted) break;
           if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'wait failed');
           backoff = BACKOFF_START_MS;
@@ -87,9 +100,10 @@ export function useTalkLongPoll(
       setHealthy(false);
     };
     // newestId seeds the loop once per conversation; later ids arrive through
-    // the ref so a new message does not restart the open request.
+    // the ref so a new message does not restart the open request. Switching
+    // between Talk and the private chat's own store restarts it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, asUser]);
+  }, [token, asUser, Boolean(waitFor)]);
 
   return healthy;
 }
