@@ -68,6 +68,12 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | local_todo, shopping_list | `todo.py` | |
 | malwarebazaar, common_sense_media | `accounts.py` | App vetting's outside sources (docs/APP_VETTING.md); no entities. Telemetry reads them with the internal secret at `GET /hub/integrations/{domain}`. Added under Devices > Add & fix > Add by address > Cloud accounts |
 
+What each integration's devices can do natively against what the hub exposes
+(and the gaps left) is in `docs/DEVICE_CAPABILITIES.md`. Drivers register the
+entities they own when the registry lacks them (`Driver.ensure_entity`), and
+report the ones their own listing no longer has (`Driver.gone_entities`) to the
+prune dry run, which can now be undone (`POST /hub/prune/restore`).
+
 ## Cameras
 
 HA's own camera routes, plus the hub's camera API for Jarvis's Cameras page
