@@ -38,7 +38,7 @@ def test_gateway_extracts_bearer_token(monkeypatch):
         def __init__(self, payload, status=200):
             self._payload = payload
             self.status = status
-        async def json(self):
+        async def json(self, content_type=None, **_):
             return self._payload
         async def text(self):
             return json.dumps(self._payload)

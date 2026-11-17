@@ -62,4 +62,10 @@ def test_describe_exc_names_errors_that_have_no_text():
     from services.common.logging_utils import describe_exc
 
     assert describe_exc(TimeoutError()) == "TimeoutError"
-    assert describe_exc(OSError(104, "Connection reset by peer")) == "OSError: [Errno 104] Connection reset by peer"
+    # OSError(errno, ...) becomes the matching subclass (ConnectionResetError on
+    # Linux), and the number differs per platform, so both come from the system.
+    import errno
+
+    exc = OSError(errno.ECONNRESET, "Connection reset by peer")
+    assert describe_exc(exc) == f"{type(exc).__name__}: [Errno {errno.ECONNRESET}] Connection reset by peer"
+    assert type(exc).__name__ == "ConnectionResetError"

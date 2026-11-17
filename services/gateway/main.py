@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect  # pyright: ignore[reportUnusedImport]
+from starlette.requests import ClientDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
@@ -3056,6 +3057,13 @@ async def secure_logging_middleware(request: Request, call_next):
             headers={"X-Error-Id": error_id},
         )
     except Exception as e:
+        if isinstance(e, ClientDisconnect):
+            # The caller hung up before its body arrived (a phone losing signal
+            # mid-upload, or every in-flight request when the gateway restarts).
+            # Nobody is waiting for an answer and nothing here failed: it was an
+            # ERROR and a 500 on the admin page (2026-11-17).
+            log.info("Client went away: %s %s", request.method, request.url.path)
+            return Response(status_code=499)
         if isinstance(e, json.JSONDecodeError) and _json_error_from_request_body(e):
             # The caller sent no body, or one that is not JSON, to a route that
             # reads JSON: the request's fault, so 400, not a 500 and a traceback
