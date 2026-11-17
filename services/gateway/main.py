@@ -14866,14 +14866,26 @@ async def proxy_bible_passages(request: Request, ref: str, version: str | None =
 
 @app.get("/api/bible/search")
 async def proxy_bible_search(
-    request: Request, q: str, version: str | None = None, book: str | None = None, limit: int = 50
+    request: Request,
+    q: str,
+    version: str | None = None,
+    book: str | None = None,
+    match: str | None = None,
+    sort: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ):
-    await _bible_caller(request)
+    # The caller's own name, never one from the query: has:note and
+    # has:highlight search that person's marks.
+    username = await _bible_caller(request)
     return await _bible_json(
         "GET",
         "/search",
         label="Bible search unavailable",
-        params={"q": q, "version": version, "book": book, "limit": limit},
+        params={
+            "q": q, "version": version, "book": book, "match": match, "sort": sort,
+            "limit": limit, "offset": offset, "username": username,
+        },
     )
 
 
