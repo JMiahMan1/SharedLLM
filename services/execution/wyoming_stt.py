@@ -17,16 +17,21 @@ import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import suppress
 
 import aiohttp
 import numpy as np
 
-from services.common import voice_learning, voice_speaker
+from services.common import voice_enroll, voice_learning, voice_speaker
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, REDIS_URL
 from services.execution import voiceprint
 
 log = logging.getLogger("execution.wyoming_stt")
+#: Every recognition outcome is logged at INFO (who, score, timing; never the
+#: signature), and execution's root logger only shows warnings, so this one
+#: says what it needs itself: without it nobody can tell why a voice was missed.
+log.setLevel(logging.INFO)
 
 #: "host:port" of the Wyoming speech-to-text server that does the transcribing.
 UPSTREAM = os.getenv("VOICE_STT_UPSTREAM", "").strip()
@@ -36,6 +41,9 @@ _MAX_AUDIO_SECONDS = 30
 #: Recognition must never hold up the reply: past this the transcript goes back
 #: and the request is answered as if no one were recognised.
 _IDENTIFY_WAIT_S = 2.0
+#: While a teaching session is open the take is the whole point of the
+#: command, so the transcript may wait longer for its signature.
+_ENROLL_WAIT_S = 8.0
 _IDENTIFY_TIMEOUT = aiohttp.ClientTimeout(total=3.0)
 #: Learning is background work; it must not delay the transcript either.
 _LEARN_TIMEOUT = aiohttp.ClientTimeout(total=5.0)
@@ -85,7 +93,14 @@ def to_samples(pcm: bytes, rate: int, width: int, channels: int) -> np.ndarray:
 
 
 async def identify(samples: np.ndarray) -> dict | None:
-    """Identity's verdict on who is speaking, or None when it cannot say."""
+    """Identity's verdict on who is speaking, with the command's signature.
+
+    None when the audio gives no signature (too little speech). Otherwise a
+    verdict dict carrying ``embedding`` (for learning and teaching), the speech
+    length and timings; ``matched`` is False when nobody has enrolled or Identity
+    could not be asked, so a teaching session still gets its take.
+    """
+    started = time.monotonic()
     try:
         signature = await asyncio.to_thread(
             voiceprint.embed_samples, samples, voiceprint.COMMAND_MIN_SPEECH_SECONDS
@@ -93,24 +108,61 @@ async def identify(samples: np.ndarray) -> dict | None:
     except voiceprint.VoiceprintError as e:
         log.info("[voice] not matching this command: %s", e)
         return None
-    async with aiohttp.ClientSession() as client:
-        resp = await client.post(
-            f"{IDENTITY_SVC_URL}/api/voice/identify",
-            json={"embedding": signature["embedding"], "model": signature["model"]},
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=_IDENTIFY_TIMEOUT,
+    embedded = time.monotonic()
+    verdict: dict = {"matched": False, "score": None}
+    try:
+        async with aiohttp.ClientSession() as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC_URL}/api/voice/identify",
+                json={"embedding": signature["embedding"], "model": signature["model"]},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=_IDENTIFY_TIMEOUT,
+            )
+            if resp.status == 404:  # nobody has enrolled a voice
+                verdict["nobody_enrolled"] = True
+            else:
+                resp.raise_for_status()
+                body = await resp.json()
+                if isinstance(body, dict):
+                    verdict = body
+    except Exception as e:  # recognition is optional; the take may still teach
+        log.warning("[voice] identity could not match this command: %s", e)
+        verdict["error"] = str(e) or type(e).__name__
+    # Identity only returns the verdict. The proxy needs the signature to offer
+    # this take to a learning or teaching session without running the model twice.
+    verdict["embedding"] = signature["embedding"]
+    verdict["model"] = signature.get("model")
+    verdict["speech_seconds"] = signature.get("speech_seconds")
+    verdict["embed_ms"] = round((embedded - started) * 1000)
+    verdict["total_ms"] = round((time.monotonic() - started) * 1000)
+    return verdict
+
+
+def describe(verdict: dict | None) -> str:
+    """One log line for a recognition outcome: who, how sure, how long. Never the signature."""
+    if verdict is None:
+        return "speaker not recognised: no signature for this command"
+    timing = (
+        f"{verdict.get('speech_seconds')}s of speech; "
+        f"embed {verdict.get('embed_ms')} ms, total {verdict.get('total_ms')} ms"
+    )
+    if verdict.get("matched"):
+        return (
+            f"recognised {verdict.get('matched_username')} (score {verdict.get('score')}, "
+            f"threshold {verdict.get('threshold')}, margin {verdict.get('margin')}; {timing})"
         )
-        if resp.status == 404:  # nobody has enrolled a voice
-            return None
-        resp.raise_for_status()
-        verdict = await resp.json()
-        if not isinstance(verdict, dict):
-            return None
-        # Identity only returns the verdict. The proxy needs the signature to
-        # offer this take to a learning session without running the model twice.
-        verdict["embedding"] = signature["embedding"]
-        verdict["speech_seconds"] = signature.get("speech_seconds")
-        return verdict
+    if verdict.get("nobody_enrolled"):
+        return f"speaker not recognised: nobody has enrolled a voice ({timing})"
+    if verdict.get("error"):
+        return f"speaker not recognised: identity failed ({verdict['error']}; {timing})"
+    candidates = verdict.get("candidates") or []
+    ranked = ", ".join(
+        f"{c.get('username')} {c.get('score')}" for c in candidates[:3] if isinstance(c, dict)
+    ) or "no candidates"
+    return (
+        f"speaker not recognised: best {ranked} (threshold {verdict.get('threshold')}, "
+        f"margin {verdict.get('margin')}; {timing})"
+    )
 
 
 async def _learn(redis, verdict: dict) -> None:
@@ -181,16 +233,37 @@ class _Utterance:
             self.task = asyncio.create_task(identify(samples))
 
 
-async def _speaker(utterance: _Utterance) -> dict | None:
+async def _speaker(utterance: _Utterance, wait_s: float = _IDENTIFY_WAIT_S) -> dict | None:
     if utterance.task is None:
         return None
     try:
-        return await asyncio.wait_for(asyncio.shield(utterance.task), _IDENTIFY_WAIT_S)
+        return await asyncio.wait_for(asyncio.shield(utterance.task), wait_s)
     except TimeoutError:
-        log.warning("[voice] recognition took over %.1fs; answering without it", _IDENTIFY_WAIT_S)
+        log.warning("[voice] recognition took over %.1fs; answering without it", wait_s)
     except Exception as e:  # recognition is optional, never fatal
         log.warning("[voice] recognition failed: %s", e)
     return None
+
+
+async def _teaching(redis) -> bool:
+    """Whether any satellite has a teaching session open (``voice_enroll``)."""
+    try:
+        return bool(await redis.get(voice_enroll.OPEN_KEY))
+    except Exception as e:  # teaching is optional, never fatal
+        log.warning("[voice] could not check for a teaching session: %s", e)
+        return False
+
+
+async def _keep_take(redis, text: str, verdict: dict | None) -> None:
+    """Keep this command's signature for the gateway's teaching session, briefly."""
+    key = voice_enroll.take_key(text)
+    take = voice_enroll.encode_take(verdict or {})
+    if not key or not take:
+        return
+    try:
+        await redis.set(key, take, ex=voice_enroll.TAKE_TTL_SECONDS)
+    except Exception as e:
+        log.warning("[voice] could not keep the take for teaching: %s", e)
 
 
 async def _handle(ha_reader, ha_writer, redis) -> None:
@@ -220,7 +293,13 @@ async def _handle(ha_reader, ha_writer, redis) -> None:
         while (event := await read_event(up_reader)) is not None:
             if event.type == "transcript":
                 text = str(event.data.get("text") or "")
-                verdict = await _speaker(utterance)
+                teaching = await _teaching(redis)
+                had_audio = utterance.task is not None
+                verdict = await _speaker(utterance, _ENROLL_WAIT_S if teaching else _IDENTIFY_WAIT_S)
+                if had_audio:
+                    log.info("[voice] %s", describe(verdict))
+                if teaching:
+                    await _keep_take(redis, text, verdict)
                 key = voice_speaker.key(text)
                 if verdict and verdict.get("matched") and key:
                     await redis.set(
@@ -228,13 +307,10 @@ async def _handle(ha_reader, ha_writer, redis) -> None:
                         voice_speaker.encode(verdict["matched_username"], verdict.get("score")),
                         ex=voice_speaker.TTL_SECONDS,
                     )
-                    log.info("[voice] recognised %s (score %s)", verdict["matched_username"], verdict.get("score"))
                     if verdict.get("embedding"):
                         task = asyncio.create_task(_learn(redis, verdict))
                         _LEARNING_TASKS.add(task)
                         task.add_done_callback(_LEARNING_TASKS.discard)
-                elif verdict:
-                    log.info("[voice] speaker not recognised (best score %s)", verdict.get("score"))
             ha_writer.write(event.raw)
             await ha_writer.drain()
 
@@ -252,6 +328,14 @@ async def _handle(ha_reader, ha_writer, redis) -> None:
                 await writer.wait_closed()
 
 
+def _warm_up() -> None:
+    try:
+        seconds = voiceprint.warm_up()
+        log.info("[voice] speaker encoder ready in %.1fs", seconds)
+    except Exception as e:  # the first command then loads it instead
+        log.warning("[voice] could not warm up the speaker encoder: %s", e)
+
+
 async def serve() -> None:
     """Listen for Home Assistant until cancelled; does nothing when unconfigured."""
     if not UPSTREAM or ":" not in UPSTREAM:
@@ -260,6 +344,11 @@ async def serve() -> None:
     import redis.asyncio as aioredis
 
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+    # The encoder loads on first use (about 3 s on the server's CPUs, measured),
+    # which made the first command after every restart miss its 2 s budget.
+    warm = asyncio.create_task(asyncio.to_thread(_warm_up))
+    _LEARNING_TASKS.add(warm)
+    warm.add_done_callback(_LEARNING_TASKS.discard)
 
     async def handle(reader, writer):
         try:
