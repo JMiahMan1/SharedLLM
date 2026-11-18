@@ -40,7 +40,7 @@ class _FakeRedis:
         return 1 if self.values.pop(key, None) is not None else 0
 
 
-async def _run(identify_result, monkeypatch, learning_for=None):
+async def _run(identify_result, monkeypatch, learning_for=None, dead_first=False):
     """One utterance through the proxy; returns (what upstream got, what HA got, redis)."""
     received = []
 
@@ -53,7 +53,15 @@ async def _run(identify_result, monkeypatch, learning_for=None):
 
     server = await asyncio.start_server(upstream, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    monkeypatch.setattr(wyoming_stt, "UPSTREAM", f"127.0.0.1:{port}")
+    upstreams = [f"127.0.0.1:{port}"]
+    if dead_first:
+        # A port nothing listens on: the proxy must move on to the next server.
+        dead = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
+        dead_port = dead.sockets[0].getsockname()[1]
+        dead.close()
+        await dead.wait_closed()
+        upstreams.insert(0, f"127.0.0.1:{dead_port}")
+    monkeypatch.setattr(wyoming_stt, "UPSTREAMS", upstreams)
 
     async def fake_identify(samples):
         assert samples.dtype == np.float32 and len(samples) == 16000  # 1 s at 16 kHz
@@ -92,6 +100,16 @@ async def test_audio_passes_through_and_the_speaker_is_recorded(monkeypatch):
     assert reply.type == "transcript" and reply.data["text"] == "Turn on the kitchen lights."
     value, ttl = redis.values[voice_speaker.key("turn on the kitchen lights")]
     assert voice_speaker.decode(value) == "sam" and ttl == voice_speaker.TTL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_first_server_falls_back_to_the_next(monkeypatch, caplog):
+    sent, received, reply, _ = await _run(
+        {"matched": False, "score": 0.1}, monkeypatch, dead_first=True
+    )
+    assert received == sent
+    assert reply.type == "transcript" and reply.data["text"] == "Turn on the kitchen lights."
+    assert any("unreachable" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
 
 
 @pytest.mark.asyncio

@@ -118,6 +118,10 @@ alarm, even for an admin (`authorize_action` in
    10300.
 2. In `.env`: `VOICE_STT_UPSTREAM=192.0.2.20:10300`, then restart execution.
    The log says "Voice recognition speech-to-text on :10310".
+   Several servers can be listed, comma-separated, fastest first
+   (`VOICE_STT_UPSTREAM=192.0.2.43:10300,127.0.0.1:10300`): each command goes
+   to the first that answers within 1.5 s, and a fallback is logged as a
+   warning.
 3. On the Jarvis server, allow only Home Assistant through the firewall. Use
    Home Assistant's address in place of `192.0.2.20`:
    ```

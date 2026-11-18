@@ -1019,6 +1019,8 @@ services:
     # which adds speaker recognition) forwards audio here
     # (VOICE_STT_UPSTREAM=127.0.0.1:10300). This used to be Home Assistant's
     # Whisper add-on; same engine, model and settings. Prebuilt upstream image.
+    # A faster machine's Whisper can go first in VOICE_STT_UPSTREAM
+    # (e.g. 192.0.2.43:10300,127.0.0.1:10300); this one is then the fallback.
     image: rhasspy/wyoming-whisper:3.8.1
     container_name: sharedllm_whisper
     restart: unless-stopped
