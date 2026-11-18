@@ -225,10 +225,16 @@ class EnergyVAD:
     speech frames in a row and ends after ``silence_s`` of frames that are not. The floor is the
     median of the last second of frames that were not speech, so a voice never becomes the floor and
     a person who starts talking at once is still heard; it starts at ``min_rms / ratio``.
+
+    The floor also follows the quietest tenth of the last three seconds, whatever they were taken
+    for. Learning only from frames under the threshold could never learn a room louder than
+    ``min_rms`` (a TV, music): every frame was "speech", the floor stayed at its start, and every
+    run listened its whole 15 s (2026-11-17). Words have gaps, so speech does not lift it.
     """
 
     FRAME_MS = 30
     FLOOR_FRAMES = 33  # one second of non-speech frames
+    RECENT_FRAMES = 100  # three seconds of all frames
 
     def __init__(self, silence_s: float, *, rate: int = RATE, ratio: float = 2.5, min_rms: float = 250.0,
                  start_frames: int = 3) -> None:
@@ -236,6 +242,7 @@ class EnergyVAD:
         self.silence_frames = max(1, math.ceil(silence_s * 1000 / self.FRAME_MS))
         self.ratio, self.min_rms, self.start_frames = ratio, min_rms, start_frames
         self._quiet_levels: deque[float] = deque([min_rms / ratio] * self.FLOOR_FRAMES, maxlen=self.FLOOR_FRAMES)
+        self._recent: deque[float] = deque(maxlen=self.RECENT_FRAMES)
         self._buf = b""
         self._run = 0
         self._quiet = 0
@@ -246,7 +253,11 @@ class EnergyVAD:
 
     @property
     def floor(self) -> float:
-        return statistics.median(self._quiet_levels)
+        quiet = statistics.median(self._quiet_levels)
+        if len(self._recent) < self.FLOOR_FRAMES:
+            return quiet
+        room = sorted(self._recent)[len(self._recent) // 10]
+        return max(quiet, room)
 
     def heard(self) -> str:
         """What arrived, for a "no speech" error: none at all and too quiet need different fixes."""
@@ -276,6 +287,7 @@ class EnergyVAD:
         while len(self._buf) >= self.frame_bytes:
             frame, self._buf = self._buf[: self.frame_bytes], self._buf[self.frame_bytes:]
             level = self.rms(frame)
+            self._recent.append(level)
             self.frames += 1
             self.peak_rms = max(self.peak_rms, level)
             speech = level >= max(self.min_rms, self.floor * self.ratio)

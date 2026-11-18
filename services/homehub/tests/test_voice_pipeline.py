@@ -235,6 +235,35 @@ def test_energy_vad_finds_speech_and_its_end():
     assert noisy.process(_tone(1.0, amplitude=150)) == []  # a hum under the absolute floor is not speech
 
 
+def _mixed(*parts: bytes) -> bytes:
+    """Samples added together (a voice over a hum), clipped to 16 bits."""
+    n = max(len(p) for p in parts) // 2
+    out = [0] * n
+    for p in parts:
+        for i, v in enumerate(struct.unpack(f"<{len(p) // 2}h", p)):
+            out[i] += v
+    return struct.pack(f"<{n}h", *(max(-32768, min(32767, v)) for v in out))
+
+
+def test_a_room_louder_than_the_gate_still_hears_the_end_of_speech():
+    # A TV hum above min_rms: every frame used to count as speech and the run listened 15 s.
+    vad = EnergyVAD(0.5, min_rms=25)
+    events = vad.process(_tone(1.0, amplitude=120))           # the room, before anyone speaks
+    events += vad.process(_mixed(_tone(1.5, amplitude=8000), _tone(1.5, amplitude=120)))
+    events += vad.process(_tone(1.5, amplitude=120))          # the room again
+    assert "end" in events
+
+
+def test_speech_with_gaps_between_words_is_not_cut_short():
+    vad = EnergyVAD(0.7, min_rms=25)
+    events = vad.process(_silence(0.5))
+    for _ in range(8):                                         # four seconds of words and short gaps
+        events += vad.process(_tone(0.35, amplitude=6000))
+        events += vad.process(_silence(0.15))
+    assert events == ["start"]
+    assert vad.process(_silence(0.8)) == ["end"]
+
+
 async def test_happy_path_sends_the_whole_event_sequence(env, monkeypatch):
     be = Backends().install(monkeypatch)
     hub, drv = make_driver()
