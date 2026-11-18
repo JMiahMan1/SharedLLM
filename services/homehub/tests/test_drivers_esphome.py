@@ -180,6 +180,11 @@ def driver(monkeypatch):
     hub, entry = make_hub("esphome", dict(DATA), ENTITIES, options={"allow_service_calls": True})
     drv = ESPHomeDriver(hub, entry)
     drv._make_client = lambda host: FakeClient()  # type: ignore[method-assign]
+
+    async def _no_mdns(host, timeout):  # a test never asks the network: a real lookup waits up to 3 s on CI
+        return None
+
+    drv._resolve_mdns = _no_mdns  # type: ignore[method-assign]
     hub.drivers[entry.entry_id] = drv
     monkeypatch.setattr(esphome, "COMMAND_SETTLE", 0.05)
     return hub, drv

@@ -25,10 +25,14 @@ log = logging.getLogger("gateway.fast_lights")
 
 
 class LightSet(tuple):
-    """``(entity_ids, label)``: the lights to switch together and what to call them."""
+    """``(entity_ids, label, names)``: the lights to switch together, what to call them, and each one's name."""
 
-    def __new__(cls, entity_ids: list[str], label: str):
-        return super().__new__(cls, (list(entity_ids), label))
+    def __new__(cls, entity_ids: list[str], label: str, names: dict[str, str] | None = None):
+        return super().__new__(cls, (list(entity_ids), label, dict(names or {})))
+
+    @property
+    def names(self) -> dict[str, str]:
+        return self[2]
 
     @property
     def entity_ids(self) -> list[str]:
@@ -41,6 +45,16 @@ class LightSet(tuple):
 
 def _visible(entities: list[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
     return {str(e.get("entity_id")): e for e in entities or [] if isinstance(e, dict) and e.get("entity_id")}
+
+
+def _names(ids: list[str], seen: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """Each light's friendly name, for execution to say (it names a generic "Light" from its id)."""
+    out = {}
+    for eid in ids:
+        name = str(((seen.get(eid) or {}).get("attributes") or {}).get("friendly_name") or "").strip()
+        if name:
+            out[eid] = name
+    return out
 
 
 def group_members(entity_id: str | None, entities: list[dict[str, Any]] | None) -> LightSet | None:
@@ -60,7 +74,8 @@ def group_members(entity_id: str | None, entities: list[dict[str, Any]] | None) 
     if any(m not in seen for m in members):
         log.info(f"[FastPath] {entity_id}: not every member is visible; the group switches as itself")
         return None
-    return LightSet(members, str(attrs.get("friendly_name") or str(entity_id).split(".", 1)[1].replace("_", " ")))
+    return LightSet(members, str(attrs.get("friendly_name") or str(entity_id).split(".", 1)[1].replace("_", " ")),
+                    _names(members, seen))
 
 
 def light_set_for(engine: Any, query: str, intent: str, entities: list[dict[str, Any]] | None) -> LightSet | None:
@@ -74,7 +89,7 @@ def light_set_for(engine: Any, query: str, intent: str, entities: list[dict[str,
     ids = [e for e in found.entity_ids if e in seen]
     if not ids:
         return None
-    return LightSet(ids, found.label)
+    return LightSet(ids, found.label, _names(ids, seen))
 
 
 def choose(engine: Any, query: str, intent: str, resolved: str | None,
@@ -104,7 +119,8 @@ async def switch(light_set: LightSet, intent: str, creds: dict[str, Any], post: 
     ``post(path, payload)`` returns execution's JSON answer.
     """
     payload = {"user_context": creds, "entity_ids": light_set.entity_ids,
-               "action": "turn_on" if intent == "turn_on" else "turn_off", "label": light_set.label}
+               "action": "turn_on" if intent == "turn_on" else "turn_off", "label": light_set.label,
+               "names": light_set.names}
     try:
         answer = await post("/execute/lights", payload)
     except Exception as exc:  # the execution service did not answer: nothing can be claimed

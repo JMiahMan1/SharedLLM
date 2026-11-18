@@ -93,6 +93,17 @@ Notes:
   light is confirmed like a single one, and the answer is one sentence of what
   was seen: "The kitchen lights are off." or "6 of 7 kitchen lights are off;
   Kitchen Light 4 isn't responding."
+- Room and plural phrases match strictly: every word that tells rooms apart
+  must be the same word ("upstairs" never matches "Downstairs Bathroom 1",
+  "master bathroom" never "Master Bedroom"; opposites such as left/right and
+  front/back never match, and a word some device name has is only ever that
+  word). Lights are found by friendly name, entity id ("Light" named
+  `light.downstairs_bathroom_1_light`) and room (the entity's area, else its
+  device's); a copy the hub hides as a duplicate is left out. Replies name lights as people do, never by entity id; a generic
+  name such as "Light" is spoken from the id ("Downstairs Bathroom 1 Light"),
+  and lights voice may not control are said for the set ("Voice can't control
+  the downstairs bathroom lights. ...") or named ("3 of 6 ...; voice can't
+  control ...").
 - A turn on/off command the model answers may not claim a change that no
   device tool made in that turn (`services/gateway/device_claims.py`): such an
   answer is replaced by what is true. A spoken request repeated word for word

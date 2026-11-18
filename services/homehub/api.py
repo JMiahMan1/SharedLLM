@@ -502,7 +502,11 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
 
         principal(request)
         if entity_id is not None:
-            return {"entity_id": entity_id, "exposed": exposure.is_exposed(hub, entity_id)}
+            ent = hub.entities.get(entity_id)
+            st = hub.states.get(entity_id)
+            name = hub.friendly_name(ent) if ent is not None else (st.attributes.get("friendly_name") if st else None)
+            # ``name``: what Jarvis says when it has to refuse (never the entity id).
+            return {"entity_id": entity_id, "exposed": exposure.is_exposed(hub, entity_id), "name": name}
         return {"assistant": exposure.ASSISTANT, "entity_ids": exposure.exposed_entities(hub)}
 
     def _recording_driver(entity_id: str) -> tuple[Any, Any]:

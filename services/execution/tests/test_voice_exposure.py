@@ -169,7 +169,9 @@ def test_ha_service_from_chat_on_an_unexposed_entity_is_a_403_with_the_reason(mo
         "user_context": {"user": "pat", "via": "assistant", "ha_url": "http://hub.test", "ha_token": TOKEN},
         "domain": "lock", "service": "unlock", "entity_id": "lock.gate"})
     assert resp.status_code == 403
-    assert "Voice and chat may not control lock.gate" in resp.json()["message"]
+    # Said by name, never by entity id (spoken_names).
+    assert resp.json()["message"].startswith("Voice can't control Gate.")
+    assert "lock.gate" not in resp.json()["message"]
     assert called == []
 
 
@@ -186,3 +188,21 @@ def test_security_handler_refuses_an_unexposed_lock_for_voice(monkeypatch, answe
                          "ha_token": TOKEN},
         "entity_id": "lock.gate", "action": "lock"})
     assert resp.status_code == 403 and called == []
+
+
+async def test_a_refusal_says_the_hubs_name_for_it_or_one_from_its_id(monkeypatch):
+    """Never "light.downstairs_bathroom_1_light": its name, and a generic "Light" named from its id."""
+    from services.execution import hardware_router
+
+    monkeypatch.setattr(hardware_router, "hub_pair", lambda ctx: ("http://hub.test", TOKEN))
+
+    async def no(url, token, eid):
+        voice_exposure._NAMES[eid] = "Light"
+        return False
+    monkeypatch.setattr(voice_exposure, "fetch_exposed", no)
+    ctx = {"user": "pat", "via": "assistant"}
+    with pytest.raises(voice_exposure.EntityNotExposed) as err:
+        await voice_exposure.require_exposed(ctx, "light.downstairs_bathroom_1_light")
+    assert str(err.value) == ("Voice can't control Downstairs Bathroom 1 Light. An admin can turn on "
+                              "'Voice can control' for it in Devices.")
+    assert err.value.entity_id == "light.downstairs_bathroom_1_light" and err.value.unchecked is False

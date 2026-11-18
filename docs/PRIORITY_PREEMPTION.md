@@ -148,6 +148,7 @@ curl -X POST http://ai.local:8080/api/raven/missions/5/resume \
 None required - priority inference works automatically.
 
 ### Redis Keys
+
 | Key Pattern | Purpose |
 |-------------|---------|
 | `raven:inference_queue` | Sorted set (priority queue) |

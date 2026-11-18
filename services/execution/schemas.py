@@ -294,6 +294,8 @@ class LightsControlRequest(BaseRequest):
     entity_ids: list[str] = Field(..., min_length=1, max_length=50)
     action: Literal["turn_on", "turn_off"]
     label: str = Field("", max_length=120)
+    #: entity id -> the name the person knows it by (spoken_names: a generic "Light" is named from its id).
+    names: dict[str, str] = Field(default_factory=dict)
     brightness_pct: int | None = Field(None, ge=0, le=100)
 
 

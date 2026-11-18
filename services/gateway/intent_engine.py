@@ -126,18 +126,53 @@ def _word_similarity(a: str, b: str) -> float:
     return sim
 
 
-def _name_score(spoken: str, name: str) -> float:
-    """How well a spoken name fits a device name, 0..1."""
+#: Words that tell places or sides apart (as ``_norm_name`` leaves them: "upstairs" is "upstair").
+#: However alike they sound or are spelt, one is never heard as another: "upstairs" is not "downstairs".
+_CONTRASTS: tuple[frozenset[str], ...] = tuple(frozenset(s) for s in (
+    {"upstair", "downstair"}, {"upper", "lower"}, {"top", "bottom"}, {"left", "right"},
+    {"front", "back", "rear"}, {"inside", "outside", "indoor", "outdoor"}, {"north", "south", "east", "west"},
+    {"master", "guest"}, {"his", "her"}, {"first", "second", "third"}, {"big", "little", "small"},
+    {"day", "night"}, {"main", "guest"},
+))
+
+
+def _contrasting(a: str, b: str) -> bool:
+    return a != b and any(a in pair and b in pair for pair in _CONTRASTS)
+
+
+def _strict_similarity(said: str, named: str, vocab: frozenset[str] | set[str] | None) -> float:
+    """``_word_similarity`` that never takes one real word of the house's device names for another.
+
+    A word that is itself in some device's name ("downstairs", "bedroom", a child's name) was said
+    on purpose: it matches only itself, or itself with a longer ending ("hall" in "hallway"). Only a
+    word no device has ("lite", "amp") is taken for the closest-sounding one. Opposites
+    (``_CONTRASTS``) never match, known or not.
+    """
+    if said == named:
+        return 1.0
+    if _contrasting(said, named):
+        return 0.0
+    if vocab is not None and said in vocab:
+        return 0.8 if len(said) >= 4 and named.startswith(said) and not said.isdigit() else 0.0
+    return _word_similarity(said, named)
+
+
+def _name_score(spoken: str, name: str, vocab: frozenset[str] | set[str] | None = None) -> float:
+    """How well a spoken name fits a device name, 0..1 (``vocab``: every word of the device names)."""
     if spoken == name:
         return 1.0
     said, named = spoken.split(), name.split()
     if not said or not named:
         return 0.0
     whole = difflib.SequenceMatcher(None, spoken, name).ratio()
-    best_per_said = [max(_word_similarity(w, n) for n in named) for w in said]
+    best_per_said = [max(_strict_similarity(w, n, vocab) for n in named) for w in said]
+    if min(best_per_said) == 0.0 and vocab is not None and any(w in vocab for w in said):
+        # A word said on purpose that this device's name does not have: another device.
+        return 0.0
     words = sum(best_per_said) / len(best_per_said)
     # Of the device's own words, how many were said (a lone "garage" is not "garage door state").
-    covered = sum(1 for n in set(named) if max(_word_similarity(w, n) for w in said) >= 0.75) / len(set(named))
+    covered = sum(1 for n in set(named)
+                  if max(_strict_similarity(w, n, vocab) for w in said) >= 0.75) / len(set(named))
     if covered < 0.6:
         return 0.0  # too little of the device's name was said to be sure it is this one
     return 0.4 * whole + 0.4 * words + 0.2 * covered
@@ -174,19 +209,49 @@ def _drop_numbers(name: str) -> str:
     return " ".join(w for w in name.split() if not w.isdigit())
 
 
-def _shares_name(stem: str, base: str) -> bool:
+#: The kind word of a plural phrase, which a light's own name need not repeat ("Upstairs Bathroom 1").
+_KIND_WORDS = frozenset({"light", "lamp", "bulb"})
+
+
+def _words_match(said: list[str], named: list[str], vocab: frozenset[str] | set[str] | None,
+                 optional: frozenset[str] = frozenset()) -> tuple[bool, int]:
+    """Does every said word find its own word in ``named`` (``_strict_similarity`` >= 0.8)?
+
+    ``(all found, how many of the name's words were not said)``. A word in ``optional`` may be missing.
+    """
+    left = list(named)
+    for w in said:
+        best = max(left, key=lambda n: _strict_similarity(w, n, vocab), default=None)
+        if best is not None and _strict_similarity(w, best, vocab) >= 0.8:
+            left.remove(best)
+        elif w not in optional:
+            return False, len(left)
+    return True, len(left)
+
+
+def _shares_name(stem: str, base: str, vocab: frozenset[str] | set[str] | None = None) -> bool:
     """Is ``base`` (a name, numbers dropped) one of the devices ``stem`` names together?
 
-    "kitchen light" names "Kitchen Light 3" and "Bedroom Light Left" is one of "bedroom lights":
-    every word said is in the name, and the name adds at most one word to tell them apart.
-    A close hearing of the whole name counts too ("kitchen lite").
+    "kitchen light" names "Kitchen Light 3", "Bedroom Light Left" is one of "bedroom lights", and
+    "upstairs bathroom light" names "Upstairs Bathroom 1": every word said is in the name (the kind
+    word may be missing), and the name adds at most one word to tell them apart. Every word that
+    tells rooms apart must be the same word: "upstairs" never names "Downstairs Bathroom 1 Light".
+    A misheard word that no device has counts by its closest sound ("kitchen lite").
     """
     said, named = stem.split(), base.split()
     if len(said) < 2 or not named:
         return False
-    if set(said) <= set(named) and len(named) - len(said) <= 1:
-        return True
-    return _name_score(stem, base) >= 0.9
+    found, extra = _words_match(said, named, vocab, optional=_KIND_WORDS)
+    return found and extra <= 1 and any(w not in _KIND_WORDS for w in named)
+
+
+def _same_room(room: str, area: str, vocab: frozenset[str] | set[str] | None = None) -> bool:
+    """Is the room said this area? Word for word ("master bathroom" is never "Master Bedroom")."""
+    said, named = room.split(), area.split()
+    if not said or len(said) != len(named):
+        return False
+    found, extra = _words_match(said, named, vocab)
+    return found and extra == 0
 
 
 def _plural_phrase(target: str) -> tuple[str, str | None, str] | None:
@@ -303,6 +368,9 @@ class IntentEngine:
             }
         self.device_records = records
         self.device_meta = meta
+        # Every word of every device's name and room: a word in it was said on purpose (_strict_similarity).
+        self.device_words = frozenset(w for _e, _d, names, _s in records for n in names for w in n.split()) \
+            | frozenset(w for m in meta.values() for w in m["area"].split())
         log.info(f"IntentEngine: Updated entity cache with {len(new_cache)} entries.")
 
     def _vectorize(self, data: dict):
@@ -446,10 +514,11 @@ class IntentEngine:
         if not spoken:
             return None
         scored: dict[str, float] = {}
+        vocab = getattr(self, "device_words", None)
         for eid, domain, names, state in getattr(self, "device_records", []):
             if domain not in ON_OFF_DOMAINS:
                 continue
-            best = max((_name_score(spoken, name) for name in names), default=0.0)
+            best = max((_name_score(spoken, name, vocab) for name in names), default=0.0)
             if state in ("unavailable", "unknown"):
                 best -= 0.05  # of two devices with one name, the one that answers
             if best > scored.get(eid, 0.0):
@@ -510,15 +579,20 @@ class IntentEngine:
                     continue
                 yield eid, names
 
+        vocab = getattr(self, "device_words", None)
         chosen: list[str] = []
         if kind and room:
+            # By name: the friendly name or the entity id (a Matter bulb named just "Light" keeps its room
+            # in its id: light.downstairs_bathroom_1_light).
             stem = _norm_name(f"{room} {kind}", numbers=True)
-            for eid, names in candidates():
-                if any(_shares_name(stem, _drop_numbers(n)) for n in names):
-                    chosen.append(eid)
-        if not chosen and room:
+            chosen = [eid for eid, names in candidates() if any(_shares_name(stem, _drop_numbers(n), vocab)
+                                                                for n in names)]
+        if room:
+            # And by room: the entity's area, else its device's (the discovery list carries the name).
             area = _norm_name(room)
-            chosen = [eid for eid, _names in candidates() if area and meta.get(eid, {}).get("area") == area]
+            chosen += [eid for eid, _names in candidates()
+                       if eid not in chosen and meta.get(eid, {}).get("area")
+                       and _same_room(area, meta[eid]["area"], vocab)]
         if not chosen:
             return None
         for gid in sorted(groups):
