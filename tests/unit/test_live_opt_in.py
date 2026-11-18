@@ -24,10 +24,14 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _root_conftest():
-    for mod in sys.modules.values():
-        if getattr(mod, "__file__", None) and Path(mod.__file__).resolve() == ROOT / "conftest.py":
-            return mod
+@pytest.fixture
+def root_conftest(request):
+    """The root conftest.py as pytest loaded it. Looked up through the plugin
+    manager: sys.modules["conftest"] is whichever conftest was imported last."""
+    for plugin in request.config.pluginmanager.get_plugins():
+        path = getattr(plugin, "__file__", None)
+        if path and Path(path).resolve() == ROOT / "conftest.py":
+            return plugin
     raise AssertionError("root conftest.py is not loaded")
 
 
@@ -62,31 +66,31 @@ def _skipped(item: _Item) -> bool:
         "scripts/test_live_api.py",
     ],
 )
-def test_live_directories_are_skipped_without_an_opt_in(monkeypatch, rel):
+def test_live_directories_are_skipped_without_an_opt_in(monkeypatch, root_conftest, rel):
     monkeypatch.delenv("SHAREDLLM_RUN_LIVE", raising=False)
     item = _Item(ROOT / rel)
-    _root_conftest().pytest_collection_modifyitems(_config(), [item])
+    root_conftest.pytest_collection_modifyitems(_config(), [item])
     assert _skipped(item)
 
 
-def test_a_live_marker_anywhere_is_skipped_without_an_opt_in(monkeypatch):
+def test_a_live_marker_anywhere_is_skipped_without_an_opt_in(monkeypatch, root_conftest):
     monkeypatch.delenv("SHAREDLLM_RUN_LIVE", raising=False)
     item = _Item(ROOT / "services/tests/test_gateway_coding.py", markers=("live",))
-    _root_conftest().pytest_collection_modifyitems(_config(), [item])
+    root_conftest.pytest_collection_modifyitems(_config(), [item])
     assert _skipped(item)
 
 
-def test_ordinary_tests_are_not_touched(monkeypatch):
+def test_ordinary_tests_are_not_touched(monkeypatch, root_conftest):
     monkeypatch.delenv("SHAREDLLM_RUN_LIVE", raising=False)
     item = _Item(ROOT / "tests/unit/test_live_opt_in.py")
-    _root_conftest().pytest_collection_modifyitems(_config(), [item])
+    root_conftest.pytest_collection_modifyitems(_config(), [item])
     assert not _skipped(item)
 
 
-def test_the_opt_in_lets_live_tests_through(monkeypatch):
+def test_the_opt_in_lets_live_tests_through(monkeypatch, root_conftest):
     monkeypatch.setenv("SHAREDLLM_RUN_LIVE", "1")
     item = _Item(ROOT / "tests/integration/test_regression.py")
-    _root_conftest().pytest_collection_modifyitems(_config(), [item])
+    root_conftest.pytest_collection_modifyitems(_config(), [item])
     assert not _skipped(item)
 
 
