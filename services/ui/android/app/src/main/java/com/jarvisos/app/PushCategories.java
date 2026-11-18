@@ -18,6 +18,11 @@ final class PushCategories {
     static final String URGENT = "urgent";
     /** A parent nudged the other in their private chat: its own sound and heartbeat vibration. */
     static final String NUDGE = "nudge";
+    /**
+     * A private chat reply reminder (kind): an ordinary chat notice, never the nudge's sound,
+     * vibration or full-screen card, whatever category it arrives with.
+     */
+    static final String PRIVATE_REMINDER = "private_reminder";
     /** Two quick pulses, a pause, two more: a heartbeat, unlike any other notice. */
     static final long[] NUDGE_VIBRATION = {0, 120, 90, 120, 450, 120, 90, 120};
 

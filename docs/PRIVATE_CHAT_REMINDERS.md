@@ -36,10 +36,16 @@ sends it twice and a failed one is tried again on the next pass.
 
 ## The notice
 
-Category and kind `nudge` (the Nudges channel and its sound on the phone, and
-the full-screen card when Jarvis is open), priority 3 (one lower than a nudge),
-tag `private-reminder:<token>` with `replace`, so a newer reminder replaces an
-older one. It opens the chat. It never contains a word of the message.
+A gentle one: category `chat` with its own kind `private_reminder`, priority
+3. On the phone it is an ordinary notification on the private chat's normal
+message channel (the one "New private message from Sam" uses): grouped with
+the chat's messages, the chat channel's sound, and not shown while the chat is
+on screen. Never the nudge's channel, sound, heartbeat vibration or
+full-screen card (the app ignores a nudge event of this kind too). It is
+switched off with the person's Family chat notifications. Tag
+`private-reminder:<token>` with `replace`, so a newer reminder replaces an
+older one in the notification list. It opens the chat (`/family?chat=<token>`).
+It never contains a word of the message.
 
 ## What leaves the device, and what the server keeps
 

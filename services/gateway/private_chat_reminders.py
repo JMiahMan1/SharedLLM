@@ -42,8 +42,11 @@ when the chat is deleted.
 
 The notice carries no content either: "Sam is waiting to hear back from you",
 or "Sam asked you something and is waiting to hear back" when the flag is set.
-It uses the nudge's ``nudge`` category (its own channel and sound on the
-phone) at a lower priority, and is tagged per chat so a newer one replaces it.
+It is gentle on purpose: category ``chat`` (the private chat's ordinary message
+channel and sound, grouped with the chat's messages, not shown while the chat
+is on screen) with its own kind ``private_reminder``, never the nudge's
+channel, heartbeat vibration or full-screen card. Tagged per chat so a newer
+one replaces it.
 
 Settings (``.env``, read once at start; a malformed value stops the gateway
 with a message saying which):
@@ -138,6 +141,8 @@ QUIET = parse_quiet(os.getenv("PRIVATE_CHAT_REMINDER_QUIET", "21:30-07:30"))
 DAILY_MAX = _env_int("PRIVATE_CHAT_REMINDER_DAILY_MAX", 2, low=1, high=10)
 #: No reminder for a message older than this when it would go.
 MAX_AGE_S = _env_int("PRIVATE_CHAT_REMINDER_MAX_AGE_S", 3 * 86400, low=3600, high=30 * 86400)
+#: The notice's kind: an ordinary chat notice, never a nudge.
+KIND = "private_reminder"
 #: How often the background worker looks.
 CHECK_S = _env_int("PRIVATE_CHAT_REMINDER_CHECK_S", 300, low=30, high=3600)
 
@@ -400,8 +405,8 @@ async def check_once(client: aiohttp.ClientSession, *, identity: str, telemetry:
             sender = people.get(str(latest.get("by"))) or {"username": latest.get("by")}
             url = f"/family?chat={token}"
             payload = notify.notice(
-                recipient, "nudge", "Private chat", reminder_text(private_chat._display(sender), decision.question),
-                url=url, priority=3, tag=f"private-reminder:{token}", kind="nudge", replace=True,
+                recipient, "chat", "Private chat", reminder_text(private_chat._display(sender), decision.question),
+                url=url, priority=3, tag=f"private-reminder:{token}", kind=KIND, replace=True,
                 actions=[notify.view_action(url)],
                 data={"token": token, "private": True, "reminder": True},
             )

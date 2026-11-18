@@ -82,4 +82,13 @@ describe('a nudge while Jarvis is open', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByTestId('nudge-overlay')).toBeNull();
   });
+
+  it('a reply reminder never opens the nudge card', async () => {
+    mount();
+    await waitFor(() => expect(m.listeners.nudge).toBeTypeOf('function'));
+    act(() => m.listeners.nudge({ title: 'Private chat', body: 'Alex is waiting to hear back from you', path: '/family?chat=room1',
+      kind: 'private_reminder' }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByTestId('nudge-overlay')).toBeNull();
+  });
 });

@@ -232,8 +232,9 @@ def test_read_and_left_gets_one_gentle_reminder(chat):
     assert notice["user"] == "sam"
     assert notice["title"] == "Private chat"
     assert notice["body"] == "Alex is waiting to hear back from you"
-    # The nudge's channel and sound, a little lower, replacing an older reminder.
-    assert notice["category"] == "nudge" and notice["kind"] == "nudge" and notice["priority"] == 3
+    # Gentle: the private chat's ordinary message channel with a kind of its own, never the nudge's.
+    assert notice["category"] == "chat" and notice["kind"] == "private_reminder" and notice["priority"] == 3
+    assert "nudge" not in json.dumps(notice)
     assert notice["tag"] == f"private-reminder:{TOKEN}" and notice["replace"] is True
     assert notice["data"]["url"] == f"/family?chat={TOKEN}" and notice["data"]["reminder"] is True
     text = json.dumps(notice)

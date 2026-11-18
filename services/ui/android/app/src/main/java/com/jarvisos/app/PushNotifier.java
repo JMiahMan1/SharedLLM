@@ -98,11 +98,11 @@ public final class PushNotifier {
                 .setShowWhen(true)
                 .setContentIntent(openIntent(context, n.path.isEmpty() ? "/" : n.path, id));
         if (PushCategories.silent(n.priority)) b.setSilent(true);
-        if (PushCategories.NUDGE.equals(n.category)) {
+        if (PushCategories.NUDGE.equals(n.category) && !PushCategories.PRIVATE_REMINDER.equals(n.kind)) {
             // Before Android 8 the sound and vibration go on the notification itself.
             b.setSound(nudgeSound(context)).setVibrate(PushCategories.NUDGE_VIBRATION);
             // Jarvis on screen: the page shows its own nudge as well.
-            PushPlugin.nudged(n.title, n.body, n.path);
+            PushPlugin.nudged(n.title, n.body, n.path, n.kind);
         }
         addActions(context, b, n.actions, n, id, null);
         nm.notify(id, b.build());
