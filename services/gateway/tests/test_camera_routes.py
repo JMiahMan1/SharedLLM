@@ -93,8 +93,9 @@ def test_without_any_hub_the_list_says_so(client, monkeypatch, perms):
 
     monkeypatch.setattr(gateway_main, "resolve_identity", resolve)
     monkeypatch.setattr(config, "HA_URL", None)
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     resp = client.get("/api/cameras")
-    assert resp.status_code == 503 and "HA_URL" in resp.json()["detail"]
+    assert resp.status_code == 503 and "No home hub is set up" in resp.json()["detail"]
 
 
 def test_without_an_ha_login_the_hubs_login_lists_only_the_callers_cameras(client, upstream, monkeypatch, perms):
@@ -106,7 +107,10 @@ def test_without_an_ha_login_the_hubs_login_lists_only_the_callers_cameras(clien
         return {**DEFAULT_IDENTITY, "is_admin": False, "ha_url": None, "ha_token": None}
 
     monkeypatch.setattr(gateway_main, "resolve_identity", resolve)
-    monkeypatch.setattr(config, "HA_URL", "http://hub.test:8123")
+    # The hub's own login goes to HOMEHUB_URL only, never to HA_URL (a real HA must not get it).
+    monkeypatch.setattr(config, "HA_URL", "http://real-ha.test:8123")
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test:8123")
+    monkeypatch.setattr(config, "INTERNAL_SECRET", "hub-secret")
     monkeypatch.setattr(gw_config, "INTERNAL_SECRET", "hub-secret")
     mock_upstream(upstream, "GET", "http://hub.test:8123/api/homehub/cameras", payload=CAMERAS)
     resp = client.get("/api/cameras")

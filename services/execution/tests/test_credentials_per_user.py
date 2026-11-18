@@ -69,7 +69,7 @@ def test_announce_without_any_hub_says_so_and_does_not_borrow_admin(monkeypatch,
     assert not called, "announce must not fall back to the first user"
     body = resp.json()
     assert body.get("status") != "SUCCESS"
-    assert "HA_URL" in json_text(body)
+    assert "No home hub is set up" in json_text(body)
 
 
 def test_entity_search_without_any_hub_says_so_and_does_not_borrow_admin(monkeypatch, no_hub):
@@ -84,7 +84,7 @@ def test_entity_search_without_any_hub_says_so_and_does_not_borrow_admin(monkeyp
     assert not called, "entity search must not fall back to the first user"
     body = resp.json()
     assert body.get("status") != "SUCCESS"
-    assert "HA_URL" in json_text(body)
+    assert "No home hub is set up" in json_text(body)
 
 
 def json_text(body) -> str:
@@ -237,7 +237,7 @@ def test_discovery_entities_without_any_hub_names_the_missing_setup(monkeypatch,
     )
 
     assert resp.status_code == 503
-    assert "HA_URL" in resp.text
+    assert "No home hub is set up" in resp.text
     assert not called
 
 

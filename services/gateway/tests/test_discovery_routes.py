@@ -3,6 +3,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from services import config
 from services.gateway import discovery_routes
 from services.gateway import main as gateway_main
 from services.gateway.main import app
@@ -146,7 +147,7 @@ async def test_the_hub_is_called_with_the_internal_secret(monkeypatch):
     monkeypatch.setattr(discovery_routes, "INTERNAL_SECRET", "made-up-secret")
     status, body = await discovery_routes._hub("GET", "/hub/discovered")
     assert status == 200 and body == {"devices": []}
-    assert sent["url"] == f"{discovery_routes.HOMEHUB_URL}/hub/discovered"
+    assert sent["url"] == f"{config.HOMEHUB_URL}/hub/discovered"
     assert sent["headers"] == {"Authorization": "Bearer made-up-secret"}
 
 

@@ -295,8 +295,11 @@ def test_a_person_without_a_hub_login_reads_through_the_hub_still_filtered(monke
     import services.config as config
     from services.gateway import config as gw_config
 
-    monkeypatch.setattr(config, "HA_URL", "http://hub.local:8123")
+    monkeypatch.setattr(config, "HA_URL", "http://real-ha.local:8123")
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.local:8123")
+    monkeypatch.setattr(config, "INTERNAL_SECRET", "internal-test-secret")
     monkeypatch.setattr(gw_config, "INTERNAL_SECRET", "internal-test-secret")
+    # The hub's own login goes to HOMEHUB_URL only, never to HA_URL.
     assert dashboard_routes._hub_login({"user": "newkid"}, personal=False) == ("http://hub.local:8123", "internal-test-secret")
     # A person's own login still wins.
     own = {"ha_url": TEST_HA_URL, "ha_token": TEST_HA_TOKEN}
@@ -316,6 +319,7 @@ def test_no_hub_configured_is_still_a_clear_503(monkeypatch):
     import services.config as config
 
     monkeypatch.setattr(config, "HA_URL", None)
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     with pytest.raises(HTTPException) as e:
         dashboard_routes._hub_login({"user": "newkid"}, personal=False)
     assert e.value.status_code == 503

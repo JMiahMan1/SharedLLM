@@ -350,7 +350,7 @@ def test_discovery_entities_without_any_hub_is_503(monkeypatch):
     monkeypatch.setattr(config, "HOMEHUB_URL", "")
     resp = client.get("/discovery/entities", headers={"X-Internal-Secret": "test-secret"})
     assert resp.status_code == 503
-    assert "HA_URL" in resp.json()["detail"]
+    assert "No home hub is set up" in resp.json()["detail"]
 
 
 def test_discovery_entities_with_credentials():

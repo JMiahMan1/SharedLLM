@@ -227,9 +227,13 @@ async def home_location(cfg: dict | None = None) -> dict | None:
         return {**chosen, "name": chosen["name"] or "Home"}
     if time.time() - _home_cache[0] < HOME_TTL_S and _home_cache[1]:
         return _home_cache[1]
+    from services import config
     from services.execution import ha_client, hardware_router
     from services.execution.main import resolve_first_user
 
+    if not config.any_home_hub():
+        # No home hub to ask for zone.home: only the weather_location setting places the home.
+        return _home_cache[1]
     hub_url, hub_token = hardware_router.hub_pair(await resolve_first_user() or {})
     if not hub_url or not hub_token:
         log.warning("[weather] no weather_location set and %s", hardware_router.NO_HUB_MESSAGE)

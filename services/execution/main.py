@@ -239,6 +239,11 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
     Resilient by design: any single failure (HA down, bad entity, identity
     error) is caught per-entity and the loop keeps running.
     """
+    from services import config as _config
+
+    if not _config.any_home_hub():
+        # Neither home integration is set up; the lifespan said so once. Nothing to poll.
+        return
     log.info("[telemetry] ingestion loop starting (interval=%ss)", interval_seconds)
     # Throttle telemetry->RAG alert pushes (once per entity per 10 minutes).
     _alert_last: dict[str, float] = {}
@@ -445,6 +450,17 @@ async def lifespan(app: FastAPI):
         return thread
 
     media_server: threading.Thread = run_media_server()
+
+    # Optional home integrations (services.config.integrations): one line naming what is off;
+    # the loops that need a home hub return at once without one, and nothing retries.
+    from services import config as _config
+
+    _off = [name for name, on in _config.integrations().items() if not on]
+    if not _config.any_home_hub():
+        log.info("No home hub is set up (HomeHub and Home Assistant are off): energy telemetry "
+                 "and home notices are not running.")
+    elif _off:
+        log.info("Integrations off, never contacted: %s", ", ".join(_off))
 
     # Background telemetry ingestion (live Energy Insights usage)
     telemetry_task = asyncio.create_task(telemetry_ingestion_loop())

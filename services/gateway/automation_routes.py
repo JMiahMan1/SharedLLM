@@ -33,7 +33,6 @@ shown. Admins see everything.
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Any
 
@@ -48,7 +47,16 @@ log = logging.getLogger("gateway.automations")
 
 router = APIRouter(prefix="/api/homehub")
 
-HOMEHUB_URL = os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123").rstrip("/")
+
+def _homehub_base() -> str:
+    """HOMEHUB_URL (resolved once at startup); 503 while the HomeHub integration is off."""
+    from services.common.hub_login import NO_HOMEHUB_MESSAGE, homehub_url
+
+    base = homehub_url()
+    if not base:
+        raise HTTPException(status_code=503, detail=NO_HOMEHUB_MESSAGE)
+    return base
+
 _TIMEOUT = aiohttp.ClientTimeout(total=30, connect=5)
 #: Running a script waits for it to be started, not finished; an import parses a whole file.
 _LONG_TIMEOUT = aiohttp.ClientTimeout(total=90, connect=5)
@@ -116,7 +124,7 @@ async def _hub(method: str, path: str, *, creds: dict[str, Any] | None = None,
     from services.gateway.main import shared_http_client
 
     if creds is None:
-        base, token = HOMEHUB_URL, INTERNAL_SECRET
+        base, token = _homehub_base(), INTERNAL_SECRET
     else:
         from services.gateway.dashboard_routes import _hub_login
 

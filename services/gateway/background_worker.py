@@ -1613,7 +1613,12 @@ class RavenWorker:
 
     async def _run_cleanup(self):
         """Single cleanup pass: sync HA entities, prune orphans, clean Redis cache."""
+        from services import config
         from services.gateway.ha_state_cache import get_redis
+
+        if not config.any_home_hub():
+            # Neither HomeHub nor Home Assistant is set up: there are no entities to sync.
+            return
 
         # 1. Fetch all users from Identity to sync their HA entities
         try:
@@ -1671,7 +1676,7 @@ class RavenWorker:
                     )
                     if resp.status != 200:
                         if resp.status == 503:
-                            log.warning("Cleanup: no home hub is set up (HA_URL); HA sync skipped.")
+                            log.warning("Cleanup: execution has no home hub to read; HA sync skipped.")
                             break
                         continue
                     resp_text = await resp.text()

@@ -135,7 +135,13 @@ from services.identity.schemas import (
     WidgetSettingsRead,
     forbidden_branch_list,
 )
-from services.identity.seed import hash_password, seed_from_env, system_service_urls, verify_password
+from services.identity.seed import (
+    ha_integration_enabled,
+    hash_password,
+    seed_from_env,
+    system_service_urls,
+    verify_password,
+)
 from services.shared.info_endpoint import info_router
 
 # Config
@@ -424,6 +430,20 @@ def _granted_services(session: Session, username: str) -> list[str]:
     return [s for s in parsed if isinstance(s, str)]
 
 
+#: Whether the Home Assistant integration is on, decided once at startup (lifespan)
+#: from the ha_url setting, else HA_URL. None until then (tests): asked per call.
+HA_INTEGRATION_ENABLED: bool | None = None
+
+
+def _ha_enabled(session: Session) -> bool:
+    """Is the Home Assistant integration on? (See ``seed.ha_integration_enabled``.)"""
+    if HA_INTEGRATION_ENABLED is not None:
+        return HA_INTEGRATION_ENABLED
+    from services import config
+
+    return ha_integration_enabled(session, config.HA_URL)
+
+
 def _decrypt_field(enc: str | None) -> str | None:
     return decrypt(enc) if enc else None
 
@@ -501,6 +521,13 @@ def _resolve_service_creds(
 ) -> tuple[dict[str, str | None], str, str | None]:
     """Return (values, source, shared_owner) for one shared-able service."""
     own = _own_service_creds(user, service)
+    if service == "home_assistant" and not _ha_enabled(session):
+        # The Home Assistant integration is off. The household account's stored HA login
+        # (often left over from .env) is not the stack's login any more, and nobody borrows it;
+        # callers fall through to HomeHub (services.common.hub_login). A person's own login is theirs.
+        if _is_system_default_user(user) or not any(own.values()):
+            return {key: None for key in own}, "absent", None
+        return own, "own", None
     if any(own.values()):
         return own, "own", None
 
@@ -677,6 +704,12 @@ async def lifespan(app: FastAPI):
         if force_reseed:
             log.info("[lifespan] FORCE_RESEED=true, re-seeding all data")
         seed_from_env(session, force=force_reseed)
+        global HA_INTEGRATION_ENABLED
+        from services import config as _config
+
+        HA_INTEGRATION_ENABLED = ha_integration_enabled(session, _config.HA_URL)
+        if not HA_INTEGRATION_ENABLED:
+            log.info("[lifespan] Home Assistant integration is off (ha_url / HA_URL blank); its logins are not used")
         _warn_about_sign_in(session)
         await _ensure_default_settings(session)
         _migrate_api_key_material(session)
@@ -3462,6 +3495,8 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
 
     ha_url = _pick("ha_url")
     ha_token = _pick("ha_token_enc", encrypted=True)
+    if not _ha_enabled(session):
+        ha_url = ha_token = None  # The Home Assistant integration is off: never scanned.
 
     nc_url = _pick("nextcloud_url")
     nc_user = _pick("nextcloud_user")
@@ -6910,6 +6945,8 @@ async def import_nextcloud_users(x_internal_secret: str | None = Header(default=
         if not ha_token_enc and default_user:
             ha_token_enc = default_user.ha_token_enc
         ha_token = decrypt(ha_token_enc) if ha_token_enc else None
+        if not _ha_enabled(session):
+            ha_url = ha_token = None  # The Home Assistant integration is off: never asked.
 
         if not nc_url or not nc_admin_user or not nc_admin_pass:
             raise HTTPException(status_code=400, detail="Nextcloud configuration missing")
@@ -7984,8 +8021,12 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
                             if isinstance(t, str):
                                 dev_ids.append(t.split(".")[-1])
 
-            # 2. Fallback to admin/default or global settings
-            if not ha_url or not ha_token:
+            # 2. Fallback to admin/default or global settings, only while the Home Assistant
+            #    integration is on. Off, those stored logins are not used; the hub's own is (below).
+            ha_on = _ha_enabled(session)
+            if not ha_on and _is_system_default_user(user):
+                ha_url = ha_token = None
+            if ha_on and (not ha_url or not ha_token):
                 admin = session.exec(select(User).where(User.is_admin == True)).first()  # noqa: E712
                 default_user = session.exec(select(User).where(User.username == "default")).first()
                 if admin and admin.ha_url and admin.ha_token_enc:
@@ -7995,7 +8036,7 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
                     ha_url = ha_url or default_user.ha_url
                     ha_token = ha_token or decrypt(default_user.ha_token_enc)
 
-            if not ha_url or not ha_token:
+            if ha_on and (not ha_url or not ha_token):
                 url_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "ha_url")).first()
                 tok_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "ha_token")).first()
                 if url_setting and url_setting.value:
@@ -8003,10 +8044,12 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
                 if tok_setting and tok_setting.value:
                     ha_token = ha_token or (decrypt(tok_setting.value) if tok_setting.value.startswith("gAAAAA") else tok_setting.value)
 
-            if not ha_url:
-                ha_url = os.getenv("HA_URL") or os.getenv("HOME_ASSISTANT_URL")
-            if not ha_token:
-                ha_token = os.getenv("HA_TOKEN") or os.getenv("HOME_ASSISTANT_TOKEN")
+            if ha_on:
+                # The startup values (services.config), never the environment per call.
+                from services import config as _config
+
+                ha_url = ha_url or _config.HA_URL
+                ha_token = ha_token or _config.HA_TOKEN
 
         if not ha_url or not ha_token:
             # No stored HA login anywhere: the hub's own (services.common.hub_login), which
@@ -8017,7 +8060,8 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
             if login is not None:
                 ha_url, ha_token = login
         if not ha_url or not ha_token:
-            log.warning("[location] Cannot forward location to the hub: HA_URL is not configured")
+            # Neither integration is set up: there is nothing to forward to, which is not a fault.
+            log.debug("[location] No home hub is set up; location not forwarded")
             return
         ha_url = ha_redirect.redirect(ha_url)
 

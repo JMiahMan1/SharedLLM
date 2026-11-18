@@ -116,9 +116,14 @@ async def get_redis():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from services import config as _config
     from services.config import resolve_runtime_config
     await resolve_runtime_config()
-    log.info("[Geo] runtime config resolved (HA_URL=%s)", bool(HA_URL))
+    # The names imported above hold the .env values; Identity's settings (ha_url,
+    # ha_token) are only known now, once.
+    global HA_URL, HA_TOKEN
+    HA_URL, HA_TOKEN = _config.HA_URL, _config.HA_TOKEN
+    log.info("[Geo] runtime config resolved (home hub: %s)", _hub_kind() or "none set up")
     global APP_TIMEZONE
     if not (os.environ.get("APP_TIMEZONE") or "").strip():
         resolved = await _household_tz_mod.startup("geo", required=True)
@@ -197,18 +202,31 @@ def _hub_target() -> tuple[str, str] | None:
     return stack_login()
 
 
-def _hub_base() -> str:
+def _hub_kind() -> str | None:
+    """"home_assistant", "homehub", or None when neither integration is set up."""
+    if HA_URL and HA_TOKEN:
+        return "home_assistant"
+    from services.common.hub_login import stack_login
+
+    return "homehub" if stack_login() is not None else None
+
+
+def _require_hub() -> tuple[str, str]:
+    """``_hub_target()``, or a clear 503 when no home hub is set up at all."""
     target = _hub_target()
     if not target:
-        raise HTTPException(status_code=503, detail="No home hub is set up (HOMEHUB_URL / HA_URL is not configured)")
-    return target[0]
+        from services.common.hub_login import NO_HUB_MESSAGE
+
+        raise HTTPException(status_code=503, detail=NO_HUB_MESSAGE)
+    return target
+
+
+def _hub_base() -> str:
+    return _require_hub()[0]
 
 
 def _ha_headers() -> dict:
-    target = _hub_target()
-    if not target:
-        raise HTTPException(status_code=503, detail="No home hub is set up (HOMEHUB_URL / HA_URL is not configured)")
-    return {"Authorization": f"Bearer {target[1]}", "Content-Type": "application/json"}
+    return {"Authorization": f"Bearer {_require_hub()[1]}", "Content-Type": "application/json"}
 
 
 def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
@@ -245,9 +263,8 @@ def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
 
 
 async def _ha_get_states() -> list:
-    if not HA_URL:
-        raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
-    async with get_client_insecure() as client, client.get(f"{_hub_base()}/api/states", headers=_ha_headers()) as resp:
+    base, headers = _hub_base(), _ha_headers()
+    async with get_client_insecure() as client, client.get(f"{base}/api/states", headers=headers) as resp:
         if resp.status != 200:
             raise HTTPException(status_code=502, detail=f"HA returned {resp.status}")
         return await resp.json()
@@ -822,8 +839,6 @@ async def get_history(entity_id: str, samples: int = Query(200, ge=1, le=2000)):
     HA returns a list of [state, attributes, last_changed] rows; we extract the
     lat/lon points for trip replay.
     """
-    if not HA_URL:
-        raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
     url = f"{_hub_base()}/api/history/period"
     # Not minimal_response: HA's REST answer then drops the attributes (the position) after the first row.
     params = {"filter_entity_id": entity_id, "significant_changes_only": "true"}
@@ -1842,8 +1857,8 @@ async def post_see(
     """Push a location into HA via the device_tracker.see service and record telemetry breadcrumb."""
     if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
-    if not HA_URL:
-        raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
+    # Home Assistant when it is set up, else HomeHub; 503 only when there is no hub at all.
+    _require_hub()
 
     r_steps = await get_redis()
     if update.daily_steps is not None and r_steps:

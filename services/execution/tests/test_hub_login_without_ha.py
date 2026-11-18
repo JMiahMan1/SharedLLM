@@ -102,7 +102,7 @@ async def test_without_any_hub_a_light_says_so(monkeypatch, commands):
     monkeypatch.setattr(config, "HOMEHUB_URL", "")
     res = await light_handler.handle_light(
         LightControlRequest(user_context=UserContext(**KID), entity_id="light.den", action="turn_on"))
-    assert res.status == "FAILURE" and "HOMEHUB_URL" in res.message
+    assert res.status == "FAILURE" and res.message == hub_login.NO_HUB_MESSAGE
     assert commands == []
 
 

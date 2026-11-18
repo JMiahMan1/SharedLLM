@@ -11,7 +11,6 @@ external URL, the push relay allow-list, the Jarvis fallback).
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Any
 
@@ -25,7 +24,16 @@ log = logging.getLogger("gateway.phones")
 
 router = APIRouter(prefix="/api/homehub/phones")
 
-HOMEHUB_URL = os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123").rstrip("/")
+
+def _homehub_base() -> str:
+    """HOMEHUB_URL (resolved once at startup); 503 while the HomeHub integration is off."""
+    from services.common.hub_login import NO_HOMEHUB_MESSAGE, homehub_url
+
+    base = homehub_url()
+    if not base:
+        raise HTTPException(status_code=503, detail=NO_HOMEHUB_MESSAGE)
+    return base
+
 _TIMEOUT = aiohttp.ClientTimeout(total=30, connect=5)
 _PASS_THROUGH = {200, 201, 400, 404}
 _ENTRY_ID = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
@@ -46,7 +54,7 @@ async def _hub(method: str, path: str, *, json: Any = None) -> tuple[int, Any]:
     headers = {"Authorization": f"Bearer {INTERNAL_SECRET}"}
     try:
         async with shared_http_client() as client, client.request(
-            method, f"{HOMEHUB_URL}{path}", json=json, headers=headers, timeout=_TIMEOUT
+            method, f"{_homehub_base()}{path}", json=json, headers=headers, timeout=_TIMEOUT
         ) as resp:
             try:
                 body = await resp.json(content_type=None)

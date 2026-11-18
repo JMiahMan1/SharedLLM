@@ -197,9 +197,13 @@ async def run_actions(actions: list[dict], event: dict) -> int:
         if action["type"] == "call":
             done += await call_service(action, {"event": "alert.started", "data": event, "ts": time.time()})
             continue
+        from services import config
         from services.execution import ha_client, hardware_router
         from services.execution.main import resolve_first_user
 
+        if not config.any_home_hub():
+            log.info("[weather] no home hub is set up; device action %s skipped", action.get("service"))
+            continue
         hub_url, hub_token = hardware_router.hub_pair(await resolve_first_user() or {})
         if not hub_url or not hub_token:
             log.warning("[weather] %s Action skipped.", hardware_router.NO_HUB_MESSAGE)

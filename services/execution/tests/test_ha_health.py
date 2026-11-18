@@ -149,8 +149,10 @@ async def test_admins_are_told_once_after_the_grace_period_and_again_on_recovery
         sent.append(payload)
         return True
 
+    from services import config
     from services.common import notify
 
+    monkeypatch.setattr(config, "HA_URL", HA)
     monkeypatch.setattr(notify, "send", fake_send)
     ha(_refused(), _refused(), _Resp(200))
     await ha_client.call_service(HA, "tok", "light", "turn_on", "light.a")
@@ -179,3 +181,46 @@ def test_status_names_the_host_and_reason():
     ha_health.record_unreachable(HA, "connection refused")
     entry = ha_health.status()["http://ha.local"]
     assert entry["status"] == "down" and entry["last_error"] == "connection refused"
+
+
+# -- only an integration that is on is ever reported (integrations step 1) -------------------------
+
+async def _notices(monkeypatch, url):
+    sent = []
+
+    async def fake_send(payload, **kw):
+        sent.append(payload)
+        return True
+
+    from services.common import notify
+
+    monkeypatch.setattr(notify, "send", fake_send)
+    await ha_health._send_notice(url, recovered=False, reason="timed out")
+    return sent
+
+
+async def test_no_home_assistant_is_down_notice_while_home_assistant_is_off(monkeypatch):
+    from services import config
+
+    monkeypatch.setattr(config, "HA_URL", "")
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
+    assert ha_health.integration_for(HA) is None
+    assert await _notices(monkeypatch, HA) == []
+
+
+async def test_a_down_homehub_is_reported_as_homehub(monkeypatch):
+    from services import config
+
+    monkeypatch.setattr(config, "HA_URL", "")
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test:8123")
+    sent = await _notices(monkeypatch, "http://hub.test:8123")
+    assert len(sent) == 1
+    assert "HomeHub is down" in str(sent[0]) and "Home Assistant" not in str(sent[0])
+
+
+async def test_a_stale_url_of_a_switched_off_home_assistant_is_not_reported(monkeypatch):
+    from services import config
+
+    monkeypatch.setattr(config, "HA_URL", "")
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test:8123")
+    assert await _notices(monkeypatch, HA) == []

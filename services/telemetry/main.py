@@ -330,6 +330,9 @@ def _internal_ok(value: str | None) -> bool:
 
 @asynccontextmanager
 async def lifespan(app):
+    # Identity's settings over .env, once (homehub_url turns the HomeHub integration on or off).
+    from services.config import resolve_runtime_config
+    await resolve_runtime_config()
     from services.common import household_tz
     await household_tz.startup("telemetry")
     tasks = [
