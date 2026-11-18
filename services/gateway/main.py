@@ -102,6 +102,7 @@ from services.gateway import (
     private_chat_marks,
     private_chat_messages,
     private_chat_preview,
+    private_chat_reminders,
     push_routes,
     recipe_images,
     room_presence,
@@ -867,6 +868,7 @@ app.include_router(private_chat_export.router)  # Export, back up and restore th
 app.include_router(private_chat_marks.router)  # Edits and reactions on private chat messages, sealed on the device
 app.include_router(private_chat_messages.router)  # The private chat's sealed messages, kept here instead of on Talk
 app.include_router(private_chat_preview.router)  # Link previews the sender's device seals into a private message
+app.include_router(private_chat_reminders.router)  # Gentle reply reminders in the private chat (metadata only)
 app.include_router(beloved_routes.router)  # Beloved: the couple's page inside the private chat (one father, one mother)
 app.include_router(account_export.router)  # Export my data and restore it (docs/ACCOUNT_EXPORT.md)
 app.include_router(private_chat.router)  # Private chat: the parents' end-to-end encrypted conversation  # Lists: the hub's to-do lists for every member
