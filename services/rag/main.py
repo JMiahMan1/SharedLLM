@@ -2622,6 +2622,30 @@ async def _device_index_loop() -> None:
         await asyncio.sleep(60)
 
 
+@app.post("/rag/devices/used", dependencies=[Depends(require_internal)])
+async def devices_used(payload: dict):
+    """Count devices a command was sent to as used: every user's row for them, from that hub.
+
+    The gateway reports the entity ids of each command the hub ran (voice, the app,
+    a schedule or an automation), batched. The rows' ``last_used_at`` and
+    ``usage_count`` are written with the next flush, like a search hit.
+    """
+    source = payload.get("source") or SOURCE_HOMEHUB
+    if source not in DEVICE_SOURCES:
+        return JSONResponse(status_code=400, content={"status": "ERROR", "message": f"unknown source {source!r}"})
+    entity_ids = [e for e in payload.get("entity_ids") or [] if isinstance(e, str) and _usable_entity_id(e)]
+    if not entity_ids:
+        return {"status": "SUCCESS", "rows": 0}
+    marks = ",".join("?" for _ in entity_ids)
+    rows = _conn().execute(
+        f"SELECT id FROM rag_items WHERE collection_name = ? AND json_extract(metadata, '$.source') = ?"
+        f" AND json_extract(metadata, '$.entity_id') IN ({marks})",
+        [HOME_DEVICES, source, *entity_ids],
+    ).fetchall()
+    _note_device_references([r["id"] for r in rows])
+    return {"status": "SUCCESS", "rows": len(rows)}
+
+
 @app.post("/rag/devices/sweep", dependencies=[Depends(require_internal)])
 async def sweep_devices():
     """Run the staleness sweep now (it also runs at start and every HOME_DEVICE_SWEEP_MINUTES)."""
