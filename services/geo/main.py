@@ -195,19 +195,18 @@ def _hub_target() -> tuple[str, str] | None:
     which may be a real Home Assistant). Removing HA_TOKEN must not take
     zones, people and arrivals down with it.
     """
-    if HA_URL and HA_TOKEN:
-        return HA_URL.rstrip("/"), HA_TOKEN
-    from services.common.hub_login import stack_login
+    from services.common.hub_login import hub_login
 
-    return stack_login()
+    login = hub_login({"ha_url": HA_URL, "ha_token": HA_TOKEN})
+    return (login[0].rstrip("/"), login[1]) if login else None
 
 
 def _hub_kind() -> str | None:
     """"home_assistant", "homehub", or None when neither integration is set up."""
-    if HA_URL and HA_TOKEN:
-        return "home_assistant"
-    from services.common.hub_login import stack_login
+    from services.common.hub_login import has_own_login, stack_login
 
+    if has_own_login({"ha_url": HA_URL, "ha_token": HA_TOKEN}):
+        return "home_assistant"
     return "homehub" if stack_login() is not None else None
 
 

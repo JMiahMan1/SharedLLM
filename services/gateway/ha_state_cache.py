@@ -63,7 +63,10 @@ def _login_params(ha_url: str | None, ha_token: str | None) -> dict[str, str]:
     The state cache answers lookups by entity id, so it keeps the entities the hub hides (a duplicate
     device's copy) too: a command naming one still reads its state.
     """
-    login = {"ha_url": ha_url, "ha_token": ha_token} if ha_url and ha_token else {}
+    from services.common.hub_login import own_login
+
+    own = own_login({"ha_url": ha_url, "ha_token": ha_token})  # None while HA is off
+    login = {"ha_url": own[0], "ha_token": own[1]} if own else {}
     return {**login, "include_hidden": "1"}
 
 

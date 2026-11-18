@@ -4172,7 +4172,11 @@ async def chat_handler(request: Request, background_tasks=None):
         log.info("[RAG] MISSION LOCK detected; bypassing all collections to ensure focus.")
     else:
         try:
-            collections = ["ha_entities", "nextcloud_files", "system_capabilities", "system_learnings"]
+            collections = ["nextcloud_files", "system_capabilities", "system_learnings"]
+            from services import config as _config
+
+            if _config.any_home_hub():  # no hub: no device index, as no hub tools are offered
+                collections.insert(0, "ha_entities")
             for coll in collections:
                 client = get_http_client()
                 resp = await client.post(
@@ -20533,7 +20537,9 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
             host = (parsed.hostname or "").lower()
             mhost = (urlparse(creds.get("mass_url", "") or "").hostname or "").lower()
             ahost = (urlparse(creds.get("audiobookshelf_url", "") or "").hostname or "").lower()
-            hhost = (urlparse(creds.get("ha_url", "") or "").hostname or "").lower()
+            from services.common.hub_login import own_login
+
+            hhost = (urlparse((own_login(creds) or ("", ""))[0]).hostname or "").lower()
             if mhost and host == mhost:
                 svc = "ma"
             elif ahost and host == ahost:
@@ -20586,8 +20592,9 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
             headers["Authorization"] = f"Bearer {token}"
     else:
         rel = parsed.path if is_full else (path if path.startswith("/") else "/" + path)
-        base = creds.get("ha_url") or ""
-        token = creds.get("ha_token") or ""
+        from services.common.hub_login import own_login
+
+        base, token = own_login(creds) or ("", "")  # their own HA login; none while HA is off
         if not (base and token):
             # No HA login of their own: the hub's login, but only for a picture of an
             # entity the caller may view (the path is the client's choice, and the hub's

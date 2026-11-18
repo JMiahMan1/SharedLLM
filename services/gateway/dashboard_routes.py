@@ -80,10 +80,11 @@ def _hub_login(creds: dict[str, Any], personal: bool) -> tuple[str, str]:
     the caller's entity permissions, so reading as the hub widens nothing. ``personal`` reads are
     the caller's own data on the hub (their dashboard prefs) and never fall back.
     """
-    base = str(creds.get("ha_url") or "").rstrip("/")
-    token = str(creds.get("ha_token") or "")
-    if base and token:
-        return base, token
+    from services.common.hub_login import own_login
+
+    own = own_login(creds)  # None while the Home Assistant integration is off
+    if own:
+        return own[0].rstrip("/"), own[1]
     if not personal:
         # The hub's own login, which only ever goes to HOMEHUB_URL (never to HA_URL: a real Home
         # Assistant must not be handed the stack's secret). None while HomeHub is off.

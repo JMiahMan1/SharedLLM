@@ -43,6 +43,12 @@ def _own(ctx: Any) -> tuple[str, str]:
         url, token = ctx.get("ha_url"), ctx.get("ha_token")
     else:
         url, token = getattr(ctx, "ha_url", None), getattr(ctx, "ha_token", None)
+    secret = getattr(config, "INTERNAL_SECRET", "") or ""
+    if secret and token == secret:
+        # A context already given the hub's own login (``with_hub_login``) carries no login of
+        # the caller's own: treating the stack's secret as theirs would skip the permission
+        # filter and could hand the secret on (a sandbox, an external agent).
+        return "", ""
     return str(url or ""), str(token or "")
 
 
@@ -50,6 +56,17 @@ def has_own_login(ctx: Any) -> bool:
     """Does this caller carry a hub login of their own (a stored HA token)?"""
     url, token = _own(ctx)
     return bool(url and token)
+
+
+def own_login(ctx: Any) -> tuple[str, str] | None:
+    """(url, token) of the caller's own Home Assistant login; None when they have none to use.
+
+    None while the Home Assistant integration is off, whatever is stored. For the
+    places that may only ever use the person's own login (their personal data on
+    the hub, a token handed to their own workspace), never the hub's.
+    """
+    url, token = _own(ctx)
+    return (url, token) if url and token else None
 
 
 def hub_login(ctx: Any) -> tuple[str, str] | None:

@@ -38,6 +38,7 @@ from services.gateway.llm_providers import (
 )
 from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION, load_prompt
 from services.gateway.schemas import ResolvedCredentials
+from services.gateway.tool_registry import hub_tool_prompt, hub_tool_withheld
 from services.shared.media_validation import MEDIA_EXTS, media_extension, rewrite_media_extension, validate_media_bytes
 
 _LESSON_MARKERS = ("RULE:", "ROOT CAUSE:", "OUTCOME:", "CONFIDENCE:", "SUPERSEDES:")
@@ -535,6 +536,21 @@ class OllamaProvider(BaseLLMProvider):
         return full_content
 
 log = logging.getLogger("gateway.agent_loop")
+
+
+def _hub_tool_unavailable(action_name: str) -> dict | None:
+    """The tool result for a device tool named while no home hub is set up; None otherwise.
+
+    Such a tool is not offered in the prompt (``hub_tool_prompt``) and is not sent anywhere
+    if the model names one anyway, or an alias resolves to one. The model is told why, in the
+    words execution uses, so it can say so instead of retrying.
+    """
+    if not hub_tool_withheld(action_name):
+        return None
+    from services.common.hub_login import NO_HUB_MESSAGE
+
+    return {"status": "ERROR", "message": NO_HUB_MESSAGE}
+
 
 ALLOWED_TOOLS = {
     "lightcontrolrequest", "mediaplayrequest", "mediatransportrequest", "mediastatusrequest",
@@ -2892,6 +2908,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     # 4. Enhance system prompt with current date/time and RAG context
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
+    # No home hub set up: the device tools are not offered (tool_registry.HUB_TOOLS), as on
+    # the single-turn path. Fixed per configuration, so the prompt's start stays the same.
+    full_system = hub_tool_prompt(full_system)
     enhanced_system = f"{full_system}\n\nCurrent Date/Time: {now}\n\nRetrieved Context:\n{rag_context}"
 
     ollama_payload = {
@@ -2960,7 +2979,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     # --- PLANNING PHASE ---
     try:
-        raven_plan = await load_prompt(get_http_client(), PROMPT_RAVEN_PLAN)
+        raven_plan = hub_tool_prompt(await load_prompt(get_http_client(), PROMPT_RAVEN_PLAN))
         plan_prompt = [
             {"role": "system", "content": raven_plan},
             {"role": "user", "content": f"Mission: {query}\n\nCreate a concise execution plan:"}
@@ -3950,8 +3969,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         "Voice Tools": ["podcastrenderrequest", "speakeridentifyrequest", "listvoicesrequest", "ttsrequest", "sttrequest"],
                         "Other": ["calendarrequest", "noterequest", "timerrequest", "talkrequest", "tvcastrequest", "systemlearningrequest", "discoverysyncrequest", "identityrequest", "identitymanagerequest", "audiobookshelfrequest", "biblerequest", "calibrerequest", "llminforequest", "contextsearchrequest", "deploymentrequest", "capabilityindexrequest", "volumeinventoryrequest", "controlplanerequest", "ravenmissionrequest", "ravenrecallrequest", "redisinspectrequest"],
                     }
-                    tool_table = "\n".join(f"  {cat}: {', '.join(tools)}" for cat, tools in tool_categories.items())
-                    closest = difflib.get_close_matches(action_name, list(ALLOWED_TOOLS), n=3, cutoff=0.4)
+                    tool_table = "\n".join(
+                        f"  {cat}: {', '.join(offered)}"
+                        for cat, tools in tool_categories.items()
+                        if (offered := [t for t in tools if not hub_tool_withheld(t)])
+                    )
+                    closest = difflib.get_close_matches(
+                        action_name, [t for t in ALLOWED_TOOLS if not hub_tool_withheld(t)], n=3, cutoff=0.4,
+                    )
                     closest_str = f" Closest matches: {', '.join(closest)}." if closest else ""
                     error_msg = (
                         f"SCHEMA ERROR: Unknown tool '{raw_action}'.{closest_str}\n"
@@ -3962,6 +3987,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     action_log.append(f"ITERATION {iter_num}: {error_msg}")
                     exec_data = {"status": "ERROR", "message": error_msg}
                     continue
+
+        no_hub = _hub_tool_unavailable(action_name)
+        if no_hub is not None:
+            log.info(f"[AgentLoop] {action_name} not dispatched: no home hub is set up")
+            action_log.append(f"ITERATION {iter_num}: {action_name}: {no_hub['message']}")
+            exec_data = no_hub
+            continue
 
         await stream_event("action", f"Executing Tool: {action_name}")
         log.info(f"[AgentLoop] Dispatching action: {action_name}")

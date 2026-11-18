@@ -287,13 +287,37 @@ _SANDBOX_BASE_ENV_KEYS = (
 )
 
 
+#: Home Assistant's keys: passed to a sandbox only while that integration is on.
+_SANDBOX_HA_ENV_KEYS = frozenset({"HA_TOKEN", "HOME_ASSISTANT_TOKEN", "HA_URL"})
+
+
+def _home_assistant_on() -> bool:
+    from services import config
+
+    return config.home_assistant_enabled()
+
+
 def _sandbox_credential_env() -> dict[str, str]:
-    """Collect integration credentials from the host env to inject into sandboxes."""
-    return {
+    """Collect integration credentials from the host env to inject into sandboxes.
+
+    No Home Assistant login or address while that integration is off. While it is on,
+    the address is the one resolved at startup (``services.config.HA_URL``, redirected
+    away from a retired host), not the raw environment.
+    """
+    env = {
         k: os.environ[k]
         for k in _SANDBOX_CRED_ENV_KEYS
-        if os.environ.get(k)
+        if k not in _SANDBOX_HA_ENV_KEYS and os.environ.get(k)
     }
+    if _home_assistant_on():
+        from services import config
+
+        for k in ("HA_TOKEN", "HOME_ASSISTANT_TOKEN"):
+            if os.environ.get(k):
+                env[k] = os.environ[k]
+        if config.HA_URL and ("HA_TOKEN" in env or "HOME_ASSISTANT_TOKEN" in env):
+            env["HA_URL"] = str(config.HA_URL)
+    return env
 
 
 def _sandbox_credential_env_with_user(user_context: dict[str, Any]) -> dict[str, str]:
@@ -302,7 +326,10 @@ def _sandbox_credential_env_with_user(user_context: dict[str, Any]) -> dict[str,
     cred_env = _sandbox_credential_env()
     # Overlay with user context if present (Identity service already decrypted)
     if isinstance(user_context, dict):
-        for key in ("GH_TOKEN", "GITHUB_TOKEN", "GIT_TOKEN", "GITLAB_TOKEN", "HA_TOKEN"):
+        keys = ["GH_TOKEN", "GITHUB_TOKEN", "GIT_TOKEN", "GITLAB_TOKEN"]
+        if _home_assistant_on():
+            keys.append("HA_TOKEN")
+        for key in keys:
             if user_context.get(key):
                 cred_env[key] = str(user_context[key])
     return cred_env
