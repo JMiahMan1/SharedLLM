@@ -56,6 +56,12 @@ GATEWAY_ENDPOINTS = [
     "http://127.0.0.1:11435",
 ]
 
+# These tests post real Raven missions. Nothing is probed, let alone posted,
+# unless the run opted in to live tests (--run-live or SHAREDLLM_RUN_LIVE=1 from
+# the shell; conftest.py ignores the variable when it only comes from .env).
+if os.environ.get("SHAREDLLM_RUN_LIVE") != "1":
+    pytest.skip("Raven live tests target a deployed gateway (opt in with --run-live)", allow_module_level=True)
+
 # Use first reachable endpoint
 gateway_url: str | None = None
 for ep in GATEWAY_ENDPOINTS:

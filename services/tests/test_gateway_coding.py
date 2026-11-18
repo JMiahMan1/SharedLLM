@@ -9,6 +9,9 @@ GATEWAY_URL = "http://ai.local:11435"
 # but for smoke tests we assume localhost bypass or pre-known secret.
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET") or ""
 
+# Targets a deployed gateway: skipped unless the run opts in (--run-live).
+pytestmark = pytest.mark.live
+
 @pytest.mark.server_only
 def test_coding_chat():
     print("Testing Coding LLM via Gateway Chat...")
