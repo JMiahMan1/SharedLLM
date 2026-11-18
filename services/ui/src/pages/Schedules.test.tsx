@@ -25,11 +25,19 @@ const OVERVIEW = {
 };
 
 let holds: unknown[] = [];
+let switched: { id: string; body: unknown }[] = [];
+let canEdit = false;
 
 beforeEach(() => {
   holds = [];
+  switched = [];
+  canEdit = false;
   server.use(
-    http.get('/api/homehub/climate', () => HttpResponse.json(OVERVIEW)),
+    http.get('/api/homehub/climate', () => HttpResponse.json({ ...OVERVIEW, can_edit: canEdit })),
+    http.post('/api/homehub/schedules/:id/enabled', async ({ params, request }) => {
+      switched.push({ id: String(params.id), body: await request.json() });
+      return HttpResponse.json({ schedule_id: params.id, enabled: false });
+    }),
     http.post('/api/homehub/climate/hold', async ({ request }) => {
       holds.push(await request.json());
       return HttpResponse.json(THERMOSTAT);
@@ -59,5 +67,19 @@ describe('Schedules page', () => {
     await waitFor(() => expect(holds).toEqual([
       { entity_id: 'climate.hall', setpoint: { hvac_mode: 'heat', temperature: 22 }, until: 'next_slot' },
     ]));
+  });
+
+  it('lets an admin switch a program off and on from its row', async () => {
+    canEdit = true;
+    renderWithProviders(<Schedules />, { route: '/schedules' });
+    const toggle = await screen.findByRole('switch', { name: 'Made-up week on' });
+    expect(toggle).toBeEnabled();
+    await userEvent.click(toggle);
+    await waitFor(() => expect(switched).toEqual([{ id: 'p1', body: { enabled: false } }]));
+  });
+
+  it('shows a family member the switch but not to use', async () => {
+    renderWithProviders(<Schedules />, { route: '/schedules' });
+    expect(await screen.findByRole('switch', { name: 'Made-up week on' })).toBeDisabled();
   });
 });

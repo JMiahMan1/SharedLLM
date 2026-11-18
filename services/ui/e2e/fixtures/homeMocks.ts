@@ -357,6 +357,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       const registry = registries.answer(method, p, body);
       if (registry) return json(registry.body, registry.status);
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
+      if (method === 'POST' && /^\/api\/homehub\/schedules\/[^/]+\/enabled$/.test(p)) return json({ schedule_id: p.split('/')[4], enabled: false });
       if (p === '/api/homehub/automations/validate') return json({ valid: true, errors: [], unsupported_reason: null, warnings: [] });
       if (method === 'POST' && /^\/api\/homehub\/automations\/(automation|script)$/.test(p)) {
         return json({ item: { ...AUTOMATION, id: 'a2', alias: 'New' }, config: (body as { config?: unknown })?.config ?? {} });

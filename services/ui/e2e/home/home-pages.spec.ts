@@ -69,6 +69,19 @@ test.describe('home pages', () => {
     await snap(page, info, 'climate-hold');
     await dialog.getByRole('button', { name: /^Hold$/ }).click();
     await expect.poll(() => run.mocks.posts.some((p) => p.path === '/api/homehub/climate/hold')).toBe(true);
+    // An admin can turn the program off from the card, after saying yes.
+    await card.getByRole('button', { name: /^Turn off the .* schedule$/ }).click();
+    // By its title: the Hold sheet (which also says "Turn off") may still be sliding away.
+    const confirm = page.getByRole('dialog', { name: /^Turn off .*\?$/ });
+    // A bottom sheet slides up (24px): measure it once it has arrived.
+    await expect.poll(async () => {
+      const box = await confirm.boundingBox();
+      return box ? box.y + box.height - page.viewportSize()!.height : 999;
+    }).toBeLessThanOrEqual(1);
+    await expectFits(page, confirm);
+    await snap(page, info, 'climate-turn-off');
+    await confirm.getByRole('button', { name: 'Turn off' }).click();
+    await expect.poll(() => run.mocks.posts.some((p) => /\/api\/homehub\/schedules\/[^/]+\/enabled$/.test(p.path))).toBe(true);
     clean(run);
   });
 
@@ -337,6 +350,13 @@ test.describe('home pages', () => {
     const card = page.getByTestId('thermostat-card');
     await expect(card).toBeVisible();
     await expectLayoutSound(page, info, 'schedules');
+    // Every program has its own on/off switch, like every other schedule.
+    const row = page.getByTestId('program-row').first();
+    await expect(row).toBeVisible();
+    await expectTapTargets(row);
+    await snap(page, info, 'schedules-programs');
+    await row.getByRole('switch').click();
+    await expect.poll(() => run.mocks.posts.some((p) => /\/api\/homehub\/schedules\/[^/]+\/enabled$/.test(p.path))).toBe(true);
     await page.getByRole('button', { name: 'Away and energy' }).click();
     await expectNoHorizontalOverflow(page);
     await snap(page, info, 'schedules-away');
