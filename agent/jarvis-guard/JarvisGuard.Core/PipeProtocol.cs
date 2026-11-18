@@ -13,13 +13,16 @@ public static class PipeProtocol
 {
     public sealed class Request
     {
-        public string Cmd { get; set; } = "";          // "status" | "parent-unlock" | "ask-time"
+        public string Cmd { get; set; } = "";          // "status" | "parent-unlock" | "offline-unlock" | "ask-time" | "message" | "chores" | "chore-done" | "usage"
         public string? HubUrl { get; set; }
         public string? ParentUsername { get; set; }
         public string? ParentPassword { get; set; }
         public int Minutes { get; set; }               // for cmd=ask-time
         public string? Note { get; set; }              // for cmd=ask-time: why, in the child's words
         public Dictionary<string, long>? Apps { get; set; } // for cmd=usage: foreground ms per exe since the last report
+        public string? Text { get; set; }              // for cmd=message: the child's message to their parents
+        public string? ChoreId { get; set; }           // for cmd=chore-done
+        public string? Code { get; set; }              // for cmd=offline-unlock: a parent's offline code
     }
 
     public sealed class Response
@@ -27,7 +30,9 @@ public static class PipeProtocol
         public bool Ok { get; set; }
         public string? Error { get; set; }
         public GuardState? State { get; set; }          // for cmd=status
-        public int UntilMinutes { get; set; }           // for cmd=parent-unlock
+        public int UntilMinutes { get; set; }           // for cmd=parent-unlock / offline-unlock
+        public List<ChoreItem>? Chores { get; set; }    // for cmd=chores
+        public string? Info { get; set; }               // a line to show on success (who a message reached)
     }
 
     public static string EncodeRequest(Request r) => JsonSerializer.Serialize(r, JsonOptions.Web);

@@ -27,9 +27,16 @@ three modes:
   the pipe (a SYSTEM process cannot see the desktop). "Ask for more time"
   goes through the service (`ask-time`) to `POST /api/screen-time/requests`.
 - `--overlay` (raised by the tray as soon as the PC locks) - the lock
-  surface: full screen, with the reason, when the lock lifts, a countdown to
-  the sign-out, "Ask for more time", "Message a parent" (opens the hub) and a
-  parent's sign-in. It explains the lock; the session sign-out holds it.
+  surface, the same ways out as the phone's lock screen: the reason, when the
+  lock lifts and a countdown to the sign-out; "Ask for more time" (15, 30 or
+  60 minutes, with a note); "Message a parent" (a chat message to the
+  child's parents, `/api/guard/message`); "Chores" (today's chores with a
+  Done button each; a parent then confirms each one, as on Android; a
+  "chores first" lock opens on them); and "A parent can unlock" (a parent's
+  sign-in, or a parent's offline code when the hub cannot be reached). It
+  explains the lock; the session sign-out holds it. One centred column that
+  wraps and scrolls, sized from the screen's DPI (PerMonitorV2), so it works
+  from 1366x768 to 4K and at 150% scaling; buttons are at least 56 px tall.
 
 The hub, identity and MDM stay exactly as they are for every other device.
 The only hub changes behind this client are the same scoped-key enrolment the
@@ -37,15 +44,17 @@ phones use.
 
 ## Install (the intended path)
 
-1. Download the `jarvis-guard-windows` artifact of the latest green
-   "Windows Guard Build" run (Actions tab, or
-   `gh run download -n jarvis-guard-windows`). It holds `jarvis-guard.exe`,
-   its `.sha256`, `install.ps1`, `uninstall.ps1` and this README. Check the
-   hash (`Get-FileHash jarvis-guard.exe`) against the `.sha256` file.
-2. On the PC, in an elevated PowerShell in that folder:
+1. A parent who manages devices opens Jarvis, Devices, Family: "Family PC
+   (Windows)" shows the version and the SHA-256 and downloads
+   `jarvis-guard-windows.zip` (exe, its `.sha256`, `install.ps1`,
+   `uninstall.ps1`, this README). The deploy copies it there from the latest
+   green CI build. (Before a deploy has done that, the same files are the
+   `jarvis-guard-windows` artifact of the "Windows Guard Build" run.)
+2. Unzip it on the PC and check the hash (`Get-FileHash .\jarvis-guard.exe`).
+3. In an elevated PowerShell in that folder:
 
 ```
-Unblock-File .\jarvis-guard.exe, .\install.ps1, .\uninstall.ps1
+Unblock-File .\*
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
@@ -123,7 +132,11 @@ tests/                xunit tests for JarvisGuard.Core (plain net10.0, any OS)
 - A parent's sign-in on the lock surface (`POST /api/guard/parent-unlock`)
   lifts the lock on this PC until the time the hub answers (ten minutes),
   even though the hub keeps reporting bedtime or the limit meanwhile, the
-  same as the phone.
+  same as the phone. The answer carries the parents' offline-code verifiers,
+  kept in `%ProgramData%\Jarvis Guard\offline.codes.json` (SYSTEM and
+  Administrators only), so a parent's offline code works later with no
+  connection: five wrong codes wait ten minutes, a good one unlocks for ten
+  minutes and is reported (`offline_unlock`) once the hub answers.
 - Offline (hub unreachable): the last cached rules are re-evaluated on the
   local clock in the hub's order: a parent's pause (on, or until a time)
   locks; bedtime and school lock unless the last answer carried time a parent
@@ -147,8 +160,9 @@ its SHA-256, `install.ps1`, `uninstall.ps1` and this README as the
 `jarvis-guard-windows` artifact (kept 30 days). When the `WINDOWS_PUBLISH_URL`
 and `INTERNAL_SECRET` secrets are set it also posts the exe to the hub's
 `POST /api/app-updates/windows`, which stores it with `windows-version.json`.
-Neither secret is set today, and the hub has no route that serves the exe
-back, so the CI artifact is the only way to get it.
+Neither secret is set today. What parents download is what
+`scripts/deploy_remote.sh` copies from the artifact into
+`data/app_updates/windows/` (docs/MOBILE_OTA_UPDATES.md).
 
 Locally: `dotnet test tests` (any OS) and
 `dotnet build -p:EnableWindowsTargeting=true` (builds the exe on macOS/Linux too).
@@ -159,8 +173,7 @@ Locally: `dotnet test tests` (any OS) and
 - No signing (the exe is unsigned; SmartScreen and Defender may warn, see
   "Unblock-File" above), no update push channel: upgrade by running the new
   `install.ps1` on the PC.
-- No in-lock chores, "Message a parent" from inside the lock surface (it
-  opens the hub in the browser instead), or offline parent codes.
+- No calls from the lock surface (a PC has no phone line).
 - No Assigned Access / kiosk (Pro/Education-only opt-in).
 - No remote wipe, by design.
 - No offline grant tracking: an offline PC cannot honour a grant that has

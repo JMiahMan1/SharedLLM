@@ -224,3 +224,35 @@ def test_a_mother_can_look_at_a_childs_chores_and_a_child_cannot(monkeypatch, re
     acting["ident"] = {"user": "jordan", "is_admin": False, "family_role": "child"}
     resp = client.get("/api/integrations/skylight/chores?scope=taylor", headers={"Authorization": f"Bearer {key}"})
     assert resp.status_code == 403, resp.text
+
+
+class TestAFamilyPcsLockSurface:
+    """A locked Windows PC shows its child's chores and ticks them off with
+    its device key: as that child, never with a scope naming someone else."""
+
+    @pytest.fixture
+    def pc(self, monkeypatch):
+        async def _pc(_request):
+            return {"device_key": "windows-test-guid", "owner_username": "kid", "kind": "windows-pc"}
+
+        async def _resolve(body):
+            return {"user": body["rag_user"], "is_admin": True, "skylight_enabled": True}
+
+        async def _not_a_user_key(_request, body=None):
+            raise AssertionError("a PC's device key is not a user's key")
+
+        monkeypatch.setattr(gateway_main, "_device_agent_key", _pc)
+        monkeypatch.setattr(gateway_main, "resolve_identity", _resolve)
+        monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _not_a_user_key)
+        return TestClient(app, headers={"Authorization": "Bearer wg_fake"})
+
+    def test_reads_only_its_childs_chores(self, pc, monkeypatch):
+        cap = _patch_execution(monkeypatch)
+        assert pc.get("/api/integrations/skylight/chores?scope=all").status_code == 200
+        assert cap["calls"][0]["params"]["user"] == "kid"
+
+    def test_ticks_a_chore_off_as_its_child(self, pc, monkeypatch):
+        cap = _patch_execution(monkeypatch)
+        assert pc.post("/api/integrations/skylight/chores/c1/complete").status_code == 200
+        assert cap["calls"][0]["url"].endswith("/chores/c1/complete")
+        assert cap["calls"][0]["params"] == {"user": "kid"}

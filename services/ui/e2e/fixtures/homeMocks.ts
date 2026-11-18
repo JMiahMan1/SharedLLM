@@ -616,6 +616,10 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/mdm/devices') return json({ devices: [], members: [] });
     if (p === '/api/mdm/files') return json({ folders: [] });
     if (p === '/api/mdm/audit') return json({ events: [] });
+    // The family PC installer (Devices, Family): none on the server in these mocks.
+    if (p === '/api/app-updates/windows/info') {
+      return json({ available: false, version: null, sha256: null, git_sha: null, built_at: null, files: [] });
+    }
 
     // No deploy under way (the "Jarvis is updating" flag, served from a file: 404 when there is none).
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });

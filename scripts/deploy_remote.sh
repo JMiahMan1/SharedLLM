@@ -299,6 +299,49 @@ if command -v gh >/dev/null 2>&1; then
     fi
 fi
 
+DEPLOY_STEP="syncing the Windows installer"
+
+# The family PC installer (agent/jarvis-guard), like the APK: the latest green
+# "Windows Guard Build" artifact on this branch (exe, its SHA-256, install.ps1,
+# uninstall.ps1, README), checked against its own hash, zipped for one download,
+# and copied to data/app_updates/windows/ with a version.json. The gateway serves
+# it to parents who manage devices only (GET /api/app-updates/windows/...).
+# A missing artifact skips this step; a hash that does not match fails the deploy.
+if command -v gh >/dev/null 2>&1; then
+    echo "Checking for the latest Windows installer artifact from CI..."
+    WIN_RUN=$(gh run list --workflow=windows-build.yml --branch="$BRANCH" --limit 10 \
+        --json databaseId,conclusion,headSha,createdAt \
+        --jq '[.[] | select(.conclusion=="success")][0] | "\(.databaseId) \(.headSha) \(.createdAt)"' 2>/dev/null || true)
+    WIN_RUN_ID=$(echo "$WIN_RUN" | awk '{print $1}')
+    WIN_SHA=$(echo "$WIN_RUN" | awk '{print $2}')
+    WIN_AT=$(echo "$WIN_RUN" | awk '{print $3}')
+    if [ -n "$WIN_RUN_ID" ] && [ "$WIN_RUN_ID" != "null" ]; then
+        WIN_TMP=.tmp/winguard
+        rm -rf "$WIN_TMP" && mkdir -p "$WIN_TMP"
+        if gh run download "$WIN_RUN_ID" -n jarvis-guard-windows -D "$WIN_TMP" 2>/dev/null && [ -f "$WIN_TMP/jarvis-guard.exe" ]; then
+            WIN_HASH=$( (sha256sum "$WIN_TMP/jarvis-guard.exe" 2>/dev/null || shasum -a 256 "$WIN_TMP/jarvis-guard.exe") | awk '{print $1}')
+            if [ -f "$WIN_TMP/jarvis-guard.exe.sha256" ] && [ "$(awk '{print $1}' "$WIN_TMP/jarvis-guard.exe.sha256")" != "$WIN_HASH" ]; then
+                echo "[FAIL] The Windows installer from CI run $WIN_RUN_ID does not match its own SHA-256; not publishing it."
+                exit 1
+            fi
+            # The version the build was made from (the csproj at that commit), else this checkout's.
+            WIN_VERSION=$( (git show "$WIN_SHA:agent/jarvis-guard/jarvis-guard.csproj" 2>/dev/null || cat agent/jarvis-guard/jarvis-guard.csproj) \
+                | sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' | head -1)
+            printf '{\n  "version": "%s",\n  "exe_sha256": "%s",\n  "git_sha": "%s",\n  "built_at": "%s",\n  "ci_run": "%s"\n}\n' \
+                "${WIN_VERSION:-unknown}" "$WIN_HASH" "$WIN_SHA" "$WIN_AT" "$WIN_RUN_ID" > "$WIN_TMP/version.json"
+            ( cd "$WIN_TMP" && python3 -m zipfile -c jarvis-guard-windows.zip \
+                $(ls jarvis-guard.exe jarvis-guard.exe.sha256 install.ps1 uninstall.ps1 README.md 2>/dev/null) )
+            ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR/data/app_updates/windows'"
+            rsync -a --delete -e "ssh $SSH_OPTS" "$WIN_TMP/" "$HOST:$DIR/data/app_updates/windows/"
+            echo "[OK] Windows installer ${WIN_VERSION:-unknown} (${WIN_SHA:0:8}, sha256 ${WIN_HASH:0:12}...) synced to the update server."
+        else
+            echo "[WARN] Could not download the jarvis-guard-windows artifact from CI run $WIN_RUN_ID (expired?); the server keeps the installer it has."
+        fi
+    else
+        echo "[WARN] No successful Windows Guard Build on $BRANCH; the server keeps the installer it has."
+    fi
+fi
+
 DEPLOY_STEP="updating the server (pull, restart, health check, OTA bundle)"
 
 # shellcheck disable=SC2087

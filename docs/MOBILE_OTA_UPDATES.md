@@ -11,7 +11,7 @@ or the app will restart in a loop.
 | Version/bundle API | `services/gateway/main.py`: `/api/app-updates/*` |
 | Bundle packaging | `services/ui/build.js` (`packageOtaBundle`) |
 | Publishing | `scripts/deploy_local_build.sh`, `scripts/deploy_remote.sh`, `.github/workflows/android-build.yml` |
-| Published artifacts | `data/app_updates/{version.json,bundle.zip,jarvis-os.apk}` |
+| Published artifacts | `data/app_updates/{version.json,bundle.zip,jarvis-os.apk}`, `data/app_updates/windows/` (the family PC installer) |
 
 ## The core invariant
 
@@ -201,6 +201,31 @@ Publish path: CI signs and publishes the APK to the gateway (above);
 `deploy_remote.sh` can also download the `jarvis-os-release-apk` artifact and
 copy it to `data/app_updates/jarvis-os.apk`. On the phone: Settings → Live
 Over-The-Air Updates → **Check Now**, then Download and Install.
+
+## The Windows installer (Jarvis Guard)
+
+The family PC agent (`agent/jarvis-guard`, docs/WINDOWS_LOCK_SCREEN.md) ships
+next to the APK, the same way: `deploy_remote.sh` takes the newest successful
+"Windows Guard Build" run on the deploy branch, downloads its
+`jarvis-guard-windows` artifact (`jarvis-guard.exe`, `jarvis-guard.exe.sha256`,
+`install.ps1`, `uninstall.ps1`, `README.md`), refuses it if the exe does not
+match its own SHA-256, zips the files into `jarvis-guard-windows.zip`, writes a
+`version.json` (`version` from the csproj at the build's commit, `exe_sha256`,
+`git_sha`, `built_at`, `ci_run`) and syncs the folder to
+`data/app_updates/windows/`. No artifact (none built yet, or older than its 30
+days) is a warning and the server keeps what it has.
+
+It is not a public download. `GET /api/app-updates/windows/info` and
+`GET /api/app-updates/windows/files/{name}` answer only a parent who may
+manage the family's devices (identity's `GET /api/user-panel/device-manager`,
+the same rule as registering a device: an admin, the father, or
+`devices.assign`); only the six names above are served. A parent finds it on
+Devices, Family, under "Family PC (Windows)": the version, the SHA-256 to check
+and the short install steps.
+
+The older `POST /api/app-updates/windows` (CI upload with the internal
+secret) still stores a bare exe at `data/app_updates/jarvis-guard.exe`; the
+download panel does not use it.
 
 ## Verifying a deploy
 

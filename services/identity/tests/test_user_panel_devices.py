@@ -624,3 +624,33 @@ def test_a_parent_signing_in_on_a_childs_tablet_does_not_take_it_over(client: Te
     session.expire_all()
     assert session.exec(select(Device).where(Device.device_key == "kid-tablet-00000001")).first().owner_username == "kate"
     app.dependency_overrides = {}
+
+
+class TestDeviceManager:
+    """The gateway hands out the family PC installer only to a device manager."""
+
+    def test_an_admin_manages_devices(self, session):
+        c = _client(session, "alex")
+        try:
+            assert c.get("/api/user-panel/device-manager").json() == {"can_manage": True}
+        finally:
+            app.dependency_overrides = {}
+
+    def test_a_member_does_not(self, session):
+        c = _client(session, "sam")
+        try:
+            assert c.get("/api/user-panel/device-manager").json() == {"can_manage": False}
+        finally:
+            app.dependency_overrides = {}
+
+    def test_a_pcs_own_key_never_does(self, session):
+        c = _client(session, "alex")
+        try:
+            raw = "wg_" + "a" * 48
+            session.add(Device(device_key="windows-test-guid", kind="windows-pc", registered_by="self",
+                               owner_username="alex", agent_key_hash=main.digest_secret(raw)))
+            session.commit()
+            r = c.get("/api/user-panel/device-manager", headers={"Authorization": f"Bearer {raw}"})
+            assert r.json() == {"can_manage": False}
+        finally:
+            app.dependency_overrides = {}

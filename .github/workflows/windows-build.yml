@@ -50,7 +50,7 @@ jobs:
         # The installer and uninstaller travel with the exe: a parent downloads
         # one zip, unpacks it, and runs install.ps1 from that folder.
         cp agent/jarvis-guard/install.ps1 agent/jarvis-guard/uninstall.ps1 agent/jarvis-guard/README.md dist/
-        sha256sum dist/jarvis-guard.exe | tee dist/jarvis-guard.exe.sha256
+        (cd dist && sha256sum jarvis-guard.exe | tee jarvis-guard.exe.sha256)
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4

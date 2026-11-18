@@ -8812,6 +8812,23 @@ def _is_device_admin(user: User | None, session: Session | None = None) -> bool:
     return False
 
 
+@app.get("/api/user-panel/device-manager")
+def device_manager(
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
+):
+    """Whether the caller may manage the family's devices (``_is_device_admin``).
+
+    The gateway asks before it hands out the family PC installer, so the
+    download follows the same rule as registering and assigning a device. A
+    PC's own device key is never a device manager, whoever owns the PC.
+    """
+    if _device_for_agent_key(session, authorization) is not None:
+        return {"can_manage": False}
+    return {"can_manage": _is_device_admin(caller, session)}
+
+
 @app.get("/api/user-panel/devices", response_model=list[DeviceRead])
 def list_user_panel_devices(
     session: Session = Depends(get_session),
