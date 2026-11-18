@@ -23,6 +23,9 @@
     # it was 1400+ lines a day (measured 2026-10-26) drowning the warnings that
     # matter. Real failures from that logger are ERROR, so this raises its level
     # without touching the access log or any other logger.
+    # Every log filter drops the headers that carry a secret: the stack's own
+    # X-Internal-Secret (found written in plain text in the access log on
+    # 2026-11-18), API keys, arcade and webhook tokens, Authorization and cookies.
     # Error logs ("http.log.error.*", e.g. a 502 while a service restarts) are
     # written by the default logger, not the site's access log, so the site's
     # token filter never saw them and the push stream's token was logged in
@@ -37,6 +40,11 @@
                     replace mt REDACTED
                 }
                 request>headers>Authorization delete
+                request>headers>X-Internal-Secret delete
+                request>headers>X-Api-Key delete
+                request>headers>X-Arcade-Token delete
+                request>headers>X-Gitlab-Token delete
+                request>headers>X-Webhook-Secret delete
                 request>headers>Cookie delete
             }
         }
@@ -87,6 +95,12 @@
                     replace mt REDACTED
                 }
                 request>headers>Authorization delete
+                request>headers>X-Internal-Secret delete
+                request>headers>X-Api-Key delete
+                request>headers>X-Arcade-Token delete
+                request>headers>X-Gitlab-Token delete
+                request>headers>X-Webhook-Secret delete
+                request>headers>Cookie delete
             }
         }
     }
@@ -184,6 +198,11 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
             fields {
                 request>uri regexp ^/api/webhook/[^/?]+ /api/webhook/REDACTED
                 request>headers>Authorization delete
+                request>headers>X-Internal-Secret delete
+                request>headers>X-Api-Key delete
+                request>headers>X-Arcade-Token delete
+                request>headers>X-Gitlab-Token delete
+                request>headers>X-Webhook-Secret delete
                 request>headers>Cookie delete
             }
         }
@@ -220,6 +239,12 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
                     replace mt REDACTED
                 }
                 request>headers>Authorization delete
+                request>headers>X-Internal-Secret delete
+                request>headers>X-Api-Key delete
+                request>headers>X-Arcade-Token delete
+                request>headers>X-Gitlab-Token delete
+                request>headers>X-Webhook-Secret delete
+                request>headers>Cookie delete
             }
         }
     }

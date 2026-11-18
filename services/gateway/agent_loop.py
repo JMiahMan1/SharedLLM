@@ -36,6 +36,7 @@ from services.gateway.llm_providers import (
     get_provider,
     strip_thinking_blocks,
 )
+from services.gateway.http_client import get_http_client, shared_http_client
 from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION, load_prompt
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.tool_registry import hub_tool_prompt, hub_tool_withheld
@@ -1957,65 +1958,6 @@ async def execute_inference_with_kill(
         # "user abort". Suppress CancelledError explicitly.
         with contextlib.suppress(asyncio.CancelledError):
             await watch
-
-
-
-
-_original_async_client = aiohttp.ClientSession
-# One HTTP client per event loop (see main.get_http_client for rationale). The
-# Raven worker runs on its own event loop, so this module's client must be
-# cached per-loop rather than as a single global that would thrash/leak when
-# both the API loop and the worker loop call in.
-_http_clients: dict[asyncio.AbstractEventLoop, aiohttp.ClientSession] = {}
-_fallback_http_client: aiohttp.ClientSession | None = None
-
-
-def _http_client_dead(client: "aiohttp.ClientSession | None") -> bool:
-    """A session can report ``closed == False`` while its underlying connector
-    has been closed (e.g. after a transient upstream disconnect). Reusing such a
-    session raises ``AssertionError: Connector is closed`` on the next request,
-    which is not a ``ClientError`` and therefore escapes normal error handling.
-    Treat a closed/missing connector as a dead client so it gets recreated."""
-    if client is None or client.closed:
-        return True
-    connector = client.connector
-    return connector is None or getattr(connector, "closed", False)
-
-
-def get_http_client() -> aiohttp.ClientSession:
-    try:
-        current_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        current_loop = None
-
-    if current_loop is None:
-        global _fallback_http_client
-        if _http_client_dead(_fallback_http_client):
-            _fallback_http_client = _original_async_client(
-                timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-                connector=aiohttp.TCPConnector(limit=100, keepalive_timeout=INTERNAL_KEEPALIVE_S),
-            )
-        return _fallback_http_client
-
-    client = _http_clients.get(current_loop)
-    if _http_client_dead(client):
-        client = _original_async_client(
-            timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-            connector=aiohttp.TCPConnector(limit=100, keepalive_timeout=INTERNAL_KEEPALIVE_S),
-        )
-        _http_clients[current_loop] = client
-    return client
-
-
-@contextlib.asynccontextmanager
-async def shared_http_client() -> AsyncIterator[aiohttp.ClientSession]:
-    """Borrow the module-pooled client without closing it on exit.
-
-    Use instead of ``async with aiohttp.ClientSession()`` for internal calls.
-    Per-call timeouts must be passed on the request (e.g. ``client.get(..., timeout=...)``).
-    """
-    yield get_http_client()
-
 
 async def _save_b64_artifact(workspace_id: str, relative_path: str, content_base64: str, user_context: dict) -> tuple[int, dict]:
     """Persist a base64 blob (audio/image) into a workspace via files/write.
