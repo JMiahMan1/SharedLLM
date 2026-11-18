@@ -408,12 +408,14 @@ def test_a_parents_answer_to_a_more_time_request_reaches_the_child(wired):
     assert "30 more minutes" in sent[-1]["body"]
 
 
-def _message_setup(monkeypatch, parents, talk, flags):
+def _message_setup(monkeypatch, parents, talk, flags, sent_as=None):
     """Wire the lock screen's "Message a parent" to a fake execution service.
 
     ``flags`` carries ``open_ok`` / ``send_ok`` so a test can make the chat
     service fail on either step.
     """
+
+    sent_as = [] if sent_as is None else sent_as
 
     async def _who(_request):
         return {"user": "kid"}
@@ -421,9 +423,10 @@ def _message_setup(monkeypatch, parents, talk, flags):
     async def _parents(_user):
         return list(parents), "Kid"
 
-    async def _proxy(request, endpoint, payload=None, **_kw):
+    async def _proxy(creds, endpoint, payload=None, **_kw):
         payload = payload or {}
         talk.append({"endpoint": endpoint, **payload})
+        sent_as.append(str((creds or {}).get("user") or ""))
         if payload.get("action") == "open":
             if not flags.get("open_ok", True):
                 return JSONResponse(status_code=500, content={"detail": "talk is down"})
@@ -437,7 +440,7 @@ def _message_setup(monkeypatch, parents, talk, flags):
 
     monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
     monkeypatch.setattr(gateway_main, "_my_parents", _parents)
-    monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", _proxy)
+    monkeypatch.setattr(gateway_main, "_execution_post_as", _proxy)
 
 
 def test_messaging_a_parent_opens_the_chat_and_sends_it(wired, monkeypatch):
@@ -556,3 +559,39 @@ def test_a_parent_unlock_on_a_family_pc_is_answered_and_told(wired, monkeypatch)
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert sent[0]["title"] == "PC protection unlocked"
     assert "kid's PC" in sent[0]["body"]
+
+
+def test_a_locked_family_pc_messages_the_childs_parents(wired, monkeypatch):
+    """The PC's lock surface sends with its device key; it speaks as the child
+    the PC is assigned to, to that child's parents, and nobody else."""
+    client, _, _, _ = wired
+    talk: list[dict] = []
+    sent_as: list[str] = []
+    _message_setup(monkeypatch, ["mom"], talk, {}, sent_as)
+
+    async def _pc(_request):
+        return {"device_key": "windows-test-guid", "owner_username": "kid", "kind": "windows-pc"}
+
+    async def _resolve(body):
+        assert body == {"rag_user": "kid"}
+        return {"user": "kid", "is_admin": True}
+
+    async def _not_a_user_key(_request):
+        raise AssertionError("a PC's device key is not a user's key")
+
+    parents_of: list[str] = []
+
+    async def _parents(user):
+        parents_of.append(user)
+        return ["mom"], "Kid"
+
+    monkeypatch.setattr(gateway_main, "_device_agent_key", _pc)
+    monkeypatch.setattr(gateway_main, "resolve_identity", _resolve)
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _not_a_user_key)
+    monkeypatch.setattr(gateway_main, "_my_parents", _parents)
+
+    r = client.post("/api/guard/message", json={"text": "can you come up?"})
+
+    assert r.status_code == 200 and r.json()["sent_to"] == ["mom"]
+    assert parents_of == ["kid"]
+    assert sent_as == ["kid", "kid"]

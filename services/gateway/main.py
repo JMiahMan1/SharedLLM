@@ -2480,6 +2480,26 @@ async def _device_agent_key(request: Request) -> dict | None:
     return result
 
 
+async def _member_or_device(request: Request) -> dict:
+    """The member behind a request: their own key, or a family PC's device key.
+
+    A Windows PC's lock surface (agent/jarvis-guard) acts for the child the PC
+    is assigned to, on the few routes a locked child still needs: messaging a
+    parent and ticking off chores. The device key resolves to that child with
+    the administrator bit dropped, never to anyone else. Every other route
+    keeps the strict user-key check.
+    """
+    device = await _device_agent_key(request)
+    if device:
+        creds = dict(_identity_cred_dict(await resolve_identity({"rag_user": device["owner_username"]})))
+        if str(creds.get("user") or "").lower() != device["owner_username"].lower():
+            raise HTTPException(status_code=401, detail="This PC is not assigned to anyone")
+        creds["is_admin"] = False
+        creds["device_key"] = device["device_key"]
+        return creds
+    return _identity_cred_dict(await _resolve_identity_from_request(request))
+
+
 async def _require_identity_from_request(request: Request, body: dict | None = None) -> Any:
     """Identity for a route that serves real family data. 401 unless proven.
 
@@ -2817,6 +2837,18 @@ async def _proxy_execution_with_identity(
         else:
             exec_payload = {"user_context": creds_data, **(payload or {})}
             resp = await client.post(url, json=exec_payload, headers=headers)
+        resp_text = await resp.text()
+        try:
+            resp_json = json.loads(resp_text)
+        except (json.JSONDecodeError, ValueError):
+            resp_json = {"detail": resp_text}
+    return JSONResponse(status_code=resp.status, content=resp_json)
+
+async def _execution_post_as(creds: Any, endpoint: str, payload: dict) -> JSONResponse:
+    """POST to execution as already-resolved credentials (see _proxy_execution_with_identity)."""
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with shared_http_client() as client:
+        resp = await client.post(f"{EXECUTION_SVC}{endpoint}", json={"user_context": creds, **payload}, headers=headers)
         resp_text = await resp.text()
         try:
             resp_json = json.loads(resp_text)
@@ -8179,7 +8211,8 @@ async def guard_message(request: Request):
     the answer lands in the same place as every other family message and the
     lock screen never has to leave the lock for it.
     """
-    creds = await _resolve_identity_from_request(request)
+    # A family PC's lock surface sends with its device key, as its child.
+    creds = await _member_or_device(request)
     me = str((creds or {}).get("user") or "").strip()
     if not me:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -8192,9 +8225,7 @@ async def guard_message(request: Request):
         raise HTTPException(status_code=422, detail="There is no parent to message")
     sent: list[str] = []
     for parent in parents:
-        opened = await _proxy_execution_with_identity(
-            request, "/execute/talk", {"action": "open", "target_user": parent}
-        )
+        opened = await _execution_post_as(creds, "/execute/talk", {"action": "open", "target_user": parent})
         token = ""
         try:
             conversation = (json.loads(opened.body).get("detail") or {}).get("conversation") or {}
@@ -8203,9 +8234,7 @@ async def guard_message(request: Request):
             token = ""
         if not token:
             continue
-        posted = await _proxy_execution_with_identity(
-            request, "/execute/talk", {"action": "send", "token": token, "message": text}
-        )
+        posted = await _execution_post_as(creds, "/execute/talk", {"action": "send", "token": token, "message": text})
         if posted.status_code == 200:
             sent.append(parent)
     if not sent:
@@ -8914,7 +8943,10 @@ async def proxy_get_skylight_chores(
     date: str | None = None,
     scope: str | None = None,
 ):
-    creds = await _resolve_identity_from_request(request)
+    # A family PC's lock surface reads its child's own chores (never a scope).
+    creds = await _member_or_device(request)
+    if creds.get("device_key"):
+        scope = None
     if not creds.get("skylight_enabled", True):
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
 
@@ -8950,7 +8982,8 @@ async def proxy_get_skylight_chores(
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete")
 async def proxy_complete_skylight_chore(chore_id: str, request: Request):
-    creds = await _resolve_identity_from_request(request)
+    # The child's own key, or their family PC's lock surface (as the child).
+    creds = await _member_or_device(request)
     if not creds.get("skylight_enabled", True):
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
 
@@ -8964,7 +8997,8 @@ async def proxy_complete_skylight_chore(chore_id: str, request: Request):
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/uncomplete")
 async def proxy_uncomplete_skylight_chore(chore_id: str, request: Request):
-    creds = await _resolve_identity_from_request(request)
+    # The child's own key, or their family PC's lock surface (as the child).
+    creds = await _member_or_device(request)
     if not creds.get("skylight_enabled", True):
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
 
@@ -17915,6 +17949,85 @@ async def publish_windows_agent(request: Request):
     }
     _windows_versions_path().write_text(json.dumps(meta, indent=2))
     return {"status": "ok", "metadata": meta}
+
+
+#: The family PC installer as a parent downloads it: what scripts/deploy_remote.sh
+#: copies from the latest green "Windows Guard Build" artifact, with its
+#: version.json (docs/MOBILE_OTA_UPDATES.md, "The Windows installer").
+WINDOWS_INSTALLER_DIR = APP_UPDATES_DIR / "windows"
+#: Only these names are ever served from it, never a path the caller chose.
+WINDOWS_INSTALLER_FILES = {
+    "jarvis-guard-windows.zip": "application/zip",
+    "jarvis-guard.exe": "application/vnd.microsoft.portable-executable",
+    "jarvis-guard.exe.sha256": "text/plain",
+    "install.ps1": "text/plain",
+    "uninstall.ps1": "text/plain",
+    "README.md": "text/markdown",
+}
+
+
+async def _require_device_manager(request: Request) -> None:
+    """401/403 unless the caller may manage the family's devices.
+
+    The same rule identity applies to registering and assigning a device
+    (``_is_device_admin``: an admin, the father, or ``devices.assign``). The
+    installer is a parent's tool: a child, or a PC's own key, never gets it.
+    """
+    if not _presented_api_key(request):
+        raise HTTPException(status_code=401, detail="Sign in first")
+    status, body = await _identity_as_caller(request, "GET", "/api/user-panel/device-manager")
+    if status == 401:
+        raise HTTPException(status_code=401, detail="Sign in first")
+    if status != 200 or not (body or {}).get("can_manage"):
+        raise HTTPException(
+            status_code=403, detail="Only a parent who manages the family's devices can download Jarvis Guard"
+        )
+
+
+def windows_installer_info() -> dict:
+    """What is on the server for a parent to download: version, SHA-256 and files."""
+    meta: dict = {}
+    try:
+        meta = json.loads((WINDOWS_INSTALLER_DIR / "version.json").read_text())
+    except Exception:
+        meta = {}
+    files = [
+        {"name": name, "size": (WINDOWS_INSTALLER_DIR / name).stat().st_size}
+        for name in WINDOWS_INSTALLER_FILES
+        if (WINDOWS_INSTALLER_DIR / name).is_file()
+    ]
+    available = any(f["name"] == "jarvis-guard.exe" for f in files)
+    return {
+        "available": available,
+        "version": meta.get("version") if available else None,
+        "sha256": meta.get("exe_sha256") if available else None,
+        "git_sha": meta.get("git_sha") if available else None,
+        "built_at": meta.get("built_at") if available else None,
+        "files": files,
+    }
+
+
+@app.get("/api/app-updates/windows/info")
+async def get_windows_installer_info(request: Request):
+    """The family PC installer's version, SHA-256 and files (parents who manage devices only)."""
+    await _require_device_manager(request)
+    return windows_installer_info()
+
+
+@app.get("/api/app-updates/windows/files/{name}")
+async def get_windows_installer_file(name: str, request: Request):
+    """One file of the family PC installer (parents who manage devices only)."""
+    await _require_device_manager(request)
+    media_type = WINDOWS_INSTALLER_FILES.get(name)
+    path = WINDOWS_INSTALLER_DIR / name
+    if media_type is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="That file is not on the server")
+    return FileResponse(
+        str(path),
+        media_type=media_type,
+        headers={"Cache-Control": "no-store"},
+        filename=name,
+    )
 
 
 

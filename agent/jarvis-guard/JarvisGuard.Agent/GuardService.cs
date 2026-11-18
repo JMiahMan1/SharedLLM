@@ -58,6 +58,7 @@ public sealed class GuardService
     private readonly object _stateLock = new();
 
     private readonly LockEnforcer _enforcer = new();
+    private readonly OfflineCodes _offline = OfflineCodes.Parse(ReadText(Config.OfflineCodesPath));
     /// <summary>The last verdict (the hub's, or the offline one) and the state it was published with.</summary>
     private GuardState? _base;
     private DateTimeOffset _lastPoll = DateTimeOffset.MinValue;
@@ -172,6 +173,7 @@ public sealed class GuardService
             });
             if (DateTimeOffset.UtcNow - _lastCapability > TimeSpan.FromSeconds(CapabilitySeconds))
                 await ReportCapabilitiesAsync();
+            await ReportOfflineUnlockIfDueAsync();
             // Near the limit, report every poll so the hub locks on time (and
             // the next poll's numbers are the hub's own).
             if (_meter.DueForFlush || (TimeBudget.ReportNow(time) && _meter.HasUnsent)) await FlushUsageAsync();
@@ -416,6 +418,18 @@ public sealed class GuardService
                             && DateTimeOffset.TryParse(u.GetString(), out var parsed)) until = parsed;
                     }
                     catch { /* ten minutes, the hub's own figure */ }
+                    // The parents' offline-code verifiers come with a real
+                    // parent unlock, as on the phone: kept for a later unlock
+                    // with no connection.
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(body);
+                        if (doc.RootElement.TryGetProperty("offline_codes", out var codes))
+                        {
+                            lock (_stateLock) { _offline.Remember(codes); SaveOfflineCodes(); }
+                        }
+                    }
+                    catch { /* the codes already kept stay */ }
                     lock (_stateLock) _enforcer.ParentUnlocked(until);
                     Log($"unlocked by a parent until {until:O}");
                     try { EnforceTick(); } catch { /* the next tick publishes it */ }
@@ -424,9 +438,143 @@ public sealed class GuardService
                 }
                 catch (Exception ex) { return new PipeProtocol.Response { Ok = false, Error = ex.Message }; }
 
+            case "offline-unlock":
+            {
+                OfflineCodes.Result result;
+                var now = DateTimeOffset.Now;
+                lock (_stateLock)
+                {
+                    result = _offline.TryUnlock(request.Code, now);
+                    SaveOfflineCodes();
+                    if (result.Ok) _enforcer.ParentUnlocked(now + OfflineCodes.UnlockFor);
+                }
+                if (!result.Ok) return new PipeProtocol.Response { Ok = false, Error = result.Error };
+                Log("unlocked with a parent's offline code; the parents are told when the hub answers");
+                try { EnforceTick(); } catch { /* the next tick publishes it */ }
+                _ = ReportOfflineUnlockIfDueAsync();
+                return new PipeProtocol.Response { Ok = true, UntilMinutes = (int)OfflineCodes.UnlockFor.TotalMinutes };
+            }
+
+            case "message":
+            {
+                var text = (request.Text ?? "").Trim();
+                if (text.Length == 0) return new PipeProtocol.Response { Ok = false, Error = "Type a message first." };
+                if (text.Length > 500) text = text[..500];
+                try
+                {
+                    var resp = await _api.MessageParentsAsync(text);
+                    var body = await resp.Content.ReadAsStringAsync();
+                    if (!resp.IsSuccessStatusCode)
+                        return new PipeProtocol.Response { Ok = false, Error = Detail(body) ?? "The message did not go. Try again in a minute." };
+                    Log("a message to the parents was sent from the lock screen");
+                    return new PipeProtocol.Response { Ok = true, Info = SentTo(body) };
+                }
+                catch
+                {
+                    return new PipeProtocol.Response { Ok = false, Error = "No connection to the family hub. Try again when the PC is online." };
+                }
+            }
+
+            case "chores":
+                try
+                {
+                    var resp = await _api.GetChoresAsync(DateTime.Now.ToString("yyyy-MM-dd"));
+                    var body = await resp.Content.ReadAsStringAsync();
+                    if (!resp.IsSuccessStatusCode)
+                        return new PipeProtocol.Response { Ok = false, Error = Detail(body) ?? "Chores could not be loaded." };
+                    var listing = Chores.Parse(body);
+                    return listing.Items is null
+                        ? new PipeProtocol.Response { Ok = false, Error = listing.Error }
+                        : new PipeProtocol.Response { Ok = true, Chores = listing.Items.ToList() };
+                }
+                catch
+                {
+                    return new PipeProtocol.Response { Ok = false, Error = "No connection to the family hub. Try again when the PC is online." };
+                }
+
+            case "chore-done":
+                if (string.IsNullOrWhiteSpace(request.ChoreId))
+                    return new PipeProtocol.Response { Ok = false, Error = "Pick a chore first." };
+                try
+                {
+                    var resp = await _api.CompleteChoreAsync(request.ChoreId.Trim());
+                    var body = await resp.Content.ReadAsStringAsync();
+                    if (!resp.IsSuccessStatusCode)
+                        return new PipeProtocol.Response { Ok = false, Error = Detail(body) ?? "That did not work. Try again." };
+                    // The hub's next status read sees it ticked off and asks a parent.
+                    _lastPoll = DateTimeOffset.MinValue;
+                    Log($"chore {request.ChoreId} ticked off from the lock screen");
+                    return new PipeProtocol.Response { Ok = true, Info = "Ticked off. A parent checks it was done right." };
+                }
+                catch
+                {
+                    return new PipeProtocol.Response { Ok = false, Error = "No connection to the family hub. Try again when the PC is online." };
+                }
+
             default:
                 return new PipeProtocol.Response { Ok = false, Error = $"Unknown command '{request.Cmd}'." };
         }
+    }
+
+    /// <summary>An offline unlock is never silent: the parents are told as soon as the hub answers.</summary>
+    private async Task ReportOfflineUnlockIfDueAsync()
+    {
+        lock (_stateLock) { if (!_offline.ReportDue) return; }
+        try
+        {
+            var resp = await _api.PostTamperAsync("offline_unlock", "");
+            if (resp.IsSuccessStatusCode)
+            {
+                lock (_stateLock) { _offline.ReportDue = false; SaveOfflineCodes(); }
+                Log("offline unlock reported to the hub");
+            }
+        }
+        catch { /* still offline: the next good poll tries again */ }
+    }
+
+    private void SaveOfflineCodes()
+    {
+        try
+        {
+            var tmp = Config.OfflineCodesPath + ".tmp";
+            File.WriteAllText(tmp, _offline.Serialize());
+            File.Move(tmp, Config.OfflineCodesPath, overwrite: true);
+        }
+        catch (Exception ex) { Log($"offline codes not saved: {ex.Message}"); }
+    }
+
+    private static string? ReadText(string path)
+    {
+        try { return File.Exists(path) ? File.ReadAllText(path) : null; }
+        catch { return null; }
+    }
+
+    /// <summary>The hub's own reason for a refusal ("Type a message first"), when it gave one.</summary>
+    private static string? Detail(string body)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("detail", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String) return d.GetString();
+            if (doc.RootElement.TryGetProperty("message", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String) return m.GetString();
+        }
+        catch { /* not JSON */ }
+        return null;
+    }
+
+    private static string SentTo(string body)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("sent_to", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                var names = s.EnumerateArray().Select(x => x.GetString()).Where(x => !string.IsNullOrEmpty(x)).ToList();
+                if (names.Count > 0) return $"Sent to {string.Join(" and ", names)}.";
+            }
+        }
+        catch { /* not JSON */ }
+        return "Sent.";
     }
 
     private static void Log(string message)

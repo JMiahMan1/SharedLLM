@@ -28,6 +28,9 @@ public static class Config
     // Today's running total of foreground minutes (agent-side only), so a
     // restart mid-day carries on from it instead of starting at zero.
     public static readonly string UsagePath = Path.Combine(Root, "usage.today.json");
+    // The parents' offline-code verifiers (salt, iterations, hash; never a code)
+    // and the recent wrong tries. Agent-side only: SYSTEM/Administrators ACL.
+    public static readonly string OfflineCodesPath = Path.Combine(Root, "offline.codes.json");
 
     public static void WriteRawStatus(string json)
     {

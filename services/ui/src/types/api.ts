@@ -672,6 +672,16 @@ export interface MdmMember {
   reason: string | null;
 }
 
+/** The family PC installer (Jarvis Guard) the server holds for parents: GET /api/app-updates/windows/info. */
+export interface WindowsInstallerInfo {
+  available: boolean;
+  version: string | null;
+  sha256: string | null;
+  git_sha: string | null;
+  built_at: string | null;
+  files: Array<{ name: string; size: number }>;
+}
+
 export interface MdmInventory {
   devices: MdmDevice[];
   members: MdmMember[];

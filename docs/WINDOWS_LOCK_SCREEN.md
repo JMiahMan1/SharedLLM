@@ -345,10 +345,29 @@ on the next poll; the lock surface was never raised by itself; the offline
 evaluator ignored `paused_until` and `granted_until`. Core now has xunit tests
 that CI runs.
 
-Still missing against this plan: an exe download for parents (publish
-secrets unset, no serving route, nothing in `deploy_remote.sh`), signing, the
-update push (no agent-side updater at all), `/api/guard/message` and chores
-on the lock surface (the gateway resolves neither for a device key), offline
-parent codes, safe-mode detection that can actually fire (Task Scheduler does not
-run in safe mode, so the current check never sees one), a Windows row for the
-capabilities on the Devices page, and the web filter / app control phases.
+### Lock screen parity and the parents' download (2026-11-18)
+
+- **Download:** `deploy_remote.sh` copies the latest green Windows build to
+  `data/app_updates/windows/` (exe, SHA-256, install.ps1, uninstall.ps1,
+  README, a zip and `version.json`); the gateway serves it only to a parent
+  who manages devices (`/api/app-updates/windows/info` and `/files/{name}`);
+  Devices, Family shows it as "Family PC (Windows)" with the version, the
+  SHA-256 and the install steps. See docs/MOBILE_OTA_UPDATES.md.
+- **Lock surface, like the phone's:** ask for more time (15/30/60 minutes and
+  a note), message a parent (`/api/guard/message`, now accepting the PC's
+  device key as the child it is assigned to, to that child's parents only),
+  today's chores with "Done" (the Skylight chore routes, same device-key
+  rule; the hub then asks a parent whether each was done right, as on
+  Android), a parent's sign-in, and a parent's **offline code** (the phone's
+  scheme: PBKDF2 verifiers arrive with an online parent unlock, five wrong
+  codes wait ten minutes, a good one unlocks for ten minutes and the parents
+  get `offline_unlock` once the hub answers). A "chores first" lock opens on
+  the chores. Calls do not apply on a PC.
+- The surface is one centred, wrapping, scrolling column sized from the DPI
+  (PerMonitorV2), buttons at least 56 logical px tall.
+
+Still missing against this plan: signing, the update push (no agent-side
+updater; upgrade by running the new install.ps1), safe-mode detection that
+can actually fire (Task Scheduler does not run in safe mode), a Windows row
+for the capabilities on the Devices page, and the web filter / app control
+phases. None of the Windows side has run on a real PC yet.

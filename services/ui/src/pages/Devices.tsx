@@ -23,6 +23,7 @@ import SharedFilesPanel from '../components/mdm/SharedFilesPanel';
 import { DeviceDetailSheet } from '../components/settings/DeviceDetailSheet';
 import NotificationLockCard from '../components/guardian/NotificationLockCard';
 import NewDevicesPanel from '../components/devices/NewDevicesPanel';
+import WindowsGuardPanel from '../components/devices/WindowsGuardPanel';
 import PageHeader from '../components/ui/PageHeader';
 import { CardSkeletons } from '../components/ui/StateViews';
 import IntegrationsPanel from '../components/devices/IntegrationsPanel';
@@ -1373,7 +1374,7 @@ const DEVICE_TABS = [
   { id: 'add', label: 'Add devices', anchors: ['devices-new', 'add-fix'] },
   { id: 'places', label: 'Rooms & places', anchors: ['devices-areas', 'devices-labels', 'devices-zones'] },
   { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-persons', 'devices-rooms'] },
-  { id: 'family', label: 'Family', anchors: ['devices-family', 'devices-folders', 'devices-activity'] },
+  { id: 'family', label: 'Family', anchors: ['devices-family', 'devices-windows', 'devices-folders', 'devices-activity'] },
 ] as const;
 type DeviceTab = (typeof DEVICE_TABS)[number]['id'];
 /** The tabs that read HomeHub's own API (`/api/homehub/...`). */
@@ -1498,7 +1499,7 @@ export default function Devices() {
         )}
         {inventory.data && inventory.data.devices.length === 0 && (
           <p className="p-4 text-sm text-slate-500" data-testid="mdm-empty">
-            No devices have registered yet. A phone or tablet registers when a member signs in to the Jarvis app; a family PC registers its Jarvis Guard agent with the family pairing code; ESPHome watches and assistants are added by pairing.
+            No devices have registered yet. A phone or tablet registers when a member signs in to the Jarvis app; a family PC registers when a parent runs the Jarvis Guard installer on it (Family PC, below); ESPHome watches and assistants are added by pairing.
           </p>
         )}
         <ul className="divide-y divide-white/5">
@@ -1529,6 +1530,8 @@ export default function Devices() {
         )}
       </Panel>
       </div>
+
+      <div id="devices-windows" className="scroll-mt-4"><WindowsGuardPanel /></div>
 
       <div id="devices-folders" className="scroll-mt-4 space-y-4">
         {files.isLoading && <CardSkeletons count={1} className="grid" height="h-24" label="Loading shared folders" />}

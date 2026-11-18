@@ -1,7 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
-import type { AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel, TtsVoices } from '../types/api';
+import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel, TtsVoices } from '../types/api';
 import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
 } from '../lib/weather';
@@ -1430,6 +1430,21 @@ export const api = {
       `/api/mdm/files/${encodeURIComponent(folder)}/${encodeURIComponent(name)}`,
       { responseType: 'blob' },
     );
+    return resp.data;
+  },
+
+  /** The family PC installer on the server: version, SHA-256 and files (parents who manage devices). */
+  async getWindowsInstaller(): Promise<WindowsInstallerInfo> {
+    const resp = await apiClient.get('/api/app-updates/windows/info');
+    return resp.data;
+  },
+
+  /** One file of the family PC installer, with the parent's key (never a public link). */
+  async getWindowsInstallerFile(name: string): Promise<Blob> {
+    const resp = await apiClient.get(`/api/app-updates/windows/files/${encodeURIComponent(name)}`, {
+      responseType: 'blob',
+      timeout: 10 * 60 * 1000,
+    });
     return resp.data;
   },
 

@@ -63,5 +63,17 @@ public sealed class ApiClient : IDisposable
             day = DateTime.Now.ToString("yyyy-MM-dd"),
         });
 
+    /// <summary>The lock surface's "Message a parent": a chat message to each of the child's parents.</summary>
+    public Task<HttpResponseMessage> MessageParentsAsync(string text) =>
+        _http.PostAsJsonAsync("api/guard/message", new { text });
+
+    /// <summary>Today's chores for the child this PC belongs to (the hub decides whose).</summary>
+    public Task<HttpResponseMessage> GetChoresAsync(string day) =>
+        _http.GetAsync($"api/integrations/skylight/chores?date={Uri.EscapeDataString(day)}");
+
+    /// <summary>Tick a chore off; the hub asks a parent whether it was done right.</summary>
+    public Task<HttpResponseMessage> CompleteChoreAsync(string choreId) =>
+        _http.PostAsync($"api/integrations/skylight/chores/{Uri.EscapeDataString(choreId)}/complete", null);
+
     public void Dispose() => _http.Dispose();
 }
