@@ -359,13 +359,32 @@ final class GuardScreenView {
         if (id > 0) statusFallback = context.getResources().getDimensionPixelSize(id);
         final int statusMin = statusFallback;
         frame.setOnApplyWindowInsetsListener((v, insets) -> {
-            android.graphics.Insets bars = insets.getInsets(
-                    android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
-            android.graphics.Insets ime = insets.getInsets(android.view.WindowInsets.Type.ime());
-            int top = Math.max(bars.top, statusMin);
-            int bottom = Math.max(bars.bottom, ime.bottom);
-            scroller.setPadding(bars.left, top, bars.right, bottom);
-            sheetLayer.setPadding(bars.left, top, bars.right, bottom);
+            int left, top, right, bottom;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                android.graphics.Insets bars = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
+                android.graphics.Insets ime = insets.getInsets(android.view.WindowInsets.Type.ime());
+                left = bars.left;
+                top = bars.top;
+                right = bars.right;
+                bottom = Math.max(bars.bottom, ime.bottom);
+            } else {
+                // Android 9 and 10: the system window insets already include the keyboard.
+                left = insets.getSystemWindowInsetLeft();
+                top = insets.getSystemWindowInsetTop();
+                right = insets.getSystemWindowInsetRight();
+                bottom = insets.getSystemWindowInsetBottom();
+                android.view.DisplayCutout cutout = insets.getDisplayCutout();
+                if (cutout != null) {
+                    left = Math.max(left, cutout.getSafeInsetLeft());
+                    top = Math.max(top, cutout.getSafeInsetTop());
+                    right = Math.max(right, cutout.getSafeInsetRight());
+                    bottom = Math.max(bottom, cutout.getSafeInsetBottom());
+                }
+            }
+            top = Math.max(top, statusMin);
+            scroller.setPadding(left, top, right, bottom);
+            sheetLayer.setPadding(left, top, right, bottom);
             return insets;
         });
         frame.requestApplyInsets();

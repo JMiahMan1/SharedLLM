@@ -78,8 +78,11 @@ final class GuardOverlay {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             lp.setFitInsetsTypes(WindowInsets.Type.ime());
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            // ALWAYS is Android 11; before it, SHORT_EDGES is the closest.
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
         try {
             windows.addView(built, lp);

@@ -251,8 +251,13 @@ final class AppInventory {
     /** The store that installed the app (Play, Galaxy Store...), or null for a sideload or adb. */
     private static Object installer(PackageManager pm, String packageName) {
         try {
-            InstallSourceInfo source = pm.getInstallSourceInfo(packageName);
-            String name = source.getInstallingPackageName();
+            String name;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                InstallSourceInfo source = pm.getInstallSourceInfo(packageName);
+                name = source.getInstallingPackageName();
+            } else {
+                name = pm.getInstallerPackageName(packageName);
+            }
             return name == null ? JSONObject.NULL : name;
         } catch (Exception e) {
             return JSONObject.NULL;

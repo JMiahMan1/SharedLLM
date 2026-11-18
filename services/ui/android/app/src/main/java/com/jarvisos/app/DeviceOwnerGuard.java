@@ -267,7 +267,7 @@ final class DeviceOwnerGuard {
     private static void applyOutgoingCallFallback(Context context, DevicePolicyManager dpm, ComponentName admin,
                                                   boolean owner, boolean prot, boolean locked, boolean unlocked) {
         boolean block = LockCommsRules.blockAllOutgoing(owner, prot, locked, unlocked,
-                LockCallFilterService.held(context));
+                CallFilterRole.held(context));
         boolean ours = GuardApi.outgoingCallsBlocked(context);
         try {
             if (block && !ours) {

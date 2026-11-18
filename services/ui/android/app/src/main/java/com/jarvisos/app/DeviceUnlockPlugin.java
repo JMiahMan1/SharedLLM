@@ -102,6 +102,7 @@ public class DeviceUnlockPlugin extends Plugin {
         Cipher cipher;
         try {
             forget(token);
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) throw new IllegalStateException("Needs Android 11");
             SecretKey key = createKey(token);
             cipher = Cipher.getInstance(TRANSFORM);
             cipher.init(Cipher.ENCRYPT_MODE, key);
@@ -245,6 +246,8 @@ public class DeviceUnlockPlugin extends Plugin {
         return ALIAS_PREFIX + token;
     }
 
+    /** Only reached past {@link #unavailableReason()}, which needs Android 11 (per-use lock auth). */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private static SecretKey createKey(String token) throws Exception {
         KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE);
         KeyGenParameterSpec spec = new KeyGenParameterSpec.Builder(

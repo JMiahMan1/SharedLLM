@@ -1,6 +1,5 @@
 package com.jarvisos.app;
 
-import android.app.role.RoleManager;
 import android.content.Context;
 import android.net.Uri;
 import android.telecom.CallRedirectionService;
@@ -21,6 +20,7 @@ import android.telephony.TelephonyManager;
  * it is held, a device owner takes outgoing calls away for the lock instead
  * ({@link LockCommsRules#blockAllOutgoing}).
  */
+@androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.Q)
 public class LockCallFilterService extends CallRedirectionService {
 
     @Override
@@ -57,27 +57,6 @@ public class LockCallFilterService extends CallRedirectionService {
         try {
             TelephonyManager tm = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
             return tm != null && tm.isEmergencyNumber(number);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /** Whether Jarvis holds the call redirection role (the lock's call filter can run). */
-    static boolean held(Context context) {
-        try {
-            RoleManager rm = context.getSystemService(RoleManager.class);
-            return rm != null && rm.isRoleAvailable(RoleManager.ROLE_CALL_REDIRECTION)
-                    && rm.isRoleHeld(RoleManager.ROLE_CALL_REDIRECTION);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /** Whether this phone offers the call redirection role at all. */
-    static boolean available(Context context) {
-        try {
-            RoleManager rm = context.getSystemService(RoleManager.class);
-            return rm != null && rm.isRoleAvailable(RoleManager.ROLE_CALL_REDIRECTION);
         } catch (Exception e) {
             return false;
         }
