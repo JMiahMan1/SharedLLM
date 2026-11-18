@@ -300,6 +300,7 @@
 [data-theme-scheme="light"] .from-emerald-950 { --tw-gradient-from: oklch(95% 0.052 163.051); }
 [data-theme-scheme="light"] .from-orange-950\/25 { --tw-gradient-from: color-mix(in srgb, oklch(95.4% 0.038 75.164) 60%, transparent); }
 [data-theme-scheme="light"] .from-sky-950\/25 { --tw-gradient-from: color-mix(in srgb, oklch(95.1% 0.026 236.824) 60%, transparent); }
+[data-theme-scheme="light"] .from-slate-700 { --tw-gradient-from: var(--ht-surface); }
 [data-theme-scheme="light"] .from-slate-800 { --tw-gradient-from: var(--ht-surface); }
 [data-theme-scheme="light"] .from-slate-900 { --tw-gradient-from: var(--ht-surface); }
 [data-theme-scheme="light"] .from-slate-950 { --tw-gradient-from: var(--ht-surface); }

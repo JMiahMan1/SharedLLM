@@ -3881,6 +3881,15 @@ export const api = {
     await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}/gallery/${encodeURIComponent(id)}`);
   },
 
+  /**
+   * A link preview for a message about to be sent (the server reads the page once; nothing is kept).
+   * The answer is checked by the caller (readLinkPreview) before it is shown or sealed.
+   */
+  async getPrivateLinkPreview(token: string, url: string, signal?: AbortSignal): Promise<unknown> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/link-preview`, { url }, { signal, timeout: 20_000 });
+    return resp.data;
+  },
+
   async nudgePrivateChat(token: string): Promise<{ nudged: string[]; next_in: number }> {
     const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/nudge`);
     return resp.data;

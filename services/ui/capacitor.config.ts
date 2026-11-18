@@ -7,7 +7,12 @@ const config: CapacitorConfig = {
   bundledWebRuntime: false,
   server: {
     androidScheme: 'https',
-    cleartext: true
+    cleartext: true,
+    // The private chat's link previews play a YouTube or Vimeo video inline, in
+    // an iframe, once tapped (PrivateLinkCard). Capacitor sends a navigation to
+    // any host outside the app to the phone's browser, and Android can report
+    // an iframe's load as one; these two player hosts stay in the WebView.
+    allowNavigation: ['www.youtube-nocookie.com', 'player.vimeo.com']
   },
   plugins: {
     CapacitorHttp: {

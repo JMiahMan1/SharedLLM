@@ -106,8 +106,16 @@ def test_anything_but_a_sealed_envelope_is_refused(chat, value):
 
 
 def test_an_oversized_message_is_refused(chat):
-    assert _send(chat, "alex", _sealed(n=40_000)).status_code == 413
+    # Past the limit (base64 makes the ciphertext 4/3 as long).
+    assert _send(chat, "alex", _sealed(n=private_chat_messages.MAX_MESSAGE_BYTES)).status_code == 413
     assert _record_files(chat["root"]) == []
+
+
+def test_a_message_with_a_sealed_link_preview_fits(chat):
+    """A 60 KB thumbnail and 8,000 characters of text, sealed and base64ed twice, still fit in one message."""
+    plain = 8_000 * 4 + 60 * 1024 * 4 // 3 + 2_000
+    assert _send(chat, "alex", _sealed(n=plain + 16)).status_code == 200
+    assert len(_record_files(chat["root"])) == 1
 
 
 @pytest.mark.parametrize("outsider", ["kid", "teen", "gran", "uncle", "nochat"])

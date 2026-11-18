@@ -23,6 +23,7 @@ import {
   WrongPasswordError,
   type ChatKeyInfo,
   type PasswordChangeBody,
+  type PrivatePayload,
 } from './privateChatCrypto';
 
 /** A chat as the first version made it (the one already in use): its key IS the password's. */
@@ -276,5 +277,51 @@ describe('picture and comment payloads', () => {
     expect(await openMessage(key, odd)).toEqual({ t: 'added', blob: 'b8', mime: 'image/png' });
     // A sent picture can carry the fingerprint too, so an import skips it.
     expect(await openMessage(key, await sealMessage(key, { t: 'image', blob: 'b1', mime: 'image/jpeg', sha256: sha }))).toEqual({ t: 'image', blob: 'b1', mime: 'image/jpeg', sha256: sha });
+  }, 30_000);
+});
+
+describe('a text message with a link preview', () => {
+  // A real JPEG's first bytes, so the thumbnail check sees a JPEG.
+  const JPEG = `data:image/jpeg;base64,${btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70))}`;
+
+  it('carries the preview inside the encryption and gives it back checked', async () => {
+    const { key } = await v1Chat('payload payload');
+    const preview = { url: 'https://example.com/cabin', title: 'The cabin', site_name: 'Example', kind: 'link' as const, image: JPEG };
+    const wire = await sealMessage(key, { t: 'text', text: 'Look https://example.com/cabin', preview });
+    expect(wire).not.toContain('cabin');
+    expect(wire).not.toContain('Example');
+    expect(await openMessage(key, wire)).toEqual({ t: 'text', text: 'Look https://example.com/cabin', preview });
+  }, 30_000);
+
+  it('keeps a message from before previews exactly as it was, and drops fields it does not know', async () => {
+    const { key } = await v1Chat('payload payload');
+    expect(await openMessage(key, await sealMessage(key, { t: 'text', text: 'plain' }))).toEqual({ t: 'text', text: 'plain' });
+    const future = await sealMessage(key, { t: 'text', text: 'hi', reply: 7, colour: 'red' } as unknown as PrivatePayload);
+    expect(await openMessage(key, future)).toEqual({ t: 'text', text: 'hi' });
+  }, 30_000);
+
+  it('a preview that is not safe to draw is dropped and the words still open', async () => {
+    const { key } = await v1Chat('payload payload');
+    const bad = [
+      { url: 'javascript:alert(1)', title: 'x', kind: 'link' },
+      { url: 'https://example.com', kind: 'link', image: 'https://tracker.example/pixel.gif' },
+      'not an object',
+    ];
+    for (const preview of bad) {
+      const wire = await sealMessage(key, { t: 'text', text: 'hi', preview } as unknown as PrivatePayload);
+      const opened = await openMessage(key, wire);
+      expect(opened).toEqual({ t: 'text', text: 'hi' });
+    }
+    // A picture from the web (a tracking pixel) is never drawn: only a sealed thumbnail is.
+    const pixel = await sealMessage(key, {
+      t: 'text', text: 'hi', preview: { url: 'https://example.com', title: 'x', kind: 'link', image: 'https://tracker.example/pixel.gif' },
+    } as unknown as PrivatePayload);
+    expect(await openMessage(key, pixel)).toEqual({ t: 'text', text: 'hi', preview: { url: 'https://example.com', title: 'x', kind: 'link' } });
+    // A player that is not one of ours turns the card into a plain link: nothing loads from elsewhere.
+    const sneaky = await sealMessage(key, {
+      t: 'text', text: 'hi',
+      preview: { url: 'https://example.com', title: 'x', kind: 'video', embed: { provider: 'iframe', src: 'https://evil.example/' } },
+    } as unknown as PrivatePayload);
+    expect(await openMessage(key, sneaky)).toEqual({ t: 'text', text: 'hi', preview: { url: 'https://example.com', title: 'x', kind: 'link' } });
   }, 30_000);
 });

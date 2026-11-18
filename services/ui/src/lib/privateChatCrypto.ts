@@ -43,6 +43,7 @@
  */
 
 import { deriveCallKey } from './callVerify';
+import { readLinkPreview, type LinkPreview } from './privateLinkPreview';
 
 export const PBKDF2_ITERATIONS = 600_000;
 export const SALT_BYTES = 16;
@@ -99,7 +100,11 @@ export class WrongPasswordError extends Error {
 
 /** What a message says once opened. */
 export type PrivatePayload =
-  | { t: 'text'; text: string }
+  /**
+   * `preview` is the link preview the sender's device made (privateLinkPreview.ts): it travels
+   * inside the encryption, and an app from before previews keeps only `text`.
+   */
+  | { t: 'text'; text: string; preview?: LinkPreview }
   /** `sent_at` / `taken_at` are seconds since the epoch, inside the encryption (older pictures have neither). */
   | { t: 'image'; blob: string; mime: string; name?: string; caption?: string; sent_at?: number; taken_at?: number; sha256?: string }
   /**
@@ -434,7 +439,10 @@ export async function openMessage(key: CryptoKey, raw: string | null | undefined
   try {
     const plain = await decrypt(key, fromBase64(sealed.iv), fromBase64(sealed.ct));
     const payload = JSON.parse(decoder.decode(plain)) as PrivatePayload;
-    if (payload?.t === 'text' && typeof payload.text === 'string') return { t: 'text', text: payload.text };
+    if (payload?.t === 'text' && typeof payload.text === 'string') {
+      const preview = 'preview' in payload ? readLinkPreview(payload.preview) : null;
+      return { t: 'text', text: payload.text, ...(preview ? { preview } : {}) };
+    }
     const stamp = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined);
     if (payload?.t === 'image' && typeof payload.blob === 'string' && typeof payload.mime === 'string') {
       const sentAt = stamp(payload.sent_at);

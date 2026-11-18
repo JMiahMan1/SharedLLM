@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { BellRing, Camera, Heart, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, Pencil, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
@@ -14,6 +14,8 @@ import { secureWindowOff, secureWindowOn, type SecureState } from '../../plugins
 import { deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
 import LinkText from './LinkText';
+import PrivateLinkCard, { PrivateLinkDraft, type DraftPreview } from './PrivateLinkCard';
+import { linkPreviewsOn, readLinkPreview, type LinkPreview } from '../../lib/privateLinkPreview';
 import PrivateChatSecurity from './PrivateChatSecurity';
 import PrivateCamera from './PrivateCamera';
 import PrivateVideoRecorder from './PrivateVideoRecorder';
@@ -32,6 +34,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   receiptFor,
   sameDay,
+  splitLinks,
   timeLabel,
   type TalkConversation,
   type TalkMessage,
@@ -194,6 +197,7 @@ export default function PrivateChatThread({
       vault={vault}
       secure={secure}
       belovedAllowed={belovedAllowed}
+      storage={info?.storage}
       onChanged={onChanged}
       onAddBelovedToHome={onAddBelovedToHome}
     />
@@ -372,11 +376,26 @@ interface UnlockedChatProps {
   secure: SecureState | 'pending';
   /** Whether the signed-in parent may open Beloved here (one father and one mother). */
   belovedAllowed: boolean;
+  /** Where the chat's messages live; a chat still on Talk has Talk's message size, too small for a preview. */
+  storage?: 'talk' | 'store';
   onChanged: () => void;
   onAddBelovedToHome?: () => void;
 }
 
-function UnlockedChat({ partnerName, partner, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, onChanged, onAddBelovedToHome }: UnlockedChatProps) {
+/** The first web address in a message being written, or null. */
+function firstLink(text: string): string | null {
+  const part = splitLinks(text).find((p) => p.kind === 'link');
+  return part && part.kind === 'link' ? part.href : null;
+}
+
+/** Wait this long after the last change to a link before asking for its preview. */
+const PREVIEW_DEBOUNCE_MS = 600;
+
+function tooLarge(error: unknown): boolean {
+  return (error as { response?: { status?: number } } | null)?.response?.status === 413;
+}
+
+function UnlockedChat({ partnerName, partner, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, storage, onChanged, onAddBelovedToHome }: UnlockedChatProps) {
   const queryClient = useQueryClient();
   const [securityOpen, setSecurityOpen] = useState(false);
   // The in-app camera: a photo, or a video clip (the two share one button and switch modes).
@@ -396,6 +415,10 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   }, [beloved, belovedAllowed, markSeen]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // Link previews made while writing (null: none could be made), the one being made, and the ones dropped with the X.
+  const [previews, setPreviews] = useState<ReadonlyMap<string, LinkPreview | null>>(() => new Map());
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
+  const [previewDropped, setPreviewDropped] = useState<ReadonlySet<string>>(() => new Set());
   const [nudging, setNudging] = useState(false);
   const [nudgeSent, setNudgeSent] = useState(false);
   const { trigger } = useHaptics();
@@ -520,6 +543,39 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
     }
   };
 
+  // The link to preview: the first one being written, unless this device has previews off, the
+  // message is an edit, the chat is still on Talk, or the X dropped it. Nothing is asked otherwise.
+  const link = useMemo(() => firstLink(text), [text]);
+  const wantedLink = link && !editing && storage !== 'talk' && linkPreviewsOn(token) && !previewDropped.has(link) ? link : null;
+  useEffect(() => {
+    if (!wantedLink || previews.has(wantedLink)) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setPreviewLoading(wantedLink);
+      void api
+        .getPrivateLinkPreview(token, wantedLink, controller.signal)
+        .then((raw) => readLinkPreview(raw), () => null)
+        .then((made) => {
+          if (controller.signal.aborted) return;
+          // A failure just means no preview: the message goes without one.
+          setPreviews((known) => new Map(known).set(wantedLink, made && made.url === wantedLink ? made : null));
+          setPreviewLoading((now) => (now === wantedLink ? null : now));
+        });
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [wantedLink, previews, token]);
+  const madePreview = wantedLink ? previews.get(wantedLink) : undefined;
+  const draft: DraftPreview | null = !wantedLink
+    ? null
+    : madePreview
+      ? { status: 'ready', url: wantedLink, preview: madePreview }
+      : madePreview === undefined && previewLoading === wantedLink
+        ? { status: 'loading', url: wantedLink }
+        : null;
+
   const startEdit = (messageId: number, current: string) => {
     setSelected(null);
     setEditing({ id: messageId, original: current });
@@ -578,10 +634,19 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
     }
     const body = text.trim();
     if (!body || sending) return;
+    // Only a preview that is ready goes: a slow one is not waited for, and the message goes without it.
+    const preview = draft?.status === 'ready' && body.includes(draft.url) ? draft.preview : undefined;
     setSending(true);
     try {
-      await post({ t: 'text', text: body });
+      try {
+        await post({ t: 'text', text: body, ...(preview ? { preview } : {}) });
+      } catch (error) {
+        // A server from before previews refuses a message this size: send the words alone.
+        if (!preview || !tooLarge(error)) throw error;
+        await post({ t: 'text', text: body });
+      }
       setText('');
+      setPreviewDropped(new Set());
       onChanged();
     } catch (error) {
       toast.error(errorText(error, 'Message failed to send'));
@@ -930,7 +995,13 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
                   ) : payload === 'unreadable' ? (
                     <span className="italic opacity-80">This message could not be decrypted.</span>
                   ) : payload.t === 'text' ? (
-                    <LinkText text={edit ? edit.text : payload.text} />
+                    <>
+                      <LinkText text={edit ? edit.text : payload.text} />
+                      {/* The sender's preview, from inside the message; gone if an edit took its link out. */}
+                      {payload.preview && (edit ? edit.text : payload.text).includes(payload.preview.url) && (
+                        <PrivateLinkCard preview={payload.preview} own={own} />
+                      )}
+                    </>
                   ) : payload.t === 'comment' ? (
                     <button
                       type="button"
@@ -1009,6 +1080,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
           Encrypting and sending the video{videoSending.count > 1 ? `: ${videoSending.done} of ${videoSending.count}` : ''}
         </p>
       )}
+      {draft && <PrivateLinkDraft draft={draft} onDismiss={() => setPreviewDropped((dropped) => new Set(dropped).add(draft.url))} />}
       <form onSubmit={(event) => void sendText(event)} className="flex shrink-0 items-end gap-2 border-t border-white/5 bg-slate-900/95 p-2">
         <input
           ref={fileRef}
