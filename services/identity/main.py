@@ -5604,6 +5604,9 @@ def _device_word(session: Session, username: str, device_key: str = "") -> str:
         row = session.exec(select(Device).where(Device.device_key == device_key)).first()
         if row is not None and row.kind in MOBILE_DEVICE_KINDS:
             return row.kind
+        if row is not None and row.kind == "windows-pc":
+            # The family PC (agent/jarvis-guard): not the member's phone.
+            return "PC"
     return device_noun.noun(_device_kinds(session, username))
 
 

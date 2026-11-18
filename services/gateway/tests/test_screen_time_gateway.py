@@ -530,3 +530,29 @@ def test_status_without_parents_has_empty_lists(wired):
     assert (body["parent_contacts"], body["lock_call_allow"], body["lock_suspend_apps"]) == ([], [], [])
 
 
+
+
+def test_a_parent_unlock_on_a_family_pc_is_answered_and_told(wired, monkeypatch):
+    """A Windows PC presents its device key. Identity accepts it as the child,
+    but the gateway's strict key check does not know device keys: the unlock
+    used to come back 401 after identity had said yes."""
+    client, _, sent, answers = wired
+
+    async def _pc(_request):
+        return {"device_key": "windows-test-guid", "owner_username": "kid", "kind": "windows-pc"}
+
+    async def _no_user_key(_request):
+        raise AssertionError("a PC's device key is not a user's key")
+
+    monkeypatch.setattr(gateway_main, "_device_agent_key", _pc)
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _no_user_key)
+    answers[("POST", "/guard/parent-unlock")] = (
+        200, {"ok": True, "parent": "mom", "until": "x", "notify": ["dad", "mom"], "device": "PC"},
+    )
+
+    r = client.post("/api/guard/parent-unlock", json={"username": "mom", "password": "p", "device_key": "windows-test-guid"})
+
+    assert r.status_code == 200
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    assert sent[0]["title"] == "PC protection unlocked"
+    assert "kid's PC" in sent[0]["body"]

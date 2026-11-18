@@ -4831,6 +4831,23 @@ async def proxy_report_capabilities(device_key: str, request: Request):
         return await _proxy_json_response(resp)
 
 
+@app.post("/api/user-panel/devices/{device_key}/agent-key")
+async def proxy_mint_device_agent_key(device_key: str, request: Request):
+    """Mint the Windows PC agent's device-scoped key (admin only, in identity).
+
+    The family PC installer (agent/jarvis-guard/install.ps1) calls this once,
+    as the parent, through the gateway like every other client. Without this
+    route the call was a 404 here and no PC could finish enrolling.
+    """
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/user-panel/devices/{device_key}/agent-key",
+            headers=_panel_headers(request),
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/user-panel/devices/{device_key}/battery")
 async def proxy_device_battery(device_key: str, request: Request, hours: int = 24):
     """A device's battery history (its owner's, or any for an admin)."""
@@ -8098,12 +8115,16 @@ async def guard_parent_unlock(request: Request):
     """
     status, body = await _identity_as_caller(request, "POST", "/api/guard/parent-unlock", json=await request.json())
     if status == 200:
-        creds = await _resolve_identity_from_request(request)
-        child = str((creds or {}).get("user") or "")
+        # A family PC unlocks with its device key, which identity accepted as
+        # the child it is assigned to but the strict key check below does not
+        # know: asking it 401'd every unlock on a PC after identity said yes.
+        device_creds = await _device_agent_key(request)
+        creds = None if device_creds else await _resolve_identity_from_request(request)
+        child = str((device_creds or {}).get("owner_username") or (creds or {}).get("user") or "")
         device = (body or {}).get("device") or "device"
         await _screen_time_notice(
             body.get("notify") or [],
-            f"{device.capitalize()} protection unlocked",
+            f"{device[:1].upper() + device[1:]} protection unlocked",
             f"{body.get('parent')} unlocked Jarvis's protection on {child}'s {device} for 10 minutes.",
             "/fitness",
         )
@@ -8186,7 +8207,7 @@ async def guard_tamper(request: Request):
     device = (info or {}).get("device") or "device"
     await _screen_time_notice(
         (info or {}).get("parents") or [],
-        f"{device.capitalize()} protection changed",
+        f"{device[:1].upper() + device[1:]} protection changed",
         f"{name}'s {device} {_TAMPER_EVENTS[event]}" + (f": {detail}." if detail else "."),
         f"/family/member/{child}",
     )
@@ -8413,10 +8434,10 @@ async def screen_time_pause(request: Request, username: str):
         # "tablet" for a member who has only tablets (identity says which).
         device = (body or {}).get("device") or "device"
         if paused:
-            title = f"{device.capitalize()} paused"
+            title = f"{device[:1].upper() + device[1:]} paused"
             text = f"You paused your {device} for now." if mine else f"A parent paused your {device} for now."
         else:
-            title, text = f"{device.capitalize()} unpaused", f"Your {device} is back on."
+            title, text = f"{device[:1].upper() + device[1:]} unpaused", f"Your {device} is back on."
         await _screen_time_notice([username], title, text, "/fitness")
         # The Devices page's lock/unlock is this pause; keep it in the MDM audit
         # log (Phase 12) so "who locked a device, and when" has one answer. A

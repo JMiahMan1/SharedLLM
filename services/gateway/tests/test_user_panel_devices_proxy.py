@@ -212,3 +212,30 @@ def test_battery_history_is_proxied_with_the_callers_token(client, monkeypatch):
     assert r.status_code == 200
     assert cap["calls"][0]["url"].endswith("/api/user-panel/devices/esphome:744dbd2c9728/battery")
     assert cap["calls"][0]["headers"].get("Authorization") == "Bearer alex-token"
+
+
+class TestWindowsAgentKeyRoute:
+    """The family PC installer mints its device key through the gateway.
+
+    install.ps1 talks only to the public hub address, which routes /api/* to
+    the gateway. Identity served the mint route; the gateway did not, so every
+    Windows enrolment stopped at "mint this PC's key" with a 404.
+    """
+
+    def test_minting_a_pc_key_is_not_a_404(self, client, monkeypatch):
+        minted = {"agent_key": "wg_fake", "device_key": "windows-test-guid", "owner_username": "kid", "kind": "windows-pc"}
+        cap = _patch_identity(monkeypatch, payload=minted)
+        r = client.post(
+            "/api/user-panel/devices/windows-test-guid/agent-key",
+            headers={"Authorization": "Bearer parent-token"},
+        )
+        assert r.status_code == 200
+        assert r.json()["agent_key"] == "wg_fake"
+        assert cap["calls"][0]["verb"] == "post"
+        assert cap["calls"][0]["url"].endswith("/api/user-panel/devices/windows-test-guid/agent-key")
+        assert cap["calls"][0]["headers"].get("Authorization") == "Bearer parent-token"
+
+    def test_a_refusal_is_relayed(self, client, monkeypatch):
+        _patch_identity(monkeypatch, status=403, payload={"detail": "Admin only"})
+        r = client.post("/api/user-panel/devices/windows-test-guid/agent-key")
+        assert r.status_code == 403
