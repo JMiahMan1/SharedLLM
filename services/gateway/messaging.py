@@ -3,11 +3,26 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass, field
 from typing import Any
 
 import redis.asyncio as redis
 
 log = logging.getLogger("gateway.messaging")
+
+# Priority levels (higher = more urgent)
+PRIORITY_LOW = 0      # Background Raven missions (coding, building)
+PRIORITY_NORMAL = 50  # Standard chat, librarian queries
+PRIORITY_HIGH = 100   # Voice commands, home automation, quick queries
+PRIORITY_CRITICAL = 200  # Emergency (SOS, security alerts)
+
+# Priority names for logging
+PRIORITY_NAMES = {
+    PRIORITY_LOW: "LOW",
+    PRIORITY_NORMAL: "NORMAL",
+    PRIORITY_HIGH: "HIGH",
+    PRIORITY_CRITICAL: "CRITICAL",
+}
 
 # Tiered Inference Concurrency Control
 # - TIER2_SEMAPHORE: Allows up to 3 concurrent non-autonomous (Librarian) jobs
@@ -17,17 +32,22 @@ log = logging.getLogger("gateway.messaging")
 TIER2_SEMAPHORE = asyncio.Semaphore(3)
 TIER3_LOCK = asyncio.Lock()
 
+# Preemption state
+_current_raven_mission: int | None = None
+_preemption_lock = asyncio.Lock()
+
+
 class JobStatus:
     QUEUED = "queued"
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
 
+
 class InferenceJobQueue:
     """
-    Strict FIFO Job Queue for inference work.
-    Claiming stays sequential; the worker decides how many claimed jobs run at
-    once, and the tier locks cap actual inference concurrency.
+    Priority-aware Job Queue for inference work.
+    Supports preemption: high-priority jobs can pause lower-priority Raven missions.
     """
     def __init__(self, redis_url: str):
         self.redis_url = redis_url
@@ -47,18 +67,7 @@ class InferenceJobQueue:
             log.info(f"Connected to Redis at {self.redis_url} for job queuing.")
 
     async def claim_loop(self, name: str, token: str, ttl_seconds: int) -> bool:
-        """Whether this worker may run the ``name`` loop right now.
-
-        Claiming inference jobs is safe from any number of workers: the queue
-        hands each job to exactly one of them. Every other loop in the worker
-        posts something - bot replies, chat notifications, admin alerts, song
-        notices, cleanup - so a second gateway must not run them as well. Each
-        such loop holds a short lease under its own name and refreshes it while
-        it runs; another worker stands down until the lease expires.
-
-        A Redis failure returns True: losing every notification would be worse
-        than a possible duplicate.
-        """
+        """Whether this worker may run the ``name`` loop right now."""
         if not self._redis:
             try:
                 await self.connect()
@@ -81,8 +90,8 @@ class InferenceJobQueue:
             log.warning(f"[RavenWorker] Could not check the {name} lease: {e}")
             return True
 
-    async def enqueue_job(self, user_id: str, payload: dict[str, Any]) -> str:
-        """Adds a job to the FIFO queue."""
+    async def enqueue_job(self, user_id: str, payload: dict[str, Any], priority: int = PRIORITY_NORMAL, tier: str = "tier2") -> str:
+        """Adds a job to the priority queue."""
         if not self._redis:
             await self.connect()
 
@@ -94,6 +103,8 @@ class InferenceJobQueue:
             "user_id": user_id,
             "status": JobStatus.QUEUED,
             "payload": payload,
+            "priority": priority,
+            "tier": tier,
             "created_at": time.time(),
             "attempts": 0,
             "result": None,
@@ -107,29 +118,35 @@ class InferenceJobQueue:
             ex=self.DEFAULT_TTL_SECONDS,
         )
 
-        # Push to FIFO queue (Right push) - rpush returns int but we await for consistency
-        await self._redis.rpush(self.QUEUE_KEY, job_id)  # type: ignore[misc]
+        # Push to priority queue (sorted set by -priority, then created_at)
+        score = -priority * 1_000_000_000 + time.time()
+        await self._redis.zadd(self.QUEUE_KEY, {job_id: score})  # type: ignore[misc]
 
-        log.info(f"Job {job_id} enqueued for user {user_id}")
+        log.info(f"Job {job_id} enqueued for user {user_id} with priority {PRIORITY_NAMES.get(priority, priority)} (tier: {tier})")
         return job_id
 
     async def claim_job(self) -> dict[str, Any] | None:
         """
-        Atomically claims the next queued job and places it into the processing list.
-        The lease must be renewed while work is in progress.
+        Atomically claims the highest-priority queued job.
         """
         if not self._redis:
             await self.connect()
 
         assert self._redis is not None
 
-        job_id = await self._redis.lmove(self.QUEUE_KEY, self.PROCESSING_KEY, "LEFT", "RIGHT")  # type: ignore[misc]
-        if not job_id:
+        # Get highest priority job (lowest score = highest priority)
+        job_ids = await self._redis.zrange(self.QUEUE_KEY, 0, 0)  # type: ignore[misc]
+        if not job_ids:
+            return None
+
+        job_id = job_ids[0]
+        # Atomic move from queue to processing
+        removed = await self._redis.zrem(self.QUEUE_KEY, job_id)  # type: ignore[misc]
+        if not removed:
             return None
 
         job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[misc]
         if not job_raw:
-            await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[misc]
             return None
 
         job = json.loads(job_raw)
@@ -142,12 +159,13 @@ class InferenceJobQueue:
             json.dumps(job),
             ex=self.DEFAULT_TTL_SECONDS,
         )
+        await self._redis.rpush(self.PROCESSING_KEY, job_id)  # type: ignore[misc]
         await self._publish_status(job_id, JobStatus.PROCESSING)
         await self.heartbeat_job(job_id)
         return job
 
     async def pop_job(self) -> dict[str, Any] | None:
-        """Backward-compatible alias for older callers."""
+        """Backward-compatible alias."""
         return await self.claim_job()
 
     async def heartbeat_job(self, job_id: str):
@@ -157,7 +175,6 @@ class InferenceJobQueue:
         await self._redis.set(f"{self.LEASE_PREFIX}{job_id}", str(time.time()), ex=self.LEASE_TTL_SECONDS)  # type: ignore[misc]
 
     async def complete_job(self, job_id: str, result: Any):
-        """Marks a job as completed and stores the result."""
         if not self._redis:
             await self.connect()
         assert self._redis is not None
@@ -175,12 +192,12 @@ class InferenceJobQueue:
             json.dumps(job),
             ex=self.DEFAULT_TTL_SECONDS,
         )
+        await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[misc]
         await self._publish_status(job_id, JobStatus.COMPLETED)
         await self._finalize_job(job_id)
         log.info(f"Job {job_id} completed.")
 
     async def fail_job(self, job_id: str, error: str):
-        """Marks a job as failed."""
         if not self._redis:
             await self.connect()
         assert self._redis is not None
@@ -198,17 +215,15 @@ class InferenceJobQueue:
             json.dumps(job),
             ex=self.DEFAULT_TTL_SECONDS,
         )
+        await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[misc]
         await self._publish_status(job_id, JobStatus.FAILED)
         await self._finalize_job(job_id)
         log.error(f"Job {job_id} failed: {error}")
 
     async def get_job_status(self, job_id: str) -> dict[str, Any] | None:
-        """Retrieves the current status and result of a job."""
         if not self._redis:
             await self.connect()
-
         assert self._redis is not None
-
         job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[misc]
         return json.loads(job_raw) if job_raw else None
 
@@ -216,31 +231,26 @@ class InferenceJobQueue:
         """Returns the 0-indexed position of a job in the queue."""
         if not self._redis:
             await self.connect()
-
         assert self._redis is not None
-
-        queue = await self._redis.lrange(self.QUEUE_KEY, 0, -1)  # type: ignore[misc]
+        queue = await self._redis.zrange(self.QUEUE_KEY, 0, -1)  # type: ignore[misc]
         try:
             return queue.index(job_id)
         except ValueError:
             return -1
 
     async def push_chunk(self, job_id: str, chunk: str):
-        """Pushes a message chunk to a job-specific Redis list."""
         if not self._redis:
             await self.connect()
         assert self._redis is not None
         key = f"raven:job:chunks:{job_id}"
         await self._redis.rpush(key, chunk)  # type: ignore[misc]
-        await self._redis.expire(key, 600) # 10 minute TTL for chunks  # type: ignore[misc]
+        await self._redis.expire(key, 600)  # type: ignore[misc]
 
     async def get_chunks(self, job_id: str) -> list[str]:
-        """Pops all available chunks for a job."""
         if not self._redis:
             await self.connect()
         assert self._redis is not None
         key = f"raven:job:chunks:{job_id}"
-        # Atomic pop all
         chunks = await self._redis.lrange(key, 0, -1)  # type: ignore[misc]
         await self._redis.ltrim(key, len(chunks), -1)  # type: ignore[misc]
         return chunks
@@ -250,13 +260,8 @@ class InferenceJobQueue:
             await self._redis.close()
 
     async def reclaim_expired_jobs(self) -> int:
-        """
-        Requeue jobs whose worker lease expired.
-        After MAX_ATTEMPTS, move them to the dead-letter list and mark failed.
-        """
         if not self._redis:
             await self.connect()
-
         assert self._redis is not None
 
         reclaimed = 0
@@ -300,7 +305,9 @@ class InferenceJobQueue:
                 ex=self.DEFAULT_TTL_SECONDS,
             )
             await self._publish_status(job_id, JobStatus.QUEUED)
-            await self._redis.rpush(self.QUEUE_KEY, job_id)  # type: ignore[misc]
+            # Re-add to priority queue
+            score = -job.get("priority", PRIORITY_NORMAL) * 1_000_000_000 + job.get("created_at", time.time())
+            await self._redis.zadd(self.QUEUE_KEY, {job_id: score})  # type: ignore[misc]
             reclaimed += 1
             log.warning("Re-queued expired job %s after lease loss (attempt %s)", job_id, attempts)
 
@@ -314,11 +321,6 @@ class InferenceJobQueue:
         await self._redis.delete(f"{self.LEASE_PREFIX}{job_id}")  # type: ignore[misc]
 
     async def find_jobs_for_mission(self, mission_id: str | int) -> list[str]:
-        """Return job_ids whose payload carries ``_mission_id == mission_id``.
-
-        Scans both the pending queue and the in-progress list so a mission can be
-        located no matter which stage its job is in.
-        """
         if not self._redis:
             await self.connect()
         assert self._redis is not None
@@ -326,7 +328,10 @@ class InferenceJobQueue:
         target = str(mission_id)
         job_ids: list[str] = []
         for key in (self.QUEUE_KEY, self.PROCESSING_KEY):
-            items = await self._redis.lrange(key, 0, -1)  # type: ignore[misc]
+            if key == self.QUEUE_KEY:
+                items = await self._redis.zrange(key, 0, -1)  # type: ignore[misc]
+            else:
+                items = await self._redis.lrange(key, 0, -1)  # type: ignore[misc]
             for jid in items:
                 raw = await self._redis.get(f"{self.JOB_PREFIX}{jid}")  # type: ignore[misc]
                 if not raw:
@@ -341,18 +346,13 @@ class InferenceJobQueue:
         return job_ids
 
     async def drop_jobs_for_mission(self, mission_id: str | int) -> int:
-        """Remove every queued/in-progress job for a mission and its metadata/lease.
-
-        Returns the number of jobs dropped. Used when cancelling a mission so the
-        singleton worker can never claim a job whose mission no longer exists.
-        """
         if not self._redis:
             await self.connect()
         assert self._redis is not None
 
         dropped = 0
         for jid in await self.find_jobs_for_mission(mission_id):
-            await self._redis.lrem(self.QUEUE_KEY, 1, jid)  # type: ignore[misc]
+            await self._redis.zrem(self.QUEUE_KEY, jid)  # type: ignore[misc]
             await self._redis.lrem(self.PROCESSING_KEY, 1, jid)  # type: ignore[misc]
             await self._redis.delete(f"{self.JOB_PREFIX}{jid}")  # type: ignore[misc]
             await self._redis.delete(f"{self.LEASE_PREFIX}{jid}")  # type: ignore[misc]
@@ -360,15 +360,118 @@ class InferenceJobQueue:
         return dropped
 
     async def _publish_status(self, job_id: str, status: str):
-        """Notify SSE subscribers that a job's status changed.
-
-        Best-effort: failures here must never break job processing. The SSE
-        status stream also falls back to a periodic GET, so a missed publish is
-        self-healing.
-        """
         if not self._redis:
             return
         try:
             await self._redis.publish(f"{self.JOB_PREFIX}status:{job_id}", status)
         except Exception as e:
             log.warning(f"Failed to publish status for job {job_id}: {e}")
+
+    # --- Preemption Support ---
+
+    async def request_preemption(self, preempting_job_id: str, priority: int) -> bool:
+        """
+        Request preemption of current Raven mission.
+        Returns True if preemption granted (mission paused).
+        """
+        async with _preemption_lock:
+            global _current_raven_mission
+
+            if _current_raven_mission is None:
+                return False  # No Raven mission running
+
+            if priority <= PRIORITY_NORMAL:
+                return False  # Only high/critical priority can preempt
+
+            # Signal the running mission to pause
+            pause_key = f"raven:mission:pause:{_current_raven_mission}"
+            try:
+                r = redis.from_url(self.redis_url, decode_responses=True)
+                await r.set(pause_key, "PREEMPTED", ex=3600)
+                await r.publish(pause_key, "PREEMPTED")
+                await r.close()
+                log.warning(f"[Preemption] Mission {_current_raven_mission} preempted by job {preempting_job_id} (priority {PRIORITY_NAMES.get(priority, priority)})")
+                return True
+            except Exception as e:
+                log.error(f"[Preemption] Failed to pause mission {_current_raven_mission}: {e}")
+                return False
+
+    async def register_raven_mission(self, mission_id: int, pause_event: asyncio.Event):
+        """Register the currently running Raven mission for preemption tracking."""
+        global _current_raven_mission
+        async with _preemption_lock:
+            _current_raven_mission = mission_id
+
+    async def unregister_raven_mission(self, mission_id: int):
+        """Unregister a completed/failed Raven mission."""
+        global _current_raven_mission
+        async with _preemption_lock:
+            if _current_raven_mission == mission_id:
+                _current_raven_mission = None
+
+    async def get_current_raven_mission(self) -> int | None:
+        """Get the currently running Raven mission ID."""
+        global _current_raven_mission
+        return _current_raven_mission
+
+
+# Helper functions for priority inference
+def infer_priority_from_payload(payload: dict[str, Any]) -> int:
+    """
+    Infer job priority from payload content.
+    High priority: voice commands, home automation, quick queries
+    Normal priority: standard chat, librarian queries
+    Low priority: Raven missions (coding, building)
+    """
+    # Explicit priority in payload
+    if "priority" in payload:
+        return int(payload["priority"])
+
+    # Raven missions are low priority (long-running)
+    if payload.get("_mission_id"):
+        return PRIORITY_LOW
+
+    # Check for fast-path indicators
+    query = str(payload.get("query", "")).lower()
+    
+    # Critical: SOS, emergency
+    if any(kw in query for kw in ["sos", "emergency", "help me", "urgent"]):
+        return PRIORITY_CRITICAL
+    
+    # High: voice commands, home automation, quick control
+    high_priority_keywords = [
+        "turn on", "turn off", "toggle", "set temperature", "lock", "unlock",
+        "open garage", "close garage", "arm", "disarm", "pause", "resume",
+        "play", "stop", "volume", "brightness", "thermostat", "lights",
+        "what is the weather", "what time", "timer", "alarm"
+    ]
+    if any(kw in query for kw in high_priority_keywords):
+        return PRIORITY_HIGH
+
+    # High: voice context (short queries from voice satellites)
+    if payload.get("voice_context"):
+        return PRIORITY_HIGH
+
+    # Normal: standard chat, librarian, questions
+    return PRIORITY_NORMAL
+
+
+def infer_tier_from_payload(payload: dict[str, Any]) -> str:
+    """Infer which tier (tier2 or tier3) based on payload."""
+    # Raven missions go to tier3
+    if payload.get("_mission_id"):
+        return "tier3"
+    
+    # Autonomous/Raven intent goes to tier3
+    query = str(payload.get("query", "")).lower()
+    coding_keywords = [
+        "raven", "build a", "create a", "fix the", "write code", "implement",
+        "write a python", "write a script", "write a function", "create a script",
+        "build a", "make a", "develop a", "code a", "program a",
+        "scrape", "crawler", "spider", "api wrapper", "backend", "frontend"
+    ]
+    if any(kw in query for kw in coding_keywords):
+        return "tier3"
+    
+    # Everything else goes to tier2 (Librarian)
+    return "tier2"

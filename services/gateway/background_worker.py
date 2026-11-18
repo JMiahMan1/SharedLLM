@@ -794,6 +794,12 @@ class RavenWorker:
             # Acquire appropriate lock based on tier, then run orchestration
             if is_autonomous:
                 log.info(f"[Worker] Acquiring TIER3 (Raven) lock for job {job_id}")
+                
+                # Register this mission for preemption tracking
+                mission_id = payload.get("_mission_id")
+                if mission_id:
+                    await self.job_queue.register_raven_mission(mission_id)
+                
                 async with TIER3_LOCK:
                     started_ts = time.time()
                     started_iso = datetime.now(UTC).isoformat()
@@ -849,7 +855,7 @@ class RavenWorker:
                                                 await pubsub.unsubscribe()
                                             with suppress(Exception):
                                                 await pubsub.aclose()
-                                kill_monitor = asyncio.create_task(_monitor_kill(mission_id, orchestration_task))
+                                    kill_monitor = asyncio.create_task(_monitor_kill(mission_id, orchestration_task))
 
                             # The loop checks its time limit only between steps, and
                             # one step (model retries, a long tool) can run for most
@@ -1060,6 +1066,10 @@ class RavenWorker:
                                 pass  # best-effort, never block mission completion
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} status: {patch_e}")
+                finally:
+                    # Unregister mission for preemption tracking
+                    if mission_id:
+                        await self.job_queue.unregister_raven_mission(mission_id)
 
         except Exception as e:
             import traceback
@@ -1084,6 +1094,9 @@ class RavenWorker:
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} to failed: {patch_e}")
         finally:
+            # Unregister mission for preemption tracking
+            if mission_id:
+                await self.job_queue.unregister_raven_mission(mission_id)
             if heartbeat_task:
                 heartbeat_task.cancel()
                 with suppress(asyncio.CancelledError):
