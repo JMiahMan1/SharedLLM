@@ -11,10 +11,15 @@ load_dotenv()
 
 HA_URL = os.getenv("HA_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
-OFFICE_TV = "media_player.office_tv"  # Hardware
-OFFICE_TV_CHROME = "media_player.office_tv_chrome"  # Cast
-OFFICE_REMOTE = "remote.office_tv_remote"
-OFFICE_SPEAKER = "media_player.office_speaker"  # Music Assistant?
+# The players under test: "entity_id=Spoken Name" pairs, comma separated, e.g.
+# LIVE_VOLUME_TARGETS="media_player.den_tv_cast=Den TV,media_player.den_speaker=Den Speaker"
+LIVE_VOLUME_TARGETS = [
+    (eid.strip(), name.strip())
+    for eid, _, name in (pair.partition("=") for pair in (os.getenv("LIVE_VOLUME_TARGETS") or "").split(","))
+    if eid.strip() and name.strip()
+]
+if not LIVE_VOLUME_TARGETS:
+    sys.exit('Set LIVE_VOLUME_TARGETS to "entity_id=Spoken Name" pairs, comma separated.')
 
 if not HA_URL or not HA_TOKEN:
     print("[FAIL] Error: HA_URL or HA_TOKEN not set in .env")
@@ -38,10 +43,9 @@ async def get_volume(entity_id):
 
 
 async def run_test():
-    print(f"--- Starting Volume Lifecycle Test on {OFFICE_TV} ---")
+    print(f"--- Starting Volume Lifecycle Test on {[eid for eid, _ in LIVE_VOLUME_TARGETS]} ---")
 
     # 1. Start Music (to ensure it's active)
-    print("\n1. Playing Music on Office Speaker (MA)...")
     # Using MA directly to ensure music context
     # Try generic play logic via our pipeline? No, let's direct hit to ensure state.
     # Actually, user wants to test OUR routing.
@@ -96,10 +100,7 @@ async def run_test():
             print(f"[FAIL] Expected {expected_vol}, got {curr_vol}")
 
     # Test both devices as requested
-    targets = [
-        ("media_player.office_tv_chrome_2", "Office TV"),
-        ("media_player.office_speaker", "Office Speaker")
-    ]
+    targets = LIVE_VOLUME_TARGETS
 
     for entity_id, name in targets:
         print(f"\n--- Starting Volume Lifecycle Test on {entity_id} ({name}) ---")

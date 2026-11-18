@@ -197,7 +197,7 @@ class CastDriver(Driver):
         ms = self._media_status(cc)
         app_id = getattr(cc, "app_id", None) or getattr(cs, "app_id", None)
         # An Android/Google TV's own apps report through Cast as "AndroidNativeApp", and that
-        # report can be false: the Office TV's built-in Spotify app said Spotify was paused or
+        # report can be false: one Google TV's built-in Spotify app said Spotify was paused or
         # "playing" though Spotify was never played on it. So a native app's session counts
         # only while the TV is awake and, when Jarvis also has the TV's remote connection,
         # that app is the one on screen. Real playback in the app still shows.

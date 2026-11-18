@@ -30,9 +30,9 @@ NO_LOGIN = {"user": "kid1"}
 OWN_LOGIN = {"user": "parent1", "ha_url": "http://own.test:8123", "ha_token": "own-token"}
 
 STATES = [
-    {"entity_id": "media_player.kids_room", "state": "idle", "attributes": {"friendly_name": "Kids Room"}},
-    {"entity_id": "media_player.office_tv", "state": "playing",
-     "attributes": {"friendly_name": "Office TV", "media_title": "News"}},
+    {"entity_id": "media_player.playroom", "state": "idle", "attributes": {"friendly_name": "Playroom"}},
+    {"entity_id": "media_player.study_tv", "state": "playing",
+     "attributes": {"friendly_name": "Study TV", "media_title": "News"}},
 ]
 
 
@@ -42,7 +42,7 @@ def _headers() -> dict:
 
 @pytest.fixture
 def hub(monkeypatch):
-    """A configured hub, kid1 allowed only the kids' room player, and a record of hub reads."""
+    """A configured hub, kid1 allowed only the playroom player, and a record of hub reads."""
     monkeypatch.setattr(config, "HA_URL", HUB_URL)
     monkeypatch.setattr(config, "HOMEHUB_URL", HUB_URL)
     monkeypatch.setattr(config, "INTERNAL_SECRET", HUB_SECRET)
@@ -50,7 +50,7 @@ def hub(monkeypatch):
     async def permissions(username, is_admin=False):
         if is_admin:
             return EntityPermissions.everything()
-        return EntityPermissions(assigned=frozenset({"media_player.kids_room"}))
+        return EntityPermissions(assigned=frozenset({"media_player.playroom"}))
 
     monkeypatch.setattr(entity_access, "load_entity_permissions", permissions)
     monkeypatch.setattr(exec_main, "load_entity_permissions", permissions)
@@ -96,7 +96,7 @@ def test_a_caller_without_a_login_sees_only_the_players_they_may_view(hub):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "SUCCESS"
-    assert [p["entity_id"] for p in body["detail"]["all_players"]] == ["media_player.kids_room"]
+    assert [p["entity_id"] for p in body["detail"]["all_players"]] == ["media_player.playroom"]
     assert body["detail"]["active"] is None
     assert hub == [(HUB_URL, HUB_SECRET)]
 
@@ -105,7 +105,7 @@ def test_an_admin_without_a_login_sees_every_player(hub):
     resp = _status({"user": "admin1", "is_admin": True})
     assert resp.status_code == 200
     players = {p["entity_id"] for p in resp.json()["detail"]["all_players"]}
-    assert players == {"media_player.kids_room", "media_player.office_tv"}
+    assert players == {"media_player.playroom", "media_player.study_tv"}
 
 
 def test_a_caller_with_their_own_login_reads_the_hub_with_it(hub):
@@ -116,28 +116,28 @@ def test_a_caller_with_their_own_login_reads_the_hub_with_it(hub):
 
 def test_a_caller_without_a_login_cannot_command_a_player_they_may_not_use(hub, sent):
     transport = client.post("/execute/media/transport", headers=_headers(), json={
-        "user_context": NO_LOGIN, "entity_id": "media_player.office_tv", "command": "pause"})
+        "user_context": NO_LOGIN, "entity_id": "media_player.study_tv", "command": "pause"})
     play = client.post("/execute/media/play", headers=_headers(), json={
-        "user_context": NO_LOGIN, "entity_id": "media_player.office_tv", "query": "a song"})
+        "user_context": NO_LOGIN, "entity_id": "media_player.study_tv", "query": "a song"})
     book = client.post("/execute/audiobookshelf", headers=_headers(), json={
-        "user_context": NO_LOGIN, "action": "play", "book_id": "b1", "entity_id": "media_player.office_tv"})
+        "user_context": NO_LOGIN, "action": "play", "book_id": "b1", "entity_id": "media_player.study_tv"})
     assert (transport.status_code, play.status_code, book.status_code) == (403, 403, 403)
     assert sent == []
 
 
 def test_a_caller_without_a_login_commands_their_own_player_with_the_hub_login(hub, sent):
     resp = client.post("/execute/media/transport", headers=_headers(), json={
-        "user_context": NO_LOGIN, "entity_id": "media_player.kids_room", "command": "pause"})
+        "user_context": NO_LOGIN, "entity_id": "media_player.playroom", "command": "pause"})
     assert resp.status_code == 200
-    assert sent == [("media_transport", "media_player.kids_room", HUB_URL, HUB_SECRET)]
+    assert sent == [("media_transport", "media_player.playroom", HUB_URL, HUB_SECRET)]
 
 
 def test_a_play_that_names_no_player_is_given_one_the_caller_may_use(hub, sent):
     resp = client.post("/execute/media/play", headers=_headers(), json={
         "user_context": NO_LOGIN, "query": "a song"})
     assert resp.status_code == 200
-    # The playing office TV would be the first pick for the whole house.
-    assert sent == [("media_play", "media_player.kids_room", HUB_URL, HUB_SECRET)]
+    # The playing study TV would be the first pick for the whole house.
+    assert sent == [("media_play", "media_player.playroom", HUB_URL, HUB_SECRET)]
 
 
 def test_a_caller_with_their_own_login_plays_as_before(hub, sent):
@@ -149,8 +149,8 @@ def test_a_caller_with_their_own_login_plays_as_before(hub, sent):
 
 @pytest.mark.parametrize("path, body", [
     ("/execute/media/status", {}),
-    ("/execute/media/play", {"entity_id": "media_player.kids_room", "query": "a song"}),
-    ("/execute/media/transport", {"entity_id": "media_player.kids_room", "command": "pause"}),
+    ("/execute/media/play", {"entity_id": "media_player.playroom", "query": "a song"}),
+    ("/execute/media/transport", {"entity_id": "media_player.playroom", "command": "pause"}),
     ("/execute/audiobookshelf", {"action": "search", "query": "a book"}),
 ])
 def test_no_hub_configured_is_a_clear_503(hub, sent, monkeypatch, path, body):
@@ -170,7 +170,7 @@ async def test_resolve_entity_chooses_only_among_allowed_players(monkeypatch):
 
     monkeypatch.setattr(media_handler.ha_client, "get_states", get_states)
     req = MediaPlayRequest(user_context=UserContext(user="kid1"), query="a song")
-    assert await media_handler.resolve_entity(req, HUB_URL, HUB_SECRET) == "media_player.office_tv"
+    assert await media_handler.resolve_entity(req, HUB_URL, HUB_SECRET) == "media_player.study_tv"
     picked = await media_handler.resolve_entity(
-        req, HUB_URL, HUB_SECRET, may_use=lambda eid: eid == "media_player.kids_room")
-    assert picked == "media_player.kids_room"
+        req, HUB_URL, HUB_SECRET, may_use=lambda eid: eid == "media_player.playroom")
+    assert picked == "media_player.playroom"

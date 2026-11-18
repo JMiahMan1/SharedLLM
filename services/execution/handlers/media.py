@@ -899,7 +899,7 @@ async def _transport_via_ha(req) -> ExecutionResult:
     standard_supported = _standard_supported(idx, full_entity_id, command, supported_features)
 
     # A TV or cast speaker playing Music Assistant's stream has its queue on
-    # MA's own entity for the same device ("Master Bedroom TV" the Cast entity
+    # MA's own entity for the same device ("Den TV": the Cast entity
     # cannot skip a track; its MA twin can). Queue commands go there while MA
     # is driving the device, or whenever the device itself cannot do them.
     if command in _QUEUE_COMMANDS and state and not is_music_assistant_player(attrs, full_entity_id):

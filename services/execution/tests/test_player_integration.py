@@ -40,10 +40,10 @@ def mock_states():
     """Return a list of mock HA states for various device types."""
     return [
         {
-            "entity_id": "media_player.office_tv",
+            "entity_id": "media_player.study_tv",
             "state": "idle",
             "attributes": {
-                "friendly_name": "Office TV",
+                "friendly_name": "Study TV",
                 "source": "Music Assistant",
                 "integration": "music_assistant",
                 "active_queue": None,
@@ -60,10 +60,10 @@ def mock_states():
             },
         },
         {
-            "entity_id": "media_player.office_tv_ma",
+            "entity_id": "media_player.study_tv_ma",
             "state": "idle",
             "attributes": {
-                "friendly_name": "Office TV",
+                "friendly_name": "Study TV",
                 "source": "Music Assistant",
                 "integration": "music_assistant",
                 "active_queue": "queue://default/67890",
@@ -93,9 +93,9 @@ class TestResolveMassEntity:
             "services.execution.handlers.media.ha_client.get_states",
             new=AsyncMock(return_value=mock_states),
         ):
-            result = asyncio.run(resolve_mass_entity(ctx, "media_player.office_tv_ma"))
+            result = asyncio.run(resolve_mass_entity(ctx, "media_player.study_tv_ma"))
 
-        assert result == "media_player.office_tv_ma"
+        assert result == "media_player.study_tv_ma"
 
     def test_resolve_to_ma_sibling_by_name(self, ctx, mock_states):
         """Resolve non-MA entity to MA player sibling with matching friendly name."""
@@ -103,9 +103,9 @@ class TestResolveMassEntity:
             "services.execution.handlers.media.ha_client.get_states",
             new=AsyncMock(return_value=mock_states),
         ):
-            result = asyncio.run(resolve_mass_entity(ctx, "media_player.office_tv"))
+            result = asyncio.run(resolve_mass_entity(ctx, "media_player.study_tv"))
 
-        assert result == "media_player.office_tv_ma"
+        assert result == "media_player.study_tv_ma"
 
     def test_no_match_returns_original(self, ctx, mock_states):
         """If no MA player matches the friendly name, return original entity."""
@@ -139,24 +139,24 @@ class TestResolveMassEntity:
 
     def test_idle_ma_player_selected(self, ctx, mock_states):
         """Idle MA players are valid routing targets (active_queue not required)."""
-        # The logic checks if original_friendly (e.g., "Office TV") is contained in MA player's friendly_name
+        # The logic checks if original_friendly (e.g., "Study TV") is contained in MA player's friendly_name
         # So we need MA player to have a longer name containing the original
         states = [
             {
-                "entity_id": "media_player.office_tv",
+                "entity_id": "media_player.study_tv",
                 "state": "standby",
                 "attributes": {
-                    "friendly_name": "Office TV",
+                    "friendly_name": "Study TV",
                     "source": "",
                     "integration": "generic",
                     "active_queue": None,
                 },
             },
             {
-                "entity_id": "media_player.office_tv_ma",
+                "entity_id": "media_player.study_tv_ma",
                 "state": "idle",
                 "attributes": {
-                    "friendly_name": "Office TV (MA)",
+                    "friendly_name": "Study TV (MA)",
                     "source": "Music Assistant",
                     "integration": "music_assistant",
                     "active_queue": "queue://default/67890",
@@ -167,9 +167,9 @@ class TestResolveMassEntity:
             "services.execution.handlers.media.ha_client.get_states",
             new=AsyncMock(return_value=states),
         ):
-            result = asyncio.run(resolve_mass_entity(ctx, "media_player.office_tv"))
+            result = asyncio.run(resolve_mass_entity(ctx, "media_player.study_tv"))
 
-        assert result == "media_player.office_tv_ma"
+        assert result == "media_player.study_tv_ma"
 
 
 # ---------------------------------------------------------------------------
@@ -625,7 +625,7 @@ class TestFullMediaPlayFlow:
         """Test the full podcast play flow: search → fallback → play_media."""
         req = MediaPlayRequest(
             user_context=ctx,
-            entity_id="media_player.office_tv",
+            entity_id="media_player.study_tv",
             query="The Daily Podcast Episode 5",
             media_type="podcast",
         )
@@ -665,14 +665,14 @@ class TestFullMediaPlayFlow:
             ),
             patch(
                 "services.execution.handlers.media.resolve_mass_entity",
-                new=AsyncMock(return_value="media_player.office_tv_ma"),
+                new=AsyncMock(return_value="media_player.study_tv_ma"),
             ),
             patch(
                 "services.execution.handlers.roku.is_roku_device",
                 new=AsyncMock(return_value=False),
             ),
         ):
-            result = await play_podcast(req, "media_player.office_tv", ctx)
+            result = await play_podcast(req, "media_player.study_tv", ctx)
 
         assert result.status == "SUCCESS"
         assert "as track" in result.message
@@ -815,7 +815,7 @@ class TestGatewayStreamEndpoint:
                 resp = AsyncMock()
                 resp.status = 200
                 resp.json = AsyncMock(return_value=[
-                    {"player_id": "office_tv", "name": "Office TV"},
+                    {"player_id": "study_tv", "name": "Study TV"},
                     {"player_id": "browser_player", "name": "Sendspin JS Client (test)"},
                 ])
                 return resp

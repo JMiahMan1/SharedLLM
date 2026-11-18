@@ -24,16 +24,16 @@ valid_context = {
 def test_entity_search_by_query(mocker):
     """Test searching entities by query term."""
     mocker.patch("services.execution.ha_client.get_states", return_value=[
-        {"entity_id": "media_player.office_tv", "state": "idle", "attributes": {"friendly_name": "Office TV", "device_class": "tv"}},
-        {"entity_id": "media_player.office_tv_chrome", "state": "off", "attributes": {"friendly_name": "Office TV Cast", "device_class": "speaker"}},
-        {"entity_id": "light.office_desk", "state": "on", "attributes": {"friendly_name": "Office Desk Light", "device_class": "light"}},
+        {"entity_id": "media_player.study_tv", "state": "idle", "attributes": {"friendly_name": "Study TV", "device_class": "tv"}},
+        {"entity_id": "media_player.study_tv_cast", "state": "off", "attributes": {"friendly_name": "Study TV Cast", "device_class": "speaker"}},
+        {"entity_id": "light.study_desk", "state": "on", "attributes": {"friendly_name": "Study Desk Light", "device_class": "light"}},
     ])
 
     resp = client.post("/execute/entity/search",
         headers={"X-Internal-Secret": "test-secret"},
         json={
             "user_context": valid_context,
-            "query": "office tv",
+            "query": "study tv",
             "domain": "media_player",
         }
     )
@@ -142,7 +142,7 @@ def test_entity_search_by_domain(mocker):
 def test_entity_search_by_area(mocker):
     """Test filtering entities by area."""
     mocker.patch("services.execution.ha_client.get_states", return_value=[
-        {"entity_id": "light.office_desk", "state": "on", "attributes": {"friendly_name": "Office Desk Light", "area_id": "office"}},
+        {"entity_id": "light.study_desk", "state": "on", "attributes": {"friendly_name": "Study Desk Light", "area_id": "study"}},
         {"entity_id": "light.kitchen_counter", "state": "off", "attributes": {"friendly_name": "Kitchen Counter", "area_id": "kitchen"}},
         {"entity_id": "light.bedroom_lamp", "state": "on", "attributes": {"friendly_name": "Bedroom Lamp", "area_id": "bedroom"}},
     ])
@@ -152,14 +152,14 @@ def test_entity_search_by_area(mocker):
         json={
             "user_context": valid_context,
             "query": "",
-            "area": "office",
+            "area": "study",
         }
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "SUCCESS"
     assert len(data["detail"]["entities"]) == 1
-    assert data["detail"]["entities"][0]["entity_id"] == "light.office_desk"
+    assert data["detail"]["entities"][0]["entity_id"] == "light.study_desk"
 
 
 def test_entity_search_by_state(mocker):

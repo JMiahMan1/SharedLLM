@@ -13,7 +13,7 @@ SERIAL = "2N0000000001"
 MP = "media_player.bedroom_roku_tv"
 REMOTE = "remote.bedroom_roku_tv"
 
-DEVICE_INFO = f"""<device-info><serial-number>{SERIAL}</serial-number><user-device-name>Taylors TV</user-device-name>
+DEVICE_INFO = f"""<device-info><serial-number>{SERIAL}</serial-number><user-device-name>Playroom TV</user-device-name>
 <power-mode>{{power}}</power-mode><supports-find-remote>true</supports-find-remote><headphones-connected>false</headphones-connected>
 <supports-airplay>true</supports-airplay><supports-ethernet>false</supports-ethernet></device-info>"""
 APPS = """<apps><app id="12" type="appl" version="5">Netflix</app><app id="837" type="appl" version="2">YouTube</app>

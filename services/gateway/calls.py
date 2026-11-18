@@ -483,8 +483,8 @@ def talk_recipients(
 
     Returns ``me``'s display name in the room, the other members' usernames,
     and the Talk actor ids that matched nobody (for the log). Nextcloud user
-    ids keep the case they were created with ("Noah") while Identity stores
-    them as typed ("noah"), so the match ignores case: an exact match missed
+    ids keep the case they were created with ("Sam") while Identity stores
+    them as typed ("sam"), so the match ignores case: an exact match missed
     that member on every call to them. The system account never counts.
     """
     by_talk: dict[str, str] = {}

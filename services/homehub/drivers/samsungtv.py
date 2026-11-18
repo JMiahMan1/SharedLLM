@@ -8,7 +8,7 @@ not ask again; the websocket TV also needs the ``token`` from the entry.
 Volume and mute go through UPnP RenderingControl at the entry's
 ``ssdp_rendering_control_location``, as HA does, because neither remote
 protocol can read the volume. Power on is Wake-on-LAN to every MAC the
-registry knows (the Q900 wakes on LAN; the 2012 EH5300 generally does not).
+registry knows (a 2016+ Tizen set wakes on LAN; a 2011-2015 Orsay set generally does not).
 URLs play through the same UPnP device's AVTransport when it has one.
 
 What the TV is comes from the TV: the websocket models' REST ``/api/v2/``

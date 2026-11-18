@@ -2245,7 +2245,7 @@ async def set_speech_server(body: dict):
     from services import config
     url = str(body.get("url") or "").strip().rstrip("/")
     if url and not re.fullmatch(r"https?://[^\s/]+(:\d+)?", url):
-        raise HTTPException(status_code=400, detail="Give the address as http://<host>:<port>, e.g. http://192.168.2.43:8082")
+        raise HTTPException(status_code=400, detail="Give the address as http://<host>:<port>, e.g. http://192.0.2.10:8082")
     config.SPEECH_SERVER_URL = url
     log.info("[tts] speech is now spoken %s", f"by {url}" if url else "here")
     return {"status": "SUCCESS", "url": url}
@@ -2887,7 +2887,7 @@ def _detect_media_platform(entity_id: str, attrs: dict) -> str:
         "webos": ["webos", "lg_", "lg.webos", "com.webos.", "com.lge."],
         "samsung": ["samsung", "samsungtv", "tizen", "org.tizen."],
         "android_tv": ["androidtv", "android_tv", "com.google.android", "com.google.tv"],
-        "chromecast": ["chrome", "_cast", "backdrop"],
+        "chromecast": ["chromecast", "_cast", "backdrop"],
         "bravia": ["bravia", "sony"],
         "esphome": ["esphome"],
         "dlna": ["dlna"],
@@ -4531,7 +4531,7 @@ def _skylight_assignees(raw: dict, included_map: dict) -> list[str]:
     """Resolve the family member(s) a chore is assigned to.
 
     Skylight models assignment through a `category` relationship whose included
-    record carries the member's name in `attributes.label` (e.g. "Noah")."""
+    record carries the member's name in `attributes.label` (e.g. "Sam")."""
     rel = raw.get("relationships", {}) or {}
     cat = (rel.get("category") or {}).get("data")
     if not cat or not cat.get("id"):

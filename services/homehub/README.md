@@ -94,7 +94,7 @@ The contract a camera driver follows is at the top of `drivers/mjpeg.py`.
 go2rtc's WebRTC settings are saved into `data/go2rtc/go2rtc.yaml`, which must
 exist and hold a mapping (at least `{}`): go2rtc 1.9.15 answers "no such file"
 when it is missing and crashes merging into an empty one. With the WebRTC
-address set to an IP (`192.168.2.205` here), go2rtc listens on port 8555 there
+address set to an IP (`192.0.2.10` in this example), go2rtc listens on port 8555 there
 only, not on every address the server has.
 
 Each camera in the list also has `rotation` (0, 90, 180 or 270): how far

@@ -18,10 +18,8 @@ if not RAG_ADDRESS:
 BASE_URL = f"http://{RAG_ADDRESS}:11435"
 HEADERS = {"X-RAG-User": "admin"}
 
-# Map friendly names to likely entity_ids (will verify/discover)
+# The device under test comes from the environment (nothing about one household is written here).
 DEVICE_MAP = {
-    "Office TV": ["media_player.office_tv", "media_player.office_tv_chrome_2"],
-    "Master Bedroom TV": ["media_player.master_bedroom_tv", "media_player.master_bedroom_tv_adb"],
     LIVE_TV_NAME: [LIVE_TV_ENTITY]
 }
 
@@ -127,33 +125,33 @@ def main():
     passes = 0
     fails = 0
 
-    # 1. Office TV - Music
-    if run_test_strict("Play Brandon Lake on Office TV", "Office TV", "play"):
+    # 1. The test TV - Music
+    if run_test_strict(f"Play Brandon Lake on {LIVE_TV_NAME}", LIVE_TV_NAME, "play"):
         passes += 1
     else:
         fails += 1
 
     time.sleep(5)
 
-    if run_test_strict("Stop Office TV", "Office TV", "stop"):
+    if run_test_strict(f"Stop {LIVE_TV_NAME}", LIVE_TV_NAME, "stop"):
         passes += 1
     else:
         fails += 1
 
-    # 2. Office TV - Video
-    if run_test_strict("Watch Big Buck Bunny on Office TV", "Office TV", "play"):
+    # 2. The test TV - Video
+    if run_test_strict(f"Watch Big Buck Bunny on {LIVE_TV_NAME}", LIVE_TV_NAME, "play"):
         passes += 1
     else:
         fails += 1
 
     time.sleep(5)
 
-    if run_test_strict("Stop Office TV", "Office TV", "stop"):
+    if run_test_strict(f"Stop {LIVE_TV_NAME}", LIVE_TV_NAME, "stop"):
         passes += 1
     else:
         fails += 1
 
-    # 3. The test TV
+    # 3. Generic music on the test TV
     if run_test_strict(f"Play generic music on {LIVE_TV_NAME}", f"{LIVE_TV_NAME}", "play"):
         passes += 1
     else:

@@ -9,8 +9,8 @@ request, ``Power<n> On|Off|Toggle`` drives a relay.
 The address is not in the HA config entry (it only holds the discovery
 prefix). It comes from, in order: ``entry.options["host"]``, ``entry.data["host"]``,
 ``entry.data["hosts"][<MAC>]`` (several devices on one entry), or the device
-registry entry's ``configuration_url`` (HA stored ``http://<ip>/`` there for the
-Loft-Plug). Those are only where to reconnect (allowed to come from the import).
+registry entry's ``configuration_url`` (HA stored ``http://<ip>/`` there for an
+imported plug). Those are only where to reconnect (allowed to come from the import).
 
 What the device is comes from its ``Status 0`` reply on every poll: firmware,
 hardware, MAC and web UI are confirmed onto the device (``device_fields``,

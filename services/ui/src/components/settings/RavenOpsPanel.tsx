@@ -259,7 +259,7 @@ export default function RavenOpsPanel() {
               inputMode="url"
               value={current.speech_server_url ?? ''}
               onChange={(e) => setDraftConfig({ ...draftConfig, speech_server_url: e.target.value })}
-              placeholder="http://192.168.2.43:8082"
+              placeholder="http://192.0.2.10:8082"
               data-testid="speech-server-url"
               className="glass-input w-full min-h-11 bg-black/30 text-sm font-mono"
             />

@@ -54,7 +54,7 @@ export function deviceOptions(
 
 /**
  * The player whose now-playing details stand for output `id`. Music
- * Assistant's wrapper around a Cast device ("Office TV") reports playing
+ * Assistant's wrapper around a Cast device ("Den TV") reports playing
  * with no title of its own: the track is on the Cast entity it plays
  * through, which its `maPlayerId` names, so that one's title, artwork and
  * clock are shown. Returns store objects as they are, so it is a stable

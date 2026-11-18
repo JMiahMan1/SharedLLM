@@ -7,6 +7,8 @@ Verifies actual state changes and HA logbook entries (no false positives).
 Required environment variables:
     PROD_HOST        - Production server IP or host
     LIVE_CLIMATE_ENTITY - climate entity for the climate test (skipped if unset)
+    LIVE_LIGHT_ENTITY, LIVE_LIGHT_NAME   - a light to switch, and what you call it to Jarvis
+    LIVE_LIGHT2_ENTITY, LIVE_LIGHT2_NAME - a second light for the service-call and status tests
     INTERNAL_SECRET  - SharedLLM internal secret
     HA_URL           - Home Assistant URL
     HA_TOKEN         - Home Assistant long-lived access token
@@ -22,6 +24,10 @@ PROD_HOST = os.environ["PROD_HOST"]
 SECRET = os.environ["INTERNAL_SECRET"]
 HA_URL = os.environ["HA_URL"]
 HA_TOKEN = os.environ["HA_TOKEN"]
+LIGHT = os.environ["LIVE_LIGHT_ENTITY"]
+LIGHT_NAME = os.environ["LIVE_LIGHT_NAME"]
+LIGHT2 = os.environ["LIVE_LIGHT2_ENTITY"]
+LIGHT2_NAME = os.environ["LIVE_LIGHT2_NAME"]
 EXEC_URL = f"http://{PROD_HOST}:8003"
 GATEWAY_URL = f"http://{PROD_HOST}:8080"
 
@@ -175,7 +181,7 @@ def wait_for_logbook_entry(entity_id, expected_action, timeout=15):
 # Test 1: Light Control - Turn ON (Direct API)
 def test_light_turn_on():
     log("=== Test 1: Light Control - Turn ON (Direct API) ===")
-    entity = "light.piano_lamp"
+    entity = LIGHT
 
     initial = ha_get_state(entity)
     initial_state = initial.get("state") if initial else "unknown"
@@ -212,7 +218,7 @@ def test_light_turn_on():
 # Test 2: Light Control - Turn OFF (Direct API)
 def test_light_turn_off():
     log("=== Test 2: Light Control - Turn OFF (Direct API) ===")
-    entity = "light.piano_lamp"
+    entity = LIGHT
 
     payload = {
         "user_context": USER_CTX,
@@ -239,7 +245,7 @@ def test_light_turn_off():
 # Test 3: Light Control - Brightness (Direct API)
 def test_light_brightness():
     log("=== Test 3: Light Control - Brightness (Direct API) ===")
-    entity = "light.piano_lamp"
+    entity = LIGHT
 
     # First ensure it's on
     exec_post("/execute/light", {"user_context": USER_CTX, "entity_id": entity, "action": "turn_on"})
@@ -283,7 +289,7 @@ def test_light_brightness():
 # Test 4: Generic HA Service Call (Direct API)
 def test_ha_service_call():
     log("=== Test 4: Generic HA Service Call (Direct API) ===")
-    entity = "light.hall_lamp"
+    entity = LIGHT2
 
     initial = ha_get_state(entity)
     initial_state = initial.get("state") if initial else "unknown"
@@ -318,7 +324,7 @@ def test_ha_service_call():
 # Test 5: HA Logbook Endpoint
 def test_ha_logbook():
     log("=== Test 5: HA Logbook Endpoint ===")
-    entity = "light.piano_lamp"
+    entity = LIGHT
 
     payload = {
         "user_context": USER_CTX,
@@ -363,7 +369,7 @@ def test_discovery_entities():
 # Test 7: Discovery History
 def test_discovery_history():
     log("=== Test 7: Discovery History ===")
-    entity = "light.piano_lamp"
+    entity = LIGHT
     status, resp = exec_get("/discovery/history", {
         "ha_url": HA_URL,
         "ha_token": HA_TOKEN,
@@ -451,10 +457,10 @@ def test_health():
     record("Health - Responds OK", status == 200 and resp.get("status") == "ok", f"status={status}, resp={resp}")
 
 
-# Test 11: Full Chat Interface - "Turn on the piano lamp"
+# Test 11: Full Chat Interface - "Turn on the <light>"
 def test_chat_turn_on_light():
-    log("=== Test 11: Full Chat Interface - 'Turn on the piano lamp' ===")
-    entity = "light.piano_lamp"
+    log(f"=== Test 11: Full Chat Interface - 'Turn on the {LIGHT_NAME}' ===")
+    entity = LIGHT
 
     # Ensure it starts off
     initial = ha_get_state(entity)
@@ -463,8 +469,8 @@ def test_chat_turn_on_light():
         time.sleep(2)
 
     # Send chat message
-    log("  Sending: 'Jarvis, turn on the piano lamp'")
-    status, resp = gateway_chat("Jarvis, turn on the piano lamp")
+    log(f"  Sending: 'Jarvis, turn on the {LIGHT_NAME}'")
+    status, resp = gateway_chat(f"Jarvis, turn on the {LIGHT_NAME}")
 
     if status != 200:
         record("Chat - HTTP response", False, f"Status={status}, resp={resp}")
@@ -474,23 +480,23 @@ def test_chat_turn_on_light():
     content = _safe_resp_content(resp)
     log(f"  Gateway response: {content[:200]}")
 
-    success_indicators = ["success", "completed", "executed", "turned on", "piano lamp"]
+    success_indicators = ["success", "completed", "executed", "turned on", LIGHT_NAME.lower()]
     has_success = any(indicator in content.lower() for indicator in success_indicators)
     record("Chat - Response indicates success", has_success, f"content={content[:150]}")
 
     # Verify state changed in HA
     changed, final = wait_for_state_change(entity, "on")
-    record("Chat - HA state verified (light.piano_lamp=on)", changed, f"Expected=on, Actual={final.get('state') if isinstance(final, dict) else final}")
+    record(f"Chat - HA state verified ({LIGHT}=on)", changed, f"Expected=on, Actual={final.get('state') if isinstance(final, dict) else final}")
 
     # Verify logbook entry
     has_log, entries = wait_for_logbook_entry(entity, "on")
     record("Chat - HA logbook entry", has_log, f"Found {len(entries)} entries")
 
 
-# Test 12: Full Chat Interface - "Turn off the piano lamp"
+# Test 12: Full Chat Interface - "Turn off the <light>"
 def test_chat_turn_off_light():
-    log("=== Test 12: Full Chat Interface - 'Turn off the piano lamp' ===")
-    entity = "light.piano_lamp"
+    log(f"=== Test 12: Full Chat Interface - 'Turn off the {LIGHT_NAME}' ===")
+    entity = LIGHT
 
     # Ensure it starts on
     initial = ha_get_state(entity)
@@ -499,8 +505,8 @@ def test_chat_turn_off_light():
         time.sleep(2)
 
     # Send chat message
-    log("  Sending: 'Jarvis, turn off the piano lamp'")
-    status, resp = gateway_chat("Jarvis, turn off the piano lamp")
+    log(f"  Sending: 'Jarvis, turn off the {LIGHT_NAME}'")
+    status, resp = gateway_chat(f"Jarvis, turn off the {LIGHT_NAME}")
 
     if status != 200:
         record("Chat OFF - HTTP response", False, f"Status={status}, resp={resp}")
@@ -515,7 +521,7 @@ def test_chat_turn_off_light():
 
     # Verify state changed in HA
     changed, final = wait_for_state_change(entity, "off")
-    record("Chat OFF - HA state verified (light.piano_lamp=off)", changed, f"Expected=off, Actual={final.get('state') if isinstance(final, dict) else final}")
+    record(f"Chat OFF - HA state verified ({LIGHT}=off)", changed, f"Expected=off, Actual={final.get('state') if isinstance(final, dict) else final}")
 
     # Verify logbook entry
     has_log, entries = wait_for_logbook_entry(entity, "off")
@@ -525,7 +531,7 @@ def test_chat_turn_off_light():
 # Test 13: Full Chat Interface - HA Status Query
 def test_chat_status_query():
     log("=== Test 13: Full Chat Interface - Status Query ===")
-    entity = "light.hall_lamp"
+    entity = LIGHT2
 
     # Get actual state from HA first
     actual = ha_get_state(entity)
@@ -533,8 +539,8 @@ def test_chat_status_query():
     log(f"  Actual HA state of {entity}: {actual_state}")
 
     # Ask via chat
-    log("  Sending: 'What is the status of the hall lamp?'")
-    status, resp = gateway_chat("What is the status of the hall lamp?")
+    log(f"  Sending: 'What is the status of the {LIGHT2_NAME}?'")
+    status, resp = gateway_chat(f"What is the status of the {LIGHT2_NAME}?")
 
     if status != 200:
         record("Chat Status - HTTP response", False, f"Status={status}")

@@ -16,9 +16,9 @@ def test_resolve_exact_friendly_name_match():
     async def run():
         global mock_states_store
         mock_states_store = [
-            {"entity_id": "media_player.office_tv", "attributes": {"friendly_name": "Office TV"}},
-            {"entity_id": "media_player.office_tv_chrome", "attributes": {"friendly_name": "Office TV Cast"}},
-            {"entity_id": "media_player.den_tv", "attributes": {"friendly_name": "Office TV 3"}},
+            {"entity_id": "media_player.study_tv", "attributes": {"friendly_name": "Study TV"}},
+            {"entity_id": "media_player.study_tv_cast", "attributes": {"friendly_name": "Study TV Cast"}},
+            {"entity_id": "media_player.den_tv", "attributes": {"friendly_name": "Study TV 3"}},
         ]
 
         from services.execution import ha_client
@@ -26,8 +26,8 @@ def test_resolve_exact_friendly_name_match():
         ha_client.get_states = mock_get_states
 
         try:
-            result = await resolve_entity_by_name("http://ha.local", "token", "Office TV")
-            assert result == "media_player.office_tv", f"Expected media_player.office_tv, got {result}"
+            result = await resolve_entity_by_name("http://ha.local", "token", "Study TV")
+            assert result == "media_player.study_tv", f"Expected media_player.study_tv, got {result}"
         finally:
             ha_client.get_states = original
 
@@ -39,8 +39,8 @@ def test_resolve_exact_entity_id_match():
     async def run():
         global mock_states_store
         mock_states_store = [
-            {"entity_id": "media_player.office_tv", "attributes": {"friendly_name": "Office Android TV"}},
-            {"entity_id": "media_player.office_tv_chrome", "attributes": {"friendly_name": "Office TV"}},
+            {"entity_id": "media_player.study_tv", "attributes": {"friendly_name": "Study Android TV"}},
+            {"entity_id": "media_player.study_tv_cast", "attributes": {"friendly_name": "Study TV"}},
         ]
 
         from services.execution import ha_client
@@ -48,8 +48,8 @@ def test_resolve_exact_entity_id_match():
         ha_client.get_states = mock_get_states
 
         try:
-            result = await resolve_entity_by_name("http://ha.local", "token", "office_tv")
-            assert result == "media_player.office_tv", f"Expected media_player.office_tv, got {result}"
+            result = await resolve_entity_by_name("http://ha.local", "token", "study_tv")
+            assert result == "media_player.study_tv", f"Expected media_player.study_tv, got {result}"
         finally:
             ha_client.get_states = original
 
@@ -61,8 +61,8 @@ def test_resolve_starts_with_match():
     async def run():
         global mock_states_store
         mock_states_store = [
-            {"entity_id": "media_player.office_tv_chrome", "attributes": {"friendly_name": "Office TV Chrome"}},
-            {"entity_id": "media_player.living_room_office_tv", "attributes": {"friendly_name": "Living Room Office TV"}},
+            {"entity_id": "media_player.study_tv_cast", "attributes": {"friendly_name": "Study TV Chrome"}},
+            {"entity_id": "media_player.living_room_study_tv", "attributes": {"friendly_name": "Living Room Study TV"}},
         ]
 
         from services.execution import ha_client
@@ -70,8 +70,8 @@ def test_resolve_starts_with_match():
         ha_client.get_states = mock_get_states
 
         try:
-            result = await resolve_entity_by_name("http://ha.local", "token", "Office TV")
-            assert result == "media_player.office_tv_chrome", f"Expected media_player.office_tv_chrome, got {result}"
+            result = await resolve_entity_by_name("http://ha.local", "token", "Study TV")
+            assert result == "media_player.study_tv_cast", f"Expected media_player.study_tv_cast, got {result}"
         finally:
             ha_client.get_states = original
 
@@ -91,7 +91,7 @@ def test_resolve_no_match():
         ha_client.get_states = mock_get_states
 
         try:
-            result = await resolve_entity_by_name("http://ha.local", "token", "Office TV")
+            result = await resolve_entity_by_name("http://ha.local", "token", "Study TV")
             assert result is None, f"Expected None, got {result}"
         finally:
             ha_client.get_states = original
@@ -104,7 +104,7 @@ def test_resolve_empty_input():
         result = await resolve_entity_by_name("http://ha.local", "token", "")
         assert result is None
 
-        result = await resolve_entity_by_name("", "token", "Office TV")
+        result = await resolve_entity_by_name("", "token", "Study TV")
         assert result is None
 
     asyncio.run(run())
@@ -128,7 +128,7 @@ def test_resolve_empty_input():
             "music",
             [
                 {"entity_id": "media_player.kitchen_speaker", "attributes": {"friendly_name": "Kitchen Speaker", "device_class": "speaker"}},
-                {"entity_id": "media_player.office_display", "attributes": {"friendly_name": "Office Display", "active_queue": True, "mass_player_type": "player"}},
+                {"entity_id": "media_player.study_display", "attributes": {"friendly_name": "Study Display", "active_queue": True, "mass_player_type": "player"}},
             ],
             "media_player.kitchen_speaker",
             id="exact-name-beats-music-assistant-queue-bonus",
@@ -157,9 +157,9 @@ def test_resolve_empty_input():
             "Porch",
             "music",
             [
-                {"entity_id": "media_player.office_display", "attributes": {"friendly_name": "Office Display", "active_queue": True}},
+                {"entity_id": "media_player.study_display", "attributes": {"friendly_name": "Study Display", "active_queue": True}},
             ],
-            "media_player.office_display",
+            "media_player.study_display",
             id="capable-entity-still-returned-without-any-name-match",
         ),
     ],

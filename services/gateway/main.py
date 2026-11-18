@@ -1231,7 +1231,7 @@ def should_search_storage_for_code_query(query: str) -> bool:
 def extract_media_request(query: str) -> tuple[str | None, str | None]:
     """
     Pull a likely media search string and target device name from commands like:
-    - Play Brandon Lake on Office TV
+    - Play Brandon Lake on Den TV
     - Listen to jazz on the kitchen speaker
     """
     cleaned = (query or "").strip().strip("?.!")
@@ -1307,7 +1307,7 @@ def is_plain_media_command(query: str) -> bool:
     """A skip / next / previous / pause / stop / resume of what is playing.
 
     It names something that plays ("skip this track", "stop the music on the
-    office TV") or is the bare command ("skip", "pause please"). "Stop the
+    den TV") or is the bare command ("skip", "pause please"). "Stop the
     timer" and "pause the vacuum" are not.
     """
     if not extract_media_transport_command(query):
@@ -3953,7 +3953,7 @@ async def chat_handler(request: Request, background_tasks=None):
             if not resolved_entity and not light_set:
                 resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
-            # A named player ("on the office TV") or else the last one used while it plays;
+            # A named player ("on the den TV") or else the last one used while it plays;
             # of players that match, the one playing (resolve_media_target "transport").
             named = engine.extract_target(query, intent)
             active_cache = cached_device_id if cached_state in ACTIVE_MEDIA_STATES else None
@@ -11802,7 +11802,7 @@ async def update_raven_config(request: Request):
     url = str(body.get("speech_server_url") or "").strip()
     if url and not re.fullmatch(r"https?://[^\s/]+(:\d+)?/?", url):
         # Checked before anything is saved, so a typo never becomes the setting.
-        raise HTTPException(status_code=400, detail="Give the address as http://<host>:<port>, e.g. http://192.168.2.43:8082")
+        raise HTTPException(status_code=400, detail="Give the address as http://<host>:<port>, e.g. http://192.0.2.10:8082")
 
     async with borrow_http_client() as client:
         for k, v in body.items():

@@ -19,7 +19,7 @@ from services.execution.schemas import ExecutionResult, MediaPlayRequest
 HA = "http://ha.local:8123"
 PLAYERS = [
     {"player_id": "ma_kitchen", "display_name": "Kitchen Speaker", "available": True},
-    {"player_id": "ma_office", "display_name": "Office", "available": True},
+    {"player_id": "ma_study", "display_name": "Study", "available": True},
     {"player_id": "ma_garage", "display_name": "Garage", "available": False},
 ]
 
@@ -41,7 +41,7 @@ def _mark_down():
     [
         ("media_player.kitchen_speaker", "ma_kitchen"),
         ("media_player.kitchen_speaker_2", "ma_kitchen"),  # HA's collision suffix
-        ("media_player.office", "ma_office"),
+        ("media_player.study", "ma_study"),
         ("media_player.garage", None),  # unavailable players cannot play
         ("media_player.attic", None),
     ],
@@ -93,10 +93,10 @@ async def test_ha_failing_mid_request_falls_back_too(ma, monkeypatch):
         return ExecutionResult(status="FAILURE", message="Home Assistant is unreachable: timed out", service="media_play")
 
     monkeypatch.setattr(media, "_play_music_via_ha", ha_goes_down)
-    req = MediaPlayRequest(user_context={"user": "casey"}, query="library://album/3", entity_id="media_player.office")
-    result = await media.play_music(req, "media_player.office", _ctx())
+    req = MediaPlayRequest(user_context={"user": "casey"}, query="library://album/3", entity_id="media_player.study")
+    result = await media.play_music(req, "media_player.study", _ctx())
     assert result.status == "SUCCESS"
-    assert ma["play"] == ("ma_office", "library://album/3", "replace")
+    assert ma["play"] == ("ma_study", "library://album/3", "replace")
 
 
 async def test_an_ha_error_that_is_not_an_outage_does_not_bypass_ha(ma, monkeypatch):
@@ -104,16 +104,16 @@ async def test_an_ha_error_that_is_not_an_outage_does_not_bypass_ha(ma, monkeypa
         media, "_play_music_via_ha",
         AsyncMock(return_value=ExecutionResult(status="FAILURE", message="No match for 'x'.", service="media_play")),
     )
-    req = MediaPlayRequest(user_context={"user": "casey"}, query="x", entity_id="media_player.office")
-    result = await media.play_music(req, "media_player.office", _ctx())
+    req = MediaPlayRequest(user_context={"user": "casey"}, query="x", entity_id="media_player.study")
+    result = await media.play_music(req, "media_player.study", _ctx())
     assert result.message == "No match for 'x'."
     assert "play" not in ma
 
 
 async def test_no_music_assistant_login_says_so(ma):
     _mark_down()
-    req = MediaPlayRequest(user_context={"user": "casey"}, query="Hymns", entity_id="media_player.office")
-    result = await media.play_music(req, "media_player.office", _ctx(mass_url=None, mass_token=None))
+    req = MediaPlayRequest(user_context={"user": "casey"}, query="Hymns", entity_id="media_player.study")
+    result = await media.play_music(req, "media_player.study", _ctx(mass_url=None, mass_token=None))
     assert result.status == "FAILURE"
     assert "unreachable" in result.message and "Music Assistant login" in result.message
 
@@ -148,13 +148,13 @@ from services.execution import direct_announce  # noqa: E402
 from services.execution.handlers import tv_stage  # noqa: E402
 
 CASTS = [
-    {"name": "Office TV Chromecast", "host": "192.0.2.50", "port": 8009},
+    {"name": "Study TV Chromecast", "host": "192.0.2.50", "port": 8009},
     {"name": "Living Room speaker", "host": "192.0.2.51", "port": 8009},
 ]
 
 
 def test_cast_devices_are_found_by_the_entity_name():
-    assert direct_announce.find_cast(CASTS, "media_player.office_tv")["host"] == "192.0.2.50"
+    assert direct_announce.find_cast(CASTS, "media_player.study_tv")["host"] == "192.0.2.50"
     assert direct_announce.find_cast(CASTS, "media_player.living_room_speaker")["host"] == "192.0.2.51"
     assert direct_announce.find_cast(CASTS, "media_player.attic") is None
 
@@ -185,7 +185,7 @@ async def test_a_speaker_music_assistant_does_not_know_is_reached_over_cast(monk
         return True, "Playing"
 
     monkeypatch.setattr(direct_announce, "_cast_play_sync", fake_cast)
-    result = await direct_announce.announce_direct("media_player.office_tv", "http://jarvis/a.wav", 0.5, _ctx())
+    result = await direct_announce.announce_direct("media_player.study_tv", "http://jarvis/a.wav", 0.5, _ctx())
     assert result["ok"] and result["route"] == "cast_direct"
     assert played["dev"] == "192.0.2.50"
 

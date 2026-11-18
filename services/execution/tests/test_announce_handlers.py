@@ -15,8 +15,8 @@ from services.execution.announce_handlers import (
 
 
 def test_detect_cast_by_entity_id():
-    assert detect_tv_type("media_player.office_tv_chrome", "idle", {}) == "cast"
-    assert detect_tv_type("media_player.living_room_cast", "idle", {}) == "cast"
+    assert detect_tv_type("media_player.study_tv_cast", "idle", {}) == "cast"
+    assert detect_tv_type("media_player.sunroom_cast", "idle", {}) == "cast"
 
 
 def test_detect_cast_by_app_id():
@@ -35,16 +35,16 @@ def test_detect_roku_by_sources():
 
 
 def test_detect_roku_ma_wrapped_when_off():
-    """When Taylor's Roku TV is off, HA sets app_id=None on the MA entity, leaving active_queue='ROKU_...'."""
-    assert detect_tv_type("media_player.taylors_tv", "off", {
+    """When the playroom Roku TV is off, HA sets app_id=None on the MA entity, leaving active_queue='ROKU_...'."""
+    assert detect_tv_type("media_player.playroom_tv", "off", {
         "mass_player_type": "player",
         "active_queue": "ROKU_2N0062385487",
     }) == "roku"
 
 
 def test_detect_webos_by_sources():
-    """Living Room LG webOS TV has entity_id media_player.living_room_tv and LG portals in source_list."""
-    assert detect_tv_type("media_player.living_room_tv", "on", {
+    """Sunroom LG webOS TV has entity_id media_player.sunroom_tv and LG portals in source_list."""
+    assert detect_tv_type("media_player.sunroom_tv", "on", {
         "device_class": "tv",
         "supported_features": 24381,
         "source_list": ["AV", "Home Dashboard", "LG Content Store", "LG Gaming Portal"],
@@ -56,7 +56,7 @@ def test_lg_webos_never_misclassified_as_samsung():
     from services.execution import device_discovery, device_profiler
 
     # LG webOS with com.webos.* app_id and TV/HDMI sources
-    assert detect_tv_type("media_player.living_room_tv", "on", {
+    assert detect_tv_type("media_player.sunroom_tv", "on", {
         "device_class": "tv",
         "supported_features": 24381,
         "app_id": "com.webos.app.hdmi1",
@@ -64,7 +64,7 @@ def test_lg_webos_never_misclassified_as_samsung():
     }) == "webos"
 
     # LG webOS with sound_output attribute (HA webostv signature) and TV/HDMI sources
-    assert detect_tv_type("media_player.living_room_tv", "on", {
+    assert detect_tv_type("media_player.sunroom_tv", "on", {
         "device_class": "tv",
         "supported_features": 24381,
         "sound_output": "tv_speaker",
@@ -72,7 +72,7 @@ def test_lg_webos_never_misclassified_as_samsung():
     }) == "webos"
 
     # LG webOS with friendly_name containing LG or webOS
-    assert detect_tv_type("media_player.living_room_tv", "off", {
+    assert detect_tv_type("media_player.sunroom_tv", "off", {
         "device_class": "tv",
         "supported_features": 24381,
         "friendly_name": "LG OLED TV",
@@ -91,13 +91,13 @@ def test_lg_webos_never_misclassified_as_samsung():
 
 
 def test_detect_samsung_tizen_and_legacy_by_sources():
-    """Loft Samsung QLED and Master Bedroom legacy Orsay Samsung have source_list=['TV', 'HDMI']."""
-    assert detect_tv_type("media_player.loft_tv", "off", {
+    """Attic Samsung QLED and Guest Room legacy Orsay Samsung have source_list=['TV', 'HDMI']."""
+    assert detect_tv_type("media_player.attic_tv", "off", {
         "device_class": "tv",
         "supported_features": 24381,
         "source_list": ["TV", "HDMI"],
     }) == "samsung"
-    assert detect_tv_type("media_player.master_bedroom_samsung", "off", {
+    assert detect_tv_type("media_player.guest_room_samsung", "off", {
         "device_class": "tv",
         "supported_features": 24381,
         "source_list": ["TV", "HDMI"],
@@ -105,7 +105,7 @@ def test_detect_samsung_tizen_and_legacy_by_sources():
 
 
 def test_detect_android_tv():
-    assert detect_tv_type("media_player.office_tv", "on", {
+    assert detect_tv_type("media_player.study_tv", "on", {
         "app_id": "com.google.android.tvlauncher"
     }) == "android_tv"
     assert detect_tv_type("media_player.tv", "idle", {
@@ -115,11 +115,11 @@ def test_detect_android_tv():
         "device_class": "tv",
         "app_id": "com.google.android.backdrop"
     }) == "android_tv"
-    # Office TV when off (app_id is None, supported_features == 153529)
-    assert detect_tv_type("media_player.office_tv", "off", {
+    # Study TV when off (app_id is None, supported_features == 153529)
+    assert detect_tv_type("media_player.study_tv", "off", {
         "device_class": "tv",
         "supported_features": 153529,
-        "friendly_name": "Office TV Remote",
+        "friendly_name": "Study TV Remote",
     }) == "android_tv"
 
 
@@ -132,40 +132,40 @@ def test_detect_with_loaded_components():
 def test_resolve_tv_companions_links_cast_ma_and_satellite():
     all_states = [
         {
-            "entity_id": "media_player.office_tv",
+            "entity_id": "media_player.study_tv",
             "state": "off",
-            "attributes": {"friendly_name": "Office TV Remote", "device_class": "tv", "supported_features": 153529},
+            "attributes": {"friendly_name": "Study TV Remote", "device_class": "tv", "supported_features": 153529},
         },
         {
-            "entity_id": "media_player.office_tv_chrome",
+            "entity_id": "media_player.study_tv_cast",
             "state": "off",
-            "attributes": {"friendly_name": "Office TV Cast", "supported_features": 152461},
+            "attributes": {"friendly_name": "Study TV Cast", "supported_features": 152461},
         },
         {
-            "entity_id": "media_player.office_tv_chrome_2",
+            "entity_id": "media_player.study_tv_cast_2",
             "state": "off",
             "attributes": {
-                "friendly_name": "Office TV Cast",
+                "friendly_name": "Study TV Cast",
                 "mass_player_type": "player",
-                "active_queue": "media_player.office_tv_chrome",
+                "active_queue": "media_player.study_tv_cast",
             },
         },
         {
-            "entity_id": "remote.office_tv_remote",
+            "entity_id": "remote.study_tv_remote",
             "state": "on",
-            "attributes": {"friendly_name": "Office TV Remote"},
+            "attributes": {"friendly_name": "Study TV Remote"},
         },
         {
-            "entity_id": "assist_satellite.office_voice_assist_satellite",
+            "entity_id": "assist_satellite.study_voice_assist_satellite",
             "state": "idle",
-            "attributes": {"friendly_name": "Office Jarvis Assist satellite"},
+            "attributes": {"friendly_name": "Study Assist satellite"},
         },
     ]
-    comp = resolve_tv_companions("media_player.office_tv", all_states)
-    assert comp["cast_sibling"] == "media_player.office_tv_chrome"
-    assert comp["ma_sibling"] == "media_player.office_tv_chrome_2"
-    assert comp["remote_sibling"] == "remote.office_tv_remote"
-    assert comp["room_assist_satellite"] == "assist_satellite.office_voice_assist_satellite"
+    comp = resolve_tv_companions("media_player.study_tv", all_states)
+    assert comp["cast_sibling"] == "media_player.study_tv_cast"
+    assert comp["ma_sibling"] == "media_player.study_tv_cast_2"
+    assert comp["remote_sibling"] == "remote.study_tv_remote"
+    assert comp["room_assist_satellite"] == "assist_satellite.study_voice_assist_satellite"
 
 
 @pytest.mark.asyncio
@@ -175,14 +175,14 @@ async def test_announce_android_tv_routes_audio_to_cast_sibling(monkeypatch):
     async def fake_all_states(ha_url, ha_token):
         return [
             {
-                "entity_id": "media_player.office_tv",
+                "entity_id": "media_player.study_tv",
                 "state": "off",
-                "attributes": {"friendly_name": "Office TV Remote", "device_class": "tv", "supported_features": 153529},
+                "attributes": {"friendly_name": "Study TV Remote", "device_class": "tv", "supported_features": 153529},
             },
             {
-                "entity_id": "media_player.office_tv_chrome",
+                "entity_id": "media_player.study_tv_cast",
                 "state": "idle",
-                "attributes": {"friendly_name": "Office TV Cast", "supported_features": 152461},
+                "attributes": {"friendly_name": "Study TV Cast", "supported_features": 152461},
             },
         ]
 
@@ -196,7 +196,7 @@ async def test_announce_android_tv_routes_audio_to_cast_sibling(monkeypatch):
     res = await announce_android_tv(
         "http://ha",
         "token",
-        "media_player.office_tv",
+        "media_player.study_tv",
         "http://192.0.2.205:8888/media/test.wav",
         0.6,
         state="on",
@@ -205,7 +205,7 @@ async def test_announce_android_tv_routes_audio_to_cast_sibling(monkeypatch):
     )
     assert res.get("ok") is True
     assert any(
-        c[0] == "media_player" and c[1] == "play_media" and c[2] == "media_player.office_tv_chrome"
+        c[0] == "media_player" and c[1] == "play_media" and c[2] == "media_player.study_tv_cast"
         for c in calls
     )
 
@@ -217,17 +217,17 @@ async def test_announce_webos_sends_toast_and_plays_audio(monkeypatch):
     async def fake_all_states(ha_url, ha_token):
         return [
             {
-                "entity_id": "media_player.living_room_tv",
+                "entity_id": "media_player.sunroom_tv",
                 "state": "on",
                 "attributes": {
-                    "friendly_name": "LG webOS TV 50UN6955ZUF",
+                    "friendly_name": "LG webOS TV 50lgtv",
                     "source_list": ["Home Dashboard", "LG Content Store"],
                 },
             }
         ]
 
     async def fake_services(ha_url, ha_token):
-        return [{"domain": "notify", "services": {"lg_webos_tv_50un6955zuf": {}}}]
+        return [{"domain": "notify", "services": {"lg_webos_tv_50lgtv": {}}}]
 
     async def fake_call_service(ha_url, ha_token, domain, service, entity_id=None, data=None):
         calls.append((domain, service, entity_id, data))
@@ -240,7 +240,7 @@ async def test_announce_webos_sends_toast_and_plays_audio(monkeypatch):
     res = await announce_webos(
         "http://ha",
         "token",
-        "media_player.living_room_tv",
+        "media_player.sunroom_tv",
         "http://192.0.2.205:8888/media/test.wav",
         0.5,
         state="on",
@@ -250,12 +250,12 @@ async def test_announce_webos_sends_toast_and_plays_audio(monkeypatch):
     assert res.get("ok") is True
     # Toast sent with human-readable message (not raw URL)
     assert any(
-        c[0] == "notify" and c[1] == "lg_webos_tv_50un6955zuf" and "Soft Boiled Egg" in (c[3] or {}).get("message", "")
+        c[0] == "notify" and c[1] == "lg_webos_tv_50lgtv" and "Soft Boiled Egg" in (c[3] or {}).get("message", "")
         for c in calls
     )
     # Audio URL played via media_player.play_media
     assert any(
-        c[0] == "media_player" and c[1] == "play_media" and c[2] == "media_player.living_room_tv"
+        c[0] == "media_player" and c[1] == "play_media" and c[2] == "media_player.sunroom_tv"
         for c in calls
     )
 
@@ -267,15 +267,15 @@ async def test_announce_samsung_uses_ma_sibling_even_when_off(monkeypatch):
     async def fake_all_states(ha_url, ha_token):
         return [
             {
-                "entity_id": "media_player.loft_tv",
+                "entity_id": "media_player.attic_tv",
                 "state": "on",
-                "attributes": {"friendly_name": "Loft TV", "source_list": ["TV", "HDMI"], "device_class": "tv"},
+                "attributes": {"friendly_name": "Attic TV", "source_list": ["TV", "HDMI"], "device_class": "tv"},
             },
             {
-                "entity_id": "media_player.loft_tv_2",
+                "entity_id": "media_player.attic_tv_2",
                 "state": "off",
                 # Note: app_id is None when off!
-                "attributes": {"friendly_name": "Loft TV", "mass_player_type": "player", "active_queue": "media_player.loft_tv"},
+                "attributes": {"friendly_name": "Attic TV", "mass_player_type": "player", "active_queue": "media_player.attic_tv"},
             },
         ]
 
@@ -289,15 +289,15 @@ async def test_announce_samsung_uses_ma_sibling_even_when_off(monkeypatch):
     res = await announce_samsung(
         "http://ha",
         "token",
-        "media_player.loft_tv",
+        "media_player.attic_tv",
         "http://192.0.2.205:8888/media/test.wav",
         0.6,
         state="on",
         attributes={},
-        message="Loft alert",
+        message="Attic alert",
     )
     assert res.get("ok") is True
-    assert any(c[2] == "media_player.loft_tv_2" for c in calls)
+    assert any(c[2] == "media_player.attic_tv_2" for c in calls)
 
 
 @pytest.mark.asyncio
@@ -307,14 +307,14 @@ async def test_stop_tv_or_media_alert_stops_primary_and_companions(monkeypatch):
     async def fake_all_states(ha_url, ha_token):
         return [
             {
-                "entity_id": "media_player.office_tv",
+                "entity_id": "media_player.study_tv",
                 "state": "on",
-                "attributes": {"friendly_name": "Office TV Remote", "device_class": "tv", "supported_features": 153529},
+                "attributes": {"friendly_name": "Study TV Remote", "device_class": "tv", "supported_features": 153529},
             },
             {
-                "entity_id": "media_player.office_tv_chrome",
+                "entity_id": "media_player.study_tv_cast",
                 "state": "playing",
-                "attributes": {"friendly_name": "Office TV Cast", "supported_features": 152461},
+                "attributes": {"friendly_name": "Study TV Cast", "supported_features": 152461},
             },
         ]
 
@@ -325,10 +325,10 @@ async def test_stop_tv_or_media_alert_stops_primary_and_companions(monkeypatch):
     monkeypatch.setattr("services.execution.ha_client.get_all_states", fake_all_states)
     monkeypatch.setattr("services.execution.ha_client.call_service", fake_call_service)
 
-    res = await stop_tv_or_media_alert("http://ha", "token", "media_player.office_tv")
+    res = await stop_tv_or_media_alert("http://ha", "token", "media_player.study_tv")
     assert res["ok"] is True
-    assert "media_player.office_tv" in res["stopped"]
-    assert "media_player.office_tv_chrome" in res["stopped"]
+    assert "media_player.study_tv" in res["stopped"]
+    assert "media_player.study_tv_cast" in res["stopped"]
 
 
 @pytest.mark.asyncio
@@ -342,17 +342,17 @@ async def test_intercom_start_twoway_uses_room_assist_satellite_and_falls_back_t
     async def fake_states(ha_url, ha_token):
         return [
             {
-                "entity_id": "media_player.office_tv",
+                "entity_id": "media_player.study_tv",
                 "state": "on",
-                "attributes": {"friendly_name": "Office TV Remote", "device_class": "tv", "supported_features": 153529},
+                "attributes": {"friendly_name": "Study TV Remote", "device_class": "tv", "supported_features": 153529},
             },
             {
-                "entity_id": "assist_satellite.office_voice_assist_satellite",
+                "entity_id": "assist_satellite.study_voice_assist_satellite",
                 "state": "idle",
-                "attributes": {"friendly_name": "Office Jarvis Assist satellite"},
+                "attributes": {"friendly_name": "Study Assist satellite"},
             },
             {
-                "entity_id": "media_player.living_room_tv",
+                "entity_id": "media_player.sunroom_tv",
                 "state": "on",
                 "attributes": {
                     "friendly_name": "LG webOS TV",
@@ -380,28 +380,28 @@ async def test_intercom_start_twoway_uses_room_assist_satellite_and_falls_back_t
 
     ctx = UserContext(user="alex", is_admin=True, ha_url="http://ha", ha_token="token")
 
-    # Case 1: Office has assist_satellite.office_voice_assist_satellite -> 2-way satellite conversation started
-    req_office = SimpleNamespace(
+    # Case 1: Study has assist_satellite.study_voice_assist_satellite -> 2-way satellite conversation started
+    req_study = SimpleNamespace(
         caller_user_id="alex",
         target_user_id=None,
-        target_room="office",
-        target_entity_ids=["media_player.office_tv"],
+        target_room="study",
+        target_entity_ids=["media_player.study_tv"],
         session_type="twoway",
-        message="Hey Office, are you ready?",
+        message="Hey Study, are you ready?",
         volume=0.6,
     )
-    res_office = await handle_intercom_start(req_office, ctx)
-    assert res_office.status == "SUCCESS"
-    assert res_office.detail["effective_mode"] == "twoway"
-    assert res_office.detail["assist_satellite"] == "assist_satellite.office_voice_assist_satellite"
+    res_study = await handle_intercom_start(req_study, ctx)
+    assert res_study.status == "SUCCESS"
+    assert res_study.detail["effective_mode"] == "twoway"
+    assert res_study.detail["assist_satellite"] == "assist_satellite.study_voice_assist_satellite"
     assert any(c[0] == "assist_satellite" and c[1] == "start_conversation" for c in ha_calls)
 
-    # Case 2: Living Room TV has no microphone satellite -> automatically falls back to 1-way announcement on TV
+    # Case 2: Sunroom TV has no microphone satellite -> automatically falls back to 1-way announcement on TV
     req_lr = SimpleNamespace(
         caller_user_id="alex",
         target_user_id=None,
-        target_room="living_room",
-        target_entity_ids=["media_player.living_room_tv"],
+        target_room="sunroom",
+        target_entity_ids=["media_player.sunroom_tv"],
         session_type="twoway",
         message="Time for dinner!",
         volume=0.7,
@@ -409,7 +409,7 @@ async def test_intercom_start_twoway_uses_room_assist_satellite_and_falls_back_t
     res_lr = await handle_intercom_start(req_lr, ctx)
     assert res_lr.status == "SUCCESS"
     assert res_lr.detail["effective_mode"] == "oneway"
-    assert any("media_player.living_room_tv" in targets for targets, _ in ann_calls)
+    assert any("media_player.sunroom_tv" in targets for targets, _ in ann_calls)
 
 
 def _media_player(entity_id, name, state, device_class, features):
@@ -434,18 +434,18 @@ def test_timer_targets_drop_corrupt_and_duplicate_media_players(monkeypatch):
     )
     states = [
         _media_player(poison, '{"username":"default"}\'s Web Player', "unavailable", "speaker", 8320575),
-        _media_player("media_player.office_tv", "Office TV Remote", "on", "tv", 153529),
-        _media_player("media_player.den_tv", "Office TV", "idle", "speaker", 8320959),
-        _media_player("media_player.office_tv_chrome", "Office TV Cast", "off", None, 152461),
-        _media_player("media_player.office_tv_chrome_2", "Office TV", "off", "speaker", 7796671),
-        _media_player("media_player.master_bedroom_tv", "Master Bedroom TV", "off", None, 152461),
-        _media_player("media_player.master_bedroom_tv_2", "Master Bedroom TV", "off", "speaker", 7796671),
-        _media_player("media_player.master_bedroom_tv_3", "Master Bedroom TV", "unavailable", "tv", 153529),
-        _media_player("media_player.master_bedroom_tv_4", "Master Bedroom TV", "unavailable", "speaker", 8320575),
-        _media_player("media_player.loft_tv", "Loft TV", "off", "tv", 24381),
-        _media_player("media_player.loft_tv_2", "Loft TV", "idle", "speaker", 7796287),
-        _media_player("media_player.taylors_tv", "Taylors TV", "off", "speaker", 7795643),
-        _media_player("media_player.taylors_tv_2", "Taylors TV", "unavailable", "speaker", 7795643),
+        _media_player("media_player.study_tv", "Study TV Remote", "on", "tv", 153529),
+        _media_player("media_player.den_tv", "Study TV", "idle", "speaker", 8320959),
+        _media_player("media_player.study_tv_cast", "Study TV Cast", "off", None, 152461),
+        _media_player("media_player.study_tv_cast_2", "Study TV", "off", "speaker", 7796671),
+        _media_player("media_player.guest_room_tv", "Guest Room TV", "off", None, 152461),
+        _media_player("media_player.guest_room_tv_2", "Guest Room TV", "off", "speaker", 7796671),
+        _media_player("media_player.guest_room_tv_3", "Guest Room TV", "unavailable", "tv", 153529),
+        _media_player("media_player.guest_room_tv_4", "Guest Room TV", "unavailable", "speaker", 8320575),
+        _media_player("media_player.attic_tv", "Attic TV", "off", "tv", 24381),
+        _media_player("media_player.attic_tv_2", "Attic TV", "idle", "speaker", 7796287),
+        _media_player("media_player.playroom_tv", "Playroom TV", "off", "speaker", 7795643),
+        _media_player("media_player.playroom_tv_2", "Playroom TV", "unavailable", "speaker", 7795643),
         _media_player("media_player.kitchen_speaker", "Kitchen Speaker", "idle", "speaker", 7796287),
     ]
 
@@ -453,21 +453,21 @@ def test_timer_targets_drop_corrupt_and_duplicate_media_players(monkeypatch):
     by_id = {d["id"]: d for d in devices}
 
     assert poison not in by_id
-    assert "media_player.office_tv" not in by_id
-    assert "media_player.office_tv_chrome" not in by_id
-    assert "media_player.office_tv_chrome_2" not in by_id
+    assert "media_player.study_tv" not in by_id
+    assert "media_player.study_tv_cast" not in by_id
+    assert "media_player.study_tv_cast_2" not in by_id
     assert "media_player.den_tv" in by_id
-    assert "media_player.master_bedroom_tv_2" in by_id
-    assert "media_player.master_bedroom_tv_3" not in by_id
-    assert "media_player.master_bedroom_tv_4" not in by_id
-    assert "media_player.loft_tv_2" in by_id
-    assert "media_player.loft_tv" not in by_id
-    assert "media_player.taylors_tv" in by_id
-    assert "media_player.taylors_tv_2" not in by_id
+    assert "media_player.guest_room_tv_2" in by_id
+    assert "media_player.guest_room_tv_3" not in by_id
+    assert "media_player.guest_room_tv_4" not in by_id
+    assert "media_player.attic_tv_2" in by_id
+    assert "media_player.attic_tv" not in by_id
+    assert "media_player.playroom_tv" in by_id
+    assert "media_player.playroom_tv_2" not in by_id
     assert "media_player.kitchen_speaker" in by_id
     assert by_id["media_player.den_tv"]["announce_capable"] is True
     assert by_id["media_player.den_tv"]["supported_features"] == 8320959
     names = [d["name"] for d in devices]
-    assert names.count("Office TV") == 1
-    assert names.count("Master Bedroom TV") == 1
-    assert names.count("Taylors TV") == 1
+    assert names.count("Study TV") == 1
+    assert names.count("Guest Room TV") == 1
+    assert names.count("Playroom TV") == 1

@@ -1160,9 +1160,9 @@ async def bulk_scan(
             # Match to discovered device by type
             for ip, dev_info in device_map.items():
                 dev_type = dev_info["type"]
-                # Cast devices may have "chrome" or "cast" in entity_id
+                # Cast devices may have "cast" (or "chromecast") in entity_id
                 type_aliases = {
-                    "cast": ["cast", "chrome"],
+                    "cast": ["cast"],
                     "androidtv": ["android", "adb"],
                     "webos": ["webos", "web_os", "lg_", "webostv"],
                     "samsung": ["samsung", "tizen", "orsay", "samsungtv"],

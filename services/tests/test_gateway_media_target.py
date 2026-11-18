@@ -4,31 +4,31 @@ from services.gateway.main import resolve_media_target, resolve_video_target
 def test_resolve_media_target_prefers_same_name_music_assistant_queue():
     entities = [
         {
-            "entity_id": "media_player.office_tv_chrome_2",
+            "entity_id": "media_player.study_tv_cast_2",
             "state": "unavailable",
-            "attributes": {"friendly_name": "Office TV", "device_class": "speaker"},
+            "attributes": {"friendly_name": "Study TV", "device_class": "speaker"},
         },
         {
             "entity_id": "media_player.den_tv",
             "state": "playing",
             "attributes": {
-                "friendly_name": "Office TV",
+                "friendly_name": "Study TV",
                 "source": "Music Assistant Queue",
                 "device_class": "speaker",
             },
         },
         {
-            "entity_id": "media_player.office_speaker",
+            "entity_id": "media_player.study_speaker",
             "state": "idle",
             "attributes": {
-                "friendly_name": "Office Speaker",
+                "friendly_name": "Study Speaker",
                 "source": "Music Assistant Queue",
                 "device_class": "speaker",
             },
         },
     ]
 
-    target = resolve_media_target("Play Brandon Lake on Office TV", entities)
+    target = resolve_media_target("Play Brandon Lake on Study TV", entities)
 
     assert target == "media_player.den_tv"
 
@@ -36,22 +36,22 @@ def test_resolve_media_target_prefers_same_name_music_assistant_queue():
 def test_resolve_media_target_matches_queue_when_requested_name_contains_suffix():
     entities = [
         {
-            "entity_id": "media_player.office_tv_remote",
+            "entity_id": "media_player.study_tv_remote",
             "state": "on",
-            "attributes": {"friendly_name": "Office TV Remote", "device_class": "tv"},
+            "attributes": {"friendly_name": "Study TV Remote", "device_class": "tv"},
         },
         {
             "entity_id": "media_player.den_tv",
             "state": "idle",
             "attributes": {
-                "friendly_name": "Office TV",
+                "friendly_name": "Study TV",
                 "source": "Music Assistant Queue",
                 "device_class": "speaker",
             },
         },
     ]
 
-    target = resolve_media_target("Play jazz on the Office TV Remote", entities)
+    target = resolve_media_target("Play jazz on the Study TV Remote", entities)
 
     assert target == "media_player.den_tv"
 
@@ -59,10 +59,10 @@ def test_resolve_media_target_matches_queue_when_requested_name_contains_suffix(
 def test_resolve_media_target_rejects_nearby_non_matching_music_assistant_queue():
     entities = [
         {
-            "entity_id": "media_player.office_speaker",
+            "entity_id": "media_player.study_speaker",
             "state": "playing",
             "attributes": {
-                "friendly_name": "Office Speaker",
+                "friendly_name": "Study Speaker",
                 "source": "Music Assistant Queue",
                 "device_class": "speaker",
             },
@@ -78,7 +78,7 @@ def test_resolve_media_target_rejects_nearby_non_matching_music_assistant_queue(
         },
     ]
 
-    target = resolve_media_target("Play worship music on Office TV", entities)
+    target = resolve_media_target("Play worship music on Study TV", entities)
 
     assert target is None
 
@@ -86,24 +86,24 @@ def test_resolve_media_target_rejects_nearby_non_matching_music_assistant_queue(
 def test_resolve_video_target_prefers_cast_like_device_for_matching_tv():
     entities = [
         {
-            "entity_id": "media_player.office_tv_queue",
+            "entity_id": "media_player.study_tv_queue",
             "state": "playing",
             "attributes": {
-                "friendly_name": "Office TV",
+                "friendly_name": "Study TV",
                 "source": "Music Assistant Queue",
                 "device_class": "speaker",
             },
         },
         {
-            "entity_id": "media_player.office_tv_cast",
+            "entity_id": "media_player.study_tv_cast",
             "state": "idle",
             "attributes": {
-                "friendly_name": "Office TV Cast",
+                "friendly_name": "Study TV Cast",
                 "device_class": "tv",
             },
         },
     ]
 
-    target = resolve_video_target("Play a music video on Office TV", entities)
+    target = resolve_video_target("Play a music video on Study TV", entities)
 
-    assert target == "media_player.office_tv_cast"
+    assert target == "media_player.study_tv_cast"

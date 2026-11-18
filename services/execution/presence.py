@@ -10,7 +10,7 @@ MQTT Topic Pattern (ESPresense default):
   espresense/rooms/{room_name} -> JSON with occupants
 
 Redis Key Pattern:
-  ha:presence:{user_id} -> JSON: {"room": "living_room", "confidence": 0.85, "last_seen": 1234567890}
+  ha:presence:{user_id} -> JSON: {"room": "den", "confidence": 0.85, "last_seen": 1234567890}
   ha:presence:all -> JSON: {user_id: {...}, ...}
 """
 import asyncio

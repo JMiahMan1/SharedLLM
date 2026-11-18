@@ -484,3 +484,63 @@ def test_entity_search_filters_by_the_hubs_area_names_and_aliases(monkeypatch):
     bad = client.post("/execute/entity/search", headers={"X-Internal-Secret": "test-secret"},
                       json={"user_context": ctx, "query": "", "area": "Attic"}).json()
     assert bad["status"] == "FAILURE" and "Attic" in bad["message"]
+
+
+# --------------------------------------------------------------------------- no rooms read out of names
+
+
+def test_with_the_index_an_unknown_entity_gets_no_companions_from_its_name():
+    # Every name here says "sunroom", and nothing is in the hub's index: names are not rooms.
+    states = [{"entity_id": e, "attributes": {"supported_features": 152461}} for e in (
+        "media_player.sunroom_tv", "media_player.sunroom_tv_cast", "media_player.sunroom_esphome_speaker")]
+    states += [{"entity_id": "remote.sunroom_tv_remote", "attributes": {}},
+               {"entity_id": "assist_satellite.sunroom_tv", "attributes": {}}]
+    comp = announce_handlers.resolve_tv_companions("media_player.sunroom_tv", states, idx=_idx())
+    assert comp["cast_sibling"] is None and comp["remote_sibling"] is None
+    assert comp["room_assist_satellite"] is None and comp["room_esphome_speaker"] is None
+    assert comp["area_id"] is None and comp["room_slug"] == ""
+
+
+def test_a_plain_ha_pairs_companions_by_the_name_left_after_device_words():
+    guess = announce_handlers._name_room_guess
+    assert guess("media_player.sunroom_tv_2") == "sunroom"
+    assert guess("remote.sunroom_tv_remote") == "sunroom"
+    assert guess("media_player.sunroom_chromecast") == "sunroom"
+    assert guess("assist_satellite.sunroom_assist_satellite") == "sunroom"
+    assert guess("media_player.west_wing_samsung_tv_3") == "west_wing"
+    assert guess("media_player.media_room_tv") == "media_room"  # a room's own words stay
+    assert guess("media_player.west_wing_voice_media_player") == "west_wing_voice"
+    states = [
+        {"entity_id": "media_player.west_wing_tv", "attributes": {"device_class": "tv"}},
+        {"entity_id": "media_player.west_wing_chromecast", "attributes": {"supported_features": 152461}},
+        {"entity_id": "remote.west_wing_tv_remote", "attributes": {}},
+        {"entity_id": "assist_satellite.west_wing_assist_satellite", "attributes": {}},
+        {"entity_id": "media_player.sunroom_chromecast", "attributes": {"supported_features": 152461}},
+    ]
+    comp = announce_handlers.resolve_tv_companions("media_player.west_wing_tv", states, idx=None)
+    assert comp["cast_sibling"] == "media_player.west_wing_chromecast"
+    assert comp["remote_sibling"] == "remote.west_wing_tv_remote"
+    assert comp["room_assist_satellite"] == "assist_satellite.west_wing_assist_satellite"
+
+
+def test_the_tv_type_comes_from_the_index_and_protocol_words_not_device_names():
+    detect = announce_handlers.detect_tv_type
+    # The hub's integration decides, whatever the id says.
+    assert detect("media_player.sunroom_chrome", "idle", {}, platform="esphome") == "esphome"
+    # Without the index, protocol and platform words (or attributes) decide; a nickname does not.
+    assert detect("media_player.sunroom_chromecast", "idle", {}) == "cast"
+    assert detect("media_player.sunroom_esphome_speaker", "idle", {}) == "esphome"
+    assert detect("media_player.sunroom_chrome", "idle", {}) == "unknown"
+    assert detect("media_player.sunroom_voice_box", "idle", {}) == "unknown"
+    assert detect("media_player.anything", "idle", {"app_id": "CC1AD845"}) == "cast"
+
+
+async def test_a_plain_ha_room_fallback_matches_the_room_said_against_entity_names(monkeypatch):
+    monkeypatch.setattr(targets, "fetch_room_speakers", AsyncMock(return_value={}))
+    monkeypatch.setattr(ha_client, "get_areas", AsyncMock(return_value={}))
+    monkeypatch.setattr(ha_client, "get_states", AsyncMock(return_value=[
+        {"entity_id": "media_player.west_wing_tv_2", "attributes": {}},
+        {"entity_id": "media_player.sunroom_speaker", "attributes": {}},
+    ]))
+    out = await targets.resolve_targets(rooms=["West Wing"], ha_url=HUB, ha_token="t")
+    assert out == ["media_player.west_wing_tv_2"]

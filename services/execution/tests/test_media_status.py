@@ -65,10 +65,10 @@ async def test_media_status_returns_active_player():
 async def test_media_status_prefers_cast_metadata_over_ma_queue():
     states = [
         _make_state(
-            "media_player.office_tv_chrome_2",
+            "media_player.study_tv_cast_2",
             "playing",
             {
-                "friendly_name": "Office TV",
+                "friendly_name": "Study TV",
                 "source": "Music Assistant Queue",
                 "integration": "music_assistant",
                 "active_queue": "queue://ma/abc123",
@@ -78,10 +78,10 @@ async def test_media_status_prefers_cast_metadata_over_ma_queue():
             },
         ),
         _make_state(
-            "media_player.office_tv_chrome",
+            "media_player.study_tv_cast",
             "playing",
             {
-                "friendly_name": "Office TV Cast",
+                "friendly_name": "Study TV Cast",
                 "app_name": "YouTube",
                 "media_title": "Underdog Saluki 27B tested - Local LLM setup",
                 "media_artist": "Luke's Dev Lab",
@@ -103,7 +103,7 @@ async def test_media_status_prefers_cast_metadata_over_ma_queue():
     assert result.status == "SUCCESS"
     active = result.detail.get("active") if result.detail else None
     assert isinstance(active, dict)
-    assert active["entity_id"] == "media_player.office_tv_chrome"
+    assert active["entity_id"] == "media_player.study_tv_cast"
     assert active["media_title"].startswith("Underdog")
 
 
@@ -420,13 +420,13 @@ async def test_media_status_empty_area_map_for_filter():
 
 @pytest.mark.asyncio
 async def test_media_status_non_ma_cast_with_metadata_is_active():
-    """Chrome/Cast Office TV is not MA but must surface title/artist/album."""
+    """Chrome/Cast Study TV is not MA but must surface title/artist/album."""
     states = [
         _make_state(
-            "media_player.office_tv_chrome",
+            "media_player.study_tv_cast",
             "paused",
             {
-                "friendly_name": "Office TV Cast",
+                "friendly_name": "Study TV Cast",
                 "media_title": "Incomplete",
                 "media_artist": "Switchfoot",
                 "media_album_name": "New Way to Be Human",
@@ -444,7 +444,7 @@ async def test_media_status_non_ma_cast_with_metadata_is_active():
     assert result.status == "SUCCESS"
     active = (result.detail or {}).get("active")
     assert active is not None
-    assert active["entity_id"] == "media_player.office_tv_chrome"
+    assert active["entity_id"] == "media_player.study_tv_cast"
     assert active["media_title"] == "Incomplete"
     assert active["media_artist"] == "Switchfoot"
     assert active["media_album"] == "New Way to Be Human"
@@ -484,7 +484,7 @@ async def test_media_status_unavailable_non_ma_without_metadata_excluded():
     """Dead non-MA entities without metadata stay out of the picker payload."""
     states = [
         _make_state("media_player.den_tv", "unavailable", {}),
-        _make_state("media_player.office_tv_chrome", "paused", {"media_title": "Song"}),
+        _make_state("media_player.study_tv_cast", "paused", {"media_title": "Song"}),
     ]
     with (
         patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
@@ -494,4 +494,4 @@ async def test_media_status_unavailable_non_ma_without_metadata_excluded():
 
     all_ids = [p["entity_id"] for p in (result.detail or {}).get("all_players") or []]
     assert "media_player.den_tv" not in all_ids
-    assert "media_player.office_tv_chrome" in all_ids
+    assert "media_player.study_tv_cast" in all_ids

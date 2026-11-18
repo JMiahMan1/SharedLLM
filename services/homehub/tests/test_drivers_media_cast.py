@@ -16,7 +16,7 @@ from services.homehub.drivers.cast import CastDriver
 from services.homehub.drivers.media_common import F
 from services.homehub.tests.conftest import make_hub
 
-OFFICE = "00000000-0000-4000-8000-00000000c001"
+STUDY = "00000000-0000-4000-8000-00000000c001"
 BEDROOM = "00000000-0000-4000-8000-00000000c002"
 STRANGER = "00000000-0000-0000-0000-000000000001"
 
@@ -102,8 +102,8 @@ def setup(monkeypatch):
     FakeBrowser.instances.clear()
     monkeypatch.setattr(mod, "CastBrowser", FakeBrowser)
     hub, entry = make_hub("cast", {"known_hosts": ["198.51.100.213"], "uuid": [], "ignore_cec": [], "user_id": "u"}, [
-        {"entity_id": "media_player.office_tv_chrome", "unique_id": OFFICE},
-        {"entity_id": "media_player.master_bedroom_tv", "unique_id": BEDROOM},
+        {"entity_id": "media_player.study_tv_cast", "unique_id": STUDY},
+        {"entity_id": "media_player.guest_room_tv", "unique_id": BEDROOM},
     ])
     drv = CastDriver(hub, entry)
     drv.zeroconf_factory = lambda: "zc"
@@ -127,17 +127,17 @@ async def test_discovery_connects_only_wanted_uuids(setup):
     await drv.async_setup()
     b = FakeBrowser.instances[-1]
     assert b.started and b.hosts == ["198.51.100.213"]
-    assert hub.states.get("media_player.office_tv_chrome").state == "unavailable"
-    b.appear(OFFICE, "Office TV")
+    assert hub.states.get("media_player.study_tv_cast").state == "unavailable"
+    b.appear(STUDY, "Study TV")
     b.appear(STRANGER, "Neighbour")
     await settle()
-    assert set(made) == {OFFICE}
-    st = hub.states.get("media_player.office_tv_chrome")
+    assert set(made) == {STUDY}
+    st = hub.states.get("media_player.study_tv_cast")
     assert st.state == "on"
     assert st.attributes["volume_level"] == 0.4
     assert st.attributes["app_name"] == "Default Media Receiver"
     assert st.attributes["supported_features"] & F.PLAY_MEDIA
-    assert hub.states.get("media_player.master_bedroom_tv").state == "unavailable"
+    assert hub.states.get("media_player.guest_room_tv").state == "unavailable"
     await drv.async_unload()
     assert b.stopped
 
@@ -145,9 +145,9 @@ async def test_discovery_connects_only_wanted_uuids(setup):
 async def test_media_status_states_and_attributes(setup):
     hub, drv, made = setup
     await drv.async_setup()
-    FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
+    FakeBrowser.instances[-1].appear(STUDY, "Study TV")
     await settle()
-    cc = made[OFFICE]
+    cc = made[STUDY]
     ms = cc.media_controller.status
     ms.player_state = "PLAYING"
     ms.content_id = "http://j/song.mp3"
@@ -160,7 +160,7 @@ async def test_media_status_states_and_attributes(setup):
     # listeners fire from pychromecast threads
     await asyncio.to_thread(cc.listeners[0].new_media_status, ms)
     await settle()
-    st = hub.states.get("media_player.office_tv_chrome")
+    st = hub.states.get("media_player.study_tv_cast")
     assert st.state == "playing"
     a = st.attributes
     assert a["media_title"] == "Song" and a["media_artist"] == "Band" and a["media_album_name"] == "LP"
@@ -169,15 +169,15 @@ async def test_media_status_states_and_attributes(setup):
     assert a["media_content_type"] == "music"
     assert a["supported_features"] & F.PAUSE and a["supported_features"] & F.NEXT_TRACK
     ms.player_state = "PAUSED"
-    drv.publish_key(OFFICE)
-    assert hub.states.get("media_player.office_tv_chrome").state == "paused"
+    drv.publish_key(STUDY)
+    assert hub.states.get("media_player.study_tv_cast").state == "paused"
     ms.player_state = "UNKNOWN"
     cc.idle = True
-    drv.publish_key(OFFICE)
-    assert hub.states.get("media_player.office_tv_chrome").state == "off"
+    drv.publish_key(STUDY)
+    assert hub.states.get("media_player.study_tv_cast").state == "off"
     await asyncio.to_thread(cc.listeners[-1].new_connection_status, SimpleNamespace(status="LOST"))
     await settle()
-    assert hub.states.get("media_player.office_tv_chrome").state == "unavailable"
+    assert hub.states.get("media_player.study_tv_cast").state == "unavailable"
 
 
 class FakeRemote:
@@ -192,9 +192,9 @@ class FakeRemote:
 async def _spotify_report(setup):
     hub, drv, made = setup
     await drv.async_setup()
-    FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
+    FakeBrowser.instances[-1].appear(STUDY, "Study TV")
     await settle()
-    cc = made[OFFICE]
+    cc = made[STUDY]
     cc.status.app_id, cc.status.display_name, cc.status.is_stand_by = "AndroidNativeApp", "Spotify", False
     ms = cc.media_controller.status
     ms.player_state = "PLAYING"
@@ -203,15 +203,15 @@ async def _spotify_report(setup):
 
 
 def _shown(hub):
-    st = hub.states.get("media_player.office_tv_chrome")
+    st = hub.states.get("media_player.study_tv_cast")
     return st.state, st.attributes.get("app_name"), st.attributes.get("media_title")
 
 
 async def test_a_sleeping_tv_never_shows_its_apps_report(setup):
-    """The Office TV's Spotify app reported Spotify paused or playing though it never played there."""
+    """The Study TV's Spotify app reported Spotify paused or playing though it never played there."""
     hub, drv, cc = await _spotify_report(setup)
     cc.status.is_stand_by = True
-    drv.publish_key(OFFICE)
+    drv.publish_key(STUDY)
     assert _shown(hub) == ("off", None, None)
 
 
@@ -219,23 +219,23 @@ async def test_an_awake_tv_shows_its_apps_report_only_when_that_app_is_on_screen
     hub, drv, cc = await _spotify_report(setup)
     remote = FakeRemote("192.0.2.50", app="com.google.android.youtube.tv")  # the address the fake TV has
     hub.drivers["atv"] = remote
-    drv.publish_key(OFFICE)
+    drv.publish_key(STUDY)
     assert _shown(hub) == ("on", None, None)  # YouTube on screen: Spotify's report is false
     remote.api.is_on = False
-    drv.publish_key(OFFICE)
+    drv.publish_key(STUDY)
     assert _shown(hub) == ("off", None, None)
     remote.api.is_on, remote.api.current_app = True, "com.spotify.tv.android"  # really playing Spotify
-    drv.publish_key(OFFICE)
+    drv.publish_key(STUDY)
     assert _shown(hub) == ("playing", "Spotify", "A song")
     # any app counts, listed or not: its name in the package is enough
     cc.status.display_name, remote.api.current_app = "Netflix", "com.netflix.ninja"
-    drv.publish_key(OFFICE)
+    drv.publish_key(STUDY)
     assert _shown(hub) == ("playing", "Netflix", "A song")
 
 
 async def test_without_the_tvs_remote_an_awake_tv_is_believed(setup):
     hub, drv, _cc = await _spotify_report(setup)
-    drv.publish_key(OFFICE)
+    drv.publish_key(STUDY)
     assert _shown(hub) == ("playing", "Spotify", "A song")
 
 
@@ -243,17 +243,17 @@ async def test_jarvis_casts_are_never_hidden(setup):
     hub, drv, cc = await _spotify_report(setup)
     hub.drivers["atv"] = FakeRemote("192.0.2.50", app="com.google.android.youtube.tv")
     cc.status.app_id, cc.status.display_name, cc.status.is_stand_by = "CC1AD845", "Default Media Receiver", True
-    drv.publish_key(OFFICE)
+    drv.publish_key(STUDY)
     assert _shown(hub) == ("playing", "Default Media Receiver", "A song")
 
 
 async def test_commands(setup):
     hub, drv, made = setup
     await drv.async_setup()
-    FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
+    FakeBrowser.instances[-1].appear(STUDY, "Study TV")
     await settle()
-    cc = made[OFFICE]
-    ent = hub.entities["media_player.office_tv_chrome"]
+    cc = made[STUDY]
+    ent = hub.entities["media_player.study_tv_cast"]
     await drv.async_call(ent, "media_player", "play_media", {
         "media_content_id": "http://jarvis/announce.wav", "media_content_type": "music",
         "extra": {"title": "Hello"}})
@@ -271,17 +271,17 @@ async def test_commands(setup):
     with pytest.raises(ServiceNotFound):
         await drv.async_call(ent, "media_player", "select_source", {"source": "x"})
     with pytest.raises(DeviceUnavailable):
-        await drv.async_call(hub.entities["media_player.master_bedroom_tv"], "media_player", "media_play", {})
+        await drv.async_call(hub.entities["media_player.guest_room_tv"], "media_player", "media_play", {})
 
 
 async def test_a_url_is_loaded_into_the_media_receiver_not_the_app_on_screen(setup):
     hub, drv, made = setup
     await drv.async_setup()
-    FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
+    FakeBrowser.instances[-1].appear(STUDY, "Study TV")
     await settle()
-    cc = made[OFFICE]
+    cc = made[STUDY]
     cc.status.app_id = "CC32E753"  # another app's receiver holds the session
-    await drv.async_call(hub.entities["media_player.office_tv_chrome"], "media_player", "play_media", {
+    await drv.async_call(hub.entities["media_player.study_tv_cast"], "media_player", "play_media", {
         "media_content_id": "http://jarvis/announce.wav", "media_content_type": "music"})
     assert cc.calls[-1] == ("start_app", "CC1AD845")
     assert cc.media_controller.calls[-1][0] == "play_media"
@@ -291,23 +291,23 @@ async def test_a_url_is_loaded_into_the_media_receiver_not_the_app_on_screen(set
 async def test_a_load_the_tv_refuses_is_an_error_not_a_success(setup, response):
     hub, drv, made = setup
     await drv.async_setup()
-    FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
+    FakeBrowser.instances[-1].appear(STUDY, "Study TV")
     await settle()
-    made[OFFICE].media_controller.load_response = response
+    made[STUDY].media_controller.load_response = response
     with pytest.raises(DeviceUnavailable):
-        await drv.async_call(hub.entities["media_player.office_tv_chrome"], "media_player", "play_media", {
+        await drv.async_call(hub.entities["media_player.study_tv_cast"], "media_player", "play_media", {
             "media_content_id": "http://jarvis/announce.wav", "media_content_type": "music"})
 
 
 async def test_cast_app_quick_play(setup, monkeypatch):
     hub, drv, _made = setup
     await drv.async_setup()
-    FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
+    FakeBrowser.instances[-1].appear(STUDY, "Study TV")
     await settle()
     seen = []
     import pychromecast.quick_play as qp
     monkeypatch.setattr(qp, "quick_play", lambda cast, app, data: seen.append((app, data)))
-    await drv.async_call(hub.entities["media_player.office_tv_chrome"], "media_player", "play_media", {
+    await drv.async_call(hub.entities["media_player.study_tv_cast"], "media_player", "play_media", {
         "media_content_id": json.dumps({"app_name": "youtube", "media_id": "dQw4w9WgXcQ"}),
         "media_content_type": "cast"})
     assert seen == [("youtube", {"media_id": "dQw4w9WgXcQ"})]
