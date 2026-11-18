@@ -145,11 +145,21 @@ describe('Rooms home overview', () => {
     expect(api.callHaService).toHaveBeenCalledWith('light', 'turn_off', 'light.lamp', null);
   });
 
-  it('says where to go when there are no rooms yet', async () => {
+  it('offers an admin Add room when there are no rooms yet', async () => {
     vi.mocked(dashboards.getRooms).mockResolvedValue({ floors: [], areas: [], unassigned: [] });
     wrap(<Rooms />);
     const empty = await screen.findByTestId('empty-state');
-    expect(within(empty).getByRole('link', { name: 'Go to Devices' })).toHaveAttribute('href', '/devices');
+    fireEvent.click(within(empty).getByRole('button', { name: 'Add room' }));
+    expect(await screen.findByRole('dialog', { name: 'Add a room' })).toBeInTheDocument();
+  });
+
+  it('tells a member a parent sets up rooms, with no Add room', async () => {
+    mockUser = { username: 'kid', is_admin: false };
+    vi.mocked(dashboards.getRooms).mockResolvedValue({ floors: [], areas: [], unassigned: [] });
+    wrap(<Rooms />);
+    const empty = await screen.findByTestId('empty-state');
+    expect(within(empty).getByText(/once a parent puts them in a room/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add room' })).toBeNull();
   });
 });
 

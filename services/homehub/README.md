@@ -316,6 +316,16 @@ flow that probed the device set, plus `state` once a driver published it.
   finds WiZ, ESPHome, Cast, Roku and HomeKit devices, adds them with an MJPEG
   camera and an Emporia account, and drives them with an empty store. Areas
   are made with `GET|POST /hub/areas`, `PATCH|DELETE /hub/areas/{id}`.
+- In the web app a parent adds, renames and removes rooms in two places: the
+  Rooms page (**Add room** in its header, or in the empty state when there are
+  no rooms yet; **Rename** and remove on each room's card) and Devices >
+  **Rooms & places**, which also manages floors. Both use the same code
+  (`services/ui/src/hooks/useRoomActions.ts`, `components/devices/RoomForms.tsx`)
+  and refresh each other's lists. A parent sees a new room on the Rooms page at
+  once, even before it has any devices; everyone else sees a room once it has
+  something in it. Only admins see these controls, and the gateway
+  (`hub_registry_routes.py`, 403) and the hub (`/hub/areas`, 401) refuse
+  everyone else. Removing a room keeps its devices working, with no room.
 - Floors, labels, zones and persons are edited the same way (`/hub/floors`,
   `/hub/labels`, `/hub/zones`, `/hub/persons`; `registries_api.py`). An area
   picks a floor; areas, devices and entities carry `labels`. A zone is
