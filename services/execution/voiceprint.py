@@ -49,6 +49,23 @@ def _get_encoder():
         return _encoder
 
 
+def warm_up() -> float:
+    """Load the encoder and the VAD now, so the first command does not pay for it.
+
+    Returns how long it took, in seconds.
+    """
+    import time
+
+    from resemblyzer import preprocess_wav
+
+    started = time.monotonic()
+    encoder = _get_encoder()
+    noise = np.random.default_rng(0).standard_normal(SAMPLE_RATE).astype(np.float32) * 0.01
+    preprocess_wav(noise, source_sr=SAMPLE_RATE)
+    encoder.embed_utterance(noise)
+    return time.monotonic() - started
+
+
 def decode(audio: bytes) -> np.ndarray:
     """Any container ffmpeg reads, as 16 kHz mono float32 samples."""
     if not audio:

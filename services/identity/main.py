@@ -1679,6 +1679,99 @@ def learn_voice(request: Request, req: VoiceLearnRequest, session: Session = Dep
     return {"status": "STORED", "speech_seconds": req.speech_seconds, **_voice_status(row)}
 
 
+class VoiceEnrollRequest(BaseModel):
+    username: str
+    embedding: list[float]
+    speech_seconds: float | None = None
+    model: str = voice.MODEL
+    #: The teaching session the take belongs to (services/common/voice_enroll).
+    session: str
+    #: The satellite it was spoken at, for the audit trail.
+    satellite: str | None = None
+
+
+@app.post("/api/voice/enroll", dependencies=[Depends(require_internal)])
+def enroll_voice_from_satellite(request: Request, req: VoiceEnrollRequest, session: Session = Depends(get_session)):
+    """Add a take spoken at the person's own voice satellite (internal).
+
+    The gateway calls this during a teaching session it opened for the one
+    person the satellite is assigned to. Unlike ``/api/voice/learn`` the
+    person need not be recognised yet: a profile recorded on a phone or laptop
+    microphone, or none at all, is exactly what this fixes. A take is checked
+    against the earlier takes of the same session, so someone else stepping in
+    halfway is refused instead of averaged in.
+    """
+    if req.model != voice.MODEL:
+        raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
+    try:
+        embedding = voice.valid_embedding(req.embedding)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    if not req.session.strip():
+        raise HTTPException(status_code=422, detail="A teaching session is required.")
+    user = session.exec(select(User).where(User.username == req.username)).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="No such person.")
+    row = session.get(VoiceSignature, req.username)
+    samples = voice.load_samples(row.samples) if row and row.model == voice.MODEL else []
+    this_session = [s for s in samples if s.get("session") == req.session]
+    if this_session:
+        score = voice.cosine(embedding, voice.centroid(this_session))
+        if score < voice.CONSISTENCY_FLOOR:
+            raise HTTPException(
+                status_code=422,
+                detail=f"That take does not sound like the earlier ones (similarity {score:.2f}).",
+            )
+    samples.append({
+        "embedding": embedding,
+        "speech_seconds": req.speech_seconds,
+        "recorded_at": datetime.now(UTC).isoformat(),
+        "source": "satellite",
+        "session": req.session,
+    })
+    samples = samples[-voice.MAX_SAMPLES:]
+    if row is None:
+        row = VoiceSignature(username=req.username, model=voice.MODEL)
+    row.model = voice.MODEL
+    row.samples = json.dumps(samples)
+    row.updated_at = datetime.now(UTC)
+    session.add(row)
+    user.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
+    session.add(user)
+    session.commit()
+    _audit(request, session, "user.voice_enroll", req.username,
+           changes=[{"field": "voice_samples", "change": str(len(samples))}],
+           note=f"taught at {req.satellite or 'a voice satellite'}")
+    log.info(
+        f"[voice] {req.username} taught sample {len(samples)} at {req.satellite or 'a satellite'} "
+        f"({req.speech_seconds}s of speech)"
+    )
+    return {"status": "STORED", "speech_seconds": req.speech_seconds, **_voice_status(row)}
+
+
+@app.get("/api/internal/satellite-owner", dependencies=[Depends(require_internal)])
+def internal_satellite_owner(entity_id: str, session: Session = Depends(get_session)):
+    """Internal: the one person a voice satellite is assigned to, if exactly one.
+
+    ``owners`` says how many people share it: 0 (unassigned) and more than
+    one both leave ``username`` empty, because a teaching session must know
+    whose voice it is learning.
+    """
+    rows = session.exec(
+        select(DeviceAssignment).where(
+            DeviceAssignment.device_id == entity_id.strip(),
+            DeviceAssignment.revoked == False,  # noqa: E712
+        )
+    ).all()
+    owners = {r.user_id for r in rows}
+    person = session.get(User, next(iter(owners))) if len(owners) == 1 else None
+    return {
+        "username": person.username if person else None,
+        "name": (person.display_name or person.username) if person else None,
+        "owners": len(owners),
+    }
+
+
 @app.post("/api/voice/identify", dependencies=[Depends(require_internal)])
 def identify_voice(req: VoiceIdentifyRequest, session: Session = Depends(get_session)):
     """Which enrolled family member a signature belongs to (internal)."""

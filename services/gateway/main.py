@@ -3331,8 +3331,9 @@ async def _handle_voice_learning(
     elif creds.identified_by != "voice":
         message = (
             "I can only refresh a voice I already recognise. If you haven't enrolled yet, record "
-            "your first three samples in Settings, Vocal Signature. If you have, try again with a "
-            "longer phrase, like 'Jarvis, please learn my voice'."
+            "your first three samples in Settings, Vocal Signature, or say 'learn my voice' at a "
+            "voice satellite assigned to you. If you have, try again with a longer phrase, like "
+            "'Jarvis, please learn my voice'."
         )
     elif _start_voice_learning(user_id):
         message = (
@@ -3346,6 +3347,197 @@ async def _handle_voice_learning(
     if is_openai:
         return _make_openai_response(message, selected_model, "voice_learning")
     return _make_ollama_response(message, selected_model, "voice_learning")
+
+
+async def _satellite_owner(satellite: str) -> dict | None:
+    """Identity's answer on whom ``satellite`` is assigned to; None when it cannot say."""
+    try:
+        resp = await get_http_client().get(
+            f"{IDENTITY_SVC}/api/internal/satellite-owner",
+            params={"entity_id": satellite},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status != 200:
+            log.warning(f"[VoiceTeaching] satellite owner: identity answered HTTP {resp.status}")
+            return None
+        data = await resp.json()
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        log.warning(f"[VoiceTeaching] satellite owner unavailable: {type(e).__name__}: {e}")
+        return None
+
+
+def _teaching_state(satellite: str) -> dict | None:
+    from services.common import voice_enroll
+    from services.gateway.cache import get_redis
+
+    try:
+        return voice_enroll.decode(get_redis().get(voice_enroll.session_key(satellite)))
+    except Exception as e:
+        log.warning(f"[VoiceTeaching] could not read the session at {satellite}: {e}")
+        return None
+
+
+def _save_teaching(satellite: str, state: dict) -> bool:
+    """Store the session and tell the speech-to-text proxy to keep takes while it runs."""
+    from services.common import voice_enroll
+    from services.gateway.cache import get_redis
+
+    try:
+        redis = get_redis()
+        redis.set(voice_enroll.session_key(satellite), voice_enroll.encode(state), ex=voice_enroll.TTL_SECONDS)
+        redis.set(voice_enroll.OPEN_KEY, "1", ex=voice_enroll.TTL_SECONDS)
+        return True
+    except Exception as e:
+        log.warning(f"[VoiceTeaching] could not save the session at {satellite}: {e}")
+        return False
+
+
+def _end_teaching(satellite: str) -> None:
+    """Close the session; the proxy stops keeping takes once no session is open."""
+    from services.common import voice_enroll
+    from services.gateway.cache import get_redis
+
+    try:
+        redis = get_redis()
+        redis.delete(voice_enroll.session_key(satellite))
+        if not any(True for _ in redis.scan_iter(match=voice_enroll.session_key("*"), count=100)):
+            redis.delete(voice_enroll.OPEN_KEY)
+    except Exception as e:
+        log.warning(f"[VoiceTeaching] could not end the session at {satellite}: {e}")
+
+
+def _take_for(query: str) -> dict | None:
+    """The signature the proxy kept for the command that said ``query`` (used once)."""
+    from services.common import voice_enroll
+    from services.gateway.cache import get_redis
+
+    key = voice_enroll.take_key(query)
+    if not key:
+        return None
+    try:
+        return voice_enroll.decode_take(get_redis().getdel(key))
+    except Exception as e:
+        log.warning(f"[VoiceTeaching] could not read the take: {e}")
+        return None
+
+
+async def _store_take(state: dict, take: dict, satellite: str) -> tuple[int, str]:
+    """Hand a take to Identity; (HTTP status, detail). 0 means Identity was unreachable."""
+    try:
+        resp = await get_http_client().post(
+            f"{IDENTITY_SVC}/api/voice/enroll",
+            json={
+                "username": state["username"],
+                "embedding": take["embedding"],
+                "speech_seconds": take.get("speech_seconds"),
+                "model": take.get("model"),
+                "session": state["session"],
+                "satellite": satellite,
+            },
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        body = await resp.json(content_type=None)
+        detail = body.get("detail") if isinstance(body, dict) else None
+        return resp.status, str(detail or "")
+    except Exception as e:
+        log.warning(f"[VoiceTeaching] identity could not store the take: {type(e).__name__}: {e}")
+        return 0, str(e)
+
+
+def _say_this(index: int, lead: str) -> str:
+    """Ask for the next sentence. It ends in a question so the satellite keeps listening."""
+    from services.common import voice_enroll
+
+    return f"{lead} Please say: {voice_enroll.sentence(index)} Can you say that for me?"
+
+
+async def _voice_teaching_reply(query: str, creds: ResolvedCredentials, satellite: str) -> str | None:
+    """One turn of teaching a voice at the satellite assigned to that person.
+
+    None when this request is not part of teaching and should be answered as usual.
+    Only the one person the satellite is assigned to can be taught here, never the
+    household and never anyone else; a recognised voice that belongs to someone
+    else keeps the older "learn my voice" path, which refreshes their own profile.
+    """
+    from services.common import voice_enroll
+
+    state = await asyncio.to_thread(_teaching_state, satellite)
+    if state is None:
+        if not _wants_voice_learning(query) or _wants_voice_learning_stop(query):
+            return None
+        owner = await _satellite_owner(satellite)
+        if owner is None:
+            return "I couldn't check who this satellite belongs to just now. Try again in a moment."
+        if not owner.get("username"):
+            if int(owner.get("owners") or 0) > 1:
+                return (
+                    f"This satellite is shared by {owner['owners']} people, so I can't tell whose voice to learn "
+                    "here. Assign it to just one person in Admin, Users and Devices, or record your samples "
+                    "in Settings, Vocal Signature."
+                )
+            return (
+                "This satellite isn't assigned to anyone, so I don't know whose voice to learn here. "
+                "An admin can assign it to you in Admin, Users and Devices. Then say 'learn my voice' again."
+            )
+        if creds.identified_by == "voice" and creds.user != owner["username"]:
+            return None
+        state = voice_enroll.new_session(owner["username"], uuid.uuid4().hex)
+        state["name"] = owner.get("name") or owner["username"]
+        if not await asyncio.to_thread(_save_teaching, satellite, state):
+            return "I couldn't start learning your voice just now. Try again in a moment."
+        log.info(f"[VoiceTeaching] started for {state['username']} at {satellite}")
+        return _say_this(
+            0,
+            f"Okay, {state['name']}. I'll learn your voice from {voice_enroll.TAKES} sentences, "
+            "spoken the way you normally talk to me. Say 'stop learning my voice' to stop.",
+        )
+
+    name = state.get("name") or state["username"]
+    if _wants_voice_learning_stop(query):
+        await asyncio.to_thread(_end_teaching, satellite)
+        kept = " The sentences you already said are kept." if state["got"] else ""
+        return f"Okay, I've stopped learning your voice.{kept}"
+    if _wants_voice_learning(query):
+        await asyncio.to_thread(_save_teaching, satellite, state)
+        return _say_this(state["got"], f"We're on sentence {state['got'] + 1} of {voice_enroll.TAKES}.")
+
+    take = await asyncio.to_thread(_take_for, query)
+    if take is None:
+        status, detail = 0, "no take"
+        retry_lead = "I didn't catch enough of your voice that time."
+    else:
+        status, detail = await _store_take(state, take, satellite)
+        retry_lead = (
+            "That didn't sound like your earlier sentences. If someone else spoke, please try again yourself."
+            if status == 422 else "I couldn't save that one."
+        )
+    if status == 200:
+        state["got"] += 1
+        state["misses"] = 0
+        log.info(f"[VoiceTeaching] {state['username']}: take {state['got']} of {voice_enroll.TAKES} at {satellite}")
+        if state["got"] >= voice_enroll.TAKES:
+            await asyncio.to_thread(_end_teaching, satellite)
+            return (
+                f"Thank you, {name}. I've learned your voice from this satellite. "
+                "From now on, try asking me 'who am I' to check."
+            )
+        await asyncio.to_thread(_save_teaching, satellite, state)
+        return _say_this(state["got"], f"Got it, {state['got']} of {voice_enroll.TAKES}.")
+
+    state["misses"] += 1
+    log.info(f"[VoiceTeaching] {state['username']}: take not stored at {satellite} ({status} {detail})")
+    if state["misses"] >= voice_enroll.MAX_MISSES:
+        await asyncio.to_thread(_end_teaching, satellite)
+        kept = f" The {state['got']} I did hear are kept." if state["got"] else ""
+        return (
+            "I couldn't hear your voice clearly enough, so let's stop for now." + kept
+            + " Say 'learn my voice' to try again, a little closer to the satellite."
+        )
+    await asyncio.to_thread(_save_teaching, satellite, state)
+    return _say_this(state["got"], retry_lead)
 
 
 def _chat_system_prompt(body: dict) -> str | None:
@@ -3628,6 +3820,15 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(msg, selected_model, "degraded")
         return _make_ollama_response(msg, selected_model, "degraded")
     log.info(f"Chat request from {user_id} query='{query}'")
+
+    # Teaching a voice at the satellite assigned to that person: every request from
+    # that satellite while the session is open is a take, not a command.
+    if not grounded and voice_context and voice_context.get("satellite"):
+        teaching = await _voice_teaching_reply(str(query), creds, voice_context["satellite"])
+        if teaching is not None:
+            if is_openai:
+                return _make_openai_response(teaching, selected_model, "voice_teaching")
+            return _make_ollama_response(teaching, selected_model, "voice_teaching")
 
     # A sentence an automation in the device hub owns (HA's conversation trigger) is answered by that
     # automation, before any shortcut or model (services/gateway/sentence_triggers.py).

@@ -2,11 +2,12 @@
 the real speech-to-text unchanged and records who spoke under the transcript."""
 import asyncio
 import json
+import logging
 
 import numpy as np
 import pytest
 
-from services.common import voice_learning, voice_speaker
+from services.common import voice_enroll, voice_learning, voice_speaker
 from services.execution import wyoming_stt
 from services.execution.ha_client import authorize_action
 
@@ -212,3 +213,102 @@ def test_a_voice_never_opens_the_house_even_an_admins():
     assert not authorize_action(admin_by_voice, "cover", "open")
     assert authorize_action(admin_by_voice, "light", "turn_on")
     assert authorize_action({"user": "alex", "is_admin": True}, "lock", "unlock")
+
+
+@pytest.mark.asyncio
+async def test_a_take_is_kept_only_while_a_teaching_session_is_open(monkeypatch):
+    verdict = {"matched": False, "score": 0.4, "embedding": [0.02] * 256, "speech_seconds": 3.0,
+               "model": wyoming_stt.voiceprint.MODEL}
+    _, _, _, redis = await _run(dict(verdict), monkeypatch)
+    assert redis.values == {}
+
+    original = _FakeRedis.__init__
+
+    def with_session(self):
+        original(self)
+        self.values[voice_enroll.OPEN_KEY] = ("1", None)
+
+    monkeypatch.setattr(_FakeRedis, "__init__", with_session)
+    _, _, _, redis = await _run(dict(verdict), monkeypatch)
+    raw, ttl = redis.values[voice_enroll.take_key("Turn on the kitchen lights.")]
+    take = voice_enroll.decode_take(raw)
+    assert take["embedding"] == [0.02] * 256 and take["model"] == wyoming_stt.voiceprint.MODEL
+    assert ttl == voice_enroll.TAKE_TTL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_every_outcome_is_logged_at_info_without_the_signature(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="execution.wyoming_stt")
+    await _run({"matched": False, "score": 0.71, "threshold": 0.8, "margin": 0.2,
+                "candidates": [{"username": "sam", "score": 0.71}], "embedding": [0.123456] * 256,
+                "speech_seconds": 2.4, "embed_ms": 410, "total_ms": 480}, monkeypatch)
+    lines = [r.getMessage() for r in caplog.records if r.name == "execution.wyoming_stt"]
+    assert any("not recognised: best sam 0.71 (threshold 0.8" in line and "embed 410 ms" in line for line in lines)
+    assert not any("0.123456" in line for line in lines)
+
+
+def test_the_logger_shows_info_even_when_the_root_does_not():
+    assert wyoming_stt.log.getEffectiveLevel() <= logging.INFO
+
+
+def test_describe_names_who_matched_and_how_long_it_took():
+    line = wyoming_stt.describe({"matched": True, "matched_username": "sam", "score": 0.9, "threshold": 0.8,
+                                 "margin": 0.2, "speech_seconds": 3.0, "embed_ms": 500, "total_ms": 560})
+    assert line.startswith("recognised sam (score 0.9") and "total 560 ms" in line
+    assert "nobody has enrolled" in wyoming_stt.describe({"matched": False, "nobody_enrolled": True})
+    assert "no signature" in wyoming_stt.describe(None)
+
+
+class _IdentityAnswer:
+    def __init__(self, status, body=None):
+        self.status = status
+        self.body = body
+
+    def raise_for_status(self):
+        if self.status >= 400:
+            raise RuntimeError(f"HTTP {self.status}")
+
+    async def json(self):
+        return self.body
+
+
+def _identity_answering(monkeypatch, answer):
+    class FakeSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, json=None, headers=None, timeout=None):
+            return answer
+
+    monkeypatch.setattr(wyoming_stt.aiohttp, "ClientSession", FakeSession)
+    monkeypatch.setattr(wyoming_stt.voiceprint, "embed_samples", lambda samples, minimum: {
+        "embedding": [0.01] * 256, "speech_seconds": 2.0, "model": wyoming_stt.voiceprint.MODEL})
+
+
+@pytest.mark.asyncio
+async def test_identify_keeps_the_signature_when_nobody_is_enrolled(monkeypatch):
+    _identity_answering(monkeypatch, _IdentityAnswer(404))
+    verdict = await wyoming_stt.identify(np.zeros(16000, dtype=np.float32))
+    assert verdict["matched"] is False and verdict["nobody_enrolled"] is True
+    assert verdict["embedding"] == [0.01] * 256 and verdict["total_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_identify_keeps_the_signature_when_identity_fails(monkeypatch):
+    _identity_answering(monkeypatch, _IdentityAnswer(500))
+    verdict = await wyoming_stt.identify(np.zeros(16000, dtype=np.float32))
+    assert verdict["matched"] is False and "500" in verdict["error"]
+    assert verdict["embedding"] == [0.01] * 256
+
+
+@pytest.mark.asyncio
+async def test_identify_passes_identitys_verdict_on(monkeypatch):
+    _identity_answering(monkeypatch, _IdentityAnswer(200, {"matched": True, "matched_username": "sam", "score": 0.9}))
+    verdict = await wyoming_stt.identify(np.zeros(16000, dtype=np.float32))
+    assert verdict["matched_username"] == "sam" and verdict["speech_seconds"] == 2.0

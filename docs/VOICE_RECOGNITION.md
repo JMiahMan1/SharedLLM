@@ -53,9 +53,56 @@ newest six samples are kept. The learning window lasts five minutes; say
 "stop learning my voice" to close it early. Only the signature is stored, never
 the audio.
 
-This refreshes an existing profile. A voice Jarvis has never enrolled cannot be
-attributed to a person safely, so first-time enrollment stays in Settings ->
-Vocal Signature.
+This refreshes an existing profile. A voice Jarvis does not recognise yet can
+be taught at a satellite assigned to that person (next section).
+
+## Teaching your voice at your own satellite
+
+A profile recorded on a phone or laptop microphone often does not match the
+same person at a far-field satellite, and someone who never enrolled is not
+recognised at all, so the refresh above could never start for them. A
+satellite assigned to exactly one person (Admin > Users & Devices, the
+`assist_satellite.*` entity) can teach that person's voice instead:
+
+1. At the satellite, say **"Jarvis, learn my voice"** (any phrase from the
+   list above).
+2. Jarvis answers with the person's name and asks for a sentence, then keeps
+   listening. Say it (the exact words do not matter, only the voice).
+3. Jarvis asks for the next one, four in all, then says it has learned the
+   voice. "Stop learning my voice" ends it early; the sentences already said
+   are kept.
+
+How it works (`services/common/voice_enroll.py`): the gateway opens a session
+for that satellite in Redis (five minutes, renewed with every sentence). While
+any session is open, the speech-to-text proxy keeps each command's signature
+for 20 seconds under its transcript; the gateway takes it from there and hands
+it to Identity (`POST /api/voice/enroll`), which adds it to the profile with
+`source: satellite`. Each take has to match the earlier takes of the same
+session, so someone else cutting in is refused. Three takes with too little
+speech in a row end the session.
+
+Only the satellite's one assigned person is ever taught, never the household
+and never someone else. A satellite with nobody assigned, or shared by several
+people, says so and how to fix it. Someone the satellite already recognises as
+a *different* enrolled person gets the refresh above for their own profile.
+Anyone standing at the satellite can speak the sentences, so assign a satellite
+only to the person who uses it.
+
+## Checking what happens
+
+Execution logs every recognition at INFO, without the signature:
+
+```
+[voice] recognised sam (score 0.91, threshold 0.8, margin 0.12; 3.2s of speech; embed 540 ms, total 610 ms)
+[voice] speaker not recognised: best sam 0.71 (threshold 0.8, margin None; ...)
+[voice] speaker not recognised: nobody has enrolled a voice (...)
+```
+
+`docker logs sharedllm_execution 2>&1 | grep "\[voice\]"` shows them, and
+`[VoiceTeaching]` lines in the gateway follow a teaching session. The speaker
+encoder loads when execution starts ("speaker encoder ready in ...s"); before
+that, the first command after a restart spent about 3 seconds loading it and
+missed the 2 second budget.
 
 ## What a voice cannot do
 
