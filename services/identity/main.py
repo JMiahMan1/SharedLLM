@@ -7314,32 +7314,15 @@ def list_light_clusters(x_internal_secret: str = Header(...)):
         return result
 
 
+#: Light clusters became the home hub's light groups (services/homehub/light_cluster_move.py moves the
+#: ones kept here, once); new ones are made there, so there are never two kinds of light group.
+LIGHT_CLUSTERS_MOVED = "Light clusters are light groups now: make one on the Devices page (Light groups)."
+
+
 @app.post("/api/groups/lights")
 def create_light_cluster(cluster_data: dict, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
-    cluster_id = cluster_data.get("cluster_id") or cluster_data.get("name")
-    if not cluster_id:
-        raise HTTPException(status_code=400, detail="cluster_id or name is required")
-    key = f"light_cluster:{cluster_id}"
-    with Session(engine) as session:
-        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
-        if existing:
-            raise HTTPException(status_code=409, detail=f"Light cluster '{cluster_id}' already exists")
-        cluster = GlobalSetting(
-            key=key,
-            value=json.dumps({
-                "cluster_id": cluster_id,
-                "cluster_name": cluster_data.get("cluster_name") or cluster_data.get("name", cluster_id),
-                "member_entity_ids": cluster_data.get("member_entity_ids", []),
-                "room": cluster_data.get("room"),
-                "scope": cluster_data.get("scope", "room"),
-                "owner_user_id": cluster_data.get("owner_user_id", "system"),
-            }),
-            description=f"Light cluster: {cluster_data.get('cluster_name') or cluster_data.get('name', '')}",
-        )
-        session.add(cluster)
-        session.commit()
-        return {"status": "SUCCESS", "message": f"Light cluster '{cluster_id}' created"}
+    raise HTTPException(status_code=410, detail=LIGHT_CLUSTERS_MOVED)
 
 
 @app.delete("/api/groups/lights/{cluster_id}")
@@ -7358,18 +7341,7 @@ def delete_light_cluster(cluster_id: str, x_internal_secret: str = Header(...)):
 @app.post("/api/groups/lights/{cluster_id}/members")
 def add_light_cluster_members(cluster_id: str, member_data: dict, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
-    key = f"light_cluster:{cluster_id}"
-    with Session(engine) as session:
-        cluster = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
-        if not cluster:
-            raise HTTPException(status_code=404, detail=f"Light cluster '{cluster_id}' not found")
-        data = json.loads(cluster.value)
-        existing = set(data.get("member_entity_ids", []))
-        existing.update(member_data.get("entity_ids", []))
-        data["member_entity_ids"] = list(existing)
-        cluster.value = json.dumps(data)
-        session.commit()
-        return {"status": "SUCCESS", "message": f"Members added to '{cluster_id}'"}
+    raise HTTPException(status_code=410, detail=LIGHT_CLUSTERS_MOVED)
 
 
 @app.delete("/api/groups/lights/{cluster_id}/members")

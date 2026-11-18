@@ -88,8 +88,10 @@ from services.gateway import (
     discovery_routes,
     drawing,
     family_safety,
+    fast_lights,
     helper_routes,
     hub_registry_routes,
+    light_group_routes,
     mdm,
     network_routes,
     notices,
@@ -1004,6 +1006,7 @@ app.include_router(image_routes.router)
 app.include_router(camera_live_routes.router)  # Real-time camera video (go2rtc)
 app.include_router(discovery_routes.router)  # New devices
 app.include_router(hub_registry_routes.router)  # Areas, floors, labels, zones, persons
+app.include_router(light_group_routes.router)  # Light groups (parents and admins)
 app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sensors
 app.include_router(room_presence.router)  # Room detection: phone beacons and the room map
 app.include_router(dashboard_routes.router)  # Rooms, Energy, History, Climate pages
@@ -4014,6 +4017,7 @@ async def chat_handler(request: Request, background_tasks=None):
     log.info(f"[FastPath] is_fast_path={is_fast_path} for intent='{intent}'")
     resolved_entity = None
     cached_device_unavailable = False
+    light_set = None  # several lights from one phrase, or a light group's members (fast_lights.py)
 
     if is_fast_path:
         media_entities = None
@@ -4043,7 +4047,9 @@ async def chat_handler(request: Request, background_tasks=None):
             resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id)
         elif intent in ["turn_on", "turn_off"]:
             resolved_entity = engine.extract_entity(query, intent)
-            if not resolved_entity:
+            if not asks_about_state(query):
+                light_set = fast_lights.choose(engine, query, intent, resolved_entity, media_entities)
+            if not resolved_entity and not light_set:
                 resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
             # A named player ("on the office TV") or else the last one used while it plays;
@@ -4062,7 +4068,10 @@ async def chat_handler(request: Request, background_tasks=None):
             resolved_entity = engine.extract_entity(query, intent)
 
         # If cached device was unavailable, bypass to LLM to ask user
-        if cached_device_unavailable and not resolved_entity and intent in ["turn_on", "turn_off"]:
+        if light_set:
+            log.info(f"[FastPath] MATCHED: intent='{intent}' {len(light_set.entity_ids)} lights as "
+                     f"'{light_set.label}'")
+        elif cached_device_unavailable and not resolved_entity and intent in ["turn_on", "turn_off"]:
             log.info(f"[FastPath] BYPASSED for {intent}: Cached device unavailable, LLM should ask for target")
             is_fast_path = False
         # If the intent requires an entity (lights) but we couldn't resolve one,
@@ -4089,6 +4098,21 @@ async def chat_handler(request: Request, background_tasks=None):
             if is_openai:
                 return _make_openai_response(ans, selected_model, "device_state")
             return _make_ollama_response(ans, selected_model, "device_state")
+
+    if is_fast_path and light_set:
+        async def _post_execution(path: str, payload: dict) -> dict:
+            async with shared_http_client() as client:
+                resp = await client.post(f"{EXECUTION_SVC}{path}", json=payload,
+                                         headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                         timeout=aiohttp.ClientTimeout(total=30.0))
+                return await resp.json()
+
+        ans = await fast_lights.switch(light_set, intent, creds.model_dump(), _post_execution)
+        await update_history(user_id, "user", query)
+        await update_history(user_id, "assistant", ans)
+        if is_openai:
+            return _make_openai_response(ans, selected_model, intent)
+        return _make_ollama_response(ans, selected_model, intent)
 
     if is_fast_path:
         # Execute immediate tool for simple intents

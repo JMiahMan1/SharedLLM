@@ -972,10 +972,8 @@ export const server = setupServer(
     breakdown: { home_assistant: { chunks: 500, documents: 200 }, notes: { chunks: 200, documents: 50 } }
   })),
   http.get('/api/storage/collection/:name', () => HttpResponse.json({ items: [] })),
-  // Media groups / light clusters / light patterns
-  http.get('/api/groups/lights', () => HttpResponse.json({ clusters: [] })),
-  http.post('/api/groups/lights', () => HttpResponse.json({ status: 'SUCCESS', message: 'Cluster created' })),
-  http.delete('/api/groups/lights/:name', () => HttpResponse.json({ status: 'SUCCESS', message: 'Cluster deleted' })),
+  // Media groups / light groups / light patterns
+  http.get('/api/homehub/light_groups', () => HttpResponse.json({ groups: [], lights: [], areas: [] })),
   http.get('/api/groups/patterns', () => HttpResponse.json({ patterns: [] })),
   http.post('/api/groups/patterns', () => HttpResponse.json({ status: 'SUCCESS', message: 'Pattern created' })),
   http.delete('/api/groups/patterns/:name', () => HttpResponse.json({ status: 'SUCCESS', message: 'Pattern deleted' })),

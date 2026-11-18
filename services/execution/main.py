@@ -102,6 +102,7 @@ from services.execution.schemas import (
     ImageEditInlineRequest,
     ImageEditRequest,
     LightControlRequest,
+    LightsControlRequest,
     ListVoicesRequest,
     LLMInfoRequest,
     LogbookRequest,
@@ -967,6 +968,18 @@ async def execute_light(req: LightControlRequest):
     if not await verify_entity_access(req.user_context, req.entity_id):
         raise HTTPException(status_code=403, detail="Access denied to this device")
     return await light.handle_light(req)
+
+@app.post("/execute/lights", response_model=ExecutionResult)
+async def execute_lights(req: LightsControlRequest):
+    """Several lights at once ("turn off the kitchen lights"): each checked like ``/execute/light``.
+
+    A light the caller may not control is left alone and named in the answer, not a 403 for all.
+    """
+    async def may_control(entity_id: str) -> bool:
+        return await verify_entity_access(req.user_context, entity_id)
+
+    return await light.handle_lights(req, may_control)
+
 
 @app.post("/execute/esphome", response_model=ExecutionResult)
 async def execute_esphome(req: EsphomeRequest):

@@ -21,6 +21,7 @@ from services.homehub import (
     builtin,
     camera_recording,
     conversation,
+    light_cluster_move,
     recorder_statistics,
     registries,
     time_date,
@@ -99,6 +100,8 @@ class Service:
         self._bg.append(asyncio.create_task(app_checks_migration.run(self.runtime)))
         # Once: the abuse.ch integration's key moves to identity's household default and the entry goes.
         self._bg.append(asyncio.create_task(abuse_ch_move.run(self.runtime)))
+        # Once: the admin page's light clusters (identity) become light groups here.
+        self._bg.append(asyncio.create_task(light_cluster_move.run(self.runtime)))
         # Automations wait (in the background, so the API is up at once) for
         # every integration's first setup attempt, as HA starts them only once
         # it has started.

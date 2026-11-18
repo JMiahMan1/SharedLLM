@@ -31,6 +31,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     ha_ws_compat,
     hardware_api,  # the hardware list: integrations, devices, entities, disable, sync
     helpers_api,  # /hub/helpers: HA's helpers (input_*, counter, timer)
+    light_groups_api,  # /hub/light_groups: light groups (the group helper)
     live_video,
     live_video_api,
     matter_ble,  # new Wi-Fi Matter devices over Bluetooth, and their household Wi-Fi
@@ -624,6 +625,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(matter_ble.build_router(runtime, auth))  # the household Wi-Fi for new Matter devices
     app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map
     app.include_router(helpers_api.build_router(runtime, auth))  # HA's helpers
+    app.include_router(light_groups_api.build_router(runtime, auth))  # light groups
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

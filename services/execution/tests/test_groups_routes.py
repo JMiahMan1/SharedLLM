@@ -69,7 +69,8 @@ def test_media_group_bad_action_is_422():
     assert resp.status_code == 422
 
 
-def test_light_cluster_create_records_acting_user(monkeypatch):
+def test_light_clusters_are_light_groups_now(monkeypatch):
+    """Making a cluster is refused with where to go instead: the hub's light groups replaced them."""
     calls = []
     monkeypatch.setattr(groups_module, "_call_identity", _fake_identity(calls))
     resp = client.post("/execute/groups/lights", headers=HEADERS, json={
@@ -78,10 +79,8 @@ def test_light_cluster_create_records_acting_user(monkeypatch):
         "user_context": {"user": "alex"},
     })
     assert resp.status_code == 200
-    assert resp.json()["status"] == "SUCCESS"
-    method, path, payload = calls[0]
-    assert (method, path) == ("POST", "/api/groups/lights")
-    assert payload["owner_user_id"] == "alex"
+    assert resp.json()["status"] == "FAILURE" and "light groups" in resp.json()["message"]
+    assert calls == []
 
 
 def test_light_pattern_list_uses_body_model(monkeypatch):

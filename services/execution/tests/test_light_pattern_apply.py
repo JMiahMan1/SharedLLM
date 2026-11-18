@@ -14,9 +14,16 @@ CLUSTERS = [{"cluster_id": "porch", "cluster_name": "Porch",
              "member_entity_ids": ["light.a", "light.b", "light.c"]}]
 
 
+HUB_STATES: list = []
+
+
 @pytest.fixture
 def lights(monkeypatch):
     calls = []
+    HUB_STATES.clear()
+
+    async def states(url, token):
+        return list(HUB_STATES)
 
     async def identity(method, path, json_data=None):
         return PATTERNS if path.endswith("/patterns") else CLUSTERS
@@ -29,6 +36,7 @@ def lights(monkeypatch):
     monkeypatch.setattr(groups, "_call_identity", identity)
     monkeypatch.setattr(hardware_router, "execute_device_command", command)
     monkeypatch.setattr(ha_client, "authorize_action", lambda ctx, domain, action: True)
+    monkeypatch.setattr(ha_client, "get_states", states)
     return calls
 
 
@@ -58,5 +66,15 @@ async def test_a_pattern_and_cluster_are_found_by_id_or_name(lights):
 async def test_missing_pieces_are_said_plainly(lights):
     assert "No light pattern" in (await _apply(pattern="nope")).message
     assert "Choose a light cluster" in (await _apply(cluster=None)).message
-    assert "No light cluster" in (await _apply(cluster="attic")).message
+    assert "No light group" in (await _apply(cluster="attic")).message
     assert lights == []
+
+
+@pytest.mark.asyncio
+async def test_a_hub_light_group_is_used_before_a_leftover_cluster(lights):
+    """Clusters moved into the hub's light groups: the group's members are the ones coloured."""
+    HUB_STATES.append({"entity_id": "light.porch", "state": "on",
+                       "attributes": {"friendly_name": "Porch", "entity_id": ["light.x", "light.y"]}})
+    res = await _apply(cluster="porch")
+    assert res.status == "SUCCESS", res.message
+    assert sorted(e for e, _, _ in lights) == ["light.x", "light.y"]

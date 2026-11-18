@@ -284,6 +284,19 @@ class LightControlRequest(BaseRequest):
     rgb_color: tuple[int, int, int] | None = None
 
 
+class LightsControlRequest(BaseRequest):
+    """Several lights (or switches) at once: "turn off the kitchen lights" when no group holds them.
+
+    ``label`` is what the person called them ("kitchen lights"); the answer
+    names them so, and says which ones did not do it (``handlers.light.handle_lights``).
+    """
+    user_context: UserContext
+    entity_ids: list[str] = Field(..., min_length=1, max_length=50)
+    action: Literal["turn_on", "turn_off"]
+    label: str = Field("", max_length=120)
+    brightness_pct: int | None = Field(None, ge=0, le=100)
+
+
 # ESPHome direct control
 class EsphomeRequest(BaseRequest):
     """Control an ESPHome device directly over its native API.

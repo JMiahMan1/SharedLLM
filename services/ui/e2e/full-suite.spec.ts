@@ -274,10 +274,10 @@ test.describe('@live Admin Page - System Matrix', () => {
     await expect(page.getByPlaceholder('Search and add media entities...')).toBeVisible({ timeout: 10000 });
   });
 
-  test('@live Device Groups tab - light clusters section loads', async ({ page }) => {
+  test('@live Device Groups tab - light groups section loads', async ({ page }) => {
     await page.getByRole('button', { name: 'Device Groups' }).click();
-    await page.getByRole('button', { name: 'Light Clusters' }).click();
-    await expect(page.getByRole('heading', { name: 'Light Clusters' })).toBeVisible({ timeout: 10000 });
+    await page.getByRole('button', { name: 'Light Groups' }).click();
+    await expect(page.getByRole('heading', { name: 'Light groups' })).toBeVisible({ timeout: 10000 });
   });
 
   test('@live Device Groups tab - light patterns section loads', async ({ page }) => {

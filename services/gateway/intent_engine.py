@@ -143,6 +143,84 @@ def _name_score(spoken: str, name: str) -> float:
     return 0.4 * whole + 0.4 * words + 0.2 * covered
 
 
+#: The device kinds a plural phrase ends in, and what each one is.
+_PLURAL_KINDS = {"lights": "light", "lamps": "lamp", "switches": "switch", "bulbs": "light"}
+_ALL = r"(?:all\s+(?:of\s+)?|every\s+|both\s+)?(?:the\s+|my\s+|our\s+)?"
+#: Lights that are part of another device and never "the kitchen lights": a status LED, a screen's backlight.
+_INDICATOR = re.compile(r"\b(?:status|led|backlight|back light|indicator|lcd|display|screen)\b")
+
+
+class DeviceSet(tuple):
+    """``(entity_ids, label, group)``: what a plural phrase switches, what to call them, the group if one."""
+
+    def __new__(cls, entity_ids: list[str], label: str, group: str | None):
+        return super().__new__(cls, (list(entity_ids), label, group))
+
+    @property
+    def entity_ids(self) -> list[str]:
+        return self[0]
+
+    @property
+    def label(self) -> str:
+        return self[1]
+
+    @property
+    def group(self) -> str | None:
+        return self[2]
+
+
+def _drop_numbers(name: str) -> str:
+    """"kitchen light 3" -> "kitchen light": the shared part of numbered devices' names."""
+    return " ".join(w for w in name.split() if not w.isdigit())
+
+
+def _shares_name(stem: str, base: str) -> bool:
+    """Is ``base`` (a name, numbers dropped) one of the devices ``stem`` names together?
+
+    "kitchen light" names "Kitchen Light 3" and "Bedroom Light Left" is one of "bedroom lights":
+    every word said is in the name, and the name adds at most one word to tell them apart.
+    A close hearing of the whole name counts too ("kitchen lite").
+    """
+    said, named = stem.split(), base.split()
+    if len(said) < 2 or not named:
+        return False
+    if set(said) <= set(named) and len(named) - len(said) <= 1:
+        return True
+    return _name_score(stem, base) >= 0.9
+
+
+def _plural_phrase(target: str) -> tuple[str, str | None, str] | None:
+    """``(room, kind, label)`` for a phrase naming several devices; None for one device.
+
+    "all the lights in the kitchen" -> ("kitchen", "light", "kitchen lights");
+    "the kitchen lights" -> ("kitchen", "light", "kitchen lights"); "the kitchen" ->
+    ("kitchen", None, "kitchen lights"). "the kitchen light" -> None (one light).
+    """
+    t = re.sub(r"[^a-z0-9' ]+", " ", (target or "").lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    kinds = "|".join(_PLURAL_KINDS)
+    m = re.match(rf"^{_ALL}({kinds})\s+(?:in|on|at|of|from)\s+(?:the\s+|my\s+|our\s+)?(.+)$", t)
+    if m:
+        room, word = m.group(2).strip(), m.group(1)
+    else:
+        m = re.match(rf"^{_ALL}(.+?)\s+({kinds})$", t)
+        if m:
+            room, word = m.group(1).strip(), m.group(2)
+        else:
+            m = re.match(rf"^{_ALL}(.+?)$", t)
+            room = m.group(1).strip() if m else ""
+            # A bare room: only when it is just a place, never a device's own name ("the den lamp").
+            if not room or room.split()[-1] in ("light", "lamp", "switch", "bulb", "fan", "tv", "plug"):
+                return None
+            return room, None, f"{room} lights"
+    room = re.sub(r"^(?:the|my|our)\s+", "", room)
+    room = re.sub(r"'s$", "", room)
+    if not room or room in ("all", "every"):
+        return None
+    kind = _PLURAL_KINDS[word]
+    return room, kind, f"{room} {word}"
+
+
 class IntentEngine:
     def __init__(self):
         self.model = None
@@ -206,14 +284,25 @@ class IntentEngine:
 
         self.entity_cache = new_cache
         records = []
+        meta: dict[str, dict[str, Any]] = {}
         for ent in entities:
             eid = str(ent.get("entity_id") or "")
             if "." not in eid:
                 continue
-            fname = str((ent.get("attributes") or {}).get("friendly_name") or "")
+            attrs = ent.get("attributes") or {}
+            fname = str(attrs.get("friendly_name") or "")
             names = {n for n in (_norm_name(fname), _norm_name(eid.split(".", 1)[1])) if n}
             records.append((eid, eid.split(".", 1)[0], tuple(names), str(ent.get("state") or "").lower()))
+            # The room (execution's discovery list carries the area's name as ``area_id``) and, for a
+            # light group, its members (HA's ``entity_id`` attribute): what a room or plural phrase needs.
+            members = attrs.get("entity_id")
+            meta[eid] = {
+                "name": fname or eid.split(".", 1)[1].replace("_", " "),
+                "area": _norm_name(str(attrs.get("area_id") or "")),
+                "members": tuple(str(m) for m in members) if isinstance(members, list) else (),
+            }
         self.device_records = records
+        self.device_meta = meta
         log.info(f"IntentEngine: Updated entity cache with {len(new_cache)} entries.")
 
     def _vectorize(self, data: dict):
@@ -378,6 +467,67 @@ class IntentEngine:
             return None
         log.info(f"[FastPath] Resolved '{target}' to '{best_id}' (score {best:.2f}, next {runner:.2f})")
         return best_id
+
+    def extract_device_set(self, query: str, intent: str) -> DeviceSet | None:
+        """The lights a plural or room phrase means ("the kitchen lights", "all the lights in the kitchen",
+        "the kitchen"), when no single device was clearly named; None otherwise."""
+        if intent not in ("turn_on", "turn_off"):
+            return None
+        target = self.extract_target(query, intent)
+        return self.resolve_device_set(target) if target else None
+
+    def resolve_device_set(self, target: str) -> DeviceSet | None:
+        """Several switchable devices a phrase names together, or one light group that holds them.
+
+        Only for a phrase that asks for more than one ("kitchen lights", "all the lights in the
+        kitchen") or names a room ("the kitchen"); "the kitchen light" with seven bulbs of that name
+        is still a question for the model. The devices are, first, those whose names are the phrase
+        plus a number ("Kitchen Light 1" .. "Kitchen Light 7"), else the lights in the room the
+        phrase names (indicator lights such as status LEDs and screen backlights left out). A light
+        group whose members cover them all is chosen instead, so its own name is used. Only lights
+        and switches, never anything else a name may match.
+        """
+        parsed = _plural_phrase(_strip_question(target))
+        if parsed is None:
+            return None
+        room, kind, label = parsed
+        meta: dict[str, dict[str, Any]] = getattr(self, "device_meta", {})
+        domains = {"switch"} if kind == "switch" else {"light", "switch"}
+        records = [r for r in getattr(self, "device_records", []) if r[1] in domains]
+        groups = {r[0] for r in records if meta.get(r[0], {}).get("members")}
+
+        def fits_kind(eid: str, domain: str, names: tuple[str, ...]) -> bool:
+            if domain == "switch" and kind != "switch":
+                # A switch counts as a light only when its name says so (a plug is not a light).
+                return any(w in ("light", "lamp") for n in names for w in n.split())
+            return True
+
+        def candidates():
+            for eid, domain, names, _state in records:
+                if eid in groups or not fits_kind(eid, domain, names):
+                    continue
+                if domain == "light" and any(_INDICATOR.search(n) for n in names):
+                    continue
+                yield eid, names
+
+        chosen: list[str] = []
+        if kind and room:
+            stem = _norm_name(f"{room} {kind}", numbers=True)
+            for eid, names in candidates():
+                if any(_shares_name(stem, _drop_numbers(n)) for n in names):
+                    chosen.append(eid)
+        if not chosen and room:
+            area = _norm_name(room)
+            chosen = [eid for eid, _names in candidates() if area and meta.get(eid, {}).get("area") == area]
+        if not chosen:
+            return None
+        for gid in sorted(groups):
+            members = set(meta[gid]["members"])
+            if set(chosen) <= members:
+                log.info(f"[FastPath] '{target}' names the light group {gid}")
+                return DeviceSet([gid], meta[gid]["name"], gid)
+        log.info(f"[FastPath] '{target}' names {len(chosen)} devices together: {', '.join(sorted(chosen))}")
+        return DeviceSet(sorted(chosen), label, None)
 
     def classify(self, query: str) -> tuple[str, float]:
         """

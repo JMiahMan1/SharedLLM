@@ -21,6 +21,7 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
+from services.gateway.device_claims import DEVICE_TOOLS, drop_repeated_request, honest_reply
 from services.gateway.history import get_history
 from services.gateway.intent_engine import is_raven_intent
 from services.gateway.llm_providers import get_provider
@@ -49,10 +50,15 @@ VOICE_HISTORY_MESSAGES = 4
 VOICE_HISTORY_CHARS = 400
 
 
-def _voice_history(history: list) -> list:
-    """The last exchanges of a spoken conversation, each cut to a sentence or two."""
+def _voice_history(history: list, query: str = "") -> list:
+    """The last exchanges of a spoken conversation, each cut to a sentence or two.
+
+    An earlier exchange for the same words as ``query`` is left out: a repeated request is
+    wanted again, and shown its old answer the model repeated that answer instead of acting
+    (``device_claims``).
+    """
     out = []
-    for message in history[-VOICE_HISTORY_MESSAGES:]:
+    for message in drop_repeated_request(history, query)[-VOICE_HISTORY_MESSAGES:]:
         if not isinstance(message, dict):
             continue
         content = str(message.get("content") or "")
@@ -618,7 +624,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     else:
         short_term = await get_history(user_id)
     if job_payload.get("voice_context") and not is_autonomous:
-        short_term = _voice_history(short_term)
+        short_term = _voice_history(short_term, query)
 
     # 2. Context Injection (RAG + live HA state + workspace memory)
     workspace_id = job_payload.get("workspace_id")
@@ -1817,6 +1823,9 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     from services.gateway.agent_loop import extract_action_json
 
+    #: Every device tool run in this turn, with its result: what an answer may claim (device_claims).
+    device_runs: list[tuple[str, str]] = []
+
     for turn in range(MAX_TURNS):
         log.info(f"[_single_turn_inference] Turn {turn + 1}/{MAX_TURNS}")
         ans = ""
@@ -1901,7 +1910,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             if chunk_callback and turn == 0:
                 clean_ans = strip_json_from_response(ans)
                 from services.gateway.llm_providers import strip_thinking_blocks
-                clean_ans = strip_thinking_blocks(clean_ans)
+                clean_ans = honest_reply(query, strip_thinking_blocks(clean_ans), device_runs)
                 if clean_ans:
                     await chunk_callback({"type": "content", "text": clean_ans})
             break
@@ -2023,6 +2032,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         else:
             tool_result = await _execute_single_tool(action, tool_data, query, creds, workspace_id=workspace_id)
         log.info(f"[_single_turn_inference] Tool result: {tool_result[:300] if tool_result else 'empty'}")
+        if re.sub(r'[\s_]+', '', str(action or '')).lower() in DEVICE_TOOLS:
+            device_runs.append((action, tool_result or ""))
 
         # Post-write lint hook: auto-lint after file write/patch to catch syntax errors
         lintable_actions = {"workspacefilewriterequest", "workspacefilepatchrequest"}
@@ -2061,13 +2072,15 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         if turn == MAX_TURNS - 1:
             if event_callback:
                 await event_callback({"type": "step", "n": "final"})
-            return await _closing_turn(messages, model, options, _step_stream("final") if event_callback else chunk_callback, tool_result)
+            closing = await _closing_turn(messages, model, options,
+                                          _step_stream("final") if event_callback else chunk_callback, tool_result)
+            return honest_reply(query, closing, device_runs)
 
     # Final answer processing: strip JSON/thinking artifacts for clean natural language
     log.info(f"[_single_turn_inference] Final answer length: {len(ans)} chars, preview: {ans[:200]}")
     final_clean = strip_json_from_response(ans)
     from services.gateway.llm_providers import strip_thinking_blocks
-    cleaned = strip_thinking_blocks(final_clean)
+    cleaned = honest_reply(query, strip_thinking_blocks(final_clean), device_runs)
     if not cleaned.strip() and 'tool_result' in locals() and tool_result:
         try:
             res_obj = json.loads(tool_result)

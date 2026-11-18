@@ -138,8 +138,8 @@ test.describe('settings, admin, identity and remote on every form factor', () =>
     const main = page.locator('main');
     await expect(main.getByText('Downstairs speakers', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
     await check(page, info, run, main, 'admin groups media');
-    await main.getByRole('button', { name: 'Light Clusters' }).click();
-    await expect(main.getByText('Create Light Cluster')).toBeVisible();
+    await main.getByRole('button', { name: 'Light Groups' }).click();
+    await expect(main.getByTestId('light-group').first()).toBeVisible();
     await check(page, info, run, main, 'admin groups lights');
     await main.getByRole('button', { name: 'Light Patterns' }).click();
     await expect(main.getByText('Create Light Pattern')).toBeVisible();
