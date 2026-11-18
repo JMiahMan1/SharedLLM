@@ -165,9 +165,13 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     @app.get("/health")
     async def health() -> dict[str, Any]:
         entries = runtime.entry_status()
-        return {"status": "ok", "service": "homehub", "entries": len(entries),
-                "loaded": sum(1 for e in entries if e["state"] == "loaded"),
-                "entities": len(hub.states.all()), "started_at": hub.started_at.isoformat()}
+        out = {"status": "ok", "service": "homehub", "entries": len(entries),
+               "loaded": sum(1 for e in entries if e["state"] == "loaded"),
+               "entities": len(hub.states.all()), "started_at": hub.started_at.isoformat()}
+        monitor = getattr(runtime, "loop_monitor", None)
+        if monitor is not None:
+            out["loop"] = monitor.snapshot()  # stalls and thread-pool waits since start (loop_monitor.py)
+        return out
 
     @api.get("/api/")
     async def root(request: Request) -> dict[str, str]:

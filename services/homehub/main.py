@@ -12,6 +12,12 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
+# uvloop (uvicorn's loop) runs every DNS lookup, and the address of every UDP socket a driver opens with
+# ``remote_addr``, on libuv's thread pool: four threads by default, read once when the pool first starts.
+# A few slow lookups filled it on 2026-11-18 and WiZ bulbs were called unreachable. More threads are
+# cheap (they sleep in the kernel); set before anything can start the pool.
+os.environ.setdefault("UV_THREADPOOL_SIZE", "16")
+
 import uvicorn
 
 from services.homehub import (
@@ -30,6 +36,7 @@ from services.homehub import (
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
 from services.homehub.core import Hub
+from services.homehub.loop_monitor import LoopMonitor
 from services.homehub.runtime import Runtime
 from services.homehub.store import Store
 
@@ -78,10 +85,13 @@ class Service:
         # Jarvis's own Nextcloud account, read once here: the motion-recording settings can use it.
         self.hub.household_nextcloud = camera_recording.household_account_from_env()
         self.runtime = Runtime(self.hub, self.store)
+        # A stalled loop or a saturated thread pool makes devices look unreachable; this says which.
+        self.runtime.loop_monitor = LoopMonitor()
         self._lock = asyncio.Lock()
         self._bg: list[asyncio.Task] = []
 
     async def start(self) -> None:
+        self._bg.append(asyncio.create_task(self.runtime.loop_monitor.run(), name="loop-monitor"))
         self.runtime.load_registry()
         self.hub.entity_registry_ids = self.store.get_kv("entity_registry_ids", {}) or {}
         # HA user id -> name: mobile_app maps a phone to its Jarvis user through it.

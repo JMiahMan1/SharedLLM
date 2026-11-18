@@ -416,9 +416,17 @@ def test_ha_color_mode_names():
     assert ha_color_mode(ColorMode.RGB_COLD_WARM_WHITE) == "rgbww"
 
 
+MDNS = {"smart-speaker.local": "192.0.2.200"}
+
+
+async def _fake_mdns(host, timeout):
+    return MDNS.get(host)
+
+
 def _driver_with(options=None, data=None):
     hub, entry = make_hub("esphome", {**DATA, **(data or {})}, ENTITIES, options=options or {})
     drv = ESPHomeDriver(hub, entry)
+    drv._resolve_mdns = _fake_mdns
     hub.drivers[entry.entry_id] = drv
     return hub, drv
 
@@ -430,11 +438,11 @@ async def test_stale_ip_falls_back_to_mdns_and_keeps_it(caplog, monkeypatch):
 
     def factory(host):
         tried.append(host)
-        return FakeClient(fail=host != "smart-speaker.local", host=host)
+        return FakeClient(fail=host != "192.0.2.200", host=host)
 
     drv._make_client = factory  # type: ignore[method-assign]
     await drv.async_setup()
-    assert tried == ["192.0.2.127", "smart-speaker.local"]
+    assert tried == ["192.0.2.127", "192.0.2.200"]  # the .local name, found by mDNS
     assert drv.host == "smart-speaker.local"
     assert "answered at smart-speaker.local, not 192.0.2.127" in caplog.text
     assert hub.states.get("switch.den_den_speaker_mute").state == "off"
@@ -442,7 +450,7 @@ async def test_stale_ip_falls_back_to_mdns_and_keeps_it(caplog, monkeypatch):
     tried.clear()
     await drv._client.on_stop(False)
     await asyncio.wait_for(drv._reconnect_task, 2)
-    assert tried == ["smart-speaker.local"]
+    assert tried == ["192.0.2.200"]
     await drv.async_unload()
 
 
@@ -692,3 +700,42 @@ async def test_gone_entities_are_node_style_entities_the_firmware_no_longer_list
     assert "no longer has this entity" in gone["sensor.gone"]
     # HA's voice-pipeline entities are not the node's, so they are never called gone.
     assert not any("assistant" in eid for eid in gone)
+
+
+# -- 2026-11-18: offline nodes' DNS lookups filled uvloop's resolver pool ------------------------------
+
+async def test_a_local_name_is_looked_up_by_mdns_and_never_handed_to_aioesphomeapi():
+    """aioesphomeapi also asks DNS for ``x`` when given ``x.local``: ~4 s of a pool thread per try."""
+    _, drv = _driver_with()
+    handed: list[str] = []
+
+    def factory(host):
+        handed.append(host)
+        return FakeClient(fail=True, host=host)
+
+    drv._make_client = factory  # type: ignore[method-assign]
+    with pytest.raises(DeviceUnavailable):
+        await drv.async_setup()
+    assert handed == ["192.0.2.127", "192.0.2.200"]
+    assert not any(h.endswith(".local") for h in handed)
+
+
+async def test_a_node_mdns_cannot_find_is_not_tried_at_all():
+    _, drv = _driver_with(data={"device_name": "gone-node"})
+    handed: list[str] = []
+
+    def factory(host):
+        handed.append(host)
+        return FakeClient(fail=True, host=host)
+
+    drv._make_client = factory  # type: ignore[method-assign]
+    with pytest.raises(DeviceUnavailable) as err:
+        await drv.async_setup()
+    assert handed == ["192.0.2.127"]
+    assert "gone-node.local:6053: not found by mDNS" in str(err.value)
+
+
+async def test_resolve_mdns_without_multicast_answers_none(monkeypatch):
+    monkeypatch.setattr(esphome, "_zeroconf", None)
+    monkeypatch.setattr(esphome, "_zeroconf_failed", True)
+    assert await esphome.resolve_mdns("x.local", 0.1) is None
