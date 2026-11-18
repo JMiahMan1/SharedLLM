@@ -24,6 +24,9 @@ INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 INTERNAL_HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 LIVE_TEST_USER = os.environ.get("LIVE_TEST_USER", "")
 
+# Targets a deployed stack: skipped unless the run opts in (--run-live).
+pytestmark = pytest.mark.live
+
 
 def _live_user() -> str:
     """The real username to test with, from LIVE_TEST_USER; skip when unset."""

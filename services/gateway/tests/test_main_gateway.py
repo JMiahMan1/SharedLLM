@@ -583,7 +583,8 @@ async def test_recreate_http_client_cooldown():
     shared pool again; the connector's ttl_dns_cache handles DNS refresh."""
     import asyncio
 
-    from services.gateway import main
+    # The pool and its cooldown live in http_client (main re-exports the function).
+    from services.gateway import http_client
 
     class _FakeClient:
         def __init__(self) -> None:
@@ -595,31 +596,31 @@ async def test_recreate_http_client_cooldown():
     loop = asyncio.get_running_loop()
 
     # Save original state
-    saved_clients = dict(main._http_clients)
-    saved_ts = main._last_client_recreate
+    saved_clients = dict(http_client._http_clients)
+    saved_ts = http_client._last_client_recreate
 
     try:
         fake = _FakeClient()
-        main._http_clients[loop] = fake
-        main._last_client_recreate = 0.0  # force the first recreate to proceed
-        await main.recreate_http_client()
+        http_client._http_clients[loop] = fake
+        http_client._last_client_recreate = 0.0  # force the first recreate to proceed
+        await http_client.recreate_http_client()
         assert fake.closed is True, "stale client should be closed on first recreate"
-        assert loop not in main._http_clients, "stale client should be popped on first recreate"
+        assert loop not in http_client._http_clients, "stale client should be popped on first recreate"
 
         # Simulate getting a new client
         mock_first = _FakeClient()
-        main._http_clients[loop] = mock_first
-        first_recreate_ts = main._last_client_recreate
+        http_client._http_clients[loop] = mock_first
+        first_recreate_ts = http_client._last_client_recreate
 
         # Immediate second call must be skipped by the cooldown.
-        await main.recreate_http_client()
+        await http_client.recreate_http_client()
         assert mock_first.closed is False, "client must not be closed/recreated during cooldown"
-        assert main._http_clients[loop] is mock_first, "client must not be recreated during cooldown"
-        assert main._last_client_recreate == first_recreate_ts
+        assert http_client._http_clients[loop] is mock_first, "client must not be recreated during cooldown"
+        assert http_client._last_client_recreate == first_recreate_ts
     finally:
-        main._http_clients.clear()
-        main._http_clients.update(saved_clients)
-        main._last_client_recreate = saved_ts
+        http_client._http_clients.clear()
+        http_client._http_clients.update(saved_clients)
+        http_client._last_client_recreate = saved_ts
 
 
 

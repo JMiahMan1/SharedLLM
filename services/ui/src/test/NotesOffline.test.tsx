@@ -19,6 +19,11 @@ function goOnline() {
   });
 }
 
+/** Wait until the open editor knows the version it was opened at. */
+async function waitForStoredVersion() {
+  await waitFor(() => expect(screen.getByTestId('note-editor')).toHaveAttribute('data-version', '"v1"'));
+}
+
 const tripDraft = (extra: Record<string, unknown> = {}) => ({
   path: 'Notes/Trip ideas.md',
   title: 'Trip ideas',
@@ -50,6 +55,10 @@ describe('Notes offline edits', () => {
     await user.click(await screen.findByText('Trip ideas'));
     const content = await screen.findByLabelText('Note content');
     await waitFor(() => expect(content.textContent).toBe('Sedona in the fall, then the coast.'));
+    // The sheet opens on the list's copy and learns the stored version from a
+    // read that lands later. Going offline before it lands queues the edit
+    // without a version, and its replay then compares texts instead.
+    await waitForStoredVersion();
 
     online = false;
     await user.click(content);
@@ -71,6 +80,10 @@ describe('Notes offline edits', () => {
     await user.click(await screen.findByText('Trip ideas'));
     const content = await screen.findByLabelText('Note content');
     await waitFor(() => expect(content.textContent).toBe('Sedona in the fall, then the coast.'));
+    // The sheet opens on the list's copy and learns the stored version from a
+    // read that lands later. Going offline before it lands queues the edit
+    // without a version, and its replay then compares texts instead.
+    await waitForStoredVersion();
 
     online = false;
     await user.click(content);

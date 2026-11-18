@@ -687,7 +687,6 @@ from services.gateway.http_client import (
     recreate_http_client,
     retry_http_request,
     close_all_clients,
-    borrow_http_client,
 )
 
 
@@ -740,6 +739,18 @@ async def shared_http_client():
     """
     yield get_http_client()
 
+
+@asynccontextmanager
+async def borrow_http_client():
+    """``shared_http_client`` under its older name, defined here like it.
+
+    Both resolve ``get_http_client`` through this module at call time, so a
+    test that patches ``main.get_http_client`` reaches every route. Importing
+    the http_client module's copy made the ~60 routes that borrow a client
+    bypass that patch and open real connections (a 503 "service restarting"
+    in the storage purge and maintenance tests).
+    """
+    yield get_http_client()
 
 
 # Global config validation state

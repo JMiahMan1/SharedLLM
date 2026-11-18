@@ -7,6 +7,19 @@ import pytest
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.fixture(autouse=True)
+def _restore_services_config(monkeypatch):
+    """These tests force a fresh ``import services.config``. Put the original
+    module back in sys.modules and on the ``services`` package afterwards: left
+    replaced, every test module collected earlier patches the old object while
+    the code under test (``from services import config``) reads the new one."""
+    import services
+    import services.config
+
+    monkeypatch.setitem(sys.modules, "services.config", sys.modules["services.config"])
+    monkeypatch.setattr(services, "config", services.config)
+
+
 class TestConfigBootstrap:
     """Test bootstrap phase: only INTERNAL_SECRET from .env."""
 

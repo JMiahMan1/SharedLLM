@@ -5,6 +5,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { mediaHandlers } from './msw/handlers/media';
 import { resetMediaStore } from '../features/media/store/mediaStore';
+import { resetBlobUrlCache } from '../lib/blobUrlCache';
 
 const defaultUser = {
   id: 1,
@@ -1199,6 +1200,10 @@ afterEach(() => {
   server.resetHandlers();
   // The media store is a module singleton; each test starts from a fresh one.
   resetMediaStore();
+  // Attachment object URLs are cached for the life of the page. Kept across
+  // tests, a picture one test loaded showed in the next without the request
+  // that test waits for, so the result depended on the order tests ran in.
+  resetBlobUrlCache();
   telemetrySchedules = [];
   notesWriteCalls.length = 0;
   notesCheckOffCalls.length = 0;

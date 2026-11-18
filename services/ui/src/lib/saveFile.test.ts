@@ -57,7 +57,9 @@ describe('saveBlob', () => {
       joined.set(p, at);
       at += p.length;
     }
-    expect(joined).toEqual(bytes);
+    // Compared as one buffer: toEqual walks 1.5 MB element by element, which
+    // took seconds alone and ran past the time limit in a full run.
+    expect(Buffer.compare(joined, bytes)).toBe(0);
     const [options] = native.save.mock.calls[0];
     expect(options).not.toHaveProperty('data');
   });

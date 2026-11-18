@@ -113,10 +113,12 @@ describe('OutputSheet', () => {
     renderSheet();
 
     expect(screen.getByRole('dialog', { name: 'Output' })).toBeTruthy();
-    expect(await screen.findByText('Kitchen Speaker')).toBeTruthy();
+    // The hub's players are read only once the integrations status says a hub
+    // is connected, so the first refresh lists Music Assistant alone. Wait for
+    // a hub-only player before checking what the merged list holds.
+    expect(await screen.findByText('Loft TV')).toBeTruthy();
     expect(screen.getAllByText('Kitchen Speaker')).toHaveLength(1);
     expect(screen.getAllByText('Office Speaker')).toHaveLength(1);
-    expect(screen.getByText('Loft TV')).toBeTruthy();
     expect(screen.getByText('TVs')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'This device' })).toBeTruthy();
     expect(screen.getByText('Active')).toBeTruthy();
@@ -166,7 +168,8 @@ describe('OutputSheet', () => {
   it('reads the status silently so the poll never re-fires the connectivity toast', async () => {
     renderSheet();
     await screen.findByText('Kitchen Speaker');
-    expect(api.mediaStatus).toHaveBeenCalledWith({ silent: true });
+    // Read after the integrations status lands, which can be after MA's list.
+    await waitFor(() => expect(api.mediaStatus).toHaveBeenCalledWith({ silent: true }));
   });
 
   it('shows no volume slider for a speaker that reports none', async () => {

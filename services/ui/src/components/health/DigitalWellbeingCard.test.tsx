@@ -39,10 +39,16 @@ const renderCard = () =>
     </QueryClientProvider>,
   );
 
+// For every test in the file, not one block: the minor test changes who is
+// signed in, and the week-axis block below, run after it in a shuffled order,
+// rendered as the child and found an empty card.
+beforeEach(() => {
+  vi.clearAllMocks();
+  auth.user = { username: 'dad', family_role: 'father', is_minor: false };
+});
+
 describe('DigitalWellbeingCard', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    auth.user = { username: 'dad', family_role: 'father', is_minor: false };
     vi.mocked(api.getUsage).mockResolvedValue({ status: 'SUCCESS', days: [day()] });
   });
 
