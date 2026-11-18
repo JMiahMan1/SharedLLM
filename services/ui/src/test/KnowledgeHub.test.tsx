@@ -39,6 +39,9 @@ describe('KnowledgeHub', () => {
     authState.user = { username: 'alex', is_admin: true } as unknown;
     vi.mocked(api.getRagStats).mockResolvedValue({ total_chunks: 0, total_documents: 0 });
     vi.mocked(api.getStorageFiles).mockResolvedValue([]);
+    // The crawl-progress test makes a crawl active; without this reset every
+    // test that ran after it showed "Indexing…" instead of "Online".
+    vi.mocked(api.getStorageStatus).mockResolvedValue({ status: 'SUCCESS', indexer: 'IDLE', checkpointed_files: 0 } as never);
   });
 
   it('renders RAG stats and file explorer', async () => {

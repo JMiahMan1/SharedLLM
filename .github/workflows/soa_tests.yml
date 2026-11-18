@@ -76,6 +76,12 @@ jobs:
         pytest --collect-only -q
 
     - name: Run Pytest
+      env:
+        # Opt in to tests/integration (conftest.py skips it otherwise). Safe
+        # here: a CI runner has no .env, no SERVER_IP and no route to a
+        # deployed stack, so those tests run only their hermetic parts (the
+        # schema contracts) and skip the rest, exactly as before the guard.
+        SHAREDLLM_RUN_LIVE: "1"
       run: |
         # The whole suite, not a 13-file sample. Excludes only the markers that
         # genuinely need live infrastructure: local_only (live Home Assistant /

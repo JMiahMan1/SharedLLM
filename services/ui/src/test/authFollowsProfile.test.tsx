@@ -21,7 +21,7 @@ function Avatar() {
 
 describe('AuthContext', () => {
   it('follows a profile the avatar picker writes to the ["me"] cache', async () => {
-    vi.spyOn(api, 'getMe').mockResolvedValue({ username: 'dad', avatar: 'preset:noah' } as never);
+    const getMe = vi.spyOn(api, 'getMe').mockResolvedValue({ username: 'dad', avatar: 'preset:noah' } as never);
     const client = new QueryClient();
     render(
       <QueryClientProvider client={client}>
@@ -30,6 +30,11 @@ describe('AuthContext', () => {
     );
     // Sign-in runs several async steps first; a busy full run took over the default 1 s.
     await waitFor(() => expect(screen.getByTestId('avatar')).toHaveTextContent('preset:noah'), { timeout: 5000 });
+    // Signing in sets the token, and a token change reads the profile again.
+    // That second answer also writes ['me']; landing after the picker's write
+    // below, it put the old picture back. Let it land first.
+    await waitFor(() => expect(getMe).toHaveBeenCalledTimes(2));
+    await act(async () => { await getMe.mock.results[1].value; });
 
     act(() => { client.setQueryData(['me'], { username: 'dad', avatar: 'upload:123' }); });
     await waitFor(() => expect(screen.getByTestId('avatar')).toHaveTextContent('upload:123'));

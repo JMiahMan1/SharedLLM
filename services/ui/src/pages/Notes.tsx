@@ -2214,6 +2214,8 @@ const NoteEditor = forwardRef<
     // is hidden) the choice looked like it did nothing.
     <div
       data-testid="note-editor"
+      // The stored version a save will send (empty until the read lands).
+      data-version={version.etag ?? ''}
       className="space-y-3 rounded-2xl p-3 transition-colors"
       style={{ background: NOTE_COLOR_BG[draft.color] ?? NOTE_COLOR_BG.default }}
     >
