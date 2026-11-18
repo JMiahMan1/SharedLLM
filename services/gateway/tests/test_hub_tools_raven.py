@@ -95,9 +95,9 @@ def test_the_dispatcher_sends_hub_tools_with_a_hub(homehub_only):
 
 @pytest.mark.parametrize("query", ["what is on the calendar", "fix the code in my workspace"])
 def test_no_device_index_is_searched_without_a_hub(no_hub, query):
-    assert "ha_entities" not in _collections_for_query(query)
-    assert "ha_entities" not in _collections_for_query(query, devices_first=True)
+    assert "home_devices" not in _collections_for_query(query)
+    assert "home_devices" not in _collections_for_query(query, devices_first=True)
 
 
 def test_the_device_index_is_searched_with_a_hub(homehub_only):
-    assert _collections_for_query("turn the lamp on", devices_first=True)[0] == "ha_entities"
+    assert _collections_for_query("turn the lamp on", devices_first=True)[0] == "home_devices"

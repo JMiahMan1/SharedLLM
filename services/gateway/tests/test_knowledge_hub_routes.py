@@ -155,11 +155,11 @@ def test_stats_do_not_count_system_collections_twice(monkeypatch):
 def test_search_hits_carry_their_own_text_and_collection(monkeypatch):
     _session(monkeypatch, search={"alex": [
         {"content": "Kitchen light is in the kitchen", "score": 0.9,
-         "metadata": {"entity_id": "light.kitchen", "friendly_name": "Kitchen", "collection_name": "ha_entities"}},
+         "metadata": {"entity_id": "light.kitchen", "friendly_name": "Kitchen", "collection_name": "home_devices"}},
         {"content": "Budget notes", "score": 0.5,
          "metadata": {"path": "/Budget.md", "collection_name": "nextcloud_files"}},
     ]})
     body = client.get("/api/search?q=kitchen", headers=AUTH).json()
 
-    assert [f["collection"] for f in body["files"]] == ["ha_entities", "nextcloud_files"]
+    assert [f["collection"] for f in body["files"]] == ["home_devices", "nextcloud_files"]
     assert body["files"][1]["snippet"] == "Budget notes"

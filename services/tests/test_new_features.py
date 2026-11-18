@@ -213,7 +213,7 @@ async def test_storage_status_returns_real_data():
         "last_indexed": "2026-05-15T10:00:00Z",
         "breakdown": {
             "nextcloud_files": {"chunks": 800, "documents": 100},
-            "ha_entities": {"chunks": 500, "documents": 80},
+            "home_devices": {"chunks": 500, "documents": 80},
         },
     })
 

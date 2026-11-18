@@ -39,7 +39,7 @@ def test_rag_sync_flow(client):
 
     # 3. Query RAG service directly to see if 'piano_lamp' is indexed
     search_payload = {
-        "collection_name": "ha_entities",
+        "collection_name": "home_devices",
         "query": ENTITY_QUERY,
         "user_id": RAG_USER,
         "k": 1

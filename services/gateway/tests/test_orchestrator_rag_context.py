@@ -127,8 +127,8 @@ async def test_a_voice_turn_reads_a_short_context_with_devices_first(monkeypatch
 
 
 def test_devices_come_first_for_a_voice_turn_even_when_it_sounds_like_coding():
-    assert orchestrator._collections_for_query("fix the thermostat")[0] != "ha_entities"
-    assert orchestrator._collections_for_query("fix the thermostat", devices_first=True)[0] == "ha_entities"
+    assert orchestrator._collections_for_query("fix the thermostat")[0] != "home_devices"
+    assert orchestrator._collections_for_query("fix the thermostat", devices_first=True)[0] == "home_devices"
 
 
 async def test_the_system_message_is_the_same_for_every_question_so_it_stays_cached(monkeypatch):

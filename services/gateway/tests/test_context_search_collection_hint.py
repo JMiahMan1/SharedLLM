@@ -21,7 +21,7 @@ _FIELDS = set(ContextSearchRequest.model_fields)
 REAL_COLLECTIONS = {
     "calibre_files",
     "nextcloud_files",
-    "ha_entities",
+    "home_devices",
     "system_capabilities",
     "system_learnings",
     "user_facts",
@@ -136,3 +136,9 @@ async def test_the_librarian_tool_path_refuses_a_search_with_no_collection(monke
         creds,
     )
     assert "collection_name is required" not in scoped
+
+
+def test_the_old_device_collection_name_still_works():
+    """Lessons and prompts written before the rename say ``ha_entities``; it means ``home_devices``."""
+    request = ContextSearchRequest(query="porch lamp", collection_name="ha_entities")
+    assert request.collection_name == "home_devices"

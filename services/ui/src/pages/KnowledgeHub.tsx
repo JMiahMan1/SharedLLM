@@ -53,7 +53,7 @@ const REINDEX_PROVIDERS: {
 const COLLECTION_LABELS: Record<string, string> = {
   nextcloud_files: 'Nextcloud',
   calibre_files: 'Calibre',
-  ha_entities: 'Home hub',
+  home_devices: 'Home hub',
   system_capabilities: 'Capabilities',
   system_learnings: 'Raven lessons',
   mission_history: 'Missions',
@@ -1093,10 +1093,10 @@ const KnowledgeHub = () => {
                    <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
                 </div>
                 <button 
-                  onClick={() => setPurgeModalCollection('ha_entities')}
+                  onClick={() => setPurgeModalCollection('home_devices')}
                   className="w-full glass-button py-3 text-red-400 border-red-500/20 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest"
                 >
-                   Purge HA Entities
+                   Purge Home Devices
                 </button>
              </div>
 

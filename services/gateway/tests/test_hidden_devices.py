@@ -88,7 +88,7 @@ def test_the_rag_sync_and_the_cache_get_only_shown_entities(monkeypatch):
     out = asyncio.run(go())
     assert [e["entity_id"] for e in out] == ["light.pantry_lamp_wiz"]
     assert [e["entity_id"] for e in learned] == ["light.pantry_lamp_wiz"]
-    (_url, body), = [p for p in fake.posts if p[0].endswith("/rag/sync/ha")]
+    (_url, body), = [p for p in fake.posts if p[0].endswith("/rag/sync/devices")]
     assert [e["entity_id"] for e in body["entities"]] == ["light.pantry_lamp_wiz"]
 
 

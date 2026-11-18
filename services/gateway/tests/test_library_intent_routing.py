@@ -58,7 +58,7 @@ def test_book_intent_wins_over_coding_intent_when_both_are_present():
 def test_the_base_set_is_unchanged_by_a_plain_question():
     """Guard against the standing set drifting while book routing is added."""
     assert _collections_for_query("is the garage door open") == [
-        "ha_entities",
+        "home_devices",
         "nextcloud_files",
         "system_capabilities",
         "system_learnings",
@@ -136,7 +136,7 @@ def test_only_the_library_header_carries_the_do_not_research_instruction():
     Applying it everywhere would tell the model to distrust context that was
     not in fact preloaded.
     """
-    for other in ("ha_entities", "nextcloud_files", "system_capabilities",
+    for other in ("home_devices", "nextcloud_files", "system_capabilities",
                   "system_learnings"):
         assert "ALREADY RETRIEVED" not in _collection_header(other)
 

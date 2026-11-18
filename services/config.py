@@ -136,6 +136,12 @@ ARTIFACT_LOCAL_QUOTA_BYTES = 0
 # policy is an operator decision, and blank means keep everything -- the
 # maintenance purge must never delete on a guessed schedule.
 RAG_RETENTION_DAYS = os.getenv("RAG_RETENTION_DAYS")
+# The home's devices in RAG (home_devices): a row that no sync has refreshed for
+# this many hours, and that no search has returned in that time either, is
+# removed (a user whose sync stopped, who lost access, or was removed). The
+# sweep runs when RAG starts and then every HOME_DEVICE_SWEEP_MINUTES.
+HOME_DEVICE_STALE_HOURS = max(1, _safe_int("HOME_DEVICE_STALE_HOURS", 72))
+HOME_DEVICE_SWEEP_MINUTES = max(1, _safe_int("HOME_DEVICE_SWEEP_MINUTES", 60))
 LOG_MAX_ENTRIES = 10000
 # Hard wall-clock cap for one Raven mission. Must stay in sync with the
 # Identity seed (services/identity/models.py) and orchestrator._DEFAULTS;

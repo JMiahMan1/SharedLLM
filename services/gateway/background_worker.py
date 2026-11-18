@@ -1612,15 +1612,14 @@ class RavenWorker:
         log.info("Cleanup loop stopped.")
 
     async def _run_cleanup(self):
-        """Single cleanup pass: sync HA entities, prune orphans, clean Redis cache."""
+        """Single cleanup pass: sync each user's home devices, prune orphans, clean Redis cache."""
         from services import config
-        from services.gateway.ha_state_cache import get_redis
 
         if not config.any_home_hub():
             # Neither HomeHub nor Home Assistant is set up: there are no entities to sync.
             return
 
-        # 1. Fetch all users from Identity to sync their HA entities
+        # 1. Fetch all users from Identity to sync their home devices
         try:
             async with _shared_http_client() as client:
                 resp = await client.get(
@@ -1634,7 +1633,6 @@ class RavenWorker:
             log.error(f"Cleanup: failed to fetch users: {e}")
             return
 
-        r = get_redis()
         total_orphaned = 0
 
         for user in users:
@@ -1661,82 +1659,108 @@ class RavenWorker:
                 log.warning(f"Cleanup: failed to resolve creds for {username}: {e}")
                 continue
 
-            # The person's own HA login, else none and execution reads with the hub's own;
-            # then only what they may view goes into their RAG (hub_access.py). Without
-            # this, everyone's home knowledge stopped refreshing once the tokens went.
-            from services.gateway.hub_access import discovery_params, visible_entities
+            # Each home hub the person can read is synced into their device index on its own
+            # (hub_access.py): their own Home Assistant login when they have one, and HomeHub
+            # with the hub's login, trimmed to what they may view. RAG keeps each hub's rows
+            # apart, so a sync from one never removes the other's.
+            from services.gateway.hub_access import discovery_params, has_own_login
 
-            try:
-                # Fetch live entities from the hub
-                async with _shared_http_client() as client:
-                    resp = await client.get(
-                        f"{EXECUTION_SVC}/discovery/entities",
-                        params=discovery_params(creds),
-                        headers={"X-Internal-Secret": INTERNAL_SECRET}
-                    )
-                    if resp.status != 200:
-                        if resp.status == 503:
-                            log.warning("Cleanup: execution has no home hub to read; HA sync skipped.")
-                            break
-                        continue
-                    resp_text = await resp.text()
-                    data = json.loads(resp_text) if resp_text else {}
-                    entities = data.get("entities", []) if isinstance(data, dict) else []
-                entities = await visible_entities(creds, entities)
-
-                if not entities:
-                    continue
-
-                # Sync to RAG (triggers orphan cleanup in RAG collection)
-                async with _shared_http_client() as client:
-                    # RAG keeps embedding after a client gives up, so a short
-                    # timeout made the next pass send the same work again while
-                    # the first was still running (seen after deploys, when the
-                    # whole entity list is new). Wait for it instead.
-                    sync_resp = await client.post(
-                        f"{RAG_SVC}/rag/sync/ha",
-                        json={"entities": entities, "user_id": username},
-                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                        timeout=aiohttp.ClientTimeout(total=HA_SYNC_TIMEOUT_SECONDS),
-                    )
-                    if sync_resp.status == 200:
-                        sync_text = await sync_resp.text()
-                        result = json.loads(sync_text) if sync_text else {}
-                        orphaned = result.get("orphaned_entity_ids", [])
-                        total_orphaned += len(orphaned)
-
-                        # Clean up orphaned Redis cache keys
-                        for eid in orphaned:
-                            with suppress(Exception):
-                                r.delete(f"ha:state:{eid}")
-
-                # Update Redis cache with fresh states
-                from services.gateway.ha_state_cache import cache_all_states
-                cache_all_states(entities)
-
-            except Exception as e:
-                # str(TimeoutError()) is empty, which logged "failed for user X: "
-                # with no cause; always name the exception type.
-                msg = f"{type(e).__name__}: {e}"
-                transient = isinstance(e, TimeoutError) or any(
-                    s in msg
-                    for s in (
-                        "Server disconnected",
-                        "Cannot connect to host",
-                        "Connection refused",
-                        "Cannot perform SSL",
-                        "ClientConnectionError",
-                    )
-                )
-                if transient:
-                    # Dependants (rag/execution) may still be starting after a
-                    # deploy, or busy (a slow RAG sync); retry next interval.
-                    log.warning(f"Cleanup: deferred for user {username}: {msg}")
-                else:
-                    log.error(f"Cleanup: failed for user {username}: {msg}")
+            passes: list[tuple[dict, dict]] = []
+            if has_own_login(creds):
+                passes.append((discovery_params(creds), creds))
+            if config.homehub_enabled():
+                passes.append(({}, {**creds, "ha_url": "", "ha_token": ""}))
+            no_hub = False
+            for params, filter_creds in passes:
+                result = await self._sync_user_devices(username, params, filter_creds)
+                if result is None:
+                    no_hub = True
+                    break
+                total_orphaned += result
+            if no_hub:
+                break
 
         if total_orphaned > 0:
             log.info(f"Cleanup pass complete: removed {total_orphaned} orphaned entity entries across all users")
+
+    async def _sync_user_devices(self, username: str, params: dict, creds: dict) -> int | None:
+        """Read one hub's entities for one person and index them in RAG ``home_devices``.
+
+        Returns how many entity ids the hub no longer has (their Redis state is
+        cleared), or None when execution has no hub to read at all.
+        """
+        from services.gateway.ha_state_cache import cache_all_states, get_redis
+        from services.gateway.hub_access import visible_entities
+
+        try:
+            async with _shared_http_client() as client:
+                resp = await client.get(
+                    f"{EXECUTION_SVC}/discovery/entities",
+                    params=params,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                )
+                if resp.status != 200:
+                    if resp.status == 503:
+                        log.warning("Cleanup: execution has no home hub to read; device sync skipped.")
+                        return None
+                    return 0
+                resp_text = await resp.text()
+                data = json.loads(resp_text) if resp_text else {}
+            entities = data.get("entities", []) if isinstance(data, dict) else []
+            source = data.get("source") if isinstance(data, dict) else None
+            entities = await visible_entities(creds, entities)
+            if not entities:
+                # Nothing to index: rows already there age out in RAG's staleness sweep.
+                return 0
+
+            orphaned: list[str] = []
+            async with _shared_http_client() as client:
+                # RAG keeps embedding after a client gives up, so a short
+                # timeout made the next pass send the same work again while
+                # the first was still running (seen after deploys, when the
+                # whole entity list is new). Wait for it instead.
+                body: dict = {"entities": entities, "user_id": username}
+                if source:
+                    body["source"] = source
+                sync_resp = await client.post(
+                    f"{RAG_SVC}/rag/sync/devices",
+                    json=body,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=HA_SYNC_TIMEOUT_SECONDS),
+                )
+                if sync_resp.status == 200:
+                    sync_text = await sync_resp.text()
+                    result = json.loads(sync_text) if sync_text else {}
+                    orphaned = result.get("orphaned_entity_ids", [])
+
+            r = get_redis()
+            for eid in orphaned:
+                with suppress(Exception):
+                    r.delete(f"ha:state:{eid}")
+            # Update Redis cache with fresh states
+            cache_all_states(entities)
+            return len(orphaned)
+        except Exception as e:
+            # str(TimeoutError()) is empty, which logged "failed for user X: "
+            # with no cause; always name the exception type.
+            msg = f"{type(e).__name__}: {e}"
+            transient = isinstance(e, TimeoutError) or any(
+                s in msg
+                for s in (
+                    "Server disconnected",
+                    "Cannot connect to host",
+                    "Connection refused",
+                    "Cannot perform SSL",
+                    "ClientConnectionError",
+                )
+            )
+            if transient:
+                # Dependants (rag/execution) may still be starting after a
+                # deploy, or busy (a slow RAG sync); retry next interval.
+                log.warning(f"Cleanup: deferred for user {username}: {msg}")
+            else:
+                log.error(f"Cleanup: failed for user {username}: {msg}")
+            return 0
 
 # Global instance
 worker = RavenWorker()

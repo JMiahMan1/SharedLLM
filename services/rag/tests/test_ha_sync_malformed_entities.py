@@ -1,6 +1,6 @@
 """Refusal of entity ids that are not ``domain.object_id``.
 
-The live ``ha_entities`` index carried two entries whose id was a serialized
+The live device index carried two entries whose id was a serialized
 user record about 1,100 characters long (display name, Nextcloud/GitHub URLs,
 e-mail addresses) -- Home Assistant accepted it because anything can be
 registered, and this service indexed it verbatim. Those two entries also set
@@ -68,7 +68,7 @@ def _valid(i=0):
 
 def _stored_ids(conn):
     rows = conn.execute(
-        "SELECT id FROM rag_items WHERE collection_name = 'ha_entities'"
+        "SELECT id FROM rag_items WHERE collection_name = 'home_devices'"
     ).fetchall()
     return {r["id"] for r in rows}
 
@@ -110,26 +110,26 @@ def test_the_refusal_warning_is_not_repeated_on_every_sync(tmp_path, caplog):
 def test_valid_entities_still_index_normally_alongside_a_refusal(tmp_path):
     conn = _install(tmp_path)
     _sync({"entities": [_valid(0), {"entity_id": POISON_ID}, _valid(1)]})
-    assert {"ha:default:light.kitchen_0", "ha:default:light.kitchen_1"} <= _stored_ids(conn)
+    assert {"dev:homehub:default:light.kitchen_0", "dev:homehub:default:light.kitchen_1"} <= _stored_ids(conn)
 
 
 def test_a_previously_stored_poisoned_row_is_removed_as_an_orphan(tmp_path):
     conn = _install(tmp_path)
     rag_main._add_item(
-        "ha_entities",
-        f"ha:{POISON_ID}",
+        "home_devices",
+        f"dev:homehub:default:{POISON_ID}",
         "default",
         "Device: {\"username\": \"default\"}",
-        {"entity_id": POISON_ID, "type": "ha_entity"},
+        {"entity_id": POISON_ID, "type": "home_device", "source": "homehub"},
         0,
         "2026-01-01T00:00:00Z",
         vector=[0.0] * DIM,
     )
-    assert f"ha:{POISON_ID}" in _stored_ids(conn)
+    assert f"dev:homehub:default:{POISON_ID}" in _stored_ids(conn)
 
     result = _sync({"entities": [_valid(0)]})
 
-    assert f"ha:{POISON_ID}" not in _stored_ids(conn)
+    assert f"dev:homehub:default:{POISON_ID}" not in _stored_ids(conn)
     assert POISON_ID in result["orphaned_entity_ids"]
 
 
@@ -141,7 +141,7 @@ def test_a_long_but_legitimate_entity_id_is_kept(tmp_path):
     result = _sync({"entities": [{"entity_id": long_id, "attributes": {}}]})
 
     assert result["refused_count"] == 0
-    assert f"ha:default:{long_id}" in _stored_ids(conn)
+    assert f"dev:homehub:default:{long_id}" in _stored_ids(conn)
 
 
 def test_a_entries_without_an_entity_id_are_still_skipped_quietly(tmp_path, caplog):

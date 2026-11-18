@@ -177,7 +177,7 @@ def test_context_search_in_agent_action_map():
 
 def test_context_search_schema_exists():
     from services.gateway.schemas import ContextSearchRequest
-    schema = ContextSearchRequest(query="test", collection_name="ha_entities", k=5)
+    schema = ContextSearchRequest(query="test", collection_name="home_devices", k=5)
     assert schema.query == "test"
-    assert schema.collection_name == "ha_entities"
+    assert schema.collection_name == "home_devices"
     assert schema.k == 5  # default value

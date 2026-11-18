@@ -50,6 +50,7 @@ from services.common.guidance import guidance as _guidance
 from services.common.http import INTERNAL_KEEPALIVE_S
 from services.common.music_recommendations import recommend_music
 from services.common.podcast_recommendations import podcast_events, recommend_podcast
+from services.common.rag_collections import HOME_DEVICES
 from services.common.relay import until_either_ends
 from services.common.screen_time import (
     carried_over as carried_over_screen_time,
@@ -2860,6 +2861,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                 return []
 
             entities = data.get("entities", []) if isinstance(data, dict) else []
+            source = data.get("source") if isinstance(data, dict) else None
             entities = await visible_entities(creds, entities)
             if entities:
                 user_id = creds.get("user") or ""
@@ -2869,9 +2871,12 @@ async def fetch_ha_entities(creds: dict) -> list:
                 # 1. Sync to RAG for discovery (and get orphan list for Redis cleanup)
                 async def _sync_to_rag():
                     try:
+                        body = {"entities": entities, "user_id": user_id}
+                        if source:
+                            body["source"] = source
                         resp = await get_http_client().post(
-                            f"{RAG_SVC}/rag/sync/ha",
-                            json={"entities": entities, "user_id": user_id},
+                            f"{RAG_SVC}/rag/sync/devices",
+                            json=body,
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
                         if resp.status == 200:
@@ -2883,7 +2888,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                                 for eid in orphaned:
                                     with suppress(Exception):
                                         r.delete(f"ha:state:{eid}")
-                                log.info(f"[ha_sync] Cleaned up {len(orphaned)} orphaned Redis cache entries")
+                                log.info(f"[device_sync] Cleaned up {len(orphaned)} orphaned Redis cache entries")
                     except Exception as _e:
                         log.debug(f"RAG sync fire-and-forget failed (non-critical): {_e}")
                 _ =                 _ = asyncio.create_task(_sync_to_rag())
@@ -4216,7 +4221,7 @@ async def chat_handler(request: Request, background_tasks=None):
             from services import config as _config
 
             if _config.any_home_hub():  # no hub: no device index, as no hub tools are offered
-                collections.insert(0, "ha_entities")
+                collections.insert(0, HOME_DEVICES)
             for coll in collections:
                 client = get_http_client()
                 resp = await client.post(

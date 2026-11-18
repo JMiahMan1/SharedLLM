@@ -169,6 +169,9 @@ _TEST_ENV_DEFAULTS = {
     # depend on whose machine ran them (tests/unit/test_config_env_isolation.py
     # caught exactly this for ALERT_TLS_HOSTS).
     "ALERT_TLS_HOSTS": "",
+    # The home device index's staleness sweep (services/rag/main.py): the defaults.
+    "HOME_DEVICE_STALE_HOURS": "72",
+    "HOME_DEVICE_SWEEP_MINUTES": "60",
     # --- Gateway-only configuration ---
     #
     # services/gateway/config.py is a SECOND config module (separate from
