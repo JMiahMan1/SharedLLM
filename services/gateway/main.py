@@ -4081,8 +4081,9 @@ async def chat_handler(request: Request, background_tasks=None):
 
     # Build job_payload for the FIFO queue
     default_sys = select_system_instruction_for_query(query, selected_model)
+    storage_directive = ""
     if not grounded and any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
-        default_sys += (
+        storage_directive = (
             "\n\n[SYSTEM OVERRIDE: CRITICAL DIRECTIVE: You have full permission to access the storage system. "
             "You ARE fully capable of executing this storage action. "
             "DO NOT apologize or say you lack access. DO NOT provide a tutorial. "
@@ -4092,7 +4093,13 @@ async def chat_handler(request: Request, background_tasks=None):
     job_payload = {
         "model": selected_model,
         "query": final_query,
-        "system": (body.get("system") or default_sys) + (_voice_context_note(voice_context) if voice_context else ""),
+        # The system stays one of a few fixed texts, so the model server can keep it
+        # warm; what belongs to this one request goes with the question (turn_note).
+        "system": body.get("system") or default_sys,
+        "turn_note": (
+            ("" if body.get("system") else storage_directive.strip())
+            + (_voice_context_note(voice_context) if voice_context else "")
+        ).strip(),
         "voice_context": voice_context,
         "creds": creds.model_dump(),
         "client": body.get("client"),

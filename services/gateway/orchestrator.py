@@ -575,17 +575,21 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
 
     # 4. Final Inference
     full_system = job_payload.get("system", "")
+    # What this one request adds to the instructions (the voice satellite's note, a
+    # storage directive): with the question for a single turn, appended for Raven.
+    turn_note = str(job_payload.get("turn_note") or "")
     if is_autonomous:
         from services.gateway.agent_loop import AgentLoop
         # Raven handles autonomous loops
         mission_id = job_payload.get("_mission_id")
         workspace_id = job_payload.get("workspace_id")
         history_log = job_payload.get("history_log")
-        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id, rag_context=rag_context, show_thinking=show_thinking, workspace_id=workspace_id, history_log=history_log)
+        raven_system = f"{full_system}\n\n{turn_note.strip()}" if turn_note.strip() else full_system
+        ans = await AgentLoop(query, model, raven_system, short_term, user_id, creds, mission_id, rag_context=rag_context, show_thinking=show_thinking, workspace_id=workspace_id, history_log=history_log)
     else:
         # Librarian handles standard single-turn inference
         try:
-            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded)
+            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note)
         except InferenceUnavailable as exc:
             # A mission and the voice assistant have no status code to report
             # on: the answer field is the only channel they have, so the old
@@ -1634,7 +1638,22 @@ async def _closing_turn(
     )
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None) -> str:
+def _speaker_line(creds: ResolvedCredentials | None) -> str:
+    """Who is asking, for the model: a person, or plainly that nobody was recognised.
+
+    A shared voice satellite or kiosk asks as the household. Told nothing, the model
+    answered "Who am I?" with an invented name ("You're Alex").
+    """
+    user = (getattr(creds, "user", "") or "").strip()
+    if not user or user == "household":
+        return ("Speaker: not identified (a shared device such as a voice satellite or kiosk). If they ask "
+                "who they are, say you could not tell from their voice and they can tell you their name. "
+                "Never guess or invent a name.")
+    how = " (recognised by their voice)" if getattr(creds, "identified_by", None) == "voice" else ""
+    return f"Speaker: {user}{how}."
+
+
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "") -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
 
     ``event_callback`` receives the turn as it happens, in the part shapes a
@@ -1659,9 +1678,13 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     if grounded:
         single_turn_guide = _grounded_tool_guide(single_turn_guide)
         log.info("[_single_turn_inference] grounded turn: retrieval tools omitted from the tool guide")
-    # What never changes comes first and what changes every turn (the time, the retrieved
-    # context) last, so the model server can reuse the cached start of the prompt instead of
-    # reading the whole tool guide again on every turn.
+    # The system message is the same for every question (the persona and the tool
+    # guide, ~3,500 tokens), and everything that changes (the time, who is speaking,
+    # the voice satellite's note, the retrieved context) travels with the question.
+    # The model server keeps a checkpoint of that fixed start warm (alpaca-proxy's
+    # prompt keeper), so a new question reads only its own part: with the time and
+    # the context inside the system message, every voice question re-read the whole
+    # guide (about 27 s on the household's card).
     system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{single_turn_guide}"
     if workspace_context.strip():
         system += (
@@ -1671,11 +1694,15 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             "here: say so plainly, name the file it would use, and suggest sending "
             "it to Raven as a mission."
         )
-    system += f"\n\nCurrent Date/Time: {now}\n\nRetrieved Context:\n{rag_context}"
+    context_parts = [f"Current Date/Time: {now}", _speaker_line(creds)]
+    if turn_note.strip():
+        context_parts.append(turn_note.strip())
+    context_parts.append(f"Retrieved Context:\n{rag_context}")
+    question = "[Context for this question]\n" + "\n\n".join(context_parts) + f"\n\n[Question]\n{query}"
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
         log.info(f"[_single_turn_inference] RAG context preview: {rag_context[:300]}")
-    messages = [{"role": "system", "content": system}, *history, {"role": "user", "content": query}]
+    messages = [{"role": "system", "content": system}, *history, {"role": "user", "content": question}]
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
 
