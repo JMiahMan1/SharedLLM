@@ -99,7 +99,7 @@ export default function DuplicatesPanel() {
                           c.last_updated ? `updated ${ago(c.last_updated)}` : 'no updates yet'].filter(Boolean).join(' · ')}
                       </p>
                     </div>
-                    <button type="button" className={BTN} disabled={busy}
+                    <button type="button" className={`${BTN} min-w-[5.5rem] justify-center`} disabled={busy}
                       aria-label={`${c.hidden ? 'Show' : 'Hide'} the ${c.label || c.domain} copy of ${g.name}`}
                       onClick={() => one.mutate({ copy: c, hidden: !c.hidden })}>
                       {c.hidden ? <Eye size={14} aria-hidden /> : <EyeOff size={14} aria-hidden />}
