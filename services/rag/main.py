@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 import traceback
 import urllib.error
@@ -58,6 +59,17 @@ conn = None
 adapter: VectorStoreAdapter | None = None
 BACKEND = "unknown"
 embedder = None
+#: A cross-encoder: it reads a question and a passage together and scores how
+#: well the passage answers it. The Bible's meaning search uses it on its best
+#: few dozen candidates, so verses that only share a word or a mood with the
+#: question (Deuteronomy 6:2's "fear the LORD" for "worry") sink and drop out.
+#: Chosen by measurement on the live Bible (MiniLM-L-12 ranked about the same
+#: at twice the time; bge-reranker-base took six times as long).
+RERANK_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
+RERANK_MAX_TEXTS = 64
+RERANK_MAX_CHARS = 2_000
+reranker = None
+_reranker_lock = threading.Lock()
 EMBEDDING_MODEL = DEFAULT_EMBEDDING_MODEL
 EMBEDDING_DIM = DEFAULT_EMBEDDING_DIM
 
@@ -216,6 +228,9 @@ async def lifespan(app: FastAPI):
     _ensure_dimension_consistent(conn)
 
     adapter = build_adapter(conn)
+    # Load the reranker in the background: the first meaning search should not
+    # wait for it, and the service must not wait for it to start.
+    asyncio.get_running_loop().run_in_executor(None, _warm_reranker)
 
     # Rebuild the vector index ONLY when it is genuinely out of sync: either the
     # vector count no longer matches rag_items (missing/orphaned vectors) or the
@@ -846,6 +861,58 @@ async def embed_texts(req: EmbedRequest):
     # request from pushing the service out of memory (see embed_batched).
     vectors = await asyncio.to_thread(embed_batched, [prefix + t for t in req.texts])
     return {"model": EMBEDDING_MODEL, "dim": len(vectors[0]) if vectors else EMBEDDING_DIM, "vectors": vectors}
+
+
+def _get_reranker():
+    """The cross-encoder, loaded once (on first use, or by the warm-up at start)."""
+    global reranker
+    if reranker is None:
+        with _reranker_lock:
+            if reranker is None:
+                from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+                reranker = TextCrossEncoder(model_name=RERANK_MODEL)
+    return reranker
+
+
+def _warm_reranker() -> None:
+    try:
+        _get_reranker()
+        log.info("Reranker ready: %s", RERANK_MODEL)
+    except Exception as exc:
+        log.warning("Reranker could not be loaded at start (%s); it is retried on first use", exc)
+
+
+class RerankRequest(BaseModel):
+    query: str
+    texts: list[str]
+
+
+@app.post("/rag/rerank", dependencies=[Depends(require_internal)])
+async def rerank_texts(req: RerankRequest):
+    """How well each text answers ``query`` (higher is better), in the texts' order.
+
+    The scores are the cross-encoder's raw logits: comparable within one call,
+    not across questions.
+    """
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="query is empty")
+    if not req.texts:
+        raise HTTPException(status_code=400, detail="texts is empty")
+    if len(req.texts) > RERANK_MAX_TEXTS:
+        raise HTTPException(status_code=400, detail=f"at most {RERANK_MAX_TEXTS} texts per request")
+    if len(req.query) > RERANK_MAX_CHARS or any(len(t) > RERANK_MAX_CHARS for t in req.texts):
+        raise HTTPException(status_code=400, detail=f"each text must be at most {RERANK_MAX_CHARS} characters")
+
+    def score() -> list[float]:
+        return [float(x) for x in _get_reranker().rerank(req.query, req.texts, batch_size=16)]
+
+    try:
+        scores = await asyncio.to_thread(score)
+    except Exception as exc:
+        log.warning("Rerank failed: %s", exc)
+        raise HTTPException(status_code=503, detail="The reranking model is not available") from exc
+    return {"model": RERANK_MODEL, "scores": scores}
 
 
 @app.post("/rag/ingest", dependencies=[Depends(require_internal)])

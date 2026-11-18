@@ -73,8 +73,31 @@ def _install(session: Session, tmp_path: Path, code: str, texts: dict) -> None:
     corpus.import_corpus(session, code=code, name=code.upper(), source_path=path)
 
 
+class FakeReranker:
+    """Scores a text by how much of the question's meaning it shares (the fake concepts)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[str]]] = []
+        self.prefer: str | None = None
+
+    def __call__(self, rag_url, secret, query, texts, timeout):
+        self.calls.append((query, list(texts)))
+        q = np.asarray(_vector(query))
+        scores = [float(np.asarray(_vector(t)) @ q) * 10 for t in texts]
+        if self.prefer:
+            scores = [s + (20 if self.prefer in t else 0) for s, t in zip(scores, texts, strict=True)]
+        return {"model": "fake-rerank", "scores": scores}
+
+
 @pytest.fixture
-def model(monkeypatch) -> FakeModel:
+def reranker(monkeypatch) -> FakeReranker:
+    fake = FakeReranker()
+    monkeypatch.setattr(meaning, "_post_rerank", fake)
+    return fake
+
+
+@pytest.fixture
+def model(monkeypatch, reranker) -> FakeModel:
     fake = FakeModel()
     monkeypatch.setattr(meaning, "_post_embed", fake)
     monkeypatch.setattr(bible_main, "RAG_SVC_URL", "http://rag.test")
@@ -205,3 +228,53 @@ def test_ask_falls_back_to_word_search_when_meaning_is_not_ready(loaded_client, 
     assert resp.status_code == 200, resp.text
     assert resp.json()["retrieval"] == "words"
     assert "Psalms 23:1" in answers[0]
+
+
+def test_the_reranker_reads_the_question_with_the_meaning_translation(bible, reranker):
+    body = _search(bible, "verses about worry")
+    assert body["reranked"] is True
+    query, texts = reranker.calls[-1]
+    assert query == "verses about worry"
+    # The modern translation the index was built from, not the reader's KJV.
+    assert "Do not be anxious about anything." in texts
+    assert "Be careful for nothing." not in texts
+
+
+def test_the_rerankers_order_wins(bible, reranker):
+    reranker.prefer = "anything"
+    assert _refs(_search(bible, "verses about worry"))[0] == "Philippians 4:1"
+    reranker.prefer = "your life"
+    assert _refs(_search(bible, "verses about worry"))[0] == "Matthew 6:1"
+
+
+def test_without_the_reranker_the_blend_still_answers(bible, monkeypatch):
+    def down(*_args, **_kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(meaning, "_post_rerank", down)
+    body = _search(bible, "verses about worry")
+    assert body["reranked"] is False
+    assert set(_refs(body)[:2]) == {"Matthew 6:1", "Philippians 4:1"}
+
+
+def test_a_wrong_number_of_scores_is_not_trusted(bible, monkeypatch):
+    monkeypatch.setattr(meaning, "_post_rerank", lambda *a, **k: {"scores": [1.0]})
+    assert _search(bible, "verses about worry")["reranked"] is False
+
+
+def test_off_topic_verses_drop_out_but_a_few_always_stay():
+    positions = [("Gen", 1, i) for i in range(1, 11)]
+    # Three answers near the best, then a cliff.
+    scores = [3.0, 2.5, -1.0, -9.0, -9.5, -10.0, -10.5, -11.0, -11.5, -12.0]
+    kept = meaning.rerank_order(positions, scores)
+    assert kept[:3] == positions[:3]
+    assert len(kept) == meaning.RERANK_MIN_RESULTS  # the cliff is cut, five always stay
+    assert all(p in positions for p in kept)
+    # Everything near the best is kept, in score order.
+    close = meaning.rerank_order(positions[:4], [1.0, 2.0, 0.5, -3.0])
+    assert close == [positions[1], positions[0], positions[2], positions[3]]
+    assert meaning.rerank_order([], []) == []
+
+
+def test_pronouns_are_not_searched_as_words():
+    assert meaning.content_words("forgiving someone who hurt you") == ["forgiving", "hurt"]
