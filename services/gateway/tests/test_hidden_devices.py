@@ -139,3 +139,25 @@ def test_duplicate_routes_are_for_admins_and_pass_only_their_fields(monkeypatch)
                     ("POST", "/hub/devices/duplicates/hide", {"hide_domain": "matter", "keep_domain": "wiz"}),
                     ("POST", "/hub/devices/duplicates/unhide", {"domain": "matter"}),
                     ("PATCH", "/hub/devices/d1", {"hidden": True})]
+
+
+def test_combine_routes_are_for_admins_and_pass_only_their_fields(monkeypatch):
+    client, seen = _hub_routes(monkeypatch)
+    admin = {"Authorization": "Bearer admin-key"}
+    for action in ("combine", "uncombine", "swap", "rule"):
+        r = client.post(f"/api/homehub/devices/duplicates/{action}", headers={"Authorization": "Bearer kid"})
+        assert r.status_code == 403
+    assert seen == []
+    client.post("/api/homehub/devices/duplicates/combine", headers=admin,
+                json={"main": "m1", "fallback": "w1", "evil": 1})
+    client.post("/api/homehub/devices/duplicates/combine", headers=admin,
+                json={"main_domain": "matter", "fallback_domain": "wiz"})
+    client.post("/api/homehub/devices/duplicates/uncombine", headers=admin, json={"device": "m1", "main": "x"})
+    client.post("/api/homehub/devices/duplicates/swap", headers=admin, json={"device": "m1"})
+    client.post("/api/homehub/devices/duplicates/rule", headers=admin, json={"clear": ["matter", "wiz"]})
+    assert client.post("/api/homehub/devices/duplicates/explode", headers=admin, json={}).status_code == 404
+    assert seen == [("POST", "/hub/devices/duplicates/combine", {"main": "m1", "fallback": "w1"}),
+                    ("POST", "/hub/devices/duplicates/combine", {"main_domain": "matter", "fallback_domain": "wiz"}),
+                    ("POST", "/hub/devices/duplicates/uncombine", {"device": "m1"}),
+                    ("POST", "/hub/devices/duplicates/swap", {"device": "m1"}),
+                    ("POST", "/hub/devices/duplicates/rule", {"clear": ["matter", "wiz"]})]

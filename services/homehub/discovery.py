@@ -484,7 +484,10 @@ class KnownIndex:
             entry_id = dev.config_entries[0] if dev.config_entries else None
             if entry_id is None:
                 continue
-            for pair in [*dev.identifiers, *dev.connections]:
+            # A Matter node's MAC (General Diagnostics) is the bulb's LAN MAC, which a LAN integration (WiZ) owns
+            # for discovery: an address change found by MAC must go to that integration, never to the fabric.
+            fabric = (e := hub.config_entries.get(entry_id)) is not None and e.domain == "matter"
+            for pair in [*dev.identifiers, *([] if fabric else dev.connections)]:
                 if len(pair) >= 2:
                     self._tok(pair[1], entry_id)
             if dev.configuration_url:

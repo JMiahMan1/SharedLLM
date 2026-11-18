@@ -9,6 +9,10 @@
 | ``GET /hub/devices/duplicates`` | Devices two integrations both register, grouped (``duplicates.py``) |
 | ``POST /hub/devices/duplicates/hide`` | ``{"hide_domain"?, "keep_domain"?}``: hide one integration's copies |
 | ``POST /hub/devices/duplicates/unhide`` | ``{"domain"}``: show that integration's copies again |
+| ``POST /hub/devices/duplicates/combine`` | ``{"main","fallback"}``, ``{"group","main_domain"?}`` or ``{"main_domain","fallback_domain"}`` |
+| ``POST /hub/devices/duplicates/uncombine`` | ``{"device"}``: both copies back as they were |
+| ``POST /hub/devices/duplicates/swap`` | ``{"device"}``: the fallback becomes the main |
+| ``POST /hub/devices/duplicates/rule`` | ``{"main_domain","fallback_domain"}`` or ``{"clear": [a, b]}``: the household rule |
 | ``DELETE /hub/devices/{id}[?force=1]`` | Remove one device (its entry too when it was the entry's only device) |
 | ``GET /hub/flows`` | Every integration that can be added by hand (by address, login or choice), with its fields and ``kind`` |
 | ``POST /hub/flows/{domain}`` | ``{"host"? or "url"?, "name"?, "area_id"?, "input"?}``; same answers as adopting a finding |
@@ -97,6 +101,19 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
             return duplicates.hide_copies(runtime, await body_of(request))
         except HubError as exc:
             return failure(exc)
+
+    for path, action in (("combine", duplicates.combine), ("uncombine", duplicates.uncombine),
+                         ("swap", duplicates.swap), ("rule", duplicates.set_rule)):
+        def route(action: Any = action) -> Any:
+            async def handler(request: Request) -> Any:
+                admin(request)
+                try:
+                    return action(runtime, await body_of(request))
+                except HubError as exc:
+                    return failure(exc)
+            return handler
+
+        router.add_api_route(f"/hub/devices/duplicates/{path}", route(), methods=["POST"])
 
     @router.post("/hub/devices/duplicates/unhide")
     async def unhide_duplicates(request: Request) -> Any:

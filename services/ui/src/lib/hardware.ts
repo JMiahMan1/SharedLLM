@@ -222,7 +222,8 @@ export function physicalDevices(devices: HardwareDevice[]): { devices: PhysicalD
 
 /** Hidden devices (a duplicate's copy a person chose to hide), by name, for the folded "Hidden" list. */
 export function hiddenDevices(devices: HardwareDevice[]): HardwareDevice[] {
-  return devices.filter((d) => d.hidden).sort((a, b) => a.name.localeCompare(b.name));
+  // A combined device's fallback is not "hidden by a person": Devices > Duplicates shows it with its main.
+  return devices.filter((d) => d.hidden && d.hidden_by !== 'combined').sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** What needs a person: devices that stopped answering, and devices in no room. */

@@ -25,6 +25,8 @@ UNKNOWN = "unknown"
 UPDATE_INSTALL = 1
 #: The update services the hub answers itself (a skipped version is the hub's record, not the device's).
 UPDATE_SKIP_SERVICES = ("skip", "clear_skipped")
+#: How long a combined device's main copy has to carry out a command before the fallback gets it.
+COMBINED_MAIN_TIMEOUT_S = 6.0
 
 # Entity services a domain answers. A driver may support fewer; the hub only
 # refuses a service no driver of that domain could ever handle.
@@ -569,6 +571,15 @@ class Hub:
         self.entity_registry_ids: dict[str, str] = {}
         #: Entities a driver has published a state for since the hub started.
         self.live: set[str] = set()
+        #: Combined duplicates (duplicates.py): each copy's entity id -> ``(main, fallback)`` entity ids. Both ids
+        #: show one shared state, the main's while it is available, else the fallback's; commands go to the main
+        #: and, when it fails, to the fallback (``_call_combined``).
+        self.combined: dict[str, tuple[str, str]] = {}
+        #: Each combined copy's own last state, as its driver published it.
+        self.copy_states: dict[str, State] = {}
+        #: Combined mains whose last command the fallback carried out: the fallback's state is the true one until
+        #: the main says something new.
+        self.fallback_active: set[str] = set()
 
     # -- registry -----------------------------------------------------------
     def entity_area_id(self, entity_id: str) -> str | None:
@@ -696,7 +707,105 @@ class Hub:
                 attrs["state_class"] = caps["state_class"]
             if entry.domain == "update" and str(state) != UNAVAILABLE:
                 state = update_state(state, attrs, skipped_version(entry))
+        if entity_id in self.combined:
+            self.copy_states[entity_id] = State(entity_id, "" if state is None else str(state), attrs)
+            if self.combined[entity_id][0] == entity_id:
+                self.fallback_active.discard(entity_id)
+            return self.publish_combined(entity_id)
         return self.states.set(entity_id, state, attrs)
+
+    # -- combined duplicates (duplicates.py) -----------------------------------
+    def combined_source(self, entity_id: str) -> tuple[str | None, State | None]:
+        """Which copy a combined entity shows: ``("main" | "fallback" | None, that copy's own state)``.
+
+        The main while it is available (unless the fallback carried out the last command and the main has said
+        nothing since); else the fallback while that is; else whichever copy has said anything (unavailable).
+        """
+        main, fallback = self.combined[entity_id]
+        ms, fs = self.copy_states.get(main), self.copy_states.get(fallback)
+        if main in self.fallback_active and fs is not None and fs.state != UNAVAILABLE:
+            return "fallback", fs
+        if ms is not None and ms.state != UNAVAILABLE:
+            return "main", ms
+        if fs is not None and fs.state != UNAVAILABLE:
+            return "fallback", fs
+        if ms is not None:
+            return "main", ms
+        return ("fallback", fs) if fs is not None else (None, None)
+
+    def publish_combined(self, entity_id: str) -> State:
+        """Write the shared state of a combined entity under both copies' ids (each keeps its own name)."""
+        main, fallback = self.combined[entity_id]
+        _which, src = self.combined_source(entity_id)
+        if src is None:
+            current = self.states.get(entity_id)
+            return current if current is not None else self.states.set(entity_id, UNKNOWN, {})
+        out: State | None = None
+        for eid in (main, fallback):
+            attrs = dict(src.attributes)
+            entry = self.entities.get(eid)
+            if entry is not None:
+                attrs["friendly_name"] = self.friendly_name(entry)
+                if entry.icon:
+                    attrs["icon"] = entry.icon
+            st = self.states.set(eid, src.state, attrs)
+            if eid == entity_id:
+                out = st
+        assert out is not None
+        return out
+
+    def _driver_for(self, entry: EntityEntry) -> Driver | None:
+        return self.drivers.get(entry.config_entry_id or "") if entry.config_entry_id \
+            else self.platform_drivers.get(entry.platform)
+
+    async def _call_combined(self, main_id: str, fallback_id: str, domain: str, service: str,
+                             data: dict[str, Any]) -> Any:
+        """Send a command to a combined entity's main copy, and to its fallback when the main fails.
+
+        A main whose own state is unavailable while the fallback's is not is skipped (it would only time out).
+        The main gets ``COMBINED_MAIN_TIMEOUT_S`` to answer; an error or a timeout sends the same command to the
+        fallback, logged at INFO. Only when both fail does the call fail, with both reasons.
+        """
+        order: list[tuple[EntityEntry, Driver]] = []
+        missing: list[str] = []
+        for eid in (main_id, fallback_id):
+            ent = self.entities.get(eid)
+            drv = self._driver_for(ent) if ent is not None and not ent.disabled_by else None
+            if ent is None or drv is None:
+                missing.append(f"{eid}: no driver is running for it")
+                continue
+            order.append((ent, drv))
+        if not order:
+            raise HubError("; ".join(missing))
+        ms, fs = self.copy_states.get(main_id), self.copy_states.get(fallback_id)
+        skipped_main = (len(order) == 2 and ms is not None and ms.state == UNAVAILABLE
+                        and fs is not None and fs.state != UNAVAILABLE)
+        if skipped_main:
+            order.reverse()
+        errors: list[tuple[str, BaseException]] = []
+        for i, (ent, drv) in enumerate(order):
+            try:
+                job = drv.async_call(ent, domain, service, dict(data))
+                if i == 0 and len(order) > 1:
+                    result = await asyncio.wait_for(job, COMBINED_MAIN_TIMEOUT_S)
+                else:
+                    result = await job
+            except Exception as exc:  # any failure of one copy is a reason to try the other
+                if isinstance(exc, TimeoutError):
+                    exc = DeviceUnavailable(f"did not answer in {COMBINED_MAIN_TIMEOUT_S:g} s")
+                errors.append((ent.entity_id, exc))
+                continue
+            if ent.entity_id != main_id:
+                why = "the main copy is unavailable" if skipped_main else \
+                    "; ".join(f"{eid}: {exc}" for eid, exc in errors) or "the main copy has no driver"
+                log.info("%s.%s on %s used fallback %s (%s)", domain, service, main_id, ent.entity_id, why)
+                self.fallback_active.add(main_id)
+                if main_id in self.combined:
+                    self.publish_combined(main_id)
+            return result
+        first = errors[0][1]
+        exc_type = type(first) if isinstance(first, HubError) else HubError
+        raise exc_type("; ".join([*missing, *(f"{eid}: {exc}" for eid, exc in errors)]))
 
     def _confirm_from_state(self, entry: EntityEntry, attrs: dict[str, Any]) -> None:
         info: dict[str, Any] = {}
@@ -946,7 +1055,20 @@ class Hub:
         errors: list[str] = []
         ran = 0
         jobs = []
+        combined_done: set[str] = set()
         for eid in call.entity_ids:
+            pair = self.combined.get(eid)
+            if pair is not None:
+                # Either copy's id is the combined device: one command, to the main (then the fallback).
+                main_entry = self.entities.get(pair[0])
+                if pair[0] in combined_done or main_entry is None:
+                    continue
+                domain = main_entry.domain if by_entity_domain else call.domain
+                if not by_entity_domain and main_entry.domain != call.domain and call.domain != "homeassistant":
+                    continue
+                combined_done.add(pair[0])
+                jobs.append((pair[0], self._call_combined(pair[0], pair[1], domain, call.service, dict(data))))
+                continue
             entry = self.entities.get(eid)
             if entry is None or entry.disabled_by:
                 errors.append(f"{eid}: unknown entity")
@@ -955,8 +1077,7 @@ class Hub:
             if not by_entity_domain and entry.domain != call.domain and call.domain != "homeassistant":
                 # HA silently skips entities of another domain; so do we.
                 continue
-            driver = self.drivers.get(entry.config_entry_id or "") if entry.config_entry_id \
-                else self.platform_drivers.get(entry.platform)
+            driver = self._driver_for(entry)
             if driver is None:
                 errors.append(f"{eid}: no driver is running for {entry.platform}")
                 continue

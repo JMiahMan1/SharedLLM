@@ -628,7 +628,9 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (registry) return json(registry.body, registry.status);
     if (p === '/api/homehub/hardware') return json(HARDWARE);
     // No device is in the hub twice here (e2e/home/devices-duplicates.spec.ts mocks some).
-    if (p === '/api/homehub/devices/duplicates') return json({ groups: [], integrations: [] });
+    if (p === '/api/homehub/devices/duplicates') return json({ groups: [], integrations: [], rules: [] });
+    // No light groups yet (e2e/home/light-groups.spec.ts mocks some); the Devices page asks.
+    if (p === '/api/homehub/light_groups' && method === 'GET') return json({ groups: [], lights: [] });
     if (p.startsWith('/api/homehub/hardware/')) {
       return json(detailFor(decodeURIComponent(p.split('/').pop() || ''), initialStates(), voices));
     }
