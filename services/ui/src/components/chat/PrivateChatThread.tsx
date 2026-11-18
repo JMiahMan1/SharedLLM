@@ -13,6 +13,7 @@ import { sha256Hex } from '../../lib/galleryImport';
 import { secureWindowOff, secureWindowOn, type SecureState } from '../../plugins/secureWindow';
 import { deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
+import LinkText from './LinkText';
 import PrivateChatSecurity from './PrivateChatSecurity';
 import PrivateCamera from './PrivateCamera';
 import PrivateVideoRecorder from './PrivateVideoRecorder';
@@ -929,7 +930,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
                   ) : payload === 'unreadable' ? (
                     <span className="italic opacity-80">This message could not be decrypted.</span>
                   ) : payload.t === 'text' ? (
-                    edit ? edit.text : payload.text
+                    <LinkText text={edit ? edit.text : payload.text} />
                   ) : payload.t === 'comment' ? (
                     <button
                       type="button"
