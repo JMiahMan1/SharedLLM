@@ -3,6 +3,7 @@ import { mockHome, PROFILES } from '../fixtures/homeMocks';
 import { mockHealth } from '../fixtures/healthMocks';
 import { mockBible } from '../fixtures/bibleMocks';
 import { mockDashboard } from '../fixtures/dashboardMocks';
+import { mockSettingsPages } from '../fixtures/settingsPagesMocks';
 import { INTEGRATIONS_STATUS_PATH, integrationsStatus } from '../fixtures/serverCalls';
 import { expectClearOfBottomBar, expectNoHorizontalOverflow, isPhoneShell } from '../fixtures/layoutChecks';
 import { quietHotReload, screenFindings, settle, shot, type Allowed } from '../fixtures/pageAudit';
@@ -34,6 +35,7 @@ async function open(page: Page, hub: { homehub: boolean; homeAssistant: boolean 
   await mockHealth(page);
   await mockBible(page);
   await mockDashboard(page);
+  await mockSettingsPages(page);
   // Registered last, so it answers before the shared mocks' "both on".
   await page.route((url) => url.pathname === INTEGRATIONS_STATUS_PATH,
     (route) => route.fulfill({ json: integrationsStatus(hub.homehub, hub.homeAssistant) }));
@@ -168,5 +170,42 @@ test.describe('home integrations on every form factor', () => {
     await expect(page.getByTestId('homehub-test-result')).toContainText('Connected to HomeHub');
     expect(tests).toEqual([{ service: 'HomeHub', config: { homehub_url: 'http://hub.example.test:8123' } }]);
     await shot(page, info, 'integrations-homehub-dialog');
+  });
+
+  test('no hub: Admin leaves out the hub tabs and parts, and says so once', async ({ page }, info) => {
+    const run = await open(page, { homehub: false, homeAssistant: false }, '/admin/users');
+    const main = page.locator('main');
+    const tabs = page.getByRole('tablist', { name: 'Admin sections' });
+    await expect(tabs.getByRole('tab', { name: 'Users & Devices' })).toBeVisible();
+    for (const name of ['Device Groups', 'Telemetry']) await expect(tabs.getByRole('tab', { name })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Sync Device Discovery' })).toHaveCount(0);
+    // Device assignments, Entity Protection and Home alerts: one notice, not three.
+    await expect(main.getByTestId('hub-not-connected')).toHaveCount(1);
+    await expect(main.getByText('Device Assignments', { exact: true })).toHaveCount(0);
+    expect(await audit(page, info, 'integrations-off-admin-users')).toEqual([]);
+
+    // An old link to a hub tab says what it needs instead of failing.
+    await page.goto('/admin/groups');
+    await expect(main.getByTestId('hub-not-connected')).toContainText('Device Groups');
+    await expect(main.getByRole('button', { name: /Media Groups/ })).toHaveCount(0);
+    expect(await audit(page, info, 'integrations-off-admin-groups')).toEqual([]);
+
+    // Intercom keeps sessions and its settings; broadcast and announce send to hub speakers.
+    await page.goto('/admin/intercom');
+    await expect(main.getByRole('button', { name: 'Sessions', exact: true })).toBeVisible();
+    await expect(main.getByRole('button', { name: 'Config', exact: true })).toBeVisible();
+    for (const name of ['Broadcast', 'Announce']) await expect(main.getByRole('button', { name, exact: true })).toHaveCount(0);
+    expect(await audit(page, info, 'integrations-off-admin-intercom')).toEqual([]);
+    expect(run.errors).toEqual([]);
+  });
+
+  test('a hub connected: Admin offers every hub tab and part', async ({ page }) => {
+    const run = await open(page, { homehub: false, homeAssistant: true }, '/admin/users');
+    const tabs = page.getByRole('tablist', { name: 'Admin sections' });
+    for (const name of ['Device Groups', 'Telemetry']) await expect(tabs.getByRole('tab', { name })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sync Device Discovery' })).toBeVisible();
+    await expect(page.locator('main').getByText('Device Assignments', { exact: true })).toBeVisible();
+    await expect(page.locator('main').getByTestId('hub-not-connected')).toHaveCount(0);
+    expect(run.errors).toEqual([]);
   });
 });

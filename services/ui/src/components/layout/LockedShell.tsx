@@ -8,6 +8,7 @@ import {
   type LockedSectionId,
 } from '../../lib/lockedMode';
 import type { IWidgetProps } from '../../types/widget';
+import { useIntegrations } from '../../hooks/useIntegrations';
 
 const ScreenTimeCard = lazy(() => import('../health/ScreenTimeCard'));
 const ChoresProgressWidget = lazy(() => import('../widgets/ChoresProgressWidget'));
@@ -36,9 +37,13 @@ const widgetProps = (key: string): IWidgetProps => ({
  * the page (when its section is open) or a friendly locked screen. The usual
  * header and menus (settings, admin, the page finder) are not shown at all.
  */
-export default function LockedShell({ children, sections }: { children: ReactNode; sections: LockedSectionId[] }) {
+export default function LockedShell({ children, sections: chosen }: { children: ReactNode; sections: LockedSectionId[] }) {
   const location = useLocation();
   useEffect(() => blockExternalNavigation(), []);
+  // Devices (the hub's lights and the TV remote) need a home hub: with none
+  // connected the section is left out, so there is no button to an empty page.
+  const { anyHub } = useIntegrations();
+  const sections = anyHub ? chosen : chosen.filter((id) => id !== 'devices');
 
   const home = location.pathname === '/';
   const allowed = lockedPathAllowed(location.pathname, location.search, sections);

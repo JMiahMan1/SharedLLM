@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import OutputSheet from './OutputSheet';
 import { MediaPlayerContext } from '../../../context/webPlayerContext';
 import type { SharedPlayer } from '../../../context/webPlayerContext';
@@ -9,6 +10,8 @@ import { sendMaRemoteCommand } from '../../../lib/maRemotePlayer';
 
 vi.mock('../../../services/api', () => ({
   api: {
+    // A home hub is connected, so its players are read too.
+    getIntegrationsStatus: vi.fn().mockResolvedValue({ homehub: { enabled: true }, home_assistant: { enabled: true } }),
     mediaStatus: vi.fn(),
     mediaTransport: vi.fn().mockResolvedValue({ status: 'SUCCESS' }),
   },
@@ -80,17 +83,20 @@ function maList(extra: unknown[] = []) {
 function renderSheet(value: SharedPlayer | null = player()) {
   const onClose = vi.fn();
   const result = render(
-    <MemoryRouter>
-      <MediaPlayerContext.Provider value={value}>
-        <OutputSheet open onClose={onClose} />
-      </MediaPlayerContext.Provider>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <MediaPlayerContext.Provider value={value}>
+          <OutputSheet open onClose={onClose} />
+        </MediaPlayerContext.Provider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
   return { ...result, onClose };
 }
 
 describe('OutputSheet', () => {
   beforeEach(() => {
+    vi.mocked(api.getIntegrationsStatus).mockResolvedValue({ homehub: { enabled: true }, home_assistant: { enabled: true } } as never);
     vi.mocked(api.mediaStatus).mockResolvedValue(status() as never);
     vi.mocked(api.mediaTransport).mockResolvedValue({ status: 'SUCCESS' } as never);
     vi.mocked(sendMaRemoteCommand).mockImplementation(async (command: string) => {
@@ -308,5 +314,23 @@ describe('OutputSheet', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('without a home hub lists Music Assistant speakers and never asks for the hub players', async () => {
+    vi.mocked(api.getIntegrationsStatus).mockResolvedValue({ homehub: { enabled: false }, home_assistant: { enabled: false } } as never);
+    renderSheet();
+
+    expect(await screen.findByText('Office Speaker')).toBeTruthy();
+    expect(screen.getByText('Kitchen Speaker')).toBeTruthy();
+    expect(screen.queryByText('Loft TV')).toBeNull();
+    expect(api.mediaStatus).not.toHaveBeenCalled();
+  });
+
+  it('without a home hub, a Music Assistant failure names only Music Assistant', async () => {
+    vi.mocked(api.getIntegrationsStatus).mockResolvedValue({ homehub: { enabled: false }, home_assistant: { enabled: false } } as never);
+    vi.mocked(sendMaRemoteCommand).mockRejectedValue(new Error('down'));
+    renderSheet();
+
+    expect(await screen.findByText('Could not load the other speakers. Check that Music Assistant is reachable.')).toBeTruthy();
   });
 });

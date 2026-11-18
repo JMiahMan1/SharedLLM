@@ -98,6 +98,11 @@ const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string
   { id: 'bible', label: 'Bible', icon: BookMarked, path: '/admin/bible' },
 ];
 
+/** Tabs that work on the home hub's devices: left out of the tab bar while no hub is connected. */
+const HUB_TABS: ReadonlySet<AdminTab> = new Set<AdminTab>(['groups', 'telemetry']);
+/** Intercom parts that send to the hub's speakers and TVs. */
+const HUB_INTERCOM_TABS = new Set(['broadcast', 'announce']);
+
 const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/ops')) return 'raven';
   if (pathname.startsWith('/admin/groups')) return 'groups';
@@ -541,19 +546,19 @@ const Admin = () => {
   const { data: mediaGroups = [] } = useQuery<GroupItem[]>({
     queryKey: ['media-groups'],
     queryFn: () => api.getMediaGroups(),
-    enabled: activeTab === 'groups',
+    enabled: activeTab === 'groups' && anyHub,
   });
 
   const { data: lightClusters = [] } = useQuery<GroupItem[]>({
     queryKey: ['light-clusters'],
     queryFn: () => api.getLightClusters(),
-    enabled: activeTab === 'groups',
+    enabled: activeTab === 'groups' && anyHub,
   });
 
   const { data: lightPatterns = [] } = useQuery<GroupItem[]>({
     queryKey: ['light-patterns'],
     queryFn: () => api.getLightPatterns(),
-    enabled: activeTab === 'groups',
+    enabled: activeTab === 'groups' && anyHub,
   });
 
   const createMediaGroupMutation = useMutation({
@@ -711,6 +716,8 @@ const Admin = () => {
           <p className="mt-2 text-slate-400">Admin-only controls for users, Raven, settings, and database.</p>
         </div>
         <div className="flex flex-wrap gap-3">
+          {/* Discovery reads the home hub's devices: nothing to sync without one. */}
+          {anyHub && (
           <button
             onClick={() => syncDiscoveryMutation.mutate()}
             disabled={syncDiscoveryMutation.isPending}
@@ -719,6 +726,7 @@ const Admin = () => {
             <RefreshCcw size={14} className={syncDiscoveryMutation.isPending ? 'animate-spin' : ''} />
             Sync Device Discovery
           </button>
+          )}
           <button
             onClick={openCreateUser}
             className="glass-button min-h-11 px-4 bg-indigo-600/30 border-indigo-500/30 text-[10px] font-black uppercase tracking-widest text-indigo-300"
@@ -733,7 +741,7 @@ const Admin = () => {
           one line meant the last few were off-screen with no sign they were
           there. */}
       <div className="flex flex-wrap gap-2 border-b border-white/10 pb-2" role="tablist" aria-label="Admin sections">
-        {tabs.map((tab) => {
+        {tabs.filter((tab) => anyHub || !HUB_TABS.has(tab.id)).map((tab) => {
           const Icon = tab.icon;
           return (
             <button
@@ -1021,86 +1029,89 @@ const Admin = () => {
             <CompanionDevicesPanel scope="all" />
           </section>
 
-          <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h3 className="flex items-center gap-3 text-xl font-bold text-white">
-                  <Cpu size={20} className="text-orange-300" />
-                  Device Assignments
-                </h3>
-                <p className="mt-1 text-sm text-slate-400">Who can use each device. A device can be shared: add it once per person.</p>
-              </div>
-              <HelpTooltip docName="ENTITY_PROTECTION.md" sectionTitle="## The rule" label="Device Assignments" />
-            </div>
-
-            <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
-              <EntitySearchDropdown
-                value={deviceId}
-                onChange={setDeviceId}
-                placeholder="Search Home Assistant entities..."
-                testId="entity-search"
-              />
-              <select
-                value={deviceUsername}
-                aria-label="Device User"
-                onChange={(event) => setDeviceUsername(event.target.value)}
-                className="glass-input bg-black/30"
-              >
-                <option value="">Select user</option>
-                {users.map((user) => (
-                  <option key={user.username} value={user.username}>
-                    {user.username}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => {
-                  if (!deviceId.trim() || !deviceUsername) {
-                    toast.error('Choose a user and a device ID');
-                    return;
-                  }
-                  assignDeviceMutation.mutate({ username: deviceUsername, device_id: deviceId.trim() });
-                }}
-                disabled={assignDeviceMutation.isPending}
-                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-              >
-                <Save size={14} />
-                Add person
-              </button>
-            </div>
-
-            <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-2">
-              {devices.map((device) => (
-                <div key={device.id} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-mono text-sm text-white truncate">{device.device_id}</p>
-                    <p className="mt-1 break-all text-xs text-slate-400">@{device.username}</p>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      if (await confirmDialog({
-                        title: 'Remove this device?',
-                        body: `Remove @${device.username} from ${device.device_id}?`,
-                        confirmLabel: 'Remove',
-                        danger: true,
-                      })) {
-                        removeDeviceMutation.mutate({ device_id: device.device_id, username: device.username });
-                      }
-                    }}
-                    className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
-                    aria-label={`Remove @${device.username} from ${device.device_id}`}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+          {/* Device assignments, Entity Protection and Home alerts work on the home
+              hub's devices: with no hub they say so instead of failing. */}
+          {anyHub ? (
+            <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                    <Cpu size={20} className="text-orange-300" />
+                    Device Assignments
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">Who can use each device. A device can be shared: add it once per person.</p>
                 </div>
-              ))}
-            </div>
-          </section>
+                <HelpTooltip docName="ENTITY_PROTECTION.md" sectionTitle="## The rule" label="Device Assignments" />
+              </div>
 
-          {/* These work on the home hub's devices: with no hub they say so instead of failing. */}
-          {anyHub ? <EntityProtectionPanel users={users} /> : <HubNotConnected title="Entity Protection" />}
+              <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
+                <EntitySearchDropdown
+                  value={deviceId}
+                  onChange={setDeviceId}
+                  placeholder="Search Home Assistant entities..."
+                  testId="entity-search"
+                />
+                <select
+                  value={deviceUsername}
+                  aria-label="Device User"
+                  onChange={(event) => setDeviceUsername(event.target.value)}
+                  className="glass-input bg-black/30"
+                >
+                  <option value="">Select user</option>
+                  {users.map((user) => (
+                    <option key={user.username} value={user.username}>
+                      {user.username}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => {
+                    if (!deviceId.trim() || !deviceUsername) {
+                      toast.error('Choose a user and a device ID');
+                      return;
+                    }
+                    assignDeviceMutation.mutate({ username: deviceUsername, device_id: deviceId.trim() });
+                  }}
+                  disabled={assignDeviceMutation.isPending}
+                  className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                >
+                  <Save size={14} />
+                  Add person
+                </button>
+              </div>
 
-          {anyHub ? <HomeAlertsPanel users={users} /> : <HubNotConnected title="Home alerts" />}
+              <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-2">
+                {devices.map((device) => (
+                  <div key={device.id} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-sm text-white truncate">{device.device_id}</p>
+                      <p className="mt-1 break-all text-xs text-slate-400">@{device.username}</p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (await confirmDialog({
+                          title: 'Remove this device?',
+                          body: `Remove @${device.username} from ${device.device_id}?`,
+                          confirmLabel: 'Remove',
+                          danger: true,
+                        })) {
+                          removeDeviceMutation.mutate({ device_id: device.device_id, username: device.username });
+                        }
+                      }}
+                      className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
+                      aria-label={`Remove @${device.username} from ${device.device_id}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : <HubNotConnected title="Device assignments, protection and home alerts" />}
+
+          {anyHub && <EntityProtectionPanel users={users} />}
+
+          {anyHub && <HomeAlertsPanel users={users} />}
 
           <WeatherRemindersPanel users={users} />
 
@@ -1108,7 +1119,11 @@ const Admin = () => {
         </div>
       )}
 
-      {activeTab === 'groups' && (
+      {!anyHub && HUB_TABS.has(activeTab) && (
+        <HubNotConnected title={activeTab === 'groups' ? 'Device Groups' : 'Telemetry'} />
+      )}
+
+      {activeTab === 'groups' && anyHub && (
         <div className="space-y-6">
           <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto">
             {(['media', 'lights', 'patterns'] as const).map((tab) => (
@@ -1439,14 +1454,14 @@ const Admin = () => {
         </div>
       )}
 
-      {activeTab === 'telemetry' && <TelemetryAdminPanel />}
+      {activeTab === 'telemetry' && anyHub && <TelemetryAdminPanel />}
       {activeTab === 'storage' && <SystemStoragePanel />}
       {activeTab === 'network' && <NetworkPanel />}
 
       {activeTab === 'intercom' && (
         <div className="space-y-6">
           <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto">
-            {(['sessions', 'broadcast', 'announce', 'config'] as const).map((tab) => (
+            {(['sessions', 'broadcast', 'announce', 'config'] as const).filter((tab) => anyHub || !HUB_INTERCOM_TABS.has(tab)).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setIntercomTab(tab)}
@@ -1542,7 +1557,7 @@ const Admin = () => {
             </div>
           )}
 
-          {intercomTab === 'broadcast' && (
+          {intercomTab === 'broadcast' && anyHub && (
             <section className="glass-panel p-4 sm:p-6">
               <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                 <Radio size={20} className="text-amber-400" />
@@ -1582,7 +1597,7 @@ const Admin = () => {
             </section>
           )}
 
-          {intercomTab === 'announce' && (
+          {intercomTab === 'announce' && anyHub && (
             <section className="glass-panel p-4 sm:p-6">
               <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
                 <Megaphone size={20} className="text-cyan-400" />

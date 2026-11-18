@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import type { IActiveMediaWidgetProps } from '../../types/widget';
 import { useOptionalWebPlayer } from '../../context/webPlayerContext';
 import { useMediaToken } from '../../lib/mediaToken';
+import { useIntegrations } from '../../hooks/useIntegrations';
 import { adapterFor } from '../../features/media/engine/adapters/adapters';
 import type { TransportCommand } from '../../features/media/engine/adapters/PlayerAdapter';
 import { useMediaStatusFeed } from '../../features/media/engine/statusFeed';
@@ -29,7 +30,8 @@ const controlButton =
 const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiveMediaWidgetProps) => {
   useMediaToken(); // cover art URLs are signed
   const web = useOptionalWebPlayer();
-  useMediaStatusFeed(web, { maPlayers: false });
+  const { anyHub, settled } = useIntegrations();
+  useMediaStatusFeed(web, { maPlayers: false, hub: settled ? anyHub : null });
   const loaded = useMediaStore((s) => s.statusReadAt !== null);
   const statusError = useMediaStore((s) => s.statusReadError);
   const players = useMediaStore((s) => s.players);

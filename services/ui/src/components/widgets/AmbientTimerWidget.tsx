@@ -22,6 +22,7 @@ import type { IWidgetProps } from '../../types/widget';
 import * as chimeLib from '../../lib/chime';
 import { playChime, unlockChime } from '../../lib/chime';
 import { api } from '../../services/api';
+import { useIntegrations } from '../../hooks/useIntegrations';
 import type { TimerTargetDevice } from '../../types/api';
 import { formatClock } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -163,8 +164,11 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
     } catch { /* ignore in partial mocks */ }
   }, []);
 
-  // Fetch HA media players and ESPHome/mobile timer devices
+  // The hub's media players (only while a home hub is connected) and the
+  // ESPHome/mobile timer devices.
+  const { anyHub } = useIntegrations();
   useEffect(() => {
+    if (!anyHub) return;
     api.getEntities().then((entities) => {
       const players = (entities || [])
         .filter((e: Record<string, unknown>) => e.domain === 'media_player')
@@ -175,7 +179,9 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
         }));
       setMediaPlayers(players);
     }).catch(() => {});
+  }, [anyHub]);
 
+  useEffect(() => {
     if (typeof api.getTimerDevices === 'function') {
       api.getTimerDevices().then((res) => {
         if (res?.devices) {

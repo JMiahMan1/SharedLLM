@@ -21,6 +21,8 @@ vi.mock('../../services/api', async (importOriginal) => {
       createTimer: vi.fn().mockResolvedValue({ status: 'ACCEPTED', message: 'Timer created' }),
       deleteTimer: vi.fn().mockResolvedValue({ status: 'ACCEPTED', message: 'Timer deleted' }),
       getEntities: vi.fn().mockResolvedValue([]),
+      // A home hub is connected, so the hub's media players are offered.
+      getIntegrationsStatus: vi.fn().mockResolvedValue({ homehub: { enabled: true }, home_assistant: { enabled: true } }),
     },
   };
 });
@@ -617,7 +619,8 @@ describe('AmbientTimerWidget', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Kitchen Egg Timer' }));
     // Select both Mobile App and Kitchen Speaker
     fireEvent.click(screen.getByRole('button', { name: /Mobile App/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Kitchen Speaker/i }));
+    // The hub's speakers arrive once the integrations status says a hub is connected.
+    fireEvent.click(await screen.findByRole('button', { name: /Kitchen Speaker/i }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Add timer' }));
 

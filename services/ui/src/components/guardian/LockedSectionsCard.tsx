@@ -6,6 +6,7 @@ import { api } from '../../services/api';
 import { statusQuery } from '../../lib/memberPage';
 import MemberCard from '../member/MemberCard';
 import type { ScreenRules } from '../../types/api';
+import { useIntegrations } from '../../hooks/useIntegrations';
 
 /**
  * "While locked, Jarvis can use": the parts of Jarvis a child can still open
@@ -19,6 +20,10 @@ export default function LockedSectionsCard({ username, name }: { username: strin
   const { data: status, isLoading, isError } = useQuery(statusQuery(username));
   const [edited, setEdited] = useState<string[] | null>(null);
   const choices = status?.locked_section_choices || [];
+  // Devices (the hub's lights and the TV remote) is offered only while a home
+  // hub is connected. A saved choice is kept and applies again once one is.
+  const { anyHub } = useIntegrations();
+  const shown = anyHub ? choices : choices.filter((c) => c.id !== 'devices');
   const chosen = edited ?? status?.locked_sections ?? [];
   const save = useMutation({
     mutationFn: (rules: ScreenRules) => api.setScreenRules(username, rules),
@@ -64,7 +69,7 @@ export default function LockedSectionsCard({ username, name }: { username: strin
             other app, stays locked. Their devices keep their usual permissions.
           </p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {choices.map((c) => (
+            {shown.map((c) => (
               <label
                 key={c.id}
                 className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2"

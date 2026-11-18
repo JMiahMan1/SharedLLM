@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, renderHook, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useLivePosition, LIVE_POSITION_INTERVAL_MS } from '../engine/useLivePosition';
 import { useMediaStore } from '../store/mediaStore';
 import { MediaPlayerContext, type SharedPlayer } from '../../../context/webPlayerContext';
@@ -62,11 +63,13 @@ describe('MediaOverlays', () => {
 
   it('opens Now Playing from the mini player through the store', () => {
     render(
-      <MemoryRouter initialEntries={['/bible']}>
-        <MediaPlayerContext.Provider value={player}>
-          <MediaOverlays />
-        </MediaPlayerContext.Provider>
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/bible']}>
+          <MediaPlayerContext.Provider value={player}>
+            <MediaOverlays />
+          </MediaPlayerContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     expect(screen.queryByTestId('now-playing-sheet')).toBeNull();
     act(() => screen.getByRole('button', { name: 'Open now playing' }).click());

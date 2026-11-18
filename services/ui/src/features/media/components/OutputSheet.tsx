@@ -7,6 +7,7 @@ import {
 import toast from 'react-hot-toast';
 import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
 import { api } from '../../../services/api';
+import { useIntegrations } from '../../../hooks/useIntegrations';
 import { formatDeviceLabel } from '../../../lib/deviceLabels';
 import { sendMaRemoteCommand } from '../../../lib/maRemotePlayer';
 import { cn } from '../../../lib/utils';
@@ -128,9 +129,12 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
   const webTitle = player?.mediaTitle ?? null;
   const webVolume = player?.volume ?? 0;
 
+  // The hub's players are asked for only while a home hub is connected;
+  // without one the list is this device and Music Assistant's speakers.
+  const { anyHub } = useIntegrations();
   const refresh = useCallback(async () => {
     const [statusResult, maResult] = await Promise.allSettled([
-      api.mediaStatus({ silent: true }),
+      anyHub ? api.mediaStatus({ silent: true }) : Promise.reject(new Error('no home hub')),
       sendMaRemoteCommand('players/all'),
     ]);
 
@@ -156,8 +160,9 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
       maOk = true;
     }
 
+    if (!anyHub) setStatusPlayers([]);
     setUnavailable(!statusOk && !maOk);
-  }, []);
+  }, [anyHub]);
 
   useEffect(() => {
     if (!open) return;
@@ -615,7 +620,9 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
 
               {unavailable ? (
                 <p className="mt-3 rounded-xl border border-[var(--color-border-mid)] bg-[var(--site-card-bg)] px-3 py-2 text-xs text-[var(--site-text)]">
-                  Could not load the other speakers. Check that Music Assistant and the home hub are reachable.
+                  {anyHub
+                    ? 'Could not load the other speakers. Check that Music Assistant and the home hub are reachable.'
+                    : 'Could not load the other speakers. Check that Music Assistant is reachable.'}
                 </p>
               ) : null}
 

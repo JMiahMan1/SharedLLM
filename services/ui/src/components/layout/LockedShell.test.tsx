@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, screen, within } from '@testing-library/react';
 import { renderWithProviders } from '../../test/render';
 import LockedShell from './LockedShell';
+import { http, HttpResponse } from 'msw';
+import { server } from '../../test/setup';
 import Family from '../../pages/Family';
 import { normalizeSections, resetLockedModeForTests, setLockedMode } from '../../lib/lockedMode';
 
@@ -47,6 +49,23 @@ describe('locked shell', () => {
     expect(await screen.findByText('chores card')).toBeInTheDocument();
     expect(screen.queryByText('devices card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('the-page')).not.toBeInTheDocument();
+  });
+
+  it('offers Devices with a home hub connected', async () => {
+    renderWithProviders(<LockedShell sections={['chat', 'devices']}>{page}</LockedShell>, { route: '/' });
+    expect(await screen.findByText('devices card')).toBeInTheDocument();
+    expect(within(screen.getByTestId('locked-nav')).getByRole('link', { name: 'Devices' })).toBeInTheDocument();
+  });
+
+  it('leaves Devices out with no home hub: no card, no button, and its page stays locked', async () => {
+    server.use(http.get('/api/integrations/status', () => HttpResponse.json({
+      homehub: { enabled: false }, home_assistant: { enabled: false } })));
+    renderWithProviders(<LockedShell sections={['chat', 'devices', 'bible']}>{page}</LockedShell>, { route: '/' });
+    expect(await within(screen.getByTestId('locked-nav')).findByRole('link', { name: 'Bible' })).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText('devices card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('locked-home-devices')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('locked-nav')).queryByRole('link', { name: 'Devices' })).not.toBeInTheDocument();
   });
 });
 

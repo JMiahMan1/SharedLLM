@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { api } from '../../../services/api';
 import { useHaptics } from '../../../hooks/useHaptics';
+import { useIntegrations } from '../../../hooks/useIntegrations';
 import { useSharedMAWebPlayer } from '../../../context/MediaPlayerContext';
 import type { SharedPlayer } from '../../../context/webPlayerContext';
 import type { DeviceOption } from '../types';
@@ -11,8 +12,8 @@ import { mediaKeys } from '../api/keys';
 import { useMediaStatusFeed } from '../engine/statusFeed';
 import { usePlayback } from '../engine/usePlayback';
 import { useMediaActions, useMediaStore } from '../store/mediaStore';
-import { deviceOptions, selectPlayers } from '../store/selectors';
-import type { OutputId } from '../types';
+import { deviceOptions, selectPlayers, type MediaEntity } from '../store/selectors';
+import { outputKind, type OutputId } from '../types';
 
 /** What every media route shares: this device's player, the playback
  *  routing for the selected output, and the device list. */
@@ -22,6 +23,8 @@ export interface MediaScreenValue {
   devices: DeviceOption[];
   selectDevice: (id: OutputId) => void;
 }
+
+const NO_ENTITIES: MediaEntity[] = [];
 
 const MediaScreenContext = createContext<MediaScreenValue | null>(null);
 
@@ -43,7 +46,10 @@ export function MediaScreen() {
   const playback = usePlayback(player);
   const players = useMediaStore(selectPlayers);
   const { selectOutput } = useMediaActions();
-  useMediaStatusFeed(player);
+  // The hub's speakers and TVs join the list only while a home hub is
+  // connected; Music Assistant, Audiobookshelf and this device work without one.
+  const { anyHub, settled } = useIntegrations();
+  useMediaStatusFeed(player, { hub: settled ? anyHub : null });
 
   const [searchParams] = useSearchParams();
   const requestedOutput = searchParams.get('output');
@@ -56,8 +62,17 @@ export function MediaScreen() {
     queryFn: () => api.getEntities(),
     select: (data) => data.filter((e) => e.domain === 'media_player'),
     staleTime: 60_000,
+    enabled: anyHub,
   });
-  const devices = useMemo(() => deviceOptions(entities, players, player.playerId), [entities, players, player.playerId]);
+  const hubEntities = anyHub ? entities : NO_ENTITIES;
+  const devices = useMemo(() => deviceOptions(hubEntities, players, player.playerId), [hubEntities, players, player.playerId]);
+
+  // A hub speaker chosen while a hub was connected (it is remembered across
+  // restarts) cannot be driven without one: play on this device instead.
+  const target = useMediaStore((s) => s.activeOutputId);
+  useEffect(() => {
+    if (settled && !anyHub && outputKind(target) === 'ha') selectOutput('');
+  }, [settled, anyHub, target, selectOutput]);
 
   const { clearError } = playback;
   const selectDevice = useCallback((id: OutputId) => {
