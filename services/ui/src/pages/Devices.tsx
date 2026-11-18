@@ -29,6 +29,7 @@ import { CardSkeletons } from '../components/ui/StateViews';
 import IntegrationsPanel from '../components/devices/IntegrationsPanel';
 import HardwarePanel from '../components/devices/HardwarePanel';
 import DuplicatesPanel from '../components/devices/DuplicatesPanel';
+import LightGroupsPanel from '../components/devices/LightGroupsPanel';
 import PhonesPanel from '../components/devices/PhonesPanel';
 import RoomMapPanel from '../components/devices/RoomMapPanel';
 import AreasPanel from '../components/devices/AreasPanel';
@@ -1370,7 +1371,7 @@ function AuditLogPanel() {
 
 /** The admin's tabs, and which old "#devices-..." link opens which. */
 const DEVICE_TABS = [
-  { id: 'devices', label: 'Your devices', anchors: ['devices-hardware'] },
+  { id: 'devices', label: 'Your devices', anchors: ['devices-hardware', 'devices-light-groups', 'devices-duplicates'] },
   { id: 'add', label: 'Add devices', anchors: ['devices-new', 'add-fix'] },
   { id: 'places', label: 'Rooms & places', anchors: ['devices-areas', 'devices-labels', 'devices-zones'] },
   { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-persons', 'devices-rooms'] },
@@ -1538,6 +1539,9 @@ export default function Devices() {
         {files.data?.folders.map((f) => <FolderCard key={f.folder} folder={f} members={members.filter((m) => m.readable)} />)}
       </div>
 
+      {/* Parents without the admin flag see no hub tabs, but grouping lights is theirs too. */}
+      {homehub && !user?.is_admin && <div id="devices-light-groups" className="scroll-mt-4"><LightGroupsPanel /></div>}
+
       <div id="devices-activity" className="scroll-mt-4"><AuditLogPanel /></div>
       </div>)}
 
@@ -1545,6 +1549,7 @@ export default function Devices() {
       {user?.is_admin && tab === 'devices' && (
         <div id="devices-tab-devices" role="tabpanel" className="space-y-4">
           <div id="devices-hardware" className="scroll-mt-4"><HardwarePanel onAdd={() => openTab('add')} /></div>
+          <div id="devices-light-groups" className="scroll-mt-4"><LightGroupsPanel /></div>
           <div id="devices-duplicates" className="scroll-mt-4"><DuplicatesPanel /></div>
         </div>
       )}

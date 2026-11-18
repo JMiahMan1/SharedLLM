@@ -70,6 +70,8 @@ import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
 import HardwarePanel from '../components/settings/HardwarePanel';
 import HubNotConnected from '../components/admin/HubNotConnected';
+import LightGroupsPanel from '../components/devices/LightGroupsPanel';
+import { LIGHT_GROUPS_KEY, getLightGroups } from '../lib/lightGroups';
 import { useIntegrations } from '../hooks/useIntegrations';
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
@@ -205,7 +207,7 @@ const normalizeServiceKey = (name: string): string =>
 
 const Admin = () => {
   const queryClient = useQueryClient();
-  const { anyHub } = useIntegrations();
+  const { anyHub, homehub } = useIntegrations();
   const location = useLocation();
   const navigate = useNavigate();
   const activeTab = adminTabFromPathname(location.pathname);
@@ -549,11 +551,14 @@ const Admin = () => {
     enabled: activeTab === 'groups' && anyHub,
   });
 
-  const { data: lightClusters = [] } = useQuery<GroupItem[]>({
-    queryKey: ['light-clusters'],
-    queryFn: () => api.getLightClusters(),
-    enabled: activeTab === 'groups' && anyHub,
+  // Light clusters became the hub's light groups (Devices > Light groups); the pattern target lists them.
+  const { data: lightGroups } = useQuery({
+    queryKey: LIGHT_GROUPS_KEY,
+    queryFn: getLightGroups,
+    enabled: activeTab === 'groups' && homehub,
+    retry: false,
   });
+  const lightGroupNames = (lightGroups?.groups ?? []).map((g) => g.name);
 
   const { data: lightPatterns = [] } = useQuery<GroupItem[]>({
     queryKey: ['light-patterns'],
@@ -579,26 +584,6 @@ const Admin = () => {
       toast.success('Media group deleted');
     },
     onError: (error: Error) => toast.error(error.message || 'Failed to delete media group'),
-  });
-
-  const createLightClusterMutation = useMutation({
-    mutationFn: (data: { name: string; member_entity_ids: string[] }) => api.createLightCluster(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['light-clusters'] });
-      setNewGroupName('');
-      setNewGroupMembers('');
-      toast.success('Light cluster created');
-    },
-    onError: (error: Error) => toast.error(error.message || 'Failed to create light cluster'),
-  });
-
-  const deleteLightClusterMutation = useMutation({
-    mutationFn: (name: string) => api.deleteLightCluster(name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['light-clusters'] });
-      toast.success('Light cluster deleted');
-    },
-    onError: (error: Error) => toast.error(error.message || 'Failed to delete light cluster'),
   });
 
   interface PatternStep { brightness?: number; color_temp?: number; rgb_color?: number[]; transition?: number; delay?: number }
@@ -1137,7 +1122,7 @@ const Admin = () => {
                 }`}
               >
                 {tab === 'media' ? <Cpu size={14} /> : tab === 'lights' ? <Lightbulb size={14} /> : <Play size={14} />}
-                {tab === 'media' ? 'Media Groups' : tab === 'lights' ? 'Light Clusters' : 'Light Patterns'}
+                {tab === 'media' ? 'Media Groups' : tab === 'lights' ? 'Light Groups' : 'Light Patterns'}
               </button>
             ))}
           </div>
@@ -1227,86 +1212,12 @@ const Admin = () => {
           )}
 
           {groupTab === 'lights' && (
-            <div className="space-y-6">
-              <section className="glass-panel p-4 sm:p-6">
-                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
-                  <Plus size={20} className="text-yellow-400" />
-                  Create Light Cluster
-                </h3>
-                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
-                  <input
-                    type="text"
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    aria-label="Light cluster name"
-                    placeholder="Cluster name (e.g., Kitchen Lights)"
-                    className="glass-input"
-                  />
-                  <EntityMultiSelect
-                    values={newGroupMembers.split(',').map((s) => s.trim()).filter(Boolean)}
-                    onChange={(vals) => setNewGroupMembers(vals.join(', '))}
-                    placeholder="Search and add light entities..."
-                    domainFilter="light"
-                  />
-                  <button
-                    onClick={() => {
-                      if (!newGroupName.trim() || !newGroupMembers.trim()) {
-                        toast.error('Enter a name and member entity IDs');
-                        return;
-                      }
-                      createLightClusterMutation.mutate({
-                        name: newGroupName.trim(),
-                        member_entity_ids: newGroupMembers.split(',').map((s) => s.trim()).filter(Boolean),
-                      });
-                    }}
-                    disabled={createLightClusterMutation.isPending}
-                    className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
-                  >
-                    <Save size={14} />
-                    Create
-                  </button>
-                </div>
-              </section>
-
-              <section className="glass-panel p-4 sm:p-6">
-                <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
-                  <Lightbulb size={20} className="text-yellow-300" />
-                  Light Clusters
-                </h3>
-                <div className="space-y-3">
-                  {lightClusters.map((cluster) => (
-                    <div key={cluster.name} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-white">{cluster.name}</p>
-                        <p className="mt-1 text-xs text-slate-400 truncate">
-                          {cluster.member_entity_ids?.join(', ') || 'No members'}
-                        </p>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          if (await confirmDialog({
-                            title: 'Delete this light cluster?',
-                            body: `Delete ${cluster.name}? The lights themselves stay as they are.`,
-                            confirmLabel: 'Delete',
-                            danger: true,
-                          })) {
-                            deleteLightClusterMutation.mutate(cluster.name);
-                          }
-                        }}
-                        className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
-                        aria-label={`Delete ${cluster.name}`}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  ))}
-                  {!lightClusters.length && (
-                    <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
-                      No light clusters configured.
-                    </p>
-                  )}
-                </div>
-              </section>
+            <div className="space-y-4">
+              {homehub ? <LightGroupsPanel /> : (
+                <p className="glass-panel p-4 text-sm text-slate-400">
+                  Light groups live in HomeHub. Connect HomeHub to group lights.
+                </p>
+              )}
             </div>
           )}
 
@@ -1382,12 +1293,12 @@ const Admin = () => {
                   <select
                     value={executeTargetCluster}
                     onChange={(e) => setExecuteTargetCluster(e.target.value)}
-                    aria-label="Target light cluster"
+                    aria-label="Target light group"
                     className="glass-input bg-black/30"
                   >
-                    <option value="">Target cluster (optional)</option>
-                    {lightClusters.map((c) => (
-                      <option key={c.name} value={c.name}>{c.name}</option>
+                    <option value="">Light group (optional)</option>
+                    {lightGroupNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
                     ))}
                   </select>
                   <button

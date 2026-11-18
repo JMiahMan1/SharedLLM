@@ -43,7 +43,8 @@ RECONFIGURABLE: dict[str, dict[str, Any]] = {
 SHARED_ENTRIES = {"matter", "cast", "music_assistant", "mobile_app"}
 _MATTER_NODE = re.compile(r"^deviceid_[0-9A-Fa-f]+-([0-9A-Fa-f]+)-MatterNodeDevice$")
 
-EXTRA_LABELS = {"esphome_builder": "ESPHome Device Builder", "matter": "Matter", "music_assistant": "Music Assistant"}
+EXTRA_LABELS = {"esphome_builder": "ESPHome Device Builder", "matter": "Matter", "music_assistant": "Music Assistant",
+                "group": "Light group"}
 
 
 class EntryError(HubError):

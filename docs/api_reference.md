@@ -85,6 +85,18 @@ Notes:
 
 - Fast-path intents can execute directly against the execution service and still
   return the same Ollama-compatible envelope.
+- Turn on/off picks one device only when its name is a clear match
+  (`IntentEngine.resolve_device`). A plural or room phrase ("the kitchen lights",
+  "all the lights in the kitchen", "the kitchen") switches every light it names
+  that the person may see, or the light group that holds them, through
+  execution's `POST /execute/lights` (`services/gateway/fast_lights.py`). Each
+  light is confirmed like a single one, and the answer is one sentence of what
+  was seen: "The kitchen lights are off." or "6 of 7 kitchen lights are off;
+  Kitchen Light 4 isn't responding."
+- A turn on/off command the model answers may not claim a change that no
+  device tool made in that turn (`services/gateway/device_claims.py`): such an
+  answer is replaced by what is true. A spoken request repeated word for word
+  is not shown its earlier answer in the voice history.
 - Slow-path requests gather device, storage, and log context before calling
   Ollama.
 - When `debug: true` is present, the response may include `debug_context`.

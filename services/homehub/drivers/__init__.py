@@ -18,6 +18,7 @@ DRIVERS: dict[str, str] = {
     "esphome_builder": "services.homehub.drivers.esphome_builder:ESPHomeBuilderDriver",
     "tasmota": "services.homehub.drivers.tasmota:TasmotaDriver",
     "switch_as_x": "services.homehub.drivers.switch_as_x:SwitchAsXDriver",
+    "group": "services.homehub.drivers.group:LightGroupDriver",
     "matter": "services.homehub.drivers.matter:MatterDriver",
     "cast": "services.homehub.drivers.cast:CastDriver",
     "roku": "services.homehub.drivers.roku:RokuDriver",

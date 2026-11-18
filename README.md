@@ -10,7 +10,10 @@ Requests are handled in three tiers, balancing speed and intelligence:
 
 1. **Tier 1: FastPath (semantic matcher)**: keyword and embedding match
    (`nomic-embed-text-v1.5`) for common commands, bypassing the LLM entirely.
-   Use case: "turn off the lights". Under ~100 ms.
+   Use case: "turn off the lights". Under ~100 ms. A phrase naming several
+   lights ("the kitchen lights", "all the lights in the kitchen") switches all
+   of them, or the light group that holds them, and says what really happened
+   (`services/gateway/fast_lights.py`).
 2. **Tier 2: Librarian**: single-turn LLM with tool access (up to 3 tool
    turns) for ambiguous home commands, document retrieval and general
    questions. Seconds.

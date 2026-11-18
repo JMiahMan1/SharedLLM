@@ -434,6 +434,7 @@
 [data-theme-scheme="light"] .text-rose-300\/30 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 30%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-300\/40 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 40%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-300\/80 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 80%, transparent) !important; }
+[data-theme-scheme="light"] .text-rose-300\/90 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-400 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-rose-50 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-rose-500 { color: oklch(51.4% 0.222 16.935) !important; }

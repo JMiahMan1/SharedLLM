@@ -88,7 +88,6 @@ import type {
   WorkspaceChatSummary,
   RavenConfig,
   MediaGroup,
-  LightCluster,
   LightPattern,
   TelemetryEnrollment,
   IntercomSessionData,
@@ -4389,24 +4388,6 @@ export const api = {
 
   async deleteMediaGroup(name: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.delete(`/api/groups/media/${encodeURIComponent(name)}`);
-    return resp.data;
-  },
-
-  async getLightClusters(): Promise<LightCluster[]> {
-    const resp = await apiClient.get('/api/groups/lights');
-    return listOf(resp.data, 'clusters').map((c) => ({
-      name: String(c.name ?? c.cluster_id ?? c.cluster_name ?? ''),
-      member_entity_ids: (c.member_entity_ids as string[] | undefined) ?? [],
-    }));
-  },
-
-  async createLightCluster(data: { name: string; member_entity_ids: string[]; default_brightness?: number; default_color_temp?: number }): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/api/groups/lights', data);
-    return resp.data;
-  },
-
-  async deleteLightCluster(name: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.delete(`/api/groups/lights/${encodeURIComponent(name)}`);
     return resp.data;
   },
 

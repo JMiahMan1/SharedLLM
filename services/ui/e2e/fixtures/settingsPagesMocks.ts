@@ -290,7 +290,16 @@ const GET: Record<string, unknown> = {
   // Admin: device groups
   '/api/groups/media': { groups: [{ name: 'Downstairs speakers', member_entity_ids: ['media_player.den_tv', 'media_player.kitchen_speaker'] },
     { name: LONG_WORD, member_entity_ids: [] }] },
-  '/api/groups/lights': { clusters: [{ name: 'Kitchen', member_entity_ids: ['light.kitchen_ceiling_light_over_the_island_and_the_long_counter'] }] },
+  // Light clusters became the hub's light groups (Devices > Light groups); Admin > Device Groups shows the same panel.
+  '/api/homehub/light_groups': {
+    groups: [{ entry_id: 'g1', entity_id: 'light.kitchen_lights', name: 'Kitchen lights', area_id: 'kitchen', area: 'Kitchen',
+      state: 'on', missing: 0, members: [
+        { entity_id: 'light.kitchen_ceiling_light_over_the_island_and_the_long_counter', name: LONG_WORD, state: 'on', missing: false, hidden: false, area: 'Kitchen' },
+        { entity_id: 'light.kitchen_pendant', name: 'Pendant', state: 'off', missing: false, hidden: false, area: 'Kitchen' },
+      ] }],
+    lights: [{ entity_id: 'light.kitchen_pendant', name: 'Pendant', area: 'Kitchen', hidden: false, available: true }],
+    areas: [{ area_id: 'kitchen', name: 'Kitchen' }],
+  },
   '/api/groups/patterns': { patterns: [{ name: 'Wake up slowly', steps: [{ brightness: 10, transition: 60 }, { brightness: 200, transition: 300 }] }] },
   // Admin: telemetry, storage, intercom, raven
   '/api/telemetry/enroll': { enrollments: [

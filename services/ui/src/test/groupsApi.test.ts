@@ -1,7 +1,8 @@
 /**
  * The Groups page's reads: Identity answers with plain lists of stored records
- * (cluster_id / cluster_name, ...), which the page used to read as
- * `{ clusters: [...] }` and so always showed nothing.
+ * (pattern_id / pattern_name, ...), which the page used to read as
+ * `{ patterns: [...] }` and so always showed nothing. (Light clusters became the
+ * hub's light groups: lightGroups.test.ts.)
  */
 import { describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
@@ -9,16 +10,13 @@ import { server } from './setup';
 import { api } from '../services/api';
 
 describe('groups API', () => {
-  it('reads light clusters and patterns from the plain lists Identity returns', async () => {
+  it('reads light patterns and media groups from the plain lists Identity returns', async () => {
     server.use(
-      http.get('*/api/groups/lights', () =>
-        HttpResponse.json([{ cluster_id: 'porch', cluster_name: 'Porch', member_entity_ids: ['light.a'] }])),
       http.get('*/api/groups/patterns', () =>
         HttpResponse.json([{ pattern_id: 'xmas', pattern_name: 'Christmas', steps: [{ positions: [0] }] }])),
       http.get('*/api/groups/media', () =>
         HttpResponse.json([{ group_id: 'kitchen', group_name: 'Kitchen', member_entity_ids: [] }])),
     );
-    expect(await api.getLightClusters()).toEqual([{ name: 'porch', member_entity_ids: ['light.a'] }]);
     expect((await api.getLightPatterns())[0]).toMatchObject({ name: 'xmas' });
     expect((await api.getMediaGroups())[0]).toMatchObject({ name: 'kitchen' });
   });

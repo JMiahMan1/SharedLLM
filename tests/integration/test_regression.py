@@ -143,16 +143,14 @@ class TestGroupEndpointFlexibility:
         # Clean up
         internal_client.delete(f"{IDENTITY_URL}/api/groups/media/{test_name}")
 
-    def test_create_light_cluster_accepts_name_field(self, internal_client):
-        """Light cluster creation must accept 'name' as alternative to 'cluster_id'."""
-        test_name = f"regression_test_{int(time.time())}"
+    def test_light_clusters_are_made_as_light_groups_now(self, internal_client):
+        """Light clusters moved to the home hub's light groups: identity refuses new ones with where to go."""
         resp = internal_client.post(
             f"{IDENTITY_URL}/api/groups/lights",
-            json={"name": test_name, "member_entity_ids": ["light.test"]},
+            json={"name": f"regression_test_{int(time.time())}", "member_entity_ids": ["light.test"]},
         )
-        assert resp.status_code == 200, f"Should accept 'name' field: {resp.text}"
-        # Clean up
-        internal_client.delete(f"{IDENTITY_URL}/api/groups/lights/{test_name}")
+        assert resp.status_code == 410, resp.text
+        assert "light groups" in resp.text
 
     def test_create_light_pattern_accepts_name_field(self, internal_client):
         """Light pattern creation must accept 'name' as alternative to 'pattern_id'."""

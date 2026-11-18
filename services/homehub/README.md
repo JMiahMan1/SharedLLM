@@ -57,6 +57,7 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | esphome | `esphome.py` | aioesphomeapi, push; stale IP falls back to `<device_name>.local`; user actions become `esphome.<node>_<action>` services |
 | tasmota | `tasmota.py` | HTTP `cm?cmnd=` (HA used MQTT through its own broker, now gone) |
 | switch_as_x | `switch_as_x.py` | Mirrors the wrapped switch |
+| group (light) | `group.py` | A light group: commands fan out to the member lights, the state follows them. See Light groups below. |
 | cast, roku, webostv, samsungtv, androidtv_remote, dlna_dmr | media drivers | Same client identities HA used, so no TV asks to pair again |
 | music_assistant | `music_assistant.py` | MA's WebSocket API; registers the `music_assistant.*` services. See `MUSIC_ASSISTANT.md`. |
 | homekit_controller | `homekit.py` | aiohomekit, on HA's stored pairings or new ones (`pairing.py`); every standard HAP service mapped by type (`homekit_services.py`) |
@@ -425,6 +426,33 @@ restarts. `GET /hub/bluetooth/map` gives each room's samples and sessions,
 leave-one-session-out accuracy (a room needs two sessions), the confusion
 matrix, and `stale_reason` when a scanner was added, moved to another area or
 went quiet after mapping (map the rooms again).
+
+## Light groups (`light_groups.py`, `drivers/group.py`)
+
+HA's group helper of type light: several lights that switch as one. Each group is a config entry
+(domain `group`, HA's options shape `{group_type: light, entities, hide_members, all}`, so an
+imported HA light group is the same thing) with one `light` entity whose unique id is the entry id.
+The entity has no device: its name and room are its own, so it shows in its room like any light and
+schedules, automations and voice ("turn off the kitchen lights") can name it.
+
+- **Commands fan out.** `light.turn_on` / `turn_off` (with brightness, colour, transition) become one
+  call on the members that can be reached; `toggle` turns them all off while any is on. One member
+  that does not answer does not stop the others.
+- **The state follows the members**: `on` while any member is on, `off` otherwise, `unavailable`
+  only when none can be reached. Brightness and colour temperature are averaged over the members that
+  are on; colour modes, features and effects are what they offer together. The `entity_id` attribute
+  lists the members (HA's), which is how Jarvis's fast path finds a group's lights.
+- **Members** are lights only, never another group (a command cannot loop). A member deleted later is
+  skipped and listed as missing until the group is edited; one hidden as a duplicate copy is still
+  a member and still switched.
+- `GET|POST /hub/light_groups`, `PATCH|DELETE /hub/light_groups/{entry_id}` (`light_groups_api.py`),
+  admins; the gateway lets parents in (`/api/homehub/light_groups`, Devices > Your devices > Light
+  groups, and Admin > Device Groups > Light Groups shows the same panel).
+- Admin's old "light clusters" (identity `light_cluster:*`) were names for lights that nothing could
+  switch. `light_cluster_move.py` makes a light group of each one once (its lights in the hub, its
+  room when the hub has it), deletes the cluster, and records what it did in the store's
+  `light_clusters_moved` marker; identity now refuses new clusters (410). Light patterns apply to a
+  light group's members.
 
 ## Duplicate devices (`duplicates.py`)
 

@@ -1675,11 +1675,6 @@ export interface MediaGroup {
   member_entity_ids?: string[];
 }
 
-export interface LightCluster {
-  name: string;
-  member_entity_ids?: string[];
-}
-
 export interface LightPattern {
   name: string;
   steps?: unknown[];

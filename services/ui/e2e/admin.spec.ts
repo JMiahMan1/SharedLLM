@@ -92,15 +92,14 @@ test.describe('@live Admin Page - System Matrix', () => {
     await expect(dropdown).toBeVisible({ timeout: 10000 });
   });
 
-  test('@live Device Groups tab - light clusters section loads', async ({ page }) => {
+  test('@live Device Groups tab - light groups section loads', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
     await page.getByRole('button', { name: 'Device Groups' }).click();
-    await page.getByRole('button', { name: 'Light Clusters' }).click();
+    await page.getByRole('button', { name: 'Light Groups' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Create Light Cluster' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Light Clusters' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Light groups' })).toBeVisible();
   });
 
   test('@live Telemetry tab - loads enrollment section', async ({ page }) => {

@@ -5,6 +5,7 @@ Manages CRUD operations via the Identity service database.
 from __future__ import annotations
 
 import logging
+import re
 
 import aiohttp
 
@@ -73,41 +74,17 @@ async def handle_media_group(req, user_context: UserContext) -> ExecutionResult:
 
 # Light Clusters
 async def handle_light_cluster(req, user_context: UserContext) -> ExecutionResult:
-    """Handle light cluster CRUD operations."""
+    """List the light clusters left in identity; anything else points to the hub's light groups."""
     try:
         if req.action == "list":
             clusters = await _call_identity("GET", "/api/groups/lights")
             return ExecutionResult(status="SUCCESS", message="Light clusters retrieved", service="light_clusters", detail={"clusters": clusters})
 
-        if req.action == "create":
-            payload = {
-                "cluster_id": req.cluster_id,
-                "cluster_name": req.cluster_name or req.cluster_id,
-                "member_entity_ids": req.member_entity_ids or [],
-                "room": req.room,
-                "scope": req.scope,
-                "owner_user_id": user_context.user,
-            }
-            await _call_identity("POST", "/api/groups/lights", payload)
-            return ExecutionResult(status="SUCCESS", message=f"Light cluster '{req.cluster_id}' created", service="light_clusters")
+        # Clusters became the hub's light groups (made, changed and removed on the Devices page).
+        return ExecutionResult(status="FAILURE", service="light_clusters",
+                               message="Light clusters are light groups now: make or change one on the "
+                                       "Devices page (Light groups).")
 
-        if req.action == "delete":
-            await _call_identity("DELETE", f"/api/groups/lights/{req.cluster_id}")
-            return ExecutionResult(status="SUCCESS", message=f"Light cluster '{req.cluster_id}' deleted", service="light_clusters")
-
-        if req.action == "add_member":
-            await _call_identity("POST", f"/api/groups/lights/{req.cluster_id}/members", {
-                "entity_ids": req.member_entity_ids or [],
-            })
-            return ExecutionResult(status="SUCCESS", message=f"Members added to '{req.cluster_id}'", service="light_clusters")
-
-        if req.action == "remove_member":
-            await _call_identity("DELETE", f"/api/groups/lights/{req.cluster_id}/members", {
-                "entity_ids": req.member_entity_ids or [],
-            })
-            return ExecutionResult(status="SUCCESS", message=f"Members removed from '{req.cluster_id}'", service="light_clusters")
-
-        return ExecutionResult(status="FAILURE", message=f"Unknown action: {req.action}", service="light_clusters")
     except Exception as e:
         log.error(f"Light cluster operation failed: {e}")
         return ExecutionResult(status="FAILURE", message=str(e), service="light_clusters")
@@ -149,14 +126,6 @@ async def _apply_light_pattern(req, ctx: UserContext) -> ExecutionResult:
     if not cluster_key:
         return ExecutionResult(status="FAILURE", message="Choose a light cluster to apply the pattern to.",
                                service=service)
-    cluster = _find(await _call_identity("GET", "/api/groups/lights"), cluster_key,
-                    "cluster_id", "cluster_name", "name")
-    if cluster is None:
-        return ExecutionResult(status="FAILURE", message=f"No light cluster '{cluster_key}'.", service=service)
-    members = [m for m in cluster.get("member_entity_ids") or [] if m]
-    if not members:
-        return ExecutionResult(status="FAILURE", message=f"Light cluster '{cluster_key}' has no lights.",
-                               service=service)
     if not ha_client.authorize_action(ctx.model_dump(), "light", "turn_on"):
         return ExecutionResult(status="FAILURE", message="Access Denied: you may not control these lights.",
                                service=service)
@@ -164,6 +133,18 @@ async def _apply_light_pattern(req, ctx: UserContext) -> ExecutionResult:
     if hub_ctx is None:
         return ExecutionResult(status="FAILURE", service=service, message=hardware_router.NO_HUB_MESSAGE)
     ctx = hub_ctx
+    # Light clusters became the hub's light groups (services/homehub/light_cluster_move.py); a cluster
+    # still in identity is used until the move has run.
+    members = await _hub_light_group_members(ctx, cluster_key)
+    if members is None:
+        cluster = _find(await _call_identity("GET", "/api/groups/lights"), cluster_key,
+                        "cluster_id", "cluster_name", "name")
+        if cluster is None:
+            return ExecutionResult(status="FAILURE", message=f"No light group '{cluster_key}'.", service=service)
+        members = [m for m in cluster.get("member_entity_ids") or [] if m]
+    if not members:
+        return ExecutionResult(status="FAILURE", message=f"Light group '{cluster_key}' has no lights.",
+                               service=service)
 
     transition_s = max(0, int(pattern.get("transition_ms", req.transition_ms))) / 1000
     targets: dict[str, dict] = {}
@@ -192,6 +173,27 @@ async def _apply_light_pattern(req, ctx: UserContext) -> ExecutionResult:
                                        + "; ".join(failed),
                                service=service)
     return ExecutionResult(status="SUCCESS", message=f"Applied {name} to {len(targets)} lights.", service=service)
+
+
+async def _hub_light_group_members(ctx: UserContext, key: str) -> list[str] | None:
+    """The members of the hub's light group named ``key`` (its entity id or its name), or None."""
+    try:
+        import ha_client
+    except ImportError:
+        from .. import ha_client  # type: ignore[no-redef]
+
+    want = (key or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", want).strip("_")
+    for st in await ha_client.get_states(ctx.ha_url, ctx.ha_token) or []:
+        eid = str(st.get("entity_id") or "")
+        attrs = st.get("attributes") or {}
+        members = attrs.get("entity_id")
+        if not eid.startswith("light.") or not isinstance(members, list):
+            continue
+        name = str(attrs.get("friendly_name") or "").strip().lower()
+        if want in (eid, name) or eid == f"light.{slug}":
+            return [str(m) for m in members if m]
+    return None
 
 
 async def handle_light_pattern(req, user_context: UserContext | None = None) -> ExecutionResult:
