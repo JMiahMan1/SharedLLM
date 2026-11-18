@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from services.homehub import registries
 from services.homehub.api import build_app
-from services.homehub.auth import Auth
+from services.homehub.auth import Auth, Principal
 from services.homehub.core import Area, ConfigEntry, DeviceEntry, EntityEntry, Hub
 from services.homehub.drivers import mobile_app
 from services.homehub.importer import import_config_dir
@@ -52,6 +52,28 @@ def test_every_route_is_admin_only(env):
         assert c.get(path).status_code == 401, path
     assert c.post("/hub/floors", json={"name": "Upstairs"}).status_code == 401
     assert c.post("/hub/zones/sync").status_code == 401
+
+
+class _MemberAuth(Auth):
+    """A signed-in household member who is not an admin (a child's login)."""
+
+    def authenticate(self, token):
+        if token == "member-token":
+            return Principal(user_id="u-member", name="Member", is_admin=False)
+        return super().authenticate(token)
+
+
+def test_a_member_cannot_add_rename_or_remove_a_room(env):
+    hub, store, rt, _c = env
+    c = TestClient(build_app(rt, _MemberAuth(store, SECRET)))
+    member = {"Authorization": "Bearer member-token"}
+    # The hub answers every admin-only route with 401 for a principal that is not an admin.
+    assert c.post("/hub/areas", headers=member, json={"name": "Fort"}).status_code == 401
+    assert c.patch("/hub/areas/den", headers=member, json={"name": "Clubhouse"}).status_code == 401
+    assert c.delete("/hub/areas/den", headers=member).status_code == 401
+    assert sorted(hub.areas) == ["den"] and hub.areas["den"].name == "Den"
+    # The same routes still work for an admin, so the refusal is about who asks.
+    assert c.post("/hub/areas", headers=H, json={"name": "Fort"}).status_code == 200
 
 
 def test_floors_are_made_renamed_and_removed_and_areas_pick_one(env):

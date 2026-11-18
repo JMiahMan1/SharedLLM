@@ -1,21 +1,24 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, House, MapPin, RefreshCw, Thermometer, Zap } from 'lucide-react';
+import { ChevronDown, ChevronRight, House, MapPin, Pencil, Plus, RefreshCw, Thermometer, Trash2, Zap } from 'lucide-react';
 import { CameraTile, EntityControl, SensorChip } from '../components/dashboards/EntityControls';
 import { MoreControlsContext } from '../components/dashboards/moreControls';
 import ControlSheet from '../components/devices/controls/ControlSheet';
+import { AddRoomForm, RenameRoomForm } from '../components/devices/RoomForms';
+import { BTN, DANGER } from '../components/devices/setupStyles';
+import Modal from '../components/ui/Modal';
 import PageHeader, { HEADER_ACTION } from '../components/ui/PageHeader';
 import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
 import HomeOverview from '../components/home/HomeOverview';
 import { useAuth } from '../context/AuthContext';
+import { ROOMS_KEY, useRoomActions } from '../hooks/useRoomActions';
 import { roomAnchor } from '../lib/homeOverview';
 import {
   failureText, getRooms, groupByDomain, groupByFloor, type HubEntity, type RoomArea,
 } from '../lib/dashboards';
 
 export const ROOMS_POLL_MS = 10_000;
-const ROOMS_KEY = ['dashboard', 'rooms'];
 
 /** Things to glance at (chips) rather than rows with controls. */
 const CHIP_DOMAINS = new Set(['sensor']);
@@ -45,11 +48,37 @@ function RoomBody({ entities, onChanged }: { entities: HubEntity[]; onChanged: (
   );
 }
 
-function RoomCard({ area, onChanged }: { area: RoomArea; onChanged: () => void }) {
+/** Rename and remove for one room; only ever rendered for an admin. */
+function RoomAdminActions({ area, onRename }: { area: RoomArea; onRename: () => void }) {
+  const { remove, confirmRemove } = useRoomActions();
+  return (
+    <div className="flex shrink-0 gap-2" data-testid="room-admin-actions">
+      <button type="button" className={`${BTN} min-w-11 justify-center`} onClick={onRename} aria-label={`Rename ${area.name}`}>
+        <Pencil size={14} aria-hidden /><span className="sr-only sm:not-sr-only">Rename</span>
+      </button>
+      <button type="button" className={DANGER} disabled={remove.isPending} aria-label={`Remove ${area.name}`}
+        onClick={() => void confirmRemove(area)}>
+        <Trash2 size={14} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function RoomCard({ area, onChanged, isAdmin, onRename }: {
+  area: RoomArea; onChanged: () => void; isAdmin: boolean; onRename: () => void;
+}) {
   return (
     <article id={roomAnchor(area.area_id)} className="glass-card rounded-2xl p-4 space-y-3 scroll-mt-4" data-testid="room-card" aria-label={area.name}>
-      <h3 className="text-base font-semibold text-slate-100">{area.name}</h3>
-      <RoomBody entities={area.entities} onChanged={onChanged} />
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="min-w-0 break-words pt-2 text-base font-semibold text-slate-100">{area.name}</h3>
+        {isAdmin && <RoomAdminActions area={area} onRename={onRename} />}
+      </div>
+      {area.entities.length > 0 ? <RoomBody entities={area.entities} onChanged={onChanged} /> : (
+        <p className="text-sm text-slate-400" data-testid="room-empty">
+          Nothing in this room yet. Put devices in it from{' '}
+          <Link to="/devices" className="text-amber-300 underline underline-offset-2">Devices</Link>.
+        </p>
+      )}
     </article>
   );
 }
@@ -61,6 +90,9 @@ export default function Rooms() {
     queryKey: ROOMS_KEY, queryFn: getRooms, refetchInterval: ROOMS_POLL_MS, refetchIntervalInBackground: false,
   });
   const [otherOpen, setOtherOpen] = useState(false);
+  // Admins only: the Add room dialog, and the room being renamed.
+  const [adding, setAdding] = useState(false);
+  const [renaming, setRenaming] = useState<RoomArea | null>(null);
   // A name tapped on a room card opens that entity's full control, with its device's other entities.
   const [more, setMore] = useState<string | null>(null);
   const everything = data ? [...data.areas.flatMap((a) => a.entities), ...data.unassigned] : [];
@@ -68,6 +100,8 @@ export default function Rooms() {
   // A control's change shows up on the next poll; ask a little sooner than that.
   const onChanged = () => window.setTimeout(() => void queryClient.invalidateQueries({ queryKey: ROOMS_KEY }), 1500);
   const empty = data && data.areas.every((a) => a.entities.length === 0) && data.unassigned.length === 0;
+  // An admin sees every room, even one with nothing in it yet, so a room just added shows at once.
+  const noRooms = isAdmin ? Boolean(data && data.areas.length === 0) : empty;
 
   return (
     <MoreControlsContext.Provider value={(e) => setMore(e.entity_id)}>
@@ -79,6 +113,11 @@ export default function Rooms() {
         subtitle="Lights, climate, cameras and energy, room by room."
         actions={(
           <nav className="flex flex-wrap gap-2" aria-label="Related pages">
+            {isAdmin && (
+              <button type="button" onClick={() => setAdding(true)} className={HEADER_ACTION} data-testid="add-room">
+                <Plus size={14} aria-hidden />Add room
+              </button>
+            )}
             <Link to="/climate" className={HEADER_ACTION}><Thermometer size={14} aria-hidden />Climate</Link>
             <Link to="/energy" className={HEADER_ACTION}><Zap size={14} aria-hidden />Energy</Link>
             <Link to="/wander" className={HEADER_ACTION}><MapPin size={14} aria-hidden />People</Link>
@@ -94,23 +133,25 @@ export default function Rooms() {
 
       {data && !empty && <HomeOverview rooms={data} onChanged={onChanged} />}
 
-      {data && groupByFloor(data).map(({ floor, areas }) => (
+      {data && groupByFloor(data, isAdmin).map(({ floor, areas }) => (
         <section key={floor?.floor_id ?? 'rooms'} className="space-y-3" aria-label={floor?.name ?? 'Rooms'}>
           {floor && <h2 className="text-sm font-black uppercase tracking-widest text-slate-500">{floor.name ?? 'Floor'}</h2>}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {areas.map((a) => <RoomCard key={a.area_id} area={a} onChanged={onChanged} />)}
+            {areas.map((a) => (
+              <RoomCard key={a.area_id} area={a} onChanged={onChanged} isAdmin={isAdmin} onRename={() => setRenaming(a)} />
+            ))}
           </div>
         </section>
       ))}
 
-      {empty && (
+      {noRooms && (
         <EmptyState
           icon={<House size={28} />}
           title="No rooms yet"
           detail={isAdmin
-            ? 'Add devices in Devices and put each one in a room; they show up here.'
+            ? 'Add the rooms in your home, like Kitchen or Living room. Then put devices in them from Devices.'
             : 'Devices show up here once a parent puts them in a room you can see.'}
-          action={isAdmin ? { label: 'Go to Devices', to: '/devices' } : null}
+          action={isAdmin ? { label: 'Add room', onClick: () => setAdding(true) } : null}
         />
       )}
 
@@ -123,6 +164,17 @@ export default function Rooms() {
           </button>
           {otherOpen && <div className="mt-3"><RoomBody entities={data.unassigned} onChanged={onChanged} /></div>}
         </article>
+      )}
+      {isAdmin && (
+        <Modal isOpen={adding} onClose={() => setAdding(false)} title="Add a room" size="md">
+          <p className="mb-3 text-sm text-slate-400">Give it a name everyone in the house uses. You can pick its floor too.</p>
+          <AddRoomForm floors={data?.floors ?? []} onAdded={() => setAdding(false)} />
+        </Modal>
+      )}
+      {isAdmin && renaming && (
+        <Modal isOpen onClose={() => setRenaming(null)} title={`Rename ${renaming.name}`} size="md">
+          <RenameRoomForm room={renaming} onDone={() => setRenaming(null)} />
+        </Modal>
       )}
       {moreEntity && (
         <ControlSheet entity={moreEntity} onClose={() => setMore(null)}

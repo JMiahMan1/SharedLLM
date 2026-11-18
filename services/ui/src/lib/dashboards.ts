@@ -395,8 +395,9 @@ export function groupByDomain(entities: HubEntity[]): DomainGroup[] {
 }
 
 /** Areas grouped under their floor (registry order by level), or one unnamed group when there are no floors. */
-export function groupByFloor(rooms: RoomsResponse): { floor: Floor | null; areas: RoomArea[] }[] {
-  const areas = rooms.areas.filter((a) => a.entities.length > 0);
+export function groupByFloor(rooms: RoomsResponse, includeEmpty = false): { floor: Floor | null; areas: RoomArea[] }[] {
+  // A room with nothing in it is left out, unless the viewer can fill it (an admin setting up rooms).
+  const areas = includeEmpty ? rooms.areas : rooms.areas.filter((a) => a.entities.length > 0);
   if (!rooms.floors?.length) return [{ floor: null, areas }];
   const floors = [...rooms.floors].sort((a, b) => (a.level ?? 0) - (b.level ?? 0)
     || (a.name ?? '').localeCompare(b.name ?? ''));
