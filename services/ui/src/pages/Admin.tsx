@@ -69,6 +69,8 @@ import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
 import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
 import HardwarePanel from '../components/settings/HardwarePanel';
+import HubNotConnected from '../components/admin/HubNotConnected';
+import { useIntegrations } from '../hooks/useIntegrations';
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 import DnsManagementPanel from '../components/settings/DnsManagementPanel';
@@ -198,6 +200,7 @@ const normalizeServiceKey = (name: string): string =>
 
 const Admin = () => {
   const queryClient = useQueryClient();
+  const { anyHub } = useIntegrations();
   const location = useLocation();
   const navigate = useNavigate();
   const activeTab = adminTabFromPathname(location.pathname);
@@ -1094,9 +1097,10 @@ const Admin = () => {
             </div>
           </section>
 
-          <EntityProtectionPanel users={users} />
+          {/* These work on the home hub's devices: with no hub they say so instead of failing. */}
+          {anyHub ? <EntityProtectionPanel users={users} /> : <HubNotConnected title="Entity Protection" />}
 
-          <HomeAlertsPanel users={users} />
+          {anyHub ? <HomeAlertsPanel users={users} /> : <HubNotConnected title="Home alerts" />}
 
           <WeatherRemindersPanel users={users} />
 
@@ -1665,7 +1669,7 @@ const Admin = () => {
             <div>
               <h3 className="text-xl font-bold text-white">Hardware Registry</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Unified hardware management: Home Assistant first, direct ESPHome fallback.
+                Unified hardware management: the home hub first, direct ESPHome fallback.
               </p>
             </div>
           </div>

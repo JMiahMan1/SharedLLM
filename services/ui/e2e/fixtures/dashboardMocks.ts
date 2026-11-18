@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import { isServerCall } from './serverCalls';
+import { isServerCall, INTEGRATIONS_STATUS_PATH, integrationsStatus } from './serverCalls';
 
 /**
  * A made-up household for the Dashboard ("/") with every widget turned on and
@@ -247,6 +247,7 @@ export async function mockDashboard(page: Page): Promise<void> {
     const p = url.pathname;
     const method = req.method();
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body });
+    if (p === INTEGRATIONS_STATUS_PATH) return route.fulfill({ json: integrationsStatus() });
 
     if (method === 'POST') {
       if (p === '/execute/entity/search') {

@@ -321,6 +321,8 @@ export const server = setupServer(
   http.get('/api/deploy-status', () => new HttpResponse(null, { status: 404 })),
   http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
+  // Both home integrations on, as in a full install; a test that needs one off answers it itself.
+  http.get('/api/integrations/status', () => HttpResponse.json({ homehub: { enabled: true }, home_assistant: { enabled: true } })),
   // Signed media token for cover art (lib/mediaToken.ts).
   http.post('/api/media/token', () => HttpResponse.json({ token: 'mt-1', user: 'alice', expires_at: Math.floor(Date.now() / 1000) + 3600 })),
   // Notice categories: nothing saved yet, so every kind is on.

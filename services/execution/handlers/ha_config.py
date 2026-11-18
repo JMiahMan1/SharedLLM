@@ -13,6 +13,8 @@ except ImportError:
 
 import aiohttp
 
+from services.common.hub_login import NO_HUB_MESSAGE
+
 log = logging.getLogger("execution.ha_config")
 
 
@@ -87,7 +89,7 @@ async def handle_ha_config(req_data: dict) -> ExecutionResult:
     if not ha_url or not ha_token:
         return ExecutionResult(
             status="FAILURE",
-            message=("No home hub is set up (HA_URL is not configured)." if (user_context or {}).get("is_admin")
+            message=(NO_HUB_MESSAGE if (user_context or {}).get("is_admin")
                      else "The hub's integration settings are for admins, and this account has no hub login "
                           "of its own."),
             service="ha_config"

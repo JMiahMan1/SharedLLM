@@ -1,6 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import { PROFILES } from './homeMocks';
-import { isServerCall } from './serverCalls';
+import { isServerCall, INTEGRATIONS_STATUS_PATH, integrationsStatus } from './serverCalls';
 
 /**
  * A made-up household for Settings, Admin, Identity and Remote, answered in the
@@ -333,6 +333,7 @@ export async function mockSettingsPages(page: Page): Promise<void> {
   await page.route(isServerCall, async (route: Route) => {
     const req = route.request();
     const p = new URL(req.url()).pathname;
+    if (p === INTEGRATIONS_STATUS_PATH) return route.fulfill({ json: integrationsStatus() });
     const json = (body: unknown) => route.fulfill({ json: body });
     // Remote reads the house's players as a POST to execution.
     if (p === '/execute/media/status') return json({ status: 'SUCCESS', message: 'ok', detail: { all_players: PLAYERS } });

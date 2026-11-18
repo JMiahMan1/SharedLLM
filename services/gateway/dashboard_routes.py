@@ -93,7 +93,7 @@ def _hub_login(creds: dict[str, Any], personal: bool) -> tuple[str, str]:
         if login is not None:
             return login
         raise HTTPException(status_code=503, detail=NO_HUB_MESSAGE)
-    raise HTTPException(status_code=503, detail="Home Assistant is not set up for your account")
+    raise HTTPException(status_code=503, detail="No home hub login is set up for your account")
 
 
 async def _hub_get(creds: dict[str, Any], path: str, params: dict[str, str] | None = None, *,

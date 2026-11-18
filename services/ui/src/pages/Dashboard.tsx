@@ -36,6 +36,7 @@ import Modal from '../components/ui/Modal';
 import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
 import DashboardSettingsPanel from '../components/dashboard/DashboardSettingsPanel';
 import { useWidgetStore } from '../stores/widgetStore';
+import { useIntegrations } from '../hooks/useIntegrations';
 import { useClearedAt, useDismissed, newerThan } from '../lib/clearedAt';
 import SwipeToDismiss from '../components/ui/SwipeToDismiss';
 import { relativeTime } from '../lib/wanderTrips';
@@ -307,6 +308,13 @@ const Dashboard = () => {
   useEffect(() => {
     setAdminStatus(Boolean(isAdmin));
   }, [isAdmin, setAdminStatus]);
+  // Hub widgets (devices, climate, energy) mount only with a home hub connected.
+  // Until the status is in they stay off, like every gate on an integration.
+  const { anyHub, homehub } = useIntegrations();
+  useEffect(() => {
+    const store = useWidgetStore.getState();
+    store.evaluateMountConditions({ ...store.mountCapabilities, has_home_hub: anyHub, has_homehub: homehub });
+  }, [anyHub, homehub]);
   // The Live Service Status and Workspaces sections are for whoever looks
   // after the server. They used to be shown to every role on desktop (and to
   // admins on a phone), which put service keys, raw registry paths and

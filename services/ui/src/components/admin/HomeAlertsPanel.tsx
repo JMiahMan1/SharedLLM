@@ -58,7 +58,7 @@ export const HomeAlertsPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
 
   const add = () => {
     if (!entityId.trim().includes('.')) {
-      toast.error('Choose a Home Assistant entity');
+      toast.error('Choose a home hub entity');
       return;
     }
     const next = upsertHomeAlert(alerts, {
@@ -106,7 +106,7 @@ export const HomeAlertsPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
         <EntitySearchDropdown
           value={entityId}
           onChange={setEntityId}
-          placeholder="Search Home Assistant entities..."
+          placeholder="Search the home hub's entities..."
           testId="home-alert-entity-search"
         />
         <select

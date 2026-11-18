@@ -120,13 +120,28 @@ def test_household_keeps_its_ha_login_while_ha_is_on(session):
     assert creds.ha_url == STORED_URL and creds.ha_token == "stored-ha-token"
 
 
-def test_a_persons_own_ha_login_is_still_theirs_while_ha_is_off(session):
-    _store_default_ha(session)
-    _ha_setting(session, "")
+def _person_with_own_ha(session) -> User:
     person = User(username="pat", display_name="Pat", ha_url="http://own.test:8123",
                   ha_token_enc=encrypt("own-token"))
     session.add(person)
     session.commit()
+    return person
+
+
+def test_a_persons_own_ha_login_is_not_used_while_ha_is_off(session):
+    _store_default_ha(session)
+    _ha_setting(session, "")
+    _person_with_own_ha(session)
+    creds = resolve_identity(ResolveRequest(rag_user="pat"), session)
+    assert creds.ha_url is None and creds.ha_token is None
+    # Not used is not deleted: the stored login is still there for when HA is back on.
+    stored = session.exec(select(User).where(User.username == "pat")).one()
+    assert stored.ha_url == "http://own.test:8123" and decrypt(stored.ha_token_enc) == "own-token"
+
+
+def test_a_persons_own_ha_login_is_theirs_while_ha_is_on(session):
+    _store_default_ha(session)
+    _person_with_own_ha(session)
     creds = resolve_identity(ResolveRequest(rag_user="pat"), session)
     assert creds.ha_url == "http://own.test:8123" and creds.ha_token == "own-token"
 
@@ -158,6 +173,19 @@ async def test_location_goes_to_homehub_not_the_stored_ha_login_while_ha_is_off(
         await _forward_location_to_ha("default", LocationUpdate(latitude=1.0, longitude=2.0, accuracy=5))
     urls = [c.args[0] for c in client.post.call_args_list]
     assert urls and all(u.startswith("http://hub.test:8123/") for u in urls)
+
+
+async def test_a_persons_own_ha_login_is_not_used_for_location_while_ha_is_off(session, monkeypatch, config):
+    _ha_setting(session, "")
+    _person_with_own_ha(session)
+    monkeypatch.setattr(config, "HA_URL", "")
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test:8123")
+    client, get_client = _mock_client()
+    with patch("services.identity.main.get_client_insecure", get_client):
+        await _forward_location_to_ha("pat", LocationUpdate(latitude=1.0, longitude=2.0, accuracy=5))
+    urls = [c.args[0] for c in client.post.call_args_list]
+    assert urls and all(u.startswith("http://hub.test:8123/") for u in urls)
+    assert not any("own.test" in u for u in urls)
 
 
 async def test_no_hub_at_all_forwards_nothing(session, monkeypatch, config):

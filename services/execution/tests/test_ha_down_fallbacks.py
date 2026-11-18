@@ -318,7 +318,7 @@ async def test_entity_search_with_ha_down_answers_from_the_last_snapshot(monkeyp
     result = await m.execute_entity_search(req)
     assert result.status == "SUCCESS"
     assert result.detail["stale"] is True and result.detail["entities"][0]["state"] == "closed"
-    assert "Home Assistant is down" in result.message and "4 minutes ago" in result.message
+    assert "The home hub is down" in result.message and "4 minutes ago" in result.message
 
 
 async def test_entity_search_without_a_snapshot_still_says_it_could_not_reach_ha(monkeypatch):

@@ -80,7 +80,7 @@ export function OutputPicker() {
             d.detail === 'TV' ? <Tv size={18} aria-hidden /> : <Speaker size={18} aria-hidden />,
           ))}
           {devices.length === 0 ? (
-            <li className={`px-3 py-4 text-sm ${muted}`}>No speakers found. Home Assistant players appear here once they are set up.</li>
+            <li className={`px-3 py-4 text-sm ${muted}`}>No speakers found. The home hub's players appear here once they are set up.</li>
           ) : null}
         </ul>
       </Modal>

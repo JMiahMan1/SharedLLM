@@ -53,6 +53,31 @@ export interface NavPage {
   group: NavGroupKey;
   /** The section for a member who is not an admin, when it differs. */
   memberGroup?: NavGroupKey;
+  /**
+   * The home integration this page reads from. `homehub`: the page calls
+   * HomeHub's own API (`/api/homehub/...`), which Home Assistant does not
+   * have. `hub`: any home hub will do (HomeHub or Home Assistant). A page whose
+   * integration is off is not listed, and its route says how to connect one.
+   */
+  requires?: HubRequirement;
+}
+
+/** Which home integrations are on (`GET /api/integrations/status`). */
+export interface HubIntegrations {
+  homehub: boolean;
+  homeAssistant: boolean;
+}
+
+export type HubRequirement = 'homehub' | 'hub';
+
+/** Both integrations on: for code that lists every page, such as saved bottom-bar choices. */
+export const EVERY_HUB: HubIntegrations = { homehub: true, homeAssistant: true };
+
+/** Is the integration a page or widget needs switched on? */
+export function hubRequirementMet(requires: HubRequirement | undefined, hubs: HubIntegrations): boolean {
+  if (requires === 'homehub') return hubs.homehub;
+  if (requires === 'hub') return hubs.homehub || hubs.homeAssistant;
+  return true;
 }
 
 /**
@@ -83,19 +108,19 @@ export const NAV_PAGES: NavPage[] = [
   { icon: HeartPulse, label: 'Health', path: '/fitness', keywords: 'steps workouts pedometer fitness goals achievements', pinnedOnMobile: 5, group: 'everyday' },
   { icon: Users, label: 'Family', path: '/family', keywords: 'games talk chores rewards together recipes timers alarms announcements speakers devices notifications', pinnedOnMobile: 3, group: 'everyday' },
   { icon: ShieldHalf, label: 'Guardian', path: '/guardian', keywords: 'family guardian parental controls screen time safety children kids wellbeing', group: 'everyday' },
-  { icon: House, label: 'Rooms', path: '/rooms', keywords: 'rooms areas lights switches thermostats media sensors home control', group: 'home' },
-  { icon: Thermometer, label: 'Climate', path: '/climate', keywords: 'thermostat temperature humidity heating cooling ac air handler', group: 'home' },
-  { icon: Cctv, label: 'Cameras', path: '/cameras', keywords: 'cameras live view security footage recordings garage backyard reolink doorbell', group: 'home' },
-  { icon: Zap, label: 'Energy', path: '/energy', keywords: 'energy power electricity usage kwh cost circuits peak utility bill', group: 'home' },
-  { icon: MonitorSmartphone, label: 'Remote', path: '/remote', keywords: 'remote control tv devices home assistant', group: 'home' },
-  { icon: CalendarClock, label: 'Schedules', path: '/schedules', keywords: 'schedules thermostat programs hold away vacation energy timers scheduler', group: 'manage' },
-  { icon: Workflow, label: 'Automations', path: '/automations', keywords: 'automations scripts scenes rules triggers routines traces', group: 'manage' },
+  { icon: House, label: 'Rooms', path: '/rooms', keywords: 'rooms areas lights switches thermostats media sensors home control', requires: 'homehub', group: 'home' },
+  { icon: Thermometer, label: 'Climate', path: '/climate', keywords: 'thermostat temperature humidity heating cooling ac air handler', requires: 'homehub', group: 'home' },
+  { icon: Cctv, label: 'Cameras', path: '/cameras', keywords: 'cameras live view security footage recordings garage backyard reolink doorbell', requires: 'homehub', group: 'home' },
+  { icon: Zap, label: 'Energy', path: '/energy', keywords: 'energy power electricity usage kwh cost circuits peak utility bill', requires: 'homehub', group: 'home' },
+  { icon: MonitorSmartphone, label: 'Remote', path: '/remote', keywords: 'remote control tv devices home assistant', requires: 'hub', group: 'home' },
+  { icon: CalendarClock, label: 'Schedules', path: '/schedules', keywords: 'schedules thermostat programs hold away vacation energy timers scheduler', requires: 'homehub', group: 'manage' },
+  { icon: Workflow, label: 'Automations', path: '/automations', keywords: 'automations scripts scenes rules triggers routines traces', requires: 'homehub', group: 'manage' },
   { icon: Smartphone, label: 'Devices', memberLabel: 'Shared files', path: '/devices', keywords: 'mdm device management inventory remote wipe lock update push shared school library files integrations pairing matter esphome add new phones', group: 'manage', memberGroup: 'library' },
-  { icon: HistoryIcon, label: 'History', path: '/history', keywords: 'history graph chart sensor states timeline statistics', group: 'manage' },
+  { icon: HistoryIcon, label: 'History', path: '/history', keywords: 'history graph chart sensor states timeline statistics', requires: 'hub', group: 'manage' },
   { icon: BookOpen, label: 'Bible', path: '/bible', keywords: 'scripture read verse devotional plan memorise quiz study blb', group: 'everyday' },
   { icon: StickyNote, label: 'Notes', path: '/notes', keywords: 'notes lists', group: 'everyday' },
   // The household's to-do and shopping lists (the hub's todo lists), for every member.
-  { icon: ListTodo, label: 'Lists', path: '/lists', keywords: 'lists to-do todo shopping groceries reminders tasks checklist', group: 'everyday' },
+  { icon: ListTodo, label: 'Lists', path: '/lists', keywords: 'lists to-do todo shopping groceries reminders tasks checklist', requires: 'hub', group: 'everyday' },
   // The recipes page had a route but no entry anywhere, so the only way to it
   // was Family -> Create, which mounts the same screen inline.
   { icon: ChefHat, label: 'Recipes', path: '/recipes', keywords: 'recipes meals cooking food kitchen meal plan groceries ingredients', group: 'everyday' },
@@ -113,10 +138,10 @@ export const NAV_PAGES: NavPage[] = [
 /**
  * The pages this user may open, in display order, with the labels that fit
  * them: a member who is not an admin sees "Shared files" where an admin sees
- * "Devices".
+ * "Devices". A page whose home integration is off (`requires`) is left out.
  */
-export function navPagesFor(isAdmin: boolean): NavPage[] {
-  return NAV_PAGES.filter((page) => !page.adminOnly || isAdmin).map((page) => {
+export function navPagesFor(isAdmin: boolean, hubs: HubIntegrations = EVERY_HUB): NavPage[] {
+  return NAV_PAGES.filter((page) => (!page.adminOnly || isAdmin) && hubRequirementMet(page.requires, hubs)).map((page) => {
     if (isAdmin) return page;
     return {
       ...page,

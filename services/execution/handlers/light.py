@@ -62,13 +62,13 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
         if current_state == "unavailable":
             return ExecutionResult(
                 status="FAILURE",
-                message=f"The light '{friendly}' ({full_entity_id}) is currently unavailable in Home Assistant. The device may be powered off, disconnected from WiFi, or not responding to MQTT. Please check the physical device and its network connection.",
+                message=f"The light '{friendly}' ({full_entity_id}) is currently unavailable on the home hub. The device may be powered off, disconnected from WiFi, or not responding to MQTT. Please check the physical device and its network connection.",
                 service="light_control"
             )
         if current_state == "unknown":
             return ExecutionResult(
                 status="FAILURE",
-                message=f"The light '{friendly}' ({full_entity_id}) has an unknown state in Home Assistant. It may be initializing or misconfigured.",
+                message=f"The light '{friendly}' ({full_entity_id}) has an unknown state on the home hub. It may be initializing or misconfigured.",
                 service="light_control"
             )
 

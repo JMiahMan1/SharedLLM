@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import { isServerCall } from './serverCalls';
+import { isServerCall, INTEGRATIONS_STATUS_PATH, integrationsStatus } from './serverCalls';
 import { FLOWS, HARDWARE, MOVED_FINDING, detailFor, initialStates } from './hardwareMocks';
 import { TINY_WEBM_BASE64 } from './tinyVideo';
 import { registryMocks } from './registryMocks';
@@ -350,6 +350,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     const p = url.pathname;
     const method = request.method();
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body });
+    if (p === INTEGRATIONS_STATUS_PATH) return route.fulfill({ json: integrationsStatus() });
     if (method !== 'GET') {
       let body: unknown;
       try { body = request.postDataJSON(); } catch { body = null; }

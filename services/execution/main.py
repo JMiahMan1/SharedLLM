@@ -927,7 +927,7 @@ def _with_hub_login(req):
     ctx = req.user_context
     login = hardware_router.hub_login(ctx)
     if login is None:
-        raise HTTPException(status_code=503, detail="No home hub is set up (HA_URL is not configured)")
+        raise HTTPException(status_code=503, detail=hardware_router.NO_HUB_MESSAGE)
     url, token = login
     if ctx.ha_url == url and ctx.ha_token == token:
         return req
@@ -2566,7 +2566,7 @@ async def execute_announce(req: AnnouncementRequest):
         via = "Music Assistant" if result.get("route") == "mass_direct" else "Cast"
         return _ok(
             f"Announcement played on {result.get('target') or target_player} directly through {via} "
-            "(Home Assistant is down).",
+            "(the home hub is down).",
             "announce",
         )
 
@@ -2801,7 +2801,7 @@ async def execute_entity_search(req: EntitySearchRequest):
         when = ha_snapshot.age_phrase(stale_at)
         detail.update(stale=True, as_of=stale_at, as_of_phrase=when)
         message = (
-            f"Home Assistant is down. Found {len(results)} matching entities; these are their "
+            f"The home hub is down. Found {len(results)} matching entities; these are their "
             f"last known states, from {when}."
         )
     return ExecutionResult(status="SUCCESS", message=message, service="entity_search", detail=detail)
@@ -3282,8 +3282,9 @@ async def _load_mass_ha_creds(user_id: str) -> dict[str, Any]:
     mass_token = creds.get("mass_token") or ""
     if not (ha_url and ha_token) and not (mass_url and mass_token):
         raise ServiceNotConfiguredError(
-            f"User '{user_id}' has no Music Assistant credentials and no home hub is set up "
-            "(HA_URL). Add Music Assistant under Identity -> Services, or configure the hub."
+            f"User '{user_id}' has no Music Assistant credentials and no home hub is "
+            "set up. Add Music Assistant under Identity -> Services, or an admin can connect HomeHub or "
+            "Home Assistant in Settings."
         )
     # If mass_config_entry_id is missing, discover it from HA
     if ha_url and ha_token and not creds.get("mass_config_entry_id"):

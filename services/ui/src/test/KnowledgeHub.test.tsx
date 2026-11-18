@@ -215,7 +215,7 @@ describe('KnowledgeHub', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
     expect(await screen.findByText('Groceries 400')).toBeInTheDocument();
-    expect(screen.getByText('Home Assistant')).toBeInTheDocument();
+    expect(screen.getByText('Home hub')).toBeInTheDocument();
     // The answer is the first hit's text: it is not shown twice.
     expect(screen.getAllByText('Kitchen light is in the kitchen')).toHaveLength(1);
   });

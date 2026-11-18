@@ -62,6 +62,10 @@ export interface CapabilityPayload {
   has_events?: boolean;
   has_quick_assistant?: boolean;
   has_assignable_devices?: boolean;
+  /** A home hub is connected: HomeHub or Home Assistant (`GET /api/integrations/status`). */
+  has_home_hub?: boolean;
+  /** The HomeHub integration specifically is on. */
+  has_homehub?: boolean;
 }
 
 export interface WidgetInstance {

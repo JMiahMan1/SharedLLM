@@ -9,7 +9,7 @@ except ImportError:
     from ..schemas import ExecutionResult, MediaStatusRequest
 
 from services.execution.entity_access import EntityPermissions, can_view
-from services.execution.hardware_router import hub_login
+from services.execution.hardware_router import NO_HUB_MESSAGE, hub_login
 from services.shared.ma_player import is_music_assistant_player, ma_player_id
 
 log = logging.getLogger("execution.media_status")
@@ -27,7 +27,7 @@ async def handle_media_status(req: MediaStatusRequest, perms: EntityPermissions 
     ctx = req.user_context
     login = hub_login(ctx)
     if login is None:
-        return ExecutionResult(status="FAILURE", message="No home hub is set up (HA_URL is not configured).",
+        return ExecutionResult(status="FAILURE", message=NO_HUB_MESSAGE,
                                service="media_status")
     ha_url, ha_token = login
     from ..announce_handlers import detect_tv_type

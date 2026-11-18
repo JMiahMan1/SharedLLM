@@ -40,6 +40,9 @@ import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel'
 import VoiceSignaturePanel from '../components/settings/VoiceSignaturePanel';
 import SpotifyLinkPanel from '../components/settings/SpotifyLinkPanel';
 import AbuseChKeyTile from '../components/settings/AbuseChKeyTile';
+import HomeHubTile from '../components/settings/HomeHubTile';
+import { HA_OFF_NOTICE } from '../lib/homehub';
+import { useIntegrations } from '../hooks/useIntegrations';
 import UserAvatar from '../components/UserAvatar';
 import AvatarPicker from '../components/AvatarPicker';
 import Modal from '../components/ui/Modal';
@@ -69,9 +72,11 @@ interface IntegrationTileProps {
   /** Fields that are arrays of strings, rendered as chip inputs */
   listKeys?: Record<string, string>;  // label -> field_key
   userData?: UserProfile | null;
+  /** Said on the card and in its dialog when this integration is switched off for the household. */
+  offNotice?: string | null;
 }
 
-const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, configKeys, listKeys, userData }) => {
+const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, configKeys, listKeys, userData, offNotice }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState<Record<string, string | boolean>>({});
   const [listForm, setListForm] = useState<Record<string, string[]>>({});
@@ -115,7 +120,9 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   const isConnected = sharedSkylight
     ? skylightStatus === 'connected'
     : !!(userData && (userData as Record<string, unknown>)[connectionKey]);
-  const statusLine = sharedSkylight
+  const statusLine = offNotice
+    ? 'INTEGRATION OFF'
+    : sharedSkylight
     ? { connected: 'CONNECTED', off: 'TURNED OFF', not_set_up: 'NOT SET UP BY ADMIN' }[skylightStatus]
     : isConnected
       ? (userData as Record<string, string>)?.[connectionKey]?.replace(/^https?:\/\//, '')
@@ -215,6 +222,12 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
 
       <Modal isOpen={isOpen} onClose={() => setIsOpen(false)} title={name}>
         <div className="space-y-6">
+          {offNotice && (
+            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex gap-4" role="note" data-testid={`integration-off-${name}`}>
+              <AlertCircle className="text-amber-400 shrink-0" size={24} />
+              <p className="text-xs text-slate-300 leading-relaxed">{offNotice}</p>
+            </div>
+          )}
           <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex gap-4">
              <LockKeyhole className="text-indigo-400 shrink-0" size={24} />
              <div className="text-xs text-slate-300 leading-relaxed">
@@ -597,6 +610,7 @@ const Identity = () => {
   const [pickingAvatar, setPickingAvatar] = useState(false);
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const integrations = useIntegrations();
   
   const { data: fullUser } = useQuery<UserProfile>({
     queryKey: ['me'],
@@ -664,11 +678,15 @@ const Identity = () => {
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
-              <IntegrationTile 
-                name="Home Assistant" 
-                icon={Home} 
-                color="blue" 
+              {/* HomeHub is the household's hub (an address, admins only); Home
+                  Assistant stays an optional integration and says when it is off. */}
+              {fullUser?.is_admin && <HomeHubTile />}
+              <IntegrationTile
+                name="Home Assistant"
+                icon={Home}
+                color="blue"
                 userData={fullUser}
+                offNotice={integrations.settled && !integrations.homeAssistant ? HA_OFF_NOTICE : null}
                 configKeys={{
                   "Instance URL": "ha_url",
                   "Long-Lived Token": "ha_token"

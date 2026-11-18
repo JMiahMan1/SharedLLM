@@ -871,8 +871,8 @@ export function DeviceSetupDialog({
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
           {climateEntities.length === 0 ? (
             <p className="p-4 text-center text-[11px] leading-snug text-slate-500">
-              Home Assistant returned no <span className="font-mono">climate</span> entities, so there is nothing to
-              select. Check the Home Assistant integration and connection settings.
+              The home hub returned no <span className="font-mono">climate</span> entities, so there is nothing to
+              select. Check the home hub in Accounts &amp; Integrations.
             </p>
           ) : shown.length === 0 ? (
             <p className="p-4 text-center text-[11px] text-slate-500">No climate entity matches “{query}”.</p>

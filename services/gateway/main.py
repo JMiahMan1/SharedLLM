@@ -187,7 +187,7 @@ from services.gateway.prompts import (
 from services.gateway.redact import redact_url
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
 from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
-from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, tool_catalog
+from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, hub_tool_guide, tool_catalog
 from services.health import challenges as _challenges
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
@@ -2983,7 +2983,7 @@ async def get_entities(request: Request):
             # a lock. Answer an error the UI can show instead.
             raise HTTPException(
                 status_code=502,
-                detail="Could not read the entities from Home Assistant",
+                detail="Could not read the entities from the home hub",
             )
         data = await resp.json()
         # Home Assistant accepts almost anything as an entity id. One install
@@ -3011,7 +3011,7 @@ async def get_entities(request: Request):
         log.warning(f"[entities] Home Assistant read failed: {e}")
         raise HTTPException(
             status_code=502,
-            detail="Could not read the entities from Home Assistant",
+            detail="Could not read the entities from the home hub",
         ) from e
 
 
@@ -6098,12 +6098,12 @@ async def proxy_trigger_telemetry_snapshot(entity_id: str, request: Request):
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
         if resp.status != 200:
-            return {"status": "ERROR", "message": f"Failed to fetch HA entities: {resp.status}"}
+            return {"status": "ERROR", "message": f"Could not read the entities from the home hub ({resp.status})"}
         data = await resp.json()
         entities = data.get("entities", []) if isinstance(data, dict) else []
         target_entity = next((e for e in entities if e.get("entity_id") == entity_id), None)
         if not target_entity:
-            return {"status": "ERROR", "message": f"Entity {entity_id} not found in Home Assistant"}
+            return {"status": "ERROR", "message": f"Entity {entity_id} not found on the home hub"}
 
         state = target_entity.get("state")
         attrs = target_entity.get("attributes", {})
@@ -10822,7 +10822,7 @@ async def _workspace_context(workspace_id: str, creds: dict, mode: str) -> str:
         return overview
     # The guide already documents some tools in full; list only the rest.
     try:
-        guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
+        guide = hub_tool_guide(load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE))
     except Exception as exc:  # no guide means list every tool, not fail the turn
         log.warning(f"[workspace ask] single-turn guide unavailable: {exc}")
         guide = ""
@@ -20592,11 +20592,11 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
             # No HA login of their own: the hub's login, but only for a picture of an
             # entity the caller may view (the path is the client's choice, and the hub's
             # login can read anything on the hub).
-            from services.common.hub_login import hub_login
+            from services.common.hub_login import NO_HUB_MESSAGE, hub_login
 
             login = hub_login({})
             if login is None:
-                raise HTTPException(status_code=400, detail="No home hub is set up (HA_URL is not configured)")
+                raise HTTPException(status_code=400, detail=NO_HUB_MESSAGE)
             await _require_hub_image_path(creds, parsed.path or rel)
             base, token = login
         target_url = f"{base.rstrip('/')}{rel}"

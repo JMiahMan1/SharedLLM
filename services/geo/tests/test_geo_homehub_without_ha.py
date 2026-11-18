@@ -116,9 +116,32 @@ def test_people_read_from_homehub_when_ha_is_blank(monkeypatch):
     assert any(c[1] == f"{HUB}/api/states" for c in calls)
 
 
+def test_no_hub_at_all_still_lists_the_saved_places_and_says_hub_zones_are_unavailable(monkeypatch):
+    geo, calls, client = _patch(monkeypatch, [ZONE], homehub="")
+    place = {"id": "p1", "name": "Made-up Park", "lat": 1.5, "lon": 2.5, "radius": 80,
+             "owner": "alex", "scope": "family"}
+
+    async def _list_all(_r):
+        return [place]
+
+    async def _redis():
+        return object()
+
+    monkeypatch.setattr(geo.places, "list_all", _list_all)
+    monkeypatch.setattr(geo, "get_redis", _redis)
+    r = client.get("/zones")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["hub_zones"] == "unavailable"
+    assert "No home hub is set up" in body["message"]
+    names = [f["properties"]["friendly_name"] for f in body["features"]]
+    assert names == ["Made-up Park"]
+    assert calls == []
+
+
 def test_no_hub_at_all_is_a_clear_503_and_nothing_is_called(monkeypatch):
     geo, calls, client = _patch(monkeypatch, [ZONE], homehub="")
-    for r in (client.get("/zones"), client.get("/people/device_tracker.a_phone/history"),
+    for r in (client.get("/people/device_tracker.a_phone/history"),
               client.post("/people/device_tracker.a_phone/see", json={"latitude": 1.0, "longitude": 2.0})):
         assert r.status_code == 503, r.text
         assert "No home hub is set up" in r.json()["detail"]

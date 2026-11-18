@@ -5,3 +5,12 @@
  */
 export const isServerCall = (url: URL): boolean =>
   url.pathname.startsWith('/api/') || url.pathname.startsWith('/execute/');
+
+/** `GET /api/integrations/status`, which every signed-in page asks once (nav, widgets, gates). */
+export const INTEGRATIONS_STATUS_PATH = '/api/integrations/status';
+
+/** Both home integrations on: what every page mock answers unless a test turns one off. */
+export const integrationsStatus = (homehub = true, homeAssistant = true) => ({
+  homehub: { enabled: homehub },
+  home_assistant: { enabled: homeAssistant },
+});

@@ -5,6 +5,7 @@ import { useHaptics } from '../../hooks/useHaptics';
 import { useAuth } from '../../context/AuthContext';
 import { cn } from '../../lib/utils';
 import { navPagesFor, navSectionsFor, type NavPage } from './navItems';
+import { useIntegrations } from '../../hooks/useIntegrations';
 import { usePublishBottomBarHeight } from '../../lib/bottomBar';
 import { readMobileNavPaths, subscribeMobileNav } from '../../lib/mobileNav';
 import { useDialogFocus } from '../../lib/focusTrap';
@@ -39,7 +40,10 @@ const BottomNav = () => {
     return subscribeMobileNav(sync);
   }, [isAdmin]);
 
-  const pages = navPagesFor(isAdmin);
+  // A pinned page whose home integration is off is not shown, but stays saved:
+  // it comes back when the hub does.
+  const { hubs } = useIntegrations();
+  const pages = navPagesFor(isAdmin, hubs);
   const pageByPath = new Map(pages.map((page) => [page.path, page]));
   const pinnedItems = pinnedPaths.flatMap((path): NavPage[] => {
     const page = pageByPath.get(path);

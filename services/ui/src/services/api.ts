@@ -4896,7 +4896,7 @@ export const api = {
     // this the widget toasted "Command sent" for a lock it was not allowed to
     // touch. `Remote`'s transport call has always checked it; now these do too.
     if (resp.data?.status === 'FAILURE') {
-      throw new Error(resp.data.message || 'Home Assistant refused that');
+      throw new Error(resp.data.message || 'The home hub refused that');
     }
     return resp.data;
   },
@@ -4918,7 +4918,7 @@ export const api = {
       service_data: serviceData ?? null,
     });
     if (resp.data?.status === 'FAILURE') {
-      throw new Error(resp.data.message || 'Home Assistant refused that');
+      throw new Error(resp.data.message || 'The home hub refused that');
     }
     return resp.data;
   },

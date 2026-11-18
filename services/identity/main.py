@@ -522,12 +522,11 @@ def _resolve_service_creds(
     """Return (values, source, shared_owner) for one shared-able service."""
     own = _own_service_creds(user, service)
     if service == "home_assistant" and not _ha_enabled(session):
-        # The Home Assistant integration is off. The household account's stored HA login
-        # (often left over from .env) is not the stack's login any more, and nobody borrows it;
-        # callers fall through to HomeHub (services.common.hub_login). A person's own login is theirs.
-        if _is_system_default_user(user) or not any(own.values()):
-            return {key: None for key in own}, "absent", None
-        return own, "own", None
+        # The Home Assistant integration is off, so no HA login is used for calls: not the
+        # household account's (often left over from .env), not one shared by a grant, and not a
+        # person's own. Callers fall through to HomeHub (services.common.hub_login). The stored
+        # logins are kept as they are, ready for when HA is switched back on.
+        return {key: None for key in own}, "absent", None
     if any(own.values()):
         return own, "own", None
 
@@ -3225,8 +3224,39 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
         f"{ {k: '***' if _is_secret_config_key(k) or k in filled_from_saved else v for k, v in config.items()} }"
     )
 
+    if service == "HomeHub" and not admin.is_admin:
+        # HomeHub is the household's hub, set up as the homehub_url setting: an admin's job.
+        raise HTTPException(status_code=403, detail="Only an admin can set up HomeHub")
+
     try:
         async with _test_connection_client(service, config) as client:
+            if service == "HomeHub":
+                # Only /health, which needs no login: the stack's own secret is never sent to
+                # an address typed into a form. Saving it as homehub_url is what trusts it.
+                url = str(config.get("homehub_url") or "").strip()
+                if not url:
+                    return {"status": "ERROR", "message": "The HomeHub address is required"}
+                if urlparse(url).scheme not in ("http", "https") or not urlparse(url).hostname:
+                    return {"status": "ERROR", "message": "The HomeHub address must start with http:// or https://"}
+                resp = await client.get(f"{url.rstrip('/')}/health", timeout=aiohttp.ClientTimeout(total=5.0))
+                if resp.status != 200:
+                    return {"status": "ERROR", "message": f"That address answered {resp.status}, not as a HomeHub"}
+                try:
+                    payload = await resp.json(content_type=None)
+                except (ValueError, aiohttp.ContentTypeError):
+                    payload = None
+                if not isinstance(payload, dict) or payload.get("service") != "homehub":
+                    return {"status": "ERROR", "message": "Something answered at that address, but it is not a HomeHub"}
+                loaded = payload.get("loaded")
+                devices = payload.get("entities")
+                parts = []
+                if isinstance(loaded, int):
+                    parts.append(f"{loaded} integrations loaded")
+                if isinstance(devices, int):
+                    parts.append(f"{devices} entities")
+                suffix = f" ({', '.join(parts)})" if parts else ""
+                return {"status": "SUCCESS", "message": f"Connected to HomeHub{suffix}"}
+
             if service == "Home Assistant":
                 url = config.get("ha_url")
                 token = config.get("ha_token")
@@ -8115,9 +8145,10 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
                                 dev_ids.append(t.split(".")[-1])
 
             # 2. Fallback to admin/default or global settings, only while the Home Assistant
-            #    integration is on. Off, those stored logins are not used; the hub's own is (below).
+            #    integration is on. Off, no stored HA login is used, the person's own included;
+            #    the hub's own is (below). The stored logins themselves are left as they are.
             ha_on = _ha_enabled(session)
-            if not ha_on and _is_system_default_user(user):
+            if not ha_on:
                 ha_url = ha_token = None
             if ha_on and (not ha_url or not ha_token):
                 admin = session.exec(select(User).where(User.is_admin == True)).first()  # noqa: E712

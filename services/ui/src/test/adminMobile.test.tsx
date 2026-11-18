@@ -22,6 +22,12 @@ vi.mock('../context/AuthContext', () => ({
   useAuth: () => authState,
 }));
 
+// Both home integrations on (the hook's own fetch needs a QueryClient this test does not render).
+const hubs = { homehub: true, homeAssistant: true };
+vi.mock('../hooks/useIntegrations', () => ({
+  useIntegrations: () => ({ ...hubs, anyHub: hubs.homehub || hubs.homeAssistant, hubs, settled: true }),
+}));
+
 vi.mock('../hooks/useHaptics', () => ({
   useHaptics: () => ({ trigger: vi.fn() }),
 }));

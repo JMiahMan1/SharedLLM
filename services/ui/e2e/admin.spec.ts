@@ -49,7 +49,7 @@ test.describe('@live Admin Page - System Matrix', () => {
     await page.waitForTimeout(3000);
     await page.getByRole('button', { name: 'Users & Devices' }).click();
 
-    const searchInput = page.getByPlaceholder('Search Home Assistant entities...');
+    const searchInput = page.getByPlaceholder('Search the home hub\'s entities...');
     await expect(searchInput).toBeVisible();
     await searchInput.click();
     await page.waitForTimeout(3000);

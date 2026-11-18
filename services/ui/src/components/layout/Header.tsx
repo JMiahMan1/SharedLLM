@@ -13,6 +13,7 @@ import SwipeToDismiss from '../ui/SwipeToDismiss';
 import NotificationActions from './NotificationActions';
 import UserAvatar from '../UserAvatar';
 import { navPagesFor } from './navItems';
+import { useIntegrations } from '../../hooks/useIntegrations';
 import { useDialogFocus } from '../../lib/focusTrap';
 import { sharePushKey } from '../../lib/push';
 
@@ -62,10 +63,11 @@ const Header = () => {
   const profileRef = useRef<HTMLDivElement>(null);
   const bellRef = useRef<HTMLDivElement>(null);
 
+  const { hubs } = useIntegrations();
   const navItems = useMemo<NavItem[]>(() => [
-    ...navPagesFor(!!user?.is_admin).map(({ label, path, keywords }) => ({ label, path, keywords, section: 'Pages' })),
+    ...navPagesFor(!!user?.is_admin, hubs).map(({ label, path, keywords }) => ({ label, path, keywords, section: 'Pages' })),
     ...EXTRA_ITEMS,
-  ], [user?.is_admin]);
+  ], [user?.is_admin, hubs]);
 
   const matches = useMemo(() => {
     const q = navQuery.trim().toLowerCase();

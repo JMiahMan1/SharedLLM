@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import { useIntegrations } from '../../hooks/useIntegrations';
 import type { CredentialShares, ShareableService } from '../../types/api';
 
 /**
@@ -35,6 +36,10 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
   });
 
   const granted = new Set<ShareableService>(data?.services ?? []);
+  // With the Home Assistant integration off nobody's HA login is used, shared or
+  // not, so the grant is not offered (an existing grant is kept for when it is on).
+  const { homeAssistant } = useIntegrations();
+  const services = SHAREABLE_SERVICES.filter(({ key }) => key !== 'home_assistant' || homeAssistant);
 
   const mutation = useMutation({
     mutationFn: (services: ShareableService[]) => api.putCredentialShares(username, services, note || undefined),
@@ -92,7 +97,7 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
       </p>
 
       <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {SHAREABLE_SERVICES.map(({ key, label }) => {
+        {services.map(({ key, label }) => {
           const on = granted.has(key);
           return (
             <li key={key}>

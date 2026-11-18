@@ -4,7 +4,8 @@ import { Activity, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useServiceInfo, useSystemHealth } from '../../hooks/useSystemHealth';
 import { cn } from '../../lib/utils';
-import { navSectionsFor, sectionOfPath, type NavGroupKey, type NavPage } from './navItems';
+import { navPagesFor, navSectionsFor, sectionOfPath, type NavGroupKey, type NavPage } from './navItems';
+import { useIntegrations } from '../../hooks/useIntegrations';
 
 const COLLAPSED_KEY = 'jarvis_sidebar_collapsed_v1';
 
@@ -41,7 +42,8 @@ const SidebarLink = ({ item }: { item: NavPage }) => (
 const Sidebar = () => {
   const { user } = useAuth();
   const isAdmin = user?.is_admin ?? false;
-  const sections = navSectionsFor(isAdmin);
+  const { hubs } = useIntegrations();
+  const sections = navSectionsFor(isAdmin, navPagesFor(isAdmin, hubs));
   const { pathname } = useLocation();
   const activeSection = sectionOfPath(sections, pathname);
   // Sections a person folded away stay folded on this device; the one holding

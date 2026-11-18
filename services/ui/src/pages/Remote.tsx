@@ -140,11 +140,11 @@ const Remote = () => {
           <div className="flex justify-center py-6" role="status" aria-label="Loading"><Loader2 className="animate-spin text-slate-500" /></div>
         ) : status.isError ? (
           <div className="text-center py-4">
-            <p className="text-sm text-red-300">Couldn’t reach Home Assistant.</p>
+            <p className="text-sm text-red-300">Couldn’t reach the home hub.</p>
             <button type="button" onClick={() => void status.refetch()} className="mt-1 min-h-11 px-4 text-sm text-cyan-300 underline">Try again</button>
           </div>
         ) : players.length === 0 ? (
-          <p className="text-sm text-slate-500 py-4">No TVs or speakers found in Home Assistant.</p>
+          <p className="text-sm text-slate-500 py-4">No TVs or speakers found in the home hub.</p>
         ) : (
           <div className="flex gap-2 overflow-x-auto sm:flex-wrap sm:overflow-visible pb-1 custom-scrollbar">
             {players.map((p) => {
@@ -175,7 +175,7 @@ const Remote = () => {
       {current && !isOnline(current) && (
         <div className="glass-panel rounded-2xl p-8 text-center">
           <p className="text-slate-300">{formatDeviceLabel(current.friendly_name, current.entity_id)} is offline</p>
-          <p className="text-xs text-slate-500 mt-1">Home Assistant can’t reach it right now.</p>
+          <p className="text-xs text-slate-500 mt-1">The home hub can’t reach it right now.</p>
         </div>
       )}
 

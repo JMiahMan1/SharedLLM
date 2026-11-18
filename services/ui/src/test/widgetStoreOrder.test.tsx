@@ -24,6 +24,8 @@ const allCapabilities = {
   has_events: true,
   has_quick_assistant: true,
   has_assignable_devices: true,
+  has_home_hub: true,
+  has_homehub: true,
 } satisfies CapabilityPayload;
 
 function settingsFor(key: WidgetKey, orderIndex: number, isPinned = false): UserWidgetSettings {

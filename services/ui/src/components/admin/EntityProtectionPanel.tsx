@@ -176,7 +176,7 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
         <EntitySearchDropdown
           value={entityId}
           onChange={setEntityId}
-          placeholder="Search Home Assistant entities..."
+          placeholder="Search the home hub's entities..."
           testId="protection-entity-search"
         />
         <input
@@ -304,7 +304,7 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
                   // enough, and it is not a thing to do by accident.
                   const ok = await confirmDialog({
                     title: 'Release this protection?',
-                    body: `Stop guarding ${protection.entity_id}? Anyone who can reach Home Assistant can use it again.`,
+                    body: `Stop guarding ${protection.entity_id}? Anyone who can reach the home hub can use it again.`,
                     confirmLabel: 'Release',
                     danger: true,
                   });

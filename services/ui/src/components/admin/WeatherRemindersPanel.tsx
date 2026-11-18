@@ -107,7 +107,7 @@ const ForecastPlaceForm: FC<{
     <fieldset className="mb-6 rounded-xl border border-white/5 bg-black/20 p-3">
       <legend className="px-1 text-[11px] font-semibold text-slate-300">Forecast location and units</legend>
       <p className="mb-3 text-[11px] text-slate-500">
-        Leave latitude and longitude empty to use Home Assistant&apos;s home zone.
+        Leave latitude and longitude empty to use the home hub&apos;s home zone.
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_120px_120px_auto]">
         <input
@@ -243,7 +243,7 @@ export const WeatherRemindersPanel: FC<{ users: UserProfile[] }> = ({ users }) =
 
   const submit = () => {
     if (draft.haService.trim() && !/^[a-z_]+\.[a-z0-9_]+$/.test(draft.haService.trim().toLowerCase())) {
-      toast.error('A Home Assistant action looks like cover.close_cover');
+      toast.error('A home hub action looks like cover.close_cover');
       return;
     }
     if (!draft.notify && !draft.haService.trim() && !draft.otherActions.length) {
@@ -407,14 +407,14 @@ export const WeatherRemindersPanel: FC<{ users: UserProfile[] }> = ({ users }) =
 
       <fieldset className="mb-4 rounded-xl border border-white/5 bg-black/20 p-3">
         <legend className="px-1 text-[11px] font-semibold text-slate-300">
-          Also run a Home Assistant action <span className="text-slate-500">(optional)</span>
+          Also run a home hub action <span className="text-slate-500">(optional)</span>
         </legend>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,200px)_minmax(0,1fr)]">
           <input
             value={draft.haService}
             onChange={(e) => setDraft((d) => ({ ...d, haService: e.target.value }))}
             placeholder="cover.close_cover"
-            aria-label="Home Assistant action"
+            aria-label="Home hub action"
             autoCapitalize="none"
             className="glass-input bg-black/30"
           />

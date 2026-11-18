@@ -65,6 +65,7 @@ import { useSiteTheme } from './themes/siteTheme';
 
 import { Toaster } from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
+import HubRequired from './components/layout/HubRequired';
 
 const queryClient = new QueryClient();
 
@@ -210,15 +211,15 @@ function App() {
                 mounting a second copy keeps one URL per page, so the query
                 cache and "you are here" state can't diverge between them. */}
             <Route path="/family-circle" element={<Navigate to="/wander" replace />} />
-            <Route path="/remote" element={<ProtectedRoute isMobile={isMobile}><Remote /></ProtectedRoute>} />
-            <Route path="/cameras" element={<ProtectedRoute isMobile={isMobile}><Cameras /></ProtectedRoute>} />
-            <Route path="/rooms" element={<ProtectedRoute isMobile={isMobile}><Rooms /></ProtectedRoute>} />
-            <Route path="/energy" element={<ProtectedRoute isMobile={isMobile}><Energy /></ProtectedRoute>} />
-            <Route path="/history" element={<ProtectedRoute isMobile={isMobile}><HistoryPage /></ProtectedRoute>} />
-            <Route path="/lists" element={<ProtectedRoute isMobile={isMobile}><Lists /></ProtectedRoute>} />
-            <Route path="/climate" element={<ProtectedRoute isMobile={isMobile}><Climate /></ProtectedRoute>} />
-            <Route path="/automations" element={<ProtectedRoute isMobile={isMobile}><Automations /></ProtectedRoute>} />
-            <Route path="/schedules" element={<ProtectedRoute isMobile={isMobile}><Schedules /></ProtectedRoute>} />
+            <Route path="/remote" element={<ProtectedRoute isMobile={isMobile}><HubRequired requires="hub" page="Remote"><Remote /></HubRequired></ProtectedRoute>} />
+            <Route path="/cameras" element={<ProtectedRoute isMobile={isMobile}><HubRequired requires="homehub" page="Cameras"><Cameras /></HubRequired></ProtectedRoute>} />
+            <Route path="/rooms" element={<ProtectedRoute isMobile={isMobile}><HubRequired requires="homehub" page="Rooms"><Rooms /></HubRequired></ProtectedRoute>} />
+            <Route path="/energy" element={<ProtectedRoute isMobile={isMobile}><HubRequired requires="homehub" page="Energy"><Energy /></HubRequired></ProtectedRoute>} />
+            <Route path="/history" element={<ProtectedRoute isMobile={isMobile}><HubRequired requires="hub" page="History"><HistoryPage /></HubRequired></ProtectedRoute>} />
+            <Route path="/lists" element={<ProtectedRoute isMobile={isMobile}><HubRequired requires="hub" page="Lists"><Lists /></HubRequired></ProtectedRoute>} />
+            <Route path="/climate" element={<ProtectedRoute isMobile={isMobile}><HubRequired requires="homehub" page="Climate"><Climate /></HubRequired></ProtectedRoute>} />
+            <Route path="/automations" element={<ProtectedRoute isMobile={isMobile}><HubRequired requires="homehub" page="Automations"><Automations /></HubRequired></ProtectedRoute>} />
+            <Route path="/schedules" element={<ProtectedRoute isMobile={isMobile}><HubRequired requires="homehub" page="Schedules"><Schedules /></HubRequired></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isMobile}><Settings /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute isMobile={isMobile}><KnowledgeHub /></ProtectedRoute>} />
             <Route path="/workspaces" element={<ProtectedRoute isMobile={isMobile}><Workspaces /></ProtectedRoute>} />

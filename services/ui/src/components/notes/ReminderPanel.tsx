@@ -84,7 +84,7 @@ function PlaceReminderSection({
           {errorText(zonesQuery.error, 'Could not load the family’s places')}
         </p>
       ) : places.length === 0 ? (
-        <p className="text-xs text-slate-400">No places yet. Places are the zones set up in Home Assistant (Wander lists them).</p>
+        <p className="text-xs text-slate-400">No places yet. Places are the zones set up in the home hub (Wander lists them).</p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <select

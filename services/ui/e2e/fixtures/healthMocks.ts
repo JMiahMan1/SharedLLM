@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import { isServerCall } from './serverCalls';
+import { isServerCall, INTEGRATIONS_STATUS_PATH, integrationsStatus } from './serverCalls';
 
 /**
  * A made-up family's health for the hermetic screen tests: a parent with a full
@@ -202,6 +202,7 @@ export async function mockHealth(page: Page): Promise<string[]> {
     const url = new URL(req.url());
     const p = url.pathname;
     const json = (body: unknown) => route.fulfill({ json: body });
+    if (p === INTEGRATIONS_STATUS_PATH) return route.fulfill({ json: integrationsStatus() });
     const health = p.startsWith('/api/health/') || p.startsWith('/api/geo/') || EXTRA.has(p);
     if (!health) return route.fallback();
     if (req.method() !== 'GET') return json({ status: 'ok' });

@@ -14,7 +14,7 @@ import {
   X,
   Settings2,
 } from 'lucide-react';
-import { useWidgetStore, defaultWidgetDefs, defaultVisibility } from '../../stores/widgetStore';
+import { useWidgetStore, defaultWidgetDefs, defaultVisibility, isWidgetAvailable } from '../../stores/widgetStore';
 import type { UserWidgetSettings, WidgetSize, WidgetVisibility } from '../../types/widget';
 import { api } from '../../services/api';
 import { focusableIn, trapTab } from '../../lib/focusTrap';
@@ -25,11 +25,11 @@ interface DashboardSettingsPanelProps {
 }
 
 const WidgetCatalog = () => {
-  const { userWidgets, widgetRegistry, showWidget, hideWidget, togglePin } = useWidgetStore();
+  const { userWidgets, widgetRegistry, showWidget, hideWidget, togglePin, mountCapabilities, isAdmin } = useWidgetStore();
 
   return (
     <div className="space-y-1">
-      {widgetRegistry.map((def) => {
+      {widgetRegistry.filter((def) => isWidgetAvailable(def, { capabilities: mountCapabilities, isAdmin })).map((def) => {
         const settings = userWidgets[def.key];
         const visibility: WidgetVisibility =
           settings?.visibility ?? defaultVisibility(def.key);
