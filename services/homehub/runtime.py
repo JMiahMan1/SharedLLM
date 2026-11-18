@@ -44,6 +44,8 @@ class Runtime:
         hub.devices = {d.id: d for d in self.store.load_devices()}
         hub.entities = {e.entity_id: e for e in self.store.load_entities()}
         hub.areas = {a.area_id: a for a in self.store.load_areas()}
+        # A hidden device's entities follow it, whatever registered them since (a resync, an import).
+        hub.reconcile_hidden()
         hub.floors = self.store.get_kv("floors", {}) or {}
         cfg = self.store.get_kv("core_config", {}) or {}
         if cfg:

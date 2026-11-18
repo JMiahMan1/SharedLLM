@@ -276,13 +276,18 @@ async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -
 # -- devices ------------------------------------------------------------------------------
 
 def update_device(runtime: Any, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """``{"name_by_user"?: str|null, "area_id"?: str|null, "labels"?: [label ids]}`` (an area by id or name)."""
-    from services.homehub import registries
+    """``{"name_by_user"?: str|null, "area_id"?: str|null, "labels"?: [label ids], "hidden"?: bool}``.
+
+    An area by id or name. ``hidden`` hides the device from what people and Jarvis browse (duplicates.py).
+    """
+    from services.homehub import duplicates, registries
 
     hub = runtime.hub
     dev = hub.devices.get(device_id)
     if dev is None:
         raise EntryError("No such device", 404)
+    if "hidden" in body and not isinstance(body["hidden"], bool):
+        raise EntryError("hidden must be true or false")
     labels = registries.clean_label_ids(runtime, body["labels"]) if "labels" in body else None
     if "name_by_user" in body:
         name = body.get("name_by_user")
@@ -300,6 +305,8 @@ def update_device(runtime: Any, device_id: str, body: dict[str, Any]) -> dict[st
         dev.labels = labels
     runtime.store.save_device(dev)
     hub.bus.fire("device_registry_updated", {"action": "update", "device_id": dev.id})
+    if "hidden" in body:
+        duplicates.set_device_hidden(runtime, dev.id, body["hidden"])
     # Friendly names come from the device name: publish every entity again.
     for eid in hub.device_entities(dev.id):
         st = hub.states.get(eid)
@@ -309,7 +316,7 @@ def update_device(runtime: Any, device_id: str, body: dict[str, Any]) -> dict[st
             attrs["friendly_name"] = hub.friendly_name(ent)
             hub.states.set(eid, st.state, attrs)
     return {"id": dev.id, "name": dev.display_name, "name_by_user": dev.name_by_user, "area_id": dev.area_id,
-            "labels": list(dev.labels)}
+            "labels": list(dev.labels), "hidden": bool(dev.hidden_by), "hidden_by": dev.hidden_by}
 
 
 def _delete_row(store: Any, table: str, column: str, key: str) -> None:

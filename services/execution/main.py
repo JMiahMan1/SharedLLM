@@ -2713,6 +2713,9 @@ async def execute_entity_search(req: EntitySearchRequest):
         # list, even if a stale DeviceAssignment row still names them.
         if not can_view(permissions, eid):
             continue
+        # A duplicate device's hidden copy is never offered to the model; naming it still works.
+        if search_idx is not None and search_idx.hidden(eid):
+            continue
         if req.controllable_only:
             entity_domain = eid.split('.')[0] if '.' in eid else ''
             if entity_domain not in CONTROLLABLE_DOMAINS:
@@ -2889,15 +2892,25 @@ def _discovery_login(ha_url: str, ha_token: str) -> tuple[str, str]:
 
 
 @app.get("/discovery/entities")
-async def discovery_entities(request: Request, ha_url: str = "", ha_token: str = ""):
+async def discovery_entities(request: Request, ha_url: str = "", ha_token: str = "", include_hidden: bool = False):
+    """Every entity with its area and network info, for the lists Jarvis browses.
+
+    Entities the hub hides (a duplicate device's copy, services/homehub/duplicates.py) are left out, unless
+    ``include_hidden`` (the state cache and other lookups by entity id): then they carry ``_hidden: true``.
+    """
     ha_url, ha_token = _discovery_login(ha_url, ha_token)
     if not ha_url:
         raise HTTPException(status_code=503, detail=hardware_router.NO_HUB_MESSAGE)
     states = await ha_client.get_states(ha_url, ha_token) or []
     areas = await ha_client.get_areas(ha_url, ha_token) or {}
+    hidden = await ha_client.get_hidden_entities(ha_url, ha_token)
+    if hidden and not include_hidden:
+        states = [s for s in states if s.get("entity_id") not in hidden]
     registry = await device_registry.list_devices()
     for s in states:
         eid = s.get("entity_id")
+        if eid in hidden:
+            s.setdefault("attributes", {})["_hidden"] = True
         if eid in areas:
             if "attributes" not in s:
                 s["attributes"] = {}

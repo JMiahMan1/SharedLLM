@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronRight, Plus, Search, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Eye, Plus, Search, X } from 'lucide-react';
 import DeviceTile from './DeviceTile';
 import HubDeviceSheet from './HubDeviceSheet';
 import { getRooms, type HubEntity } from '../../lib/dashboards';
 import { failureText, updateHubDevice } from '../../lib/discoveredDevices';
+import { setDeviceHidden } from '../../lib/duplicates';
 import {
-  STATUS_LABEL, filterDevices, getHardware, needsAttention, physicalDevices, type HardwareDevice, type PhysicalDevice,
+  STATUS_LABEL, filterDevices, getHardware, hiddenDevices, needsAttention, physicalDevices, type HardwareDevice,
+  type PhysicalDevice,
 } from '../../lib/hardware';
 import { TYPE_FILTERS, primaryEntity, tileKind, typeFilterOf, type TileKind } from '../../lib/deviceTiles';
 
@@ -96,6 +98,48 @@ function NoRoom({ devices, areas }: { devices: PhysicalDevice[]; areas: { area_i
   );
 }
 
+/** Devices a person hid (a duplicate's other copy), folded at the end, each with Show. They still work. */
+function HiddenDevices({ devices }: { devices: HardwareDevice[] }) {
+  const qc = useQueryClient();
+  const show = useMutation({
+    mutationFn: (id: string) => setDeviceHidden(id, false),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: HARDWARE_KEY });
+      void qc.invalidateQueries({ queryKey: ['homehub-duplicates'] });
+      void qc.invalidateQueries({ queryKey: STATES_KEY });
+    },
+  });
+  if (!devices.length) return null;
+  return (
+    <details className="glass-panel group rounded-2xl border border-white/10" data-testid="hardware-hidden">
+      <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 px-4 text-sm text-slate-300 [&::-webkit-details-marker]:hidden">
+        <span>Hidden <span className="text-slate-500">({devices.length})</span></span>
+        <ChevronRight size={16} className="text-slate-500 motion-safe:transition-transform group-open:rotate-90" aria-hidden />
+      </summary>
+      <p className="border-t border-white/5 px-4 pt-3 text-xs text-slate-500">
+        Hidden devices keep working; rooms, Jarvis and voice leave them out.
+      </p>
+      <ul className="divide-y divide-white/5">
+        {devices.map((d) => (
+          <li key={d.id} className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2"
+            data-testid="hidden-device">
+            <span className="min-w-0 flex-1 basis-40">
+              <span className="block truncate text-sm text-slate-200" title={d.name}>{d.name}</span>
+              <span className="block truncate text-xs text-slate-500">{[d.label, d.area].filter(Boolean).join(' · ')}</span>
+            </span>
+            <button type="button" disabled={show.isPending} onClick={() => show.mutate(d.id)}
+              aria-label={`Show ${d.name}${d.label ? ` (${d.label})` : ''}`}
+              className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-50">
+              <Eye size={14} aria-hidden /> Show
+            </button>
+          </li>
+        ))}
+      </ul>
+      {show.isError && <p className="px-4 pb-3 text-xs text-amber-300/90" role="alert">{failureText(show.error)}</p>}
+    </details>
+  );
+}
+
 /**
  * Devices > Your devices (admins): every physical device as a tile, by room (or by type or
  * integration), however many integrations see it (a TV that Roku, Cast and Music Assistant all
@@ -114,6 +158,7 @@ export default function HardwarePanel({ onAdd }: { onAdd?: () => void }) {
 
   const raw = useMemo(() => list.data?.devices ?? [], [list.data]);
   const { devices, services } = useMemo(() => physicalDevices(raw), [raw]);
+  const hidden = useMemo(() => hiddenDevices(raw), [raw]);
   const byDevice = useMemo(() => statesByDevice(states.data), [states.data]);
   const rows: Row[] = useMemo(() => devices.map((device) => {
     const entities = device.views.flatMap((v) => byDevice.get(v.id) ?? []);
@@ -262,6 +307,8 @@ export default function HardwarePanel({ onAdd }: { onAdd?: () => void }) {
           </ul>
         </details>
       )}
+
+      {!filtered && <HiddenDevices devices={hidden} />}
 
       {open && (
         <HubDeviceSheet deviceId={open} summary={(openRow?.device ?? openService ?? null) as HardwareDevice | null}

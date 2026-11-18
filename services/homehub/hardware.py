@@ -179,6 +179,8 @@ def device_view(runtime: Any, dev: DeviceEntry, *, areas: dict[str, str] | None 
         "configuration_url": dev.configuration_url, "entry_type": dev.entry_type,
         "via_device_id": dev.via_device_id, "via_device_name": via.display_name if via else None,
         "disabled_by": dev.disabled_by, "entities": total, "unavailable": unavailable,
+        # Hidden from what people and Jarvis browse (a duplicate another integration also sees; duplicates.py).
+        "hidden": bool(dev.hidden_by), "hidden_by": dev.hidden_by,
         "status": _status(entry.state if entry else None, disabled, total, unavailable),
         "last_seen": _iso(last),
         "abilities": capabilities.device_capabilities(hub, dev.id)["abilities"],

@@ -426,6 +426,23 @@ leave-one-session-out accuracy (a room needs two sessions), the confusion
 matrix, and `stale_reason` when a scanner was added, moved to another area or
 went quiet after mapping (map the rooms again).
 
+## Duplicate devices (`duplicates.py`)
+
+The same bulb is often in the hub twice, through Matter and through WiZ. Deleting the Matter copy
+would take it off the fabric, so a person hides one copy instead (Devices > Your devices >
+Duplicates). A hidden device (`DeviceEntry.hidden_by = "user"`; its entities get
+`hidden_by: "device"`) keeps working: states update, automations and a service call naming it or
+its device still run. It is left out of the rooms dashboard, the voice exposure list,
+`/api/homehub/hidden_entities` consumers (execution's `/discovery/entities`, so Jarvis's entity
+lists, fast-path cache and RAG sync), capability-index room lookups and a service call aimed at a
+whole area. It survives restarts, resyncs and a re-import of Home Assistant.
+
+Duplicates are devices of different integrations with the same real MAC, or (when both do not
+report one) the same name in the same area; one integration's devices are never grouped.
+`GET /hub/devices/duplicates`, `PATCH /hub/devices/{id}` `{"hidden"}`,
+`POST /hub/devices/duplicates/hide` `{"hide_domain"?, "keep_domain"?}` and
+`POST /hub/devices/duplicates/unhide` `{"domain"}`, admins only.
+
 ## Known issues
 
 - **Garage door sensor (hardware): needs fixing.** `binary_sensor.demo_door_sensor`

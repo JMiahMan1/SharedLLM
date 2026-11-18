@@ -5,7 +5,10 @@
 | ``GET /hub/entries`` | Every integration entry with its devices, entities and reconfigurable fields, plus the areas |
 | ``PATCH /hub/entries/{id}`` | ``{"title"?, "data"?: {"host"?, "url"?, "username"?, "password"?, ...}}``; reloads it |
 | ``DELETE /hub/entries/{id}[?force=1]`` | Unpair (HomeKit), remove the entry, its entities and devices |
-| ``PATCH /hub/devices/{id}`` | ``{"name_by_user"?, "area_id"?}`` |
+| ``PATCH /hub/devices/{id}`` | ``{"name_by_user"?, "area_id"?, "labels"?, "hidden"?}`` |
+| ``GET /hub/devices/duplicates`` | Devices two integrations both register, grouped (``duplicates.py``) |
+| ``POST /hub/devices/duplicates/hide`` | ``{"hide_domain"?, "keep_domain"?}``: hide one integration's copies |
+| ``POST /hub/devices/duplicates/unhide`` | ``{"domain"}``: show that integration's copies again |
 | ``DELETE /hub/devices/{id}[?force=1]`` | Remove one device (its entry too when it was the entry's only device) |
 | ``GET /hub/flows`` | Every integration that can be added by hand (by address, login or choice), with its fields and ``kind`` |
 | ``POST /hub/flows/{domain}`` | ``{"host"? or "url"?, "name"?, "area_id"?, "input"?}``; same answers as adopting a finding |
@@ -28,7 +31,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from services.common.secrets import secret_matches
-from services.homehub import entries, flows
+from services.homehub import duplicates, entries, flows
 from services.homehub import manual_flows as by_hand
 from services.homehub.auth import Auth, bearer
 from services.homehub.core import HubError
@@ -79,6 +82,27 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         admin(request)
         try:
             return await entries.remove_entry(runtime, entry_id, force=truthy(force))
+        except HubError as exc:
+            return failure(exc)
+
+    @router.get("/hub/devices/duplicates")
+    async def list_duplicates(request: Request) -> dict[str, Any]:
+        admin(request)
+        return duplicates.list_duplicates(runtime)
+
+    @router.post("/hub/devices/duplicates/hide")
+    async def hide_duplicates(request: Request) -> Any:
+        admin(request)
+        try:
+            return duplicates.hide_copies(runtime, await body_of(request))
+        except HubError as exc:
+            return failure(exc)
+
+    @router.post("/hub/devices/duplicates/unhide")
+    async def unhide_duplicates(request: Request) -> Any:
+        admin(request)
+        try:
+            return duplicates.show_copies(runtime, await body_of(request))
         except HubError as exc:
             return failure(exc)
 

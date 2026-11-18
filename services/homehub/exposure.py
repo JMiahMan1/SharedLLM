@@ -136,8 +136,14 @@ def set_expose_new(hub: Any, value: bool) -> None:
 
 
 def exposed_entities(hub: Any) -> list[str]:
-    """Every entity with a state that voice and chat may control, sorted."""
-    return sorted(eid for eid in hub.states.entity_ids() if is_exposed(hub, eid))
+    """Every entity with a state that voice and chat may control, sorted.
+
+    A hidden one (a duplicate device's copy, duplicates.py) is left out of the list; asked about by its id
+    (``is_exposed``) it answers as before, so a command naming it still runs.
+    """
+    hidden = getattr(hub, "is_hidden", None)
+    return sorted(eid for eid in hub.states.entity_ids()
+                  if is_exposed(hub, eid) and not (callable(hidden) and hidden(eid)))
 
 
 def from_ha_storage(data: Any) -> tuple[dict[str, Any], dict[str, bool]]:

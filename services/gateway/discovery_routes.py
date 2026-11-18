@@ -204,12 +204,40 @@ async def remove_entry(entry_id: str, request: Request, force: bool = False):
                                timeout=_SCAN_TIMEOUT))
 
 
-@router.patch("/devices/{device_id}")
-async def update_device(device_id: str, request: Request):
-    """Rename a device, move it to an area or label it: ``{"name_by_user"?, "area_id"?, "labels"?}``."""
+@router.get("/devices/duplicates")
+async def duplicate_devices(request: Request):
+    """Devices two integrations both register (homehub duplicates.py), grouped, with which copy is hidden."""
+    await _admin(request)
+    return _answer(*await _hub("GET", "/hub/devices/duplicates"))
+
+
+@router.post("/devices/duplicates/hide")
+async def hide_duplicates(request: Request):
+    """Hide one integration's copies of duplicate devices: ``{"hide_domain"?, "keep_domain"?}``."""
     await _admin(request)
     body = await _json(request)
-    payload = {k: body[k] for k in ("name_by_user", "area_id", "labels") if k in body}
+    payload = {k: body[k] for k in ("hide_domain", "keep_domain") if k in body}
+    return _answer(*await _hub("POST", "/hub/devices/duplicates/hide", json=payload))
+
+
+@router.post("/devices/duplicates/unhide")
+async def unhide_duplicates(request: Request):
+    """Show one integration's hidden copies again: ``{"domain"}``."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("domain",) if k in body}
+    return _answer(*await _hub("POST", "/hub/devices/duplicates/unhide", json=payload))
+
+
+@router.patch("/devices/{device_id}")
+async def update_device(device_id: str, request: Request):
+    """Rename, move, label or hide a device: ``{"name_by_user"?, "area_id"?, "labels"?, "hidden"?}``.
+
+    Hidden keeps it working; only what people and Jarvis browse leaves it out (homehub duplicates.py).
+    """
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("name_by_user", "area_id", "labels", "hidden") if k in body}
     return _answer(*await _hub("PATCH", f"/hub/devices/{_rid(device_id, 'device')}", json=payload))
 
 

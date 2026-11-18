@@ -245,6 +245,9 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
         (ent.device_class or _trusted(ent, "original_device_class")) if ent is not None else None)
     if device_class:
         details["device_class"] = device_class
+    # A hidden entity (a duplicate device's copy) still works by its id; room lookups leave it out.
+    if ent is not None and callable(getattr(hub, "is_hidden", None)) and hub.is_hidden(entity_id):
+        details["hidden"] = True
 
     if domain == "light":
         abilities |= {"power", "toggle"}

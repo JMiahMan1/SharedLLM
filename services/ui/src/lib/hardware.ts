@@ -54,6 +54,9 @@ export interface HardwareDevice {
   group_primary?: boolean;
   /** Label ids the device wears (homehub registries); absent from older hubs. */
   labels?: string[];
+  /** Hidden from what people and Jarvis browse (a duplicate of a device another integration sees); it still works. */
+  hidden?: boolean;
+  hidden_by?: string | null;
 }
 
 export type DeviceKind = 'light' | 'media' | 'camera' | 'climate' | 'access' | 'power' | 'sensor' | 'vacuum'
@@ -195,10 +198,11 @@ const kindOf = (d: HardwareDevice): DeviceKind => d.kind ?? 'other';
  * is idle is still on), offline when none answers. Older hubs send no groups: one per device.
  */
 export function physicalDevices(devices: HardwareDevice[]): { devices: PhysicalDevice[]; services: HardwareDevice[] } {
-  const services = devices.filter((d) => d.service);
+  const services = devices.filter((d) => d.service && !d.hidden);
   const groups = new Map<string, HardwareDevice[]>();
   for (const d of devices) {
-    if (d.service) continue;
+    // A hidden copy is not a view of the tile; the tile stands for the copies that show.
+    if (d.service || d.hidden) continue;
     const key = d.group_id || d.id;
     groups.set(key, [...(groups.get(key) ?? []), d]);
   }
@@ -214,6 +218,11 @@ export function physicalDevices(devices: HardwareDevice[]): { devices: PhysicalD
       area: primary.area ?? placed?.area ?? null, views });
   }
   return { devices: out.sort((a, b) => a.name.localeCompare(b.name)), services };
+}
+
+/** Hidden devices (a duplicate's copy a person chose to hide), by name, for the folded "Hidden" list. */
+export function hiddenDevices(devices: HardwareDevice[]): HardwareDevice[] {
+  return devices.filter((d) => d.hidden).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** What needs a person: devices that stopped answering, and devices in no room. */

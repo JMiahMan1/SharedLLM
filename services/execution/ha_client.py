@@ -402,6 +402,31 @@ async def get_areas(ha_url: str, ha_token: str, account: str = "") -> dict:
         )
     return {}
 
+async def get_hidden_entities(ha_url: str, ha_token: str) -> set[str]:
+    """Entity ids the hub has hidden (a duplicate device's copy, services/homehub/duplicates.py).
+
+    They still work; Jarvis only leaves them out of its lists. A plain Home Assistant has no such route (404)
+    and hides nothing here. Any other failure is logged and answers an empty set: the lists then show the
+    hidden copies too, which is the state before anything was hidden, never a missing device.
+    """
+    if not ha_url or ha_health.skip_reason(ha_url):
+        return set()
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    url = f"{ha_url.rstrip('/')}/api/homehub/hidden_entities"
+    try:
+        async with _ha_session(ha_url) as client, client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
+            if resp.status == 404:
+                return set()
+            resp.raise_for_status()
+            data = await resp.json(content_type=None)
+    except Exception as e:
+        log.warning("[ha_client] could not read the hub's hidden entities, showing every copy: %s",
+                    ha_health.describe(e))
+        return set()
+    ids = data.get("entity_ids") if isinstance(data, dict) else None
+    return {str(x) for x in ids or [] if isinstance(x, str)}
+
+
 _ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 # media_player -> remote lookups barely change; one HA round-trip per key press
 # would make the Remote page's d-pad feel sluggish.

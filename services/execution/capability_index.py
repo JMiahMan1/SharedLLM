@@ -101,6 +101,11 @@ class CapabilityIndex:
     def __contains__(self, entity_id: object) -> bool:
         return entity_id in self.by_entity
 
+    def hidden(self, entity_id: str) -> bool:
+        """The hub hides it (a duplicate device's copy): left out of room and ability lookups, never of ``get``."""
+        cap = self.by_entity.get(entity_id)
+        return bool(cap) and bool((cap.get("details") or {}).get("hidden"))
+
     # -- areas --------------------------------------------------------------
     def _phrases(self) -> list[tuple[str, str]]:
         """``(normalized phrase, area_id)`` for every area id, name and alias."""
@@ -172,9 +177,10 @@ class CapabilityIndex:
                     and (domain is None or cap.get("domain") == domain)
                     and (integration is None or self.integration(eid) == integration))
 
-        same_dev = sorted(e for e, c in self.by_entity.items() if dev and c.get("device_id") == dev and ok(e))
+        same_dev = sorted(e for e, c in self.by_entity.items()
+                          if dev and c.get("device_id") == dev and ok(e) and not self.hidden(e))
         same_area = sorted(e for e, c in self.by_entity.items()
-                           if area and c.get("area_id") == area and e not in same_dev and ok(e))
+                           if area and c.get("area_id") == area and e not in same_dev and ok(e) and not self.hidden(e))
         return same_dev + same_area
 
     # -- abilities ----------------------------------------------------------
@@ -196,7 +202,7 @@ class CapabilityIndex:
     def media_targets(self, area_id: str | None = None, *, available_only: bool = False) -> list[str]:
         """Every entity that can be sent sound, optionally in one area."""
         return sorted(eid for eid in self.by_entity
-                      if self.is_media_target(eid)
+                      if self.is_media_target(eid) and not self.hidden(eid)
                       and (area_id is None or self.area_of(eid) == area_id)
                       and (not available_only or self.by_entity[eid].get("available")))
 
@@ -253,9 +259,11 @@ class CapabilityIndex:
 
     def with_ability(self, *abilities: str, area_id: str | None = None, domain: str | None = None,
                      available_only: bool = False) -> list[str]:
-        """Entity ids having every ability, optionally in one area (its id) or domain."""
+        """Entity ids having every ability, optionally in one area (its id) or domain; hidden ones left out."""
         out = []
         for eid, cap in self.by_entity.items():
+            if self.hidden(eid):
+                continue
             have = set(cap.get("abilities") or [])
             if not set(abilities) <= have:
                 continue

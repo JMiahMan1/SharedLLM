@@ -26,6 +26,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { CardSkeletons } from '../components/ui/StateViews';
 import IntegrationsPanel from '../components/devices/IntegrationsPanel';
 import HardwarePanel from '../components/devices/HardwarePanel';
+import DuplicatesPanel from '../components/devices/DuplicatesPanel';
 import PhonesPanel from '../components/devices/PhonesPanel';
 import RoomMapPanel from '../components/devices/RoomMapPanel';
 import AreasPanel from '../components/devices/AreasPanel';
@@ -1529,7 +1530,10 @@ export default function Devices() {
 
       {/* The hub's discovery API is for admins only (parents without the admin flag get 403). */}
       {user?.is_admin && tab === 'devices' && (
-        <div id="devices-tab-devices" role="tabpanel"><div id="devices-hardware" className="scroll-mt-4"><HardwarePanel onAdd={() => openTab('add')} /></div></div>
+        <div id="devices-tab-devices" role="tabpanel" className="space-y-4">
+          <div id="devices-hardware" className="scroll-mt-4"><HardwarePanel onAdd={() => openTab('add')} /></div>
+          <div id="devices-duplicates" className="scroll-mt-4"><DuplicatesPanel /></div>
+        </div>
       )}
       {user?.is_admin && tab === 'add' && (
         <div id="devices-tab-add" role="tabpanel"><div id="devices-new" className="scroll-mt-4"><NewDevicesPanel /></div></div>
