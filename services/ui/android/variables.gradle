@@ -1,5 +1,5 @@
 ext {
-    minSdkVersion = 30  // Android 11: the oldest device in the house is a Fire OS 8 (Android 11) tablet
+    minSdkVersion = 28  // Android 9: the oldest device in the house is a Fire HD 8 (2020, Fire OS 7, Android 9)
     compileSdkVersion = 36
     targetSdkVersion = 36
     androidxActivityVersion = '1.11.0'

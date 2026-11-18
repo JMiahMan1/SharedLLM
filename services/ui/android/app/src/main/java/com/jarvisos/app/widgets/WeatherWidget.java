@@ -63,7 +63,7 @@ public class WeatherWidget extends AppWidgetProvider {
         WidgetFit.Tweak narrow = v -> {
             v.setViewVisibility(R.id.wx_now_icon, View.GONE);
             v.setTextViewTextSize(R.id.wx_temp, android.util.TypedValue.COMPLEX_UNIT_SP, 32);
-            v.setViewLayoutMargin(R.id.wx_temp, RemoteViews.MARGIN_START, 0, android.util.TypedValue.COMPLEX_UNIT_DIP);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) v.setViewLayoutMargin(R.id.wx_temp, RemoteViews.MARGIN_START, 0, android.util.TypedValue.COMPLEX_UNIT_DIP);
         };
         return WidgetFit.of(base)
                 .at(100, 100, base, v -> { noHours.apply(v); narrow.apply(v); })

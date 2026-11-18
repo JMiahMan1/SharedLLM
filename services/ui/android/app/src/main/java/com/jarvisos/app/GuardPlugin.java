@@ -89,8 +89,8 @@ public class GuardPlugin extends Plugin {
         // The lock's call filter (parents and 911 only while locked, from the
         // phone, a watch or a car): whether its role is granted, and whether
         // this phone offers the role at all.
-        out.put("callFilter", LockCallFilterService.held(getContext()));
-        out.put("callFilterAvailable", LockCallFilterService.available(getContext()));
+        out.put("callFilter", CallFilterRole.held(getContext()));
+        out.put("callFilterAvailable", CallFilterRole.available(getContext()));
         // Ways around the filter (FilterBypass), for the father's Devices section.
         String privateDns = GuardNotices.privateDnsHost(getContext());
         out.put("privateDnsHost", privateDns == null ? "" : privateDns);
@@ -145,6 +145,11 @@ public class GuardPlugin extends Plugin {
      */
     @PluginMethod
     public void allowCallFilter(PluginCall call) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+            // No call redirection before Android 10: the device-owner fallback covers the lock.
+            onCallFilter(call, null);
+            return;
+        }
         try {
             android.app.role.RoleManager rm = getContext().getSystemService(android.app.role.RoleManager.class);
             if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_REDIRECTION)
@@ -164,7 +169,7 @@ public class GuardPlugin extends Plugin {
     private void onCallFilter(PluginCall call, androidx.activity.result.ActivityResult result) {
         if (call == null) return;
         JSObject out = new JSObject();
-        out.put("held", LockCallFilterService.held(getContext()));
+        out.put("held", CallFilterRole.held(getContext()));
         call.resolve(out);
     }
 
