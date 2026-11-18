@@ -322,6 +322,13 @@ function linkify(text: string, out: RichPart[]): void {
   if (last < text.length) out.push({ kind: 'text', text: text.slice(last) });
 }
 
+/** Plain text with its web addresses as link parts (an encrypted private message has no placeholders). */
+export function splitLinks(text: string): RichPart[] {
+  const out: RichPart[] = [];
+  linkify(text, out);
+  return out;
+}
+
 /**
  * Split a Talk message into drawable parts. Talk sends "{file}" for a shared
  * file and "{mention-user1}" for a mention, with the objects in

@@ -649,6 +649,32 @@ test.describe('private chat on every form factor', () => {
     done(run);
   });
 
+  test('a link in a message opens in the browser and does not open the message sheet', async ({ page, context }, info) => {
+    const { server, key } = await v1Server();
+    server.messages.push({ id: 2, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 60,
+      message_type: 'comment', message: await sealMessage(key, { t: 'text', text: 'The cabin is https://example.com/cabin?week=2, look!' }) });
+    await context.route('https://example.com/**', (route) => route.fulfill({ body: 'cabin', contentType: 'text/plain' }));
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    const link = page.getByTestId('private-link');
+    await expect(link).toHaveAttribute('href', 'https://example.com/cabin?week=2');
+    await expect(link).toHaveText('https://example.com/cabin?week=2');
+    await check(page, info, run, 'private chat link', page.getByTestId('chat-thread'), [
+      ...await overPanel(page, /private chat link/),
+      // WCAG 2.5.8 exempts a link inside a sentence: its size is the text's.
+      { where: /private chat link/, finding: /under 44px: https:\/\/example\.com\/cabin/, why: 'an inline link in message text' },
+    ]);
+    const popup = context.waitForEvent('page');
+    await link.click();
+    const opened = await popup;
+    await opened.waitForURL('https://example.com/cabin?week=2');
+    await opened.close();
+    // The tap went to the link only: the message's own sheet stayed closed.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    done(run);
+  });
+
   test('a child account: no private chat anywhere, and never a private-chat request', async ({ page }, info) => {
     const asked: string[] = [];
     page.on('request', (req) => {
