@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import Toggle from '../components/ui/Toggle';
 import { CalendarClock, Plane, Plus, Thermometer, Zap } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
@@ -12,7 +14,7 @@ import { BUTTON, PRIMARY } from '../components/automations/styles';
 import { errorText } from '../lib/errorText';
 import { getCatalog } from '../lib/automations';
 import {
-  blankProgram, defaultSetpoint, getClimate, weekdaysText,
+  blankProgram, defaultSetpoint, getClimate, setScheduleEnabled, weekdaysText,
   type Program,
 } from '../lib/schedules';
 
@@ -29,6 +31,15 @@ export default function Schedules() {
   const [tab, setTab] = useState<'thermostats' | 'other'>('thermostats');
   const climate = useQuery({ queryKey: CLIMATE_KEY, queryFn: getClimate, refetchInterval: () => (document.hidden ? false : 30_000) });
   const canEdit = !!climate.data?.can_edit;
+  // Any program can be switched off and on right from the list, like every other schedule.
+  const enable = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => setScheduleEnabled(id, enabled),
+    onSuccess: (_out, { enabled }) => {
+      toast.success(enabled ? 'Schedule on' : 'Schedule off');
+      void queryClient.invalidateQueries({ queryKey: CLIMATE_KEY });
+    },
+    onError: (err) => toast.error(errorText(err, 'That did not work')),
+  });
   // The catalog fills the people, power sensor and service pickers; only editors need it.
   const catalog = useQuery({ queryKey: ['homehub-automation-catalog'], queryFn: getCatalog, staleTime: 5 * 60_000, retry: false, enabled: canEdit });
   const [program, setProgram] = useState<Partial<Program> | null>(null);
@@ -109,8 +120,8 @@ export default function Schedules() {
               <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Programs</h2>
               <ul className="space-y-2">
                 {programs.map((p) => (
-                  <li key={p.id}>
-                    <button type="button" className="glass-panel flex min-h-11 w-full flex-col items-start rounded-2xl border border-white/10 p-3 text-left"
+                  <li key={p.id} className="glass-panel flex items-start gap-3 rounded-2xl border border-white/10 p-3" data-testid="program-row">
+                    <button type="button" className="flex min-h-11 min-w-0 flex-1 flex-col items-start text-left"
                       onClick={() => setProgram(p)} aria-label={`Open program ${p.name}`}>
                       <span className="text-sm font-semibold text-white">{p.name}{p.enabled ? '' : ' (off)'}</span>
                       <span className="text-xs text-slate-500">
@@ -119,6 +130,10 @@ export default function Schedules() {
                       </span>
                       {p.reason && <span className="text-[11px] text-amber-200">{p.reason}</span>}
                     </button>
+                    <div className="flex min-h-11 items-center">
+                      <Toggle checked={p.enabled !== false} disabled={!canEdit || enable.isPending} ariaLabel={`${p.name} on`}
+                        onChange={(v) => enable.mutate({ id: p.id, enabled: v })} />
+                    </div>
                   </li>
                 ))}
               </ul>

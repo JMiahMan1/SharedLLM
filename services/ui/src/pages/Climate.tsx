@@ -145,7 +145,7 @@ function ThermostatCard({ thermostat, scheduled, isAdmin, onChanged }: {
         )}
       </header>
       <ClimateControl entity={thermostat} onChanged={onChanged} compact />
-      {scheduled && <ScheduleStatus thermostat={scheduled} onChanged={onChanged} />}
+      {scheduled && <ScheduleStatus thermostat={scheduled} onChanged={onChanged} canEdit={isAdmin} />}
       {(thermostat.sensors.length > 0 || thermostat.power.length > 0) && (
         <div className="flex flex-wrap gap-1.5">
           {thermostat.sensors.map((s) => <SensorChip key={s.entity_id} entity={s} />)}
