@@ -440,6 +440,7 @@
 [data-theme-scheme="light"] .text-rose-500 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-sky-100 { color: oklch(50% 0.134 242.749) !important; }
 [data-theme-scheme="light"] .text-sky-200 { color: oklch(50% 0.134 242.749) !important; }
+[data-theme-scheme="light"] .text-sky-200\/90 { color: color-mix(in srgb, oklch(50% 0.134 242.749) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-sky-300 { color: oklch(50% 0.134 242.749) !important; }
 [data-theme-scheme="light"] .text-sky-300\/60 { color: color-mix(in srgb, oklch(50% 0.134 242.749) 60%, transparent) !important; }
 [data-theme-scheme="light"] .text-sky-300\/80 { color: color-mix(in srgb, oklch(50% 0.134 242.749) 80%, transparent) !important; }

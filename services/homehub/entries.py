@@ -289,6 +289,8 @@ def update_device(runtime: Any, device_id: str, body: dict[str, Any]) -> dict[st
         raise EntryError("No such device", 404)
     if "hidden" in body and not isinstance(body["hidden"], bool):
         raise EntryError("hidden must be true or false")
+    if "hidden" in body and bool(dev.hidden_by) != body["hidden"] and duplicates.record_of(runtime, dev.id):
+        raise EntryError("This device is combined with its other copy. Uncombine it first.", 409)
     labels = registries.clean_label_ids(runtime, body["labels"]) if "labels" in body else None
     if "name_by_user" in body:
         name = body.get("name_by_user")

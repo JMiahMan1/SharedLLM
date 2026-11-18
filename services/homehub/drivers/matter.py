@@ -41,6 +41,8 @@ or classes until it does, rather than Home Assistant's.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import colorsys
 import contextlib
 import json
@@ -1131,6 +1133,8 @@ def node_device_info(fabric: int, node: dict[str, Any]) -> dict[str, Any]:
 
     def basic(attr: int) -> Any:
         value = a.get(f"0/{BASIC_INFORMATION}/{attr}")
+        if isinstance(value, str):  # an unset label arrives as NUL bytes
+            value = value.strip("\x00").strip()
         return value if value not in ("", None) else None
 
     serial = basic(15)
@@ -1145,7 +1149,44 @@ def node_device_info(fabric: int, node: dict[str, Any]) -> dict[str, Any]:
         "hw_version": None if basic(8) is None else str(basic(8)),
         "serial_number": None if serial is None else str(serial),
         "identifiers": identifiers,
+        "connections": [["mac", m] for m in node_macs(node)],
     }
+
+
+def _octets(value: Any) -> bytes | None:
+    """An octet string as the Matter Server sends it (base64; a hex string from older servers)."""
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.strip()
+    if re.fullmatch(r"(?:[0-9a-fA-F]{2}[:-]?){6}", text):
+        return bytes.fromhex(re.sub(r"[:-]", "", text))
+    try:
+        return base64.b64decode(text, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+def node_macs(node: dict[str, Any]) -> list[str]:
+    """The node's Wi-Fi or Ethernet MACs, from General Diagnostics' NetworkInterfaces (``0/51/0``).
+
+    Each interface's HardwareAddress is the MAC the device answers the LAN with, the same one a LAN integration
+    (WiZ, ESPHome, Shelly) reports, which is how duplicates.py knows two copies are one bulb. A Thread radio's
+    8-byte extended address is not a MAC and is skipped, as are all-zero and broadcast placeholders.
+    """
+    out: list[str] = []
+    interfaces = (node.get("attributes") or {}).get(f"0/{GENERAL_DIAGNOSTICS}/0")
+    for iface in interfaces if isinstance(interfaces, list) else []:
+        if not isinstance(iface, dict):
+            continue
+        raw = _octets(iface.get("4", iface.get("hardwareAddress")))
+        if raw is None or len(raw) != 6 or raw in (b"\x00" * 6, b"\xff" * 6):
+            continue
+        mac = ":".join(f"{b:02x}" for b in raw)
+        if mac not in out:
+            out.append(mac)
+    return out
 
 
 def node_entity_specs(fabric: int, node: dict[str, Any]) -> list[dict[str, Any]]:

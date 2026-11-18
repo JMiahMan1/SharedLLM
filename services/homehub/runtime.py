@@ -47,6 +47,10 @@ class Runtime:
         hub.areas = {a.area_id: a for a in self.store.load_areas()}
         # A hidden device's entities follow it, whatever registered them since (a resync, an import).
         hub.reconcile_hidden()
+        # Combined duplicates (one device, a main and a fallback) are in place before any driver publishes.
+        from services.homehub import duplicates
+
+        duplicates.load_combinations(self)
         hub.floors = self.store.get_kv("floors", {}) or {}
         cfg = self.store.get_kv("core_config", {}) or {}
         if cfg:

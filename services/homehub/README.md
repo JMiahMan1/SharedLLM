@@ -475,11 +475,64 @@ its device still run. It is left out of the rooms dashboard, the voice exposure 
 lists, fast-path cache and RAG sync), capability-index room lookups and a service call aimed at a
 whole area. It survives restarts, resyncs and a re-import of Home Assistant.
 
-Duplicates are devices of different integrations with the same real MAC, or (when both do not
-report one) the same name in the same area; one integration's devices are never grouped.
+Duplicates are devices of different integrations with the same real MAC or the same serial
+number, or (when the copies do not both report one) the same name in the same area; one
+integration's devices are never grouped, and two different MACs or serials are never one device.
+An IP address is never evidence: DHCP hands it to the next device. A WiZ bulb reports its MAC
+itself; a Matter node reports its Wi-Fi MAC in General Diagnostics' NetworkInterfaces (`0/51/0`,
+field 4), which the Matter driver now confirms onto its device (`node_macs`), so a bulb paired to
+the fabric and found on the LAN pairs on its MAC whatever each copy is called (the bathroom bulbs:
+"Upstairs Bathroom 1" on Matter is "WiZ Tunable White ..." on WiZ). Discovery does not index a
+Matter device's MAC, so an address change found on the LAN still goes to the LAN integration.
 `GET /hub/devices/duplicates`, `PATCH /hub/devices/{id}` `{"hidden"}`,
 `POST /hub/devices/duplicates/hide` `{"hide_domain"?, "keep_domain"?}` and
 `POST /hub/devices/duplicates/unhide` `{"domain"}`, admins only.
+
+### Combining duplicates: a main and a fallback
+
+Instead of hiding a copy, two copies can be combined into one device (Devices > Duplicates >
+Combine). A person picks the **main**; the other copy is kept as its **fallback**
+(`DeviceEntry.hidden_by = "combined"`, its entities `hidden_by: "device"`).
+
+- **One device.** The main keeps its entity ids. Each controllable entity (light, switch, fan,
+  cover, lock, climate, media player, valve, humidifier, vacuum, water heater, siren) of the main
+  is paired with the fallback's entity of the same kind when each copy has exactly one; sensors and
+  diagnostics stay each copy's own. A name or room only one copy has is carried over to the main
+  (device name, area, labels; entity labels and aliases), and an entity named only "Light" takes
+  the device's name, so nothing loses its name or its room.
+- **Commands** to either copy's id (by entity, device, area, a light group or `homeassistant.*`) go
+  to the main once. If it fails (an error, `DeviceUnavailable`, or no answer within
+  `COMBINED_MAIN_TIMEOUT_S`, 6 s) the same command goes to the fallback and the hub logs
+  `light.turn_on on light.x used fallback light.y (reason)` at INFO. A main whose own state is
+  unavailable while the fallback's is not is skipped straight away. Only when both fail does the
+  call fail, naming both reasons. This lives in `Hub._dispatch_entities` (`_call_combined`), so
+  voice, the app, schedules, automations, light groups and the HA-compatible REST and websocket
+  APIs all get it.
+- **State.** `Hub.copy_states` keeps each copy's own last state; both ids show one shared state:
+  the main's while it is available, else the fallback's, so the combined device is unavailable
+  only when both copies are. After the fallback carried out a command, its state is shown until
+  the main publishes again (the main may still report the state from before it stopped answering).
+- **Choosing.** Per pair (`{"main", "fallback"}`), swap (`/swap`), and a household rule per pair of
+  integrations ("Prefer Matter, fall back to WiZ"): `POST .../combine` `{"main_domain",
+  "fallback_domain"}` combines every uncombined pair of those two integrations that way and saves
+  the rule; `{"group"}` alone uses the rule; `POST .../rule` `{"clear": [a, b]}` forgets it. A pair
+  is never combined without someone choosing the main (or the rule saying so).
+- **Uncombine** (`POST .../uncombine` `{"device"}`) puts both copies back as they were: hidden flags,
+  names, rooms and labels it changed (a field a person changed since is left as they set it), and
+  each id shows its own state again. A combined copy cannot be hidden or shown on its own (409), and
+  the bulk hide/show leaves combined groups alone. Combinations live in the store (`kv`
+  `combined_devices`, rules in `duplicate_rules`) and are in place before any driver publishes at
+  start; one whose device was removed is dropped.
+
+| Route (admins) | Body |
+|---|---|
+| `POST /hub/devices/duplicates/combine` | `{"main","fallback"}`, `{"group","main_domain"?}` or `{"main_domain","fallback_domain"}` |
+| `POST /hub/devices/duplicates/uncombine` | `{"device"}` (either copy) |
+| `POST /hub/devices/duplicates/swap` | `{"device"}` (either copy) |
+| `POST /hub/devices/duplicates/rule` | `{"main_domain","fallback_domain"}` or `{"clear": [a, b]}` |
+
+The gateway passes them through at `/api/homehub/devices/duplicates/{combine,uncombine,swap,rule}`
+(`discovery_routes.py`, each action's own fields only).
 
 ## WiZ bulbs (`drivers/wiz.py`)
 
