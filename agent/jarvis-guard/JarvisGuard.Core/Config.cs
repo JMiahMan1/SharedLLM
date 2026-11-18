@@ -34,16 +34,29 @@ public static class Config
         try { File.WriteAllText(RawStatusPath, json); } catch { /* caching is optional */ }
     }
 
-    public static JsonElement? ReadRawRules()
+    /// <summary>The cached rules and the granted_until the hub answered with them (for the offline evaluator).</summary>
+    public static (JsonElement? Rules, DateTimeOffset? GrantedUntil) ReadRawCache()
     {
         try
         {
-            if (!File.Exists(RawStatusPath)) return null;
-            using var doc = JsonDocument.Parse(File.ReadAllText(RawStatusPath));
-            return doc.RootElement.TryGetProperty("rules", out var r) && r.ValueKind == JsonValueKind.Object
-                ? r.Clone() : null;
+            if (!File.Exists(RawStatusPath)) return (null, null);
+            return ParseRawCache(File.ReadAllText(RawStatusPath));
         }
-        catch { return null; }
+        catch { return (null, null); }
+    }
+
+    public static (JsonElement? Rules, DateTimeOffset? GrantedUntil) ParseRawCache(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            JsonElement? rules = root.TryGetProperty("rules", out var r) && r.ValueKind == JsonValueKind.Object ? r.Clone() : null;
+            DateTimeOffset? granted = root.TryGetProperty("granted_until", out var g) && g.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(g.GetString(), out var parsed) ? parsed : null;
+            return (rules, granted);
+        }
+        catch { return (null, null); }
     }
 
     /// <summary>Named pipe the tray and the lock surface use to ask the SYSTEM agent for things.</summary>
@@ -54,7 +67,25 @@ public static class Config
         try
         {
             if (!File.Exists(ConfigPath)) return null;
-            return JsonSerializer.Deserialize<GuardConfig>(File.ReadAllText(ConfigPath));
+            return ParseConfig(File.ReadAllText(ConfigPath));
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// install.ps1 writes camelCase keys (hubUrl, agentKey); the properties are
+    /// PascalCase. Case-sensitive parsing left every field empty, so the agent
+    /// started with no hub, no user and no key.
+    /// </summary>
+    public static GuardConfig? ParseConfig(string json)
+    {
+        try
+        {
+            var config = JsonSerializer.Deserialize<GuardConfig>(json.TrimStart('\uFEFF'), JsonOptions.Web);
+            if (config is null) return null;
+            if (string.IsNullOrWhiteSpace(config.HubUrl) || string.IsNullOrWhiteSpace(config.Username)
+                || string.IsNullOrWhiteSpace(config.AgentKey) || string.IsNullOrWhiteSpace(config.DeviceKey)) return null;
+            return config;
         }
         catch { return null; }
     }
@@ -110,6 +141,10 @@ public sealed class GuardState
     public string? NextLockAt { get; set; }
     public string? NextLockReason { get; set; }
     public string ThemeId { get; set; } = "clean-athletic";
+    /// <summary>While locked: when this PC signs the session out (ISO), for the lock surface's countdown.</summary>
+    public string? SignOutAt { get; set; }
+    /// <summary>A parent unlocked this PC on its lock surface until then (ISO); the hub still says locked.</summary>
+    public string? ParentUnlockUntil { get; set; }
     /// <summary>When the agent last heard from the hub (UTC).</summary>
     public string AsOfUtc { get; set; } = "";
     /// <summary>"hub" when the last poll reached the hub, "offline" when running on cached rules.</summary>

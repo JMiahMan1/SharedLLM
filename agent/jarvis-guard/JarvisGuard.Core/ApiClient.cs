@@ -33,7 +33,7 @@ public sealed class ApiClient : IDisposable
                 lockCapable,
                 trayRunning,
                 webFilterMode, // "off" | "report" | "enforce"
-                version = _config.Version,
+                version = typeof(ApiClient).Assembly.GetName().Version?.ToString(3) ?? _config.Version,
                 reportedAt = DateTime.UtcNow.ToString("O"),
             },
         });

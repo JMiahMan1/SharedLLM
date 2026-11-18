@@ -26,9 +26,10 @@ three modes:
   on and the user not idle for ten minutes - and hands it to the service over
   the pipe (a SYSTEM process cannot see the desktop). "Ask for more time"
   goes through the service (`ask-time`) to `POST /api/screen-time/requests`.
-- `--overlay` (launched by the tray) - the lock surface: full screen signage
-  with the reason and a parent sign-in. It shows state; it does not hold the
-  lock (the session sign-out does).
+- `--overlay` (raised by the tray as soon as the PC locks) - the lock
+  surface: full screen, with the reason, when the lock lifts, a countdown to
+  the sign-out, "Ask for more time", "Message a parent" (opens the hub) and a
+  parent's sign-in. It explains the lock; the session sign-out holds it.
 
 The hub, identity and MDM stay exactly as they are for every other device.
 The only hub changes behind this client are the same scoped-key enrolment the
@@ -36,21 +37,40 @@ phones use.
 
 ## Install (the intended path)
 
+1. Download the `jarvis-guard-windows` artifact of the latest green
+   "Windows Guard Build" run (Actions tab, or
+   `gh run download -n jarvis-guard-windows`). It holds `jarvis-guard.exe`,
+   its `.sha256`, `install.ps1`, `uninstall.ps1` and this README. Check the
+   hash (`Get-FileHash jarvis-guard.exe`) against the `.sha256` file.
+2. On the PC, in an elevated PowerShell in that folder:
+
 ```
-.\install.ps1   # elevated; asks for the hub URL (for example https://ai.example.com),
-                # a Jarvis admin/father/mother username + password, and the
-                # child username to assign the PC to
+Unblock-File .\jarvis-guard.exe, .\install.ps1, .\uninstall.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The installer signs in as the admin (that key is never written to disk),
+It asks for the hub address (for example `https://hub.example.com`), a Jarvis
+account that may manage devices (admin, father, or `devices.assign`), and the
+Jarvis username of the child the PC belongs to. It lists the PC's Windows
+administrators: the child's Windows account must not be one of them.
+
+The installer signs in as the parent (that key is never written to disk),
 registers this PC as a Windows PC, assigns it to the child, mints a key that
 is scoped to this one device, and keeps only that scoped key in
-`%ProgramFiles%\Jarvis Guard\guard.config.json` (ACL'd to SYSTEM +
-Administrators). The child's own key and the admin's key are never stored.
+`%ProgramData%\Jarvis Guard\guard.config.json` (SYSTEM + Administrators only).
+The exe goes to `%ProgramFiles%\Jarvis Guard` (default ACL: everyone may run
+it, only administrators may change it). The child's own key and the parent's
+key are never stored.
 
-Then it creates the SYSTEM boot task `Jarvis Guard (service)` and the
-per-sign-in tray Run entry, and starts the guard. It appears on the Devices
-page assigned to the child - Devices, pause/resume, rules, same as a phone.
+Then it registers the task `Jarvis Guard (service)` (SYSTEM, at startup, no
+time limit, runs on battery, restarted if it exits, re-triggered every five
+minutes without ever running twice) and the per-sign-in tray Run entry, and
+starts the guard. It appears on the Devices page assigned to the child.
+
+Running it again upgrades in place (it stops the guard, replaces the exe and
+mints a fresh key). `uninstall.ps1` (also copied into the install folder)
+tells the hub first (`guard_missing`, the parents are notified) and refuses
+to remove anything while the hub cannot be told, unless `-Offline` is given.
 
 ## Layout
 
@@ -62,7 +82,9 @@ JarvisGuard.Agent/    the SYSTEM guard loop (poll, enforce, usage meter, named-p
 JarvisGuard.Tray/     signage (NotifyIcon)
 JarvisGuard.Overlay/  the lock surface (WinForms)
 build.ps1             dotnet publish win-x64 single-file into ./dist
-install.ps1           elevated installer (register → assign → mint scoped key → install)
+install.ps1           elevated installer (register, assign, mint scoped key, install)
+uninstall.ps1         elevated removal; reports guard_missing to the hub first
+tests/                xunit tests for JarvisGuard.Core (plain net10.0, any OS)
 ```
 
 ## Security model
@@ -71,7 +93,7 @@ install.ps1           elevated installer (register → assign → mint scoped ke
   time by an admin). It cannot read the child's personal key, cannot edit
   rules, cannot mint keys, and cannot call admin routes - the hub resolves it
   as the assigned child with `is_admin` stripped.
-- `public\state.json` is the only user-readable file: locked, reason, until,
+- `%ProgramData%\Jarvis Guard\public\state.json` is the only user-readable file: locked, reason, until,
   theme, hub URL and username. It is written by the agent.
 - A parent's unlock uses the parent's own username and password, checked by
   identity (`POST /api/guard/parent-unlock`, five strikes → ten-minute wait),
@@ -90,33 +112,55 @@ install.ps1           elevated installer (register → assign → mint scoped ke
 
 ## Enforcement notes
 
-- `locked` from the hub is authoritative. The agent signs out interactive
-  console sessions once per lock transition (`WTSLogoffSession`). A child who
-  signs back in while still in a locked window signs out again on the next
-  poll - the phone's behavior, one step louder.
+- `locked` from the hub is authoritative. When the PC locks, the tray raises
+  the lock surface at once and the agent signs the child's session out two
+  minutes later (time to read why, ask for more time or fetch a parent). A
+  child who signs back in while the lock holds gets the lock surface again
+  and is signed out after 45 seconds, as often as it takes. The lock is
+  enforced every 15 seconds; the hub is asked every 60.
+- Sessions of local administrators (the parents' own Windows accounts) are
+  never signed out.
+- A parent's sign-in on the lock surface (`POST /api/guard/parent-unlock`)
+  lifts the lock on this PC until the time the hub answers (ten minutes),
+  even though the hub keeps reporting bedtime or the limit meanwhile, the
+  same as the phone.
+- Offline (hub unreachable): the last cached rules are re-evaluated on the
+  local clock in the hub's order: a parent's pause (on, or until a time)
+  locks; bedtime and school lock unless the last answer carried time a parent
+  gave (`granted_until`) that has not run out. The daily limit and "chores
+  first" are not enforced offline (fail open). With no cache at all it fails
+  open.
 - Usage is reported as the day's running total for this PC (kept in
   `usage.today.json`, so a restart carries on), because the hub keeps the
   largest reading per device per day. Within 15 minutes of the limit it is
   reported every poll so the hub locks on time; the tray counts unsent
   minutes so its warnings and "time left" are current.
-- `until` is shown but not enforced client-side beyond the hub's answer on
-  the next poll (60 s).
 - Screen-time grants reach this PC through the same `granted_until` the
   phone obeys; the hub's evaluate() suspends bedtime/school while it holds.
 
 ## Build in CI
 
-`.github/workflows/windows-build.yml` builds on windows-latest on every push
-to main|microservices (and on manual dispatch), publishes
-`dist/jarvis-guard.exe` as the `jarvis-guard-windows` artifact, and - when
-`WINDOWS_PUBLISH_URL` and `INTERNAL_SECRET` secrets are configured - posts
-the exe to the hub's publish endpoint exactly like the APK flow does. PR
-builds skip the publish step.
+`.github/workflows/windows-build.yml` runs the Core tests, then builds on
+windows-latest on every push to main|microservices (and on manual dispatch),
+and uploads `jarvis-guard.exe` (single file, compressed, about 50 MB) with
+its SHA-256, `install.ps1`, `uninstall.ps1` and this README as the
+`jarvis-guard-windows` artifact (kept 30 days). When the `WINDOWS_PUBLISH_URL`
+and `INTERNAL_SECRET` secrets are set it also posts the exe to the hub's
+`POST /api/app-updates/windows`, which stores it with `windows-version.json`.
+Neither secret is set today, and the hub has no route that serves the exe
+back, so the CI artifact is the only way to get it.
+
+Locally: `dotnet test tests` (any OS) and
+`dotnet build -p:EnableWindowsTargeting=true` (builds the exe on macOS/Linux too).
 
 ## What this is not (deferred)
 
 - No web/DNS filter (Phase P5).
-- No signing (the exe is unsigned; SmartScreen will warn), no update push channel.
+- No signing (the exe is unsigned; SmartScreen and Defender may warn, see
+  "Unblock-File" above), no update push channel: upgrade by running the new
+  `install.ps1` on the PC.
+- No in-lock chores, "Message a parent" from inside the lock surface (it
+  opens the hub in the browser instead), or offline parent codes.
 - No Assigned Access / kiosk (Pro/Education-only opt-in).
 - No remote wipe, by design.
 - No offline grant tracking: an offline PC cannot honour a grant that has

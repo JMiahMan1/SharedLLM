@@ -35,8 +35,21 @@ public sealed class GuardService
         public int State; // 0 = WTSActive
     }
 
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    private static extern bool WTSQueryUserToken(uint sessionId, out IntPtr token);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, int length, out int returned);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private const int TokenGroupsClass = 2;
+
     private static readonly IntPtr WTS_CURRENT_SERVER = IntPtr.Zero;
     private const int PollSeconds = 60;
+    /// <summary>How often the lock is enforced (and the state file refreshed) between hub polls.</summary>
+    private const int TickSeconds = 15;
     private const int CapabilitySeconds = 600;
 
     private readonly GuardConfig _config;
@@ -44,7 +57,10 @@ public sealed class GuardService
     private readonly UsageMeter _meter = new(Config.UsagePath);
     private readonly object _stateLock = new();
 
-    private bool _wasLocked;
+    private readonly LockEnforcer _enforcer = new();
+    /// <summary>The last verdict (the hub's, or the offline one) and the state it was published with.</summary>
+    private GuardState? _base;
+    private DateTimeOffset _lastPoll = DateTimeOffset.MinValue;
     private DateTimeOffset _lastCapability = DateTimeOffset.MinValue;
     private int _consecutiveFailures;
 
@@ -69,10 +85,19 @@ public sealed class GuardService
         // Foreground minutes arrive from the tray over the pipe ("usage"):
         // this SYSTEM process runs in session 0 and cannot see the desktop.
 
-        using var pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(PollSeconds));
-        // First poll immediately, then on the timer.
-        await PollOnceAsync();
-        while (await pollTimer.WaitForNextTickAsync()) await PollOnceAsync();
+        // The hub is asked once a minute; the lock is enforced every tick, so a
+        // child who signs back in during a lock is signed out again on time.
+        using var tick = new PeriodicTimer(TimeSpan.FromSeconds(TickSeconds));
+        do
+        {
+            if (DateTimeOffset.UtcNow - _lastPoll >= TimeSpan.FromSeconds(PollSeconds))
+            {
+                _lastPoll = DateTimeOffset.UtcNow;
+                await PollOnceAsync();
+            }
+            try { EnforceTick(); }
+            catch (Exception ex) { Log($"enforce: {ex.Message}"); }
+        } while (await tick.WaitForNextTickAsync());
     }
 
     private void ReportSafeBootIfNeeded()
@@ -126,7 +151,7 @@ public sealed class GuardService
             if (hub.WipeRequested) Log("wipe requested by the hub; ignored (no wipe in this build)");
 
             var time = TimeBudget.Apply(hub, _meter.PendingMinutes, DateTimeOffset.Now);
-            Publish(new GuardState
+            SetBase(new GuardState
             {
                 Locked = hub.Locked,
                 Reason = hub.Reason,
@@ -145,7 +170,6 @@ public sealed class GuardService
                 HubUrl = _config.HubUrl.TrimEnd('/'),
                 Username = _config.Username,
             });
-            Enforce(hub.Locked, hub.Reason);
             if (DateTimeOffset.UtcNow - _lastCapability > TimeSpan.FromSeconds(CapabilitySeconds))
                 await ReportCapabilitiesAsync();
             // Near the limit, report every poll so the hub locks on time (and
@@ -158,9 +182,9 @@ public sealed class GuardService
         // night's bedtime still locks; absent a cache, fail open.
         _consecutiveFailures++;
         var cached = Config.ReadState();
-        var cachedRaw = Config.ReadRawRules();
-        var offline = GuardEvaluator.Evaluate(cachedRaw, DateTimeOffset.Now);
-        Publish(new GuardState
+        var (cachedRules, grantedUntil) = Config.ReadRawCache();
+        var offline = GuardEvaluator.Evaluate(cachedRules, DateTimeOffset.Now, grantedUntil);
+        SetBase(new GuardState
         {
             Locked = offline.Locked,
             Reason = offline.Reason,
@@ -180,7 +204,6 @@ public sealed class GuardService
             HubUrl = _config.HubUrl.TrimEnd('/'),
             Username = _config.Username,
         });
-        Enforce(offline.Locked, offline.Reason);
         if (_meter.DueForFlush) await FlushUsageAsync();
     }
 
@@ -197,39 +220,103 @@ public sealed class GuardService
         catch (Exception ex) { Log($"usage flush failed: {ex.Message}"); }
     }
 
-    private void Publish(GuardState state)
+    private void SetBase(GuardState state)
     {
-        lock (_stateLock) Config.WriteState(state);
+        lock (_stateLock) _base = state;
     }
 
-    private void Enforce(bool locked, string? reason)
+    /// <summary>
+    /// Apply the last verdict: a parent's unlock on this PC lifts it for a
+    /// while; otherwise a locked PC shows the lock surface (the tray raises
+    /// it) and signs the child's session out once its grace has run out.
+    /// </summary>
+    private void EnforceTick()
     {
-        if (locked && !_wasLocked)
+        GuardState state;
+        IReadOnlyList<uint> signOut;
+        lock (_stateLock)
         {
-            Log($"locked ({reason ?? "unknown reason"}): signing out interactive sessions");
-            LogoffInteractiveSessions();
+            if (_base is null) return;
+            var now = DateTimeOffset.Now;
+            var effective = _enforcer.EffectiveLocked(_base.Locked, now);
+            signOut = _enforcer.SessionsToSignOut(effective, effective ? ChildSessions() : Array.Empty<uint>(), now);
+            var unlockUntil = _enforcer.ParentUnlockActive(now) ? _enforcer.UnlockUntil : null;
+            state = Copy(_base);
+            state.Locked = effective;
+            if (!effective && _base.Locked) state.Reason = null;
+            state.SignOutAt = _enforcer.NextSignOutAt(effective)?.ToString("O");
+            state.ParentUnlockUntil = unlockUntil?.ToString("O");
+            Config.WriteState(state);
         }
-        _wasLocked = locked;
+        foreach (var id in signOut)
+        {
+            Log($"locked ({state.Reason ?? "unknown reason"}): signing out session {id}");
+            WTSLogoffSession(WTS_CURRENT_SERVER, id, false);
+        }
     }
 
-    private void LogoffInteractiveSessions()
+    private static GuardState Copy(GuardState s) =>
+        System.Text.Json.JsonSerializer.Deserialize<GuardState>(System.Text.Json.JsonSerializer.Serialize(s, JsonOptions.Web), JsonOptions.Web)!;
+
+    /// <summary>
+    /// Active interactive sessions a lock applies to: not session 0, and not a
+    /// session whose user is a local administrator (a parent signing in to
+    /// their own account at bedtime is not the child; the child must be a
+    /// standard user, see install.ps1).
+    /// </summary>
+    private List<uint> ChildSessions()
     {
-        if (!WTSEnumerateSessionsW(WTS_CURRENT_SERVER, 0, 1, out var infoPtr, out var count)) return;
+        var ids = new List<uint>();
+        if (!WTSEnumerateSessionsW(WTS_CURRENT_SERVER, 0, 1, out var infoPtr, out var count)) return ids;
         try
         {
             var size = Marshal.SizeOf<WTS_SESSION_INFOW>();
             for (var i = 0u; i < count; i++)
             {
                 var entry = Marshal.PtrToStructure<WTS_SESSION_INFOW>(IntPtr.Add(infoPtr, (int)(i * size)));
-                if (entry.State != 0) continue;             // WTSActive only
-                if (entry.SessionId == 0) continue;          // services session
-                var console = WTSGetActiveConsoleSessionId();
-                if (entry.SessionId != console && console != uint.MaxValue) continue; // console only
-                Log($"signing out session {entry.SessionId}");
-                WTSLogoffSession(WTS_CURRENT_SERVER, entry.SessionId, false);
+                if (entry.State != 0) continue;     // WTSActive only
+                if (entry.SessionId == 0) continue; // services session
+                if (IsAdministratorSession(entry.SessionId)) continue;
+                ids.Add(entry.SessionId);
             }
         }
         finally { WTSFreeMemory(infoPtr); }
+        return ids;
+    }
+
+    /// <summary>
+    /// Whether the session's user belongs to BUILTIN\Administrators. With UAC
+    /// the session token is the filtered one, where that group is present but
+    /// deny-only, so the group list is read directly rather than through
+    /// IsInRole (which would say no for every administrator).
+    /// </summary>
+    private static bool IsAdministratorSession(uint sessionId)
+    {
+        if (!WTSQueryUserToken(sessionId, out var token)) return false;
+        var buffer = IntPtr.Zero;
+        try
+        {
+            GetTokenInformation(token, TokenGroupsClass, IntPtr.Zero, 0, out var needed);
+            if (needed <= 0) return false;
+            buffer = Marshal.AllocHGlobal(needed);
+            if (!GetTokenInformation(token, TokenGroupsClass, buffer, needed, out _)) return false;
+            var groupCount = Marshal.ReadInt32(buffer);
+            var admins = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+            // TOKEN_GROUPS: a DWORD count, then SID_AND_ATTRIBUTES { PSID; DWORD } aligned to the pointer size.
+            var entrySize = IntPtr.Size * 2;
+            for (var i = 0; i < groupCount; i++)
+            {
+                var sidPtr = Marshal.ReadIntPtr(buffer, IntPtr.Size + i * entrySize);
+                if (new System.Security.Principal.SecurityIdentifier(sidPtr) == admins) return true;
+            }
+            return false;
+        }
+        catch { return false; }
+        finally
+        {
+            if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+            CloseHandle(token);
+        }
     }
 
     /// <summary>Serve the tray and the lock surface. One request per connection.</summary>
@@ -318,8 +405,22 @@ public sealed class GuardService
                             : "That did not work. Check the parent's username and password.";
                         return new PipeProtocol.Response { Ok = false, Error = message };
                     }
-                    _wasLocked = false; // next poll decides afresh
-                    return new PipeProtocol.Response { Ok = true, UntilMinutes = 10 };
+                    // The hub only lifts a parent's pause; bedtime and the day's
+                    // limit still read as locked there. The unlock is this PC's
+                    // to keep for the time the hub granted.
+                    var until = DateTimeOffset.Now.AddMinutes(10);
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(body);
+                        if (doc.RootElement.TryGetProperty("until", out var u) && u.ValueKind == System.Text.Json.JsonValueKind.String
+                            && DateTimeOffset.TryParse(u.GetString(), out var parsed)) until = parsed;
+                    }
+                    catch { /* ten minutes, the hub's own figure */ }
+                    lock (_stateLock) _enforcer.ParentUnlocked(until);
+                    Log($"unlocked by a parent until {until:O}");
+                    try { EnforceTick(); } catch { /* the next tick publishes it */ }
+                    var minutes = (int)Math.Ceiling(Math.Max(0, (until - DateTimeOffset.Now).TotalMinutes));
+                    return new PipeProtocol.Response { Ok = true, UntilMinutes = minutes };
                 }
                 catch (Exception ex) { return new PipeProtocol.Response { Ok = false, Error = ex.Message }; }
 

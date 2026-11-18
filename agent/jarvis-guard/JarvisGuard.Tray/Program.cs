@@ -28,6 +28,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly ScreenWatch _screen = new();
     private readonly LockWarning.Tracker _warnings = new();
     private TimePanelForm? _panel;
+    private Process? _overlay;
     private bool _locked;
     private bool _reporting;
 
@@ -40,7 +41,7 @@ internal sealed class TrayContext : ApplicationContext
         var askItem = new ToolStripMenuItem("Ask a parent for more time…");
         askItem.Click += (_, _) => AskForTime();
         var unlockItem = new ToolStripMenuItem("A parent can unlock…");
-        unlockItem.Click += (_, _) => LaunchOverlay();
+        unlockItem.Click += (_, _) => { if (_overlay is null || _overlay.HasExited) _overlay = LaunchOverlay(); };
         var aboutItem = new ToolStripMenuItem("About Jarvis Guard");
         aboutItem.Click += (_, _) => ShowAbout();
 
@@ -119,6 +120,10 @@ internal sealed class TrayContext : ApplicationContext
         }
         _icon.Text = TimeText.Tooltip(state);
         CheckWarning(state);
+        // A locked PC shows the lock surface in this session at once: the
+        // reason, "Ask for more time" and a parent's sign-in, before the
+        // agent signs the session out. Raised again if it was closed.
+        if (locked && (_overlay is null || _overlay.HasExited)) _overlay = LaunchOverlay();
     }
 
     private static Icon MakeIcon(bool locked)
@@ -160,11 +165,12 @@ internal sealed class TrayContext : ApplicationContext
         catch { MessageBox.Show("Could not open the family hub."); }
     }
 
-    private static void LaunchOverlay()
+    private static Process? LaunchOverlay()
     {
-        var overlay = Path.Combine(AppContext.BaseDirectory, "jarvis-guard.exe");
-        try { Process.Start(new ProcessStartInfo(overlay, "--overlay") { UseShellExecute = true }); }
-        catch { MessageBox.Show("The lock screen helper could not be started."); }
+        // A single-file app's own path; AppContext.BaseDirectory can be the extraction folder.
+        var overlay = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "jarvis-guard.exe");
+        try { return Process.Start(new ProcessStartInfo(overlay, "--overlay") { UseShellExecute = false }); }
+        catch { return null; }
     }
 
     private static void ShowAbout()

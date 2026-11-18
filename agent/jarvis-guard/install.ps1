@@ -3,19 +3,27 @@
 # it enrolls the machine on the family hub, assigns it to the child, mints a
 # scoped key for the PC alone, and only ever keeps that scoped key on disk.
 #
-# Setup requires a Jarvis ADMIN (or father/mother) username and password -
-# the same account a parent uses to manage the Devices page.
+# Setup needs the username and password of a Jarvis account that may manage
+# devices (an admin, the father, or a member with the devices.assign
+# permission) - the same account that manages the Devices page. The hub
+# decides; this script does not guess from the account's flags.
 #
-# The child account must be a STANDARD user. The installer:
+# The child's Windows account must be a STANDARD user. The installer:
 #   1. fails safe unless run elevated,
-#   2. signs in as the admin (that key is never written to disk),
+#   2. signs in as the parent (that key is never written to disk),
 #   3. registers this PC as a Windows PC and assigns it to the child,
 #   4. mints this device's own scoped agent key,
-#   5. writes the config (scoped key ACL'd to SYSTEM + Administrators),
-#   6. creates "Jarvis Guard (service)", a SYSTEM boot task, and the
-#      "This PC is managed by the family hub" tray for every sign-in.
+#   5. copies jarvis-guard.exe to %ProgramFiles%\Jarvis Guard (readable by
+#      everyone, writable by administrators only, the Windows default there),
+#   6. writes the config to %ProgramData%\Jarvis Guard (SYSTEM +
+#      Administrators only; the public\ folder the tray reads is Users:Read),
+#   7. registers the "Jarvis Guard (service)" task: SYSTEM, at startup, never
+#      stopped after a time limit or on battery, restarted if it ever exits,
+#   8. adds the tray shield to every sign-in, and starts the guard.
 #
-# Uninstall is Admin-only and is reported to the parents as guard_missing.
+# Put this script next to jarvis-guard.exe (the CI artifact holds both), or
+# run it from agent/jarvis-guard after build.ps1 (it then uses dist\).
+# Remove it with uninstall.ps1, which tells the parents first.
 param(
     [string]$HubUrl = '',
     [string]$AdminUsername = '',
@@ -30,13 +38,34 @@ $ErrorActionPreference = 'Stop'
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) { throw 'Run this installer from an elevated (administrator) PowerShell.' }
 
-if (-not $HubUrl) { $HubUrl = Read-Host 'Family hub address (e.g. https://jarvis.example.com)' }
+# The exe: next to this script (the downloaded artifact), else dist\ (a build).
+$exe = @((Join-Path $PSScriptRoot 'jarvis-guard.exe'), (Join-Path $PSScriptRoot 'dist\jarvis-guard.exe')) |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $exe) { throw "jarvis-guard.exe was not found next to this script or in dist\. Download the CI artifact or run build.ps1 first." }
+$version = (Get-Item $exe).VersionInfo.ProductVersion
+if (-not $version) { $version = '0.0.0' }
+$version = ($version -split '\+')[0]
+
+if (-not $HubUrl) { $HubUrl = Read-Host 'Family hub address (for example https://hub.example.com)' }
 if (-not $HubUrl.Trim()) { throw 'The family hub address is required.' }
 $HubUrl = $HubUrl.Trim().TrimEnd('/')
-if (-not $AdminUsername) { $AdminUsername = Read-Host 'Jarvis admin username (a parent or admin account)' }
+if ($HubUrl -notmatch '^https?://') { throw "The hub address must start with https:// (got '$HubUrl')." }
+if ($HubUrl -like 'http://*') { Write-Warning 'The hub address is not https: the PC key and a parent''s unlock password would cross the network unencrypted.' }
+if (-not $AdminUsername) { $AdminUsername = Read-Host 'Jarvis parent or admin username' }
 if (-not $AdminPassword) { $AdminPassword = Read-Host "Password for '$AdminUsername' (never written to disk)" -AsSecureString }
-if (-not $ChildUsername) { $ChildUsername = Read-Host 'Child username to assign this PC to' }
+if (-not $ChildUsername) { $ChildUsername = Read-Host 'Jarvis username of the child this PC belongs to' }
 if (-not $ChildUsername.Trim()) { throw 'A child username is required.' }
+$ChildUsername = $ChildUsername.Trim().ToLowerInvariant()
+
+# A child who is a Windows administrator can remove the guard: say so loudly.
+try {
+    $admins = Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop |
+        Where-Object { $_.ObjectClass -eq 'User' } | ForEach-Object { $_.Name }
+    Write-Host 'Windows administrators on this PC (each can remove Jarvis Guard; the child must not be one):'
+    $admins | ForEach-Object { Write-Host "  $_" }
+} catch {
+    Write-Warning 'Could not list the Windows administrators. Check by hand that the child''s account is a standard user.'
+}
 
 function To-Plain([securestring]$s) {
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
@@ -44,103 +73,134 @@ function To-Plain([securestring]$s) {
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 
-$dist = Join-Path $PSScriptRoot 'dist'
-$exe = Join-Path $dist 'jarvis-guard.exe'
-if (-not (Test-Path $exe)) { throw "Missing $exe - run build.ps1 first." }
+# One call to the hub, with the hub's own reason when it says no.
+function Invoke-Hub([string]$Method, [string]$Path, $Body = $null, [hashtable]$Headers = @{}, [string]$Doing) {
+    $params = @{ Method = $Method; Uri = "$HubUrl$Path"; Headers = $Headers; ContentType = 'application/json' }
+    if ($null -ne $Body) { $params.Body = ($Body | ConvertTo-Json -Compress) }
+    try { return Invoke-RestMethod @params }
+    catch {
+        $code = $null
+        try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+        $detail = $null
+        try { $detail = ($_.ErrorDetails.Message | ConvertFrom-Json).detail } catch { }
+        if (-not $detail) { $detail = $_.Exception.Message }
+        if ($code -eq 403) { throw "The hub refused to let '$AdminUsername' $Doing (403: $detail). Use an account that may manage devices." }
+        if ($code -eq 404) { throw "The hub could not $Doing (404: $detail). Check the hub address, the child's username, and that the hub is up to date." }
+        throw "Could not $Doing ($code`: $detail)."
+    }
+}
 
 if (-not $DeviceKey) {
     $computerGuid = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid).MachineGuid
     $DeviceKey = "windows-$computerGuid"
 }
 
-$HubUrl = $HubUrl.TrimEnd('/')
 $plainPassword = To-Plain $AdminPassword
-$authHeaders = $null
 $adminKey = $null
 try {
-    # 1. Sign in as the admin. Only something with is_admin=true may continue.
-    $login = Invoke-RestMethod -Method Post -Uri "$HubUrl/api/auth/login" -ContentType 'application/json' `
-        -Body (@{ username = $AdminUsername; password = $plainPassword } | ConvertTo-Json)
-    if (-not $login.api_key -and -not $login.apiKey) { throw "Could not sign in as '$AdminUsername'." }
+    # 1. Sign in as the parent.
+    $login = Invoke-Hub Post '/api/auth/login' @{ username = $AdminUsername; password = $plainPassword } @{} 'sign in'
     $adminKey = if ($login.api_key) { $login.api_key } else { $login.apiKey }
-    if (-not $login.is_admin -and -not $login.isAdmin) {
-        throw "'$AdminUsername' is not an admin account. Setup requires a parent or admin account."
-    }
+    if (-not $adminKey) { throw "Could not sign in as '$AdminUsername'." }
+    $plainPassword = $null
     Write-Host "Signed in as '$AdminUsername'."
-
-    $jsonHeaders = @{ Authorization = "Bearer $adminKey" }
+    $auth = @{ Authorization = "Bearer $adminKey" }
 
     # 2. Register this PC as a Windows PC (idempotent on the hub).
-    $registerBody = @{
+    $null = Invoke-Hub Post '/api/user-panel/devices/register' @{
         device_key  = $DeviceKey
         kind        = 'windows-pc'
-        platform    = 'windows'
         model       = $env:COMPUTERNAME
         os_version  = [System.Environment]::OSVersion.VersionString
-        app_version = '0.1.0'
-        label       = $env:COMPUTERNAME
-    } | ConvertTo-Json
-    Invoke-RestMethod -Method Post -Uri "$HubUrl/api/user-panel/devices/register" -ContentType 'application/json' `
-        -Body $registerBody -Headers $jsonHeaders | Out-Null
+        app_version = $version
+    } $auth 'register this PC'
     Write-Host "Registered this PC as '$DeviceKey'."
 
     # 3. Assign it to the child.
-    $assignBody = @{ owner_username = $ChildUsername.Trim().ToLowerInvariant() } | ConvertTo-Json
-    Invoke-RestMethod -Method Patch -Uri "$HubUrl/api/user-panel/devices/$DeviceKey" -ContentType 'application/json' `
-        -Body $assignBody -Headers $jsonHeaders | Out-Null
+    $null = Invoke-Hub Patch "/api/user-panel/devices/$DeviceKey" @{ owner_username = $ChildUsername } $auth 'assign this PC to the child'
     Write-Host "Assigned this PC to '$ChildUsername'."
 
     # 4. Mint THIS DEVICE's scoped agent key (shown once; the PC keeps only this).
-    $minted = Invoke-RestMethod -Method Post -Uri "$HubUrl/api/user-panel/devices/$DeviceKey/agent-key" -Headers $jsonHeaders
+    $minted = Invoke-Hub Post "/api/user-panel/devices/$DeviceKey/agent-key" $null $auth 'mint this PC''s key'
     $agentKey = $minted.agent_key
-    if (-not $agentKey) { $agentKey = $minted.agentKey }
-    if (-not $agentKey) { $agentKey = $minted.key }
     if (-not $agentKey) { throw 'The hub did not return a device key.' }
-    Write-Host "Minted this PC's scoped key."
+    if ($minted.owner_username -and $minted.owner_username -ne $ChildUsername) {
+        throw "The hub says this PC belongs to '$($minted.owner_username)', not '$ChildUsername'."
+    }
+    Write-Host "Minted this PC's own key."
 }
 finally {
-    # The admin password leaves memory; only the scoped key is kept, below.
+    # The parent's password and key leave memory; only the scoped key is kept, below.
     $plainPassword = $null
-    $authHeaders = $null
     $adminKey = $null
 }
 
+$taskName = 'Jarvis Guard (service)'
+
+# A reinstall or an upgrade: stop the running guard so its exe can be replaced.
+$existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($existing) { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }
+Get-Process -Name 'jarvis-guard' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 1
+
+# The program: %ProgramFiles% keeps its default ACL (everyone may read and
+# run, only administrators may change), which the tray in the child's
+# session needs to start at all.
 $installDir = Join-Path $env:ProgramFiles 'Jarvis Guard'
 New-Item -ItemType Directory -Force $installDir | Out-Null
+# An earlier version of this script locked this folder to SYSTEM + Administrators
+# (so the tray could not start for the child) and kept the key here: undo both.
+icacls $installDir /reset /T /Q | Out-Null
+Remove-Item -Force -Recurse -ErrorAction SilentlyContinue (Join-Path $installDir 'guard.config.json'), (Join-Path $installDir 'public')
 Copy-Item -Force $exe (Join-Path $installDir 'jarvis-guard.exe')
-Copy-Item -Force $dist\README.md $installDir -ErrorAction SilentlyContinue
+$readme = Join-Path $PSScriptRoot 'README.md'
+if (Test-Path $readme) { Copy-Item -Force $readme $installDir }
+$uninstaller = Join-Path $PSScriptRoot 'uninstall.ps1'
+if (Test-Path $uninstaller) { Copy-Item -Force $uninstaller $installDir }
+
+# The data: %ProgramData%\Jarvis Guard, where the agent reads its config.
+# SYSTEM + Administrators only; the key, the cached rules and the log live here.
+$dataDir = Join-Path $env:ProgramData 'Jarvis Guard'
+New-Item -ItemType Directory -Force $dataDir | Out-Null
+icacls $dataDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not lock down $dataDir." }
 
 $config = [ordered]@{
     hubUrl    = $HubUrl
-    username  = $ChildUsername.Trim().ToLowerInvariant()
+    username  = $ChildUsername
     agentKey  = $agentKey
     deviceKey = $DeviceKey
-    version   = '0.1.0'
+    version   = $version
 } | ConvertTo-Json
-$configPath = Join-Path $installDir 'guard.config.json'
-Set-Content -Path $configPath -Value $config -Encoding UTF8
+Set-Content -Path (Join-Path $dataDir 'guard.config.json') -Value $config -Encoding UTF8
+$agentKey = $null
 
-# Root folder and the config file: SYSTEM + Administrators only.
-icacls $installDir /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'BUILTIN\Administrators:(OI)(CI)F' | Out-Null
-
-# The tray reads exactly one world-readable file; nothing else needs to be.
-$publicDir = Join-Path $installDir 'public'
+# The one folder the tray and the lock surface read (state.json, no secrets).
+$publicDir = Join-Path $dataDir 'public'
 New-Item -ItemType Directory -Force $publicDir | Out-Null
-if (-not (Test-Path (Join-Path $publicDir 'state.json'))) {
-    Set-Content -Path (Join-Path $publicDir 'state.json') -Value '{}' -Encoding UTF8
-}
-icacls $publicDir /grant:r 'Users:R' 'SYSTEM:F' 'BUILTIN\Administrators:F' | Out-Null
+icacls $publicDir /grant '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not let users read $publicDir." }
 
-# The SYSTEM guard: boots with the PC, signs locked sessions out.
-schtasks /create /tn 'Jarvis Guard (service)' /tr "`"$installDir\jarvis-guard.exe`" --serve" /sc onstart /ru SYSTEM /rl HIGHEST /f | Out-Null
+# The SYSTEM guard: at every start, never time-limited, not stopped on
+# battery, restarted if it exits. The five-minute repetition starts it again
+# if anything ever stops it; a second copy is never started next to it.
+$action = New-ScheduledTaskAction -Execute (Join-Path $installDir 'jarvis-guard.exe') -Argument '--serve'
+$boot = New-ScheduledTaskTrigger -AtStartup
+$again = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($boot, $again) -Principal $principal -Settings $settings `
+    -Description 'Jarvis Guard: this PC is managed by the family hub.' -Force | Out-Null
 
-# The tray: runs for everyone who signs in (managed-device signage).
-New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'JarvisGuardTray' -Value "`"$installDir\jarvis-guard.exe`" --tray" -PropertyType String -Force | Out-Null
+# The tray: runs for everyone who signs in (managed-device signage, and it
+# raises the lock surface when the PC locks).
+New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'JarvisGuardTray' `
+    -Value "`"$installDir\jarvis-guard.exe`" --tray" -PropertyType String -Force | Out-Null
 
-schtasks /run /tn 'Jarvis Guard (service)' | Out-Null
+Start-ScheduledTask -TaskName $taskName
 
 Write-Host ""
-Write-Host "Jarvis Guard is installed for '$ChildUsername' (device $DeviceKey)."
-Write-Host "It already appears on the Devices page, assigned to '$ChildUsername'."
-Write-Host "To remove it: schtasks /delete /tn 'Jarvis Guard (service)' /f ; delete the Run entry 'JarvisGuardTray'; remove $installDir"
-Write-Host "Removing it is reported to the parents; nothing about that is silent."
+Write-Host "Jarvis Guard $version is installed for '$ChildUsername' (device $DeviceKey)."
+Write-Host "It appears on the Devices page, assigned to '$ChildUsername'. The tray shield appears at the next sign-in."
+Write-Host "To remove it: run '$installDir\uninstall.ps1' as an administrator. The parents are told."
