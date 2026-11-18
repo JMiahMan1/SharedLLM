@@ -55,17 +55,17 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
 
     current = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
     friendly = _spoken_name(full_entity_id)
+    was_unavailable = False
     if current:
         current_state = current.get("state", "").lower()
-        friendly = current.get("attributes", {}).get("friendly_name", full_entity_id)
+        friendly = (current.get("attributes") or {}).get("friendly_name") or friendly
 
         if current_state == "unavailable":
-            return ExecutionResult(
-                status="FAILURE",
-                message=f"The light '{friendly}' ({full_entity_id}) is currently unavailable on the home hub. The device may be powered off, disconnected from WiFi, or not responding to MQTT. Please check the physical device and its network connection.",
-                service="light_control", detail={"confirmed": False, "state": "unavailable", "name": friendly},
-            )
-        if current_state == "unknown":
+            # Still send it: the hub tries the device anyway (a bulb switched back on at the wall, or one the
+            # hub missed for a moment, answers), and says so if it does not. Refusing here left bulbs on
+            # in a room that had been asked to turn off (2026-11-18).
+            was_unavailable = True
+        elif current_state == "unknown":
             return ExecutionResult(
                 status="FAILURE",
                 message=f"The light '{friendly}' ({full_entity_id}) has an unknown state on the home hub. It may be initializing or misconfigured.",
@@ -77,7 +77,7 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
             or req.color_temp is not None
             or req.rgb_color is not None
         )
-        if req.action in ("turn_on", "turn_off"):
+        if req.action in ("turn_on", "turn_off") and not was_unavailable:
             target_state = "on" if req.action == "turn_on" else "off"
             if current_state == target_state and not (req.action == "turn_on" and has_attributes):
                 return ExecutionResult(
@@ -100,7 +100,9 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
         ctx, domain, req.action, full_entity_id, service_data or None,
         service_name="light_control",
     )
-    if result.status != "SUCCESS" or req.action not in ("turn_on", "turn_off"):
+    if result.status != "SUCCESS":
+        return _not_done(result, friendly, full_entity_id, was_unavailable)
+    if req.action not in ("turn_on", "turn_off"):
         return result
     target = "on" if req.action == "turn_on" else "off"
     if (result.detail or {}).get("route") != "ha" or current is None:
@@ -110,6 +112,19 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
                                service=result.service,
                                detail={**(result.detail or {}), "confirmed": False, "name": friendly})
     return await _confirmed(ctx, full_entity_id, friendly, req, result)
+
+
+def _not_done(result: ExecutionResult, friendly: str, entity_id: str, was_unavailable: bool) -> ExecutionResult:
+    """A command the hub could not carry out, named as the person knows the light (never its id)."""
+    detail = {**(result.detail or {}), "confirmed": False, "name": friendly}
+    silent = was_unavailable or detail.get("status_code") == 503  # 503: the hub's "the device did not answer"
+    if silent:
+        detail["state"] = "unavailable"
+        message = (f"The light '{friendly}' ({entity_id}) is not responding on the home hub. The device may be "
+                   "powered off or disconnected from WiFi. Please check the physical device and its network connection.")
+    else:
+        message = result.message
+    return ExecutionResult(status=result.status, message=message, service=result.service, detail=detail)
 
 
 def _spoken_name(entity_id: str) -> str:

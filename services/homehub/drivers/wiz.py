@@ -23,15 +23,18 @@ the next poll.
 
 A bulb switched off at the wall simply stops answering. Setup raises in that
 case so the runtime marks the entry ``setup_retry`` and tries again with
-backoff, which is what HA does; once loaded, a bulb that goes quiet is marked
-unavailable by the poll and comes back on the next poll that it answers.
+backoff, which is what HA does; once loaded, a bulb that misses
+``MISSES_BEFORE_UNAVAILABLE`` polls in a row is marked unavailable and comes back
+on the next poll (or command) that it answers.
 """
 from __future__ import annotations
 
 import asyncio
 import colorsys
 import contextlib
+import ipaddress
 import json
+import socket
 from typing import Any
 
 from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, ServiceNotFound
@@ -60,11 +63,15 @@ FEATURE_EFFECT = 4
 
 
 class _UDPReply(asyncio.DatagramProtocol):
-    def __init__(self, method: str) -> None:
+    def __init__(self, method: str, host: str | None = None) -> None:
         self.method = method
+        self.host = host
         self.future: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def datagram_received(self, data: bytes, addr: Any) -> None:
+        # The socket is not connected (connecting would resolve again), so only the bulb's own replies count.
+        if self.host is not None and isinstance(addr, tuple) and addr and addr[0] != self.host:
+            return
         try:
             msg = json.loads(data.decode("utf-8", "replace"))
         except ValueError:
@@ -77,22 +84,67 @@ class _UDPReply(asyncio.DatagramProtocol):
         pass
 
 
+class WizTransportError(DeviceUnavailable):
+    """The hub could not open a socket for the request: nothing reached the bulb, so it says nothing about it."""
+
+
+def _bulb_address(host: str, port: int) -> tuple[socket.socket, tuple[str, int]]:
+    """A non-blocking UDP socket and the bulb's address, with no name resolution.
+
+    ``loop.create_datagram_endpoint(remote_addr=...)`` resolves the address, and under uvloop (which
+    uvicorn runs the hub on) that is always a ``uv_getaddrinfo`` job on libuv's four-thread pool, even for
+    a numeric address. That pool also runs every DNS lookup in the process, and on the server a lookup of a
+    single-label name (aioesphomeapi tries an offline node's ``x.local`` as ``x`` too) takes ~4 s to fail.
+    Four of those at once and opening a socket to a bulb waited past its 3 s timeout, so working bulbs
+    were called unreachable (measured 2026-11-18). A socket we open ourselves skips the pool entirely.
+    """
+    ip = ipaddress.ip_address(host)  # ValueError for a name; the caller resolves it first
+    family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
+    try:
+        sock = socket.socket(family, socket.SOCK_DGRAM)
+    except OSError as exc:
+        raise WizTransportError(f"no UDP socket for WiZ bulb {host}: {exc}") from exc
+    sock.setblocking(False)
+    return sock, (str(ip), port)
+
+
+async def _numeric_host(host: str, port: int, timeout: float) -> str:
+    """``host`` as an IP address. Entries hold one; a name is resolved once per request (rare)."""
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        pass
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await asyncio.wait_for(loop.getaddrinfo(host, port, type=socket.SOCK_DGRAM), timeout)
+    except (OSError, TimeoutError) as exc:
+        raise DeviceUnavailable(f"WiZ bulb {host} does not resolve: {type(exc).__name__} {exc}".rstrip()) from exc
+    return str(infos[0][4][0])
+
+
 async def udp_request(host: str, method: str, params: dict[str, Any] | None = None, *,
                       port: int = PORT, timeout: float = REQUEST_TIMEOUT) -> dict[str, Any]:
-    """Send one WiZ request and return the reply's ``result``. Raises DeviceUnavailable."""
+    """Send one WiZ request and return the reply's ``result``. Raises DeviceUnavailable.
+
+    ``WizTransportError`` (a DeviceUnavailable) means the hub could not send at all.
+    """
     loop = asyncio.get_running_loop()
     payload = json.dumps({"method": method, "params": params or {}}).encode()
-    proto = _UDPReply(method)
+    address = await _numeric_host(host, port, timeout)
+    sock, addr = _bulb_address(address, port)
+    proto = _UDPReply(method, addr[0])
     try:
-        transport, _ = await asyncio.wait_for(
-            loop.create_datagram_endpoint(lambda: proto, remote_addr=(host, port)), timeout)
-    except (OSError, TimeoutError) as exc:
-        raise DeviceUnavailable(f"WiZ bulb {host} unreachable: {type(exc).__name__} {exc}".rstrip()) from exc
+        transport, _ = await loop.create_datagram_endpoint(lambda: proto, sock=sock)
+    except OSError as exc:
+        sock.close()
+        raise WizTransportError(f"WiZ bulb {host}: could not open a socket: {type(exc).__name__} {exc}".rstrip()) \
+            from exc
     try:
         deadline = loop.time() + timeout
         while True:
             with contextlib.suppress(OSError):
-                transport.sendto(payload)
+                transport.sendto(payload, addr)
             remaining = deadline - loop.time()
             if remaining <= 0:
                 raise DeviceUnavailable(f"WiZ bulb {host} did not answer {method}")
@@ -112,10 +164,18 @@ async def udp_request(host: str, method: str, params: dict[str, Any] | None = No
 #: Poll period while a bulb answers, and while it does not (off at the switch).
 ONLINE_POLL_S = 30.0
 OFFLINE_POLL_S = 5.0
-#: A bulb that was answering is asked once more, this long after a miss, before it is called
-#: unavailable: three bulbs missed every other poll and answered 5 s later, so the app showed
-#: them flicking to unavailable and back every minute (2026-11-14).
+#: A bulb that was answering is asked once more, this long after a miss, before the poll counts as missed.
 RECHECK_AFTER_S = 1.0
+#: Missed polls in a row before a bulb that was answering is called unavailable. Bulbs flicked to
+#: unavailable and back every minute (2026-11-14), and a re-check within the poll did not stop it: the
+#: misses were the hub's own (a socket that could not be opened in time, 2026-11-18), several bulbs at once.
+#: A bulb switched off at the wall is unavailable after about 20 s instead of 8.
+MISSES_BEFORE_UNAVAILABLE = 2
+#: A command's whole budget: setPilot (with its resends) and the read-back. A bulb marked unavailable is
+#: still sent the command (it may have just come back), but a silent one cannot hold a room's reply.
+COMMAND_BUDGET_S = 5.0
+#: The read-back after a command is a courtesy; the command already answered.
+READBACK_TIMEOUT_S = 1.5
 
 
 class WizDriver(Driver):
@@ -133,7 +193,9 @@ class WizDriver(Driver):
         self.power: EntityEntry | None = None
         self.pilot: dict[str, Any] = {}
         self._online = False
+        self._misses = 0
         self._identified = False
+        self._bg_tasks: set[asyncio.Task] = set()
         self.poll_interval = ONLINE_POLL_S
         for e in self.entities:
             uid = e.unique_id or ""
@@ -270,6 +332,7 @@ class WizDriver(Driver):
 
     def _came_online(self) -> None:
         self._online = True
+        self._misses = 0
         self.poll_interval = ONLINE_POLL_S
 
     def _went_offline(self) -> None:
@@ -283,6 +346,10 @@ class WizDriver(Driver):
             return
         try:
             self.pilot = await self._request("getPilot")
+        except WizTransportError as exc:
+            # The hub could not send: that says nothing about the bulb, so its state stands.
+            self.log.warning("WiZ %s (%s): poll not sent: %s", self.entry.title, self.host, exc)
+            return
         except DeviceUnavailable as exc:
             if not self._online:
                 self._went_offline()
@@ -292,7 +359,15 @@ class WizDriver(Driver):
             try:
                 self.pilot = await self._request("getPilot")
             except DeviceUnavailable as again:
-                self.log.warning("WiZ %s (%s) unreachable: %s", self.entry.title, self.host, again)
+                self._misses += 1
+                if self._misses < MISSES_BEFORE_UNAVAILABLE:
+                    # Ask again soon rather than in 30 s, but keep showing the last state until it is clear.
+                    self.poll_interval = OFFLINE_POLL_S
+                    self.log.info("WiZ %s (%s) missed %d poll(s) in a row; still shown as it was: %s",
+                                  self.entry.title, self.host, self._misses, again)
+                    return
+                self.log.warning("WiZ %s (%s) unreachable after %d missed polls: %s",
+                                 self.entry.title, self.host, self._misses, again)
                 self._went_offline()
                 return
         if not self._online:
@@ -360,16 +435,29 @@ class WizDriver(Driver):
 
     # -- services -------------------------------------------------------------
     async def async_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
-        if not self._online:
-            # The switch may have just been flipped on: try now rather than
-            # wait for the next poll, and learn the bulb's type first.
-            self.pilot = await self._request("getPilot")
-            await self._identify()
-            self._came_online()
+        """Run a service within ``COMMAND_BUDGET_S``.
+
+        A bulb shown unavailable is still sent the command: it may have just been switched back on, and the
+        command itself is the quickest way to find out (no getPilot first). Only a toggle needs to read the
+        bulb first, and only colour needs its type.
+        """
+        try:
+            async with asyncio.timeout(COMMAND_BUDGET_S):
+                return await self._call(entity, domain, service, data)
+        except TimeoutError as exc:
+            self._online = False
+            self.mark_unavailable()
+            raise DeviceUnavailable(f"WiZ bulb {self.host} did not answer within {COMMAND_BUDGET_S:.0f}s") from exc
+
+    async def _call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
         if entity is self.light or (self.light is not None and entity.entity_id == self.light.entity_id):
             if service == "toggle":
+                if not self._online:
+                    self.pilot = await self._request("getPilot")
                 service = "turn_off" if self.pilot.get("state") else "turn_on"
             if service == "turn_on":
+                if not self._identified and any(data.get(k) is not None for k in ("rgb_color", "hs_color", "effect")):
+                    await self._identify()  # colour and scenes depend on what the bulb is
                 await self._set_pilot(self._turn_on_params(data))
             elif service == "turn_off":
                 await self._set_pilot({"state": False})
@@ -417,17 +505,34 @@ class WizDriver(Driver):
     async def _set_pilot(self, params: dict[str, Any]) -> None:
         try:
             await self._request("setPilot", params)
+        except WizTransportError:
+            raise  # nothing was sent: the bulb's state stands
         except DeviceUnavailable:
             self._online = False
             self.mark_unavailable()
             raise
-        self._online = True
+        was_online = self._online
+        self._came_online()
+        if not was_online:
+            self.log.info("WiZ %s (%s) is back (it answered a command)", self.entry.title, self.host)
         # Read back what the bulb actually did (it clamps and may ignore keys).
         try:
-            self.pilot = await self._request("getPilot")
-        except DeviceUnavailable:
+            self.pilot = await asyncio.wait_for(self._request("getPilot"), READBACK_TIMEOUT_S)
+        except (DeviceUnavailable, TimeoutError):
             self.pilot = {**self.pilot, **{k: v for k, v in params.items() if k != "sceneId"},
                           "sceneId": params.get("sceneId", 0)}
         self._publish_light()
         if self.speed is not None and self.pilot.get("speed") is not None:
             self.publish(self.speed, self.pilot["speed"], {"min": 10, "max": 200, "step": 1, "mode": "slider"})
+        if not was_online and not self._identified:
+            # It just came back: learn its type off the command's path (the next poll would too).
+            self._spawn_identify()
+
+    def _spawn_identify(self) -> None:
+        task = asyncio.get_running_loop().create_task(self._identify_quietly())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    async def _identify_quietly(self) -> None:
+        with contextlib.suppress(Exception):
+            await self._identify()

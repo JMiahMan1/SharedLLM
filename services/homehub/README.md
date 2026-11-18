@@ -53,8 +53,8 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | HA integration | Driver | Notes |
 |---|---|---|
 | matter | `matter.py` | WebSocket client of `matter-server` (matter.js 1.5.5, the add-on's server, on the add-on's fabric). See `MATTER.md`. |
-| wiz | `wiz.py` | UDP 38899, no library |
-| esphome | `esphome.py` | aioesphomeapi, push; stale IP falls back to `<device_name>.local`; user actions become `esphome.<node>_<action>` services |
+| wiz | `wiz.py` | UDP 38899, no library. See WiZ bulbs below. |
+| esphome | `esphome.py` | aioesphomeapi, push; stale IP falls back to `<device_name>.local`, looked up by mDNS only (never DNS, see the event loop and its thread pools below); user actions become `esphome.<node>_<action>` services |
 | tasmota | `tasmota.py` | HTTP `cm?cmnd=` (HA used MQTT through its own broker, now gone) |
 | switch_as_x | `switch_as_x.py` | Mirrors the wrapped switch |
 | group (light) | `group.py` | A light group: commands fan out to the member lights, the state follows them. See Light groups below. |
@@ -480,6 +480,48 @@ report one) the same name in the same area; one integration's devices are never 
 `GET /hub/devices/duplicates`, `PATCH /hub/devices/{id}` `{"hidden"}`,
 `POST /hub/devices/duplicates/hide` `{"hide_domain"?, "keep_domain"?}` and
 `POST /hub/devices/duplicates/unhide` `{"domain"}`, admins only.
+
+## WiZ bulbs (`drivers/wiz.py`)
+
+- **Its own socket, no resolver.** Each request opens a UDP socket itself and hands it to
+  `create_datagram_endpoint(sock=...)`. Passing `remote_addr` instead made uvloop resolve the bulb's
+  numeric address on libuv's thread pool, where it queued behind slow DNS lookups (see below) and timed
+  out after 3 s: working bulbs were logged `unreachable: TimeoutError` and flicked to unavailable.
+- **Unavailable takes two missed polls.** A poll that gets no reply asks once more a second later; a
+  bulb is marked unavailable only after `MISSES_BEFORE_UNAVAILABLE` (2) such polls in a row (about
+  20 s for a bulb switched off at the wall). Until then it keeps its last state and is polled every
+  5 s. A request the hub could not send at all (`WizTransportError`) never counts against the bulb.
+- **A command always goes to the bulb.** A bulb shown unavailable is sent `setPilot` straight away (no
+  `getPilot` first); if it answers it is online again. Each command has `COMMAND_BUDGET_S` (5 s) in
+  all, with resends every 0.6 s, and the read-back after it at most 1.5 s, so one silent bulb cannot
+  hold a room's reply. A room is one service call with several entities, and the hub sends every
+  entity's command at once (`Hub._dispatch_entities`); execution's `/execute/lights` also fans out.
+
+## The event loop and its thread pools (`loop_monitor.py`)
+
+Everything runs on one asyncio loop (uvloop, under uvicorn) with two thread pools behind it: the
+default executor (`asyncio.to_thread`) and libuv's pool, which uvloop uses for every `getaddrinfo`
+and for the address of every `create_datagram_endpoint(remote_addr=...)`, even a numeric one.
+`main.py` raises libuv's pool from 4 threads to 16 (`UV_THREADPOOL_SIZE`, before anything starts it).
+
+What happened on 2026-11-18: seven ESPHome nodes were offline, and for each reconnect aioesphomeapi
+looked up `x.local` and also the bare name `x` through `getaddrinfo`. On the server a single-label
+name takes about 4 s to fail, and a cancelled lookup still holds its thread until then, so the pool's
+four threads were busy for 4 to 8 s at a time (seen in `/proc` as libuv workers waiting on a DNS reply
+for `kauf-plug-d67371`, `water-valve`, `jarvis-cyd2`...). The loop itself was fine (`/health` never
+took 0.4 s over 7 minutes). Fixed three ways: WiZ no longer uses the pool, ESPHome resolves `.local`
+by mDNS itself and hands aioesphomeapi an address, and the pool is larger.
+
+The monitor makes the next one visible. It logs a WARNING (logger `homehub.loop`, at most one per kind
+a minute, with a count of the ones held back) when:
+
+- the loop wakes more than 0.5 s late: the warning includes the loop thread's stack, taken by a
+  watchdog thread while the loop was still stuck, so it names the blocking code;
+- a no-op job waits more than 1 s in the default executor or in the resolver pool (probed every 30 s;
+  the resolver probe opens one UDP socket to 127.0.0.1, which under uvloop is exactly one pool job).
+
+`GET /health` carries the counts under `loop` (`stalls`, `worst_stall_s`, `last_stall`, `pool_waits`
+and the last probe times in `pools_s`).
 
 ## Known issues
 

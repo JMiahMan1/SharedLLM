@@ -37,6 +37,7 @@ class Runtime:
         self._unsub_record = None
         self.automations: Any = None  # set by main once the engine is loaded
         self.helpers: Any = None  # HA's helpers (helpers.py), set by main
+        self.loop_monitor: Any = None  # loop_monitor.LoopMonitor, set by main
 
     def load_registry(self) -> None:
         hub = self.hub

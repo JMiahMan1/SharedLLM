@@ -41,6 +41,7 @@ import colorsys
 import contextlib
 import inspect
 import json
+import logging
 import math
 import re
 from collections.abc import AsyncIterator
@@ -118,6 +119,66 @@ TIMER_EVENTS = {
 }
 SATELLITE_ANNOUNCE_TIMEOUT_S = 120.0  # a long announcement plays to the end before the node answers
 RECONNECT_DELAYS = (2, 5, 10, 30, 60)
+#: How long an mDNS lookup of a node's ``.local`` name may take.
+MDNS_RESOLVE_TIMEOUT = 3.0
+
+# One zeroconf instance for every node's ``.local`` lookups in the process.
+_zeroconf: Any = None
+_zeroconf_failed = False
+_zeroconf_lock = asyncio.Lock()
+
+
+async def _shared_zeroconf() -> Any:
+    global _zeroconf, _zeroconf_failed
+    async with _zeroconf_lock:
+        if _zeroconf is None and not _zeroconf_failed:
+            try:
+                from zeroconf.asyncio import AsyncZeroconf
+
+                _zeroconf = AsyncZeroconf()
+            except Exception as exc:  # no multicast here: .local names cannot be looked up at all
+                _zeroconf_failed = True
+                logging.getLogger("homehub.esphome").warning("mDNS is unavailable, .local names will not "
+                                                             "resolve: %s", exc)
+        return _zeroconf
+
+
+async def resolve_mdns(host: str, timeout: float) -> str | None:
+    """``x.local`` -> its IPv4 address by mDNS only (never DNS), or None.
+
+    Asks for the host's A record and for the node's ``_esphomelib._tcp`` service (what aioesphomeapi
+    asks) at once; the first address either finds wins.
+    """
+    from zeroconf import AddressResolverIPv4, IPVersion
+    from zeroconf.asyncio import AsyncServiceInfo
+
+    aiozc = await _shared_zeroconf()
+    if aiozc is None:
+        return None
+    server = host.rstrip(".") + "."
+    short = server.split(".", 1)[0]
+    lookups = [AddressResolverIPv4(server),
+               AsyncServiceInfo("_esphomelib._tcp.local.", f"{short}._esphomelib._tcp.local.", server=server)]
+
+    async def ask(info: Any) -> str | None:
+        try:
+            if await info.async_request(aiozc.zeroconf, int(timeout * 1000)):
+                found = info.parsed_addresses(IPVersion.V4Only)
+                return found[0] if found else None
+        except Exception:
+            return None
+        return None
+
+    tasks = [asyncio.ensure_future(ask(i)) for i in lookups]
+    try:
+        for done in asyncio.as_completed(tasks):
+            address = await done
+            if address:
+                return address
+    finally:
+        for t in tasks:
+            t.cancel()
+    return None
 
 # EntityInfo class -> the platform word HA put in the unique_id.
 PLATFORMS: dict[str, str] = {
@@ -260,6 +321,7 @@ class ESPHomeDriver(Driver):
         self.noise_psk: str | None = d.get("noise_psk") or None
         self.allow_service_calls: bool = bool(entry.options.get("allow_service_calls"))
         self._client: Any = None
+        self._resolve_mdns = resolve_mdns
         self._device_info: Any = None
         self._api_version: Any = None
         self._closing = False
@@ -288,7 +350,7 @@ class ESPHomeDriver(Driver):
 
     # -- connection -----------------------------------------------------------
     def _make_client(self, host: str) -> Any:
-        # aioesphomeapi resolves a ``.local`` name itself through zeroconf (host_resolver).
+        # ``host`` is an address: a ``.local`` name was resolved by mDNS first (``_address_for``).
         return APIClient(host, self.port, self.password, client_info="homehub",
                          noise_psk=self.noise_psk, expected_name=self.device_name or None)
 
@@ -296,8 +358,24 @@ class ESPHomeDriver(Driver):
     def connected(self) -> bool:
         return self._client is not None
 
+    async def _address_for(self, host: str) -> str:
+        """Where to connect for ``host``: a ``.local`` name is looked up by mDNS alone.
+
+        Given ``x.local``, aioesphomeapi also asks DNS for ``x`` (no suffix) through ``loop.getaddrinfo``.
+        On the server a single-label name takes ~4 s to fail, and under uvloop each lookup holds one of
+        libuv's four pool threads, which every UDP socket the hub opens also needs: offline nodes retrying
+        filled the pool and WiZ bulbs were called unreachable (measured 2026-11-18). So the hub resolves
+        the name itself and hands aioesphomeapi an address, which it never looks up.
+        """
+        if not host.lower().rstrip(".").endswith(".local"):
+            return host
+        address = await self._resolve_mdns(host, MDNS_RESOLVE_TIMEOUT)
+        if not address:
+            raise DeviceUnavailable(f"{host}:{self.port}: not found by mDNS")
+        return address
+
     async def _try_connect(self, host: str) -> tuple[Any, Any, list[Any], list[Any]]:
-        client = self._make_client(host)
+        client = self._make_client(await self._address_for(host))
         try:
             await asyncio.wait_for(client.connect(on_stop=self._on_stop, login=True), CONNECT_TIMEOUT)
             device_info, infos, services = await asyncio.wait_for(
