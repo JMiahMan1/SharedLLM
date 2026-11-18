@@ -42,6 +42,24 @@ MAX_RAG_CONTEXT_CHARS = 12000
 VOICE_RAG_CHARS = 5000
 #: Room for a full page of matching devices (8, searched first) plus a few other hits.
 VOICE_RAG_HITS = 12
+#: A spoken follow-up ("turn it off", "and the kitchen?") needs the last exchange or two.
+#: The household's last ten messages (long answers included) were about 2,000 tokens,
+#: read again before every spoken answer: about 10 s on the household's card.
+VOICE_HISTORY_MESSAGES = 4
+VOICE_HISTORY_CHARS = 400
+
+
+def _voice_history(history: list) -> list:
+    """The last exchanges of a spoken conversation, each cut to a sentence or two."""
+    out = []
+    for message in history[-VOICE_HISTORY_MESSAGES:]:
+        if not isinstance(message, dict):
+            continue
+        content = str(message.get("content") or "")
+        if len(content) > VOICE_HISTORY_CHARS:
+            content = content[:VOICE_HISTORY_CHARS].rstrip() + "..."
+        out.append({**message, "content": content})
+    return out
 
 
 def _truncate_rag_context(rag_context: str) -> str:
@@ -543,6 +561,8 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         short_term = []
     else:
         short_term = await get_history(user_id)
+    if job_payload.get("voice_context") and not is_autonomous:
+        short_term = _voice_history(short_term)
 
     # 2. Context Injection (RAG + live HA state + workspace memory)
     workspace_id = job_payload.get("workspace_id")

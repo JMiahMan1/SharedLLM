@@ -1,6 +1,8 @@
 """A voice satellite's room reaches Jarvis only from an internal caller (homehub)."""
 from types import SimpleNamespace
 
+import pytest
+
 from services.gateway import main as gateway_main
 
 
@@ -46,3 +48,25 @@ def test_a_satellite_with_no_room_is_told_to_ask():
     note = gateway_main._voice_context_note({"satellite_name": "Spare speaker"})
     assert "no room assigned" in note
     assert gateway_main._voice_context_note({}) == ""
+
+
+
+@pytest.mark.parametrize("query, question", [
+    ("Is the hall lamp on?", True),
+    ("are the kitchen lights off", True),
+    ("Did I leave the porch light on?", True),
+    ("Turn on the hall lamp.", False),
+    ("Can you turn on the hall lamp?", False),
+    ("Please turn off the den lights", False),
+    ("Isabel's lamp on", False),
+])
+def test_a_question_about_a_light_is_not_a_command(query, question):
+    assert gateway_main.asks_about_state(query) is question
+
+
+def test_a_lights_state_in_words():
+    lamp = {"entity_id": "light.hall_lamp", "state": "on", "attributes": {"friendly_name": "Hall Lamp", "brightness": 128}}
+    assert gateway_main.describe_state(lamp) == "Hall Lamp is on at 50%."
+    assert gateway_main.describe_state({"entity_id": "light.hall_lamp", "state": "off", "attributes": {}}) == "hall lamp is off."
+    assert gateway_main.describe_state({"entity_id": "light.x", "state": "unavailable", "attributes": {"friendly_name": "X"}}) \
+        == "X isn't responding right now."
