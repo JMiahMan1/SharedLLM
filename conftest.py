@@ -278,6 +278,55 @@ def _isolate_environ():
         os.environ.update(saved)
 
 
+# Config modules that derive their constants once, at import, and that code
+# under test reads through the package attribute (``from services import
+# config``) at call time.
+_CONFIG_MODULES = ("services.config", "services.gateway.config")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_modules():
+    """Undo a test's re-import, reload or attribute edits of the config modules.
+
+    _isolate_environ restores os.environ, but services.config copies it into
+    module attributes once. Two kinds of test changed that copy for everyone
+    after them:
+
+    * ``del sys.modules["services.config"]`` then ``import services.config``
+      (test_config_resolution.py) binds a NEW module to sys.modules and to the
+      ``services.config`` package attribute. Every test module collected
+      before that still holds the OLD object, so its
+      ``monkeypatch.setattr(config, "HA_URL", ...)`` patched a module nobody
+      read any more: hub_login does ``from services import config`` at call
+      time and saw the new module's defaults. That is how 29 execution tests
+      (test_hub_login_*, test_media_hub_login, test_piper_tts) passed alone and
+      failed after services/tests in one run.
+    * ``importlib.reload(services.config)`` (test_mass_config.py) re-runs the
+      module in place against the test's own environment and leaves those
+      values behind.
+
+    Snapshot the module objects, the package attributes and each module's
+    namespace, and put all three back after every test.
+    """
+    saved = []
+    for name in _CONFIG_MODULES:
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        parent_name, _, attr = name.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        saved.append((name, mod, parent, attr, getattr(parent, attr, None), dict(vars(mod))))
+    yield
+    for name, mod, parent, attr, parent_attr, namespace in saved:
+        sys.modules[name] = mod
+        if parent is not None and parent_attr is not None:
+            setattr(parent, attr, parent_attr)
+        current = vars(mod)
+        if current != namespace:
+            current.clear()
+            current.update(namespace)
+
+
 @pytest.fixture(autouse=True)
 def _reset_ha_health():
     """Home Assistant up/down is process-wide state learned from failed calls.
