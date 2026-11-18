@@ -53,11 +53,11 @@ describe('ingest: the media store reducer', () => {
       name: 'UX-12 marks radio and live streams as isLive from kind or URI, not from duration <= 0',
       steps: [
         [status(kitchen({ duration: 0, media_type: 'track', media_content_id: 'library://track/1' })), 0],
-        [{ type: 'player', output_id: 'ma:office', state: 'playing', item: { uri: 'library://radio/7', title: 'KEXP', duration: 0 } }, 10],
+        [{ type: 'player', output_id: 'ma:study', state: 'playing', item: { uri: 'library://radio/7', title: 'KEXP', duration: 0 } }, 10],
       ],
       check: (s) => {
         expect(s.players[K].item?.isLive).toBe(false);
-        expect(s.players['ma:office'].item?.isLive).toBe(true);
+        expect(s.players['ma:study'].item?.isLive).toBe(true);
       },
     },
     {
@@ -137,21 +137,21 @@ describe('ingest: the media store reducer', () => {
     },
     {
       name: 'a snapshot folds every player in; Music Assistant volumes are already 0-100',
-      steps: [[{ type: 'snapshot', players: [{ output_id: 'ma:office', state: 'playing', volume: 35, item: null }, { output_id: K, state: 'idle' }] }, 0]],
+      steps: [[{ type: 'snapshot', players: [{ output_id: 'ma:study', state: 'playing', volume: 35, item: null }, { output_id: K, state: 'idle' }] }, 0]],
       check: (s) => {
-        expect(s.players['ma:office']).toMatchObject({ kind: 'ma', status: 'playing', volume: 35 });
+        expect(s.players['ma:study']).toMatchObject({ kind: 'ma', status: 'playing', volume: 35 });
         expect(s.players[K].status).toBe('idle');
       },
     },
     {
       name: 'queue events bump the queue version and can re-anchor the clock',
-      steps: [[{ type: 'player', output_id: 'ma:office', state: 'playing' }, 0], [{ type: 'queue', output_id: 'ma:office', items_changed: true }, 100], [{ type: 'queue', output_id: 'ma:office', items_changed: false, position: 77 }, 200]],
-      check: (s) => expect(s.players['ma:office']).toMatchObject({ queueVersion: 1, positionSec: 77, positionUpdatedAt: T0 + 200 }),
+      steps: [[{ type: 'player', output_id: 'ma:study', state: 'playing' }, 0], [{ type: 'queue', output_id: 'ma:study', items_changed: true }, 100], [{ type: 'queue', output_id: 'ma:study', items_changed: false, position: 77 }, 200]],
+      check: (s) => expect(s.players['ma:study']).toMatchObject({ queueVersion: 1, positionSec: 77, positionUpdatedAt: T0 + 200 }),
     },
     {
       name: 'Music Assistant player lists skip this device and replace earlier MA rows',
       steps: [
-        [{ type: 'ma-players', webPlayerId: 'me', players: [{ player_id: 'me', name: 'Me', available: true, state: 'idle', powered: true }, { player_id: 'office', name: 'Office', available: true, state: 'playing', powered: true }] }, 0],
+        [{ type: 'ma-players', webPlayerId: 'me', players: [{ player_id: 'me', name: 'Me', available: true, state: 'idle', powered: true }, { player_id: 'study', name: 'Study', available: true, state: 'playing', powered: true }] }, 0],
         [{ type: 'ma-players', players: [{ player_id: 'den', name: 'Den', available: false, state: 'idle', powered: false }] }, 100],
       ],
       check: (s) => {
@@ -162,14 +162,14 @@ describe('ingest: the media store reducer', () => {
     {
       name: 'this device’s own MA player is dropped from the event stream too (no phantom speaker)',
       steps: [
-        [{ type: 'ma-players', webPlayerId: 'me', players: [{ player_id: 'office', name: 'Office', available: true, state: 'idle', powered: true }] }, 0],
+        [{ type: 'ma-players', webPlayerId: 'me', players: [{ player_id: 'study', name: 'Study', available: true, state: 'idle', powered: true }] }, 0],
         [{ type: 'player', output_id: 'ma:me', state: 'playing', item: { title: 'Mine', uri: 'x://m' } }, 1],
-        [{ type: 'snapshot', players: [{ output_id: 'ma:me', state: 'playing', item: { title: 'Mine', uri: 'x://m' } }, { output_id: 'ma:office', state: 'playing' }] }, 2],
+        [{ type: 'snapshot', players: [{ output_id: 'ma:me', state: 'playing', item: { title: 'Mine', uri: 'x://m' } }, { output_id: 'ma:study', state: 'playing' }] }, 2],
       ],
       check: (s) => {
         expect(s.webPlayerId).toBe('me');
         expect(s.players['ma:me']).toBeUndefined();
-        expect(s.players['ma:office'].status).toBe('playing');
+        expect(s.players['ma:study'].status).toBe('playing');
       },
     },
     {
@@ -233,10 +233,10 @@ describe('useMediaStore', () => {
   });
 
   it('persists only the output choice and recent searches', () => {
-    actions().selectOutput('ma:office');
+    actions().selectOutput('ma:study');
     actions().addRecentSearch('abba');
     const stored = JSON.parse(localStorage.getItem('jarvis_media') || '{}');
-    expect(stored.state).toEqual({ activeOutputId: 'ma:office', userPickedOutput: true, recentSearches: ['abba'] });
+    expect(stored.state).toEqual({ activeOutputId: 'ma:study', userPickedOutput: true, recentSearches: ['abba'] });
   });
 
   it('keeps ten recent searches, newest first, without duplicates', () => {
@@ -279,26 +279,26 @@ describe('selectors', () => {
     [status(kitchen({ ma_player_id: 'kitchen' }), { entity_id: 'media_player.den_tv', friendly_name: 'Den TV', state: 'idle', icon_kind: 'tv' }), 0],
     [{ type: 'ma-players', webPlayerId: 'me', players: [
       { player_id: 'kitchen', name: 'Kitchen', available: true, state: 'playing', powered: true },
-      { player_id: 'office', name: 'Office', available: true, state: 'paused', powered: true },
+      { player_id: 'study', name: 'Study', available: true, state: 'paused', powered: true },
     ] }, 0],
-    [{ type: 'player', output_id: 'ma:office', state: 'paused', item: { title: 'Podcast', uri: 'x://p' } }, 0],
+    [{ type: 'player', output_id: 'ma:study', state: 'paused', item: { title: 'Podcast', uri: 'x://p' } }, 0],
   ]).players;
 
   it('BUG-65 lists each speaker once and labels TVs', () => {
     const rows = deviceOptions([{ entity_id: K, friendly_name: 'Kitchen Speaker', state: 'playing' }], players, 'me');
-    expect(rows.map((r) => r.id)).toEqual([K, 'media_player.den_tv', 'ma:office']);
+    expect(rows.map((r) => r.id)).toEqual([K, 'media_player.den_tv', 'ma:study']);
     expect(rows.find((r) => r.id === 'media_player.den_tv')?.detail).toBe('TV');
     expect(rows.find((r) => r.id === K)?.detail).toBe('Playing');
   });
 
   it('lists what is playing around the house, playing first, each device once', () => {
-    expect(playingElsewhere(players).map((p) => p.id)).toEqual([K, 'ma:office']);
+    expect(playingElsewhere(players).map((p) => p.id)).toEqual([K, 'ma:study']);
   });
 
   it('never lists this device’s own MA player as elsewhere, even before it is named', () => {
-    const own = { ...players['ma:office'], id: 'ma:me', name: 'This device' };
+    const own = { ...players['ma:study'], id: 'ma:me', name: 'This device' };
     const withOwn = { ...players, 'ma:me': own };
-    expect(playingElsewhere(withOwn, 'me').map((p) => p.id)).toEqual([K, 'ma:office']);
+    expect(playingElsewhere(withOwn, 'me').map((p) => p.id)).toEqual([K, 'ma:study']);
     // Without the id the row is still visible; the caller is what names it.
     expect(playingElsewhere(withOwn).map((p) => p.id)).toContain('ma:me');
   });
@@ -306,16 +306,16 @@ describe('selectors', () => {
 
 describe('shownPlayer', () => {
   const rows = (wrapperTitle: string): MediaStatus[] => [
-    { entity_id: 'media_player.office_tv_chrome_2', friendly_name: 'Office TV', state: 'playing', ma_player_id: 'media_player.office_tv_chrome', media_title: wrapperTitle },
-    { entity_id: 'media_player.office_tv_chrome', friendly_name: 'Office TV Cast', state: 'playing', media_title: 'Pharaoh', media_content_id: 'http://ma/flow.flac' },
+    { entity_id: 'media_player.study_tv_cast_2', friendly_name: 'Study TV', state: 'playing', ma_player_id: 'media_player.study_tv_cast', media_title: wrapperTitle },
+    { entity_id: 'media_player.study_tv_cast', friendly_name: 'Study TV Cast', state: 'playing', media_title: 'Pharaoh', media_content_id: 'http://ma/flow.flac' },
   ] as MediaStatus[];
 
   it('shows a titleless Music Assistant wrapper through the device it plays on, and the player itself otherwise', () => {
     const { players } = ingest(EMPTY_PLAYERS, { type: 'status', players: rows('') }, T0);
-    expect(shownPlayer(players, 'media_player.office_tv_chrome_2')?.item?.title).toBe('Pharaoh');
-    expect(shownPlayer(players, 'media_player.office_tv_chrome_2')).toBe(players['media_player.office_tv_chrome']);
+    expect(shownPlayer(players, 'media_player.study_tv_cast_2')?.item?.title).toBe('Pharaoh');
+    expect(shownPlayer(players, 'media_player.study_tv_cast_2')).toBe(players['media_player.study_tv_cast']);
     const own = ingest(EMPTY_PLAYERS, { type: 'status', players: rows('Its own') }, T0).players;
-    expect(shownPlayer(own, 'media_player.office_tv_chrome_2')?.item?.title).toBe('Its own');
+    expect(shownPlayer(own, 'media_player.study_tv_cast_2')?.item?.title).toBe('Its own');
     expect(shownPlayer(players, '')).toBeNull();
   });
 });

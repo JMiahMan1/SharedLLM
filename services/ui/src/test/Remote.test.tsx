@@ -14,9 +14,9 @@ const STATUS = {
     all_players: [
       { entity_id: 'web_player', friendly_name: 'Web Player', state: 'idle' },
       { entity_id: 'media_player.kitchen', friendly_name: 'Kitchen Speaker', state: 'idle', icon_kind: 'speaker', volume_level: 0.3 },
-      { entity_id: 'media_player.office_tv', friendly_name: 'Office TV Remote', state: 'on', icon_kind: 'tv', volume_level: 0.8, is_volume_muted: false, app_name: 'YouTube' },
+      { entity_id: 'media_player.study_tv', friendly_name: 'Study TV Remote', state: 'on', icon_kind: 'tv', volume_level: 0.8, is_volume_muted: false, app_name: 'YouTube' },
       { entity_id: 'media_player.loft_tv', friendly_name: 'Loft TV', state: 'off', icon_kind: 'tv' },
-      { entity_id: 'media_player.rv_tv', friendly_name: 'RV TV', state: 'unavailable', icon_kind: 'tv' },
+      { entity_id: 'media_player.cabin_tv', friendly_name: 'Cabin TV', state: 'unavailable', icon_kind: 'tv' },
     ],
   },
 };
@@ -37,7 +37,7 @@ beforeEach(() => {
 describe('Remote page', () => {
   it('starts on the first TV that is on and shows its real volume', async () => {
     renderWithProviders(<Remote />);
-    expect(await screen.findByRole('button', { name: /Office TV Remote/, pressed: true })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Study TV Remote/, pressed: true })).toBeInTheDocument();
     expect(await screen.findByText('80%')).toBeInTheDocument();
     expect(screen.getByText('YouTube')).toBeInTheDocument();
     // The browser's own player is not a TV to remote-control.
@@ -46,18 +46,18 @@ describe('Remote page', () => {
 
   it('sends each d-pad key as itself (they all used to send "home")', async () => {
     renderWithProviders(<Remote />);
-    await screen.findByRole('button', { name: /Office TV Remote/, pressed: true });
+    await screen.findByRole('button', { name: /Study TV Remote/, pressed: true });
     for (const label of ['Up', 'Down', 'Left', 'Right', 'OK', 'Back', 'Home', 'Menu']) {
       await userEvent.click(screen.getByRole('button', { name: label }));
     }
     await waitFor(() => expect(sent).toHaveLength(8));
     expect(sent.map((s) => s.command)).toEqual(['up', 'down', 'left', 'right', 'select', 'back', 'home', 'menu']);
-    expect(sent.every((s) => s.entity_id === 'media_player.office_tv')).toBe(true);
+    expect(sent.every((s) => s.entity_id === 'media_player.study_tv')).toBe(true);
   });
 
   it('mutes with an explicit state (there is no "unmute" command)', async () => {
     renderWithProviders(<Remote />);
-    await screen.findByRole('button', { name: /Office TV Remote/, pressed: true });
+    await screen.findByRole('button', { name: /Study TV Remote/, pressed: true });
     await userEvent.click(screen.getByRole('button', { name: 'Mute' }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({ command: 'volume_mute', muted: true });
@@ -67,18 +67,18 @@ describe('Remote page', () => {
     renderWithProviders(<Remote />);
     await userEvent.click(await screen.findByRole('button', { name: /Loft TV/ }));
     await userEvent.click(await screen.findByRole('button', { name: /Turn on/ }));
-    await userEvent.click(screen.getByRole('button', { name: /Office TV Remote/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Study TV Remote/ }));
     await userEvent.click(await screen.findByRole('button', { name: /Turn off/ }));
     await waitFor(() => expect(sent).toHaveLength(2));
     expect(sent.map((s) => [s.entity_id, s.command])).toEqual([
       ['media_player.loft_tv', 'power_on'],
-      ['media_player.office_tv', 'power_off'],
+      ['media_player.study_tv', 'power_off'],
     ]);
   });
 
   it('steps the volume from the device level', async () => {
     renderWithProviders(<Remote />);
-    await screen.findByRole('button', { name: /Office TV Remote/, pressed: true });
+    await screen.findByRole('button', { name: /Study TV Remote/, pressed: true });
     await userEvent.click(screen.getByRole('button', { name: 'Volume up' }));
     await waitFor(() => expect(sent).toHaveLength(1), { timeout: 2000 });
     expect(sent[0]).toMatchObject({ command: 'volume_set', volume_level: 0.85 });
@@ -86,8 +86,8 @@ describe('Remote page', () => {
 
   it('says when a device is offline instead of showing dead buttons', async () => {
     renderWithProviders(<Remote />);
-    await userEvent.click(await screen.findByRole('button', { name: /RV TV/ }));
-    expect(await screen.findByText('RV TV is offline')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: /Cabin TV/ }));
+    expect(await screen.findByText('Cabin TV is offline')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Up' })).not.toBeInTheDocument();
   });
 });

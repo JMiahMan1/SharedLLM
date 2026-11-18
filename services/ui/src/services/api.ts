@@ -4884,7 +4884,7 @@ export const api = {
     if (resp.data?.status === 'FAILURE') {
       throw new Error(resp.data.message || 'Could not read your devices');
     }
-    return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string; attributes?: Record<string, number | string | boolean | string[] | null>; last_changed?: string; last_updated?: string }) => {
+    return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string; device_class?: string | null; attributes?: Record<string, number | string | boolean | string[] | null>; last_changed?: string; last_updated?: string }) => {
       const ts = e.last_updated || e.last_changed;
       let lastActivated: number | undefined;
       if (ts) {
@@ -4898,7 +4898,8 @@ export const api = {
         domain: e.domain,
         room: e.area_id || undefined,
         last_activated: lastActivated,
-        attributes: e.attributes || undefined,
+        // The search answers device_class beside the attributes; the safety checks read it there.
+        attributes: e.device_class ? { ...(e.attributes || {}), device_class: e.device_class } : e.attributes || undefined,
       };
     });
   },

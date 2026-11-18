@@ -26,10 +26,10 @@ describe('listRemoteMaPlayers', () => {
   it('returns the parsed list when MA answers', async () => {
     vi.mocked(api.mediaMaCommand).mockResolvedValueOnce({
       status: 'SUCCESS',
-      result: [{ player_id: 'office', name: 'Office', available: true, state: 'playing', powered: true }],
+      result: [{ player_id: 'study', name: 'Study', available: true, state: 'playing', powered: true }],
     } as never);
     await expect(listRemoteMaPlayers()).resolves.toEqual([
-      { player_id: 'office', name: 'Office', available: true, state: 'playing', powered: true },
+      { player_id: 'study', name: 'Study', available: true, state: 'playing', powered: true },
     ]);
   });
 });

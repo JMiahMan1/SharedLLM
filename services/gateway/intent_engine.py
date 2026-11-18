@@ -65,7 +65,7 @@ _FILLER = {"the", "a", "an", "my", "our", "please", "now"}
 
 
 def _strip_question(target: str) -> str:
-    """'is the hall lamp' -> 'hall lamp' (a state question reaches the same patterns)."""
+    """'is the desk lamp' -> 'desk lamp' (a state question reaches the same patterns)."""
     return re.sub(r"^(?:is|are|was|were|did|do|does)\s+", "", target.strip(), flags=re.IGNORECASE)
 
 
@@ -364,13 +364,16 @@ class IntentEngine:
             meta[eid] = {
                 "name": fname or eid.split(".", 1)[1].replace("_", " "),
                 "area": _norm_name(str(attrs.get("area_id") or "")),
+                # The area's other names in the hub's area registry, said word for word like the name.
+                "area_aliases": tuple(n for n in (_norm_name(str(x)) for x in (attrs.get("area_aliases") or [])
+                                                  if isinstance(x, str)) if n),
                 "members": tuple(str(m) for m in members) if isinstance(members, list) else (),
             }
         self.device_records = records
         self.device_meta = meta
         # Every word of every device's name and room: a word in it was said on purpose (_strict_similarity).
         self.device_words = frozenset(w for _e, _d, names, _s in records for n in names for w in n.split()) \
-            | frozenset(w for m in meta.values() for w in m["area"].split())
+            | frozenset(w for m in meta.values() for a in (m["area"], *m["area_aliases"]) for w in a.split())
         log.info(f"IntentEngine: Updated entity cache with {len(new_cache)} entries.")
 
     def _vectorize(self, data: dict):
@@ -413,7 +416,7 @@ class IntentEngine:
         return self._fuzzy_entity(target)
 
     def extract_target(self, query: str, intent: str) -> str | None:
-        """The device as said ("the office tv"), from the command's wording; None when none is named."""
+        """The device as said ("the den tv"), from the command's wording; None when none is named."""
         target = None
 
         # Regex patterns for common control intents
@@ -458,11 +461,11 @@ class IntentEngine:
         return target or None
 
     #: The state word that ends a yes/no question about a device ("... on?"), as heard:
-    #: speech to text sometimes adds an s ("Is the hall lamp ons").
+    #: speech to text sometimes adds an s ("Is the desk lamp ons").
     _STATE_WORDS = r"(?:on|ons|off|offs|still on|still off|turned on|turned off|running|playing)"
 
     def state_question_target(self, query: str) -> str | None:
-        """The device a yes/no state question names: "Is the hall lamp on?" -> "hall lamp".
+        """The device a yes/no state question names: "Is the desk lamp on?" -> "desk lamp".
 
         None when the question does not end in a device state word, so "is it going
         to rain" names no device.
@@ -500,9 +503,9 @@ class IntentEngine:
     def resolve_device(self, target: str) -> str | None:
         """The switchable device a (possibly misheard) spoken name means, or None.
 
-        Speech-to-text drops and swaps sounds ("hall amp", "security lite",
-        "kitchen light to"), and device names are messy ("Hall-Lamp",
-        "office_lamp", a brand and model after the room). Every device that can be
+        Speech-to-text drops and swaps sounds ("desk amp", "security lite",
+        "kitchen light to"), and device names are messy ("Desk-Lamp",
+        "den_lamp", a brand and model after the room). Every device that can be
         switched on and off is scored on its whole name, word by word (a word
         heard without its first letter or with a close spelling still counts) and
         on how much of its name was said. Only a clear winner is returned: a weak
@@ -588,11 +591,12 @@ class IntentEngine:
             chosen = [eid for eid, names in candidates() if any(_shares_name(stem, _drop_numbers(n), vocab)
                                                                 for n in names)]
         if room:
-            # And by room: the entity's area, else its device's (the discovery list carries the name).
+            # And by room: the entity's area, else its device's (the discovery list carries the name and
+            # the area's aliases).
             area = _norm_name(room)
             chosen += [eid for eid, _names in candidates()
-                       if eid not in chosen and meta.get(eid, {}).get("area")
-                       and _same_room(area, meta[eid]["area"], vocab)]
+                       if eid not in chosen and any(_same_room(area, a, vocab) for a in (
+                           meta.get(eid, {}).get("area"), *meta.get(eid, {}).get("area_aliases", ())) if a)]
         if not chosen:
             return None
         for gid in sorted(groups):

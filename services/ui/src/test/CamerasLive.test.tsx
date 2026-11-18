@@ -14,7 +14,7 @@ const LIVE_CAMERA = {
   realtime: { modes: ['webrtc', 'mse', 'mp4'], qualities: ['sub', 'main'], default_quality: 'sub', on_demand: true },
 };
 const PLAIN_CAMERA = {
-  entity_id: 'camera.printer', name: 'Printer', area: 'Office', platform: 'mjpeg', state: 'idle',
+  entity_id: 'camera.printer', name: 'Printer', area: 'Study', platform: 'mjpeg', state: 'idle',
   recordings: false, live: ['snapshot', 'mjpeg'], stream: 'camera',
 };
 

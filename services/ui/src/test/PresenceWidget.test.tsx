@@ -112,7 +112,7 @@ describe('PresenceWidget', () => {
           activity_type: 'driving',
           status: 'completed',
           start_location: { name: 'Home' },
-          end_location: { name: 'Office' },
+          end_location: { name: 'Study' },
           mpg: 25,
           cost_per_gallon: 3.65,
           fuel_used_gal: 0,
@@ -124,7 +124,7 @@ describe('PresenceWidget', () => {
     );
     renderWithProviders(<PresenceWidget {...props} />);
 
-    expect(await screen.findByText('Home → Office')).toBeInTheDocument();
+    expect(await screen.findByText('Home → Study')).toBeInTheDocument();
     // formatMiles drops the decimal at >= 10 miles, so this is "12 mi".
     expect(screen.getByText(/^12 mi$/)).toBeInTheDocument();
     expect(screen.getByText(/Alex/)).toBeInTheDocument();

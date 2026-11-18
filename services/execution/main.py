@@ -2935,6 +2935,15 @@ async def discovery_entities(request: Request, ha_url: str = "", ha_token: str =
     if hidden and not include_hidden:
         states = [s for s in states if s.get("entity_id") not in hidden]
     registry = await device_registry.list_devices()
+    # The hub's area registry adds each area's aliases, so a room said by its alias matches too.
+    # A plain HA (no index) has none to add; a hub whose index fails is logged and listed without them.
+    area_idx = None
+    try:
+        from services.execution import capability_index
+
+        area_idx = await capability_index.routing_index(ha_url, ha_token, "area aliases for the device list")
+    except capability_index.CapabilityIndexError as e:
+        log.warning("[discovery] entities listed without area aliases: %s", e)
     for s in states:
         eid = s.get("entity_id")
         if eid in hidden:
@@ -2943,6 +2952,9 @@ async def discovery_entities(request: Request, ha_url: str = "", ha_token: str =
             if "attributes" not in s:
                 s["attributes"] = {}
             s["attributes"]["area_id"] = areas[eid]
+        area_entry = area_idx.areas.get(area_idx.area_of(eid) or "") if area_idx is not None and eid else None
+        if area_entry and area_entry.get("aliases"):
+            s.setdefault("attributes", {})["area_aliases"] = list(area_entry["aliases"])
         if eid in registry:
             dev = registry[eid]
             if "attributes" not in s:
