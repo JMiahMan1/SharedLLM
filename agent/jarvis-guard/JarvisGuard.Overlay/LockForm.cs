@@ -67,7 +67,7 @@ public sealed class LockForm : Form
 
         var hubNote = new Label
         {
-            Text = "Calls, texts and the Jarvis app still work. A parent can lift the lock, or approve more time, from anywhere.",
+            Text = "Ask for more time and a parent can say yes from their phone, or a parent can sign in here to unlock.",
             Font = new Font("Segoe UI", 13),
             ForeColor = Color.FromArgb(148, 163, 184),
             AutoSize = true,
@@ -88,7 +88,13 @@ public sealed class LockForm : Form
             ask.ShowDialog(this);
         };
         var messageButton = MakeButton("Message a parent");
-        messageButton.Click += (_, _) => OpenHub("/family/member/");
+        messageButton.Click += (_, _) =>
+        {
+            // The hub opens in the browser; this surface steps back so it can
+            // be seen. The sign-out countdown still runs.
+            TopMost = false;
+            OpenHub("/family/member/");
+        };
         _toggleUnlockButton.Text = "A parent can unlock…";
         StyleButton(_toggleUnlockButton);
         _toggleUnlockButton.Click += (_, _) => { _unlockPanel.Visible = !_unlockPanel.Visible; _error.Visible = false; };
@@ -127,6 +133,7 @@ public sealed class LockForm : Form
         Controls.Add(bottomBar);
         bottomBar.BringToFront();
 
+        _refresh.Interval = 1000;
         _refresh.Tick += async (_, _) => await RefreshAsync();
         _refresh.Start();
         Shown += async (_, _) => await RefreshAsync();
@@ -196,22 +203,39 @@ public sealed class LockForm : Form
         _unlockPanel.Height = 78;
     }
 
-    private async Task RefreshAsync()
+    private Task RefreshAsync()
     {
-        var state = await PipeProtocol.SendAsync(Config.PipeName, new PipeProtocol.Request { Cmd = "status" });
-        if (state?.Ok == true && state.State is { } s)
+        // The agent's public state file, readable by every user: no pipe
+        // round trip for a once-a-second countdown.
+        if (Config.ReadState() is { } s)
         {
             _reason.Text = ReasonText(s.Reason);
-            _until.Text = s.Until is null ? "" : $"…until {s.Until}";
+            _until.Text = UntilText(s);
             if (!s.Locked && _title.Tag is null)
             {
                 _allowingClose = true;
                 Close();
             }
-            return;
+            return Task.CompletedTask;
         }
-        _reason.Text = "Locked - cannot reach the hub";
+        _reason.Text = "Locked - the guard is not answering";
         _until.Text = "";
+        return Task.CompletedTask;
+    }
+
+    /// <summary>When the lock lifts, and when this session will be signed out if nobody answers.</summary>
+    private static string UntilText(GuardState s)
+    {
+        var parts = new List<string>();
+        if (DateTimeOffset.TryParse(s.Until, out var until)) parts.Add($"Until {until.ToLocalTime():h:mm tt}.");
+        if (DateTimeOffset.TryParse(s.SignOutAt, out var signOut))
+        {
+            var left = signOut - DateTimeOffset.Now;
+            parts.Add(left <= TimeSpan.Zero
+                ? "Signing out now."
+                : $"This PC signs out in {Math.Max(1, (int)Math.Ceiling(left.TotalSeconds))} seconds. Save your work.");
+        }
+        return string.Join("  ", parts);
     }
 
     private async Task UnlockAsync()

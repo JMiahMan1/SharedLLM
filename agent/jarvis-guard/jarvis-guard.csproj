@@ -8,8 +8,15 @@
     <Nullable>enable</Nullable>
     <AssemblyName>jarvis-guard</AssemblyName>
     <RootNamespace>JarvisGuard</RootNamespace>
-    <Version>0.1.0</Version>
-    <InformationalVersion>0.1.0</InformationalVersion>
+    <Version>0.2.0</Version>
+    <InformationalVersion>0.2.0</InformationalVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The cross-platform tests for the Core logic build on their own. -->
+    <Compile Remove="tests/**" />
+    <None Remove="tests/**" />
+    <EmbeddedResource Remove="tests/**" />
+  </ItemGroup>
 
 </Project>

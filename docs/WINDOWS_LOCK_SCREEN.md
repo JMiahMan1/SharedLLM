@@ -325,6 +325,30 @@ repair round. Remaining phases P2 (logon rear-guard edge cases), P4
 (web filter), P5 (app control), P6 (signed CI exe + publish flow) are
 untouched by design.
 
-Install: `agent/jarvis-guard/install.ps1 -HubUrl <hub> -Username <child>
--ApiKey <child key>` run elevated on a PC whose child account is a
-standard user.
+Install: download the `jarvis-guard-windows` CI artifact (exe, its SHA-256,
+`install.ps1`, `uninstall.ps1`) and run `install.ps1` elevated on a PC whose
+child account is a standard user; it asks for the hub address, a parent
+account that may manage devices, and the child's Jarvis username. See
+`agent/jarvis-guard/README.md`.
+
+### Readiness review (2026-11-18)
+
+Fixed in `fix/windows-guard-readiness`: the gateway had no route for
+`POST /api/user-panel/devices/{key}/agent-key`, so every enrolment stopped
+with a 404 at "mint this PC's key"; install.ps1 wrote the config to
+`%ProgramFiles%` while the agent reads `%ProgramData%`, in camelCase the
+agent parsed case-sensitively, and locked `%ProgramFiles%\Jarvis Guard` so
+the child's session could not start the tray; the boot task was a default
+`schtasks` task (stopped after three days and on battery); the agent signed
+out once per lock (signing back in kept the PC) and undid a parent's unlock
+on the next poll; the lock surface was never raised by itself; the offline
+evaluator ignored `paused_until` and `granted_until`. Core now has xunit tests
+that CI runs.
+
+Still missing against this plan: an exe download for parents (publish
+secrets unset, no serving route, nothing in `deploy_remote.sh`), signing, the
+update push (no agent-side updater at all), `/api/guard/message` and chores
+on the lock surface (the gateway resolves neither for a device key), offline
+parent codes, safe-mode detection that can actually fire (Task Scheduler does not
+run in safe mode, so the current check never sees one), a Windows row for the
+capabilities on the Devices page, and the web filter / app control phases.
