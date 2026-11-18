@@ -17,3 +17,8 @@ export function cachedUrl(key: string, load: () => Promise<Blob>): Promise<strin
   }
   return entry;
 }
+
+/** Forget every cached URL (for tests: each starts as a freshly opened page). */
+export function resetBlobUrlCache(): void {
+  blobCache.clear();
+}
