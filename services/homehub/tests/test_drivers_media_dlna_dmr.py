@@ -12,7 +12,7 @@ from services.homehub.tests.conftest import make_hub
 from services.homehub.tests.media_fakes import AVT, RC, FakeHttp, device_xml, soap_reply, soap_router
 
 URL = "http://192.0.2.115:9197/dmr"
-ENT = "media_player.tv_loft_samsung_q900"
+ENT = "media_player.attic_tv_dlna"
 
 
 def build(state: str = "PLAYING", volume: str = "23", mute: str = "0"):

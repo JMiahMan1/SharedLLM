@@ -6632,7 +6632,7 @@ def internal_guard_tamper(username: str, body: dict, session: Session = Depends(
     return {
         "username": subject.username, "parents": parents, "notify": parents,
         "display_name": subject.display_name or subject.username,
-        # The reporting device's kind when it is registered: "Noah's tablet ...".
+        # The reporting device's kind when it is registered: "Sam's tablet ...".
         "device": _device_word(session, subject.username, str((body or {}).get("device_key") or "")),
     }
 

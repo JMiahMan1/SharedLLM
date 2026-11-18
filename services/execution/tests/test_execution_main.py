@@ -133,16 +133,16 @@ def test_tv_cast_smart_power_sync(mocker):
 
 def test_entity_search_by_query(mocker):
     mocker.patch("services.execution.handlers.media.ha_client.get_states", return_value=[
-        {"entity_id": "media_player.office_tv", "state": "idle", "attributes": {"friendly_name": "Office TV", "device_class": "tv"}},
-        {"entity_id": "media_player.office_tv_chrome", "state": "off", "attributes": {"friendly_name": "Office TV Cast", "device_class": "speaker"}},
-        {"entity_id": "light.office_desk", "state": "on", "attributes": {"friendly_name": "Office Desk Light", "device_class": "light"}},
+        {"entity_id": "media_player.study_tv", "state": "idle", "attributes": {"friendly_name": "Study TV", "device_class": "tv"}},
+        {"entity_id": "media_player.study_tv_cast", "state": "off", "attributes": {"friendly_name": "Study TV Cast", "device_class": "speaker"}},
+        {"entity_id": "light.study_desk", "state": "on", "attributes": {"friendly_name": "Study Desk Light", "device_class": "light"}},
     ])
 
     resp = client.post("/execute/entity/search",
         headers={"X-Internal-Secret": "test-secret"},
         json={
             "user_context": valid_context,
-            "query": "office tv",
+            "query": "study tv",
             "domain": "media_player"
         }
     )
@@ -152,7 +152,7 @@ def test_entity_search_by_query(mocker):
     entities = data["detail"]["entities"]
     assert len(entities) >= 1
     assert entities[0]["entity_id"].startswith("media_player.")
-    assert "office" in entities[0]["entity_id"].lower() or "tv" in entities[0]["entity_id"].lower()
+    assert "study" in entities[0]["entity_id"].lower() or "tv" in entities[0]["entity_id"].lower()
 
 def test_entity_search_no_results(mocker):
     mocker.patch("services.execution.handlers.media.ha_client.get_states", return_value=[
@@ -175,7 +175,7 @@ def test_entity_search_no_results(mocker):
 def test_announce_with_device_name(mocker):
     """Test announce resolves device_name and plays media."""
     mocker.patch("services.execution.handlers.media.ha_client.get_states", return_value=[
-        {"entity_id": "media_player.office_tv", "state": "on", "attributes": {"friendly_name": "Office TV", "device_class": "tv", "app_id": "com.google.android.tvlauncher"}},
+        {"entity_id": "media_player.study_tv", "state": "on", "attributes": {"friendly_name": "Study TV", "device_class": "tv", "app_id": "com.google.android.tvlauncher"}},
     ])
     mocker.patch("services.execution.handlers.media.ha_client.get_config", return_value={"components": ["cast.media_player", "media_player"]})
     mocker.patch("services.execution.handlers.media.ha_client.call_service", return_value={"ok": True})
@@ -188,7 +188,7 @@ def test_announce_with_device_name(mocker):
         headers={"X-Internal-Secret": "test-secret"},
         json={
             "user_context": valid_context,
-            "device_name": "Office TV",
+            "device_name": "Study TV",
             "message": "Test announcement",
             "tts_engine": "kokoro",
             "volume": 0.5

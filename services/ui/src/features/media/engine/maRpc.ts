@@ -217,7 +217,7 @@ export class MaRpc {
  * queue event is this player's only when it names this player: with no id
  * of our own yet, or an event that names no player, it is not. Letting those
  * through made this phone's player (and its lock-screen controls) show
- * another player's song: the Office TV's "Spotify" session appeared on a
+ * another player's song: a TV's "Spotify" session appeared on a
  * phone as if Jarvis were playing it. Other events apply to everyone.
  */
 export function eventIsForPlayer(

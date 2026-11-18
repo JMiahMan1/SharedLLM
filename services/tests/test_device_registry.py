@@ -121,11 +121,11 @@ async def test_needs_rediscovery():
 
 @pytest.mark.asyncio
 async def test_search_devices():
-    await device_registry.set_device("media_player.taylors_tv", ip="198.51.100.100", friendly_name="Taylors TV")
-    await device_registry.set_device("media_player.office_tv", ip="198.51.100.101", friendly_name="Office TV")
-    results = await device_registry.search_devices("taylor")
+    await device_registry.set_device("media_player.playroom_tv", ip="198.51.100.100", friendly_name="Playroom TV")
+    await device_registry.set_device("media_player.study_tv", ip="198.51.100.101", friendly_name="Study TV")
+    results = await device_registry.search_devices("playroom")
     assert len(results) == 1
-    assert results[0]["entity_id"] == "media_player.taylors_tv"
+    assert results[0]["entity_id"] == "media_player.playroom_tv"
 
     results = await device_registry.search_devices("tv")
     assert len(results) == 2

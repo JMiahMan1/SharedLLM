@@ -35,11 +35,11 @@ def _headers() -> dict:
 
 @pytest.fixture
 def hub(monkeypatch):
-    """A configured hub; kid1 may use only the den light and the kids' room speaker and TV."""
+    """A configured hub; kid1 may use only the den light and the playroom speaker and TV."""
     monkeypatch.setattr(config, "HA_URL", HUB_URL)
     monkeypatch.setattr(config, "HOMEHUB_URL", HUB_URL)
     monkeypatch.setattr(config, "INTERNAL_SECRET", HUB_SECRET)
-    allowed = frozenset({"light.den", "media_player.kids_room", "lock.kids_window"})
+    allowed = frozenset({"light.den", "media_player.playroom", "lock.kids_window"})
 
     async def permissions(username, is_admin=False):
         return EntityPermissions.everything() if is_admin else EntityPermissions(assigned=allowed)
@@ -155,17 +155,17 @@ def test_tv_cast_checks_the_tv_and_uses_the_hubs_login(hub, monkeypatch):
     monkeypatch.setattr(media_handler, "handle_tv_cast", fake_cast)
     body = {"user_context": KID, "media_content_id": "http://example.test/v.mp4"}
     denied = client.post("/execute/tv_cast", headers=_headers(),
-                         json={**body, "media_player_entity_id": "media_player.office_tv"})
+                         json={**body, "media_player_entity_id": "media_player.study_tv"})
     assert denied.status_code == 403 and seen == []
     ok = client.post("/execute/tv_cast", headers=_headers(),
-                     json={**body, "media_player_entity_id": "media_player.kids_room"})
+                     json={**body, "media_player_entity_id": "media_player.playroom"})
     assert ok.status_code == 200, ok.text
-    assert seen == [("media_player.kids_room", HUB_URL, HUB_SECRET)]
+    assert seen == [("media_player.playroom", HUB_URL, HUB_SECRET)]
 
 
 def test_a_voice_command_on_someone_elses_light_is_refused(hub, commands):
     resp = client.post("/execute/voice/command", headers=_headers(),
-                       json={"transcript": "turn on the light", "user_context": KID, "entity_id": "light.office"})
+                       json={"transcript": "turn on the light", "user_context": KID, "entity_id": "light.study"})
     assert resp.json()["status"] == "FAILURE" and "Access denied" in resp.json()["message"]
     assert commands == []
 
@@ -182,7 +182,7 @@ def test_announcing_on_a_speaker_the_caller_may_not_use_is_403(hub, monkeypatch)
     monkeypatch.setattr(capability_index, "routing_index", no_index)
     monkeypatch.setattr(exec_main.ha_client, "get_states", no_states)
     resp = client.post("/execute/announce", headers=_headers(),
-                       json={"user_context": KID, "message": "dinner", "entity_id": "media_player.office_tv"})
+                       json={"user_context": KID, "message": "dinner", "entity_id": "media_player.study_tv"})
     assert resp.status_code == 403
 
 

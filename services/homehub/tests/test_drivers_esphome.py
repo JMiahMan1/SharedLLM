@@ -91,7 +91,7 @@ ENTITIES = [
     {"entity_id": "media_player.den_den_speaker_smart_speaker",
      "unique_id": f"{MAC}/0/media_player/smart-speaker"},
     {"entity_id": "switch.scr_save", "unique_id": f"{MAC}/0/switch/Scr/save enable"},
-    {"entity_id": "light.hall_lamp", "unique_id": f"{MAC}/0/light/"},
+    {"entity_id": "light.example_lamp", "unique_id": f"{MAC}/0/light/"},
     {"entity_id": "cover.garage", "unique_id": f"{MAC}/0/cover/Garage Door"},
     {"entity_id": "valve.water", "unique_id": f"{MAC}/0/valve/Water Valve"},
     {"entity_id": "binary_sensor.presence", "unique_id": "smart-speakerbinary_sensorpresence"},  # older format
@@ -217,7 +217,7 @@ async def test_setup_maps_unique_ids_and_publishes_pushed_states(driver):
     assert mp.state == "idle" and mp.attributes["volume_level"] == 0.5
     assert mp.attributes["supported_features"] & 512
     assert hub.states.get("switch.scr_save").state == "on"           # a name with "/" in it
-    assert hub.states.get("light.hall_lamp").state == "off"          # the node's nameless main entity
+    assert hub.states.get("light.example_lamp").state == "off"          # the node's nameless main entity
     assert hub.states.get("cover.garage").state == "closed"
     assert hub.states.get("binary_sensor.presence").state == "on"    # older unique_id format
     assert hub.states.get("button.den_den_speaker_reboot").state == "unknown"
@@ -254,7 +254,7 @@ async def test_light_commands(driver):
     assert last_command(drv)[2]["effect"] == "Rainbow"
     await hub.call_service("light", "turn_off", {"entity_id": eid})
     assert last_command(drv)[2] == {"device_id": 0, "state": False}
-    await hub.call_service("light", "toggle", {"entity_id": "light.hall_lamp"})
+    await hub.call_service("light", "toggle", {"entity_id": "light.example_lamp"})
     assert last_command(drv)[1] == (10,) and last_command(drv)[2]["state"] is True
 
 

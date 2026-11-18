@@ -220,7 +220,7 @@ class MediaPlayRequest(BaseRequest):
     """Unified media play request supporting all content types and devices."""
     user_context: UserContext
     entity_id: str | None = Field(None, description="HA media_player entity ID (optional if device_name provided)")
-    device_name: str | None = Field(None, description="Human-readable device name (e.g., 'Office TV', 'Master Bedroom speaker')")
+    device_name: str | None = Field(None, description="Human-readable device name (e.g., 'Den TV', 'Sunroom speaker')")
     query: str | None = Field(None, description="Search query: song/album/artist name, video title, podcast name, audiobook title, or URL")
     media_type: str | None = Field(None, description="Content type: 'music', 'video', 'podcast', 'audiobook', 'radio', 'url', 'announcement'")
     media_content_id: str | None = Field(None, description="Direct URL or media ID (bypasses search)")
@@ -374,8 +374,8 @@ class TodoListRequest(BaseRequest):
 # Announcements
 class AnnouncementRequest(BaseRequest):
     user_context: UserContext
-    entity_id: str | None = Field(None, description="Exact HA entity ID (e.g., media_player.office_tv_chrome). If omitted, resolved from device_name.")
-    device_name: str | None = Field(None, description="Human-readable device name for entity resolution (e.g., 'Office TV')")
+    entity_id: str | None = Field(None, description="Exact HA entity ID (e.g., media_player.den_tv). If omitted, resolved from device_name.")
+    device_name: str | None = Field(None, description="Human-readable device name for entity resolution (e.g., 'Den TV')")
     entity_ids: list[str] | None = Field(None, description="Optional multi-target entity IDs (room/speaker fan-out)")
     rooms: list[str] | None = Field(None, description="Optional room names resolved via room_speakers config / HA areas")
     group_id: str | None = Field(None, description="Optional media group ID whose members receive the announcement")
@@ -418,16 +418,16 @@ class VideoPlayRequest(BaseRequest):
 class MediaStatusRequest(BaseRequest):
     """Query what is currently playing across media devices."""
     user_context: UserContext
-    area: str | None = Field(None, description="Filter by area (e.g., 'Office', 'Living Room')")
+    area: str | None = Field(None, description="Filter by area (e.g., 'Den', 'Kitchen')")
     entity_id: str | None = Field(None, description="Specific entity to query")
 
 
 class EntitySearchRequest(BaseRequest):
     """Search for Home Assistant entities by name, type, or area when entity_id is unknown."""
     user_context: UserContext
-    query: str = Field(..., description="Search term (e.g., 'office tv', 'kitchen light', 'bedroom speaker')")
+    query: str = Field(..., description="Search term (e.g., 'den tv', 'kitchen light', 'bedroom speaker')")
     domain: str | None = Field(None, description="Filter by domain (e.g., 'media_player', 'light', 'switch')")
-    area: str | None = Field(None, description="Filter by area (e.g., 'Office', 'Kitchen', 'Master Bedroom')")
+    area: str | None = Field(None, description="Filter by area (e.g., 'Den', 'Kitchen', 'Guest Bedroom')")
     state: str | None = Field(None, description="Filter by state (e.g., 'on', 'off', 'playing', 'idle')")
     limit: int = Field(200, ge=1, le=1000, description="Max entities to return (browse lists need more than search)")
     controllable_only: bool = Field(
@@ -537,7 +537,7 @@ class MealPlanRequest(BaseRequest):
 class ChoreRequest(BaseRequest):
     """Family chores on Skylight, from a spoken or typed request.
 
-    ``add`` ("give Noah 'feed the chickens' every day at 7am, 2 stars"),
+    ``add`` ("give Sam 'feed the chickens' every day at 7am, 2 stars"),
     ``remove`` / ``update`` a chore found by ``title`` (and ``assignee``) or
     ``chore_id``, ``list`` today's (or ``date``'s), and ``complete`` /
     ``uncomplete``. Adding, changing and removing are for parents; anyone can

@@ -477,9 +477,9 @@ def _remote_by_name(all_states: list, media_entity_id: str) -> str | None:
 async def find_companion_remote(ha_url: str, ha_token: str, media_entity_id: str) -> str:
     """The ``remote.*`` entity that sends keys to the same device as a media player.
 
-    The two are rarely named alike (live: ``media_player.office_tv`` is driven by
-    ``remote.office_tv_remote``, ``media_player.kids_room_tv`` by
-    ``remote.bedroom_roku_tv``), and Home Assistant answers a service call to a
+    The two are rarely named alike (``media_player.den_tv`` may be driven by
+    ``remote.den_tv_remote``, ``media_player.playroom_tv`` by
+    ``remote.upstairs_roku``), and Home Assistant answers a service call to a
     non-existent entity with success -- so guessing the name made remote keys
     vanish silently. Ask HA's device registry first, then match by name, and only
     then fall back to the same-named entity.
@@ -555,10 +555,10 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
         # Exact friendly name match (highest priority)
         if friendly_name == search:
             name_score += 100
-        # Exact entity_id base match (e.g., "office_tv" matches "media_player.office_tv")
+        # Exact entity_id base match (e.g., "den_tv" matches "media_player.den_tv")
         elif eid_base == search.replace(" ", "_"):
             name_score += 90
-        # Starts with search (e.g., "office tv" matches "office tv chrome")
+        # Starts with search (e.g., "den tv" matches "den tv cast")
         elif friendly_name.startswith(search):
             name_score += 50
         elif eid_base.startswith(search.replace(" ", "_")):
@@ -576,7 +576,7 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
             if word in eid_base:
                 name_score += 2
 
-        # Penalty for numeric suffixes (e.g., "den_tv" when searching "office tv")
+        # Penalty for numeric suffixes (e.g., "den_tv_2" when searching "den tv")
         if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_") and any(c.isdigit() for c in eid_base.split("_")[-1:]):
             name_score -= 5
 

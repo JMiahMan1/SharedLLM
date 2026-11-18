@@ -436,8 +436,8 @@ def test_one_physical_device_seen_by_several_integrations_is_one_group():
         _view("hub", "Camera hub", "reolink", "Hub", "garage", ["00:1b:63:00:00:03"]),
         _view("cam", "Garage camera", "reolink", "Argus", "garage", ["00:1b:63:00:00:03"]),
         # A mesh bridge's locally administered MAC is shared by unrelated devices.
-        _view("tv2", "Loft TV", "samsungtv", "Q900", "loft", ["7a:20:51:0a:1a:88"]),
-        _view("plug", "Loft plug", "tasmota", "Plug", "loft", ["7a:20:51:0a:1a:88"]),
+        _view("tv2", "Attic TV", "samsungtv", "qled", "attic", ["7a:20:51:0a:1a:88"]),
+        _view("plug", "Attic plug", "tasmota", "Plug", "attic", ["7a:20:51:0a:1a:88"]),
         # Same name in one integration: separate monitors, not one.
         _view("vue1", "Panel", "emporia_vue", "VUE003", "den"),
         _view("vue2", "Panel", "emporia_vue", "VUE003", None),

@@ -124,21 +124,27 @@ def _is_ma_player(attrs: dict, entity_id: str = "") -> bool:
         )
 
 
-def _room_slug_from_entity(entity_id: str, friendly_name: str = "") -> str:
-    """Extract normalized room prefix (e.g. 'office', 'living_room', 'master_bedroom', 'loft', 'kids_room', 'rv')."""
+#: Words that say what kind of device an entity is (or whose it is by brand), never where it is.
+_DEVICE_KIND_WORDS = frozenset({
+    "player", "satellite", "smart", "speaker", "speakers", "tv", "television",
+    "remote", "cast", "chromecast", "airplay", "dlna", "display", "screen", "soundbar", "esphome",
+    "roku", "samsung", "tizen", "lg", "webos", "sony", "bravia", "android", "google", "nest", "sonos",
+})
+
+
+def _name_room_guess(entity_id: str) -> str:
+    """What is left of an entity id once device-kind words and numbers are taken off (``den_tv_2`` -> ``den``).
+
+    Only for a plain Home Assistant, which has no capability index (``routing_index``
+    logs that fallback): its states carry no area, so companions there are paired by
+    this. With the hub, rooms are its areas (``capability_index``: ``area_of``,
+    ``nearby``, ``in_area``) and nothing reads a room out of an entity id.
+    """
     raw = entity_id.split(".")[-1].lower()
-    for suffix in (
-        "_assist_satellite", "_s3_box_media_player", "_jarvis_smart_speaker",
-        "_smart_speaker", "_tv_chrome_2", "_tv_chrome", "_tv_remote",
-        "_tv_2", "_tv_3", "_tv", "_samsung", "_speaker_2", "_speaker",
-        "_airplay", "_cast", "_dlna", "_q900_2", "_q900",
-    ):
-        if raw.endswith(suffix):
-            raw = raw[: -len(suffix)]
-            break
-    raw = raw.removeprefix("jarvis_").removeprefix("tv_")
-    # Collapse duplicate room words like 'office_office' -> 'office'
-    parts = [p for p in raw.split("_") if p and p not in ("jarvis", "media", "player")]
+    # Two-word kinds go first, so a room called "Media Room" keeps its "media".
+    raw = re.sub(r"(^|_)(media_player|assist_satellite)(?=_|$)", r"\1", raw)
+    parts = [p for p in re.split(r"[^0-9a-z]+", raw) if p and p not in _DEVICE_KIND_WORDS and not p.isdigit()]
+    # Collapse a doubled word ('den_den' -> 'den').
     if len(parts) >= 2 and parts[0] == parts[1]:
         parts = parts[1:]
     return "_".join(parts)
@@ -170,8 +176,8 @@ def detect_tv_type(
     active_queue = (attrs.get("active_queue") or "").lower()
     friendly_lower = (attrs.get("friendly_name") or "").lower()
 
-    # 1. Cast devices: entity contains 'chrome'/'cast', or app_id matches known Cast receivers
-    if "chrome" in eid or "_cast" in eid or app_id in CAST_APP_IDS:
+    # 1. Cast devices: entity says chromecast/cast, or app_id matches known Cast receivers
+    if "chromecast" in eid or "_cast" in eid or app_id in CAST_APP_IDS:
         return "cast"
 
     # 2. Roku: entity contains 'roku', source_list has Roku entries, or MA player wrapping Roku queue
@@ -246,8 +252,8 @@ def detect_tv_type(
     if "bravia" in eid or "sony" in eid:
         return "bravia"
 
-    # 7. ESPHome: entity contains 'esphome' or known ESPHome voice satellite slugs
-    if "esphome" in eid or "s3_box" in eid or "jarvis_smart_speaker" in eid or "atom_echo" in eid:
+    # 7. ESPHome: entity says esphome (with the hub, its integration says so instead)
+    if "esphome" in eid:
         return "esphome"
 
     # 8. DLNA: entity contains 'dlna'
@@ -312,15 +318,18 @@ def resolve_tv_companions(
 
     With the hub's capability index (``idx``) every companion is chosen by the
     integration that owns it and by being on the same device or in the same
-    area; without it (a plain Home Assistant) room words in entity ids decide.
+    area; without it (a plain Home Assistant, which ``routing_index`` logs) what is
+    left of each entity id after device-kind words (``_name_room_guess``) decides.
+    An entity the index does not know gets no room companions: the hub is never
+    second-guessed from names.
     """
-    if idx is not None and entity_id in idx:
+    if idx is not None:
         return _companions_from_index(entity_id, all_states or [], services, idx)
     states = all_states or []
     state_by_id = {s.get("entity_id", ""): s for s in states if s.get("entity_id")}
     target_state = state_by_id.get(entity_id, {})
     target_attrs = target_state.get("attributes", {}) if isinstance(target_state, dict) else {}
-    room_slug = _room_slug_from_entity(entity_id, target_attrs.get("friendly_name", ""))
+    room_slug = _name_room_guess(entity_id)
 
     primary_entity = entity_id
     active_q = target_attrs.get("active_queue") or ""
@@ -343,7 +352,7 @@ def resolve_tv_companions(
             continue
         s_attrs = s.get("attributes", {}) or {}
         s_q = s_attrs.get("active_queue") or ""
-        s_room = _room_slug_from_entity(eid, s_attrs.get("friendly_name", ""))
+        s_room = _name_room_guess(eid)
         s_features = int(s_attrs.get("supported_features") or 0)
 
         if eid.startswith("assist_satellite.") and room_slug and (room_slug in eid or s_room == room_slug):
@@ -359,7 +368,7 @@ def resolve_tv_companions(
             continue
 
         # ESPHome speaker in same room
-        if ("s3_box" in eid or "jarvis_smart_speaker" in eid or "esphome" in eid) and room_slug and s_room == room_slug:
+        if "esphome" in eid and room_slug and s_room == room_slug:
             room_esphome_speaker = eid
 
         if eid == entity_id:
@@ -369,12 +378,12 @@ def resolve_tv_companions(
         if _is_ma_player(s_attrs, eid) and (
             s_q in (entity_id, primary_entity)
             or (not ma_sibling and room_slug and s_room == room_slug and "speaker" not in eid)
-            or (not ma_sibling and "webos" in eid and ("living_room" in entity_id or "webos" in entity_id))
+            or (not ma_sibling and "webos" in eid and "webos" in entity_id)
         ):
             ma_sibling = eid
 
-        # Cast sibling matching (e.g., media_player.office_tv_chrome or media_player.master_bedroom_tv)
-        if not _is_ma_player(s_attrs, eid) and ("chrome" in eid or "_cast" in eid or s_features == CAST_FEATURES) and room_slug and s_room == room_slug:
+        # Cast sibling matching (e.g., media_player.den_tv_cast or media_player.den_chromecast)
+        if not _is_ma_player(s_attrs, eid) and ("chromecast" in eid or "_cast" in eid or s_features == CAST_FEATURES) and room_slug and s_room == room_slug:
             cast_sibling = eid
             # Also check if there is an MA wrapper for this cast sibling
             if not ma_sibling:
@@ -385,8 +394,8 @@ def resolve_tv_companions(
                         ma_sibling = eid2
                         break
 
-        # DLNA sibling matching (e.g., media_player.tv_loft_samsung_q900)
-        if ("dlna" in eid or "q900" in eid or (s_q == primary_entity and not _is_ma_player(s_attrs, eid))) and room_slug and (room_slug in eid or s_q == primary_entity):
+        # DLNA sibling matching (e.g., media_player.den_tv_dlna, or the renderer an MA player queues to)
+        if ("dlna" in eid or (s_q == primary_entity and not _is_ma_player(s_attrs, eid))) and room_slug and (room_slug in eid or s_q == primary_entity):
             dlna_sibling = eid
 
     webos_notify_service = _webos_notify_service(services)
@@ -644,7 +653,7 @@ async def announce_roku(
         except Exception as e:
             log.warning(f"[announce.roku] ECP launch failed: {e}")
 
-    # 3. Fallback: check Music Assistant sibling (e.g., media_player.kids_room_tv)
+    # 3. Fallback: check Music Assistant sibling (e.g., media_player.playroom_tv)
     idx = await routing_index(ha_url, ha_token)
     with contextlib.suppress(Exception):
         all_states = await ha_client.get_all_states(ha_url, ha_token)
@@ -736,7 +745,7 @@ async def announce_webos(
     if play_res.get("ok"):
         return play_res
 
-    # 3. Fallback: play audio via Music Assistant / AirPlay sibling (e.g. media_player.lg_webos_tv_un6955zuf_airplay)
+    # 3. Fallback: play audio via Music Assistant / AirPlay sibling (e.g. media_player.den_tv_airplay)
     ma_sibling = companions.get("ma_sibling")
     if ma_sibling and ma_sibling != entity_id:
         log.info(f"[announce.webos] Trying AirPlay/MA sibling {ma_sibling}")
@@ -787,7 +796,7 @@ async def announce_android_tv(
         await asyncio.sleep(1.5)
 
     # 2. If entity is androidtv_remote (features == 153529, which does not support play_media URLs),
-    #    prefer its Cast sibling (e.g. media_player.office_tv_chrome) or MA sibling first!
+    #    prefer its Cast sibling (e.g. media_player.den_tv_cast) or MA sibling first!
     cast_sibling = companions.get("cast_sibling")
     ma_sibling = companions.get("ma_sibling")
 
@@ -912,7 +921,7 @@ async def announce_samsung(
         if result.get("ok"):
             playback_ok = True
 
-    # Strategy 2: DLNA DMR sibling (e.g. media_player.tv_loft_samsung_q900)
+    # Strategy 2: DLNA DMR sibling (e.g. media_player.den_tv_dlna)
     if not playback_ok and dlna_entity:
         log.info(f"[announce.samsung] Trying DLNA renderer {dlna_entity}")
         result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", dlna_entity, {
@@ -922,7 +931,7 @@ async def announce_samsung(
         if result.get("ok"):
             playback_ok = True
 
-    # Strategy 3: Room Cast companion (e.g. Master Bedroom Legacy Samsung UN46EH5300 + Master Bedroom Cast TV)
+    # Strategy 3: Room Cast companion (e.g. a legacy Orsay Samsung with a Cast dongle in the same room)
     if not playback_ok and cast_sibling:
         log.info(f"[announce.samsung] Routing legacy Samsung audio to room Cast companion {cast_sibling}")
         result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", cast_sibling, {
@@ -1260,7 +1269,7 @@ _TARGET_STATE_PRIORITY = {
 def _target_group_key(name: str) -> str:
     """Group the many HA wrappers for one physical room/device.
 
-    ``Office TV``, ``Office TV Remote`` and ``Office TV Cast`` are three
+    ``Den TV``, ``Den TV Remote`` and ``Den TV Cast`` are three
     entities for the same television. One row is enough in a picker.
     """
     cleaned = _TARGET_NAME_NOISE_RE.sub("", name or "")
@@ -1380,7 +1389,7 @@ async def classify_communication_devices(
         primary_ent = companions.get("primary_entity")
         if primary_ent and primary_ent != eid and primary_ent in {s.get("entity_id") for s in states}:
             # Keep the wrapper when the primary is unavailable (for example
-            # a child's Roku TV) or cannot announce. A TV entity often exposes
+            # a Roku TV that is switched off at the wall) or cannot announce. A TV entity often exposes
             # only power/volume, while its Cast or MA sibling is the one that
             # can speak a timer alert.
             primary_state = next((s for s in states if s.get("entity_id") == primary_ent), {})
@@ -1412,7 +1421,7 @@ async def classify_communication_devices(
         except (TypeError, ValueError):
             supported_features = 0
         # MEDIA_ANNOUNCE is the feature an alarm/TTS target actually needs.
-        # TV remotes and cast wrappers in this house carry the low-bit feature
+        # TV remotes and cast wrappers often carry the low-bit feature
         # sets but not this bit, so they stop appearing as speakers.
         announce_capable = bool(supported_features & SUPPORT_MEDIA_ANNOUNCE)
         cap = idx.get(eid) if idx is not None else None

@@ -12,8 +12,10 @@ Precedence:
      the hub in any room is a target on the next index load, with no change here.
 
 Only a plain Home Assistant (no capability index, HTTP 404) falls back to its
-area names and, failing those, to room words inside entity ids; that path is
-logged. A room the hub does not have raises ``UnknownAreaError``.
+area names and, failing those, to the room as said matched against what is left
+of each entity id once device-kind words are taken off; that path is logged and
+holds no room or device names of its own. A room the hub does not have raises
+``UnknownAreaError``.
 """
 from __future__ import annotations
 
@@ -139,14 +141,13 @@ async def _legacy_speakers_for_rooms(rooms: list[str], ha_url: str, ha_token: st
         log.warning("[targets] no HA area named %s; matching room words in media_player entity ids "
                     "(Home Assistant without the hub's capability index)", sorted(target_room_keys))
         try:
-            from services.execution.announce_handlers import _room_slug_from_entity
+            from services.execution.announce_handlers import _name_room_guess
             states = await ha_client.get_states(ha_url, ha_token)
             for st in states or []:
                 eid = str(st.get("entity_id") or "")
                 if not eid.startswith("media_player."):
                     continue
-                attrs = st.get("attributes") or {}
-                slug = _room_slug_from_entity(eid, str(attrs.get("friendly_name") or ""))
+                slug = _name_room_guess(eid)
                 if slug in target_room_keys or any(rk in eid.lower() for rk in target_room_keys):
                     ids.append(eid)
         except Exception as e:

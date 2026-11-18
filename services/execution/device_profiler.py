@@ -188,9 +188,9 @@ def _detect_device_type(entity_id: str, integration: str, device_class: str,
         return "samsungtv"
     if "android" in entity_lower or "shield" in entity_lower:
         return "androidtv"
-    if "cast" in entity_lower or "chrome" in entity_lower:
+    if "cast" in entity_lower:  # also "chromecast"
         return "cast"
-    if "esphome" in entity_lower or "s3_box" in entity_lower or "jarvis_smart_speaker" in entity_lower:
+    if "esphome" in entity_lower:
         return "esphome"
     if "dlna" in entity_lower:
         return "dlna"
@@ -446,7 +446,7 @@ async def build_capability_map(
                 "wol_supported": False,
                 "recommendations": [...]
             },
-            "office tv": {...},
+            "den tv": {...},
             ...
         }
     """
@@ -489,7 +489,7 @@ def resolve_by_friendly_name(
     """
     Resolve a fuzzy friendly name query to (entity_id, capabilities).
 
-    Handles partial matches like "bedroom", "office tv", "master bedroom".
+    Handles partial matches like "bedroom", "den tv", "guest bedroom".
     Returns (entity_id, cap_dict) or (None, None).
     """
     query_lower = query.lower().strip()

@@ -41,7 +41,7 @@ class _CallRecorder:
 
 def _patch_samsung(monkeypatch, recorder, *, ma_entity_state):
     monkeypatch.setattr(media_handler, "MASS_CONFIG_ENTRY_ID", "ce-test")
-    monkeypatch.setattr(media_handler, "resolve_mass_entity", AsyncMock(return_value="media_player.loft_tv_2"))
+    monkeypatch.setattr(media_handler, "resolve_mass_entity", AsyncMock(return_value="media_player.attic_tv_2"))
     monkeypatch.setattr(f"{P_ROKU}is_roku_device", AsyncMock(return_value=False))
     monkeypatch.setattr(f"{P_SAMSUNG}is_samsung_tv", AsyncMock(return_value=True))
     samsung_play = AsyncMock()
@@ -55,14 +55,14 @@ def test_samsung_playlist_fills_the_tvs_ma_queue(monkeypatch):
     recorder = _CallRecorder()
     samsung_play = _patch_samsung(
         monkeypatch, recorder,
-        ma_entity_state={"attributes": {"app_id": "music_assistant", "active_queue": "media_player.loft_tv"}},
+        ma_entity_state={"attributes": {"app_id": "music_assistant", "active_queue": "media_player.attic_tv"}},
     )
-    result = asyncio.run(media_handler.play_music(_req(PLAYLIST, "media_player.loft_tv"), "media_player.loft_tv", _req(PLAYLIST, "x").user_context))
+    result = asyncio.run(media_handler.play_music(_req(PLAYLIST, "media_player.attic_tv"), "media_player.attic_tv", _req(PLAYLIST, "x").user_context))
 
     assert result.status == "SUCCESS"
     samsung_play.assert_not_called()
     assert recorder.calls == [{
-        "domain": "music_assistant", "service": "play_media", "entity_id": "media_player.loft_tv_2",
+        "domain": "music_assistant", "service": "play_media", "entity_id": "media_player.attic_tv_2",
         "service_data": {"media_id": PLAYLIST, "enqueue": "replace"},
     }]
 
@@ -71,11 +71,11 @@ def test_samsung_web_address_still_goes_to_the_tv(monkeypatch):
     recorder = _CallRecorder()
     samsung_play = _patch_samsung(
         monkeypatch, recorder,
-        ma_entity_state={"attributes": {"app_id": "music_assistant", "active_queue": "media_player.loft_tv"}},
+        ma_entity_state={"attributes": {"app_id": "music_assistant", "active_queue": "media_player.attic_tv"}},
     )
     samsung_play.return_value = media_handler.ExecutionResult(status="SUCCESS", message="ok", service="samsung")
     url = "https://example.test/song.mp3"
-    asyncio.run(media_handler.play_music(_req(url, "media_player.loft_tv"), "media_player.loft_tv", _req(url, "x").user_context))
+    asyncio.run(media_handler.play_music(_req(url, "media_player.attic_tv"), "media_player.attic_tv", _req(url, "x").user_context))
 
     samsung_play.assert_awaited_once()
     assert recorder.calls == []
@@ -83,9 +83,9 @@ def test_samsung_web_address_still_goes_to_the_tv(monkeypatch):
 
 def test_samsung_without_an_ma_player_keeps_the_tv_path(monkeypatch):
     recorder = _CallRecorder()
-    samsung_play = _patch_samsung(monkeypatch, recorder, ma_entity_state={"attributes": {"friendly_name": "Loft TV"}})
+    samsung_play = _patch_samsung(monkeypatch, recorder, ma_entity_state={"attributes": {"friendly_name": "Attic TV"}})
     samsung_play.return_value = media_handler.ExecutionResult(status="SUCCESS", message="ok", service="samsung")
-    asyncio.run(media_handler.play_music(_req(PLAYLIST, "media_player.loft_tv"), "media_player.loft_tv", _req(PLAYLIST, "x").user_context))
+    asyncio.run(media_handler.play_music(_req(PLAYLIST, "media_player.attic_tv"), "media_player.attic_tv", _req(PLAYLIST, "x").user_context))
 
     samsung_play.assert_awaited_once()
 
@@ -93,7 +93,7 @@ def test_samsung_without_an_ma_player_keeps_the_tv_path(monkeypatch):
 def test_roku_plays_an_ma_playlist_as_given(monkeypatch):
     recorder = _CallRecorder()
     monkeypatch.setattr(roku_handler, "get_roku_ip", AsyncMock(return_value=None))
-    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.taylors_tv"))
+    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.playroom_tv"))
     monkeypatch.setattr(roku_handler.ha_client, "call_service", recorder)
 
     result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.bedroom_roku_tv", PLAYLIST, "ce-test"))
@@ -106,7 +106,7 @@ def test_roku_plays_an_ma_playlist_as_given(monkeypatch):
 def test_roku_with_ip_skips_the_name_search_for_a_uri(monkeypatch):
     recorder = _CallRecorder()
     monkeypatch.setattr(roku_handler, "get_roku_ip", AsyncMock(return_value="192.0.2.10"))
-    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.taylors_tv"))
+    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.playroom_tv"))
     monkeypatch.setattr(roku_handler.ha_client, "call_service", recorder)
     monkeypatch.setattr(roku_handler.asyncio, "sleep", AsyncMock())
 
@@ -118,7 +118,7 @@ def test_roku_with_ip_skips_the_name_search_for_a_uri(monkeypatch):
     monkeypatch.setattr(aiohttp, "ClientSession", _NoNetwork)
     monkeypatch.setattr(roku_handler.device_registry, "invalidate_device", AsyncMock())
 
-    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.taylors_tv", PLAYLIST, "ce-test"))
+    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.playroom_tv", PLAYLIST, "ce-test"))
 
     assert result.status == "SUCCESS"
     assert [c["service"] for c in recorder.calls] == ["play_media"]
@@ -135,7 +135,7 @@ def test_ma_uri_type():
 def test_roku_add_to_queue_does_not_relaunch_the_channel(monkeypatch):
     recorder = _CallRecorder()
     monkeypatch.setattr(roku_handler, "get_roku_ip", AsyncMock(return_value="192.0.2.10"))
-    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.taylors_tv"))
+    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.playroom_tv"))
     monkeypatch.setattr(roku_handler.ha_client, "call_service", recorder)
 
     import aiohttp
@@ -145,7 +145,7 @@ def test_roku_add_to_queue_does_not_relaunch_the_channel(monkeypatch):
 
     monkeypatch.setattr(aiohttp, "ClientSession", _launch)
 
-    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.taylors_tv", PLAYLIST, "ce-test", enqueue="add"))
+    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.playroom_tv", PLAYLIST, "ce-test", enqueue="add"))
 
     assert result.status == "SUCCESS"
     assert recorder.calls[0]["service_data"] == {"media_id": PLAYLIST, "media_type": "playlist", "enqueue": "add"}
@@ -155,10 +155,10 @@ def test_play_next_on_a_speaker_passes_the_queue_option(monkeypatch):
     recorder = _CallRecorder()
     _patch_samsung(
         monkeypatch, recorder,
-        ma_entity_state={"attributes": {"app_id": "music_assistant", "active_queue": "media_player.loft_tv"}},
+        ma_entity_state={"attributes": {"app_id": "music_assistant", "active_queue": "media_player.attic_tv"}},
     )
-    req = _req(PLAYLIST, "media_player.loft_tv")
+    req = _req(PLAYLIST, "media_player.attic_tv")
     req.enqueue = "next"
-    asyncio.run(media_handler.play_music(req, "media_player.loft_tv", req.user_context))
+    asyncio.run(media_handler.play_music(req, "media_player.attic_tv", req.user_context))
 
     assert recorder.calls[0]["service_data"] == {"media_id": PLAYLIST, "enqueue": "next"}

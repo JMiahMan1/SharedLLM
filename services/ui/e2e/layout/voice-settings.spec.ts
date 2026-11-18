@@ -88,9 +88,9 @@ test.describe('Voices on every form factor', () => {
     const run = await open(page, '/admin/ops');
     const url = page.getByTestId('speech-server-url');
     await url.scrollIntoViewIfNeeded();
-    await url.fill('http://192.168.2.43:8082');
+    await url.fill('http://192.0.2.10:8082');
     await page.getByTestId('speech-server-save').click();
-    await expect.poll(() => run.sent.find((s) => s.path === '/api/admin/raven/config')?.body).toEqual({ speech_server_url: 'http://192.168.2.43:8082' });
+    await expect.poll(() => run.sent.find((s) => s.path === '/api/admin/raven/config')?.body).toEqual({ speech_server_url: 'http://192.0.2.10:8082' });
     await url.scrollIntoViewIfNeeded();
     await settle(page);
     await page.locator('div', { has: url }).last().screenshot({ path: info.outputPath('speech-server.png') });

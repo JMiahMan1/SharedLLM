@@ -52,11 +52,11 @@ def test_a_satellite_with_no_room_is_told_to_ask():
 
 
 @pytest.mark.parametrize("query, question", [
-    ("Is the hall lamp on?", True),
+    ("Is the example lamp on?", True),
     ("are the kitchen lights off", True),
     ("Did I leave the porch light on?", True),
-    ("Turn on the hall lamp.", False),
-    ("Can you turn on the hall lamp?", False),
+    ("Turn on the example lamp.", False),
+    ("Can you turn on the example lamp?", False),
     ("Please turn off the den lights", False),
     ("Isabel's lamp on", False),
 ])
@@ -65,9 +65,9 @@ def test_a_question_about_a_light_is_not_a_command(query, question):
 
 
 def test_a_lights_state_in_words():
-    lamp = {"entity_id": "light.hall_lamp", "state": "on", "attributes": {"friendly_name": "Hall Lamp", "brightness": 128}}
-    assert gateway_main.describe_state(lamp) == "Hall Lamp is on at 50%."
-    assert gateway_main.describe_state({"entity_id": "light.hall_lamp", "state": "off", "attributes": {}}) == "hall lamp is off."
+    lamp = {"entity_id": "light.example_lamp", "state": "on", "attributes": {"friendly_name": "Example Lamp", "brightness": 128}}
+    assert gateway_main.describe_state(lamp) == "Example Lamp is on at 50%."
+    assert gateway_main.describe_state({"entity_id": "light.example_lamp", "state": "off", "attributes": {}}) == "example lamp is off."
     assert gateway_main.describe_state({"entity_id": "light.x", "state": "unavailable", "attributes": {"friendly_name": "X"}}) \
         == "X isn't responding right now."
 
@@ -75,7 +75,7 @@ def test_a_lights_state_in_words():
 @pytest.mark.parametrize("query, plain", [
     ("Can you skip this track?", True),
     ("Since you can't skip the track, stop the music please.", True),
-    ("Just stop the music on the office TV.", True),
+    ("Just stop the music on the study TV.", True),
     ("next song", True),
     ("skip", True),
     ("Pause please.", True),
@@ -93,13 +93,13 @@ def test_skip_and_stop_pick_the_named_player_that_is_playing():
     players = [
         {"entity_id": "media_player.den_tv_cast", "state": "playing", "attributes": {"friendly_name": "Den TV"}},
         {"entity_id": "media_player.den_tv", "state": "idle", "attributes": {"friendly_name": "Den TV"}},
-        {"entity_id": "media_player.loft_speaker", "state": "idle", "attributes": {"friendly_name": "Loft Speaker"}},
+        {"entity_id": "media_player.attic_speaker", "state": "idle", "attributes": {"friendly_name": "Attic Speaker"}},
     ]
     pick = gateway_main.resolve_media_target
     assert pick("stop the music on the den tv", players, media_type="transport", requested_device="the den tv") \
         == "media_player.den_tv_cast"
-    assert pick("skip on the loft speaker", players, media_type="transport", requested_device="loft speaker") \
-        == "media_player.loft_speaker"
+    assert pick("skip on the attic speaker", players, media_type="transport", requested_device="attic speaker") \
+        == "media_player.attic_speaker"
     # No player named: the last one used, while it plays.
     assert pick("skip this track", players, media_type="transport", cached_device="media_player.den_tv_cast") \
         == "media_player.den_tv_cast"

@@ -1197,7 +1197,7 @@ export interface EsphomeDevice {
   kind?: string;
   model?: string;
   esphome_version?: string;
-  /** Optional HA entity (e.g. light.office_light) this device mirrors for unified routing */
+  /** Optional HA entity (e.g. light.den_light) this device mirrors for unified routing */
   ha_entity_id?: string;
 }
 

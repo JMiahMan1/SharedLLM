@@ -183,9 +183,9 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
         # Cast device signals
         s_cast_type = str(s_attrs.get("cast_type", "")).lower()
         is_cast_type = s_cast_type in ("cast", "audio", "group", "chromecast")
-        has_cast_hint = any(x in s_entity_lower for x in ["_chrome", "_cast", "_chromecast"])
+        has_cast_hint = any(x in s_entity_lower for x in ["_cast", "_chromecast"])
         s_friendly = s_attrs.get("friendly_name", "")
-        has_friendly_cast_hint = "cast" in s_friendly.lower() or "chromecast" in s_friendly.lower() or "chrome" in s_friendly.lower()
+        has_friendly_cast_hint = "cast" in s_friendly.lower()  # also "Chromecast"
 
         if not (is_cast_type or has_cast_hint or has_friendly_cast_hint):
             continue
@@ -237,7 +237,7 @@ async def play_video(ha_url: str, ha_token: str, entity_id: str, video_url: str,
 
     Android TV's play_media with local stream URLs often fails (HA 500).
     The proven approach: download video locally, serve via HTTP, then cast
-    to the Cast sibling (e.g., media_player.office_tv_chrome) which handles
+    to the Cast sibling (e.g., media_player.den_tv_cast) which handles
     video/mp4 streaming reliably.
     """
     from . import video as video_handler
