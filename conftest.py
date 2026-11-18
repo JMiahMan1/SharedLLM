@@ -126,6 +126,8 @@ _TEST_ENV_DEFAULTS = {
     # .env, never in a test run.
     "HA_URL": "http://localhost:8123",
     "HOMEHUB_URL": "http://localhost:8123",
+    # Unset: meaning search picks its translation from what is installed.
+    "BIBLE_MEANING_VERSION": "",
     "OSRM_URL": "",
     "OSRM_FOOT_URL": "",
     "NOMINATIM_URL": "",
