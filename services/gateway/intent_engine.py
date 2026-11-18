@@ -49,6 +49,100 @@ def is_raven_intent(query: str | None) -> bool:
     return any(v in q for v in RAVEN_COMMAND_VERBS)
 
 
+#: What "turn on" / "turn off" may switch. Never an automation, a script, a camera,
+#: a firmware update or a sensor, however close its name.
+ON_OFF_DOMAINS = frozenset({"light", "switch", "fan", "input_boolean", "media_player", "humidifier", "climate", "siren"})
+#: A device is chosen only above this score and this far ahead of the next one.
+DEVICE_MATCH_MIN = 0.70
+DEVICE_MATCH_MARGIN = 0.04
+_NUMBER_WORDS = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
+    "nine": "9", "ten": "10",
+}
+#: Heard for a number only as the last word ("kitchen light to"): elsewhere they are words.
+_TRAILING_NUMBER_WORDS = {"won": "1", "to": "2", "too": "2", "for": "4", "fore": "4", "ate": "8"}
+_FILLER = {"the", "a", "an", "my", "our", "please", "now"}
+
+
+def _strip_question(target: str) -> str:
+    """'is the hall lamp' -> 'hall lamp' (a state question reaches the same patterns)."""
+    return re.sub(r"^(?:is|are|was|were|did|do|does)\s+", "", target.strip(), flags=re.IGNORECASE)
+
+
+def _norm_name(text: str, numbers: bool = False) -> str:
+    """Lower case, separators to spaces, filler dropped, plurals singular; spoken numbers as digits."""
+    words = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split()
+    out = []
+    for i, w in enumerate(words):
+        if w in _FILLER:
+            continue
+        if numbers:
+            if w in _NUMBER_WORDS:
+                w = _NUMBER_WORDS[w]
+            elif i == len(words) - 1 and w in _TRAILING_NUMBER_WORDS and out:
+                w = _TRAILING_NUMBER_WORDS[w]
+        if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+            w = w[:-1]
+        # Hub names often repeat the device in the entity ("Security-Light Security Light").
+        if w not in out:
+            out.append(w)
+    return " ".join(out)
+
+
+def _sound(word: str) -> str:
+    """A rough sound of an English word: spellings that sound alike come out the same.
+
+    "lite"/"light", "hole"/"hall", "fone"/"phone". Silent and soft letters are
+    folded, then vowels after the first letter dropped and doubles collapsed.
+    """
+    w = word.lower()
+    for a, b in (("ght", "t"), ("ph", "f"), ("ck", "k"), ("qu", "kw"), ("wh", "w"), ("kn", "n"), ("wr", "r")):
+        w = w.replace(a, b)
+    w = re.sub(r"c(?=[eiy])", "s", w).replace("c", "k")
+    if not w:
+        return ""
+    tail = re.sub(r"[aeiouyhw]", "", w[1:])
+    out = w[0]
+    for ch in tail:
+        if ch != out[-1]:
+            out += ch
+    return out
+
+
+def _word_similarity(a: str, b: str) -> float:
+    if a == b:
+        return 1.0
+    if a.isdigit() or b.isdigit():
+        return 0.0  # "light 2" is never "light 4"
+    sim = difflib.SequenceMatcher(None, a, b).ratio()
+    if len(a) >= 3 and len(b) >= 3 and _sound(a) == _sound(b):
+        sim = max(sim, 0.85)  # heard as a word that sounds the same
+    # "hallway" for "hall": one word is the other with a longer ending.
+    if min(len(a), len(b)) >= 4 and (a.startswith(b) or b.startswith(a)):
+        sim = max(sim, 0.8)
+    # A word heard without its first sound ("amp" for "lamp", "ight" for "light").
+    if len(a) >= 3 and len(b) >= 3 and (b.endswith(a) or a.endswith(b)) and abs(len(a) - len(b)) <= 2:
+        sim = max(sim, 0.85)
+    return sim
+
+
+def _name_score(spoken: str, name: str) -> float:
+    """How well a spoken name fits a device name, 0..1."""
+    if spoken == name:
+        return 1.0
+    said, named = spoken.split(), name.split()
+    if not said or not named:
+        return 0.0
+    whole = difflib.SequenceMatcher(None, spoken, name).ratio()
+    best_per_said = [max(_word_similarity(w, n) for n in named) for w in said]
+    words = sum(best_per_said) / len(best_per_said)
+    # Of the device's own words, how many were said (a lone "garage" is not "garage door state").
+    covered = sum(1 for n in set(named) if max(_word_similarity(w, n) for w in said) >= 0.75) / len(set(named))
+    if covered < 0.6:
+        return 0.0  # too little of the device's name was said to be sure it is this one
+    return 0.4 * whole + 0.4 * words + 0.2 * covered
+
+
 class IntentEngine:
     def __init__(self):
         self.model = None
@@ -105,6 +199,15 @@ class IntentEngine:
                 new_cache[short_id] = eid
 
         self.entity_cache = new_cache
+        records = []
+        for ent in entities:
+            eid = str(ent.get("entity_id") or "")
+            if "." not in eid:
+                continue
+            fname = str((ent.get("attributes") or {}).get("friendly_name") or "")
+            names = {n for n in (_norm_name(fname), _norm_name(eid.split(".", 1)[1])) if n}
+            records.append((eid, eid.split(".", 1)[0], tuple(names), str(ent.get("state") or "").lower()))
+        self.device_records = records
         log.info(f"IntentEngine: Updated entity cache with {len(new_cache)} entries.")
 
     def _vectorize(self, data: dict):
@@ -182,6 +285,9 @@ class IntentEngine:
         if not target:
             return None
 
+        if intent in ("turn_on", "turn_off"):
+            return self.resolve_device(target)
+
         # Fuzzy Matching against cache
         friendly_names = list(self.entity_cache.keys())
         matches = difflib.get_close_matches(target, friendly_names, n=1, cutoff=0.7)
@@ -202,6 +308,45 @@ class IntentEngine:
 
         log.warning(f"[FastPath] Could not resolve entity from target string: '{target}'")
         return None
+
+    def resolve_device(self, target: str) -> str | None:
+        """The switchable device a (possibly misheard) spoken name means, or None.
+
+        Speech-to-text drops and swaps sounds ("hall amp", "security lite",
+        "kitchen light to"), and device names are messy ("Hall-Lamp",
+        "office_lamp", a brand and model after the room). Every device that can be
+        switched on and off is scored on its whole name, word by word (a word
+        heard without its first letter or with a close spelling still counts) and
+        on how much of its name was said. Only a clear winner is returned: a weak
+        or tied match goes to the model, which can ask, rather than switching the
+        wrong thing. Before this, any entity could match, and "turn on the string
+        lights" switched on an automation.
+        """
+        spoken = _norm_name(_strip_question(target), numbers=True)
+        if not spoken:
+            return None
+        scored: dict[str, float] = {}
+        for eid, domain, names, state in getattr(self, "device_records", []):
+            if domain not in ON_OFF_DOMAINS:
+                continue
+            best = max((_name_score(spoken, name) for name in names), default=0.0)
+            if state in ("unavailable", "unknown"):
+                best -= 0.05  # of two devices with one name, the one that answers
+            if best > scored.get(eid, 0.0):
+                scored[eid] = best
+        if not scored:
+            log.warning(f"[FastPath] No switchable device for '{target}'")
+            return None
+        ranked = sorted(scored.items(), key=lambda kv: kv[1], reverse=True)
+        best_id, best = ranked[0]
+        runner = ranked[1][1] if len(ranked) > 1 else 0.0
+        if best < DEVICE_MATCH_MIN or best - runner < DEVICE_MATCH_MARGIN:
+            log.warning(
+                f"[FastPath] No clear device for '{target}' (best {best_id} {best:.2f}, next {runner:.2f}); the model decides"
+            )
+            return None
+        log.info(f"[FastPath] Resolved '{target}' to '{best_id}' (score {best:.2f}, next {runner:.2f})")
+        return best_id
 
     def classify(self, query: str) -> tuple[str, float]:
         """
