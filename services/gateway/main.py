@@ -3700,12 +3700,18 @@ async def answer_state_question(query: str, creds: dict) -> str | None:
     and that device is among the ones this person may see. Nothing is switched.
     """
     target = engine.state_question_target(query)
-    if not target or not engine.entity_cache:
+    if not target:
         return None
+    entities = None
+    if not engine.entity_cache:
+        # The device names are learnt from the hub's list the first time it is read
+        # (fetch_ha_entities fills the cache); right after a restart that has not happened.
+        entities = await fetch_ha_entities(creds)
     entity_id = engine.resolve_device(target)
     if not entity_id:
         return None
-    entities = await fetch_ha_entities(creds)
+    if entities is None:
+        entities = await fetch_ha_entities(creds)
     entity = next((e for e in entities if e.get("entity_id") == entity_id), None)
     if entity is None:
         log.info(f"[FastPath] state question names {entity_id}, which this person cannot see; routing as usual")

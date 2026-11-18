@@ -42,3 +42,19 @@ async def test_a_question_naming_no_device_is_left_to_routing(engine, monkeypatc
     monkeypatch.setattr(gateway_main, "fetch_ha_entities", visible)
     assert await gateway_main.answer_state_question("Is it going to rain tomorrow?", {"user": "sam"}) is None
     assert await gateway_main.answer_state_question("Is the toaster on?", {"user": "sam"}) is None
+
+
+@pytest.mark.asyncio
+async def test_right_after_a_restart_the_device_names_are_read_first(monkeypatch):
+    eng = IntentEngine()  # empty cache, as after a restart
+    monkeypatch.setattr(gateway_main, "engine", eng)
+    calls = []
+
+    async def visible(creds):
+        calls.append(1)
+        eng.update_entity_cache([LAMP, FAN])  # what fetch_ha_entities does
+        return [LAMP, FAN]
+
+    monkeypatch.setattr(gateway_main, "fetch_ha_entities", visible)
+    assert await gateway_main.answer_state_question("Is the den lamp on?", {"user": "sam"}) == "Den Lamp is on."
+    assert len(calls) == 1  # the list read for the names also answers the question
