@@ -70,8 +70,11 @@ one, and only they can read it:
   only the chat password can open a backup (docs/PRIVATE_CHAT_BACKUP.md).
 * **Notices carry no content**: "New private message from Sam" (chat_notify),
   "Sam nudged you in your private chat" (``nudge``), "Sam changed the
-  private chat password" (``change_password``) and "Sam reacted in your
-  private chat" (a reaction).
+  private chat password" (``change_password``), "Sam reacted in your
+  private chat" (a reaction) and "Sam is waiting to hear back from you" (a
+  reply reminder, services/gateway/private_chat_reminders.py; decided from
+  read markers and one bit the reader's device may send: whether the newest
+  message asks something).
 
 The registry is one JSON file per chat (``chats/<token>.json``; ``storage``
 is ``"store"`` once its messages live here); pictures are ``blobs/<token>/<id>``
@@ -218,6 +221,8 @@ class Store:
         # Its messages (services/gateway/private_chat_messages.py) and the export made when it moved off Talk.
         shutil.rmtree(self.root / "messages" / token, ignore_errors=True)
         shutil.rmtree(self.root / "migration" / token, ignore_errors=True)
+        # Reply reminder state (services/gateway/private_chat_reminders.py): settings and which ids were reminded.
+        (self.root / "reminders" / f"{token}.json").unlink(missing_ok=True)
 
     def _gallery_dir(self, token: str) -> Path:
         self._chat_path(token)  # validates the token

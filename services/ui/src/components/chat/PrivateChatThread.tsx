@@ -57,6 +57,7 @@ import {
 import PrivateMessageSheet, { ReactionRow } from './PrivateMessageSheet';
 import ReactionBurst from './ReactionBurst';
 import { isImeKey } from '../../lib/keyboard';
+import { reminderText, replyFlag } from '../../lib/privateChatReminders';
 
 interface PrivateChatThreadProps {
   conversation: TalkConversation;
@@ -458,6 +459,26 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   const mine = visible.filter((m) => !isSystemMessage(m) && isMine(m, myActorIds));
   const myLatest = mine[mine.length - 1];
   const nudgeable = canNudge(visible.filter((m) => !isSystemMessage(m)), myActorIds, conversation.last_common_read);
+
+  // Reply reminders: whether the other parent's last messages ask something is decided here, from the text
+  // this device holds, and only that one bit goes to the server, once per message (lib/privateChatReminders.ts).
+  const flagged = useRef(new Set<number>());
+  useEffect(() => {
+    if (storage !== 'store' || !pageVisible) return;
+    const items = visible
+      .filter((m) => !isSystemMessage(m) && typeof m.id === 'number')
+      .map((m) => ({
+        id: Number(m.id),
+        mine: isMine(m, myActorIds),
+        text: reminderText(opened[String(m.id)], marks[Number(m.id)]?.edit?.text),
+      }));
+    const flag = replyFlag(items);
+    if (!flag?.expectsReply || flagged.current.has(flag.messageId)) return;
+    flagged.current.add(flag.messageId);
+    void api.flagPrivateChatExpectsReply(token, flag.messageId, true).catch(() => {
+      // Only the hint is lost: the reminder still comes, after the longer wait.
+    });
+  }, [visible, opened, marks, myActorIds, storage, pageVisible, token]);
 
   const lastId = visible[visible.length - 1]?.id;
   const openedCount = Object.keys(opened).length;

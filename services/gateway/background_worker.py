@@ -157,6 +157,7 @@ class RavenWorker:
         self._cleanup_task = None
         self._admin_alerts_task = None
         self._songs_task = None
+        self._reminders_task = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         # Initialize the self-repair cooldown here rather than lazily behind a
@@ -248,6 +249,7 @@ class RavenWorker:
         self._cleanup_task = self._loop.create_task(self._cleanup_loop())
         self._admin_alerts_task = self._loop.create_task(self._admin_alerts_loop())
         self._songs_task = self._loop.create_task(self._songs_loop())
+        self._reminders_task = self._loop.create_task(self._private_chat_reminders_loop())
         log.info("Raven Background Worker (Health + Inference + Talk Monitor + Chat Notify + Cleanup + Admin Alerts) started.")
 
     def stop(self):
@@ -265,7 +267,8 @@ class RavenWorker:
 
     async def _shutdown(self):
         for t in (self._health_task, self._inference_task, self._talk_task,
-                  self._chat_notify_task, self._cleanup_task, self._admin_alerts_task, self._songs_task):
+                  self._chat_notify_task, self._cleanup_task, self._admin_alerts_task, self._songs_task,
+                  self._reminders_task):
             if t is not None:
                 t.cancel()
         # The inference loop cancels and awaits its in-flight jobs in its own
@@ -633,6 +636,30 @@ class RavenWorker:
                     with suppress(Exception):
                         await r.aclose()
                     r = None
+
+    async def _private_chat_reminders_loop(self):
+        """Gentle reply reminders in the parents' private chat
+        (services/gateway/private_chat_reminders.py): metadata only."""
+        from services.gateway import private_chat_reminders as reminders
+        from services.gateway.config import TELEMETRY_SVC
+
+        if not reminders.ENABLED:
+            log.info("Private chat reminders are off (PRIVATE_CHAT_REMINDERS=0).")
+            return
+        while self.is_running:
+            await asyncio.sleep(reminders.CHECK_S)
+            try:
+                if not await self.job_queue.claim_loop(
+                    "private_chat_reminders", self._lease_token, max(120, reminders.CHECK_S * 3)
+                ):
+                    continue
+                async with _shared_http_client() as client:
+                    await reminders.check_once(client, identity=IDENTITY_SVC, telemetry=TELEMETRY_SVC,
+                                               secret=INTERNAL_SECRET)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning(f"Private chat reminders: {type(e).__name__}: {e}")
 
     async def _check_talk_once(self, r):
         """Perform a single poll of Nextcloud Talk."""

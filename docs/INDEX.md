@@ -24,6 +24,7 @@
 - `docs/INTEGRATIONS.md`: Accounts & Integrations page: each service's fields, API keys
 - `docs/FAMILY_HUB.md`: family chat (Nextcloud Talk), games, drawing, music, recipes, voice signatures, calls, phone notifications
 - `docs/PRIVATE_CHAT_BACKUP.md`: the private chat's nightly backups, encrypted so only the chat password opens them, and how to restore one
+- `docs/PRIVATE_CHAT_REMINDERS.md`: gentle reply reminders in the private chat: the rules, the one bit of metadata the reader's device sends, settings
 - `docs/ACCOUNT_EXPORT.md`: Export my data: what each service exports, the encrypted file format (made and opened on the device), reading it and restoring it
 - `docs/WEATHER.md`: Open-Meteo forecast (household default, or each person's own place), reminders to phones and the actions they run, the Weather widget and calendar, any metric against the weather, events and hooks for other services
 - `docs/NETWORK.md`: home network monitoring through the OpenWrt router: setup, what is checked, alerts, Admin > Network, the read-only access it uses

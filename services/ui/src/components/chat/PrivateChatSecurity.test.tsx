@@ -6,16 +6,29 @@ import PrivateChatSecurity from './PrivateChatSecurity';
 import PrivateChatThread from './PrivateChatThread';
 import type { DeviceUnlockPluginInterface } from '../../plugins/deviceUnlock';
 import type { PrivateChatInfo } from './privateChatModel';
-import { deriveKey, makeVerifier, PBKDF2_ITERATIONS, randomBytes, toBase64 } from '../../lib/privateChatCrypto';
+import { deriveKey, makeVerifier, PBKDF2_ITERATIONS, randomBytes, sealMessage, toBase64 } from '../../lib/privateChatCrypto';
+import type { PrivateChatReminders } from './privateChatModel';
 
 const getPrivateChat = vi.fn();
-vi.mock('../../services/api', () => ({ api: { getPrivateChat: (...a: unknown[]) => getPrivateChat(...a) } }));
+const getPrivateChatReminders = vi.fn(async (): Promise<PrivateChatReminders> => {
+  throw new Error('no reminders here');
+});
+const setPrivateChatReminders = vi.fn();
+const flagPrivateChatExpectsReply = vi.fn(async () => ({}));
+vi.mock('../../services/api', () => ({
+  api: {
+    getPrivateChat: (...a: unknown[]) => getPrivateChat(...a),
+    getPrivateChatReminders: (...a: unknown[]) => getPrivateChatReminders(...(a as [])),
+    setPrivateChatReminders: (...a: unknown[]) => setPrivateChatReminders(...a),
+    flagPrivateChatExpectsReply: (...a: unknown[]) => flagPrivateChatExpectsReply(...(a as [])),
+  },
+}));
 
 function wrap(node: ReactNode) {
   return <QueryClientProvider client={new QueryClient()}>{node}</QueryClientProvider>;
 }
 
-async function chat(password: string): Promise<{ info: PrivateChatInfo; raw: Uint8Array<ArrayBuffer> }> {
+async function chat(password: string): Promise<{ info: PrivateChatInfo; raw: Uint8Array<ArrayBuffer>; key: CryptoKey }> {
   const kdf = { salt: toBase64(randomBytes(16)), iterations: PBKDF2_ITERATIONS };
   const key = await deriveKey(password, kdf);
   const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
@@ -24,6 +37,7 @@ async function chat(password: string): Promise<{ info: PrivateChatInfo; raw: Uin
     info: { token: 'roomP', members: ['a', 'b'], partner: 'b', partner_name: 'Robin', created_by: 'a', created_at: 1, version: 1,
       kdf: { name: 'PBKDF2-SHA256', ...kdf }, verifier: await makeVerifier(key) },
     raw,
+    key,
   };
 }
 
@@ -53,6 +67,12 @@ afterEach(() => {
   delete window.__jarvisDeviceUnlockMock;
   delete window.__jarvisPrivatePreviewMock;
   getPrivateChat.mockReset();
+  getPrivateChatReminders.mockReset();
+  getPrivateChatReminders.mockImplementation(async (): Promise<PrivateChatReminders> => {
+    throw new Error('no reminders here');
+  });
+  setPrivateChatReminders.mockReset();
+  flagPrivateChatExpectsReply.mockClear();
 });
 
 describe('private chat: password and phone lock', () => {
@@ -119,5 +139,89 @@ describe('private chat: password and phone lock', () => {
     render(wrap(thread(info)));
     await waitFor(() => expect(screen.getByTestId('private-chat')).toBeTruthy(), { timeout: 10_000 });
     expect(unlock).toHaveBeenCalledTimes(1);
+  }, 30_000);
+});
+
+const REMINDERS: PrivateChatReminders = {
+  enabled: true, available: true, delay_s: 6 * 3600, question_delay_s: 2 * 3600, quiet: '21:30-07:30', daily_max: 2,
+};
+
+describe('private chat: reply reminders', () => {
+  it('the switch is on by default, says the rules, and turns off on the server', async () => {
+    getPrivateChatReminders.mockImplementation(async () => REMINDERS);
+    setPrivateChatReminders.mockImplementation(async (_token: string, enabled: boolean) => ({ ...REMINDERS, enabled }));
+    render(wrap(<PrivateChatSecurity token="roomP" partnerName="Robin" onChanged={() => undefined} onClose={() => undefined} />));
+    const toggle = await screen.findByTestId('private-reminders-toggle');
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    const summary = screen.getByTestId('private-reminders-summary').textContent ?? '';
+    expect(summary).toMatch(/after 6 hours \(2 hours if your phone sees a question/);
+    expect(summary).toMatch(/never between 21:30 and 07:30, at most 2 times a day/);
+    expect(summary).toMatch(/never says what was written/);
+    toggle.click();
+    await waitFor(() => expect(screen.getByTestId('private-reminders-toggle').getAttribute('aria-checked')).toBe('false'));
+    expect(setPrivateChatReminders).toHaveBeenCalledWith('roomP', false);
+  });
+
+  it('an older server without reminders, or one with them off, shows no switch', async () => {
+    render(wrap(<PrivateChatSecurity token="roomP" partnerName="Robin" onChanged={() => undefined} onClose={() => undefined} />));
+    expect(await screen.findByTestId('private-change-password-open')).toBeTruthy();
+    expect(screen.queryByTestId('private-reminders')).toBeNull();
+  });
+
+  it('sends only the bit and the id when the partner asked something, once', async () => {
+    const { info, raw, key } = await chat('pw pw pw pw');
+    window.__jarvisDeviceUnlockMock = plugin({ unlock: vi.fn(async () => ({ key: toBase64(raw) })) });
+    const message = async (id: number, actor: string, text: string) => ({
+      id, actor_id: actor, actor_type: 'users', actor_display_name: actor, timestamp: 1000 + id, message_type: 'comment',
+      message: await sealMessage(key, { t: 'text', text }),
+    });
+    const messages = [await message(1, 'a', 'Home at 6'), await message(2, 'b', 'Are you bringing bread'), await message(3, 'b', 'love you')];
+    const view = render(wrap(
+      <PrivateChatThread
+        conversation={{ token: 'roomP', private: true } as never}
+        info={{ ...info, storage: 'store' }}
+        messages={messages as never}
+        myActorIds={new Set(['a'])}
+        onUnlockedChange={() => undefined}
+        onChanged={() => undefined}
+      />,
+    ));
+    await waitFor(() => expect(flagPrivateChatExpectsReply).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    expect(flagPrivateChatExpectsReply).toHaveBeenCalledWith('roomP', 3, true);
+    view.rerender(wrap(
+      <PrivateChatThread
+        conversation={{ token: 'roomP', private: true } as never}
+        info={{ ...info, storage: 'store' }}
+        messages={messages as never}
+        myActorIds={new Set(['a'])}
+        onUnlockedChange={() => undefined}
+        onChanged={() => undefined}
+      />,
+    ));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(flagPrivateChatExpectsReply).toHaveBeenCalledTimes(1);
+  }, 30_000);
+
+  it('says nothing when the newest message is mine or asks nothing', async () => {
+    const { info, raw, key } = await chat('pw pw pw pw');
+    window.__jarvisDeviceUnlockMock = plugin({ unlock: vi.fn(async () => ({ key: toBase64(raw) })) });
+    const sealed = async (text: string) => sealMessage(key, { t: 'text', text });
+    const messages = [
+      { id: 1, actor_id: 'b', actor_type: 'users', timestamp: 1, message_type: 'comment', message: await sealed('Are you home?') },
+      { id: 2, actor_id: 'a', actor_type: 'users', timestamp: 2, message_type: 'comment', message: await sealed('Yes') },
+      { id: 3, actor_id: 'b', actor_type: 'users', timestamp: 3, message_type: 'comment', message: await sealed('Lovely') },
+    ];
+    render(wrap(
+      <PrivateChatThread
+        conversation={{ token: 'roomP', private: true } as never}
+        info={{ ...info, storage: 'store' }}
+        messages={messages as never}
+        myActorIds={new Set(['a'])}
+        onUnlockedChange={() => undefined}
+        onChanged={() => undefined}
+      />,
+    ));
+    await waitFor(() => expect(screen.getByText('Lovely')).toBeTruthy(), { timeout: 10_000 });
+    expect(flagPrivateChatExpectsReply).not.toHaveBeenCalled();
   }, 30_000);
 });
