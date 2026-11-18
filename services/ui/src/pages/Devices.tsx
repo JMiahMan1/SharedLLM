@@ -9,6 +9,7 @@ import type { LucideIcon } from 'lucide-react';
 import { api } from '../services/api';
 import { downloadBlobUrl } from '../lib/artifactKinds';
 import { useAuth } from '../context/AuthContext';
+import { useIntegrations } from '../hooks/useIntegrations';
 import { relativeTime } from '../lib/wanderTrips';
 import {
   deviceKindLabel,
@@ -1375,6 +1376,8 @@ const DEVICE_TABS = [
   { id: 'family', label: 'Family', anchors: ['devices-family', 'devices-folders', 'devices-activity'] },
 ] as const;
 type DeviceTab = (typeof DEVICE_TABS)[number]['id'];
+/** The tabs that read HomeHub's own API (`/api/homehub/...`). */
+const HUB_TABS: ReadonlySet<DeviceTab> = new Set<DeviceTab>(['devices', 'add', 'places', 'setup']);
 
 function tabForHash(hash: string): DeviceTab {
   const anchor = hash.replace(/^#/, '');
@@ -1386,8 +1389,13 @@ export default function Devices() {
   const isAdmin = Boolean(user?.is_admin || user?.family_role === 'father' || user?.family_role === 'mother' || user?.username === 'default');
   const queryClient = useQueryClient();
   const [detailDevice, setDetailDevice] = useState<MdmDevice | null>(null);
-  const [tab, setTab] = useState<DeviceTab>(() => tabForHash(typeof window === 'undefined' ? '' : window.location.hash));
+  const [chosenTab, setTab] = useState<DeviceTab>(() => tabForHash(typeof window === 'undefined' ? '' : window.location.hash));
   const openTab = (id: DeviceTab) => { setTab(id); window.history.replaceState(null, '', `#${id}`); };
+  // Every tab but Family is HomeHub's (its devices, discovery, areas and setup):
+  // with HomeHub off only the family's phones and folders are left.
+  const { homehub } = useIntegrations();
+  const tabs = homehub ? DEVICE_TABS : DEVICE_TABS.filter((t) => !HUB_TABS.has(t.id));
+  const tab: DeviceTab = tabs.some((t) => t.id === chosenTab) ? chosenTab : 'family';
   const inventory = useQuery({ queryKey: ['mdm-devices'], queryFn: () => api.getMdmDevices(), enabled: isAdmin, retry: false });
   const myDevices = useQuery({ queryKey: ['my-companion-devices'], queryFn: () => api.getCompanionDevices(), enabled: !isAdmin, retry: false });
   const files = useQuery({ queryKey: ['mdm-files'], queryFn: () => api.getMdmFiles(), enabled: isAdmin, retry: false });
@@ -1457,13 +1465,15 @@ export default function Devices() {
   return (
     <div className={PAGE}>
       <PageHeader icon={Smartphone} tone="text-violet-400" title="Devices and integrations"
-        subtitle="The house's devices by room, adding and fixing them, their setup, and the family's phones and folders.">
+        subtitle={homehub
+          ? "The house's devices by room, adding and fixing them, their setup, and the family's phones and folders."
+          : "The family's phones, tablets and shared folders. The house's devices appear here once HomeHub is connected."}>
         {/* Admins: tabs instead of one long page. Old #devices-... links open the right tab. */}
-        {user?.is_admin && (
+        {user?.is_admin && tabs.length > 1 && (
           <div role="tablist" aria-label="Parts of this page"
             className="-mx-1 flex gap-1 overflow-x-auto touch-pan-x rounded-2xl border border-white/10 bg-black/20 p-1 sm:mx-0 sm:inline-flex sm:max-w-full"
             data-testid="devices-sections">
-            {DEVICE_TABS.map((t) => (
+            {tabs.map((t) => (
               <button key={t.id} type="button" role="tab" aria-selected={tab === t.id}
                 aria-controls={`devices-tab-${t.id}`}
                 className={`min-h-11 shrink-0 whitespace-nowrap rounded-xl px-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${

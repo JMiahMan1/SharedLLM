@@ -138,7 +138,7 @@ describe('WeatherRemindersPanel', () => {
     fireEvent.click(screen.getByLabelText('Weather reminder sends a notice'));
     fireEvent.click(screen.getByRole('button', { name: 'Add reminder' }));
     expect(saves).toEqual([]);  // a reminder that does nothing is refused
-    fireEvent.change(screen.getByLabelText('Home Assistant action'), { target: { value: 'cover.close_cover' } });
+    fireEvent.change(screen.getByLabelText('Home hub action'), { target: { value: 'cover.close_cover' } });
     fireEvent.change(screen.getByTestId('weather-action-entity'), { target: { value: 'cover.barn_door' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add reminder' }));
     await waitFor(() => expect(saves).toHaveLength(1));

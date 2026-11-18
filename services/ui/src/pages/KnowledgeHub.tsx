@@ -53,7 +53,7 @@ const REINDEX_PROVIDERS: {
 const COLLECTION_LABELS: Record<string, string> = {
   nextcloud_files: 'Nextcloud',
   calibre_files: 'Calibre',
-  ha_entities: 'Home Assistant',
+  ha_entities: 'Home hub',
   system_capabilities: 'Capabilities',
   system_learnings: 'Raven lessons',
   mission_history: 'Missions',
@@ -364,7 +364,7 @@ const KnowledgeHub = () => {
           <Brain size={16} className="text-indigo-300" />
           <h3 className="font-bold text-indigo-300">Semantic Memory Search</h3>
           <span className="text-[10px] uppercase tracking-widest text-slate-500">
-            RAG · indexed files, Home Assistant, missions &amp; more
+            RAG · indexed files, home hub devices, missions &amp; more
           </span>
         </div>
         <form onSubmit={runRagSearch} className="relative">
@@ -373,7 +373,7 @@ const KnowledgeHub = () => {
             type="text"
             value={ragQuery}
             onChange={(e) => setRagQuery(e.target.value)}
-            placeholder="Ask the brain: search indexed files, Home Assistant devices, missions…"
+            placeholder="Ask the brain: search indexed files, home hub devices, missions…"
             className="glass-input w-full py-3 pl-10 pr-28 text-sm"
             aria-label="Semantic memory search"
           />
@@ -1087,8 +1087,8 @@ const KnowledgeHub = () => {
              <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
                 <div className="flex items-start justify-between mb-6">
                    <div className="space-y-1">
-                      <h4 className="font-bold text-white">Clear Home Assistant Devices</h4>
-                      <p className="text-xs text-slate-500">Remove your Home Assistant devices from semantic memory. The background sync re-adds them from Home Assistant within minutes.</p>
+                      <h4 className="font-bold text-white">Clear Home Hub Devices</h4>
+                      <p className="text-xs text-slate-500">Remove your home hub devices from semantic memory. The background sync re-adds them from the home hub within minutes.</p>
                    </div>
                    <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
                 </div>

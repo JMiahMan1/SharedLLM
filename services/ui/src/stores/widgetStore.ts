@@ -47,6 +47,9 @@ function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSetting
   };
 }
 
+/** A widget that reads the home hub's devices (HomeHub or Home Assistant). */
+export const needsHomeHub = (capabilities: CapabilityPayload): boolean => capabilities.has_home_hub === true;
+
 export const defaultWidgetDefs: WidgetDef[] = [
   // One health widget, not two. `health_hero` (labelled "Today") was added
   // alongside `health_activity` ("Health") and both drew steps and a ring, so the
@@ -54,7 +57,9 @@ export const defaultWidgetDefs: WidgetDef[] = [
   // Health widget is the one to keep: it also carries data freshness, the 7-day
   // average, best day and distance. The hero's baseline-relative insight is not
   // lost; the Health page renders the same `heroInsight` and `ActivityRings`.
-  { key: 'energy_insights', label: 'Energy Insights', icon: Zap, minSize: 'small', defaultSize: 'medium' },
+  // Energy, device and climate widgets read the home hub's devices: with no hub
+  // connected they are not offered at all (not shown empty or failing).
+  { key: 'energy_insights', label: 'Energy Insights', icon: Zap, minSize: 'small', defaultSize: 'medium', mountConditions: needsHomeHub },
   // Medium, not small: the add-timer form alone is taller than a 200px cell.
   { key: 'ambient_timer', label: 'Ambient Timer', icon: Timer, minSize: 'small', defaultSize: 'medium' },
   { key: 'quick_notes', label: 'Quick Notes', icon: StickyNote, minSize: 'small', defaultSize: 'medium' },
@@ -62,14 +67,14 @@ export const defaultWidgetDefs: WidgetDef[] = [
   { key: 'chores_progress', label: 'Chores Progress', icon: ListChecks, minSize: 'small', defaultSize: 'tall' },
   { key: 'upcoming_events', label: 'Upcoming Events', icon: CalendarDays, minSize: 'small', defaultSize: 'wide' },
   { key: 'quick_assistant', label: 'Quick Assistant', icon: Sparkles, minSize: 'small', defaultSize: 'medium', requiresQuickAssistantEnabled: true },
-  { key: 'device_control', label: 'Device Control', icon: LayoutGrid, minSize: 'small', defaultSize: 'tall' },
+  { key: 'device_control', label: 'Device Control', icon: LayoutGrid, minSize: 'small', defaultSize: 'tall', mountConditions: needsHomeHub },
   { key: 'workspaces', label: 'Workspaces', icon: LayoutDashboard, minSize: 'small', defaultSize: 'medium' },
   { key: 'health_activity', label: 'Health', icon: Activity, minSize: 'small', defaultSize: 'medium' },
   // The hub's today card: readiness, sleep, water, food, active minutes and
   // tonight's dinner. It never reads steps (those stay on `health_activity`),
   // so the two never show the same number.
   { key: 'health_today', label: 'Health today', icon: HeartPulse, minSize: 'small', defaultSize: 'medium' },
-  { key: 'climate', label: 'Climate', icon: Thermometer, minSize: 'small', defaultSize: 'medium' },
+  { key: 'climate', label: 'Climate', icon: Thermometer, minSize: 'small', defaultSize: 'medium', mountConditions: needsHomeHub },
   { key: 'presence', label: 'Family Presence', icon: Compass, minSize: 'small', defaultSize: 'medium' },
   // The reading app's front door. `small` is enough for the verse text, and the
   // whole widget is one tap into the chapter, so it is not hidden by default:
@@ -106,10 +111,7 @@ export function isWidgetVisible(
     isAdmin: boolean;
   },
 ): boolean {
-  // Management widgets are hidden from normal users before anything else is
-  // considered, so their existence is not even hinted at by the registry.
-  if (def.adminOnly && !ctx.isAdmin) return false;
-  if (def.mountConditions && !def.mountConditions(ctx.capabilities)) return false;
+  if (!isWidgetAvailable(def, ctx)) return false;
   const settings = ctx.userWidgets[def.key];
   if (settings) {
     if (settings.visibility === 'removed' || settings.visibility === 'hidden') return false;
@@ -118,6 +120,22 @@ export function isWidgetVisible(
     if (defaultSettings.visibility === 'hidden' || defaultSettings.visibility === 'removed') return false;
   }
   if (def.requiresQuickAssistantEnabled && !ctx.quickAssistantEnabled) return false;
+  return true;
+}
+
+/**
+ * Can this widget be offered at all, whatever the person chose? Management
+ * widgets are hidden from normal users before anything else is considered, so
+ * their existence is not even hinted at, and a widget whose data source is not
+ * there (`mountConditions`, e.g. no home hub) is neither shown nor listed in
+ * the widget sheet. The person's own choice is kept and applies again once it is.
+ */
+export function isWidgetAvailable(
+  def: WidgetDef,
+  ctx: { capabilities: CapabilityPayload; isAdmin: boolean },
+): boolean {
+  if (def.adminOnly && !ctx.isAdmin) return false;
+  if (def.mountConditions && !def.mountConditions(ctx.capabilities)) return false;
   return true;
 }
 

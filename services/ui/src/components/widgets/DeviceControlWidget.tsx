@@ -170,7 +170,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       setActivityCutoff(Date.now() - 30 * 24 * 60 * 60 * 1000);
     } catch (err) {
       console.error('Failed to load device states:', err);
-      setError('Failed to load devices. Check that Home Assistant is reachable.');
+      setError('Failed to load devices. Check that the home hub is reachable.');
     }
 
     // Load user device assignments (isolated): failure here only logs
@@ -281,14 +281,14 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       // A refused command arrives as a FAILURE body with HTTP 200, so this used
       // to toast "Command sent" for a device the person may not touch.
       if (resp.data?.status === 'FAILURE') {
-        throw new Error(resp.data.message || 'Home Assistant refused that');
+        throw new Error(resp.data.message || 'The home hub refused that');
       }
       toast.success('Command sent');
       // Refresh device states in background after HA executes
       loadDevices();
     } catch (err) {
       console.error('HA Service Error:', err);
-      toast.error(errorText(err, 'Could not send that command. Check Home Assistant.'));
+      toast.error(errorText(err, 'Could not send that command. Check the home hub.'));
     } finally {
       setPendingEntity(null);
     }
@@ -619,7 +619,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                 {hasRooms ? renderRoomGroups() : (
                   <div className="h-full flex flex-col items-center justify-center text-center p-6">
                     <p className="text-xs text-slate-400">No devices have a room yet</p>
-                    <p className="text-[10px] text-slate-600 mt-1">Assign areas to devices in Home Assistant and they group here.</p>
+                    <p className="text-[10px] text-slate-600 mt-1">Assign areas to devices in the home hub and they group here.</p>
                   </div>
                 )}
               </div>
@@ -718,7 +718,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
           hasRooms ? renderRoomGroups() : (
             <div className="text-center py-6">
               <p className="text-[10px] text-slate-500">No devices have a room yet</p>
-              <p className="text-[9px] text-slate-600 mt-0.5">Assign areas in Home Assistant and devices group here.</p>
+              <p className="text-[9px] text-slate-600 mt-0.5">Assign areas in the home hub and devices group here.</p>
             </div>
           )
         )}

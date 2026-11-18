@@ -257,7 +257,7 @@ async def play_music_direct(req: MediaPlayRequest, entity_id: str, ctx, why: str
     log.info(f"[media/play] '{query}' -> MA player {player['player_id']} directly (HA unreachable: {why})")
     return ExecutionResult(
         status="SUCCESS",
-        message=f"Playing '{query}' ({kind}) on {name} directly through Music Assistant (Home Assistant is down).",
+        message=f"Playing '{query}' ({kind}) on {name} directly through Music Assistant (the home hub is down).",
         service="media_play",
         detail={"route": "mass_direct", "player_id": player["player_id"], "uri": uri},
     )

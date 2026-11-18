@@ -4,6 +4,7 @@ import { Link2, Trash2, TrendingUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import EntitySearchDropdown from '../ui/EntitySearchDropdown';
+import { useIntegrations } from '../../hooks/useIntegrations';
 import HelpTooltip from '../ui/HelpTooltip';
 import { confirmDialog } from '../ui/confirmDialog';
 import {
@@ -17,7 +18,7 @@ import {
  * Admin: tie the weather to everything else (docs/WEATHER.md).
  *
  * - **Insights**: every tracked metric against the weather, in plain sentences.
- * - **Track with weather**: any Home Assistant sensor (solar, a water meter, a
+ * - **Track with weather**: any home hub sensor (solar, a water meter, a
  *   pump, barn humidity) becomes a metric, analysed like energy is.
  * - **Send weather to services**: weather events delivered to any service this
  *   deployment knows, picked from the server's own list, so a new service
@@ -36,6 +37,7 @@ const unitOf = (unit: string) => (unit ? ` ${unit}` : '');
 
 export const WeatherIntegrationsPanel: FC = () => {
   const queryClient = useQueryClient();
+  const { anyHub } = useIntegrations();
   const settings = useQuery<WeatherIntegrationSettings>({ queryKey: SETTINGS_KEY, queryFn: loadIntegrationSettings });
   const info = useQuery({ queryKey: ['weather', 'integrations'], queryFn: api.getWeatherIntegrations, retry: false });
   const insights = useQuery({
@@ -76,7 +78,7 @@ export const WeatherIntegrationsPanel: FC = () => {
 
   const addMetric = () => {
     if (!label.trim() || !entity.includes('.')) {
-      toast.error('Give it a name and pick a Home Assistant entity');
+      toast.error('Give it a name and pick a home hub entity');
       return;
     }
     const name = metricName(label);
@@ -168,9 +170,10 @@ export const WeatherIntegrationsPanel: FC = () => {
         )}
       </div>
 
-      {/* Sensors */}
+      {/* Sensors: the home hub's, so only offered while a hub is connected. */}
+      {anyHub ? (
       <fieldset className="mb-6 rounded-xl border border-white/5 bg-black/20 p-3">
-        <legend className="px-1 text-[11px] font-semibold text-slate-300">Track a Home Assistant sensor with the weather</legend>
+        <legend className="px-1 text-[11px] font-semibold text-slate-300">Track a home hub sensor with the weather</legend>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_200px_90px_auto]">
           <input
             value={label}
@@ -221,6 +224,11 @@ export const WeatherIntegrationsPanel: FC = () => {
           </p>
         )}
       </fieldset>
+      ) : (
+        <p className="mb-6 text-[11px] text-slate-500" data-testid="weather-sensors-no-hub">
+          Tracking a sensor with the weather needs a home hub; none is connected.
+        </p>
+      )}
 
       {/* Hooks */}
       <fieldset className="rounded-xl border border-white/5 bg-black/20 p-3">

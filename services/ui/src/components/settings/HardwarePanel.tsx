@@ -90,7 +90,7 @@ const HardwarePanel: React.FC = () => {
   return (
     <div className="space-y-6">
       <p className="text-xs text-slate-400">
-        ESPHome devices are controlled directly over their native API when Home Assistant is
+        ESPHome devices are controlled directly over their native API when the home hub is
         unreachable. Devices with an HA entity mapping are routed through HA first and fall back
         to the direct path only on connection failure.
       </p>
@@ -115,7 +115,7 @@ const HardwarePanel: React.FC = () => {
                       : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                   }`}
                   title={device.ha_entity_id
-                    ? 'Mapped to Home Assistant; direct ESPHome used as fallback'
+                    ? 'Mapped to the home hub; direct ESPHome used as fallback'
                     : 'Direct ESPHome native API only'}
                 >
                   {device.ha_entity_id ? 'Both' : 'Direct'}

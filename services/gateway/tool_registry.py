@@ -710,6 +710,66 @@ SINGLE_TURN_EXCLUDED: dict[str, str] = {
 }
 
 
+#: Rows that only do anything through a home hub (HomeHub or Home Assistant):
+#: device control, the hub's entities, logbook, config and to-do lists. While no
+#: hub is set up they are not offered to a model (``tool_catalog``,
+#: ``get_raven_tool_schemas``, ``hub_tool_guide``); they still route, and answer
+#: the shared "no home hub" message if a model names one anyway. Media playback,
+#: video and casting stay: they have direct paths that work without a hub.
+HUB_TOOLS: frozenset[str] = frozenset({
+    "LightControlRequest",
+    "MediaStatusRequest",
+    "ClimateRequest",
+    "SecurityRequest",
+    "AnnouncementRequest",
+    "HAServiceRequest",
+    "TodoListRequest",
+    "CapabilityIndexRequest",
+    "DiscoverySyncRequest",
+    "HAConfigRequest",
+    "EntitySearchRequest",
+    "LogbookRequest",
+    "DocumentBroadcastRequest",
+    "NightModeRequest",
+})
+
+#: Said in the tool guide in place of the hub tools while no hub is set up.
+NO_HUB_TOOLS_NOTICE = (
+    "No home hub is set up, so there are no tools for the home's devices (lights, climate, "
+    "locks, alarms, announcements, the hub's lists). If asked to control one, say that an admin "
+    "can connect HomeHub or Home Assistant in Settings.\n\n"
+)
+
+
+def hub_tools_offered() -> bool:
+    """Are the hub tools offered to a model? Only while a home hub is set up.
+
+    Decided from ``services.config``'s startup values, so the answer (and every
+    prompt built from it) is fixed for a given configuration, never per request:
+    the model server keeps the fixed start of the prompt warm.
+    """
+    from services import config
+
+    return config.any_home_hub()
+
+
+def _offered(name: str) -> bool:
+    return name not in HUB_TOOLS or hub_tools_offered()
+
+
+def hub_tool_guide(guide: str) -> str:
+    """The single-turn tool guide, without the hub tools' sections while no hub is set up."""
+    if hub_tools_offered():
+        return guide
+    parts = re.split(r"(?m)^(?=#{2,3} )", guide)
+    kept = [p for p in parts if not any(p.startswith(f"### {name}") for name in HUB_TOOLS)]
+    joined = "".join(kept)
+    marker = "## Available Tools"
+    if marker in joined:
+        return joined.replace(marker, f"{marker}\n\n{NO_HUB_TOOLS_NOTICE.rstrip()}", 1)
+    return f"{NO_HUB_TOOLS_NOTICE}{joined}"
+
+
 def single_turn_tools() -> dict[str, tuple[str, str]]:
     """``{normalized name: (service, path)}`` for every single-turn tool.
 
@@ -736,7 +796,7 @@ def tool_catalog(exclude: set[str] | None = None) -> str:
     for name, _svc, method, path, _ws, desc, hint in _RAVEN_TOOL_TABLE:
         if name in SINGLE_TURN_EXCLUDED or method != "POST" or "{" in path:
             continue
-        if name.lower() in skip:
+        if name.lower() in skip or not _offered(name):
             continue
         lines.append(f"- {name}: {desc} {hint}")
     return "\n".join(lines)
@@ -746,6 +806,8 @@ def get_raven_tool_schemas() -> list[dict]:
     """Build OpenAI ``tools`` schemas for the full Raven action surface."""
     schemas: list[dict] = []
     for name, _svc, _method, _path, requires_ws, desc, hint in _RAVEN_TOOL_TABLE:
+        if not _offered(name):
+            continue
         props: dict = {
             "payload": {
                 "type": "object",

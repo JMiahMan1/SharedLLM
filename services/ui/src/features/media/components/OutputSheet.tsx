@@ -615,7 +615,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
 
               {unavailable ? (
                 <p className="mt-3 rounded-xl border border-[var(--color-border-mid)] bg-[var(--site-card-bg)] px-3 py-2 text-xs text-[var(--site-text)]">
-                  Could not load the other speakers. Check that Music Assistant and Home Assistant are reachable.
+                  Could not load the other speakers. Check that Music Assistant and the home hub are reachable.
                 </p>
               ) : null}
 

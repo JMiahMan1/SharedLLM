@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Page, Route } from '@playwright/test';
-import { isServerCall } from './serverCalls';
+import { isServerCall, INTEGRATIONS_STATUS_PATH, integrationsStatus } from './serverCalls';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -174,6 +174,7 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
     // (/api/users/me/theme…) must not fall through to the network, where the
     // dev server's proxy would send it to a real gateway.
     if (new URL(url).pathname === '/api/users/me') return route.fallback();
+    if (new URL(url).pathname === INTEGRATIONS_STATUS_PATH) return route.fulfill({ json: integrationsStatus() });
     unmockedCalls.push(`${route.request().method()} ${url}`);
     return route.abort();
   };

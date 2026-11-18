@@ -237,7 +237,7 @@ const TelemetryAdminPanel = () => {
               Enroll Device
             </h3>
             <p className="mt-1 text-sm text-slate-400">
-              Add a Home Assistant entity for telemetry monitoring.
+              Add a home hub entity for telemetry monitoring.
             </p>
           </div>
           <button

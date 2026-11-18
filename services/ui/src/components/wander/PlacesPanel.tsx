@@ -242,7 +242,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
         </h3>
         <p className="mt-1 text-xs text-slate-500">
           {canEdit
-            ? 'Mark a place important to get a safety alert when someone arrives or leaves. Home Assistant places are drawn in Home Assistant; the ones you add here live in Wander.'
+            ? 'Mark a place important to get a safety alert when someone arrives or leaves. Places from the home hub are drawn there; the ones you add here live in Wander.'
             : 'Arriving at or leaving an important place sends a safety alert. You can add your own places here.'}
         </p>
       </div>

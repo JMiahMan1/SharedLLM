@@ -27,7 +27,7 @@ from services.gateway.llm_providers import get_provider
 from services.gateway.location_query import parse_location_query
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
-from services.gateway.tool_registry import single_turn_tools
+from services.gateway.tool_registry import hub_tool_guide, single_turn_tools
 
 log = logging.getLogger("gateway.orchestrator")
 
@@ -1694,7 +1694,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         )
     rag_context = _truncate_rag_context(rag_context)
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
-    single_turn_guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
+    single_turn_guide = hub_tool_guide(load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE))
     if grounded:
         single_turn_guide = _grounded_tool_guide(single_turn_guide)
         log.info("[_single_turn_inference] grounded turn: retrieval tools omitted from the tool guide")

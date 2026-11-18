@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Page, Route } from '@playwright/test';
 import { seedAuth } from './mediaMocks';
+import { integrationsStatus } from './serverCalls';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -142,6 +143,7 @@ export async function mockClimateApi(page: Page, scenario: ClimateScenario): Pro
   const objectResponses: Array<[RegExp, unknown]> = [
     [/\/api\/health\b/, { status: 'ok' }],
     [/\/api\/info\b/, { service: 'jarvis-ui', version: 'e2e', git_sha: 'e2e', git_branch: 'e2e' }],
+    [/\/api\/integrations\/status\b/, integrationsStatus()],
     [/\/api\/(config|settings)\b/, {}],
     [/\/api\/telemetry\/(notifications|schedules)\b/, { notifications: [], jobs: [] }],
   ];

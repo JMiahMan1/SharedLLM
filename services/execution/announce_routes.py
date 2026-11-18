@@ -10,6 +10,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from services.common.hub_login import NO_HUB_MESSAGE
 from services.execution.schemas import AnnouncementRequest, UserContext
 from services.execution.schemas_intercom import IntercomAnnouncementRequest, IntercomBroadcastRequest
 from services.execution.targets import resolve_targets
@@ -62,7 +63,7 @@ async def run_announcement(
     if not ha_url or not ha_token:
         return {
             "status": "FAILURE",
-            "message": "No home hub is set up (HA_URL is not configured), so there is nothing to announce on.",
+            "message": NO_HUB_MESSAGE,
             "detail": {"resolved": []},
         }
 

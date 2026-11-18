@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { KeyRound, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import { useIntegrations } from '../../hooks/useIntegrations';
 
 type Service = 'home_assistant' | 'nextcloud' | 'audiobookshelf';
 
@@ -43,7 +44,11 @@ export default function ServiceAccessSetup({
   const [asking, setAsking] = useState<Service | null>(null);
   const [password, setPassword] = useState('');
 
+  // Home Assistant is offered only while that integration is on: with it off no
+  // Home Assistant login is used, so setting one up would do nothing.
+  const { homeAssistant } = useIntegrations();
   const offered = SERVICES.filter((s) => {
+    if (s.id === 'home_assistant' && !homeAssistant) return false;
     if (!services?.length) return true;
     return services.some((label) => s.label.toLowerCase().includes(label.toLowerCase()));
   });

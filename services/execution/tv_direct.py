@@ -141,7 +141,7 @@ async def _webos(dev: dict[str, Any], command: str, volume_level: float | None, 
     if not dev["webos_key"]:
         return _fail(
             f"{dev['name']} has never been paired with Jarvis directly, so it cannot be controlled while "
-            "Home Assistant is down (casting a game to it once pairs it)."
+            "the home hub is down (casting a game to it once pairs it)."
         )
     from aiowebostv import WebOsClient  # pyright: ignore[reportMissingImports]
 

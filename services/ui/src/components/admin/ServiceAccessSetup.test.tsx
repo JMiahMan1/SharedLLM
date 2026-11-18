@@ -13,9 +13,23 @@ vi.mock('../../services/api', async (importOriginal) => {
 
 const setUp = vi.mocked(api.setUpServiceToken);
 
+// Both home integrations on (the hook's own fetch needs a QueryClient this test does not render).
+const hubs = { homehub: true, homeAssistant: true };
+vi.mock('../../hooks/useIntegrations', () => ({
+  useIntegrations: () => ({ ...hubs, anyHub: hubs.homehub || hubs.homeAssistant, hubs, settled: true }),
+}));
+
 describe('ServiceAccessSetup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hubs.homeAssistant = true;
+  });
+
+  it('does not offer Home Assistant while that integration is off', () => {
+    hubs.homeAssistant = false;
+    render(<ServiceAccessSetup username="mom" services={['Nextcloud', 'Home Assistant']} />);
+    expect(screen.getByRole('button', { name: /set up nextcloud/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /set up home assistant/i })).toBeNull();
   });
 
   it('offers Nextcloud with no password and the other services with one', () => {

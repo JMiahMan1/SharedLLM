@@ -69,7 +69,7 @@ const seed = () => {
 };
 
 const pickEntity = async (entityId: string) => {
-  const box = await screen.findByPlaceholderText('Search Home Assistant entities...');
+  const box = await screen.findByPlaceholderText('Search the home hub\'s entities...');
   fireEvent.focus(box);
   fireEvent.click(await screen.findByText('Hallway'));
   expect(screen.getByDisplayValue('Hallway')).toBeInTheDocument();

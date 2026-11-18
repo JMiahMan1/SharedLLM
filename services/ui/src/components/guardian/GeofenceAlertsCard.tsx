@@ -109,7 +109,7 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
 
           {places.length === 0 ? (
             <p className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-slate-400">
-              No places configured in Home Assistant yet (e.g. Home, School).
+              No places configured in the home hub yet (e.g. Home, School).
             </p>
           ) : (
             <div className="space-y-2">

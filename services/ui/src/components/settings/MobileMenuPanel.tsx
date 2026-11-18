@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, Pin, PinOff, RotateCcw, Smartphone } from 'lucide-r
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { navPagesFor, type NavPage } from '../layout/navItems';
+import { useIntegrations } from '../../hooks/useIntegrations';
 import {
   MAX_MOBILE_PINS,
   moveMobileNavPath,
@@ -31,7 +32,8 @@ export default function MobileMenuPanel() {
     return subscribeMobileNav(sync);
   }, [isAdmin]);
 
-  const pages = navPagesFor(isAdmin);
+  const { hubs } = useIntegrations();
+  const pages = navPagesFor(isAdmin, hubs);
   const pageByPath = new Map(pages.map((page) => [page.path, page]));
   const pinned = paths.flatMap((path): NavPage[] => {
     const page = pageByPath.get(path);

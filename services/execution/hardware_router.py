@@ -262,7 +262,7 @@ async def execute_device_command(
     if login is None:
         return ExecutionResult(
             status="FAILURE",
-            message="No home hub is set up to send this command to (HA_URL is not configured).",
+            message=NO_HUB_MESSAGE,
             service=service_name,
             detail={"route": "none"},
         )

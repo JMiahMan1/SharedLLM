@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Page, Route } from '@playwright/test';
-import { isServerCall } from './serverCalls';
+import { isServerCall, INTEGRATIONS_STATUS_PATH, integrationsStatus } from './serverCalls';
 
 /**
  * Made-up content for the "library" pages (Notes, Recipes, Media, Knowledge,
@@ -272,6 +272,7 @@ export async function mockLibraryPages(page: Page): Promise<void> {
     const req = route.request();
     const url = new URL(req.url());
     const p = url.pathname;
+    if (p === INTEGRATIONS_STATUS_PATH) return route.fulfill({ json: integrationsStatus() });
     const method = req.method();
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body });
     let body: Record<string, unknown> = {};

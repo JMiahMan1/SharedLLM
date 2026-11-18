@@ -714,7 +714,7 @@ async def forecast_route(latitude: float | None = None, longitude: float | None 
         if not loc:
             # 404, not 503: nothing to retry until an admin sets a location (the app
             # retries 503s), and the widget explains this case by its status.
-            raise HTTPException(status_code=404, detail="No home location: set one in Admin > Weather reminders or add zone.home in Home Assistant")
+            raise HTTPException(status_code=404, detail="No home location: set one in Admin > Weather reminders or add a home zone on the home hub")
     fc = await forecast_for(loc, cfg, units=units if units in wx.UNITS else None)
     if not fc:
         raise HTTPException(status_code=502, detail="The weather service did not answer")

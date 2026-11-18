@@ -595,8 +595,14 @@ async def get_android_auto(
 async def get_zones(viewer: str | None = Query(None)):
     """The family's places as a GeoJSON FeatureCollection: the Home Assistant
     zones plus the places saved from Wander (a shared family list and each
-    person's own, filtered to ``viewer`` when given)."""
-    states = await _ha_get_states()
+    person's own, filtered to ``viewer`` when given).
+
+    With no home hub set up at all the saved places are still the family's:
+    they are answered, with ``hub_zones: "unavailable"`` and the reason, and
+    nothing is called. A hub that is set up but failing still errors.
+    """
+    hub_on = _hub_target() is not None
+    states = await _ha_get_states() if hub_on else []
     features = []
     for s in _filter_entities(states, "zone"):
         f = _entity_to_feature(s["entity_id"], s)
@@ -625,7 +631,12 @@ async def get_zones(viewer: str | None = Query(None)):
                 **({"icon": place["icon"]} if place.get("icon") else {}),
             },
         })
-    return {"type": "FeatureCollection", "features": features}
+    if hub_on:
+        return {"type": "FeatureCollection", "features": features, "hub_zones": "available"}
+    from services.common.hub_login import NO_HUB_MESSAGE
+
+    return {"type": "FeatureCollection", "features": features, "hub_zones": "unavailable",
+            "message": NO_HUB_MESSAGE}
 
 
 @app.put("/place-settings/{zone_id}")
@@ -2415,7 +2426,7 @@ async def get_closest(
         raise HTTPException(status_code=403, detail="Forbidden")
     dest = await _destination(to)
     if not dest:
-        raise HTTPException(status_code=404, detail=f"No place called '{to}' (a Home Assistant zone or lat,lon)")
+        raise HTTPException(status_code=404, detail=f"No place called '{to}' (a saved place, a home hub zone or lat,lon)")
     r = await get_redis()
     now = time.time()
     people = []

@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import { isServerCall } from './serverCalls';
+import { isServerCall, INTEGRATIONS_STATUS_PATH, integrationsStatus } from './serverCalls';
 import { REQUEST_VETTING, appVettingAnswer } from './appVettingMocks';
 
 /**
@@ -536,6 +536,7 @@ export async function mockFamilyPages(page: Page): Promise<void> {
     const req = route.request();
     const url = new URL(req.url());
     const p = url.pathname;
+    if (p === INTEGRATIONS_STATUS_PATH) return route.fulfill({ json: integrationsStatus() });
     // The Talk long poll: hold a moment, then "nothing new", like a quiet room.
     if (p === '/api/communication/talk/messages/wait') {
       await new Promise((resolve) => setTimeout(resolve, 1500));

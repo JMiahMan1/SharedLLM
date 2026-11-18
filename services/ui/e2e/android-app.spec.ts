@@ -207,7 +207,7 @@ test.describe('@live Android App - Entity Dropdowns (Mobile)', () => {
 
   test('@live entity search dropdown opens on mobile tap', async ({ page }) => {
     await page.getByRole('button', { name: 'Users & Devices' }).click();
-    const searchInput = page.getByPlaceholder('Search Home Assistant entities...');
+    const searchInput = page.getByPlaceholder('Search the home hub\'s entities...');
     await expect(searchInput).toBeVisible({ timeout: 10000 });
     await searchInput.tap();
     await page.waitForTimeout(2000);
@@ -217,7 +217,7 @@ test.describe('@live Android App - Entity Dropdowns (Mobile)', () => {
 
   test('@live selecting entity from dropdown adds it (mobile)', async ({ page }) => {
     await page.getByRole('button', { name: 'Users & Devices' }).click();
-    const searchInput = page.getByPlaceholder('Search Home Assistant entities...');
+    const searchInput = page.getByPlaceholder('Search the home hub\'s entities...');
     await searchInput.tap();
     await page.waitForTimeout(2000);
     const dropdown = page.locator('.entity-dropdown-portal');
@@ -321,7 +321,7 @@ test.describe('@live Android App - Performance', () => {
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
     await page.getByRole('button', { name: 'Users & Devices' }).click();
-    const searchInput = page.getByPlaceholder('Search Home Assistant entities...');
+    const searchInput = page.getByPlaceholder('Search the home hub\'s entities...');
     await searchInput.click();
     const start = Date.now();
     await page.waitForSelector('.entity-dropdown-portal', { timeout: 5000 });

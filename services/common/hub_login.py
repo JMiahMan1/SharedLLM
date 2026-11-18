@@ -32,6 +32,13 @@ NO_HUB_MESSAGE = (
 def _own(ctx: Any) -> tuple[str, str]:
     if ctx is None:
         return "", ""
+    from services import config
+
+    if not config.home_assistant_enabled():
+        # A caller's own login is a Home Assistant token. While that integration is off no HA
+        # login is used for calls, the person's own included (it stays stored, unused), so the
+        # caller falls through to the hub's own login below.
+        return "", ""
     if isinstance(ctx, dict):
         url, token = ctx.get("ha_url"), ctx.get("ha_token")
     else:
