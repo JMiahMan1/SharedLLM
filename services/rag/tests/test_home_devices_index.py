@@ -278,9 +278,11 @@ def test_a_fresh_row_is_kept(conn):
     assert result["removed_stale"] == result["removed_switched_off"] == 0
 
 
-def test_rows_of_a_switched_off_hub_are_swept(conn):
+def test_rows_of_a_switched_off_hub_go_once_past_the_age(conn, monkeypatch):
+    monkeypatch.setattr("services.config.HOME_DEVICE_STALE_HOURS", 72)
     _sync({"entities": [_entity("light.porch")], "source": "homehub"}, user_id="sam")
     _sync({"entities": [_entity("light.den")], "source": "home_assistant"}, user_id="sam")
+    _age(conn, "dev:home_assistant:sam:light.den", synced_ago=100 * 3600)
 
     result = rag_main._sweep_stale_devices()  # HA_URL is blank in the fixture: Home Assistant is off
 
@@ -291,6 +293,14 @@ def test_rows_of_a_switched_off_hub_are_swept(conn):
     assert result["removed_switched_off"] == 1
 
 
+def test_fresh_rows_of_a_switched_off_hub_are_kept(conn):
+    # A container started without its hub settings sees that hub as off; the index must survive it.
+    _sync({"entities": [_entity("light.den")], "source": "home_assistant"}, user_id="sam")
+    result = rag_main._sweep_stale_devices()  # HA_URL is blank in the fixture
+    assert "dev:home_assistant:sam:light.den" in _ids(conn)
+    assert result["removed_switched_off"] == 0
+
+
 def test_the_sweep_clears_the_state_cache_of_entities_no_row_holds(conn, monkeypatch):
     deleted = []
 
@@ -299,7 +309,9 @@ def test_the_sweep_clears_the_state_cache_of_entities_no_row_holds(conn, monkeyp
             deleted.extend(keys)
 
     monkeypatch.setattr(rag_main, "_redis", lambda: _Cache())
+    monkeypatch.setattr("services.config.HOME_DEVICE_STALE_HOURS", 72)
     _sync({"entities": [_entity("light.den")], "source": "home_assistant"}, user_id="sam")
+    _age(conn, "dev:home_assistant:sam:light.den", synced_ago=100 * 3600)
     rag_main._sweep_stale_devices()
     assert deleted == ["ha:state:light.den"]
 

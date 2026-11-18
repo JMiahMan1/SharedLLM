@@ -154,7 +154,7 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 
 - `POST /rag/search`: hybrid vector + BM25 search in one collection (`home_devices`, `nextcloud_files`, `system_learnings`, `system_capabilities`, …) or all of them (`collection_name` empty or `all`)
 - `POST /rag/sync/devices` (old name `/rag/sync/ha`): refresh one user's devices from one home hub (`source`: `homehub` or `home_assistant`)
-- `POST /rag/devices/sweep`: remove device rows nobody refreshes or uses any more, and rows of a switched-off hub
+- `POST /rag/devices/sweep`: remove device rows nobody refreshes or uses any more, and old rows of a switched-off hub
 - `POST /rag/sync/capabilities`: refresh the self-awareness capability index
 - `GET /rag/stats`: retrieval performance and index status (internal)
 

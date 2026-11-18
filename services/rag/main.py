@@ -2529,7 +2529,7 @@ def _flush_device_references() -> int:
 
 
 def _sweep_stale_devices(now: int | None = None) -> dict[str, Any]:
-    """Delete device rows nobody refreshes or uses any more, and rows of a hub that is switched off.
+    """Delete device rows nobody refreshes or uses any more, and old rows of a hub that is switched off.
 
     A row is stale when its last sync is older than HOME_DEVICE_STALE_HOURS and
     no search has returned it in that time either. Sync status rows go with the
@@ -2564,9 +2564,14 @@ def _sweep_stale_devices(now: int | None = None) -> dict[str, Any]:
             status_rows[(r["user_id"], source)] = r["id"]
             continue
         eid = meta.get("entity_id") or ""
-        if source not in enabled:
+        if source not in enabled and (r["indexed_at"] or "") < cutoff:
+            # A switched-off hub's rows go once they are past the age too, never at once:
+            # a container that started without its hub settings must not empty the index.
             switched_off.append(r["id"])
             removed_eids.add(eid)
+        elif source not in enabled:
+            kept_pairs.add((r["user_id"], source))
+            kept_eids.add(eid)
         elif (r["indexed_at"] or "") < cutoff and (r["last_used_at"] or "") < cutoff:
             stale.append(r["id"])
             removed_eids.add(eid)
