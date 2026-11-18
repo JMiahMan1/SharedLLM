@@ -268,6 +268,9 @@ class DeviceEntry:
     connections: list[list[str]] = field(default_factory=list)
     via_device_id: str | None = None
     disabled_by: str | None = None
+    #: ``"user"`` when a person hid the device (a duplicate another integration also sees). A hidden device
+    #: keeps working; only the lists people and Jarvis browse leave it out (``set_device_hidden``).
+    hidden_by: str | None = None
     entry_type: str | None = None
     labels: list[str] = field(default_factory=list)
     configuration_url: str | None = None
@@ -513,6 +516,7 @@ class Driver:
                           device_id=device.id if device else None, has_entity_name=device is not None,
                           disabled_by="integration" if disabled else None)
         self.hub.entities[ent.entity_id] = ent
+        self.hub.inherit_device_hidden(ent)
         self.hub.confirm_entity(ent, original_name=name, **info)
         self.hub._save("entity", ent)
         self.hub.bus.fire("entity_registry_updated", {"action": "create", "entity_id": ent.entity_id})
@@ -601,6 +605,50 @@ class Hub:
 
     def device_entities(self, device_id: str) -> list[str]:
         return [e.entity_id for e in self.entities.values() if e.device_id == device_id]
+
+    # -- hidden devices --------------------------------------------------------
+    def is_hidden(self, entity_id: str) -> bool:
+        """Left out of what people and Jarvis browse: hidden itself, or on a hidden device. It still works."""
+        e = self.entities.get(entity_id)
+        if e is None:
+            return False
+        if e.hidden_by:
+            return True
+        dev = self.devices.get(e.device_id or "")
+        return bool(dev and dev.hidden_by)
+
+    def hidden_entity_ids(self) -> list[str]:
+        """Every hidden entity, sorted."""
+        return sorted(eid for eid in self.entities if self.is_hidden(eid))
+
+    def inherit_device_hidden(self, ent: EntityEntry) -> bool:
+        """An entity on a hidden device is hidden by it (``hidden_by: device``, HA's rule for disabling).
+
+        Answers whether it changed; the caller saves. A person's own choice (``user``) is left alone.
+        """
+        dev = self.devices.get(ent.device_id or "")
+        if dev is not None and dev.hidden_by and not ent.hidden_by:
+            ent.hidden_by = "device"
+            return True
+        return False
+
+    def reconcile_hidden(self) -> list[str]:
+        """Bring every entity in line with its device's hidden flag (at start, after an import or a resync).
+
+        An entity on a hidden device gains ``hidden_by: device``; one left marked ``device`` by a device that is
+        no longer hidden loses it. Answers the entity ids that changed (saved).
+        """
+        changed = []
+        for ent in self.entities.values():
+            dev = self.devices.get(ent.device_id or "")
+            if self.inherit_device_hidden(ent):
+                changed.append(ent.entity_id)
+            elif ent.hidden_by == "device" and not (dev is not None and dev.hidden_by):
+                ent.hidden_by = None
+                changed.append(ent.entity_id)
+        for eid in changed:
+            self._save("entity", self.entities[eid])
+        return changed
 
     def friendly_name(self, entity: EntityEntry) -> str:
         """HA's naming: a user's name wins; else device name + the entity's own name."""
@@ -776,7 +824,10 @@ class Hub:
                 else:
                     ids.append(eid)
             for area in as_list(src.get("area_id")):
-                ids.extend(self.area_entities(area))
+                # A hidden device's entities are left out of a room (it is the duplicate of one that stays);
+                # named by entity or device id they still run (HA skips hidden entities in areas too).
+                ids.extend(eid for eid in self.area_entities(area)
+                           if (e := self.entities.get(eid)) is None or e.hidden_by != "device")
             for dev in as_list(src.get("device_id")):
                 ids.extend(self.device_entities(dev))
         seen: set[str] = set()

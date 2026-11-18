@@ -185,7 +185,13 @@ class IntentEngine:
             log.error(f"Failed to load Semantic Router: {e}. Gracefully degrading to LLM intent engine.")
 
     def update_entity_cache(self, entities: list[dict[str, Any]]):
-        """Updates the local cache of friendly names for fuzzy matching."""
+        """Updates the local cache of friendly names for fuzzy matching.
+
+        An entity the hub hides (``attributes._hidden``, a duplicate device's copy) never enters it: the
+        fast path must not pick the hidden copy of a bulb by its name. A command naming it still works.
+        """
+        entities = [e for e in entities if isinstance(e, dict)
+                    and not (isinstance(e.get("attributes"), dict) and e["attributes"].get("_hidden"))]
         new_cache = {}
         for ent in entities:
             eid = ent.get("entity_id")

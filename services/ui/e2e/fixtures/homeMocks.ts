@@ -598,6 +598,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     const registry = registries.answer(method, p, null);
     if (registry) return json(registry.body, registry.status);
     if (p === '/api/homehub/hardware') return json(HARDWARE);
+    // No device is in the hub twice here (e2e/home/devices-duplicates.spec.ts mocks some).
+    if (p === '/api/homehub/devices/duplicates') return json({ groups: [], integrations: [] });
     if (p.startsWith('/api/homehub/hardware/')) {
       return json(detailFor(decodeURIComponent(p.split('/').pop() || ''), initialStates(), voices));
     }

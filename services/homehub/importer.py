@@ -102,6 +102,8 @@ def import_config_dir(store: Store, config_dir: str, *, history_days: int = 0) -
     })
 
     # -- areas / floors -------------------------------------------------------
+    # A device a person hid on the hub stays hidden when Home Assistant's registry is imported again.
+    hidden = {d.id: d.hidden_by for d in store.load_devices() if d.hidden_by}
     for table in ("areas", "devices", "entities"):
         store._exec(f"DELETE FROM {table}")
     areas = (_read_storage(config_dir, "core.area_registry") or {}).get("areas", [])
@@ -134,6 +136,8 @@ def import_config_dir(store: Store, config_dir: str, *, history_days: int = 0) -
         doc["config_entries"] = entries
         doc["identifiers"] = [list(x) for x in d.get("identifiers") or []]
         doc["connections"] = [list(x) for x in d.get("connections") or []]
+        if doc.get("id") in hidden:
+            doc["hidden_by"] = hidden[doc["id"]]
         store.save_device(DeviceEntry(**doc))
     report["devices"] = len(devices)
 

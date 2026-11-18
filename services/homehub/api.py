@@ -481,6 +481,15 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         principal(request)
         return [_camera_summary(e) for e in _camera_entities()]
 
+    @api.get("/api/homehub/hidden_entities")
+    async def homehub_hidden(request: Request) -> dict[str, Any]:
+        """Entities left out of what people and Jarvis browse (hidden, or on a hidden device; duplicates.py).
+
+        They still work: Jarvis drops them from its lists, caches and pickers, never from a command naming one.
+        """
+        principal(request)
+        return {"entity_ids": hub.hidden_entity_ids()}
+
     @api.get("/api/homehub/exposed_entities")
     async def homehub_exposed(request: Request, entity_id: str | None = None) -> dict[str, Any]:
         """What voice and chat may control (``exposure.py``): one entity's answer, or the whole list."""

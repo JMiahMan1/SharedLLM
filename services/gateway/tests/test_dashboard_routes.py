@@ -131,6 +131,16 @@ def test_entities_picker_lists_visible_entities(client, upstream, perms, member)
     assert [e["entity_id"] for e in body["entities"]] == ["sensor.hall_temp"]
 
 
+def test_entities_picker_leaves_hidden_duplicates_out(client, upstream, perms, member):
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/states", payload=[
+        {"entity_id": "sensor.hall_temp", "state": "71", "attributes": {}},
+        {"entity_id": "sensor.dryer_power", "state": "5", "attributes": {}}])
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/homehub/hidden_entities",
+                  payload={"entity_ids": ["sensor.dryer_power"]})
+    body = client.get("/api/dashboard/entities", params={"domains": "sensor"}).json()
+    assert [e["entity_id"] for e in body["entities"]] == ["sensor.hall_temp"]
+
+
 @pytest.fixture
 def admin_hub(monkeypatch):
     seen = []

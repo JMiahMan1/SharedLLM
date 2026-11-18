@@ -247,17 +247,34 @@ async def climate(request: Request):
     return {"thermostats": out}
 
 
+async def _hidden_ids(creds: dict[str, Any]) -> set[str]:
+    """Entities the hub hides (a duplicate device's copy): left out of pickers.
+
+    A hub without the list (HTTP 404) hides none. One that fails to answer it is logged and the picker shows
+    every copy, as it did before anything was hidden, rather than no picker at all.
+    """
+    try:
+        data = await _hub_get(creds, "/api/homehub/hidden_entities")
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            log.warning("[dashboards] the hub's hidden entities: HTTP %s; showing every copy", exc.status_code)
+        return set()
+    ids = data.get("entity_ids") if isinstance(data, dict) else None
+    return {str(x) for x in ids or [] if isinstance(x, str)}
+
+
 @router.get("/entities")
 async def entities(request: Request, domains: str | None = None):
     """Entities the caller may see, for the History page's picker."""
     creds = await _caller(request)
     wanted = {d.strip() for d in (domains or "").split(",") if d.strip()}
     states = await _hub_get(creds, "/api/states")
+    hidden = await _hidden_ids(creds)
     perms = await _permissions(creds)
     out = []
     for st in states if isinstance(states, list) else []:
         eid = str(st.get("entity_id") or "")
-        if (wanted and eid.split(".", 1)[0] not in wanted) or not can_view(perms, eid):
+        if (wanted and eid.split(".", 1)[0] not in wanted) or eid in hidden or not can_view(perms, eid):
             continue
         attrs = st.get("attributes") or {}
         out.append({"entity_id": eid, "name": attrs.get("friendly_name") or eid, "domain": eid.split(".", 1)[0],

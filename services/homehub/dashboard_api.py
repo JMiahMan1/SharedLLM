@@ -129,7 +129,7 @@ def summarize(hub: Any, entity_id: str) -> dict[str, Any] | None:
 
 def on_room_card(hub: Any, entity_id: str, hidden: set[str]) -> bool:
     ent = hub.entities.get(entity_id)
-    if ent is None or ent.disabled_by or ent.hidden_by or ent.entity_category or entity_id in hidden:
+    if ent is None or ent.disabled_by or hub.is_hidden(entity_id) or ent.entity_category or entity_id in hidden:
         return False
     domain = ent.domain
     if domain not in ROOM_DOMAINS:
@@ -185,7 +185,7 @@ def climate(hub: Any, prefs: dict[str, Any]) -> dict[str, Any]:
     override = prefs.get("climate_power") or {}
     out = []
     for ent in sorted(hub.entities.values(), key=lambda e: e.entity_id):
-        if ent.domain != "climate" or ent.disabled_by:
+        if ent.domain != "climate" or ent.disabled_by or hub.is_hidden(ent.entity_id):
             continue
         item = summarize(hub, ent.entity_id)
         if item is None:

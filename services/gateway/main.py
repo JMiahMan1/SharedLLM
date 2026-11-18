@@ -5842,7 +5842,8 @@ async def proxy_trigger_telemetry_snapshot(entity_id: str, request: Request):
     async with borrow_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/discovery/entities",
-            params=discovery_params(creds or {}),
+            # One entity by its id: a hidden one (a duplicate device's copy) still answers.
+            params={**discovery_params(creds or {}), "include_hidden": "1"},
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=10.0),
         )

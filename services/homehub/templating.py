@@ -603,6 +603,10 @@ class _HubFunctions:
     def device_entities(self, device_id: Any) -> list[str]:
         return self.hub.device_entities(str(device_id))
 
+    def is_hidden_entity(self, entity_id: Any) -> bool:
+        """HA's ``is_hidden_entity``: hidden itself, or (the hub's) on a hidden device."""
+        return bool(entity_id) and self.hub.is_hidden(str(entity_id))
+
     def integration_entities(self, integration: str) -> list[str]:
         return [e.entity_id for e in self.hub.entities.values() if e.platform == integration]
 
@@ -610,7 +614,8 @@ class _HubFunctions:
         names = ("utcnow", "now", "as_local", "as_datetime", "as_timestamp", "timestamp_custom", "timestamp_local",
                  "timestamp_utc", "today_at", "relative_time", "is_state", "state_attr", "is_state_attr",
                  "has_value", "expand", "area_name", "area_id", "area_entities", "area_devices", "areas",
-                 "device_id", "device_attr", "is_device_attr", "device_entities", "integration_entities")
+                 "device_id", "device_attr", "is_device_attr", "device_entities", "integration_entities",
+                 "is_hidden_entity")
         return {n: getattr(self, n) for n in names}
 
 
@@ -618,7 +623,7 @@ _FILTER_NAMES = ("as_local", "as_datetime", "as_timestamp", "timestamp_custom", 
                  "relative_time", "is_state", "state_attr", "is_state_attr", "has_value", "expand", "area_name",
                  "area_id", "area_entities", "area_devices", "device_id", "device_attr", "is_device_attr",
                  "device_entities", "today_at")
-_TEST_NAMES = ("is_state", "is_state_attr", "has_value", "is_device_attr")
+_TEST_NAMES = ("is_state", "is_state_attr", "has_value", "is_device_attr", "is_hidden_entity")
 
 # The hub-bound filters and tests are compiled into templates once, so they
 # reach the hub of the render in progress through this context variable.

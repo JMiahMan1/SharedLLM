@@ -25,8 +25,24 @@ def discovery_params(creds: Any) -> dict[str, str]:
     return {}
 
 
+def is_hidden(entity: Any) -> bool:
+    """Execution marks an entity the hub hides (a duplicate device's copy) with ``_hidden``."""
+    attrs = entity.get("attributes") if isinstance(entity, dict) else None
+    return isinstance(attrs, dict) and bool(attrs.get("_hidden"))
+
+
+def browsable(entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``entities`` without the ones the hub hides: what lists, caches, pickers and RAG may hold.
+
+    A hidden entity still works when a command names it; it is only never browsed.
+    """
+    return [e for e in entities if not is_hidden(e)]
+
+
 async def visible_entities(creds: Any, entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """``entities`` as the caller may see them: all of them on their own login or as an admin."""
+    """``entities`` as the caller may browse them: hidden ones never; all others on their own login or as
+    an admin, else only those they may view."""
+    entities = browsable(entities)
     if has_own_login(creds) or _field(creds, "is_admin"):
         return entities
     perms = await load_entity_permissions(str(_field(creds, "user") or ""), False)
