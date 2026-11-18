@@ -386,7 +386,9 @@ async def get_areas(ha_url: str, ha_token: str, account: str = "") -> dict:
             return {}
     from services import config
 
-    household_url, household_token = config.HA_URL or "", config.HA_TOKEN or ""
+    household_url, household_token = "", ""
+    if config.home_assistant_enabled():
+        household_url, household_token = config.HA_URL or "", config.HA_TOKEN or ""
     if household_token and household_token != ha_token and host_of(household_url) == host_of(ha_url):
         try:
             return await _render_areas(household_url, household_token)

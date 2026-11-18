@@ -935,7 +935,8 @@ def _with_hub_login(req):
 
 
 def _has_own_hub_login(ctx: UserContext) -> bool:
-    return bool(ctx.ha_url and ctx.ha_token)
+    """A login of the caller's own (``hub_login.has_own_login``): never while HA is off."""
+    return hardware_router.has_own_login(ctx)
 
 
 async def _pick_permitted_player(req: MediaPlayRequest) -> MediaPlayRequest | ExecutionResult:
@@ -1264,7 +1265,11 @@ async def _stage_ha_creds(user_id: str | None) -> tuple[str, str]:
     if user_id:
         with suppress(Exception):
             creds = await resolve_internal_user(rag_user=str(user_id))
-    if not creds or not creds.get("ha_url") or not creds.get("ha_token"):
+    from services import config as _config
+
+    # The household default only ever adds a Home Assistant login, so it is not asked while
+    # that integration is off: the hub's own login is used instead (hub_pair).
+    if _config.home_assistant_enabled() and not hardware_router.has_own_login(creds):
         with suppress(Exception):
             creds = await resolve_internal_user(user_id=1) or creds
     return hardware_router.hub_pair(creds or {})

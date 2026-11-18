@@ -227,6 +227,8 @@ def hub_login(ctx) -> tuple[str, str] | None:
 #: Said when neither the caller nor the stack has a hub to talk to.
 NO_HUB_MESSAGE = _hub_login.NO_HUB_MESSAGE
 hub_pair = _hub_login.hub_pair
+has_own_login = _hub_login.has_own_login
+own_login = _hub_login.own_login
 
 
 def with_hub_login(ctx):

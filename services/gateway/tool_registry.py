@@ -770,6 +770,33 @@ def hub_tool_guide(guide: str) -> str:
     return f"{NO_HUB_TOOLS_NOTICE}{joined}"
 
 
+_HUB_TOOLS_NORMALIZED: frozenset[str] = frozenset(name.lower() for name in HUB_TOOLS)
+_HUB_TOOL_MENTION = re.compile(r"\b(?:" + "|".join(sorted(HUB_TOOLS)) + r")\b", re.IGNORECASE)
+
+
+def hub_tool_withheld(name: str) -> bool:
+    """Is ``name`` (any spelling: ``LightControlRequest``, ``light_control_request``) a hub tool
+    that is not offered right now? For an agent that resolves free-form tool names itself."""
+    normalized = re.sub(r"[\s_]+", "", name or "").lower()
+    return normalized in _HUB_TOOLS_NORMALIZED and not hub_tools_offered()
+
+
+def hub_tool_prompt(prompt: str) -> str:
+    """A free-form agent prompt (Raven's) without the lines that name a hub tool, while no hub is set up.
+
+    Raven's instructions are prose, not the guide's one-section-per-tool layout, so the
+    unit removed is the line. The notice saying why goes at the end, once. Unchanged
+    while a hub is set up, and the same text every time for a given configuration.
+    """
+    if hub_tools_offered():
+        return prompt
+    kept = "".join(line for line in prompt.splitlines(keepends=True) if not _HUB_TOOL_MENTION.search(line))
+    notice = NO_HUB_TOOLS_NOTICE.strip()
+    if notice in kept:
+        return kept
+    return f"{kept.rstrip()}\n\n{notice}"
+
+
 def single_turn_tools() -> dict[str, tuple[str, str]]:
     """``{normalized name: (service, path)}`` for every single-turn tool.
 

@@ -13,7 +13,7 @@ except ImportError:
 
 import aiohttp
 
-from services.common.hub_login import NO_HUB_MESSAGE
+from services.common.hub_login import NO_HUB_MESSAGE, own_login
 
 log = logging.getLogger("execution.ha_config")
 
@@ -36,7 +36,9 @@ async def _get_ha_credentials(user_context: dict) -> tuple:
     ) as resp:
         if resp.status == 200:
             creds = await resp.json()
-            return creds.get("ha_url"), creds.get("ha_token")
+            # Their own Home Assistant login only (none while that integration is off).
+            own = own_login(creds)
+            return own if own else (None, None)
     return None, None
 
 

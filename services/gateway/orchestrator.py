@@ -190,6 +190,12 @@ def _collections_for_query(query: str, *, include_library: bool = False, devices
     collections = list(_CODING_COLLECTIONS) if any(token in q for token in _CODING_INTENT_TOKENS) else list(_BASE_COLLECTIONS)
     if include_library or _library_intent_asked(q):
         collections = ["calibre_files"] + [c for c in collections if c != "calibre_files"]
+    from services import config
+
+    if not config.any_home_hub():
+        # No home hub is set up: its device index is left over at best, and nothing in it can be
+        # read or commanded, so it is not offered as context (the hub tools are not offered either).
+        collections = [c for c in collections if c != "ha_entities"]
     if devices_first and "ha_entities" in collections:
         # A spoken request is most often about a device ("fix the thermostat" reads as coding),
         # so the devices it names are searched before anything else can use up the budget.
@@ -846,25 +852,29 @@ async def _fetch_rag_context(
                 except Exception as e:
                     log.warning(f"[Orchestrator] nextcloud resources fetch skipped: {e}")
 
-                try:
-                    _hr = await client.get(
-                        f"{rag_svc}/rag/resources/ha",
-                        params={"limit": 10},
-                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                        timeout=aiohttp.ClientTimeout(total=5.0),
-                    )
-                    if _hr.status == 200:
-                        _ents = (await _hr.json()).get("entities") or []
-                        if _ents:
-                            rag_context += (
-                                "\n[HOME ASSISTANT SNAPSHOT: entities you can read state from "
-                                "or control]\n"
-                            )
-                            for _e in _ents:
-                                _en = _e.get("friendly_name") or _e.get("entity_id") or ""
-                                rag_context += f"- {_e.get('entity_id')}: {_e.get('state')} ({_en})\n"
-                except Exception as e:
-                    log.warning(f"[Orchestrator] HA resources fetch skipped: {e}")
+                from services import config as _config
+
+                # No home hub set up: no device snapshot, just as no hub tools are offered.
+                if _config.any_home_hub():
+                    try:
+                        _hr = await client.get(
+                            f"{rag_svc}/rag/resources/ha",
+                            params={"limit": 10},
+                            headers={"X-Internal-Secret": INTERNAL_SECRET},
+                            timeout=aiohttp.ClientTimeout(total=5.0),
+                        )
+                        if _hr.status == 200:
+                            _ents = (await _hr.json()).get("entities") or []
+                            if _ents:
+                                rag_context += (
+                                    "\n[HOME ASSISTANT SNAPSHOT: entities you can read state from "
+                                    "or control]\n"
+                                )
+                                for _e in _ents:
+                                    _en = _e.get("friendly_name") or _e.get("entity_id") or ""
+                                    rag_context += f"- {_e.get('entity_id')}: {_e.get('state')} ({_en})\n"
+                    except Exception as e:
+                        log.warning(f"[Orchestrator] HA resources fetch skipped: {e}")
         except Exception as e:
             log.warning(f"[Orchestrator] awareness blocks skipped: {e}")
 
@@ -1179,12 +1189,12 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     entity_id is the stable join key between RAG metadata and live state.
     Even if friendly_name changes in HA, entity_id remains constant.
     """
+    from services.common.hub_login import own_login
     from services.gateway.ha_state_cache import fetch_live_states, get_cached_state
 
-    # The caller's own HA login, else empty and execution reads with the hub's own: only the
-    # states of entities already in the caller's hits are added.
-    ha_url = getattr(creds, "ha_url", None) or ""
-    ha_token = getattr(creds, "ha_token", None) or ""
+    # The caller's own HA login (none while HA is off), else empty and execution reads with the
+    # hub's own: only the states of entities already in the caller's hits are added.
+    ha_url, ha_token = own_login(creds) or ("", "")
 
     # Collect entity_ids from RAG hits
     entity_ids = [h.get("entity_id", "") for h in hits if h.get("entity_id")]

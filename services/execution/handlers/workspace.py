@@ -107,13 +107,14 @@ def _identity_secrets_to_env(user_ctx) -> dict[str, str]:
     ncu = _get("nextcloud_url")
     if ncu:
         env["NEXTCLOUD_URL"] = ncu
-    ha = _get("ha_token")
-    if ha:
-        env["HA_TOKEN"] = ha
-        env["HOME_ASSISTANT_TOKEN"] = ha
-    hau = _get("ha_url")
-    if hau:
-        env["HA_URL"] = hau
+    # Only the person's own Home Assistant login, and only while that integration is on: never
+    # the hub's own login (it can command the whole house and must not leave the stack).
+    from services.common.hub_login import own_login
+
+    ha_login = own_login(uc)
+    if ha_login:
+        env["HA_URL"], env["HA_TOKEN"] = ha_login
+        env["HOME_ASSISTANT_TOKEN"] = ha_login[1]
     ak = _get("api_key")
     if ak:
         env["API_KEY"] = ak
