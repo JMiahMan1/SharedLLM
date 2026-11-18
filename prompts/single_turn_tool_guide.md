@@ -99,7 +99,7 @@ Read or write files in user cloud storage (Nextcloud).
 
 ### ContextSearchRequest
 Search semantic memories, documents, and indexed knowledge.
-- Fields: `tool`, `query`, `collection_name` (REQUIRED; an omitted collection is refused, not guessed: `calibre_files` for the book library, `nextcloud_files` for files, `system_learnings` for past lessons, `ha_entities` for the house), optional `k` (number of results, default 5).
+- Fields: `tool`, `query`, `collection_name` (REQUIRED; an omitted collection is refused, not guessed: `calibre_files` for the book library, `nextcloud_files` for files/notes/recipes, `system_learnings` for past lessons, `ha_entities` for the house, `system_capabilities` for tools/CLI binaries, `user_facts` for remembered user facts/preferences, `conversation_memory` for intercom transcripts, `mission_history` for past Raven missions, `network_topology` for Docker/LAN topology, `telemetry_alerts` for device/sensor alerts), optional `k` (number of results, default 5), optional `tags` (list of topic names such as `["fasting"]` for `Resources/<Topic>/` files or `jarvis:<topic>` Calibre books).
 - Example: `{"tool": "ContextSearchRequest", "query": "Macduff trusting God in trial", "collection_name": "calibre_files"}`
 
 ### CalibreRequest
@@ -113,6 +113,12 @@ The family's Calibre book library; you are its librarian. Use it for a specific 
   - `{"tool": "CalibreRequest", "action": "audit"}` (duplicate copies, other editions, books with no file or only PDF, untagged books)
   - `{"tool": "CalibreRequest", "action": "tag", "book_id": 617, "add_tags": ["fasting"]}` (admins only)
 - There is NO delete action. Never invent one. When asked what the family may not need, run `audit` and recommend, with reasons; removing a book is done by a person in Calibre. If a fetch is refused because a book is stored only as PDF, say so instead of guessing its text.
+
+### AudiobookshelfRequest
+Search, browse, play, resume, or check listening progress in the family's Audiobookshelf library (audiobooks and podcasts).
+- Fields: `tool`, `action` (`libraries`, `list`, `search`, `get_book`, `progress`, `last_played`, `play`, `play_podcast_episode`, `resume`, `update_progress`).
+- Optional: `query`, `book_id`, `library_id`, `episode_id`, `entity_id`, `limit`.
+- Example: `{"tool": "AudiobookshelfRequest", "action": "search", "query": "Mere Christianity"}`
 
 ### BibleRequest
 Read-only access to the installed Bible corpus: scripture text, verse search, study notes by edition, verse of the day, and the catalogue of installed translations. Scripture text is NOT in RAG (`calibre_files` holds books, not the installed translations), so use this tool for any Bible quote and `study_notes` for commentary.

@@ -532,6 +532,36 @@ _PROTOCOL_LESSONS: list[dict] = [
         "rule": "Scripture quotes and passages come from BibleRequest FIRST: action 'read' with a ref (and version when the asker names one) returns the real verse text. Cite it as `{reference} ({version})`. For commentary or study-Bible notes use action 'study_notes' (add edition for a named study Bible); for 'what does the Bible say about X' use 'search' then read the best passage; use 'catalogue' to discover installed translations and editions. Never quote scripture from WebSearchRequest or ContextSearchRequest; a paraphrase from the web is a wrong-source answer when the corpus holds the verse.",
         "tags": ["protocol", "scripture", "bible", "quote"],
     },
+    {
+        "id": "lesson-proto-rag-collections",
+        "topic": "Raven protocol: all RAG collections and topic tags",
+        "rule": "ContextSearchRequest requires collection_name: calibre_files (books), nextcloud_files (cloud docs, notes, recipes), ha_entities (smart home devices), system_learnings (past lessons), system_capabilities (tools and CLI binaries), user_facts (remembered user facts and preferences), conversation_memory (intercom voice transcripts), mission_history (past Raven mission outcomes), network_topology (Docker/LAN containers), telemetry_alerts (device and sensor alerts). Pass tags: [topic] to filter Calibre books tagged jarvis:<topic> or Nextcloud files under Resources/<Topic>/.",
+        "tags": ["protocol", "rag", "search", "resources"],
+    },
+    {
+        "id": "lesson-proto-audiobooks",
+        "topic": "Raven protocol: Audiobookshelf audiobooks and podcasts",
+        "rule": "For audiobooks, spoken-word libraries, listening progress, or podcast episodes in Audiobookshelf, use AudiobookshelfRequest (actions: libraries, list, search, get_book, progress, last_played, play, play_podcast_episode, resume, update_progress) instead of guessing titles or searching the web.",
+        "tags": ["protocol", "audiobookshelf", "media", "audio"],
+    },
+    {
+        "id": "lesson-proto-home-data",
+        "topic": "Raven protocol: household data",
+        "rule": "For household schedules and notes use CalendarRequest (action=read for events, list for calendars), NoteRequest, ChoreRequest, and MealPlanRequest. Read the real data rather than inventing schedules.",
+        "tags": ["protocol", "home", "personal-data"],
+    },
+    {
+        "id": "lesson-proto-home-hub",
+        "topic": "Raven protocol: home hub inspection",
+        "rule": "For live home device state and history use EntitySearchRequest, HAConfigRequest, and LogbookRequest, and the hub's lists through TodoListRequest. Read the real state rather than inventing it. (Only while a home hub is set up; without one these tools are not offered.)",
+        "tags": ["protocol", "ha", "home"],
+    },
+    {
+        "id": "lesson-proto-observability",
+        "topic": "Raven protocol: logs, diagnostics, network, and model telemetry",
+        "rule": "For SharedLLM diagnostics use ExecutionLogRequest, DockerLogsRequest, RedisInspectRequest (never shell redis-cli), LLMInfoRequest, AiCapabilitiesRequest (check image/voice support before promising), and NetworkDeviceScanRequest; search mission_history and telemetry_alerts via ContextSearchRequest for past failures or alerts.",
+        "tags": ["protocol", "diagnostics", "logs", "network"],
+    },
 ]
 
 

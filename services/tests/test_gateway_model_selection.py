@@ -567,7 +567,10 @@ async def test_single_turn_inference_uses_assist_prompt_with_full_capability_gui
     assert "System Capability Context:" in system_message
     assert "ClimateRequest" in system_message
     assert "ExecutionLogRequest" in system_message
-    assert "sensor.upstairs_temperature" in system_message
+    # Retrieved context travels with the question, so the system message stays the same
+    # for every question and the model server can keep it warm.
+    assert "sensor.upstairs_temperature" not in system_message
+    assert "sensor.upstairs_temperature" in captured["payload"]["messages"][-1]["content"]
 
 
 @pytest.mark.skipif(not LIVE_GATEWAY_AVAILABLE, reason="No live gateway endpoint detected")

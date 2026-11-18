@@ -70,6 +70,11 @@ Test calls `GET /api/me` with an API key, or `POST /login` with a
 username and password (Audiobookshelf logs in at the root `/login`; `/api/login`
 answers 401).
 
+Once connected, Jarvis and Raven can search it, check listening progress and
+play or resume a book or podcast episode (`AudiobookshelfRequest`: `libraries`,
+`list`, `search`, `get_book`, `progress`, `last_played`, `play`,
+`play_podcast_episode`, `resume`, `update_progress`).
+
 ## Music Assistant
 
 - **Server URL**: e.g. `http://music-assistant.local:8095`.

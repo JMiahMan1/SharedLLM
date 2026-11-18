@@ -206,11 +206,12 @@ class ContextSearchRequest(BaseModel):
     collection_name: str = Field(
         ...,
         description=(
-            "Target collection, required. One of: calibre_files (text from the "
-            "user's book library), nextcloud_files, ha_entities, "
-            "system_learnings, system_capabilities, user_facts, "
-            "conversation_memory. Must match the kind of thing asked about -- "
-            "calibre_files for books, authors, sermons or commentaries."
+            "Target collection, required. One of: calibre_files, "
+            "nextcloud_files, ha_entities, system_learnings, "
+            "system_capabilities, user_facts, conversation_memory, "
+            "mission_history, network_topology, telemetry_alerts (use "
+            "calibre_files for the user's book library, books, authors, "
+            "sermons or commentaries)."
         ),
     )
     k: int = Field(5, description="Number of results to return")
