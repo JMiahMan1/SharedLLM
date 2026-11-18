@@ -18,10 +18,10 @@ const OUTPUT_STATUS = {
         volume_level: 0.42,
       },
       {
-        entity_id: 'media_player.office',
-        friendly_name: 'Office Speaker',
+        entity_id: 'media_player.study',
+        friendly_name: 'Study Speaker',
         state: 'idle',
-        ma_player_id: 'office',
+        ma_player_id: 'study',
         volume_level: 0.2,
       },
       { entity_id: 'media_player.den_tv', friendly_name: 'Den TV', state: 'idle', icon_kind: 'tv' },
@@ -56,7 +56,7 @@ test('moves playback to one de-duplicated speaker', async ({ page }) => {
   await expect(output.getByRole('heading', { name: 'Speakers' })).toBeVisible();
   await expect(output.getByRole('heading', { name: 'TVs' })).toBeVisible();
   await expect(output.getByText('Kitchen Speaker', { exact: true })).toHaveCount(1);
-  await expect(output.getByText('Office Speaker', { exact: true })).toHaveCount(1);
+  await expect(output.getByText('Study Speaker', { exact: true })).toHaveCount(1);
   await expect(output.getByText('Den TV', { exact: true })).toHaveCount(1);
 
   await output.getByRole('button', { name: 'Play here on Kitchen Speaker' }).click();
@@ -81,11 +81,11 @@ test('groups a speaker and changes its volume from the picker', async ({ page })
   const { ma, remote } = await setupPlayerMocks(page, {
     mediaStatus: OUTPUT_STATUS,
     ma: { players: [] },
-    // Music Assistant says Office can play in sync with this device; Kitchen cannot.
+    // Music Assistant says Study can play in sync with this device; Kitchen cannot.
     remotePlayers: [
-      { player_id: 'hermetic-web-player', name: 'Web Player', available: true, can_group_with: ['office'] },
+      { player_id: 'hermetic-web-player', name: 'Web Player', available: true, can_group_with: ['study'] },
       { player_id: 'kitchen', name: 'Kitchen Speaker', available: true, state: 'playing', volume_level: 42 },
-      { player_id: 'office', name: 'Office Speaker', available: true, state: 'idle', volume_level: 20 },
+      { player_id: 'study', name: 'Study Speaker', available: true, state: 'idle', volume_level: 20 },
     ],
   });
   await startTrack(page, ma);
@@ -97,12 +97,12 @@ test('groups a speaker and changes its volume from the picker', async ({ page })
   await expect(output.getByRole('checkbox', { name: /Group Kitchen Speaker/ })).toHaveCount(0);
   // A controlled checkbox stays unchecked until MA reports the new group;
   // click (rather than check) so the command, not the fixture echo, is asserted.
-  await output.getByRole('checkbox', { name: 'Group Office Speaker with This device' }).click();
+  await output.getByRole('checkbox', { name: 'Group Study Speaker with This device' }).click();
   await expect.poll(() => remote.sentCommands.find(
     (entry) => entry.command === 'players/cmd/set_members',
   )).toBeTruthy();
   const group = remote.sentCommands.find((entry) => entry.command === 'players/cmd/set_members');
-  expect(group?.args).toEqual({ target_player: 'hermetic-web-player', player_ids_to_add: ['office'], player_ids_to_remove: [] });
+  expect(group?.args).toEqual({ target_player: 'hermetic-web-player', player_ids_to_add: ['study'], player_ids_to_remove: [] });
 
   const volume = output.getByRole('slider', { name: 'Volume for Kitchen Speaker' });
   await volume.fill('55');

@@ -37,11 +37,18 @@ public class MetricWidget extends AppWidgetProvider {
         st.text(views, R.id.metric_unit, st.muted);
         st.text(views, R.id.metric_label, st.text);
         st.text(views, R.id.metric_sub, st.muted);
-        String entityId = WidgetApi.prefs(context).getString(PREF_ENTITY, "sensor.garage_door_internal_temperature");
-        String label = WidgetApi.prefs(context).getString(PREF_LABEL, "Garage Temp");
-        if (entityId == null || entityId.isEmpty()) entityId = "sensor.garage_door_internal_temperature";
+        // The sensor is the one chosen when the widget was placed (ConfigureMetricActivity); no default device.
+        String entityId = WidgetApi.prefs(context).getString(PREF_ENTITY, "");
+        String label = WidgetApi.prefs(context).getString(PREF_LABEL, "");
         if (label == null || label.isEmpty()) label = "Metric";
         views.setTextViewText(R.id.metric_title, label.toUpperCase(java.util.Locale.ROOT));
+        if (entityId == null || entityId.isEmpty()) {
+            views.setTextViewText(R.id.metric_value, "-");
+            views.setTextViewText(R.id.metric_unit, "");
+            views.setTextViewText(R.id.metric_label, "Choose a sensor");
+            views.setTextViewText(R.id.metric_sub, "Long-press the widget to choose one");
+            return views;
+        }
         try {
             if (WidgetApi.apiKey(context) == null) {
                 views.setTextViewText(R.id.metric_value, "-");

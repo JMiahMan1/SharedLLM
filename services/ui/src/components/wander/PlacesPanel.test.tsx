@@ -122,13 +122,13 @@ describe('PlacesPanel', () => {
   it("the owner of a saved place changes its icon, and someone else's has no edit button", async () => {
     const mine = { id: 'a'.repeat(32), entity_id: `place.${'a'.repeat(32)}`, name: 'Gymnastics', lat: 39.69, lon: -104.82, radius: 150,
       scope: 'family' as const, owner: 'leo', important: false, notify: [] };
-    const theirs = { ...mine, id: 'b'.repeat(32), entity_id: `place.${'b'.repeat(32)}`, name: 'Office', owner: 'sam' };
+    const theirs = { ...mine, id: 'b'.repeat(32), entity_id: `place.${'b'.repeat(32)}`, name: 'Study', owner: 'sam' };
     getSavedPlaces.mockResolvedValue([mine, theirs]);
     updateSavedPlace.mockResolvedValue({ ...mine, icon: 'gym' });
     const onSaved = vi.fn();
     renderPanel(<PlacesPanel places={[]} members={members} canEdit={false} onSaved={onSaved} currentUser="leo" isAdmin={false} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Edit Gymnastics' }));
-    expect(screen.queryByRole('button', { name: 'Edit Office' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Study' })).not.toBeInTheDocument();
     await userEvent.selectOptions(screen.getByRole('combobox', { name: /map icon for gymnastics/i }), 'gym');
     await userEvent.click(screen.getByRole('button', { name: 'Save place' }));
     await waitFor(() => expect(updateSavedPlace).toHaveBeenCalledWith(mine.id, expect.objectContaining({ icon: 'gym' })));

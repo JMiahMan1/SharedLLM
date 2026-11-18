@@ -578,13 +578,12 @@ and the last probe times in `pools_s`).
 
 ## Known issues
 
-- **Garage door sensor (hardware): needs fixing.** `binary_sensor.demo_door_sensor`
-  on the garage ESPHome node has read `on` continuously since at least
-  2026-11-01, through every open and close (under HA too). Until it is
-  repaired: nothing reports whether the door is open, the "Close Garage if
-  open for more than 15 minutes" automation cannot fire, and because the opener
-  is a toggle, "open the garage" closes an open door. Use
-  `camera.garage_door_garage_camera` to see the door.
+- **A door sensor stuck on one value is a hardware fault, not a hub one.** A
+  contact sensor that reads `on` through every open and close (under HA too)
+  leaves nothing reporting whether the door is open: an automation that waits for
+  it to be open for a while never fires, and when the opener is a toggle, "open
+  the garage" closes an open door. Repair the sensor; until then a camera on the
+  door is the way to see it.
 
 Not carried over: HA Assist (whisper, piper, wake word, voice satellites'
 pipelines).

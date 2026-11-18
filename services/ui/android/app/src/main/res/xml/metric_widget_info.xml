@@ -8,5 +8,7 @@
     android:initialLayout="@layout/widget_metric"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
+    android:configure="com.jarvisos.app.widgets.ConfigureMetricActivity"
+    android:widgetFeatures="reconfigurable"
     android:description="@string/app_name"
     android:previewLayout="@layout/widget_metric" />

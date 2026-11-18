@@ -1130,8 +1130,8 @@ ARRIVE_MAX_SPEED_MPS = 4.0
 #: What the phone reports when its owner has plainly stopped.
 STOPPED_ACTIVITIES = {"still", "walking", "on_foot", "running"}
 #: A zone drawn tighter than a phone can resolve is not a usable geofence.
-#: ``zone.home`` in this household is only 40 m across while an indoor fix can
-#: sit 200 m out, which flapped "left Home" / "arrived at Home" all day.
+#: A ``zone.home`` drawn 40 m across, with an indoor fix that can sit 200 m out,
+#: flaps "left Home" / "arrived at Home" all day.
 PRESENCE_MIN_RADIUS_M = 150.0
 #: Only a zone drawn tighter than this is widened to PRESENCE_MIN_RADIUS_M. A
 #: zone someone deliberately drew roomy (100 m or more) is left alone, so this
@@ -1224,8 +1224,8 @@ async def _presence_transition(
     current = state.get("zone") if state else None
     margin = max(ZONE_EXIT_MARGIN_M, float(acc or 0.0))
     # A zone drawn tighter than a phone can resolve is not a usable geofence:
-    # ``zone.home`` here is 40 m across while an indoor fix can sit 200 m out,
-    # which flapped "left Home" / "arrived at Home" all day. Floor the radius
+    # a 40 m ``zone.home`` with an indoor fix that can sit 200 m out flaps
+    # "left Home" / "arrived at Home" all day. Floor the radius
     # for the presence decision only; the drawn circle stays as it is.
     usable = [
         {

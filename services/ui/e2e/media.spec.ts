@@ -42,7 +42,7 @@ test.describe('@live Device Selector: Rendering', () => {
 
     // Check for at least one device card button
     const deviceCards = page.locator(
-      '.glass-panel button:has-text("Master Bedroom TV")',
+      '.glass-panel button:has-text("Guest Room TV")',
     ).first();
     if (await deviceCards.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(deviceCards).toBeVisible();
@@ -63,7 +63,7 @@ test.describe('@live Device Selector: Rendering', () => {
 
   test('@live device cards show device name and room', async ({ page }) => {
     // Each device card has a name + room name derived from entity_id
-    // e.g. "master_bedroom_tv" → room = "master bedroom"
+    // e.g. "guest_room_tv" → room = "guest room"
     const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
     const cards = panel.locator('button');
     await expect(cards.first()).toBeVisible();
@@ -120,7 +120,7 @@ test.describe('@live Device Selector: Selection', () => {
   test('@live clicking a device card selects it', async ({ page }) => {
     // Click the first available device card
     const deviceCard = page.locator(
-      '.glass-panel button:has-text("Master Bedroom TV")',
+      '.glass-panel button:has-text("Guest Room TV")',
     ).first();
     if (await deviceCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       await deviceCard.click();
@@ -132,7 +132,7 @@ test.describe('@live Device Selector: Selection', () => {
 
   test('@live selected device shows cyan highlight ring', async ({ page }) => {
     const deviceCard = page.locator(
-      '.glass-panel button:has-text("Office TV")',
+      '.glass-panel button:has-text("Study TV")',
     ).first();
     if (await deviceCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       await deviceCard.click();
@@ -639,21 +639,21 @@ test.describe('@live Media Playback: End-to-End', () => {
   });
 
   test('@live selecting a device shows it as active', async ({ page }) => {
-    // Click the Office TV device card
-    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    // Click the Study TV device card
+    const officeTvCard = page.locator('.glass-panel button:has-text("Study TV")').first();
     if (await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       await officeTvCard.click();
       await page.waitForTimeout(500);
 
       // Player card should show the selected device name
       const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
-      await expect(playerCard.getByText('Office TV')).toBeVisible();
+      await expect(playerCard.getByText('Study TV')).toBeVisible();
     }
   });
 
   test('@live playing a song updates media status', async ({ page }) => {
-    // Select Office TV
-    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    // Select Study TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Study TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       test.skip();
     }
@@ -684,8 +684,8 @@ test.describe('@live Media Playback: End-to-End', () => {
   });
 
   test('@live stopping playback resets player card', async ({ page }) => {
-    // Select Office TV
-    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    // Select Study TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Study TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       test.skip();
     }
@@ -729,8 +729,8 @@ test.describe('@live Media Playback: End-to-End', () => {
   });
 
   test('@live playing from playlists updates media status', async ({ page }) => {
-    // Select Office TV
-    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    // Select Study TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Study TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       test.skip();
     }
@@ -774,8 +774,8 @@ test.describe('@live Media Playback: End-to-End', () => {
   });
 
   test('@live transport controls respond to clicks', async ({ page }) => {
-    // Select Office TV
-    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    // Select Study TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Study TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       test.skip();
     }
@@ -813,8 +813,8 @@ test.describe('@live Media Playback: End-to-End', () => {
   });
 
   test('@live volume slider updates on player card', async ({ page }) => {
-    // Select Office TV
-    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    // Select Study TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Study TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       test.skip();
     }

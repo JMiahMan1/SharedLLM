@@ -35,8 +35,8 @@ const ACTIVE_REMOTE = {
   status: 'SUCCESS',
   detail: {
     active: {
-      entity_id: 'media_player.office',
-      name: 'Office Speaker',
+      entity_id: 'media_player.study',
+      name: 'Study Speaker',
       state: 'playing',
       media_title: 'Test Song',
       media_artist: 'Test Artist',
@@ -49,7 +49,7 @@ const ACTIVE_REMOTE = {
     },
     available: [],
     all_players: [
-      { entity_id: 'media_player.office', name: 'Office Speaker', state: 'playing' },
+      { entity_id: 'media_player.study', name: 'Study Speaker', state: 'playing' },
     ],
   },
 };
@@ -62,9 +62,9 @@ describe('Media page: active remote player', () => {
         HttpResponse.json({
           entities: [
             {
-              entity_id: 'media_player.office',
+              entity_id: 'media_player.study',
               domain: 'media_player',
-              friendly_name: 'Office Speaker',
+              friendly_name: 'Study Speaker',
               state: 'playing',
             },
           ],
@@ -82,7 +82,7 @@ describe('Media page: active remote player', () => {
     expect(screen.queryByText('No Active Playback')).not.toBeInTheDocument();
     // The device was adopted, so the status line names the speaker.
     await waitFor(() =>
-      expect(screen.getByText(/Playing through Office Speaker/)).toBeInTheDocument()
+      expect(screen.getByText(/Playing through Study Speaker/)).toBeInTheDocument()
     );
   });
 

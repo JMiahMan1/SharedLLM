@@ -130,7 +130,7 @@ def _not_done(result: ExecutionResult, friendly: str, entity_id: str, was_unavai
 
 
 def _spoken_name(entity_id: str) -> str:
-    """What to call a device when the hub gives no friendly name: light.hall_lamp -> Hall Lamp (never the id)."""
+    """What to call a device when the hub gives no friendly name: light.example_lamp -> Example Lamp (never the id)."""
     return spoken_name(entity_id)
 
 

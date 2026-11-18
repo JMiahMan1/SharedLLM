@@ -44,11 +44,11 @@ describe('useRoomActions', () => {
   });
 
   it('renames or moves a room and refreshes', async () => {
-    m.updateArea.mockResolvedValue({ ...STUDY, name: 'Office' });
+    m.updateArea.mockResolvedValue({ ...STUDY, name: 'Library' });
     const { result, refreshed } = setupHook();
-    act(() => result.current.update.mutate({ id: 'study', body: { name: 'Office' } }));
+    act(() => result.current.update.mutate({ id: 'study', body: { name: 'Library' } }));
     await waitFor(() => expect(result.current.update.isSuccess).toBe(true));
-    expect(m.updateArea).toHaveBeenCalledWith('study', { name: 'Office' });
+    expect(m.updateArea).toHaveBeenCalledWith('study', { name: 'Library' });
     expect(refreshed()).toEqual(expect.arrayContaining([ROOMS_KEY]));
   });
 

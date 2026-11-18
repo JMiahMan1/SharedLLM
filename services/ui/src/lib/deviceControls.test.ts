@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HubEntity } from './dashboards';
 import {
-  climateFeatures, controlKind, coverFeatures, keyCommand, lightEffects, mapImage, mediaFeatures, mediaPosition, powerReadings,
+  climateFeatures, controlKind, coverFeatures, isEntranceCover, keyCommand, opensSomething, lightEffects, mapImage, mediaFeatures, mediaPosition, powerReadings,
   sirenFeatures, tvApps, usedSiblings, vacuumFeatures, vacuumReadings,
 } from './deviceControls';
 
@@ -99,5 +99,29 @@ describe("the device's other entities", () => {
     expect(usedSiblings(ent('switch.a', 'on'), siblings).sort()).toEqual(['sensor.e', 'sensor.p']);
     expect(usedSiblings(ent('media_player.tv', 'on', { device_class: 'tv' }), siblings)).toEqual(['remote.tv']);
     expect(usedSiblings(ent('vacuum.a', 'docked'), siblings)).toContain('image.robot_map');
+  });
+});
+
+describe('entrances are known by device_class, never by name', () => {
+  const cover = (entity_id: string, device_class?: string) => ({ entity_id, attributes: device_class ? { device_class } : {} });
+
+  it('treats a garage, gate or door cover as an entrance', () => {
+    expect(isEntranceCover(cover('cover.side_shutter', 'garage'))).toBe(true);
+    expect(isEntranceCover(cover('cover.drive', 'gate'))).toBe(true);
+    expect(isEntranceCover(cover('cover.back', 'door'))).toBe(true);
+  });
+
+  it('does not read the entity id', () => {
+    expect(isEntranceCover(cover('cover.garage_blind', 'blind'))).toBe(false);
+    expect(isEntranceCover(cover('cover.garage_door'))).toBe(false);
+    expect(isEntranceCover({ entity_id: 'switch.garage_door', attributes: { device_class: 'garage' } })).toBe(false);
+  });
+
+  it('asks before opening locks and covers, by domain and service', () => {
+    expect(opensSomething('lock', 'unlock')).toBe(true);
+    expect(opensSomething('cover', 'open_cover')).toBe(true);
+    expect(opensSomething('cover', 'turn_on')).toBe(true);
+    expect(opensSomething('switch', 'turn_on')).toBe(false);
+    expect(opensSomething('light', 'turn_on')).toBe(false);
   });
 });

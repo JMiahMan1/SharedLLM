@@ -25,6 +25,7 @@ import { confirmDialog } from '../ui/confirmDialog';
 import { errorText } from '../../lib/errorText';
 import DeviceControl from '../devices/controls/registry';
 import type { HubEntity } from '../../lib/dashboards';
+import { isEntranceCover, opensSomething } from '../../lib/deviceControls';
 
 const DEVICE_ICONS: Record<string, string> = {
   light: '💡',
@@ -245,22 +246,22 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       return;
     }
 
-    const wantsGarageOpen =
-      entityId.toLowerCase().includes('garage') &&
-      (service === 'turn_on' || service === 'open_cover' || service === 'unlock');
-    if (wantsGarageOpen) {
+    // A garage door, gate or door is known by its HA device_class, never by words in its id.
+    const device = devices.find((d) => d.entity_id === entityId);
+    const wantsEntranceOpen =
+      !!device && isEntranceCover(device) && (service === 'turn_on' || service === 'open_cover');
+    if (wantsEntranceOpen) {
       const away = await isAwayFromHome();
       if (away) {
-        const ok = await confirmDialog({ title: 'Open the garage?', body: 'You appear to be away from home. Open the garage door anyway?', confirmLabel: 'Open', danger: true });
+        const name = device?.friendly_name || entityId;
+        const ok = await confirmDialog({ title: `Open ${name}?`, body: `You appear to be away from home. Open ${name} anyway?`, confirmLabel: 'Open', danger: true });
         if (!ok) return;
       }
     }
 
-    // Opening a lock or a cover was a single unconfirmed tap, and the garage
+    // Opening a lock or a cover was a single unconfirmed tap, and the entrance
     // case above only asked when presence said away.
-    const opensSomething =
-      service === 'unlock' || service === 'open_cover' || service === 'turn_on' && /(lock|garage|cover|gate)/.test(entityId.toLowerCase());
-    if (opensSomething && !wantsGarageOpen) {
+    if (opensSomething(domain, service) && !wantsEntranceOpen) {
       const ok = await confirmDialog({
         title: 'Open it?',
         body: `Send ${service.replace('_', ' ')} to ${entityId}?`,
@@ -292,7 +293,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     } finally {
       setPendingEntity(null);
     }
-  }, [hasControlPermission, loadDevices, isAwayFromHome]);
+  }, [hasControlPermission, loadDevices, isAwayFromHome, devices]);
 
   const toggleDevice = useCallback(
     async (entityId: string, currentState: string) => {

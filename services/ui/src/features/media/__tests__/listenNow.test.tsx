@@ -87,7 +87,7 @@ describe('Listen Now', () => {
   it('names what a Music Assistant Cast wrapper is playing from the Cast device it plays through', async () => {
     web.state = player();
     serveHome();
-    // Home Assistant's two "Office TV" entities: Music Assistant's wrapper
+    // Home Assistant's two "Study TV" entities: Music Assistant's wrapper
     // (playing, no title) and the Cast entity it plays through (the title).
     server.use(
       http.post('/execute/media/status', () => HttpResponse.json({
@@ -95,15 +95,15 @@ describe('Listen Now', () => {
         detail: {
           active: null,
           all_players: [
-            { entity_id: 'media_player.office_tv_chrome_2', friendly_name: 'Office TV', state: 'playing', is_ma: true,
-              ma_player_id: 'media_player.office_tv_chrome', media_title: '', media_content_id: null },
-            { entity_id: 'media_player.office_tv_chrome', friendly_name: 'Office TV Cast', state: 'playing',
+            { entity_id: 'media_player.study_tv_cast_2', friendly_name: 'Study TV', state: 'playing', is_ma: true,
+              ma_player_id: 'media_player.study_tv_cast', media_title: '', media_content_id: null },
+            { entity_id: 'media_player.study_tv_cast', friendly_name: 'Study TV Cast', state: 'playing',
               media_title: 'Pharaoh (Let My People Go)', media_artist: 'Brandon Lake', media_content_id: 'http://ma:8097/flow/x.flac' },
           ],
         },
       })),
     );
-    useMediaStore.getState().actions.selectOutput('media_player.office_tv_chrome_2');
+    useMediaStore.getState().actions.selectOutput('media_player.study_tv_cast_2');
     renderWithProviders(<Media />);
     expect(await screen.findAllByText('Pharaoh (Let My People Go)')).not.toHaveLength(0);
     expect(screen.queryByText('Untitled')).toBeNull();

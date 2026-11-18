@@ -33,7 +33,7 @@ public class ActionButtonFitTest {
     @Test
     public void theNameIsNeverCutItWrapsThenShrinks() {
         // At a one-cell size every name shows: two lines at 12sp, else up to three at 10sp.
-        for (String name : new String[] {"Office lamp", "Living room ceiling fan", "Christmas lights outside"}) {
+        for (String name : new String[] {"Pantry lamp", "Living room ceiling fan", "Christmas lights outside"}) {
             ActionButtonFit f = ActionButtonFit.of(72, 88, name, "On");
             assertTrue(name, f.label);
             assertTrue(name, f.lines <= (f.smallText ? ActionButtonFit.MAX_SMALL_LINES : ActionButtonFit.MAX_LINES));
@@ -70,7 +70,7 @@ public class ActionButtonFitTest {
     @Test
     public void linesCountWholeWords() {
         assertEquals(1, ActionButtonFit.linesFor("Garage", 66, 6.6f));
-        assertEquals(2, ActionButtonFit.linesFor("Office lamp", 66, 6.6f));
+        assertEquals(2, ActionButtonFit.linesFor("Pantry lamp", 66, 6.6f));
         assertEquals(0, ActionButtonFit.linesFor("  ", 66, 6.6f));
         // A word longer than a line breaks inside it.
         assertEquals(2, ActionButtonFit.linesFor("Supercalifragilistic", 66, 6.6f));

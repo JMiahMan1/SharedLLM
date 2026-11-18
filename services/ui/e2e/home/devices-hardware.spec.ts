@@ -63,7 +63,7 @@ test.describe('Devices: the tile grid', () => {
     const panel = page.getByTestId('hardware');
     await expect(page.getByTestId('device-tile')).toHaveCount(13);
     await expect(panel.getByTestId('hardware-group').locator('h3'))
-      .toHaveText([/^Den/, /^Front porch/, /^Garage/, /^Kitchen/, /^Living room/, /^Office/, /^No room/]);
+      .toHaveText([/^Den/, /^Front porch/, /^Garage/, /^Kitchen/, /^Living room/, /^Study/, /^No room/]);
     await expect(tile(page, 'Hall thermostat').getByTestId('tile-state')).toHaveText('Heat and cool, 68 to 76°F');
     await expect(tile(page, 'Garage door').getByTestId('tile-state')).toHaveText('Closed');
     await expect(tile(page, 'Front door lock').getByTestId('tile-state')).toHaveText('Locked');
@@ -123,9 +123,9 @@ test.describe('Devices: the tile grid', () => {
     await expect(page.getByTestId('device-tile')).toHaveCount(2);
     const noRoom = page.getByTestId('no-room-list');
     await expect(noRoom).toContainText('Hall climate sensor');
-    await noRoom.getByLabel('Room for Hall climate sensor').selectOption('office');
+    await noRoom.getByLabel('Room for Hall climate sensor').selectOption('study');
     await expect.poll(() => run.mocks.posts.find((p) => p.path === '/api/homehub/devices/hw-sensor')?.body)
-      .toEqual({ area_id: 'office' });
+      .toEqual({ area_id: 'study' });
     await expectTapTargets(noRoom);
     await expectNoHorizontalOverflow(page);
     await snap(page, info, 'devices-needs-attention');
@@ -142,7 +142,7 @@ test.describe('Devices: the tile grid', () => {
   test('an RGB and white bulb: power, brightness, white and colour first; its settings after', async ({ page }, info) => {
     const run = await open(page);
     const { dialog, detail } = await openDevice(page, 'Desk bulb');
-    await expect(dialog.getByTestId('detail-status')).toHaveText('Office · On, 50%');
+    await expect(dialog.getByTestId('detail-status')).toHaveText('Study · On, 50%');
     const main = detail.getByTestId('main-control');
     await expect(main.getByRole('switch', { name: 'Desk bulb power' })).toHaveAttribute('aria-checked', 'true');
     const brightness = main.getByRole('slider', { name: 'Desk bulb brightness' });
@@ -372,12 +372,12 @@ test.describe('Devices: every kind gets its control', () => {
     await snap(page, info, 'controls-thermostat');
     await dialog.getByRole('button', { name: 'Close' }).click();
 
-    ({ dialog, control } = await kind(page, 'Office fan'));
-    await expect(control.getByRole('slider', { name: 'Office fan speed' })).toHaveAttribute('aria-valuenow', '40');
+    ({ dialog, control } = await kind(page, 'Study fan'));
+    await expect(control.getByRole('slider', { name: 'Study fan speed' })).toHaveAttribute('aria-valuenow', '40');
     await control.getByRole('button', { name: /Swing/ }).click();
-    await expect.poll(() => sent(run, 'fan.office_fan').find((c) => c.service === 'oscillate')?.service_data).toEqual({ oscillating: true });
+    await expect.poll(() => sent(run, 'fan.study_fan').find((c) => c.service === 'oscillate')?.service_data).toEqual({ oscillating: true });
     await control.getByRole('button', { name: 'Sleep' }).click();
-    await expect.poll(() => sent(run, 'fan.office_fan').some((c) => c.service === 'set_preset_mode')).toBe(true);
+    await expect.poll(() => sent(run, 'fan.study_fan').some((c) => c.service === 'set_preset_mode')).toBe(true);
     await expectFits(page, dialog);
     await snap(page, info, 'controls-fan');
     clean(run);
