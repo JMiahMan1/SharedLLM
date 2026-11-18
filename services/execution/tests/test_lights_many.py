@@ -83,7 +83,7 @@ async def test_a_light_the_person_may_not_switch_is_left_alone(bulbs):
         return eid != BULBS[0]
     res = await light.handle_lights(_req(), may)
     assert BULBS[0] not in asked
-    assert res.message == "3 of 4 pantry lights are off; pantry bulb 1 isn't yours to switch."
+    assert res.message == "3 of 4 pantry lights are off; Pantry Bulb 1 isn't yours to switch."
     assert res.status == "PARTIAL"
 
 
@@ -194,3 +194,47 @@ async def test_any_other_failure_keeps_the_name_and_its_message(monkeypatch):
     res = await light.handle_light(req)
     assert res.detail["name"] == "Kitchen Light 1" and "state" not in res.detail
     assert res.message == "Service call failed: HA returned 500"
+
+
+# -- voice may not control some or all of them; names, never ids ----------------------------------
+
+DOWN = [f"light.downstairs_bathroom_{n}_light" for n in (1, 2, 3)]
+
+
+async def test_a_set_voice_may_not_control_is_refused_for_the_set_by_name(bulbs):
+    async def voice_off(eid):
+        return "voice_off"
+    req = LightsControlRequest(user_context=CTX, entity_ids=DOWN, action="turn_off",
+                               label="downstairs bathroom lights", names={e: "Light" for e in DOWN})
+    res = await light.handle_lights(req, voice_off)
+    assert res.status == "FAILURE"
+    assert res.message == ("Voice can't control the downstairs bathroom lights. An admin can turn on "
+                           "'Voice can control' for them in Devices.")
+    assert "light." not in res.message
+
+
+async def test_some_voice_may_not_control_are_named_from_their_ids(bulbs):
+    async def may(eid):
+        return "voice_off" if eid in DOWN else True
+    req = LightsControlRequest(user_context=CTX, entity_ids=[*BULBS[:3], *DOWN], action="turn_off",
+                               label="bathroom lights", names={e: "Light" for e in DOWN})
+    res = await light.handle_lights(req, may)
+    assert res.message == ("3 of 6 bathroom lights are off; voice can't control Downstairs Bathroom 1 Light, "
+                           "Downstairs Bathroom 2 Light and Downstairs Bathroom 3 Light.")
+
+
+async def test_when_voice_access_cannot_be_checked_it_says_so(bulbs):
+    async def unchecked(eid):
+        return "unchecked" if eid == BULBS[0] else True
+    res = await light.handle_lights(_req(), unchecked)
+    assert res.message == ("3 of 4 pantry lights are off; I couldn't check whether voice may control "
+                           "Pantry Bulb 1.")
+
+
+def test_spoken_names():
+    from services.execution.spoken_names import spoken_name
+
+    assert spoken_name("light.downstairs_bathroom_1_light", "Light") == "Downstairs Bathroom 1 Light"
+    assert spoken_name("light.kitchen_7", "Kitchen Light 7") == "Kitchen Light 7"
+    assert spoken_name("switch.den_plug", None) == "Den Plug"
+    assert spoken_name("switch.den_plug", "switch.den_plug") == "Den Plug"

@@ -975,8 +975,12 @@ async def execute_lights(req: LightsControlRequest):
 
     A light the caller may not control is left alone and named in the answer, not a 403 for all.
     """
-    async def may_control(entity_id: str) -> bool:
-        return await verify_entity_access(req.user_context, entity_id)
+    async def may_control(entity_id: str) -> bool | str:
+        # A light voice may not control is one refusal in the answer, never a 403 for the whole set.
+        try:
+            return await verify_entity_access(req.user_context, entity_id)
+        except EntityNotExposed as exc:
+            return "unchecked" if exc.unchecked else "voice_off"
 
     return await light.handle_lights(req, may_control)
 
