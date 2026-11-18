@@ -3692,6 +3692,28 @@ def describe_state(entity: dict) -> str:
     return f"{name} is {state}."
 
 
+async def answer_state_question(query: str, creds: dict) -> str | None:
+    """The answer to "Is the <device> on?" from the device's live state, or None.
+
+    None (the normal routing decides) unless the question names one device clearly
+    (``IntentEngine.resolve_device``: a clear best match among switchable devices)
+    and that device is among the ones this person may see. Nothing is switched.
+    """
+    target = engine.state_question_target(query)
+    if not target or not engine.entity_cache:
+        return None
+    entity_id = engine.resolve_device(target)
+    if not entity_id:
+        return None
+    entities = await fetch_ha_entities(creds)
+    entity = next((e for e in entities if e.get("entity_id") == entity_id), None)
+    if entity is None:
+        log.info(f"[FastPath] state question names {entity_id}, which this person cannot see; routing as usual")
+        return None
+    log.info(f"[FastPath] state question answered for {entity_id}: {entity.get('state')}")
+    return describe_state(entity)
+
+
 def _voice_context_note(ctx: dict) -> str:
     """What the model is told about where a spoken request came from."""
     lines = []
@@ -3969,6 +3991,18 @@ async def chat_handler(request: Request, background_tasks=None):
         engine.FAST_PATH_CONFIDENCE = float(threshold_str)
     except (ValueError, TypeError):
         engine.FAST_PATH_CONFIDENCE = _DEFAULT_FAST_PATH_THRESHOLD
+
+    # "Is the hall lamp on?" is answered from the device's state whenever the device is
+    # clearly named, whatever the classifier scored: a misheard word ("on" heard as "ons")
+    # used to drop the score under the threshold and send a 0.2 s answer to the model.
+    if not grounded and asks_about_state(query):
+        state_answer = await answer_state_question(query, creds.model_dump())
+        if state_answer is not None:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", state_answer)
+            if is_openai:
+                return _make_openai_response(state_answer, selected_model, "device_state")
+            return _make_ollama_response(state_answer, selected_model, "device_state")
 
     is_fast_path = not grounded and engine.is_fast_path(intent, confidence)
     log.info(f"[FastPath] is_fast_path={is_fast_path} for intent='{intent}'")
