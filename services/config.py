@@ -195,6 +195,22 @@ LEGACY_ENV_PATH = os.getenv("LEGACY_ENV_PATH")
 IDENTITY_DATABASE_URL = os.getenv("IDENTITY_DATABASE_URL")
 
 
+def _phone_country_code(key: str) -> str:
+    """The household's country calling code ("1", "44"), or "" when unset.
+
+    A phone number saved without a ``+`` is completed with it, so every
+    number the server keeps is E.164. Set but not a calling code is a
+    configuration mistake, and refused at startup rather than guessed around.
+    """
+    raw = (os.getenv(key) or "").strip().lstrip("+")
+    if raw and not (raw.isdigit() and 1 <= len(raw) <= 3):
+        raise ValueError(f"{key} must be a country calling code such as 1 or 44, not {raw!r}")
+    return raw
+
+
+HOUSEHOLD_PHONE_COUNTRY_CODE = _phone_country_code("HOUSEHOLD_PHONE_COUNTRY_CODE")
+
+
 def _csv_env(key: str, default: tuple[str, ...]) -> list[str]:
     """A comma-separated env var as a list, with a deterministic default."""
     raw = os.getenv(key)

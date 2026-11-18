@@ -498,3 +498,35 @@ def test_a_parent_that_cannot_be_reached_is_reported_not_claimed(wired, monkeypa
     assert client.post("/api/guard/message", json={"text": "hello"}).status_code == 502
 
 
+def test_status_names_the_parents_and_the_numbers_a_locked_phone_may_call(wired):
+    """The lock screen's "Call a parent" reads parent_contacts; the phone's call
+    filter reads lock_call_allow, the same numbers. Fake people and numbers."""
+    client, _, _, answers = wired
+    answers[("GET", "/screen-time/kid/rules")] = (200, {
+        "rules": {"bedtime_start": "15:00", "bedtime_end": "07:00", "lock_suspend_apps": ["com.example.watch"]},
+        "protected": True,
+        "parent_contacts": [
+            {"name": "Test Dad", "phone": "+15550100101"},
+            {"name": "Test Mom", "phone": ""},
+        ],
+    })
+
+    body = client.get("/api/screen-time/kid/status").json()
+
+    assert body["parent_contacts"] == [
+        {"name": "Test Dad", "phone": "+15550100101"},
+        {"name": "Test Mom", "phone": ""},
+    ]
+    assert body["lock_call_allow"] == ["+15550100101"]
+    # Bedtime locks, and the watch and messaging lock goes with it.
+    assert (body["locked"], body["reason"]) == (True, "bedtime")
+    assert body["lock_suspend_apps"] == ["com.example.watch"]
+
+
+def test_status_without_parents_has_empty_lists(wired):
+    client, _, _, answers = wired
+    answers[("GET", "/screen-time/kid/rules")] = (200, {"rules": {}})
+    body = client.get("/api/screen-time/kid/status").json()
+    assert (body["parent_contacts"], body["lock_call_allow"], body["lock_suspend_apps"]) == ([], [], [])
+
+

@@ -86,6 +86,11 @@ public class GuardPlugin extends Plugin {
         out.put("guardEnabled", guardEnabled(getContext()));
         out.put("webFilterAllowed", android.net.VpnService.prepare(getContext()) == null);
         out.put("webFilterActive", WebFilterService.active);
+        // The lock's call filter (parents and 911 only while locked, from the
+        // phone, a watch or a car): whether its role is granted, and whether
+        // this phone offers the role at all.
+        out.put("callFilter", LockCallFilterService.held(getContext()));
+        out.put("callFilterAvailable", LockCallFilterService.available(getContext()));
         // Ways around the filter (FilterBypass), for the father's Devices section.
         String privateDns = GuardNotices.privateDnsHost(getContext());
         out.put("privateDnsHost", privateDns == null ? "" : privateDns);
@@ -130,6 +135,37 @@ public class GuardPlugin extends Plugin {
             getActivity().startActivity(consent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         }
         call.resolve();
+    }
+
+    /**
+     * Android's one-time prompt to let Jarvis check outgoing calls (the call
+     * redirection role), so a locked phone calls only its parents and 911.
+     * Resolves when the prompt closes, with {@code held}: the prompt is a
+     * dialog, so the page underneath never sees a visibility change to tell it.
+     */
+    @PluginMethod
+    public void allowCallFilter(PluginCall call) {
+        try {
+            android.app.role.RoleManager rm = getContext().getSystemService(android.app.role.RoleManager.class);
+            if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_REDIRECTION)
+                    && !rm.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_REDIRECTION)) {
+                startActivityForResult(call,
+                        rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_REDIRECTION), "onCallFilter");
+                return;
+            }
+        } catch (Exception e) {
+            call.reject("This phone does not offer a call filter");
+            return;
+        }
+        onCallFilter(call, null);
+    }
+
+    @com.getcapacitor.annotation.ActivityCallback
+    private void onCallFilter(PluginCall call, androidx.activity.result.ActivityResult result) {
+        if (call == null) return;
+        JSObject out = new JSObject();
+        out.put("held", LockCallFilterService.held(getContext()));
+        call.resolve(out);
     }
 
     @PluginMethod

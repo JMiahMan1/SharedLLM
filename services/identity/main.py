@@ -37,10 +37,17 @@ from services.common.screen_time import (
     PERMISSION_GROUPS,
     WEB_FILTER_CATEGORIES,
     locked_section_choices,
+    normalize_phone,
+    parent_contacts,
 )
 from services.common.secrets import secret_matches
 from services.common.sqlite import apply_sqlite_pragmas
-from services.config import IDENTITY_CORS_ORIGINS, IDENTITY_DATABASE_URL, INTERNAL_SECRET
+from services.config import (
+    HOUSEHOLD_PHONE_COUNTRY_CODE,
+    IDENTITY_CORS_ORIGINS,
+    IDENTITY_DATABASE_URL,
+    INTERNAL_SECRET,
+)
 from services.identity import abuse_ch, audit, battery_alerts, push, roles, voice
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
@@ -206,6 +213,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "family_role", "ALTER TABLE user ADD COLUMN family_role VARCHAR NOT NULL DEFAULT 'other'")
         _add_column("user", "mother_username", "ALTER TABLE user ADD COLUMN mother_username VARCHAR")
         _add_column("user", "birth_date", "ALTER TABLE user ADD COLUMN birth_date VARCHAR")
+        _add_column("user", "phone_number", "ALTER TABLE user ADD COLUMN phone_number VARCHAR")
         _add_column("user", "password_hash", "ALTER TABLE user ADD COLUMN password_hash VARCHAR")
         _add_column("user", "api_key", "ALTER TABLE user ADD COLUMN api_key VARCHAR")
         _add_column("user", "api_key_enc", "ALTER TABLE user ADD COLUMN api_key_enc VARCHAR")
@@ -1183,6 +1191,12 @@ def _coerce_profile_value(key: str, value):
             return None
         if key == "audiobookshelf_url":
             return normalize_abs_url(value)
+        if key == "phone_number":
+            number = normalize_phone(value, HOUSEHOLD_PHONE_COUNTRY_CODE)
+            if number is None:
+                hint = "" if HOUSEHOLD_PHONE_COUNTRY_CODE else " with its country code (+1 ...)"
+                raise HTTPException(status_code=422, detail=f"phone_number must be a phone number{hint}")
+            return number
         return value
     if key == "forbidden_branches" and isinstance(value, list):
         # A JSON array string on the User row (UserWidget.pinned_devices does
@@ -5142,7 +5156,7 @@ def _clean_screen_rules(body: dict) -> dict:
         out["always_allowed"] = [a.strip() for a in apps][:50]
     # App control (step 5): apps blocked outright, per-app daily minutes,
     # remote install/uninstall lists, and COSU kiosk mode.
-    for pkg_list_key in ("blocked_apps", "uninstall_apps", "install_apps", "kiosk_apps"):
+    for pkg_list_key in ("blocked_apps", "uninstall_apps", "install_apps", "kiosk_apps", "lock_suspend_apps"):
         if body.get(pkg_list_key) is not None:
             apps = body[pkg_list_key]
             if not isinstance(apps, list) or any(not isinstance(a, str) or not _PACKAGE.match(a.strip()) for a in apps):
@@ -5397,6 +5411,21 @@ def _parents_of(session: Session, subject: User) -> list[str]:
     return [u.username for u in session.exec(select(User)).all() if _may_manage_screen_time(u, subject)]
 
 
+def _parent_contacts(session: Session, subject: User) -> list[dict[str, str]]:
+    """Who a locked child may still call: the father, and the mother the
+    child belongs to, each with their own number (E.164, "" when they saved
+    none). Not an admin who is not a parent: "call home" means a parent.
+    Only a minor's phone locks, so anyone else has none."""
+    if (subject.family_role or "other") not in roles.MINOR_FAMILY_ROLES:
+        return []
+    parents = sorted(
+        (u for u in session.exec(select(User)).all()
+         if u.family_role in ("father", "mother") and _may_manage_screen_time(u, subject)),
+        key=lambda u: (u.family_role != "father", u.username),
+    )
+    return parent_contacts([{"name": u.display_name or u.username, "phone": u.phone_number} for u in parents])
+
+
 def _device_kinds(session: Session, username: str) -> list[str]:
     """The kinds of a member's phones and tablets that are not revoked, sorted
     (["tablet"], ["phone", "tablet"], or [] for none), so text names them right."""
@@ -5459,6 +5488,9 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         "device_kinds": _device_kinds(session, subject.username),
         # The parts of Jarvis a parent can leave open while the phone is locked.
         "locked_section_choices": locked_section_choices(),
+        # Who a locked phone may still call (emergency numbers always go
+        # through): the parents, with their own numbers.
+        "parent_contacts": _parent_contacts(session, subject),
     }
 
 

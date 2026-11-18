@@ -28,6 +28,9 @@ class User(SQLModel, table=True):  # type: ignore
     # only: it sets the default app content rating (services/common/app_vetting.py).
     # Not the health profile's birth year, which the member edits themselves.
     birth_date: str | None = Field(default=None)
+    # The member's own mobile number, normalised (services/common/screen_time.py
+    # normalize_phone). A parent's is what their locked child may still call.
+    phone_number: str | None = Field(default=None)
     password_hash: str | None = Field(default=None)
     api_key: str | None = Field(default=None, index=True)
     api_key_enc: str | None = Field(default=None)

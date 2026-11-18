@@ -26,6 +26,9 @@ import java.util.Set;
  */
 final class DeviceOwnerGuard {
 
+    /** Logcat tag for what the device-owner enforcement changed (package names only, no personal data). */
+    static final String TAG = "JarvisGuard";
+
     private DeviceOwnerGuard() {}
 
     /** Whether this app is the phone's device owner. */
@@ -114,10 +117,22 @@ final class DeviceOwnerGuard {
                 }
             }
             Set<String> always = GuardApi.alwaysAllowed(context);
-            Set<String> nowSuspended = DeviceOwnerRules.packagesToSuspend(
-                    owner, prot, unlocked, GuardApi.blockedApps(context), awaitingApproval, always, ownPkg);
+            // Blocked and unapproved apps, plus, for a lock, every watch
+            // companion and messaging app (LockCommsRules). One set, so a
+            // package is unsuspended only when neither reason holds any more,
+            // and exactly what the lock added comes back when it lifts.
+            Set<String> nowSuspended = new java.util.LinkedHashSet<>(DeviceOwnerRules.packagesToSuspend(
+                    owner, prot, unlocked, GuardApi.blockedApps(context), awaitingApproval, always, ownPkg));
+            nowSuspended.addAll(LockCommsRules.lockSuspensions(owner, prot, locked, unlocked,
+                    installedPackages(context), GuardApi.lockSuspendApps(context),
+                    defaultSmsPackage(context), defaultDialerPackage(context), ownPkg));
+            Set<String> previously = GuardApi.suspendedPackages(context);
             Set<String> toUnsuspend = DeviceOwnerRules.packagesToUnsuspend(
-                    owner, known, GuardApi.suspendedPackages(context), nowSuspended);
+                    owner, known, previously, nowSuspended);
+            if (!previously.equals(nowSuspended)) {
+                // Only on a change, so the log says when a lock took or gave back apps.
+                android.util.Log.i(TAG, "suspended " + nowSuspended + " unsuspending " + toUnsuspend);
+            }
             if (!nowSuspended.isEmpty()) {
                 try {
                     dpm.setPackagesSuspended(admin, nowSuspended.toArray(new String[0]), true);
@@ -136,6 +151,7 @@ final class DeviceOwnerGuard {
                 GuardApi.setSuspendedPackages(context, nowSuspended);
             }
         }
+        applyOutgoingCallFallback(context, dpm, admin, owner, prot, locked, unlocked);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             String effPolicy = DeviceOwnerRules.effectiveUpdatePolicy(owner, prot, GuardApi.osUpdatePolicyType(context));
             try {
@@ -239,6 +255,65 @@ final class DeviceOwnerGuard {
         }
     }
 
+    /** Android's UserManager.DISALLOW_OUTGOING_CALLS value. */
+    static final String DISALLOW_OUTGOING_CALLS = "no_outgoing_calls";
+
+    /**
+     * The fail-safe for the lock's call rule: while locked without the call
+     * filter role, take outgoing calls away (Android still places emergency
+     * calls), and give them back when the lock lifts or the role is granted.
+     * Only a restriction Jarvis set is ever lifted.
+     */
+    private static void applyOutgoingCallFallback(Context context, DevicePolicyManager dpm, ComponentName admin,
+                                                  boolean owner, boolean prot, boolean locked, boolean unlocked) {
+        boolean block = LockCommsRules.blockAllOutgoing(owner, prot, locked, unlocked,
+                LockCallFilterService.held(context));
+        boolean ours = GuardApi.outgoingCallsBlocked(context);
+        try {
+            if (block && !ours) {
+                dpm.addUserRestriction(admin, DISALLOW_OUTGOING_CALLS);
+                GuardApi.setOutgoingCallsBlocked(context, true);
+                android.util.Log.i(TAG, "locked without the call filter: outgoing calls off (emergency still allowed)");
+            } else if (!block && ours) {
+                dpm.clearUserRestriction(admin, DISALLOW_OUTGOING_CALLS);
+                GuardApi.setOutgoingCallsBlocked(context, false);
+                android.util.Log.i(TAG, "outgoing calls back on");
+            }
+        } catch (Exception ignored) {
+            // Not device owner any more: nothing to set or lift; tried again next tick.
+        }
+    }
+
+    /** Every installed package (null when Android will not say). */
+    static Set<String> installedPackages(Context context) {
+        try {
+            Set<String> out = new java.util.HashSet<>();
+            for (android.content.pm.ApplicationInfo info : context.getPackageManager().getInstalledApplications(0)) {
+                out.add(info.packageName);
+            }
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static String defaultSmsPackage(Context context) {
+        try {
+            return android.provider.Telephony.Sms.getDefaultSmsPackage(context);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static String defaultDialerPackage(Context context) {
+        try {
+            android.telecom.TelecomManager tm = context.getSystemService(android.telecom.TelecomManager.class);
+            return tm == null ? null : tm.getDefaultDialerPackage();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /** Silently uninstall a package on a device-owner phone via PackageInstaller. */
     static void uninstallPackageSilently(Context context, String packageName) {
         if (!isOwner(context) || packageName == null || packageName.isEmpty()) return;
@@ -315,18 +390,22 @@ final class DeviceOwnerGuard {
     }
 
     /**
-     * Allow Jarvis to hold Android's lock-task (kiosk) mode: only this package
-     * may run once the guard screen starts lock task. A device owner may set the
-     * allowlist; call only when {@link DeviceOwnerRules#lockTask} says so. Without
-     * device owner (or on an older Android without lock task) this does nothing,
-     * and the Accessibility overlay is the whole of the lock.
+     * Allow Jarvis to hold Android's lock-task (kiosk) mode: once the guard
+     * screen starts lock task only Jarvis, the default dialer and the in-call
+     * and emergency screens may run ({@link LockCommsRules#lockTaskPackages}),
+     * so the lock's "Call a parent" and 911 still work while the call filter
+     * refuses anyone else. A device owner may set the allowlist; call only when
+     * {@link DeviceOwnerRules#lockTask} says so. Without device owner (or on an
+     * older Android without lock task) this does nothing, and the Accessibility
+     * overlay is the whole of the lock.
      */
     static void enterLockTask(Context context) {
         DevicePolicyManager dpm = dpm(context);
         if (dpm == null) return;
         try {
-            dpm.setLockTaskPackages(new ComponentName(context, GuardAdminReceiver.class),
-                    new String[]{context.getPackageName()});
+            Set<String> allow = LockCommsRules.lockTaskPackages(context.getPackageName(), defaultDialerPackage(context));
+            dpm.setLockTaskPackages(new ComponentName(context, GuardAdminReceiver.class), allow.toArray(new String[0]));
+            android.util.Log.i(TAG, "lock task allowlist " + allow);
         } catch (Exception ignored) {
             // Not device owner, or no lock task on this Android: the overlay still runs.
         }

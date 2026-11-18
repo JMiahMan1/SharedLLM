@@ -15,6 +15,10 @@ export interface GuardStatus {
   privateDnsHost?: string;
   /** Names of installed apps that get around the web filter (a VPN, Tor, Opera...). */
   bypassApps?: string[];
+  /** The lock's call filter role is granted: while locked, calls go only to the parents and 911. */
+  callFilter?: boolean;
+  /** Whether this phone offers the call filter role (APKs with the call filter; older ones leave it out). */
+  callFilterAvailable?: boolean;
   /** Android lets Jarvis install its own updates ("Install unknown apps"). */
   installUpdates?: boolean;
 }
@@ -38,6 +42,8 @@ export interface GuardPluginInterface {
   openGuardSettings(): Promise<void>;
   openAppInfo(): Promise<void>;
   allowWebFilter(): Promise<void>;
+  /** Android's one-time prompt to let Jarvis check outgoing calls while the phone is locked. */
+  allowCallFilter(): Promise<{ held: boolean }>;
 }
 
 // Off Android nothing is guarded: report it plainly, never a fake "on".
@@ -49,6 +55,7 @@ const webFallback: GuardPluginInterface = {
   openGuardSettings: async () => undefined,
   openAppInfo: async () => undefined,
   allowWebFilter: async () => undefined,
+  allowCallFilter: async () => ({ held: false }),
 };
 
 const Guard = registerPlugin<GuardPluginInterface>('JarvisGuard', { web: () => webFallback });

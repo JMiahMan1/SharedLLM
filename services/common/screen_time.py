@@ -37,6 +37,7 @@ Semantics follow Family Link and Qustodio:
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -275,6 +276,93 @@ def kiosk_apps(rules: dict[str, Any] | None) -> list[str]:
     for pkg in (rules or {}).get("kiosk_apps") or []:
         if isinstance(pkg, str) and pkg and pkg not in out:
             out.append(pkg)
+    return out
+
+
+def lock_suspend_apps(rules: dict[str, Any] | None) -> list[str]:
+    """Extra packages the phone suspends while it is locked, on top of its own
+    lists of watch companion and messaging apps (``LockCommsRules`` on the
+    phone). For a watch or messenger the phone does not know yet; the phone
+    still never suspends its dialer, emergency or Jarvis itself."""
+    out: list[str] = []
+    for pkg in (rules or {}).get("lock_suspend_apps") or []:
+        if isinstance(pkg, str) and pkg and pkg not in NEVER_BLOCKED_CORE and pkg not in out:
+            out.append(pkg)
+    return out
+
+
+#: Fewest digits a number may have and still name one phone (a short code
+#: could match far too much on the phone's trailing-digits compare).
+PHONE_MIN_DIGITS = 7
+#: The E.164 maximum.
+PHONE_MAX_DIGITS = 15
+#: Where an extension starts ("ext. 12", "x12", ";12", ",12"); it is dropped.
+_PHONE_EXTENSION = re.compile(r"(?i)(?:ext|x|;|,)")
+
+
+def normalize_phone(value: Any, country_code: str = "") -> str | None:
+    """A phone number in E.164 (``+<digits>``), or None when it is not one.
+
+    A number written with its country code (a leading ``+`` or ``00``) keeps
+    it. One written without is completed with ``country_code``, the
+    household's (``HOUSEHOLD_PHONE_COUNTRY_CODE``): its trunk ``0`` is dropped
+    (``020 7946 0999`` in the UK is ``+44 20 7946 0999``), and in the North
+    American plan a leading ``1`` is already the country code. With no
+    country code configured such a number is None: the household's country
+    is not something to guess. An extension (``x12``, ``ext. 12``, ``;12``)
+    is dropped.
+    """
+    if not isinstance(value, str):
+        return None
+    text = _PHONE_EXTENSION.split(value.strip(), maxsplit=1)[0].strip()
+    if not text or any(ch.isalpha() for ch in text):
+        return None
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if text.startswith("+"):
+        full = digits
+    elif digits.startswith("00"):
+        full = digits[2:]
+    else:
+        cc = (country_code or "").strip().lstrip("+")
+        if not cc.isdigit():
+            return None
+        if cc == "1" and len(digits) == 11 and digits.startswith("1"):
+            digits = digits[1:]
+        national = digits.lstrip("0") if cc != "1" else digits
+        if len(national) < PHONE_MIN_DIGITS:
+            return None
+        full = cc + national
+    if not PHONE_MIN_DIGITS <= len(full) <= PHONE_MAX_DIGITS:
+        return None
+    return f"+{full}"
+
+
+def lock_call_allow(numbers: Any) -> list[str]:
+    """The numbers a locked phone may still call (the parents'), in E.164
+    and without duplicates. The server keeps numbers already normalised, so
+    anything that is not ``+<digits>`` is left out rather than guessed at.
+    Emergency numbers are not listed: Android never hands an emergency call
+    to the phone's call filter, so they always go through."""
+    out: list[str] = []
+    for raw in numbers if isinstance(numbers, (list, tuple)) else ():
+        number = normalize_phone(raw)
+        if number and number not in out:
+            out.append(number)
+    return out
+
+
+def parent_contacts(entries: Any) -> list[dict[str, str]]:
+    """The child's parents as the lock screen's "Call a parent" shows them:
+    ``[{"name": ..., "phone": "<E.164 or empty>"}]``, one per parent, a
+    parent without a number kept with ``""`` so the screen can say so."""
+    out: list[dict[str, str]] = []
+    for entry in entries if isinstance(entries, (list, tuple)) else ():
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        out.append({"name": name, "phone": normalize_phone(entry.get("phone")) or ""})
     return out
 
 
@@ -686,6 +774,9 @@ def evaluate(
         "install_apps": install_apps(rules),
         "kiosk_mode": bool(rules.get("kiosk_mode")),
         "kiosk_apps": kiosk_apps(rules),
+        # While locked the phone suspends its watch companion and messaging
+        # apps (its own lists) plus these, so a watch is no way around the lock.
+        "lock_suspend_apps": lock_suspend_apps(rules),
         "locked_sections": locked_sections(rules),
         "permission_gating": [g for g in rules.get("permission_gating") or [] if g in PERMISSION_GROUPS],
         "web_allow": active_allow(rules.get("web_filter"), now),
