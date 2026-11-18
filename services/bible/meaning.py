@@ -55,6 +55,20 @@ RRF_K = 60
 #: without a floor, a meaning search returns the whole Bible in some order.
 SCORE_WINDOW = 0.12
 MAX_RESULTS = 200
+#: The blend's best this many verses are read again, together with the
+#: question, by the RAG service's cross-encoder (/rag/rerank), which orders
+#: them by how well each answers it. A verse that only shares a word ("hurt")
+#: or a mood ("fear the LORD" for worry) with the question sinks.
+RERANK_CANDIDATES = 50
+#: A reranked verse scoring this far below the best one is off topic and is
+#: left out (the scores are the cross-encoder's logits). Measured on the live
+#: Bible: on-topic verses sat within about 5 of the best, the ones people
+#: called off topic 6 or more below.
+RERANK_WINDOW = 6.0
+#: Never fewer than this many, however low the scores: a question the model
+#: finds hard still gets its best few answers.
+RERANK_MIN_RESULTS = 5
+RERANK_TIMEOUT_S = 10
 
 #: Translations whose wording is closest to how people ask today, in order,
 #: for when ``BIBLE_MEANING_VERSION`` is not set.
@@ -72,7 +86,10 @@ STOPWORDS = frozenset(
         "then", "there", "these", "they", "this", "those", "through", "to", "too", "under", "until", "up", "very",
         "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why", "will", "with",
         "would", "you", "your", "verse", "verses", "bible", "scripture", "scriptures", "passage", "passages", "say",
-        "says", "said", "talk", "talks", "talking", "show", "find", "tell", "god's"
+        "says", "said", "talk", "talks", "talking", "show", "find", "tell", "god's",
+        # Pronoun-like words carry no topic, but match thousands of verses.
+        "someone", "somebody", "something", "anyone", "anybody", "anything", "everyone", "everybody",
+        "everything"
     ]
 )
 
@@ -330,6 +347,49 @@ def fuse(meaning: list[tuple[str, int, int]], words: list[tuple[str, int, int]])
         if pos in score or rank < 20:
             score[pos] = score.get(pos, 0.0) + 1.0 / (RRF_K + rank + 1)
     return sorted(score, key=lambda p: (-score[p], BOOK_ORDER.get(p[0], 99), p[1], p[2]))
+
+
+class RerankUnavailable(RuntimeError):
+    """The reranker could not answer; the blend's own order is used instead."""
+
+
+def _post_rerank(rag_url: str, secret: str, query: str, texts: list[str], timeout: float) -> dict:
+    body = json.dumps({"query": query[:2000], "texts": [t[:2000] for t in texts]}).encode()
+    request = urllib.request.Request(
+        f"{rag_url.rstrip('/')}/rag/rerank",
+        data=body,
+        headers={"Content-Type": "application/json", "X-Internal-Secret": secret},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def rerank_scores(rag_url: str, secret: str, query: str, texts: list[str]) -> list[float]:
+    """The cross-encoder's score for each text against ``query``, in order."""
+    try:
+        answer = _post_rerank(rag_url, secret, query, texts, RERANK_TIMEOUT_S)
+    except Exception as exc:
+        raise RerankUnavailable(f"the reranker did not answer ({exc.__class__.__name__}: {exc})") from exc
+    scores = answer.get("scores") if isinstance(answer, dict) else None
+    if not isinstance(scores, list) or len(scores) != len(texts):
+        raise RerankUnavailable("the reranker answered with the wrong number of scores")
+    return [float(x) for x in scores]
+
+
+def rerank_order(
+    positions: list[tuple[str, int, int]], scores: list[float]
+) -> list[tuple[str, int, int]]:
+    """``positions`` best answer first, without the ones far below the best.
+
+    Ties keep the blend's order. At least ``RERANK_MIN_RESULTS`` are kept.
+    """
+    if not positions:
+        return []
+    order = sorted(range(len(positions)), key=lambda i: (-scores[i], i))
+    best = scores[order[0]]
+    kept = [positions[i] for n, i in enumerate(order) if n < RERANK_MIN_RESULTS or scores[i] >= best - RERANK_WINDOW]
+    return kept
 
 
 def describe_position(pos: tuple[str, int, int]) -> str:

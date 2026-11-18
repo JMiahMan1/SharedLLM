@@ -829,6 +829,23 @@ def run(
     }
 
 
+def _verse_texts(conn, version: str, positions: list[tuple[str, int, int]]) -> dict[tuple[str, int, int], str]:
+    """The text of each position in ``version`` (the translation the meaning index was built from)."""
+    out: dict[tuple[str, int, int], str] = {}
+    for start in range(0, len(positions), 100):
+        chunk = positions[start : start + 100]
+        where = " OR ".join(f"(osis = :o{i} AND chapter = :c{i} AND verse = :v{i})" for i in range(len(chunk)))
+        params: dict[str, object] = {"ver": version}
+        for i, (osis, chapter, verse) in enumerate(chunk):
+            params.update({f"o{i}": osis, f"c{i}": chapter, f"v{i}": verse})
+        rows = conn.execute(
+            text(f"SELECT osis, chapter, verse, text FROM bibleverse WHERE version_code = :ver AND ({where})"), params
+        ).all()
+        for osis, chapter, verse, body in rows:
+            out[(osis, int(chapter), int(verse))] = body or ""
+    return out
+
+
 def _run_meaning(
     session: Session,
     parsed: ParsedQuery,
@@ -888,6 +905,19 @@ def _run_meaning(
         allowed = mine if allowed is None else allowed & mine
     if allowed is not None:
         fused = [p for p in fused if p in allowed]
+    # The cross-encoder reads the best candidates with the question and puts
+    # the ones that answer it first; the clearly off-topic ones drop out. If it
+    # cannot answer, the blend's own order stands and the response says so.
+    reranked = False
+    head = fused[: meaning.RERANK_CANDIDATES]
+    if head:
+        texts = _verse_texts(session.connection(), matrix.version, head)
+        try:
+            scores = meaning.rerank_scores(rag_url, secret, question, [texts.get(p, "") for p in head])
+            fused = meaning.rerank_order(head, scores)
+            reranked = True
+        except meaning.RerankUnavailable as exc:
+            log.warning("Meaning search results are not reranked: %s", exc)
     fused = fused[: meaning.MAX_RESULTS]
 
     counts: dict[str, int] = {}
@@ -910,6 +940,7 @@ def _run_meaning(
         "parsed": parsed.describe(),
         "meaning_version": matrix.version,
         "meaning_coverage": meaning.coverage(session, matrix.version),
+        "reranked": reranked,
         "results": results,
     }
 
