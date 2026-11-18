@@ -131,17 +131,58 @@ def test_devices_come_first_for_a_voice_turn_even_when_it_sounds_like_coding():
     assert orchestrator._collections_for_query("fix the thermostat", devices_first=True)[0] == "ha_entities"
 
 
-async def test_the_tool_guide_comes_before_the_time_so_the_prompt_start_is_reused(monkeypatch):
-    sent = {}
+async def test_the_system_message_is_the_same_for_every_question_so_it_stays_cached(monkeypatch):
+    sent: list[list[dict]] = []
 
     async def fake_ollama(payload, use_chat=True):
-        sent["system"] = payload["messages"][0]["content"]
+        sent.append(payload["messages"])
         return {"message": {"content": "Done."}}
 
     monkeypatch.setattr(orchestrator, "load_prompt_sync", lambda name: "TOOL GUIDE: LightControlRequest, ClimateRequest")
     monkeypatch.setattr(orchestrator, "call_ollama", fake_ollama)
     creds = orchestrator.ResolvedCredentials(user="u")
-    await orchestrator._single_turn_inference("turn on the lamp", "m", "PERSONA", "DEVICES", [], creds)
-    system = sent["system"]
-    assert system.index("PERSONA") < system.index("TOOL GUIDE") < system.index("Current Date/Time") < system.index("DEVICES")
+    await orchestrator._single_turn_inference("turn on the lamp", "m", "PERSONA", "DEVICES", [], creds,
+                                              turn_note="[Voice context]\nIn the den.")
+    await orchestrator._single_turn_inference("what is the weather", "m", "PERSONA", "FORECAST", [], creds)
+    first, second = sent
+    # Persona then tool guide, and nothing that changes per question.
+    system = first[0]["content"]
+    assert system.index("PERSONA") < system.index("TOOL GUIDE")
     assert "ClimateRequest" in system and "LightControlRequest" in system
+    assert first[0] == second[0]
+    for part in ("Current Date/Time", "DEVICES", "Speaker:", "In the den"):
+        assert part not in system
+    # The question carries the time, the speaker, the note and the context, then the words.
+    question = first[-1]["content"]
+    assert first[-1]["role"] == "user"
+    assert question.index("Current Date/Time") < question.index("Speaker: u.") < question.index("In the den") \
+        < question.index("DEVICES") < question.index("turn on the lamp")
+    assert question.endswith("[Question]\nturn on the lamp")
+
+
+def test_an_unrecognised_speaker_is_never_given_a_name():
+    line = orchestrator._speaker_line(orchestrator.ResolvedCredentials(user="household"))
+    assert "not identified" in line and "Never guess or invent a name" in line
+    named = orchestrator.ResolvedCredentials(user="robin", identified_by="voice")
+    assert orchestrator._speaker_line(named) == "Speaker: robin (recognised by their voice)."
+    assert orchestrator._speaker_line(orchestrator.ResolvedCredentials(user="robin")) == "Speaker: robin."
+
+
+async def test_the_voice_note_reaches_the_question_and_raven_keeps_it_in_its_instructions(monkeypatch):
+    seen = {}
+
+    async def fake_fetch(*a, **k):
+        return ""
+
+    async def fake_inference(*args, **kwargs):
+        seen["single"] = (args[2], kwargs.get("turn_note"))
+        return "answer"
+
+    monkeypatch.setattr(orchestrator, "_fetch_rag_context", fake_fetch)
+    monkeypatch.setattr(orchestrator, "_single_turn_inference", fake_inference)
+    monkeypatch.setattr(orchestrator, "get_history", AsyncMock(return_value=[]))
+    await orchestrator.process_full_orchestration({
+        "query": "lights on", "creds": {"user": "u"}, "model": "m", "system": "PERSONA",
+        "turn_note": "[Voice context]\nIn the den.",
+    })
+    assert seen["single"] == ("PERSONA", "[Voice context]\nIn the den.")

@@ -226,8 +226,12 @@ async def test_chat_storage_routing(auth_headers, monkeypatch):
     chat_calls = [c for c in sess.post.call_args_list if "/api/chat" in str(c[0][0])]
     assert chat_calls, "Ollama /api/chat was not called"
     llm_request_payload = chat_calls[0][1]["json"]
+    # The directive belongs to this request, so it travels with the question and
+    # the system message stays the fixed text the model server keeps cached.
     system_prompt = llm_request_payload["messages"][0]["content"]
-    assert "CRITICAL DIRECTIVE: You have full permission to access the storage system" in system_prompt
+    question = next(m["content"] for m in llm_request_payload["messages"] if "[Question]" in str(m.get("content")))
+    assert "CRITICAL DIRECTIVE: You have full permission to access the storage system" in question
+    assert "CRITICAL DIRECTIVE" not in system_prompt
 
     # 2. Verify the storage routing correctly mapped the payload
     storage_calls = [c for c in sess.post.call_args_list if "/index/full" in str(c[0][0])]
