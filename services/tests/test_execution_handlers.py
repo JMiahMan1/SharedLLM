@@ -20,16 +20,21 @@ async def test_light_handler_success(user_ctx):
          patch("services.execution.ha_client.call_service", mock_call), \
          patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("services.execution.ha_client.get_state", mock_get_state):
-        mock_get_state.return_value = {"state": "off"}
+        # Off before the command; the hub shows it on (at half brightness) once the bulb has changed.
+        mock_get_state.side_effect = [
+            {"state": "off", "attributes": {"friendly_name": "Test Lamp"}},
+            {"state": "on", "attributes": {"friendly_name": "Test Lamp", "brightness": 128}},
+        ]
         mock_call.return_value = {"ok": True}
 
         req = LightControlRequest(user_context=user_ctx, entity_id="light.test", action="turn_on", brightness_pct=50)
         res = await light.handle_light(req)
 
         assert res.status == "SUCCESS"
-        # Router reports the executed HA service and the route taken
-        assert "light.turn_on" in res.message
-        assert res.detail is not None and res.detail.get("route") == "ha"
+        # The new state, in words: never the hub's service name.
+        assert res.message == "Test Lamp is on at 50%."
+        assert "light.turn_on" not in res.message
+        assert res.detail is not None and res.detail.get("route") == "ha" and res.detail.get("confirmed") is True
         mock_call.assert_called_once_with(
             "http://ha", "test_tok", "light", "turn_on", "light.test", {"brightness_pct": 50}
         )
@@ -41,7 +46,8 @@ async def test_hyphenated_entity_resolution(user_ctx):
          patch("services.execution.ha_client.call_service", mock_call), \
          patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("services.execution.ha_client.get_state", mock_get_state):
-        mock_get_state.return_value = {"state": "off"}
+        states = iter([{"state": "off"}, {"state": "on"}, {"state": "off"}, {"state": "on"}])
+        mock_get_state.side_effect = lambda *_a, **_k: next(states)
         mock_call.return_value = {"ok": True}
 
         # Test 1: Bare hyphenated name
@@ -59,6 +65,46 @@ async def test_hyphenated_entity_resolution(user_ctx):
         mock_call.assert_called_with(
             "http://ha", "test_tok", "light", "turn_on", "light.alex_s_lamp", None
         )
+@pytest.mark.asyncio
+async def test_a_light_that_never_changes_is_reported_as_it_is(user_ctx, monkeypatch):
+    monkeypatch.setattr(light, "CONFIRM_WITHIN_S", 0.05)
+    monkeypatch.setattr(light, "CONFIRM_POLL_S", 0.01)
+    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
+        mock_get_state.return_value = {"state": "off", "attributes": {"friendly_name": "Hall Lamp"}}
+        mock_call.return_value = {"ok": True}
+        res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.hall_lamp", action="turn_on"))
+    assert res.status == "PARTIAL"
+    assert res.message == "I asked Hall Lamp to turn on, but it still shows off."
+    assert res.detail["confirmed"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_light_that_drops_off_the_network_says_so(user_ctx, monkeypatch):
+    monkeypatch.setattr(light, "CONFIRM_WITHIN_S", 0.05)
+    monkeypatch.setattr(light, "CONFIRM_POLL_S", 0.01)
+    states = iter([{"state": "on", "attributes": {"friendly_name": "Hall Lamp"}}])
+    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
+        mock_get_state.side_effect = lambda *_a, **_k: next(states, {"state": "unavailable", "attributes": {"friendly_name": "Hall Lamp"}})
+        mock_call.return_value = {"ok": True}
+        res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.hall_lamp", action="turn_off"))
+    assert res.status == "PARTIAL"
+    assert res.message == "I asked Hall Lamp to turn off, but it is not responding."
+
+
+@pytest.mark.asyncio
+async def test_a_light_whose_state_cannot_be_read_gets_plain_words(user_ctx):
+    with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
+         patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
+        mock_get_state.return_value = None
+        mock_call.return_value = {"ok": True}
+        res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.hall_lamp", action="turn_on"))
+    assert res.status == "SUCCESS"
+    assert res.message == "Turned on hall lamp."
+    assert mock_get_state.await_count == 1  # nothing to watch
+
+
 @pytest.mark.asyncio
 async def test_security_status_check(user_ctx):
     with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
