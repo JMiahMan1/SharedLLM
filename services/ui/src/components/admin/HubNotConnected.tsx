@@ -14,9 +14,12 @@ export default function HubNotConnected({ title }: { title: string }) {
         {title}
       </h3>
       <p className="mt-2 text-sm text-slate-400">
-        Not connected: this needs a home hub (HomeHub or Home Assistant).{' '}
-        <Link to="/identity" className="text-sky-300 underline underline-offset-2">Connect one in Accounts &amp; Integrations</Link>.
+        Not connected: this needs a home hub (HomeHub or Home Assistant).
       </p>
+      {/* On its own line, so it is a full-size tap target on a phone. */}
+      <Link to="/identity" className="mt-1 inline-flex min-h-11 items-center text-sm text-sky-300 underline underline-offset-2">
+        Connect one in Accounts &amp; Integrations
+      </Link>
     </section>
   );
 }

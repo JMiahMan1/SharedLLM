@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Cast, Check, ChevronDown, Headphones, Speaker, Tv } from 'lucide-react';
 import Modal from '../../../components/ui/Modal';
+import { useIntegrations } from '../../../hooks/useIntegrations';
 import { useMediaStore } from '../store/mediaStore';
 import { shownPlayer } from '../store/selectors';
 import { useMediaScreen } from '../pages/MediaScreen';
@@ -17,6 +18,7 @@ export function OutputPicker() {
   const target = useMediaStore((s) => s.activeOutputId);
   const players = useMediaStore((s) => s.players);
   const [open, setOpen] = useState(false);
+  const { anyHub } = useIntegrations();
   const current = target ? devices.find((d) => d.id === target)?.name ?? players[target]?.name ?? 'a speaker' : 'This device';
   const online = devices.filter((d) => d.online).length;
 
@@ -80,7 +82,11 @@ export function OutputPicker() {
             d.detail === 'TV' ? <Tv size={18} aria-hidden /> : <Speaker size={18} aria-hidden />,
           ))}
           {devices.length === 0 ? (
-            <li className={`px-3 py-4 text-sm ${muted}`}>No speakers found. The home hub's players appear here once they are set up.</li>
+            <li className={`px-3 py-4 text-sm ${muted}`}>
+              {anyHub
+                ? "No speakers found. The home hub's players appear here once they are set up."
+                : 'No speakers found. Music Assistant speakers appear here once they are set up.'}
+            </li>
           ) : null}
         </ul>
       </Modal>

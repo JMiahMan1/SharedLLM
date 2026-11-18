@@ -4,6 +4,7 @@ import type { IWidgetProps } from '../../types/widget';
 import { useWeather } from '../../hooks/useWeather';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { useIntegrations } from '../../hooks/useIntegrations';
 import { dayLabel, hourLabel, round, type WeatherHeadsUp } from '../../lib/weather';
 import { WeatherGlyph } from './WeatherGlyph';
 
@@ -75,6 +76,8 @@ function EnergyLine() {
 export default function WeatherWidget({ settingsButton, userSettings }: IWidgetProps) {
   const size = userSettings.size;
   const isAdmin = useAuth().role === 'admin';
+  // Energy use is read from the home hub's meters: with no hub there is none to show.
+  const { anyHub } = useIntegrations();
   const { data, isLoading, error } = useWeather();
 
   const header = (
@@ -201,7 +204,7 @@ export default function WeatherWidget({ settingsButton, userSettings }: IWidgetP
             </ul>
           )}
 
-          {size === 'tall' && isAdmin && <EnergyLine />}
+          {size === 'tall' && isAdmin && anyHub && <EnergyLine />}
         </div>
       )}
 

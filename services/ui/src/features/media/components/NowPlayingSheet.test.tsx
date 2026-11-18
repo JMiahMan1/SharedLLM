@@ -2,13 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import NowPlayingSheet from './NowPlayingSheet';
 import { resetMediaTokenForTests } from '../../../lib/mediaToken';
 import { MediaPlayerContext } from '../../../context/webPlayerContext';
 import type { SharedPlayer } from '../../../context/webPlayerContext';
 
 vi.mock('../../../services/api', () => ({
-  api: { setMediaFavorite: vi.fn().mockResolvedValue({ status: 'ok', favorite: true }) },
+  api: {
+    setMediaFavorite: vi.fn().mockResolvedValue({ status: 'ok', favorite: true }),
+    getIntegrationsStatus: vi.fn().mockResolvedValue({ homehub: { enabled: true }, home_assistant: { enabled: true } }),
+  },
   apiClient: {
     post: vi.fn().mockResolvedValue({
       data: { token: 'mt-1', user: 'alice', expires_at: Math.floor(Date.now() / 1000) + 3600 },
@@ -50,15 +54,17 @@ function renderSheet(
   props: Partial<{ open: boolean; onClose: () => void; onOpenQueue: () => void }> = {},
 ) {
   return render(
-    <MemoryRouter>
-      <MediaPlayerContext.Provider value={value}>
-        <NowPlayingSheet
-          open={props.open ?? true}
-          onClose={props.onClose ?? (() => {})}
-          onOpenQueue={props.onOpenQueue}
-        />
-      </MediaPlayerContext.Provider>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <MediaPlayerContext.Provider value={value}>
+          <NowPlayingSheet
+            open={props.open ?? true}
+            onClose={props.onClose ?? (() => {})}
+            onOpenQueue={props.onOpenQueue}
+          />
+        </MediaPlayerContext.Provider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
