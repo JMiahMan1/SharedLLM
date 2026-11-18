@@ -3442,6 +3442,29 @@ def _voice_context_from(request: Request, body: dict) -> dict | None:
     return {k: v for k, v in out.items() if v}
 
 
+_STATE_QUESTION = re.compile(r"^\s*(is|are|was|were|did|do|does|has|have)\b", re.IGNORECASE)
+
+
+def asks_about_state(query: str) -> bool:
+    """A yes/no question about how something is ("Is the hall lamp on?"), not a command.
+
+    "Can you turn on the lamp" and "please turn it off" are commands.
+    """
+    return bool(_STATE_QUESTION.match(query or ""))
+
+
+def describe_state(entity: dict) -> str:
+    """A device's state in a sentence, from a hub state record."""
+    attrs = entity.get("attributes") or {}
+    name = attrs.get("friendly_name") or str(entity.get("entity_id", "")).split(".", 1)[-1].replace("_", " ")
+    state = str(entity.get("state") or "unknown")
+    if state in ("unavailable", "unknown"):
+        return f"{name} isn't responding right now."
+    if state == "on" and isinstance(attrs.get("brightness"), (int, float)):
+        return f"{name} is on at {round(attrs['brightness'] * 100 / 255)}%."
+    return f"{name} is {state}."
+
+
 def _voice_context_note(ctx: dict) -> str:
     """What the model is told about where a spoken request came from."""
     lines = []
@@ -3761,6 +3784,21 @@ async def chat_handler(request: Request, background_tasks=None):
         else:
             log.info(f"[FastPath] MATCHED: intent='{intent}' confidence={confidence} entity='{resolved_entity}'")
 
+    # "Is the hall lamp on?" reads like "turn on the hall lamp" to the classifier. A
+    # question about a light is answered with its state; it never switches the light.
+    if is_fast_path and intent in ("turn_on", "turn_off") and resolved_entity and asks_about_state(query):
+        entity = next((e for e in media_entities or [] if e.get("entity_id") == resolved_entity), None)
+        if entity is None:
+            log.info(f"[FastPath] state question about {resolved_entity} with no state at hand; the model answers")
+            is_fast_path = False
+        else:
+            ans = describe_state(entity)
+            log.info(f"[FastPath] state question answered for {resolved_entity}: {entity.get('state')}")
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", ans)
+            if is_openai:
+                return _make_openai_response(ans, selected_model, "device_state")
+            return _make_ollama_response(ans, selected_model, "device_state")
 
     if is_fast_path:
         # Execute immediate tool for simple intents

@@ -186,3 +186,37 @@ async def test_the_voice_note_reaches_the_question_and_raven_keeps_it_in_its_ins
         "turn_note": "[Voice context]\nIn the den.",
     })
     assert seen["single"] == ("PERSONA", "[Voice context]\nIn the den.")
+
+
+def test_a_spoken_turn_reads_only_its_last_exchanges_cut_short():
+    long_answer = "Owls " * 300
+    history = [{"role": "user", "content": f"q{i}"} if i % 2 == 0 else {"role": "assistant", "content": long_answer}
+               for i in range(10)]
+    kept = orchestrator._voice_history(history)
+    assert [m["role"] for m in kept] == ["user", "assistant", "user", "assistant"]
+    assert kept[0]["content"] == "q6" and kept[2]["content"] == "q8"
+    assert len(kept[1]["content"]) <= orchestrator.VOICE_HISTORY_CHARS + 3 and kept[1]["content"].endswith("...")
+    assert orchestrator._voice_history([]) == []
+
+
+async def test_a_voice_turn_gets_the_short_history_and_a_typed_one_the_full_one(monkeypatch):
+    seen = {}
+    history = [{"role": "user", "content": f"m{i}"} for i in range(10)]
+
+    async def fake_fetch(*a, **k):
+        return ""
+
+    async def fake_inference(*args, **kwargs):
+        seen["history"] = args[4]
+        return "answer"
+
+    monkeypatch.setattr(orchestrator, "_fetch_rag_context", fake_fetch)
+    monkeypatch.setattr(orchestrator, "_single_turn_inference", fake_inference)
+    monkeypatch.setattr(orchestrator, "get_history", AsyncMock(return_value=history))
+    await orchestrator.process_full_orchestration({
+        "query": "lights on", "creds": {"user": "u"}, "model": "m",
+        "voice_context": {"satellite": "assist_satellite.den"},
+    })
+    assert [m["content"] for m in seen["history"]] == ["m6", "m7", "m8", "m9"]
+    await orchestrator.process_full_orchestration({"query": "hello", "creds": {"user": "u"}, "model": "m"})
+    assert len(seen["history"]) == 10
