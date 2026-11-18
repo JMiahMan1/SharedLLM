@@ -85,3 +85,20 @@ def test_a_state_question_reaches_the_same_device(engine):
 def test_the_player_named_in_a_media_command_is_read_from_its_words(engine):
     assert engine.extract_target("stop the music on the den tv", "media_transport") == "the den tv"
     assert engine.extract_target("can you skip this track", "media_transport") is None
+
+
+@pytest.mark.parametrize("query, target", [
+    ("Is the den lamp on?", "den lamp"),
+    ("is the Den Lamp Ons.", "den lamp"),  # "on?" as speech to text sometimes hears it
+    ("Are the patio lights off", "patio lights"),
+    ("Is my reading lamp still on right now?", "reading lamp"),
+    ("Is it going to rain tomorrow?", None),
+    ("Is the garage door open?", None),
+    ("Turn on the den lamp", None),
+])
+def test_the_device_a_state_question_names(engine, query, target):
+    assert engine.state_question_target(query) == target
+
+
+def test_a_misheard_state_question_still_finds_its_device(engine):
+    assert engine.resolve_device(engine.state_question_target("is the Den Lamp Ons.")) == "light.den_lamp"

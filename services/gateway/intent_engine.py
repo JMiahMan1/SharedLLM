@@ -300,6 +300,24 @@ class IntentEngine:
 
         return target or None
 
+    #: The state word that ends a yes/no question about a device ("... on?"), as heard:
+    #: speech to text sometimes adds an s ("Is the hall lamp ons").
+    _STATE_WORDS = r"(?:on|ons|off|offs|still on|still off|turned on|turned off|running|playing)"
+
+    def state_question_target(self, query: str) -> str | None:
+        """The device a yes/no state question names: "Is the hall lamp on?" -> "hall lamp".
+
+        None when the question does not end in a device state word, so "is it going
+        to rain" names no device.
+        """
+        q = (query or "").lower().strip().strip("?.!").strip()
+        match = re.match(
+            r"^(?:is|are|was|were)\s+(?:the\s+|my\s+|our\s+)?(.+?)\s+" + self._STATE_WORDS
+            + r"(?:\s+(?:right now|now|currently))?$",
+            q,
+        )
+        return match.group(1).strip() if match else None
+
     def _fuzzy_entity(self, target: str) -> str | None:
         # Fuzzy Matching against cache
         friendly_names = list(self.entity_cache.keys())
