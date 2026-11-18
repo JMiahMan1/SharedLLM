@@ -101,7 +101,7 @@ async def test_a_light_whose_state_cannot_be_read_gets_plain_words(user_ctx):
         mock_call.return_value = {"ok": True}
         res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.example_lamp", action="turn_on"))
     assert res.status == "SUCCESS"
-    assert res.message == "Turned on example lamp."
+    assert res.message == "Turned on Example Lamp."  # named from the id as people write it
     assert mock_get_state.await_count == 1  # nothing to watch
 
 
