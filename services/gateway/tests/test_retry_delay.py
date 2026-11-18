@@ -2,8 +2,8 @@
 import aiohttp
 import pytest
 
-from services.gateway import main as gateway_main
-from services.gateway.main import _retry_delay
+from services.gateway import http_client
+from services.gateway.http_client import _retry_delay
 
 
 def test_the_delay_grows_with_the_attempt_and_is_jittered():
@@ -24,10 +24,10 @@ async def test_a_retry_sleeps_a_jittered_backoff(monkeypatch):
     async def flaky():
         raise aiohttp.ClientError("boom")
 
-    monkeypatch.setattr(gateway_main.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(http_client.asyncio, "sleep", fake_sleep)
 
     with pytest.raises(aiohttp.ClientError):
-        await gateway_main.retry_http_request(
+        await http_client.retry_http_request(
             flaky, "test", max_retries=1, base_delay=0.2, dns_recovery=False
         )
 
