@@ -16,8 +16,8 @@ AUTOMATION_SVC_URL = (
     os.getenv("AUTOMATION_SVC_URL") or _net_url("AUTOMATION", "http://automation:11437")
 ).rstrip("/")
 
-#: The device hub: the Common Sense Media app check is its integration (GET /hub/integrations/{domain}).
-HOMEHUB_URL = os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123").rstrip("/")
+# The device hub (the Common Sense Media app check is its integration) is
+# services.config.HOMEHUB_URL, read through services.common.hub_login.homehub_url().
 
 GEO_SVC = (GEO_SVC_URL or "").rstrip("/")
 IDENTITY_SVC = (IDENTITY_SVC_URL or "").rstrip("/")

@@ -4,7 +4,6 @@ These are unit tests: they mock the Home Assistant state fetch so no live
 HA connection is required. They validate endpoint shape and the static
 MapLibre client being served at "/".
 """
-from unittest.mock import patch
 
 import pytest
 
@@ -47,10 +46,12 @@ def client(monkeypatch):
     async def fake_states():
         return sample
 
-    with patch.object(geo, "_ha_get_states", fake_states):
-        from fastapi.testclient import TestClient
+    # monkeypatch, not patch.object: a test that patches _ha_get_states again through monkeypatch
+    # would otherwise have its fake restored after this fixture's teardown, and leak into later tests.
+    monkeypatch.setattr(geo, "_ha_get_states", fake_states)
+    from fastapi.testclient import TestClient
 
-        yield TestClient(geo.app, headers={"X-Internal-Secret": INTERNAL_SECRET})
+    yield TestClient(geo.app, headers={"X-Internal-Secret": INTERNAL_SECRET})
 
 
 def test_health_reports_configured(client):

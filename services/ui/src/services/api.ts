@@ -925,6 +925,17 @@ apiClient.interceptors.response.use(
   },
 );
 
+/** One optional integration's switch: off means Jarvis never contacts it. */
+export interface IntegrationSwitch {
+  enabled: boolean;
+}
+
+/** ``GET /api/integrations/status``: each optional home integration and whether it is on. */
+export interface IntegrationsStatus {
+  homehub: IntegrationSwitch;
+  home_assistant: IntegrationSwitch;
+}
+
 /** Most trips a single request returns (geo caps it too). */
 export const TRIPS_FETCH_LIMIT = 500;
 
@@ -5451,6 +5462,12 @@ export const api = {
       params: { start, end },
       timeout: 60_000,
     });
+    return resp.data;
+  },
+
+  /** Which optional home integrations are on (HomeHub, Home Assistant); read once at the gateway's startup. */
+  async getIntegrationsStatus(): Promise<IntegrationsStatus> {
+    const resp = await apiClient.get('/api/integrations/status');
     return resp.data;
   },
 

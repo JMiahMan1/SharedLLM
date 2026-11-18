@@ -169,6 +169,20 @@ def _parse_env_users() -> dict:
     return users
 
 
+def ha_integration_enabled(session: Session, env_url: str | None) -> bool:
+    """Is the Home Assistant integration on?
+
+    The ``ha_url`` global setting decides once someone has saved it (blank =
+    off); until then the HA_URL from .env does. This is the same rule
+    ``services.config`` applies at every other service's startup, so identity
+    and the services agree on whether HA is set up.
+    """
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == "ha_url")).first()
+    if row is not None:
+        return bool((row.value or "").strip())
+    return bool((env_url or "").strip())
+
+
 def _is_empty_setting(value: str | None) -> bool:
     return not (value or "").strip() or (value or "").strip() in ("{}", "[]")
 
@@ -273,6 +287,14 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             "mass_url": "MA_URL",
             "huggingface_token_enc": "HF_TOKEN",
         }
+        # The default user's HA login is only refilled while the Home Assistant
+        # integration is on. With HA_URL blank (or the ha_url setting saved
+        # blank) HA is off: refilling it here would quietly turn it back on.
+        # What is already stored is left alone; it is simply not used.
+        _ha_env_url = _env_vals["HA_URL"] if "HA_URL" in _env_vals else os.getenv("HA_URL")
+        if not ha_integration_enabled(session, _ha_env_url):
+            _secret_map = {k: v for k, v in _secret_map.items() if k not in ("ha_url", "ha_token_enc")}
+            log.info("[seed] Home Assistant integration is off; the default user's HA login is not refilled")
         _reconciled = False
         for _field, _envkey in _secret_map.items():
             _val = _env_vals.get(_envkey)

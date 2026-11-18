@@ -3,15 +3,14 @@ them, managing what is set up (reconfigure, rename, move, disable, reload, sync,
 device list built from the hub's registry, and the hub's capability index.
 
 Admins only. Everything is homehub's discovery API (``services/homehub/discovery_api.py``),
-reached with the stack's internal secret at ``HOMEHUB_URL`` (default the hub on
-the Docker host, ``http://host.docker.internal:8123``). The secret never leaves
+reached with the stack's internal secret at ``HOMEHUB_URL`` (no default: blank turns the
+HomeHub integration off and these pages answer 503). The secret never leaves
 the server; the hub's answers (including "needs input" and "not supported yet")
 are passed through with their status.
 """
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Any
 
@@ -25,7 +24,16 @@ log = logging.getLogger("gateway.discovery")
 
 router = APIRouter(prefix="/api/homehub")
 
-HOMEHUB_URL = os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123").rstrip("/")
+
+def _homehub_base() -> str:
+    """HOMEHUB_URL (resolved once at startup); 503 while the HomeHub integration is off."""
+    from services.common.hub_login import NO_HOMEHUB_MESSAGE, homehub_url
+
+    base = homehub_url()
+    if not base:
+        raise HTTPException(status_code=503, detail=NO_HOMEHUB_MESSAGE)
+    return base
+
 _TIMEOUT = aiohttp.ClientTimeout(total=30, connect=5)
 #: A scan listens for replies for several seconds; commissioning a Matter device takes minutes.
 _SCAN_TIMEOUT = aiohttp.ClientTimeout(total=60, connect=5)
@@ -52,7 +60,7 @@ async def _hub(method: str, path: str, *, params: Any = None, json: Any = None,
     headers = {"Authorization": f"Bearer {INTERNAL_SECRET}"}
     try:
         async with shared_http_client() as client, client.request(
-            method, f"{HOMEHUB_URL}{path}", params=params, json=json, headers=headers, timeout=timeout
+            method, f"{_homehub_base()}{path}", params=params, json=json, headers=headers, timeout=timeout
         ) as resp:
             try:
                 body = await resp.json(content_type=None)

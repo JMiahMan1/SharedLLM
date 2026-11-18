@@ -92,7 +92,9 @@ async def test_the_hub_is_asked_with_the_internal_secret(monkeypatch):
             seen.update(url=url, headers=headers)
             return Resp()
 
-    monkeypatch.setattr(app_catalog, "HOMEHUB_URL", "http://hub.invalid:8123")
+    from services import config
+
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.invalid:8123")
     monkeypatch.setattr(app_catalog, "INTERNAL_SECRET", "made-up-internal-secret")
     out = await app_catalog.hub_integration(Session(), "common_sense_media")
     assert out["configured"] is True

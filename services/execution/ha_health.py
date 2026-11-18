@@ -178,21 +178,43 @@ def _spawn(coro) -> None:
     task.add_done_callback(_tasks.discard)
 
 
+def integration_for(ha_url: str) -> str | None:
+    """Which switched-on integration answers at this host: "HomeHub", "Home Assistant" or None.
+
+    The same HA-style API is spoken by both, so a down host is named after the
+    integration that is configured at it. A host that belongs to no integration
+    that is on (Home Assistant switched off, a stale stored URL) gets no notice:
+    admins never hear "Home Assistant is down" for something they turned off.
+    """
+    from services import config
+
+    key = _key(ha_url)
+    if config.homehub_enabled() and _key(config.HOMEHUB_URL) == key:
+        return "HomeHub"
+    if config.home_assistant_enabled() and _key(str(config.HA_URL)) == key:
+        return "Home Assistant"
+    return None
+
+
 async def _send_notice(ha_url: str, *, recovered: bool, reason: str = "") -> None:
+    name = integration_for(ha_url)
+    if name is None:
+        log.info(f"[ha_health] {_key(ha_url)} is not a configured integration; no admin notice")
+        return
     with contextlib.suppress(Exception):
         from services.common import notify
 
         host = _key(ha_url)
         if recovered:
             title, body, priority = (
-                "Home Assistant is back",
-                f"Home Assistant at {host} is answering again; Jarvis is using it normally.",
+                f"{name} is back",
+                f"{name} at {host} is answering again; Jarvis is using it normally.",
                 2,
             )
         else:
             title, body, priority = (
-                "Home Assistant is down",
-                f"Home Assistant at {host} is not answering ({reason}). Jarvis is controlling "
+                f"{name} is down",
+                f"{name} at {host} is not answering ({reason}). Jarvis is controlling "
                 "devices it can reach directly; the rest will fail until it is back.",
                 3,
             )

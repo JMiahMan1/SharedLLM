@@ -17,7 +17,6 @@ which enforces the same permissions.
 from __future__ import annotations
 
 import logging
-import os
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -33,7 +32,16 @@ log = logging.getLogger("gateway.dashboards")
 
 router = APIRouter(prefix="/api/dashboard")
 
-HOMEHUB_URL = os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123").rstrip("/")
+
+def _homehub_base() -> str:
+    """HOMEHUB_URL (resolved once at startup); 503 while the HomeHub integration is off."""
+    from services.common.hub_login import NO_HOMEHUB_MESSAGE, homehub_url
+
+    base = homehub_url()
+    if not base:
+        raise HTTPException(status_code=503, detail=NO_HOMEHUB_MESSAGE)
+    return base
+
 _TIMEOUT = aiohttp.ClientTimeout(total=45, connect=5)
 #: Importing years of HA statistics takes a while.
 _IMPORT_TIMEOUT = aiohttp.ClientTimeout(total=900, connect=5)
@@ -77,13 +85,15 @@ def _hub_login(creds: dict[str, Any], personal: bool) -> tuple[str, str]:
     if base and token:
         return base, token
     if not personal:
-        from services.config import HA_URL
-        from services.gateway.config import INTERNAL_SECRET
+        # The hub's own login, which only ever goes to HOMEHUB_URL (never to HA_URL: a real Home
+        # Assistant must not be handed the stack's secret). None while HomeHub is off.
+        from services.common.hub_login import NO_HUB_MESSAGE, stack_login
 
-        if HA_URL and INTERNAL_SECRET:
-            return str(HA_URL).rstrip("/"), INTERNAL_SECRET
-    raise HTTPException(status_code=503, detail="No home hub is set up (HA_URL is not configured)"
-                        if not personal else "Home Assistant is not set up for your account")
+        login = stack_login()
+        if login is not None:
+            return login
+        raise HTTPException(status_code=503, detail=NO_HUB_MESSAGE)
+    raise HTTPException(status_code=503, detail="Home Assistant is not set up for your account")
 
 
 async def _hub_get(creds: dict[str, Any], path: str, params: dict[str, str] | None = None, *,
@@ -117,7 +127,7 @@ async def _hub_admin(method: str, path: str, *, json: Any = None,
 
     try:
         async with shared_http_client() as client, client.request(
-            method, f"{HOMEHUB_URL}{path}", json=json, headers={"Authorization": f"Bearer {INTERNAL_SECRET}"},
+            method, f"{_homehub_base()}{path}", json=json, headers={"Authorization": f"Bearer {INTERNAL_SECRET}"},
             timeout=timeout,
         ) as resp:
             try:

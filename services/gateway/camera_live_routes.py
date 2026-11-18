@@ -24,7 +24,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 from typing import Any
 
 import aiohttp
@@ -38,7 +37,16 @@ log = logging.getLogger("gateway.cameras.live")
 
 router = APIRouter()
 
-HOMEHUB_URL = os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123").rstrip("/")
+
+def _homehub_base() -> str:
+    """HOMEHUB_URL (resolved once at startup); 503 while the HomeHub integration is off."""
+    from services.common.hub_login import NO_HOMEHUB_MESSAGE, homehub_url
+
+    base = homehub_url()
+    if not base:
+        raise HTTPException(status_code=503, detail=NO_HOMEHUB_MESSAGE)
+    return base
+
 QUALITIES = ("sub", "main")
 MAX_OFFER_BYTES = 64 * 1024
 #: The hub answers once the camera streams; a sleeping battery camera takes about 16 s to wake.
@@ -196,7 +204,7 @@ async def _admin_hub(method: str, path: str, json_body: Any = None) -> Any:
 
     try:
         async with shared_http_client() as client, client.request(
-            method, f"{HOMEHUB_URL}{path}", json=json_body, headers={"Authorization": f"Bearer {INTERNAL_SECRET}"},
+            method, f"{_homehub_base()}{path}", json=json_body, headers={"Authorization": f"Bearer {INTERNAL_SECRET}"},
             timeout=_ADMIN_TIMEOUT,
         ) as resp:
             status = resp.status

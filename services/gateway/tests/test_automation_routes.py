@@ -9,6 +9,7 @@ from conftest_media import DEFAULT_IDENTITY, TEST_HA_TOKEN, TEST_HA_URL
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from services import config
 from services.execution.entity_access import EntityPermissions
 from services.gateway import automation_routes
 from services.gateway import main as gateway_main
@@ -283,25 +284,30 @@ async def test_the_hub_is_reached_with_the_right_credentials(monkeypatch):
     monkeypatch.setattr(gateway_main, "shared_http_client", lambda: Shared())
     monkeypatch.setattr(automation_routes, "INTERNAL_SECRET", "made-up-secret")
     await automation_routes._hub("PUT", "/api/homehub/climate/settings", json={})
-    assert sent[-1]["url"] == f"{automation_routes.HOMEHUB_URL}/api/homehub/climate/settings"
+    assert sent[-1]["url"] == f"{config.HOMEHUB_URL}/api/homehub/climate/settings"
     assert sent[-1]["headers"] == {"Authorization": "Bearer made-up-secret"}
     creds = {"ha_url": "http://hub.example:8123/", "ha_token": "made-up-token"}
     await automation_routes._hub("GET", "/api/homehub/automations", creds=creds)
     assert sent[-1]["url"] == "http://hub.example:8123/api/homehub/automations"
     assert sent[-1]["headers"] == {"Authorization": "Bearer made-up-token"}
-    # No HA login of their own: the hub's own login (the routes filter or check first).
-    import services.config as config
-    from services.gateway import config as gw_config
-
-    monkeypatch.setattr(config, "HA_URL", "http://hub.example:8123")
-    monkeypatch.setattr(gw_config, "INTERNAL_SECRET", "made-up-secret")
+    # No HA login of their own: the hub's own login (the routes filter or check first), which
+    # only ever goes to HOMEHUB_URL, never to HA_URL.
+    monkeypatch.setattr(config, "HA_URL", "http://real-ha.example:8123")
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.example:8123")
+    monkeypatch.setattr(config, "INTERNAL_SECRET", "made-up-secret")
     await automation_routes._hub("GET", "/api/homehub/automations", creds={"ha_url": "", "ha_token": ""})
+    assert sent[-1]["url"] == "http://hub.example:8123/api/homehub/automations"
     assert sent[-1]["headers"] == {"Authorization": "Bearer made-up-secret"}
     # No hub at all: a clear 503.
     monkeypatch.setattr(config, "HA_URL", None)
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
     with pytest.raises(HTTPException) as err:
         await automation_routes._hub("GET", "/x", creds={"ha_url": "", "ha_token": ""})
-    assert err.value.status_code == 503 and "HA_URL" in err.value.detail
+    assert err.value.status_code == 503 and "No home hub is set up" in err.value.detail
+    # The admin path (the internal secret) also says 503 rather than calling a default address.
+    with pytest.raises(HTTPException) as err:
+        await automation_routes._hub("PUT", "/api/homehub/climate/settings", json={})
+    assert err.value.status_code == 503
 
 
 def test_a_blueprint_path_cannot_climb_out(client, hub, perms):

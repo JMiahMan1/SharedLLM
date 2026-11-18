@@ -2793,8 +2793,12 @@ async def fetch_ha_entities(creds: dict) -> list:
     and nothing is auto-assigned: that grant was only ever made from a
     person's own login, and the hub's login would hand them the whole house.
     """
+    from services import config
     from services.gateway.hub_access import discovery_params, visible_entities
 
+    if not config.any_home_hub():
+        # Neither HomeHub nor Home Assistant is set up: nothing to read and nothing to sync to RAG.
+        return []
     own_login = bool(discovery_params(creds))
     try:
         url = f"{EXECUTION_SVC}/discovery/entities"
@@ -2918,6 +2922,7 @@ async def get_entities(request: Request):
     On the hub's login (hub_access.py) a non-admin sees only what they may view.
     With no hub configured execution answers 503, said as a FAILURE below.
     """
+    from services.common.hub_login import NO_HUB_MESSAGE
     from services.gateway.hub_access import discovery_params, visible_entities
 
     creds = await _resolve_identity_from_request(request)
@@ -2932,8 +2937,7 @@ async def get_entities(request: Request):
         )
         if resp.status == 503:
             return {"entities": [], "status": "FAILURE",
-                    "message": (await resp.json(content_type=None) or {}).get("detail")
-                    or "No home hub is set up (HA_URL is not configured)."}
+                    "message": (await resp.json(content_type=None) or {}).get("detail") or NO_HUB_MESSAGE}
         if resp.status != 200:
             # An empty list here made a Home Assistant outage look like a house
             # with no entities, in the dropdown an admin uses to add an alert or
@@ -4722,6 +4726,22 @@ async def proxy_update_setting(key: str, request: Request):
             from services.gateway.cache import invalidate_settings
             invalidate_settings()
         return await _proxy_json_response(resp)
+
+
+# --- Optional integrations (docs/CONFIG.md, "Integrations") --------------------------
+
+
+@app.get("/api/integrations/status")
+async def integrations_status(request: Request):
+    """Which optional home integrations are on, as resolved at the gateway's startup.
+
+    ``homehub_url`` / ``ha_url`` (Identity settings, else HOMEHUB_URL / HA_URL in .env);
+    blank is off. No addresses are returned: the UI only needs the switches.
+    """
+    await _require_identity_from_request(request)
+    from services import config
+
+    return {name: {"enabled": on} for name, on in config.integrations().items()}
 
 
 # --- Household time zone (docs/CONFIG.md, "Time zone") --------------------------

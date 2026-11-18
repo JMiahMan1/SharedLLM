@@ -72,7 +72,6 @@ from services.telemetry.config import (
     COMMON_SENSE_BACKOFF_MAX_S,
     COMMON_SENSE_MIN_INTERVAL_S,
     COMMON_SENSE_TTL_DAYS,
-    HOMEHUB_URL,
     IDENTITY_SVC,
     INTERNAL_SECRET,
     JARVIS_ANDROID_PACKAGE,
@@ -273,8 +272,13 @@ async def _interval_ok(rc, key: str, interval: float) -> bool:
 async def hub_integration(session, domain: str) -> dict[str, Any]:
     """``GET /hub/integrations/{domain}`` with the internal secret: ``{configured, data}``. Raises when
     the hub does not answer 200."""
+    from services.common.hub_login import NO_HOMEHUB_MESSAGE, homehub_url
+
+    base = homehub_url()
+    if not base:
+        raise RuntimeError(NO_HOMEHUB_MESSAGE)
     async with session.get(
-        f"{HOMEHUB_URL}/hub/integrations/{domain}", headers={"Authorization": f"Bearer {INTERNAL_SECRET}"},
+        f"{base}/hub/integrations/{domain}", headers={"Authorization": f"Bearer {INTERNAL_SECRET}"},
         timeout=aiohttp.ClientTimeout(total=HUB_TIMEOUT_S),
     ) as resp:
         if resp.status != 200:
@@ -291,6 +295,11 @@ async def check_settings(session) -> dict[str, Any]:
     global _settings_cache, _hub_down
     if _settings_cache and _settings_cache[0] > time.monotonic():
         return _settings_cache[1]
+    from services.common.hub_login import homehub_url
+
+    if not homehub_url():
+        # The HomeHub integration is off: Common Sense is simply not set up, and nobody is asked.
+        return {"common_sense": False}
     try:
         csm = await hub_integration(session, CSM_DOMAIN)
     except Exception as exc:

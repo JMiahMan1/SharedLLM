@@ -75,7 +75,7 @@ async def test_without_any_hub_the_check_fails_fast(monkeypatch):
     monkeypatch.setattr(config, "HA_URL", None)
 
     monkeypatch.setattr(config, "HOMEHUB_URL", "")
-    with pytest.raises(EntityNotExposed, match="HA_URL"):
+    with pytest.raises(EntityNotExposed, match="No home hub is set up"):
         await voice_exposure.require_exposed(_Ctx(via="assistant", ha_url=None), "light.den")
 
 

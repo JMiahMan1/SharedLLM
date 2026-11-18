@@ -144,7 +144,7 @@ async def test_without_a_login_of_their_own_the_hubs_login_reads_the_lists(hub, 
     monkeypatch.setattr(config, "HA_URL", None)
     monkeypatch.setattr(config, "HOMEHUB_URL", "")
     res = await run(action="lists", ctx={"ha_url": None, "ha_token": None})
-    assert res.status == "FAILURE" and "HA_URL" in res.message
+    assert res.status == "FAILURE" and "No home hub is set up" in res.message
 
 
 async def test_lists_names_every_list_the_caller_may_use(hub):

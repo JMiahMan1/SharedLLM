@@ -42,7 +42,8 @@ Names: `IDENTITY`, `EXECUTION`, `RAG`, `STORAGE`, `LOGGING`,
 | `llm_local_url` | `LLM_URL` | Local inference server |
 | `{mode}_execution_svc_url`, `{mode}_rag_svc_url`, `{mode}_storage_svc_url`, `{mode}_logging_svc_url`, `{mode}_workspace_runtime_svc_url`, `{mode}_bible_svc_url`, `{mode}_searxng_url` | `*_SVC_URL`, `SEARXNG_URL` | Network-scoped URLs |
 | `geo_svc_url`, `control_plane_url` | `GEO_SVC_URL`, `CONTROL_PLANE_URL` | |
-| `ha_url`, `ha_token` | `HA_URL`, `HA_TOKEN` | Home Assistant |
+| `ha_url`, `ha_token` | `HA_URL`, `HA_TOKEN` | Home Assistant (optional integration; blank = off) |
+| `homehub_url` | `HOMEHUB_URL` | HomeHub (optional integration; blank = off, no default) |
 | `nextcloud_url`, `nextcloud_user`, `nextcloud_pass` | `NEXTCLOUD_*` | System Nextcloud account |
 | `git_url`, `git_user`, `git_token` | `GIT_*` | System git identity |
 | `audiobookshelf_url`, `audiobookshelf_user`, `audiobookshelf_pass` | `AUDIOBOOKSHELF_*` | |
@@ -80,6 +81,29 @@ secrets shared with the ntfy container:
 
 **Not here:** Music Assistant and per-service logins are per-user credentials
 in Identity, with admin grants for sharing; see `docs/PER_USER_CREDENTIALS.md`.
+
+## Integrations
+
+HomeHub and Home Assistant are both optional, and neither is required. Each
+has one switch, its address, resolved once at each service's startup:
+
+| Integration | Setting (wins) | `.env` | Off when |
+|---|---|---|---|
+| HomeHub | `homehub_url` | `HOMEHUB_URL` | blank (there is no default address) |
+| Home Assistant | `ha_url` (with `ha_token`) | `HA_URL` (with `HA_TOKEN`) | blank |
+
+A setting saved blank turns its integration off even when `.env` names one
+(other settings ignore a blank value and keep the `.env` one). Services read
+the switches from `services.config.integrations()`; the UI reads them from
+`GET /api/integrations/status` (`{"homehub": {"enabled": bool}, "home_assistant":
+{"enabled": bool}}`). A change needs the services restarted.
+
+An integration that is off is never contacted: no requests, no retries, no
+"is down" admin notices. With HA off, identity stops refilling the household
+account's HA login from `.env` and no longer hands that stored login out as the
+stack's; callers use HomeHub instead (`services/common/hub_login.py`). With
+neither on, the loops that need a hub (energy telemetry, home notices, entity
+sync) do not run, and device features answer "No home hub is set up".
 
 ## Time zone
 

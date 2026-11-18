@@ -318,6 +318,10 @@ async def esphome_states(entries: list[dict]) -> dict[str, dict]:
 
 
 async def home_alert_loop() -> None:
+    from services import config
+
+    if not config.any_home_hub():
+        return  # No home hub is set up (execution's lifespan said so once): nothing to watch.
     while True:
         await asyncio.sleep(INTERVAL_S)
         try:

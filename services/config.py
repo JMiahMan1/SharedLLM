@@ -101,7 +101,9 @@ SEARXNG_URL = os.getenv(f"{NETWORK_MODE.upper()}_SEARXNG_URL") or os.getenv("SEA
 HA_URL = _ha_redirect(os.getenv("HA_URL"))
 # homehub itself. The stack's own login (INTERNAL_SECRET) is only ever sent
 # here: HA_URL may point at a real Home Assistant, which must never receive it.
-HOMEHUB_URL = (os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123") or "").rstrip("/")
+# No default: blank (here and in the homehub_url setting) means the HomeHub
+# integration is off, and nothing tries to reach it. See integrations().
+HOMEHUB_URL = (os.getenv("HOMEHUB_URL") or "").strip().rstrip("/")
 #: Self-hosted OSRM for snapping trip routes to roads (services/geo/map_match.py).
 #: Unset: routes are served as raw breadcrumbs.
 OSRM_URL = os.getenv("OSRM_URL")
@@ -306,6 +308,82 @@ WORKSPACE_RUNTIME_SVC = WORKSPACE_RUNTIME_SVC_URL
 TELEMETRY_SVC = TELEMETRY_SVC_URL
 HEALTH_SVC = HEALTH_SVC_URL
 
+#: Settings whose blank value means "off", so a blank row in Identity clears the
+#: .env value instead of being ignored. Only the integration switches: most
+#: other settings are seeded blank on purpose (a blank there means "use .env"),
+#: so treating every blank row as a clear would wipe working .env values. These
+#: keys are never seeded, so a row for one only exists because someone saved it.
+_BLANK_CLEARS = frozenset({"HA_URL", "HA_TOKEN", "HOMEHUB_URL"})
+
+_INT_SETTINGS = frozenset({
+    "LOG_RETENTION_DAYS", "LOG_MAX_ENTRIES", "ARTIFACT_LOCAL_QUOTA_BYTES", "RAVEN_MAX_TOTAL_SECONDS",
+    "RAVEN_ITERATION_TIMEOUT", "RAVEN_HEARTBEAT_INTERVAL",
+    "RAVEN_HUNG_THRESHOLD", "RAVEN_ERROR_THRESHOLD", "RAVEN_CHECK_INTERVAL",
+    "DNS_POLL_INTERVAL", "WORKSPACE_RUNTIME_FILE_READ_LIMIT",
+    "WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT",
+    "ALERT_ERROR_SPIKE_THRESHOLD", "ALERT_ERROR_REPEAT_THRESHOLD",
+    "ALERT_DISK_FREE_PERCENT", "ALERT_DESKTOP_DOWN_MINUTES", "ALERT_TLS_DAYS",
+})
+
+
+def _apply_settings(settings: dict, settings_map: dict[str, str]) -> None:
+    """Write Identity's settings over the .env values, once, at startup.
+
+    A blank value is skipped (the .env value stands), except for the
+    integration switches in ``_BLANK_CLEARS``: a ``homehub_url`` or ``ha_url``
+    saved blank turns that integration off even when .env names one.
+    """
+    for setting_key, var_name in settings_map.items():
+        if setting_key not in settings:
+            continue
+        value = settings[setting_key]
+        if not (value.strip() if isinstance(value, str) else value):
+            if var_name in _BLANK_CLEARS:
+                globals()[var_name] = ""
+            continue
+        if var_name in _INT_SETTINGS:
+            value = int(float(value))
+        elif var_name == "FAST_PATH_THRESHOLD":
+            value = float(value)
+        elif var_name == "HA_URL":
+            # Like the env value: a retired HA host answers through homehub.
+            value = _ha_redirect(str(value).strip())
+        elif var_name == "HOMEHUB_URL":
+            value = str(value).strip().rstrip("/")
+        globals()[var_name] = value
+
+
+def homehub_enabled() -> bool:
+    """Is the HomeHub integration on? (HOMEHUB_URL, resolved once at startup.)"""
+    return bool(HOMEHUB_URL)
+
+
+def home_assistant_enabled() -> bool:
+    """Is the Home Assistant integration on? (HA_URL, resolved once at startup.)"""
+    return bool(HA_URL)
+
+
+def any_home_hub() -> bool:
+    """Is either home integration (HomeHub or Home Assistant) on?"""
+    return homehub_enabled() or home_assistant_enabled()
+
+
+def integrations() -> dict[str, bool]:
+    """Which optional home integrations are on: the one source of truth.
+
+    An integration that is off is never contacted: no requests, no retries,
+    no "is down" notices. Both come from this module's startup values (.env,
+    then Identity's settings), never from the environment per call.
+    """
+    return {"homehub": homehub_enabled(), "home_assistant": home_assistant_enabled()}
+
+
+def _log_integrations() -> None:
+    off = [name for name, on in integrations().items() if not on]
+    if off:
+        log.info("Integrations off (not configured, never contacted): %s", ", ".join(off))
+
+
 async def resolve_runtime_config():
     """Fetch all runtime configuration from Identity service.
 
@@ -348,6 +426,7 @@ async def resolve_runtime_config():
         "control_plane_url": "CONTROL_PLANE_URL",
         "ha_url": "HA_URL",
         "ha_token": "HA_TOKEN",
+        "homehub_url": "HOMEHUB_URL",
         "calibre_library_path": "CALIBRE_LIBRARY_PATH",
         "nextcloud_url": "NEXTCLOUD_URL",
         "nextcloud_user": "NEXTCLOUD_USER",
@@ -414,27 +493,10 @@ async def resolve_runtime_config():
 
                 settings = {s["key"]: s["value"] for s in await resp.json()}
 
-                for setting_key, var_name in settings_map.items():
-                    if settings.get(setting_key):
-                        value = settings[setting_key]
-                        # Type coercion for known numeric settings
-                        if var_name in ("LOG_RETENTION_DAYS", "LOG_MAX_ENTRIES", "ARTIFACT_LOCAL_QUOTA_BYTES", "RAVEN_MAX_TOTAL_SECONDS",
-                                        "RAVEN_ITERATION_TIMEOUT", "RAVEN_HEARTBEAT_INTERVAL",
-                                        "RAVEN_HUNG_THRESHOLD", "RAVEN_ERROR_THRESHOLD", "RAVEN_CHECK_INTERVAL",
-                                        "DNS_POLL_INTERVAL", "WORKSPACE_RUNTIME_FILE_READ_LIMIT",
-                                        "WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT",
-                                        "ALERT_ERROR_SPIKE_THRESHOLD", "ALERT_ERROR_REPEAT_THRESHOLD",
-                                        "ALERT_DISK_FREE_PERCENT", "ALERT_DESKTOP_DOWN_MINUTES", "ALERT_TLS_DAYS"):
-                            value = int(float(value))
-                        elif var_name == "FAST_PATH_THRESHOLD":
-                            value = float(value)
-                        elif var_name == "HA_URL":
-                            # Like the env value: a retired HA host answers through homehub.
-                            value = _ha_redirect(value)
-
-                        globals()[var_name] = value
+                _apply_settings(settings, settings_map)
 
                 log.info("Runtime configuration loaded from Identity service")
+                _log_integrations()
 
                 # Update shorthand aliases (set at import time, stale after runtime resolve)
                 globals()["EXECUTION_SVC"] = globals()["EXECUTION_SVC_URL"]
