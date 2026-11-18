@@ -853,7 +853,10 @@ class Hub:
         unsub = self.bus.subscribe(note, "state_changed")
         response: Any = None
         try:
-            self.bus.fire("call_service", {"domain": domain, "service": service, "service_data": data})
+            # entity_ids: the entities the call resolved to (areas, devices and labels
+            # included), so a listener need not resolve targets itself.
+            self.bus.fire("call_service", {"domain": domain, "service": service, "service_data": data,
+                                           "entity_ids": list(targets)})
             handler = self.services.get((domain, service))
             if handler is not None:
                 response = await handler(self, call)

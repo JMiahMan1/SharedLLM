@@ -938,6 +938,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # non-fatal
         log.error(f"[private-chat] could not schedule the move off Talk: {e}")
 
+    # Device commands (voice, the app, schedules, automations) count as use of the
+    # device in the RAG device index, so a device in use never ages out of it.
+    try:
+        from services.gateway import device_usage
+        _run_in_background(device_usage.run())
+    except Exception as e:  # non-fatal
+        log.warning(f"[device_usage] could not start: {e}")
+
     # Warm RAG's embedding model in the background so the FIRST Raven mission's
     # lesson injection doesn't hit RAG's ~25s cold start and silently skip lessons.
     try:

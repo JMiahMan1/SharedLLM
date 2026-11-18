@@ -349,3 +349,31 @@ def test_stored_lessons_are_taught_the_new_name(conn):
     assert "ha_entities" not in row["rule"] + row["metadata"]
     assert row["applied_count"] == 2
     assert rag_main._rename_legacy_collection_in_text() == 0
+
+
+def test_a_command_counts_as_use_for_every_users_row_of_that_hub(conn, monkeypatch):
+    monkeypatch.setattr("services.config.HOME_DEVICE_STALE_HOURS", 72)
+    for user in ("sam", "alex"):
+        _sync({"entities": [_entity("light.porch"), _entity("light.den")], "source": "homehub"}, user_id=user)
+        _age(conn, f"dev:homehub:{user}:light.porch", synced_ago=100 * 3600)
+        _age(conn, f"dev:homehub:{user}:light.den", synced_ago=100 * 3600)
+
+    result = asyncio.run(rag_main.devices_used({"source": "homehub", "entity_ids": ["light.porch"]}))
+    assert result["rows"] == 2
+
+    rag_main._sweep_stale_devices()
+    ids = _ids(conn)
+    assert {"dev:homehub:sam:light.porch", "dev:homehub:alex:light.porch"} <= ids
+    assert not {"dev:homehub:sam:light.den", "dev:homehub:alex:light.den"} & ids
+
+
+def test_a_command_reported_from_one_hub_never_marks_the_others_rows(conn):
+    _sync({"entities": [_entity("light.porch")], "source": "home_assistant"}, user_id="sam")
+    result = asyncio.run(rag_main.devices_used({"source": "homehub", "entity_ids": ["light.porch"]}))
+    assert result["rows"] == 0
+
+
+def test_a_report_with_an_unknown_hub_or_bad_ids_is_refused_or_ignored(conn):
+    bad = asyncio.run(rag_main.devices_used({"source": "elsewhere", "entity_ids": ["light.porch"]}))
+    assert bad.status_code == 400
+    assert asyncio.run(rag_main.devices_used({"source": "homehub", "entity_ids": ["not an id", 7]}))["rows"] == 0
