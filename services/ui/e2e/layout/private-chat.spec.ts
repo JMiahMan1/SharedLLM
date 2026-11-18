@@ -5,7 +5,7 @@ import { mockBible } from '../fixtures/bibleMocks';
 import { mockFamilyPages, CONVERSATIONS } from '../fixtures/familyPagesMocks';
 import { screenFindings, settle, shot, quietHotReload, type Allowed } from '../fixtures/pageAudit';
 import JSZip from 'jszip';
-import { deriveKey, encryptBytes, makeVerifier, openMessage, openRecord, randomBytes, sealMessage, sealRecord, toBase64, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
+import { deriveKey, encryptBytes, makeVerifier, openMessage, openRecord, randomBytes, sealMessage, sealRecord, toBase64, PBKDF2_ITERATIONS, type PrivatePayload } from '../../src/lib/privateChatCrypto';
 import { fakeJpeg } from '../../src/test/fakes/fakeJpeg';
 import { TINY_WEBM_BASE64 } from '../fixtures/tinyVideo';
 
@@ -53,6 +53,9 @@ interface Server {
   /** The blob ids each sent message said it is made of, and the blobs this device deleted. */
   messageBlobs?: string[][];
   blobsDeleted?: string[];
+  /** Link previews the server would make, by address, and the addresses this device asked about. */
+  previews?: Record<string, Record<string, unknown>>;
+  previewAsks?: string[];
 }
 
 interface Mark {
@@ -162,6 +165,14 @@ async function serve(page: Page, server: Server): Promise<void> {
       mark.reactions = mark.reactions.filter((r) => r.id !== reactions[2]);
       return route.fulfill({ json: mark });
     }
+    if (p === `/api/private-chat/chats/${TOKEN}/link-preview` && req.method() === 'POST') {
+      const asked = String((req.postDataJSON() as { url?: string }).url);
+      (server.previewAsks ??= []).push(asked);
+      const made = server.previews?.[asked];
+      // As slow as a real page, so the loading line is seen.
+      await new Promise((r) => setTimeout(r, 400));
+      return made ? route.fulfill({ json: made }) : route.fulfill({ status: 502, json: { detail: 'The page could not be read.' } });
+    }
     if (/\/nudge$/.test(p)) {
       server.nudges += 1;
       return route.fulfill({ json: { nudged: ['robin'], next_in: 300 } });
@@ -232,6 +243,53 @@ async function v1Server(): Promise<{ server: Server; key: CryptoKey }> {
     blobs: {}, posted: [], created: [], nudges: 0, changes: [],
   };
   return { server, key: secrets.key };
+}
+
+/** A real JPEG thumbnail, drawn by the page's own canvas (as the server's would look: about 480 wide). */
+async function thumbnail(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 480;
+    canvas.height = 252;
+    const g = canvas.getContext('2d')!;
+    const sky = g.createLinearGradient(0, 0, 0, 252);
+    sky.addColorStop(0, '#f59e0b');
+    sky.addColorStop(1, '#7c3aed');
+    g.fillStyle = sky;
+    g.fillRect(0, 0, 480, 252);
+    g.fillStyle = '#0f172a';
+    g.beginPath();
+    g.moveTo(0, 200);
+    g.lineTo(140, 110);
+    g.lineTo(260, 190);
+    g.lineTo(360, 120);
+    g.lineTo(480, 200);
+    g.lineTo(480, 252);
+    g.lineTo(0, 252);
+    g.fill();
+    return canvas.toDataURL('image/jpeg', 0.8);
+  });
+}
+
+/** Half a second of silence as a WAV file. */
+function silentWav(): Buffer {
+  const rate = 8000;
+  const samples = rate / 2;
+  const out = Buffer.alloc(44 + samples);
+  out.write('RIFF', 0);
+  out.writeUInt32LE(36 + samples, 4);
+  out.write('WAVEfmt ', 8);
+  out.writeUInt32LE(16, 16);
+  out.writeUInt16LE(1, 20);
+  out.writeUInt16LE(1, 22);
+  out.writeUInt32LE(rate, 24);
+  out.writeUInt32LE(rate, 28);
+  out.writeUInt16LE(1, 32);
+  out.writeUInt16LE(8, 34);
+  out.write('data', 36);
+  out.writeUInt32LE(samples, 40);
+  out.fill(128, 44);
+  return out;
 }
 
 async function unlockWith(page: Page, password: string): Promise<void> {
@@ -671,6 +729,156 @@ test.describe('private chat on every form factor', () => {
     await opened.waitForURL('https://example.com/cabin?week=2');
     await opened.close();
     // The tap went to the link only: the message's own sheet stayed closed.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    done(run);
+  });
+
+  test('link previews: made while writing, sent sealed, dropped with the X, and off in the settings', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    const run = await open(page, server);
+    const thumb = await thumbnail(page);
+    server.previews = {
+      'https://example.com/cabin': { url: 'https://example.com/cabin', title: 'The lake cabin, two bedrooms and a dock', site_name: 'Example Rentals',
+        description: 'Quiet water, a fire pit and the best sunsets on the lake. Sleeps four.', kind: 'link', image: thumb },
+    };
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+
+    const input = page.getByTestId('private-input');
+    await input.fill('This one? https://example.com/cabin');
+    await expect(page.getByTestId('private-link-draft-loading')).toBeVisible();
+    await check(page, info, run, 'private link preview loading', page.getByTestId('chat-thread'), await overPanel(page, /^private link preview loading$/));
+    await expect(page.getByTestId('private-link-draft-card')).toContainText('The lake cabin');
+    await check(page, info, run, 'private link preview draft', page.getByTestId('chat-thread'), await overPanel(page, /^private link preview draft$/));
+    // Only the address went to the server, and only once.
+    expect(server.previewAsks).toEqual(['https://example.com/cabin']);
+
+    await page.getByTestId('private-send').click();
+    await expect.poll(() => server.posted.length).toBe(1);
+    await expect(input).toHaveValue('');
+    // The preview is inside the encryption: the server sees none of it.
+    expect(server.posted[0]).not.toContain('lake cabin');
+    expect(server.posted[0]).not.toContain('example.com');
+    const sent = await openMessage(key, server.posted[0]);
+    expect(sent).toMatchObject({ t: 'text', text: 'This one? https://example.com/cabin',
+      preview: { url: 'https://example.com/cabin', title: 'The lake cabin, two bedrooms and a dock', kind: 'link', image: thumb } });
+    const card = page.getByTestId('private-feed').getByTestId('private-link-card');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('href', 'https://example.com/cabin');
+    await expect(page.getByTestId('private-link-draft')).toHaveCount(0);
+    await check(page, info, run, 'private link preview sent', page.getByTestId('chat-thread'), [
+      ...await overPanel(page, /^private link preview sent$/),
+      { where: /^private link preview sent$/, finding: /under 44px: https:\/\/example\.com\/cabin/, why: 'an inline link in message text' },
+    ]);
+
+    // The X sends the words without a preview.
+    await input.fill('Or https://example.com/cabin again');
+    await expect(page.getByTestId('private-link-draft-card')).toBeVisible();
+    await page.getByTestId('private-link-draft-remove').click();
+    await expect(page.getByTestId('private-link-draft')).toHaveCount(0);
+    await page.getByTestId('private-send').click();
+    await expect.poll(() => server.posted.length).toBe(2);
+    await expect(input).toHaveValue('');
+    expect(await openMessage(key, server.posted[1])).toEqual({ t: 'text', text: 'Or https://example.com/cabin again' });
+
+    // A page that cannot be read: no card, and the message still goes.
+    await input.fill('Broken https://example.net/gone');
+    await expect.poll(() => (server.previewAsks ?? []).length).toBe(2);
+    await expect(page.getByTestId('private-link-draft-loading')).toHaveCount(0);
+    await expect(page.getByTestId('private-link-draft')).toHaveCount(0);
+    await page.getByTestId('private-send').click();
+    await expect.poll(() => server.posted.length).toBe(3);
+    await expect(input).toHaveValue('');
+    expect(await openMessage(key, server.posted[2])).toEqual({ t: 'text', text: 'Broken https://example.net/gone' });
+
+    // Off in the settings: nothing about a link leaves this device.
+    await page.getByTestId('private-security-open').click();
+    const toggle = page.getByTestId('private-link-previews-toggle');
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await check(page, info, run, 'private link previews setting', page.getByRole('dialog').last());
+    await page.getByTestId('private-security').getByRole('button', { name: 'Close' }).last().click();
+    await input.fill('Quiet https://example.org/private');
+    await page.waitForTimeout(1500);
+    await expect(page.getByTestId('private-link-draft')).toHaveCount(0);
+    expect(server.previewAsks).toHaveLength(2);
+    done(run);
+  });
+
+  test('received previews: a link card, and video and audio that load nothing until tapped', async ({ page, context }, info) => {
+    const { server, key } = await v1Server();
+    const thirdParty: string[] = [];
+    page.on('request', (req) => {
+      if (/youtube|ytimg|vimeo|media\.example/.test(new URL(req.url()).hostname)) thirdParty.push(req.url());
+    });
+    // Stand-ins for the players, so nothing leaves the test.
+    await context.route(/^https:\/\/www\.youtube-nocookie\.com\//, (route) => route.fulfill({ contentType: 'text/html',
+      body: '<!doctype html><body style="margin:0;background:#000;color:#fff;font:16px sans-serif;display:grid;place-items:center;height:100vh">Player</body>' }));
+    await context.route(/^https:\/\/media\.example\//, (route) => route.fulfill(
+      route.request().url().endsWith('.webm')
+        ? { contentType: 'video/webm', body: Buffer.from(TINY_WEBM_BASE64, 'base64') }
+        : { contentType: 'audio/wav', body: silentWav() }));
+    const run = await open(page, server);
+    const thumb = await thumbnail(page);
+    const from = async (id: number, text: string, preview: Record<string, unknown>) => ({
+      id, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 300 + id, message_type: 'comment',
+      message: await sealMessage(key, { t: 'text', text, preview } as unknown as PrivatePayload),
+    });
+    server.messages.push(
+      await from(2, 'For Saturday https://example.com/trail', { url: 'https://example.com/trail', title: 'Ridge trail loop', site_name: 'Trails',
+        description: 'Five miles, one long climb.', kind: 'link', image: thumb }),
+      await from(3, 'Our song https://youtu.be/dQw4w9WgXcQ', { url: 'https://youtu.be/dQw4w9WgXcQ', title: 'Our song (live)', site_name: 'YouTube',
+        kind: 'video', image: thumb, embed: { provider: 'youtube', id: 'dQw4w9WgXcQ' } }),
+      await from(4, 'Voice memo https://media.example/memo.wav', { url: 'https://media.example/memo.wav', title: 'memo.wav', site_name: 'media.example',
+        kind: 'audio', embed: { provider: 'file', src: 'https://media.example/memo.wav', mime: 'audio/wav' } }),
+      await from(5, 'The kids https://media.example/kids.webm', { url: 'https://media.example/kids.webm', title: 'kids.webm', site_name: 'media.example',
+        kind: 'video', embed: { provider: 'file', src: 'https://media.example/kids.webm', mime: 'video/webm' } }),
+    );
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    const feed = page.getByTestId('private-feed');
+    await expect(feed.getByTestId('private-link-card')).toHaveCount(4);
+    await expect(feed.getByText('Ridge trail loop')).toBeVisible();
+    const inline = { where: /^private link cards/, finding: /under 44px: https:\/\//, why: 'an inline link in message text' };
+    await check(page, info, run, 'private link cards', page.getByTestId('chat-thread'), [...await overPanel(page, /^private link cards$/), inline]);
+    // Drawn from the messages alone: no player, no picture and no file has been asked of anyone.
+    expect(thirdParty).toEqual([]);
+    await expect(page.locator('iframe, video[src^="http"], audio')).toHaveCount(0);
+
+    const video = feed.locator('[data-testid="private-link-card"][data-kind="video"]').first();
+    await video.getByRole('button', { name: 'Play video: Our song (live)' }).click();
+    const frame = video.locator('iframe');
+    await expect(frame).toBeVisible();
+    expect(await frame.getAttribute('src')).toMatch(/^https:\/\/www\.youtube-nocookie\.com\/embed\/dQw4w9WgXcQ\?/);
+    await expect.poll(() => thirdParty.some((u) => u.startsWith('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'))).toBe(true);
+    // Sized to the bubble: inside it, 16:9.
+    const bubble = (await video.boundingBox())!;
+    const box = (await frame.boundingBox())!;
+    expect(box.width).toBeLessThanOrEqual(bubble.width + 1);
+    expect(Math.abs(box.width / box.height - 16 / 9)).toBeLessThan(0.05);
+    // The tap played the video; it did not open the message's sheet.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await frame.scrollIntoViewIfNeeded();
+    await check(page, info, run, 'private link video playing', page.getByTestId('chat-thread'), [...await overPanel(page, /^private link video playing$/),
+      { ...inline, where: /^private link video playing$/ }]);
+    expect(thirdParty.some((u) => u.includes('media.example'))).toBe(false);
+
+    const audio = feed.locator('[data-testid="private-link-card"][data-kind="audio"]');
+    await audio.getByRole('button', { name: 'Play audio: memo.wav' }).click();
+    const player = audio.locator('audio');
+    await expect(player).toBeVisible();
+    expect(await player.getAttribute('src')).toBe('https://media.example/memo.wav');
+    expect(await player.getAttribute('preload')).toBe('none');
+    await audio.scrollIntoViewIfNeeded();
+    await check(page, info, run, 'private link audio player', page.getByTestId('chat-thread'), [...await overPanel(page, /^private link audio player$/),
+      { ...inline, where: /^private link audio player$/ }]);
+
+    const clip = feed.locator('[data-testid="private-link-card"][data-kind="video"]').last();
+    await clip.getByRole('button', { name: 'Play video: kids.webm' }).click();
+    await expect(clip.locator('video')).toBeVisible();
+    await expect.poll(() => thirdParty.some((u) => u === 'https://media.example/kids.webm')).toBe(true);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     done(run);
   });

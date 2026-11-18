@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { BellRing, ChevronRight, Download, Fingerprint, FolderOpen, KeyRound, Loader2, Timer, TriangleAlert } from 'lucide-react';
+import { BellRing, ChevronRight, Download, Fingerprint, FolderOpen, KeyRound, Link2, Loader2, Timer, TriangleAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { changePasswordRequest } from '../../lib/privateChatCrypto';
 import { getLockAfter, LOCK_OPTIONS, setLockAfter, type LockAfter } from '../../lib/privateChatSession';
+import { linkPreviewsOn, setLinkPreviews } from '../../lib/privateLinkPreview';
 import { enableDeviceUnlock, giveKeyTo } from '../../lib/privateChatDeviceUnlock';
 import { privatePreviewPlugin, privatePreviewState } from '../../plugins/privatePreview';
 import { deviceUnlockAvailable, deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
@@ -68,6 +69,7 @@ export default function PrivateChatSecurity({
 }) {
   const [mode, setMode] = useState<Mode>('menu');
   const [lockAfter, setLockAfterState] = useState<LockAfter>(() => getLockAfter(token));
+  const [linkPreviews, setLinkPreviewsState] = useState(() => linkPreviewsOn(token));
   const [phone, setPhone] = useState<{ available: boolean; enabled: boolean }>({ available: false, enabled: false });
   const [preview, setPreview] = useState<{ available: boolean; enabled: boolean }>({ available: false, enabled: false });
   const [current, setCurrent] = useState('');
@@ -188,6 +190,15 @@ export default function PrivateChatSecurity({
       setLockAfterState(value);
     } catch (e) {
       setError(errorText(e, 'Could not save the lock setting'));
+    }
+  };
+
+  const toggleLinkPreviews = () => {
+    try {
+      setLinkPreviews(token, !linkPreviews);
+      setLinkPreviewsState(!linkPreviews);
+    } catch (e) {
+      setError(errorText(e, 'Could not save the link preview setting'));
     }
   };
 
@@ -386,6 +397,31 @@ export default function PrivateChatSecurity({
             On this device only. Closing Jarvis always locks it, and screenshots stay blocked while the chat is on screen.
           </p>
         </fieldset>
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+          <Link2 size={16} className="shrink-0 text-rose-200" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-white" id="private-link-previews-label">
+              Link previews
+            </p>
+            <p className="text-xs leading-relaxed text-slate-400">
+              On: when you write a web address, your home server reads the page once and the preview goes inside the encrypted
+              message. Off: nothing about your links leaves this device. On this device only.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={linkPreviews}
+            aria-labelledby="private-link-previews-label"
+            onClick={toggleLinkPreviews}
+            data-testid="private-link-previews-toggle"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center"
+          >
+            <span className={`relative h-6 w-11 rounded-full transition-colors ${linkPreviews ? 'bg-rose-600' : 'bg-white/15'}`}>
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${linkPreviews ? 'left-[22px]' : 'left-0.5'}`} />
+            </span>
+          </button>
+        </div>
         <button
           type="button"
           onClick={() => reset('password')}

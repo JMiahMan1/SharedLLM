@@ -121,8 +121,10 @@ log = logging.getLogger("gateway.private_chat_messages")
 
 router = APIRouter(prefix="/api/private-chat")
 
-#: One sealed message: Talk's own limit was 32,000 characters.
-MAX_MESSAGE_BYTES = 32 * 1024
+#: One sealed message. Talk allowed 32,000 characters; a link preview sealed into a message
+#: (services/gateway/private_chat_preview.py) carries a thumbnail of up to 60 KB, which the
+#: encryption and two layers of base64 make about 110 KB, next to up to 8,000 characters of text.
+MAX_MESSAGE_BYTES = 192 * 1024
 #: Messages per chat, so a runaway client cannot fill the disk.
 MAX_MESSAGES = 500_000
 #: Most blobs one message may name: a 50 MiB clip is 13 pieces and a poster, with room to spare.
