@@ -33,8 +33,14 @@ log = logging.getLogger("execution.wyoming_stt")
 #: says what it needs itself: without it nobody can tell why a voice was missed.
 log.setLevel(logging.INFO)
 
-#: "host:port" of the Wyoming speech-to-text server that does the transcribing.
-UPSTREAM = os.getenv("VOICE_STT_UPSTREAM", "").strip()
+#: "host:port" of the Wyoming speech-to-text server that does the transcribing,
+#: or several, comma-separated, tried in order: the first that answers gets the
+#: command, and every fallback is logged as a warning (a faster server on
+#: another machine first, this host's own server after it).
+UPSTREAMS = [u.strip() for u in os.getenv("VOICE_STT_UPSTREAM", "").split(",") if ":" in u.strip()]
+UPSTREAM = ",".join(UPSTREAMS)
+#: How long one upstream may take to accept a connection before the next is tried.
+_CONNECT_TIMEOUT_S = 1.5
 PORT = int(os.getenv("VOICE_STT_PORT", "10310"))
 #: A spoken command is seconds long; past this the rest is not kept for matching.
 _MAX_AUDIO_SECONDS = 30
@@ -266,14 +272,29 @@ async def _keep_take(redis, text: str, verdict: dict | None) -> None:
         log.warning("[voice] could not keep the take for teaching: %s", e)
 
 
+async def _connect_upstream():
+    """(reader, writer) of the first speech-to-text server that answers, else None."""
+    for i, upstream in enumerate(UPSTREAMS):
+        host, port = upstream.rsplit(":", 1)
+        try:
+            conn = await asyncio.wait_for(asyncio.open_connection(host, int(port)), _CONNECT_TIMEOUT_S)
+        except (TimeoutError, OSError) as e:
+            nxt = UPSTREAMS[i + 1] if i + 1 < len(UPSTREAMS) else None
+            if nxt:
+                log.warning("[voice] speech-to-text server %s unreachable (%s); using %s", upstream, e or "timeout", nxt)
+            else:
+                log.error("[voice] speech-to-text server %s unreachable: %s", upstream, e or "timeout")
+            continue
+        return conn
+    return None
+
+
 async def _handle(ha_reader, ha_writer, redis) -> None:
-    host, port = UPSTREAM.rsplit(":", 1)
-    try:
-        up_reader, up_writer = await asyncio.open_connection(host, int(port))
-    except OSError as e:
-        log.error("[voice] speech-to-text server %s unreachable: %s", UPSTREAM, e)
+    conn = await _connect_upstream()
+    if conn is None:
         ha_writer.close()
         return
+    up_reader, up_writer = conn
     utterance = _Utterance()
 
     async def from_ha() -> None:
@@ -338,7 +359,7 @@ def _warm_up() -> None:
 
 async def serve() -> None:
     """Listen for Home Assistant until cancelled; does nothing when unconfigured."""
-    if not UPSTREAM or ":" not in UPSTREAM:
+    if not UPSTREAMS:
         log.info("VOICE_STT_UPSTREAM not set; voice recognition for Home Assistant is off.")
         return
     import redis.asyncio as aioredis

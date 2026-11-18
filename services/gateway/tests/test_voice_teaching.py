@@ -167,7 +167,7 @@ async def _speak(monkeypatch, store: _Store, engine, text: str, embedding: list[
                 await writer.drain()
 
     upstream = await asyncio.start_server(whisper, "127.0.0.1", 0)
-    monkeypatch.setattr(wyoming_stt, "UPSTREAM", f"127.0.0.1:{upstream.sockets[0].getsockname()[1]}")
+    monkeypatch.setattr(wyoming_stt, "UPSTREAMS", [f"127.0.0.1:{upstream.sockets[0].getsockname()[1]}"])
 
     def fake_embed(samples, min_speech_seconds):
         if embedding is None:
