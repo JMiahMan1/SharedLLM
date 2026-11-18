@@ -247,6 +247,16 @@ class IntentEngine:
         Regex-based extraction of the target entity from a natural language query.
         Returns the resolved entity_id if a match is found via fuzzy lookup.
         """
+        target = self.extract_target(query, intent)
+        if not target:
+            return None
+
+        if intent in ("turn_on", "turn_off"):
+            return self.resolve_device(target)
+        return self._fuzzy_entity(target)
+
+    def extract_target(self, query: str, intent: str) -> str | None:
+        """The device as said ("the office tv"), from the command's wording; None when none is named."""
         target = None
 
         # Regex patterns for common control intents
@@ -288,12 +298,9 @@ class IntentEngine:
                     target = re.sub(r"\b(?:please|now|right away)\b", "", target).strip()
                     break
 
-        if not target:
-            return None
+        return target or None
 
-        if intent in ("turn_on", "turn_off"):
-            return self.resolve_device(target)
-
+    def _fuzzy_entity(self, target: str) -> str | None:
         # Fuzzy Matching against cache
         friendly_names = list(self.entity_cache.keys())
         matches = difflib.get_close_matches(target, friendly_names, n=1, cutoff=0.7)

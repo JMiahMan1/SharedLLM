@@ -1424,6 +1424,29 @@ def extract_media_transport_command(query: str) -> str | None:
     return None
 
 
+_MEDIA_NOUNS = re.compile(
+    r"\b(?:music|songs?|tracks?|tunes?|playlists?|albums?|podcasts?|audiobooks?|episodes?|radio|playing|playback|video|movie|show)\b",
+    re.IGNORECASE,
+)
+_BARE_MEDIA_COMMAND = re.compile(
+    r"^\s*(?:(?:hey\s+)?jarvis[,\s]+)?(?:(?:can|could|would)\s+you\s+|please\s+)?"
+    r"(?:skip|next|previous|go\s+back|pause|stop|resume|unpause)(?:\s+(?:it|that|this|please))*[\s.!?]*$",
+    re.IGNORECASE,
+)
+
+
+def is_plain_media_command(query: str) -> bool:
+    """A skip / next / previous / pause / stop / resume of what is playing.
+
+    It names something that plays ("skip this track", "stop the music on the
+    office TV") or is the bare command ("skip", "pause please"). "Stop the
+    timer" and "pause the vacuum" are not.
+    """
+    if not extract_media_transport_command(query):
+        return False
+    return bool(_MEDIA_NOUNS.search(query or "") or _BARE_MEDIA_COMMAND.match(query or ""))
+
+
 def is_time_or_date_query(query: str) -> bool:
     q = (query or "").strip().lower()
     if not q:
@@ -2089,7 +2112,12 @@ async def orchestrate_code_change(
     return _make_ollama_response(summary, selected_model, stream=should_stream)
 
 
-def resolve_media_target(query: str, entities: list[dict], media_type: str | None = None, cached_device: str | None = None) -> str | None:
+#: A player that skip, stop and pause can act on.
+ACTIVE_MEDIA_STATES = frozenset({"playing", "paused", "buffering"})
+
+
+def resolve_media_target(query: str, entities: list[dict], media_type: str | None = None, cached_device: str | None = None,
+                         requested_device: str | None = None) -> str | None:
     """
     Resolve media player entity from query using device capabilities/metadata.
     For video: prefer Cast/Chromecast devices (support play_media with local streams).
@@ -2097,7 +2125,10 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str | Non
     Names are only used for grouping/matching requested device, not for capability detection.
     Returns None when no entity can be confidently resolved.
     """
-    _, requested_device = extract_media_request(query)
+    if requested_device is None:
+        _, requested_device = extract_media_request(query)
+    else:
+        requested_device = re.sub(r"^(?:the|my|our)\s+", "", requested_device.strip(), flags=re.IGNORECASE)
     requested_lower = requested_device.lower() if requested_device else ""
 
     def _normalize_name(value: str) -> str:
@@ -2171,6 +2202,10 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str | Non
               score += 200
           if _is_ma_speaker(entity):
               score -= 200
+      elif media_type == "transport":
+          # Skip / stop / pause: of the players that match, the one that is playing.
+          if state in ACTIVE_MEDIA_STATES:
+              score += 300
       elif media_type == "power":
           if device_class == "tv":
               score += 200
@@ -3721,6 +3756,11 @@ async def chat_handler(request: Request, background_tasks=None):
     # 3. Semantic Routing (Fast Path Detection)
     intent, confidence = engine.classify(query)
     log.info(f"[FastPath] classify result: intent='{intent}' confidence={confidence:.3f} is_active={engine.is_active} threshold={engine.FAST_PATH_CONFIDENCE}")
+    if not grounded and is_plain_media_command(query):
+        # "Can you skip this track?" scored 0.79 and went to the model, which said it
+        # skipped and called nothing. A plain skip/stop/pause is never the model's job.
+        log.info(f"[FastPath] plain media command: {extract_media_transport_command(query)}")
+        intent, confidence = "media_transport", 1.0
 
     # Resolve dynamic threshold from Identity
     threshold_str = await fetch_global_setting("fast_path_threshold", str(_DEFAULT_FAST_PATH_THRESHOLD))
@@ -3738,9 +3778,13 @@ async def chat_handler(request: Request, background_tasks=None):
         media_entities = None
         cached_device_info = None
         cached_device_id = None
+        cached_state = None
         if intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
             media_entities = await fetch_ha_entities(creds.model_dump())
             cached_device_info = get_last_used_device(user_id)
+            if cached_device_info and intent not in ("turn_on", "turn_off") \
+                    and not str(cached_device_info.get("entity_id") or "").startswith("media_player."):
+                cached_device_info = None  # the last device used was a lamp: not a player to skip on
             if cached_device_info:
                 cached_device_id = cached_device_info.get("entity_id")
                 entity_states = {e.get("entity_id"): e.get("state") for e in media_entities or []}
@@ -3761,7 +3805,12 @@ async def chat_handler(request: Request, background_tasks=None):
             if not resolved_entity:
                 resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
-            resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [], cached_device=cached_device_id)
+            # A named player ("on the office TV") or else the last one used while it plays;
+            # of players that match, the one playing (resolve_media_target "transport").
+            named = engine.extract_target(query, intent)
+            active_cache = cached_device_id if cached_state in ACTIVE_MEDIA_STATES else None
+            resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
+                                                   cached_device=None if named else active_cache, requested_device=named)
             if not resolved_entity and media_entities:
                 for e in media_entities:
                     if e.get("entity_id", "").startswith("media_player.") and e.get("state") in ("playing", "paused"):

@@ -80,3 +80,8 @@ def test_no_clear_device_means_no_guess(engine, query):
 
 def test_a_state_question_reaches_the_same_device(engine):
     assert engine.extract_entity("is the den lamp on", "turn_on") == "light.den_lamp"
+
+
+def test_the_player_named_in_a_media_command_is_read_from_its_words(engine):
+    assert engine.extract_target("stop the music on the den tv", "media_transport") == "the den tv"
+    assert engine.extract_target("can you skip this track", "media_transport") is None

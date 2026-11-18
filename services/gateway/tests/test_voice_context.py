@@ -70,3 +70,36 @@ def test_a_lights_state_in_words():
     assert gateway_main.describe_state({"entity_id": "light.hall_lamp", "state": "off", "attributes": {}}) == "hall lamp is off."
     assert gateway_main.describe_state({"entity_id": "light.x", "state": "unavailable", "attributes": {"friendly_name": "X"}}) \
         == "X isn't responding right now."
+
+
+@pytest.mark.parametrize("query, plain", [
+    ("Can you skip this track?", True),
+    ("Since you can't skip the track, stop the music please.", True),
+    ("Just stop the music on the office TV.", True),
+    ("next song", True),
+    ("skip", True),
+    ("Pause please.", True),
+    ("Jarvis, stop", True),
+    ("Stop the timer", False),
+    ("Pause the vacuum", False),
+    ("What is the next holiday?", False),
+    ("Play some music", False),
+])
+def test_a_plain_media_command_is_recognised(query, plain):
+    assert gateway_main.is_plain_media_command(query) is plain
+
+
+def test_skip_and_stop_pick_the_named_player_that_is_playing():
+    players = [
+        {"entity_id": "media_player.den_tv_cast", "state": "playing", "attributes": {"friendly_name": "Den TV"}},
+        {"entity_id": "media_player.den_tv", "state": "idle", "attributes": {"friendly_name": "Den TV"}},
+        {"entity_id": "media_player.loft_speaker", "state": "idle", "attributes": {"friendly_name": "Loft Speaker"}},
+    ]
+    pick = gateway_main.resolve_media_target
+    assert pick("stop the music on the den tv", players, media_type="transport", requested_device="the den tv") \
+        == "media_player.den_tv_cast"
+    assert pick("skip on the loft speaker", players, media_type="transport", requested_device="loft speaker") \
+        == "media_player.loft_speaker"
+    # No player named: the last one used, while it plays.
+    assert pick("skip this track", players, media_type="transport", cached_device="media_player.den_tv_cast") \
+        == "media_player.den_tv_cast"

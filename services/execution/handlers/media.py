@@ -805,6 +805,19 @@ _QUEUE_COMMANDS = frozenset({
 })
 
 
+_TRANSPORT_DONE = {
+    "next": "Skipped to the next track", "previous": "Went back a track", "pause": "Paused", "stop": "Stopped",
+    "play": "Playing", "play_pause": "Toggled play and pause", "seek": "Moved the playback position",
+}
+
+
+def transport_said(command: str, attrs: dict | None, entity_id: str) -> str:
+    """What a transport command did, in words a voice can say (never the entity id)."""
+    name = (attrs or {}).get("friendly_name") or entity_id.split(".", 1)[-1].replace("_", " ")
+    done = _TRANSPORT_DONE.get((command or "").lower())
+    return f"{done} on {name}." if done else f"Sent {command} to {name}."
+
+
 async def handle_media_transport(req) -> ExecutionResult:
     """Transport/remote commands: through HA, or straight to the device when HA is down."""
     ctx = req.user_context
@@ -934,7 +947,7 @@ async def _transport_via_ha(req) -> ExecutionResult:
             ha_url, ha_token, "media_player", service_cmd, full_entity_id, data,
         )
         if result.get("ok"):
-            return ExecutionResult(status="SUCCESS", message=f"Media command '{command}' executed on {full_entity_id}.", service="media_transport")
+            return ExecutionResult(status="SUCCESS", message=transport_said(command, attrs, full_entity_id), service="media_transport")
         return ExecutionResult(status="FAILURE", message=f"Media command failed: {result.get('error')}", service="media_transport", detail=result)
 
     if not standard_supported:
@@ -1003,7 +1016,7 @@ async def _transport_via_ha(req) -> ExecutionResult:
     )
 
     if result.get("ok"):
-        return ExecutionResult(status="SUCCESS", message=f"Media command '{command}' executed on {full_entity_id}.", service="media_transport")
+        return ExecutionResult(status="SUCCESS", message=transport_said(command, attrs, full_entity_id), service="media_transport")
     return ExecutionResult(status="FAILURE", message=f"Media command failed: {result.get('error')}", service="media_transport", detail=result)
 
 async def handle_tv_cast(req) -> ExecutionResult:
