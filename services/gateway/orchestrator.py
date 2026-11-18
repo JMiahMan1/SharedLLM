@@ -27,7 +27,7 @@ from services.gateway.llm_providers import get_provider
 from services.gateway.location_query import parse_location_query
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
-from services.gateway.tool_registry import hub_tool_guide, single_turn_tools
+from services.gateway.tool_registry import hub_tool_guide, names_withheld_hub_tool, single_turn_tools
 
 log = logging.getLogger("gateway.orchestrator")
 
@@ -110,6 +110,23 @@ COLLECTION_HEADERS = {
         "chapter. Do not call ContextSearchRequest to look them up again; only "
         "search the library if these passages plainly do not answer the question."
     ),
+    "user_facts": (
+        "USER FACTS & PREFERENCES: remembered facts about the person asking; "
+        "apply them directly when relevant."
+    ),
+    "mission_history": (
+        "PAST MISSION HISTORY: outcomes and errors from prior Raven missions; "
+        "reuse fixes and avoid repeating past failures."
+    ),
+    "conversation_memory": (
+        "CONVERSATION MEMORY: recent household intercom transcripts and spoken exchanges."
+    ),
+    "network_topology": (
+        "NETWORK TOPOLOGY: discovered Docker containers, services, ports, and IP addresses."
+    ),
+    "telemetry_alerts": (
+        "TELEMETRY ALERTS: recent device, sensor, and service alerts."
+    ),
 }
 
 
@@ -161,6 +178,36 @@ _BASE_COLLECTIONS = ("ha_entities", "nextcloud_files", "system_capabilities", "s
 _CODING_INTENT_TOKENS = ("file", "code", "git", "workspace", "fix", "repair")
 _CODING_COLLECTIONS = ("system_capabilities", "nextcloud_files", "system_learnings", "ha_entities")
 
+# Specialized RAG collections searched only when the question plainly asks about that
+# source. Phrases, matched as whole words: every extra collection costs a search on the
+# reply's path (voice included), so a common word ("remember", "network", the "mission"
+# in "permission") must not pull one in.
+_INTENT_COLLECTION_SIGNALS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("user_facts", (
+        "about me", "who am i", "do you remember", "what do you remember", "remember that i",
+        "remember my", "my preference", "my preferences", "i prefer", "my favorite",
+        "my favourite", "my allergy", "my allergies", "allergic", "my birthday", "what do i like",
+    )),
+    ("mission_history", (
+        "raven mission", "raven missions", "past mission", "last mission", "previous mission",
+        "post-mortem", "postmortem", "previous run", "last run",
+    )),
+    ("network_topology", (
+        "docker", "container", "containers", "subnet", "vlan", "ip address",
+        "network topology", "open ports", "which port",
+    )),
+    ("telemetry_alerts", (
+        "alerts", "telemetry", "anomaly", "anomalies", "went offline", "gone offline",
+    )),
+    ("conversation_memory", (
+        "intercom", "transcript", "who said", "what did we say", "what did i say",
+    )),
+)
+_INTENT_COLLECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (coll, re.compile(r"\b(?:" + "|".join(re.escape(s) for s in signals) + r")\b"))
+    for coll, signals in _INTENT_COLLECTION_SIGNALS
+)
+
 
 def _collections_for_query(query: str, *, include_library: bool = False, devices_first: bool = False) -> list[str]:
     """Choose which RAG collections a query is allowed to spend budget on.
@@ -188,6 +235,9 @@ def _collections_for_query(query: str, *, include_library: bool = False, devices
     """
     q = query.lower()
     collections = list(_CODING_COLLECTIONS) if any(token in q for token in _CODING_INTENT_TOKENS) else list(_BASE_COLLECTIONS)
+    for coll, pattern in _INTENT_COLLECTION_PATTERNS:
+        if coll not in collections and pattern.search(q):
+            collections.append(coll)
     if include_library or _library_intent_asked(q):
         collections = ["calibre_files"] + [c for c in collections if c != "calibre_files"]
     from services import config
@@ -722,6 +772,10 @@ async def _fetch_rag_context(
                         coll_added = False
                         for h in hits:
                             content = h["content"]
+                            if coll == "system_learnings" and names_withheld_hub_tool(str(content)):
+                                # A lesson that sends the model to a hub tool while no hub is set up
+                                # would only point it at a tool it is not offered.
+                                continue
                             _meta = _as_meta_dict(h.get("metadata"))
                             if len(content) > MAX_CHARS_PER_HIT:
                                 content = content[:MAX_CHARS_PER_HIT] + "... [TRUNCATED]"
@@ -805,6 +859,8 @@ async def _fetch_rag_context(
                             for _l in _proto:
                                 _m = _l.get("metadata") or {}
                                 _prule = _m.get("rule") or _l.get("content") or ""
+                                if names_withheld_hub_tool(str(_prule)):
+                                    continue  # a hub lesson while no hub is set up
                                 _pid = _m.get("id") or _l.get("id") or ""
                                 _pout = _m.get("outcome", "")
                                 _pconf = _m.get("confidence", "")
@@ -1365,7 +1421,11 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         "was asked. Pass collection_name explicitly -- "
                         "calibre_files for the book library, nextcloud_files for "
                         "files, system_learnings for past lessons, ha_entities for "
-                        "the house."
+                        "the house, system_capabilities for tools, user_facts for "
+                        "remembered user facts, conversation_memory for intercom "
+                        "transcripts, mission_history for past Raven runs, "
+                        "network_topology for Docker/LAN topology, or "
+                        "telemetry_alerts for device alerts."
                     )
 
             if action == "talkrequest" and not payload.get("action"):
@@ -1528,8 +1588,11 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         results = result.get("results", [])
                         if not results:
                             return "No relevant context found. Try a different query or collection."
-                        context_text = "\n".join([f"- {r.get('content', '')}" for r in results])
-                        return f"Found {len(results)} relevant results:\n{context_text}"
+                        lines = [
+                            f"- {r.get('content', '')}{_citation_suffix(_as_meta_dict(r.get('metadata')))}"
+                            for r in results
+                        ]
+                        return f"Found {len(results)} relevant results:\n" + "\n".join(lines)
                     if action == "entitysearchrequest":
                         detail = result.get("detail", {})
                         entities = detail.get("entities") or result.get("entities") or []

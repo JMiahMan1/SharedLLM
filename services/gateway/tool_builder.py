@@ -96,6 +96,71 @@ _TOOLS: tuple[_Tool, ...] = (
         3,
     ),
     _Tool(
+        "AudiobookshelfRequest",
+        "Search, browse, play, resume, or check listening progress in Audiobookshelf.",
+        ("audiobookshelf", "audiobook", "listening progress", "last played audiobook",
+         "podcast episode in abs"),
+        3,
+    ),
+    _Tool(
+        "ContextSearchRequest",
+        "Semantic RAG search across indexed collections (calibre_files, nextcloud_files, "
+        "ha_entities, system_learnings, system_capabilities, user_facts, "
+        "conversation_memory, mission_history, network_topology, telemetry_alerts).",
+        ("search rag", "semantic search", "context search", "search indexed knowledge",
+         "search learnings", "search user facts"),
+        2,
+    ),
+    _Tool(
+        "EntitySearchRequest",
+        "Search Home Assistant entities by name, domain, area, or state.",
+        ("find home assistant entity", "search home assistant", "list lights",
+         "find smart home device", "entity search"),
+        2,
+    ),
+    _Tool(
+        "HAConfigRequest",
+        "Inspect Home Assistant integrations and configuration snapshot.",
+        ("home assistant config", "list integrations", "ha integrations"),
+        2,
+    ),
+    _Tool(
+        "LogbookRequest",
+        "Query Home Assistant entity state history / logbook events.",
+        ("ha logbook", "entity history", "when did the light", "state history"),
+        2,
+    ),
+    _Tool(
+        "ExecutionLogRequest",
+        "Fetch recent SharedLLM execution service/handler logs.",
+        ("execution log", "handler log", "recent service errors"),
+        2,
+    ),
+    _Tool(
+        "CodeSearchRequest",
+        "Search code across repositories or workspace files.",
+        ("code search", "search repositories"),
+        2,
+    ),
+    _Tool(
+        "RedisInspectRequest",
+        "Read-only Redis inspection (ping, get, keys, ttl).",
+        ("inspect redis", "redis key", "check redis"),
+        2,
+    ),
+    _Tool(
+        "NetworkDeviceScanRequest",
+        "Scan the local network (LAN) for discovered devices.",
+        ("scan network", "scan lan", "network devices", "discover lan"),
+        2,
+    ),
+    _Tool(
+        "SystemLearningRequest",
+        "Persist or validate a lesson in the system_learnings RAG collection.",
+        ("save a lesson", "record a lesson", "validate lesson", "system learning"),
+        4,
+    ),
+    _Tool(
         "WorkspaceBootstrapRequest",
         "Bootstrap/clone an existing repo into a workspace.",
         ("bootstrap", "clone repo", "checkout repo", "clone the"),
@@ -174,7 +239,12 @@ def slugify(text: str) -> str:
 
 
 def _matched_tools(cap: str) -> list[_Tool]:
-    return [t for t in _TOOLS if any(trig in cap for trig in t.triggers)]
+    from services.gateway.tool_registry import hub_tool_withheld
+
+    return [
+        t for t in _TOOLS
+        if any(trig in cap for trig in t.triggers) and not hub_tool_withheld(t.name)
+    ]
 
 
 def decide(capability: str) -> dict[str, Any]:

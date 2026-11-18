@@ -608,7 +608,7 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "an omitted collection is rejected rather than guessed. "
      "collection_name=calibre_files searches the user's book library, and is "
      "the right choice for books, authors, sermons or commentaries.",
-     "payload fields: query, collection_name, k."),
+     "payload fields: query, collection_name, k, tags."),
     ("HAConfigRequest", SVC_EXECUTION, "POST", "/execute/ha_config", False,
      "Read Home Assistant configuration snapshot.",
      "payload fields: action, domain, entity_domain, keyword."),
@@ -779,6 +779,11 @@ def hub_tool_withheld(name: str) -> bool:
     that is not offered right now? For an agent that resolves free-form tool names itself."""
     normalized = re.sub(r"[\s_]+", "", name or "").lower()
     return normalized in _HUB_TOOLS_NORMALIZED and not hub_tools_offered()
+
+
+def names_withheld_hub_tool(text: str) -> bool:
+    """Does ``text`` (a lesson, a line of guidance) name a hub tool that is not offered right now?"""
+    return not hub_tools_offered() and bool(_HUB_TOOL_MENTION.search(text or ""))
 
 
 def hub_tool_prompt(prompt: str) -> str:

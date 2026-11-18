@@ -156,6 +156,15 @@ missions dispatch directly from the agent loop.
 
 ### Read path
 
+Which RAG collections a question searches is decided in
+`_collections_for_query` (`orchestrator.py`): a standing set, plus
+`user_facts`, `mission_history`, `network_topology`, `telemetry_alerts` or
+`conversation_memory` only when the question plainly asks about that source
+(whole-word phrases in `_INTENT_COLLECTION_SIGNALS`; every extra collection is
+one more search on the reply's path, voice included). Searches only return the
+asker's own items and shared ones. `ha_entities` is dropped while no hub is set
+up.
+
 `_fetch_rag_context()` injects, before planning:
 
 - `[PROTOCOL: ALWAYS-ON CURRICULUM. …]`: the seeded protocol lessons, pinned.
@@ -176,11 +185,18 @@ summaries, MERGE duplicates sharing a rule, PRUNE superseded lessons).
 ## 7. Teaching it
 
 1. **Always-on protocol curriculum (seeded).** At RAG startup
-   `_seed_protocol_lessons()` idempotently writes the 19 `lesson-proto-*`
+   `_seed_protocol_lessons()` idempotently writes the 24 `lesson-proto-*`
    lessons (tag `protocol`): dedicated workspace, cheapest sufficient tool,
    verification before reporting, web-search fact checks, `Apply: [id]`
    citations, and scenario lessons (writing, programming, typesetting,
    publishing, image editing, resource pulling).
+   It also teaches every data source: all ten RAG collections and their
+   `tags` filter, Audiobookshelf, household data (calendar, notes, chores,
+   meal plan), the home hub's inspection tools, and diagnostics (logs, Redis,
+   models, network). A lesson that names a home hub tool
+   (`HUB_TOOLS` in `tool_registry.py`) is left out of the context while no
+   hub is set up, pinned or earned, so the hub's lesson is
+   `lesson-proto-home-hub` and the household one names no hub tool.
 2. **Verified mission lessons (earned).** Simple, independently checkable
    missions in `tests/integration/test_raven_python_basics.py` (hello CLI,
    FizzBuzz + tests, packaged module, file-processing CLI). Each mission must
