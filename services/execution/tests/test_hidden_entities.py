@@ -57,6 +57,18 @@ def test_nothing_hidden_changes_nothing(monkeypatch):
     assert len(resp.json()["entities"]) == 2
 
 
+def test_discovery_names_the_hub_that_answered(monkeypatch):
+    """RAG keeps each hub's devices apart, so the answer says which hub it came from."""
+    _patch(monkeypatch, set())
+    monkeypatch.setattr("services.config.HOMEHUB_URL", "http://hub.test")
+    resp = client.get("/discovery/entities", headers=H, params={"ha_url": "http://hub.test/", "ha_token": "t"})
+    assert resp.json()["source"] == "homehub"
+
+    monkeypatch.setattr("services.config.HOMEHUB_URL", "http://other-hub.test")
+    resp = client.get("/discovery/entities", headers=H, params={"ha_url": "http://hub.test", "ha_token": "t"})
+    assert resp.json()["source"] == "home_assistant"
+
+
 class _Resp:
     def __init__(self, status, data):
         self.status = status

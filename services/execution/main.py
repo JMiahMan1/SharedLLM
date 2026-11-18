@@ -2902,10 +2902,16 @@ async def discovery_entities(request: Request, ha_url: str = "", ha_token: str =
 
     Entities the hub hides (a duplicate device's copy, services/homehub/duplicates.py) are left out, unless
     ``include_hidden`` (the state cache and other lookups by entity id): then they carry ``_hidden: true``.
+    ``source`` says which hub answered ("homehub" or "home_assistant"), so RAG indexes each hub's devices apart.
     """
+    from services.common.hub_login import homehub_url
+    from services.common.rag_collections import SOURCE_HOME_ASSISTANT, SOURCE_HOMEHUB
+
     ha_url, ha_token = _discovery_login(ha_url, ha_token)
     if not ha_url:
         raise HTTPException(status_code=503, detail=hardware_router.NO_HUB_MESSAGE)
+    hub = homehub_url()
+    source = SOURCE_HOMEHUB if hub and ha_url.rstrip("/") == hub else SOURCE_HOME_ASSISTANT
     states = await ha_client.get_states(ha_url, ha_token) or []
     areas = await ha_client.get_areas(ha_url, ha_token) or {}
     hidden = await ha_client.get_hidden_entities(ha_url, ha_token)
@@ -2931,7 +2937,7 @@ async def discovery_entities(request: Request, ha_url: str = "", ha_token: str =
             s["attributes"]["_device_last_verified"] = dev.get("last_verified")
             if dev.get("metadata"):
                 s["attributes"]["_device_metadata"] = dev["metadata"]
-    return {"entities": states}
+    return {"entities": states, "source": source}
 
 @app.get("/discovery/history")
 async def discovery_history(entity_id: str, days: int = 1, ha_url: str = "", ha_token: str = ""):

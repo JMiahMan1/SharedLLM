@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from services.common.rag_collections import canonical_collection
+
 
 class ChatRequest(BaseModel):
     query: str
@@ -207,7 +209,7 @@ class ContextSearchRequest(BaseModel):
         ...,
         description=(
             "Target collection, required. One of: calibre_files, "
-            "nextcloud_files, ha_entities, system_learnings, "
+            "nextcloud_files, home_devices, system_learnings, "
             "system_capabilities, user_facts, conversation_memory, "
             "mission_history, network_topology, telemetry_alerts (use "
             "calibre_files for the user's book library, books, authors, "
@@ -224,6 +226,12 @@ class ContextSearchRequest(BaseModel):
             "keeps resources on (fasting, prayer, Bible study, health)."
         ),
     )
+
+    @field_validator("collection_name")
+    @classmethod
+    def _current_collection_name(cls, value: str) -> str:
+        """An old collection name in a lesson or prompt (``ha_entities``) means its current one."""
+        return canonical_collection(value) or value
 
 class HAConfigRequest(BaseModel):
     """Inspect Home Assistant integration configurations via WebSocket API."""

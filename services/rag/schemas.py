@@ -1,7 +1,9 @@
 # services/rag/schemas.py
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from services.common.rag_collections import canonical_collection
 
 
 class SearchRequest(BaseModel):
@@ -53,6 +55,12 @@ class SearchRequest(BaseModel):
         description="Only items about one of these topics (a Calibre tag, or a Resources/<Topic>/ folder); see topics.py",
     )
 
+    @field_validator("collection_name")
+    @classmethod
+    def _current_collection_name(cls, value: str) -> str:
+        """An old collection name (``ha_entities``) means its current one (``home_devices``)."""
+        return canonical_collection(value) or value
+
 class SearchResultItem(BaseModel):
     content: str
     metadata: dict[str, Any]
@@ -66,6 +74,12 @@ class IngestRequest(BaseModel):
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     collection_name: str = "nextcloud"
+
+    @field_validator("collection_name")
+    @classmethod
+    def _current_collection_name(cls, value: str) -> str:
+        """An old collection name (``ha_entities``) means its current one (``home_devices``)."""
+        return canonical_collection(value) or value
 
 class UserFact(BaseModel):
     id: str | None = None

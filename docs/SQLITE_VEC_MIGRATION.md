@@ -59,7 +59,7 @@ which one is active (`backend: sqlite-vec | numpy`).
 ## Writes
 
 - Single items: `_add_item()` upserts `rag_items`, the vector and the FTS row.
-- Batch endpoints (`/rag/sync/ha`, file chunks, capabilities) embed in a
+- Batch endpoints (`/rag/sync/devices`, file chunks, capabilities) embed in a
   worker thread in cost-bounded batches (`embed_batched`) and **commit once**
   per batch, so a large sync costs one disk sync, not one per item.
 
@@ -67,11 +67,20 @@ which one is active (`backend: sqlite-vec | numpy`).
 
 `rag_items.id` is the table's primary key, so an id must be unique per owner:
 
-- HA entities: `ha:{user}:{entity_id}`. The gateway's background loop syncs
-  every user's entities every ~5 min; unchanged text keeps its vector and only
-  metadata is refreshed. (The id used to be `ha:{entity_id}` for everyone, so
-  each user's sync replaced the previous user's rows and re-embedded all ~700
-  entities every time. Old-format rows are removed on each user's next sync.)
+- Home devices (collection `home_devices`): `dev:{source}:{user}:{entity_id}`,
+  where `source` is the home hub (`homehub` or `home_assistant`), also stored in
+  the row's metadata. The gateway's background loop syncs every user's devices
+  from each hub every ~5 min; unchanged text keeps its vector and only metadata
+  is refreshed, and a sync from one hub never removes another hub's rows. Each
+  user and hub also has a `sync_status:{source}:{user}` row. Rows nobody
+  refreshes or uses age out (see `docs/BACKGROUND_JOBS.md`, device index
+  upkeep). History: the id was `ha:{entity_id}` for everyone (each user's sync
+  replaced the previous user's rows), then `ha:{user}:{entity_id}` in a
+  collection called `ha_entities`. RAG moves rows in that form to the new
+  collection and id once at startup, keeping their vectors and counters
+  (`_migrate_legacy_device_rows`, logged with counts). The old collection name
+  is still accepted wherever a caller names a collection and means
+  `home_devices`.
 - Nextcloud and Calibre chunks are stored under the **Nextcloud username**
   (storage indexes with the provider's credentials), not the Jarvis username.
 - `system_capabilities` and `system_learnings` live under `default` and are
@@ -93,6 +102,7 @@ which one is active (`backend: sqlite-vec | numpy`).
 ## Tests
 
 `services/rag/tests/`: schema migrations (`test_rag_search.py`), batch
-embedding, single-commit and per-user HA syncs (`test_ha_sync_embed_batches.py`), cost
+embedding, single-commit and per-user device syncs (`test_ha_sync_embed_batches.py`), hubs
+kept apart, the rename, references and the staleness sweep (`test_home_devices_index.py`), cost
 budget, curriculum. The `sqlite_vec`-dependent tests skip where the extension
 is not installed.

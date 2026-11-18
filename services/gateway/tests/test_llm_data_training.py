@@ -29,7 +29,7 @@ GUIDE_PATH = ROOT / "prompts" / "single_turn_tool_guide.md"
 REAL_COLLECTIONS = {
     "calibre_files",
     "nextcloud_files",
-    "ha_entities",
+    "home_devices",
     "system_capabilities",
     "system_learnings",
     "user_facts",

@@ -73,8 +73,8 @@ The mission list rows are summaries; the detail views load the full mission
 (`GET /api/raven/missions/{id_or_slug}`) for its log and result.
 
 The worker's other loops: the cleanup loop (every `CLEANUP_INTERVAL_SECONDS`,
-default 300; environment only) syncs each user's Home Assistant entities into
-RAG, prunes orphans and refreshes the Redis state cache; Talk Monitor and Chat
+default 300; environment only) syncs each user's devices from each home hub
+into RAG (`home_devices`), prunes orphans and refreshes the Redis state cache; Talk Monitor and Chat
 Notify are described in their own docs.
 
 ## 3. The agent loop (`services/gateway/agent_loop.py`)
@@ -162,8 +162,8 @@ Which RAG collections a question searches is decided in
 `conversation_memory` only when the question plainly asks about that source
 (whole-word phrases in `_INTENT_COLLECTION_SIGNALS`; every extra collection is
 one more search on the reply's path, voice included). Searches only return the
-asker's own items and shared ones. `ha_entities` is dropped while no hub is set
-up.
+asker's own items and shared ones. `home_devices` is dropped while no home hub
+is set up.
 
 `_fetch_rag_context()` injects, before planning:
 

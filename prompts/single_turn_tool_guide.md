@@ -99,7 +99,7 @@ Read or write files in user cloud storage (Nextcloud).
 
 ### ContextSearchRequest
 Search semantic memories, documents, and indexed knowledge.
-- Fields: `tool`, `query`, `collection_name` (REQUIRED; an omitted collection is refused, not guessed: `calibre_files` for the book library, `nextcloud_files` for files/notes/recipes, `system_learnings` for past lessons, `ha_entities` for the house, `system_capabilities` for tools/CLI binaries, `user_facts` for remembered user facts/preferences, `conversation_memory` for intercom transcripts, `mission_history` for past Raven missions, `network_topology` for Docker/LAN topology, `telemetry_alerts` for device/sensor alerts), optional `k` (number of results, default 5), optional `tags` (list of topic names such as `["fasting"]` for `Resources/<Topic>/` files or `jarvis:<topic>` Calibre books).
+- Fields: `tool`, `query`, `collection_name` (REQUIRED; an omitted collection is refused, not guessed: `calibre_files` for the book library, `nextcloud_files` for files/notes/recipes, `system_learnings` for past lessons, `home_devices` for the house, `system_capabilities` for tools/CLI binaries, `user_facts` for remembered user facts/preferences, `conversation_memory` for intercom transcripts, `mission_history` for past Raven missions, `network_topology` for Docker/LAN topology, `telemetry_alerts` for device/sensor alerts), optional `k` (number of results, default 5), optional `tags` (list of topic names such as `["fasting"]` for `Resources/<Topic>/` files or `jarvis:<topic>` Calibre books).
 - Example: `{"tool": "ContextSearchRequest", "query": "Macduff trusting God in trial", "collection_name": "calibre_files"}`
 
 ### CalibreRequest

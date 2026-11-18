@@ -247,7 +247,7 @@ async def test_nextcloud_resources_inventory(tmp_path):
 async def test_ha_resources_inventory(tmp_path):
     _install_fakes(tmp_path)
     await _ingest(
-        "ha_entities",
+        "home_devices",
         "entity snapshot",
         {
             "entity_id": "sensor.office_temperature",

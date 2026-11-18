@@ -94,7 +94,7 @@ def test_every_entity_text_is_embedded_once_in_order(tmp_path):
     assert recorded[0].startswith("Device:")
     assert recorded[1].startswith("Device:")
     assert recorded[299].startswith("Device:")
-    assert recorded[-1].startswith("Last HA sync for default")
+    assert recorded[-1].startswith("Last home hub sync (homehub) for default")
 
 
 def test_a_small_sync_still_lands_in_one_batch(tmp_path):
@@ -182,7 +182,7 @@ def test_a_sync_commits_once_not_once_per_entity(tmp_path):
     rag_main.conn = counting
     _sync({"entities": _entities(50), "user_id": "default"})
     assert counting.commits == 1
-    rows = conn.execute("SELECT COUNT(*) FROM rag_items WHERE collection_name = 'ha_entities'").fetchone()[0]
+    rows = conn.execute("SELECT COUNT(*) FROM rag_items WHERE collection_name = 'home_devices'").fetchone()[0]
     assert rows == 51
 
 
@@ -204,7 +204,7 @@ def test_a_repeat_sync_does_not_re_embed_unchanged_entities(tmp_path):
     assert len(recorded) == 3  # the two changed entities plus the status row
     assert any("Renamed Lamp" in t for t in recorded)
     rows = conn.execute(
-        "SELECT COUNT(*) FROM rag_items WHERE collection_name = 'ha_entities'"
+        "SELECT COUNT(*) FROM rag_items WHERE collection_name = 'home_devices'"
     ).fetchone()[0]
     assert rows == 51
 
@@ -214,7 +214,7 @@ def test_an_unchanged_entity_still_gets_fresh_metadata_and_keeps_usage(tmp_path)
 
     conn = _install(tmp_path)
     _sync({"entities": _entities(2), "user_id": "default"})
-    conn.execute("UPDATE rag_items SET usage_count = 4, indexed_at = 'old' WHERE id = 'ha:default:light.kitchen_0'")
+    conn.execute("UPDATE rag_items SET usage_count = 4, indexed_at = 'old' WHERE id = 'dev:homehub:default:light.kitchen_0'")
     conn.commit()
 
     again = _entities(2)
@@ -222,7 +222,7 @@ def test_an_unchanged_entity_still_gets_fresh_metadata_and_keeps_usage(tmp_path)
     _sync({"entities": again, "user_id": "default"})
 
     row = conn.execute(
-        "SELECT metadata, indexed_at, usage_count FROM rag_items WHERE id = 'ha:default:light.kitchen_0'"
+        "SELECT metadata, indexed_at, usage_count FROM rag_items WHERE id = 'dev:homehub:default:light.kitchen_0'"
     ).fetchone()
     meta = _json.loads(row["metadata"])
     assert meta["device_discovery_method"] == "mdns"
@@ -235,7 +235,7 @@ def test_users_keep_their_own_copies_and_do_not_re_embed_each_other(tmp_path):
     """Live, three users synced the same ~700 entities in turn. The ids were
     shared, so each sync replaced the previous user's rows, found nothing of its
     own unchanged, and re-embedded everything: RAG spent about half of every
-    hour embedding, and only the last user to sync had HA entities indexed."""
+    hour embedding, and only the last user to sync had any devices indexed."""
     conn = _install(tmp_path)
     for user in ("default", "sam", "alex"):
         _sync({"entities": _entities(20)}, user_id=user)
@@ -248,24 +248,8 @@ def test_users_keep_their_own_copies_and_do_not_re_embed_each_other(tmp_path):
     assert len(_recorded()) == 3
     per_user = dict(
         conn.execute(
-            "SELECT user_id, COUNT(*) FROM rag_items WHERE collection_name = 'ha_entities'"
-            " AND id LIKE 'ha:%' GROUP BY user_id"
+            "SELECT user_id, COUNT(*) FROM rag_items WHERE collection_name = 'home_devices'"
+            " AND id LIKE 'dev:%' GROUP BY user_id"
         ).fetchall()
     )
     assert per_user == {"default": 20, "sam": 20, "alex": 20}
-
-
-def test_rows_under_the_old_shared_id_are_replaced_without_dropping_live_entities(tmp_path):
-    conn = _install(tmp_path)
-    rag_main._add_item(
-        "ha_entities", "ha:light.kitchen_0", "sam", "old text", {"entity_id": "light.kitchen_0"},
-        0, "2026-01-01T00:00:00Z", vector=[0.0] * rag_main.EMBEDDING_DIM,
-    )
-
-    result = _sync({"entities": _entities(2)}, user_id="sam")
-
-    ids = {r[0] for r in conn.execute("SELECT id FROM rag_items WHERE collection_name = 'ha_entities'")}
-    assert "ha:light.kitchen_0" not in ids
-    assert {"ha:sam:light.kitchen_0", "ha:sam:light.kitchen_1"} <= ids
-    # The entity is still in HA, so the gateway must not clear its state cache.
-    assert result["orphaned_entity_ids"] == []

@@ -11,6 +11,7 @@ from typing import Any, cast
 import aiohttp
 
 from services.common.circuit_breaker import CircuitOpenError, get_breaker
+from services.common.rag_collections import HOME_DEVICES, canonical_collection
 from services.gateway.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
@@ -174,9 +175,9 @@ def _library_intent_asked(query: str) -> bool:
 
 # Collections consulted for a query that names no particular source. Book text
 # is absent on purpose: see _collections_for_query.
-_BASE_COLLECTIONS = ("ha_entities", "nextcloud_files", "system_capabilities", "system_learnings")
+_BASE_COLLECTIONS = (HOME_DEVICES, "nextcloud_files", "system_capabilities", "system_learnings")
 _CODING_INTENT_TOKENS = ("file", "code", "git", "workspace", "fix", "repair")
-_CODING_COLLECTIONS = ("system_capabilities", "nextcloud_files", "system_learnings", "ha_entities")
+_CODING_COLLECTIONS = ("system_capabilities", "nextcloud_files", "system_learnings", HOME_DEVICES)
 
 # Specialized RAG collections searched only when the question plainly asks about that
 # source. Phrases, matched as whole words: every extra collection costs a search on the
@@ -245,11 +246,11 @@ def _collections_for_query(query: str, *, include_library: bool = False, devices
     if not config.any_home_hub():
         # No home hub is set up: its device index is left over at best, and nothing in it can be
         # read or commanded, so it is not offered as context (the hub tools are not offered either).
-        collections = [c for c in collections if c != "ha_entities"]
-    if devices_first and "ha_entities" in collections:
+        collections = [c for c in collections if c != HOME_DEVICES]
+    if devices_first and HOME_DEVICES in collections:
         # A spoken request is most often about a device ("fix the thermostat" reads as coding),
         # so the devices it names are searched before anything else can use up the budget.
-        collections = ["ha_entities"] + [c for c in collections if c != "ha_entities"]
+        collections = [HOME_DEVICES] + [c for c in collections if c != HOME_DEVICES]
     return collections
 
 
@@ -765,8 +766,8 @@ async def _fetch_rag_context(
                 if resp.status == 200:
                     hits = (await resp.json()).get("results", [])
                     if hits:
-                        # For HA entities, enrich with live state from HA
-                        if coll == "ha_entities" and creds:
+                        # For home devices, enrich with live state from the hub
+                        if coll == HOME_DEVICES and creds:
                             hits = await _enrich_entities_with_live_state(hits, creds)
 
                         coll_added = False
@@ -1413,6 +1414,8 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                 # its context, called this without a collection three times, and
                 # answered "No relevant context found" about a book it was
                 # already holding. So refuse, and say what to pass.
+                if payload.get("collection_name"):
+                    payload["collection_name"] = canonical_collection(str(payload["collection_name"]))
                 if not str(payload.get("collection_name") or "").strip():
                     return (
                         "collection_name is required and was not supplied, so the "
@@ -1420,7 +1423,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         "nextcloud_files and report no results regardless of what "
                         "was asked. Pass collection_name explicitly -- "
                         "calibre_files for the book library, nextcloud_files for "
-                        "files, system_learnings for past lessons, ha_entities for "
+                        "files, system_learnings for past lessons, home_devices for "
                         "the house, system_capabilities for tools, user_facts for "
                         "remembered user facts, conversation_memory for intercom "
                         "transcripts, mission_history for past Raven runs, "

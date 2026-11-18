@@ -21,7 +21,7 @@ RAG_DB_PATH = os.getenv("RAG_DB_PATH", "/data/rag.db").strip() or "/data/rag.db"
 # The relational collections are stored in the generic `rag_items` table.
 GENERIC_COLLECTIONS = {
     "nextcloud_files",
-    "ha_entities",
+    "home_devices",
     "system_capabilities",
     "system_learnings",
     "user_facts",

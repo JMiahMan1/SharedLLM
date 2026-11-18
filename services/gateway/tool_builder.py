@@ -105,7 +105,7 @@ _TOOLS: tuple[_Tool, ...] = (
     _Tool(
         "ContextSearchRequest",
         "Semantic RAG search across indexed collections (calibre_files, nextcloud_files, "
-        "ha_entities, system_learnings, system_capabilities, user_facts, "
+        "home_devices, system_learnings, system_capabilities, user_facts, "
         "conversation_memory, mission_history, network_topology, telemetry_alerts).",
         ("search rag", "semantic search", "context search", "search indexed knowledge",
          "search learnings", "search user facts"),

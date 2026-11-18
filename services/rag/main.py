@@ -37,6 +37,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from services.common.entity_ids import usable_entity_id as _usable_entity_id
+from services.common.rag_collections import (
+    DEVICE_SOURCES,
+    HOME_DEVICES,
+    LEGACY_HOME_DEVICES,
+    SOURCE_HOME_ASSISTANT,
+    SOURCE_HOMEHUB,
+    canonical_collection,
+)
 from services.common.secrets import secret_matches
 from services.config import INTERNAL_SECRET
 from services.rag import db, topics
@@ -228,6 +236,11 @@ async def lifespan(app: FastAPI):
     _ensure_dimension_consistent(conn)
 
     adapter = build_adapter(conn)
+    try:
+        _migrate_legacy_device_rows()
+        _rename_legacy_collection_in_text()
+    except Exception as e:
+        log.warning(f"[home_devices] moving {LEGACY_HOME_DEVICES} rows failed (retried at next start): {e}")
     # Load the reranker in the background: the first meaning search should not
     # wait for it, and the service must not wait for it to start.
     asyncio.get_running_loop().run_in_executor(None, _warm_reranker)
@@ -267,7 +280,11 @@ async def lifespan(app: FastAPI):
         _seed_protocol_lessons()
     except Exception as e:
         log.warning(f"[RAG] protocol lesson seeding failed (non-fatal): {e}")
+    device_task = asyncio.create_task(_device_index_loop())
     yield
+    device_task.cancel()
+    with suppress(Exception):
+        _flush_device_references()
     try:
         _conn().commit()
         _conn().close()
@@ -493,7 +510,7 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-resources",
         "topic": "Raven protocol: pulling resources in",
-        "rule": "Before starting, check the resources blocks in the prompt. Bring in what you need instead of inventing it: Nextcloud files via StorageFileReadRequest then WorkspaceFileWriteRequest to import into the workspace; Home Assistant entity state via entity requests; previously indexed knowledge via the context blocks. Resources you import may then be processed with the workspace toolchain.",
+        "rule": "Before starting, check the resources blocks in the prompt. Bring in what you need instead of inventing it: Nextcloud files via StorageFileReadRequest then WorkspaceFileWriteRequest to import into the workspace; home hub entity state via entity requests; previously indexed knowledge via the context blocks. Resources you import may then be processed with the workspace toolchain.",
         "tags": ["protocol", "resources", "nextcloud", "ha"],
     },
     {
@@ -517,7 +534,7 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-orchestrate",
         "topic": "Raven scenario: multi-tool orchestration",
-        "rule": "Multi-source tasks that cross domains: query Home Assistant for current state (temperature, device status), fetch related web information with WebSearchRequest, then synthesize everything into a combined workspace artifact (status report, dashboard JSON, etc.). Pull resources from Nextcloud as needed. Each domain feeds into the next, so show the logical chain in your plan and Apply: citations.",
+        "rule": "Multi-source tasks that cross domains: query the home hub for current state (temperature, device status), fetch related web information with WebSearchRequest, then synthesize everything into a combined workspace artifact (status report, dashboard JSON, etc.). Pull resources from Nextcloud as needed. Each domain feeds into the next, so show the logical chain in your plan and Apply: citations.",
         "tags": ["protocol", "orchestration", "ha", "web", "resources"],
     },
     {
@@ -535,7 +552,7 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-rag-collections",
         "topic": "Raven protocol: all RAG collections and topic tags",
-        "rule": "ContextSearchRequest requires collection_name: calibre_files (books), nextcloud_files (cloud docs, notes, recipes), ha_entities (smart home devices), system_learnings (past lessons), system_capabilities (tools and CLI binaries), user_facts (remembered user facts and preferences), conversation_memory (intercom voice transcripts), mission_history (past Raven mission outcomes), network_topology (Docker/LAN containers), telemetry_alerts (device and sensor alerts). Pass tags: [topic] to filter Calibre books tagged jarvis:<topic> or Nextcloud files under Resources/<Topic>/.",
+        "rule": "ContextSearchRequest requires collection_name: calibre_files (books), nextcloud_files (cloud docs, notes, recipes), home_devices (the home's devices from the home hub), system_learnings (past lessons), system_capabilities (tools and CLI binaries), user_facts (remembered user facts and preferences), conversation_memory (intercom voice transcripts), mission_history (past Raven mission outcomes), network_topology (Docker/LAN containers), telemetry_alerts (device and sensor alerts). Pass tags: [topic] to filter Calibre books tagged jarvis:<topic> or Nextcloud files under Resources/<Topic>/.",
         "tags": ["protocol", "rag", "search", "resources"],
     },
     {
@@ -685,6 +702,7 @@ def _hybrid_search(
     tags: list[str] | None = None,
 ) -> list[SearchResultItem]:
     user_id = user_id.lower()
+    collection = canonical_collection(collection) or collection
 
     # The indexes narrow only by collection and user, so a topic filter takes
     # a wider pool of candidates and keeps the ones about that topic.
@@ -750,6 +768,9 @@ def _hybrid_search(
     #    metric reflects real usefulness, not just search frequency.
     if collection == "system_learnings" and results:
         _bump_retrieved([doc_id for doc_id, _ in kept if _item_exists(doc_id)])
+    elif collection == HOME_DEVICES and kept:
+        # A device that searches keep finding stays in the index (see _sweep_stale_devices).
+        _note_device_references([doc_id for doc_id, _ in kept])
     return results
 
 
@@ -970,7 +991,7 @@ async def get_stats(user_id: str = "default"):
     try:
         # calibre_files is crawled from the Knowledge Hub like nextcloud_files,
         # so it belongs in the same counts.
-        collections = ["nextcloud_files", "calibre_files", "ha_entities", "system_capabilities", "system_learnings"]
+        collections = ["nextcloud_files", "calibre_files", HOME_DEVICES, "system_capabilities", "system_learnings"]
         total_chunks = 0
         coll_chunks_map: dict[str, int] = {}
         coll_docs_map: dict[str, int] = {}
@@ -1026,6 +1047,7 @@ async def get_stats(user_id: str = "default"):
 async def list_collection_documents(
     collection_name: str, user_id: str = "default", limit: int = Query(100, ge=1, le=500)
 ):
+    collection_name = canonical_collection(collection_name) or collection_name
     try:
         target_user = "default" if collection_name == "system_capabilities" else user_id
         rows = _conn().execute(
@@ -1974,6 +1996,7 @@ async def get_indexed_paths(user_id: str = "default", collection_name: str = "ne
     collection made that impossible for any future provider.
     """
     user_id = user_id.lower()
+    collection_name = canonical_collection(collection_name) or collection_name
     try:
         rows = _conn().execute(
             "SELECT metadata FROM rag_items WHERE collection_name = ? AND user_id = ?",
@@ -1991,7 +2014,7 @@ async def get_indexed_paths(user_id: str = "default", collection_name: str = "ne
 async def sync_files(payload: dict):
     chunks = payload.get("chunks", [])
     user_id = payload.get("user_id", "default").lower()
-    collection_name = payload.get("collection_name", "nextcloud_files")
+    collection_name = canonical_collection(payload.get("collection_name")) or "nextcloud_files"
 
     if not chunks:
         return {"status": "SUCCESS", "count": 0}
@@ -2063,6 +2086,7 @@ def _purge_ids(collection_name: str, user_id: str, filter_meta: dict) -> list[st
     """
     if filter_meta and not isinstance(filter_meta, dict):
         raise HTTPException(status_code=400, detail="filter must be a JSON object of metadata keys")
+    collection_name = canonical_collection(collection_name) or collection_name
     sql = "SELECT id FROM rag_items WHERE collection_name = ? AND user_id = ?"
     params: list[Any] = [collection_name, user_id]
     for k, v in (filter_meta or {}).items():
@@ -2267,6 +2291,8 @@ async def maintenance_endpoint(payload: dict):
         or not all(isinstance(c, str) and c for c in requested)
     ):
         raise HTTPException(status_code=400, detail="collections must be a list of collection names")
+    if requested is not None:
+        requested = [canonical_collection(c) or c for c in requested]
     retention = _retention_map()
     only = None
     if requested is not None:
@@ -2305,49 +2331,345 @@ async def maintenance_endpoint(payload: dict):
     return body
 
 
-# Home Assistant sync
+# Home devices (the ``home_devices`` collection)
+#
+# One row per entity, per user, per home hub: HomeHub and Home Assistant can
+# both feed the index, so the row id names its hub and a sync from one hub
+# never touches the other hub's rows. A row leaves the index when its hub no
+# longer lists the entity (on that user's next sync from that hub), when its
+# hub is switched off, or when nothing has refreshed it for
+# HOME_DEVICE_STALE_HOURS and no search has returned it in that time (the
+# staleness sweep: a user whose sync stopped, or lost access, or was removed).
 
 
-def _ha_item_id(user_id: str, entity_id: str) -> str:
-    """The ``rag_items`` id of one user's copy of one HA entity.
+def _device_item_id(source: str, user_id: str, entity_id: str) -> str:
+    """The ``rag_items`` id of one user's copy of one entity from one hub.
 
-    It used to be ``ha:{entity_id}`` for everyone. ``id`` is the table's primary
-    key, so each user's sync (default, then each family member in turn, every five
-    minutes) replaced the previous user's rows: no user ever found their own
-    copy as "unchanged", all ~700 entities were re-embedded on every sync
-    (RAG busy roughly half of every hour), and at any moment only the last
-    user to sync had any HA entities indexed. Rows stored under the old id are
-    removed as orphans on each user's next sync.
+    It was ``ha:{entity_id}`` for everyone once. ``id`` is the table's primary
+    key, so each user's sync replaced the previous user's rows: no user ever
+    found their own copy as "unchanged", all ~700 entities were re-embedded on
+    every sync, and only the last user to sync had any devices indexed. It was
+    then ``ha:{user}:{entity_id}``, which let the same entity id from two hubs
+    overwrite each other; rows in that form are renamed once at startup
+    (``_migrate_legacy_device_rows``).
     """
-    return f"ha:{user_id}:{entity_id}"
+    return f"dev:{source}:{user_id}:{entity_id}"
 
 
-# Home Assistant still carries entities whose id is a serialized user record
-# (see the test module for the two live ones). They are refused on every sync,
-# and a sync runs every five minutes for every user, so the same warning was
-# written ~2,400 times a day and buried everything else in the log. The full
-# warning is repeated only when the set of refused ids changes for that user.
+def _device_sync_status_id(source: str, user_id: str) -> str:
+    return f"sync_status:{source}:{user_id}"
+
+
+def _default_device_source() -> str:
+    """The hub a sync came from when the caller did not say (a gateway older than this one).
+
+    Execution reads HomeHub whenever it is on, so that is the answer then.
+    """
+    from services import config as cfg
+
+    if cfg.homehub_enabled() or not cfg.home_assistant_enabled():
+        return SOURCE_HOMEHUB
+    return SOURCE_HOME_ASSISTANT
+
+
+def _enabled_device_sources() -> set[str]:
+    from services import config as cfg
+
+    enabled = set()
+    if cfg.homehub_enabled():
+        enabled.add(SOURCE_HOMEHUB)
+    if cfg.home_assistant_enabled():
+        enabled.add(SOURCE_HOME_ASSISTANT)
+    return enabled
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _move_row(old_id: str, new_id: str, collection: str, metadata: str) -> None:
+    """Rename one row and move it to ``collection`` in every table that holds it, keeping its vector."""
+    db_conn = _conn()
+    db_conn.execute(
+        "UPDATE rag_items SET id = ?, collection_name = ?, metadata = ? WHERE id = ?",
+        [new_id, collection, metadata, old_id],
+    )
+    with suppress(Exception):
+        db_conn.execute(
+            "UPDATE rag_fts SET id = ?, collection_name = ? WHERE id = ?", [new_id, collection, old_id]
+        )
+    db_conn.execute(
+        "UPDATE vec_store SET id = ?, collection_name = ? WHERE id = ?", [new_id, collection, old_id]
+    )
+    # vec0 tables are rewritten rather than updated: delete and insert the same vector.
+    with suppress(Exception):
+        row = db_conn.execute(
+            "SELECT embedding, user_id FROM vec_rag_items WHERE id = ?", [old_id]
+        ).fetchone()
+        if row is not None:
+            db_conn.execute("DELETE FROM vec_rag_items WHERE id = ?", [old_id])
+            db_conn.execute(
+                "INSERT INTO vec_rag_items(id, embedding, collection_name, user_id) VALUES (?, ?, ?, ?)",
+                [new_id, row["embedding"], collection, row["user_id"]],
+            )
+
+
+def _migrate_legacy_device_rows() -> dict[str, int]:
+    """Move rows stored under ``ha_entities`` into ``home_devices``, once.
+
+    Each ``ha:{user}:{entity_id}`` row is renamed to the new id form with the hub
+    it most likely came from (``_default_device_source``), and ``sync_status:{user}``
+    to ``sync_status:{source}:{user}``. Vectors are kept, so nothing is
+    re-embedded. Rows in the oldest ``ha:{entity_id}`` form, and any whose new
+    id already exists, are deleted (a sync would have removed them as orphans).
+    Running it again finds nothing to do.
+    """
+    rows = _conn().execute(
+        "SELECT id, user_id, metadata FROM rag_items WHERE collection_name = ?",
+        [LEGACY_HOME_DEVICES],
+    ).fetchall()
+    if not rows:
+        return {"moved": 0, "deleted": 0}
+    source = _default_device_source()
+    moved = 0
+    doomed: list[str] = []
+    for r in rows:
+        old_id, user = r["id"], r["user_id"]
+        try:
+            meta = json.loads(r["metadata"]) if r["metadata"] else {}
+        except Exception:
+            meta = {}
+        if old_id == f"sync_status:{user}":
+            new_id = _device_sync_status_id(source, user)
+        elif old_id.startswith(f"ha:{user}:"):
+            new_id = _device_item_id(source, user, old_id[len(f"ha:{user}:"):])
+            meta["type"] = "home_device"
+        else:
+            doomed.append(old_id)
+            continue
+        if _item_exists(new_id):
+            doomed.append(old_id)
+            continue
+        meta["source"] = source
+        _move_row(old_id, new_id, HOME_DEVICES, json.dumps(meta))
+        moved += 1
+    _conn().commit()
+    if doomed:
+        _delete_items(doomed)
+    log.info(
+        f"[home_devices] moved {moved} rows from {LEGACY_HOME_DEVICES} to {HOME_DEVICES} "
+        f"(source {source}), deleted {len(doomed)} rows that a sync would have dropped"
+    )
+    return {"moved": moved, "deleted": len(doomed)}
+
+
+def _rename_legacy_collection_in_text() -> int:
+    """Say ``home_devices`` where stored lessons and capabilities still say ``ha_entities``.
+
+    Protocol lessons are seeded once and never overwritten (users edit them), so
+    the one that lists the collections kept the old name. The old name still
+    works (``canonical_collection``), but a lesson should teach the current one.
+    Only the word changes; counters and edits stay, and the row is re-embedded.
+    """
+    rows = _conn().execute(
+        "SELECT id, collection_name, user_id, content, metadata, rule FROM rag_items "
+        "WHERE collection_name IN ('system_learnings', 'system_capabilities') "
+        "AND (content LIKE ? OR metadata LIKE ? OR rule LIKE ?)",
+        [f"%{LEGACY_HOME_DEVICES}%"] * 3,
+    ).fetchall()
+    for r in rows:
+        content = r["content"].replace(LEGACY_HOME_DEVICES, HOME_DEVICES)
+        _conn().execute(
+            "UPDATE rag_items SET content = ?, metadata = ?, rule = ? WHERE id = ?",
+            [
+                content,
+                (r["metadata"] or "").replace(LEGACY_HOME_DEVICES, HOME_DEVICES),
+                (r["rule"] or "").replace(LEGACY_HOME_DEVICES, HOME_DEVICES),
+                r["id"],
+            ],
+        )
+        with suppress(Exception):
+            _conn().execute("UPDATE rag_fts SET content = ? WHERE id = ?", [content, r["id"]])
+        _adapter().add(r["id"], embed([content])[0], r["collection_name"], r["user_id"])
+    if rows:
+        _conn().commit()
+        log.info(f"[home_devices] renamed {LEGACY_HOME_DEVICES} to {HOME_DEVICES} in {len(rows)} stored lessons/capabilities")
+    return len(rows)
+
+
+# Search hits on device rows, waiting to be written as last_used_at. A search
+# must not wait on a disk sync, so hits are collected here and written in one
+# statement by the maintenance loop (and before every staleness sweep).
+_pending_device_refs: dict[str, str] = {}
+
+
+def _note_device_references(doc_ids: list[str]) -> None:
+    now = _now_iso()
+    for doc_id in doc_ids:
+        if doc_id.startswith("dev:"):
+            _pending_device_refs[doc_id] = now
+
+
+def _flush_device_references() -> int:
+    """Write the noted search hits: ``last_used_at`` and one more ``usage_count`` each."""
+    if not _pending_device_refs:
+        return 0
+    batch = [(used_at, doc_id) for doc_id, used_at in _pending_device_refs.items()]
+    _pending_device_refs.clear()
+    try:
+        _conn().executemany(
+            "UPDATE rag_items SET last_used_at = ?, usage_count = usage_count + 1 WHERE id = ?",
+            batch,
+        )
+        _conn().commit()
+    except Exception as e:  # best effort: a lost reference only shortens a row's life
+        log.warning(f"[home_devices] could not record {len(batch)} search references: {e}")
+        return 0
+    return len(batch)
+
+
+def _sweep_stale_devices(now: int | None = None) -> dict[str, Any]:
+    """Delete device rows nobody refreshes or uses any more, and rows of a hub that is switched off.
+
+    A row is stale when its last sync is older than HOME_DEVICE_STALE_HOURS and
+    no search has returned it in that time either. Sync status rows go with the
+    last device row of their user and hub. Entity ids that no row holds any more
+    are cleared from the gateway's Redis state cache (``ha:state:<entity_id>``)
+    and returned.
+    """
+    from services import config as cfg
+
+    _flush_device_references()
+    now = int(time.time()) if now is None else now
+    hours = cfg.HOME_DEVICE_STALE_HOURS
+    cutoff = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - hours * 3600))
+    enabled = _enabled_device_sources()
+    rows = _conn().execute(
+        "SELECT id, user_id, metadata, indexed_at, last_used_at FROM rag_items WHERE collection_name = ?",
+        [HOME_DEVICES],
+    ).fetchall()
+    stale: list[str] = []
+    switched_off: list[str] = []
+    kept_pairs: set[tuple[str, str]] = set()
+    status_rows: dict[tuple[str, str], str] = {}
+    removed_eids: set[str] = set()
+    kept_eids: set[str] = set()
+    for r in rows:
+        try:
+            meta = json.loads(r["metadata"]) if r["metadata"] else {}
+        except Exception:
+            meta = {}
+        source = meta.get("source") or SOURCE_HOMEHUB
+        if meta.get("type") == "sync_status":
+            status_rows[(r["user_id"], source)] = r["id"]
+            continue
+        eid = meta.get("entity_id") or ""
+        if source not in enabled:
+            switched_off.append(r["id"])
+            removed_eids.add(eid)
+        elif (r["indexed_at"] or "") < cutoff and (r["last_used_at"] or "") < cutoff:
+            stale.append(r["id"])
+            removed_eids.add(eid)
+        else:
+            kept_pairs.add((r["user_id"], source))
+            kept_eids.add(eid)
+    empty_status = [sid for pair, sid in status_rows.items() if pair not in kept_pairs]
+    doomed = stale + switched_off + empty_status
+    if doomed:
+        _delete_items(doomed)
+    gone_eids = sorted(e for e in removed_eids - kept_eids if e)
+    if gone_eids:
+        cache = _redis()
+        if cache is not None:
+            with suppress(Exception):
+                cache.delete(*[f"ha:state:{eid}" for eid in gone_eids])
+    result = {
+        "stale_hours": hours,
+        "removed_stale": len(stale),
+        "removed_switched_off": len(switched_off),
+        "removed_sync_status": len(empty_status),
+        "kept": len(rows) - len(status_rows) - len(stale) - len(switched_off),
+        "removed_entity_ids": gone_eids,
+    }
+    log.info(
+        f"[home_devices] sweep: removed {len(stale)} stale rows (not synced or used in {hours} h), "
+        f"{len(switched_off)} rows of a switched-off hub, {len(empty_status)} sync status rows; "
+        f"kept {result['kept']}"
+    )
+    return result
+
+
+async def _device_index_loop() -> None:
+    """Record search references every minute and sweep stale device rows at start and then on an interval."""
+    from services import config as cfg
+
+    sweep_every = max(60, cfg.HOME_DEVICE_SWEEP_MINUTES * 60)
+    next_sweep = 0.0
+    while True:
+        try:
+            if time.monotonic() >= next_sweep:
+                _sweep_stale_devices()
+                next_sweep = time.monotonic() + sweep_every
+            else:
+                _flush_device_references()
+        except Exception as e:
+            log.warning(f"[home_devices] maintenance failed: {e}")
+        await asyncio.sleep(60)
+
+
+@app.post("/rag/devices/sweep", dependencies=[Depends(require_internal)])
+async def sweep_devices():
+    """Run the staleness sweep now (it also runs at start and every HOME_DEVICE_SWEEP_MINUTES)."""
+    return {"status": "SUCCESS", **_sweep_stale_devices()}
+
+
+# Home hubs still carry entities whose id is a serialized user record (see the
+# test module for the two live ones). They are refused on every sync, and a
+# sync runs every five minutes for every user, so the same warning was written
+# ~2,400 times a day and buried everything else in the log. The full warning is
+# repeated only when the set of refused ids changes for that user.
 _refused_entity_ids: dict[str, tuple[str, ...]] = {}
 
 
 def _log_refused_entity_ids(user: str, malformed_ids: list[str]) -> None:
     signature = tuple(sorted(set(malformed_ids)))
     if _refused_entity_ids.get(user) == signature:
-        log.debug("[ha_sync] still refusing %d malformed entity_ids for %s", len(signature), user)
+        log.debug("[device_sync] still refusing %d malformed entity_ids for %s", len(signature), user)
         return
     _refused_entity_ids[user] = signature
     log.warning(
-        f"[ha_sync] refusing {len(malformed_ids)} malformed entity_ids for "
+        f"[device_sync] refusing {len(malformed_ids)} malformed entity_ids for "
         f"{user}: {malformed_ids[:3]}"
     )
 
 
+def _entity_area(attrs: dict) -> str:
+    """The room an entity is in, as the hub reports it.
+
+    Execution fills ``area_id`` with the area's name from the hub, which already
+    falls back to the device's area when the entity has none of its own
+    (HomeHub's ``area_name`` and Home Assistant's both do).
+    """
+    return str(attrs.get("area_id") or attrs.get("area_name") or attrs.get("area") or "unassigned area")
+
+
+@app.post("/rag/sync/devices", dependencies=[Depends(require_internal)])
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
-async def sync_ha(payload: dict, user_id: str | None = None):
+async def sync_devices(payload: dict, user_id: str | None = None):
+    """Index one user's devices from one home hub (``source``: homehub or home_assistant).
+
+    ``/rag/sync/ha`` is the route's old name, kept for callers built before the rename.
+    """
     entities = payload.get("entities", [])
     resolved_user = (user_id or payload.get("user_id", "default")).lower()
+    source = str(payload.get("source") or _default_device_source())
+    if source not in DEVICE_SOURCES:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "ERROR", "message": f"source must be one of {list(DEVICE_SOURCES)}"},
+        )
     now = int(time.time())
-    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    now_ts = _now_iso()
 
     if not isinstance(entities, list):
         return JSONResponse(
@@ -2367,11 +2689,12 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         e for e in entities if isinstance(e, dict) and _usable_entity_id(e.get("entity_id", ""))
     ]
 
+    own_prefix = _device_item_id(source, resolved_user, "")
     try:
         existing_rows = _conn().execute(
             "SELECT id, content, usage_count FROM rag_items"
-            " WHERE collection_name = 'ha_entities' AND user_id = ?",
-            [resolved_user],
+            " WHERE collection_name = ? AND user_id = ? AND substr(id, 1, ?) = ?",
+            [HOME_DEVICES, resolved_user, len(own_prefix), own_prefix],
         ).fetchall()
         existing = {r["id"]: (r["content"], r["usage_count"]) for r in existing_rows}
     except Exception:
@@ -2386,14 +2709,12 @@ async def sync_ha(payload: dict, user_id: str | None = None):
     # their metadata (device_* fields, timestamps) is refreshed.
     unchanged: list[tuple[str, dict]] = []
     for e in entities:
-        if not isinstance(e, dict):
-            continue
         eid = e.get("entity_id", "")
         if not eid:
             continue
-        attrs = e.get("attributes", {})
+        attrs = e.get("attributes") or {}
         fname = attrs.get("friendly_name", eid)
-        area = attrs.get("area_id") or "unassigned area"
+        area = _entity_area(attrs)
         device_class = attrs.get("device_class", "")
         supported = attrs.get("supported_features", 0)
 
@@ -2414,8 +2735,7 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         if dev_hostname:
             content += f" | Hostname: {dev_hostname}"
 
-        cid = _ha_item_id(resolved_user, eid)
-        created_at = now
+        cid = _device_item_id(source, resolved_user, eid)
         if cid not in existing_ids:
             new_count += 1
 
@@ -2426,10 +2746,11 @@ async def sync_ha(payload: dict, user_id: str | None = None):
             "device_class": device_class,
             "supported_features": str(supported),
             "user_id": resolved_user,
-            "type": "ha_entity",
+            "type": "home_device",
+            "source": source,
             "domain": eid.split(".")[0],
             "updated_at": now,
-            "created_at": created_at,
+            "created_at": now,
             "indexed_at": now_ts,
             "device_ip": dev_ip,
             "device_mac": dev_mac,
@@ -2441,34 +2762,26 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         if cid in existing and existing[cid][0] == content:
             unchanged.append((cid, {**meta, "usage_count": existing[cid][1] or 0}))
         else:
-            pending.append((cid, content, meta, created_at))
+            pending.append((cid, content, meta, now))
 
-    # Orphan cleanup: delete entities no longer present in HA.
+    # Orphan cleanup: this user's rows from this hub that the hub no longer lists.
     incoming_eids = {e.get("entity_id") for e in entities if e.get("entity_id")}
-    incoming_ids = {_ha_item_id(resolved_user, eid) for eid in incoming_eids}
-    stale_rows = [oid for oid in (existing_ids - incoming_ids) if oid.startswith("ha:")]
+    incoming_ids = {_device_item_id(source, resolved_user, eid) for eid in incoming_eids}
+    stale_rows = sorted(existing_ids - incoming_ids)
     if stale_rows:
         _delete_items(stale_rows)
-        log.info(f"[ha_sync] Removed {len(stale_rows)} stale entity rows")
-    # Report entity ids (the gateway clears its ``ha:state:{entity_id}`` cache
-    # with them), and only ones HA no longer has: a row left under the old id
-    # format is stale, but its entity is still live.
-    own_prefix = _ha_item_id(resolved_user, "")
-    orphaned_entities = sorted(
-        {
-            oid[len(own_prefix):] if oid.startswith(own_prefix) else oid[len("ha:"):]
-            for oid in stale_rows
-        }
-        - incoming_eids
-    )
+        log.info(f"[device_sync] removed {len(stale_rows)} {source} rows for {resolved_user}")
+    # Report entity ids (the gateway clears its ``ha:state:{entity_id}`` cache with them).
+    orphaned_entities = sorted({oid[len(own_prefix):] for oid in stale_rows} - incoming_eids)
 
     pending.append(
         (
-            f"sync_status:{resolved_user}",
-            f"Last HA sync for {resolved_user} at {now}. Total: {len(entities)}, "
+            _device_sync_status_id(source, resolved_user),
+            f"Last home hub sync ({source}) for {resolved_user} at {now}. Total: {len(entities)}, "
             f"New: {new_count}, Removed: {len(orphaned_entities)}",
             {
                 "type": "sync_status",
+                "source": source,
                 "user_id": resolved_user,
                 "timestamp": now,
                 "count": len(entities),
@@ -2481,31 +2794,31 @@ async def sync_ha(payload: dict, user_id: str | None = None):
     )
 
     # Embedding is CPU-bound ONNX inference; run it in a worker thread so the
-    # event loop stays responsive (health checks, searches) while HA entities
+    # event loop stays responsive (health checks, searches) while devices
     # are being (re-)indexed.
     try:
         log.info(
-            f"[ha_sync] embedding {len(pending)} texts for {resolved_user} "
+            f"[device_sync] embedding {len(pending)} texts for {resolved_user} ({source}) "
             f"in batches of {EMBED_BATCH_SIZE} (rss={_self_rss_mib()}MiB)"
         )
         embed_started = time.monotonic()
         vectors = await asyncio.to_thread(embed_batched, [p[1] for p in pending])
         log.info(
-            f"[ha_sync] embedded {len(pending)} texts in "
+            f"[device_sync] embedded {len(pending)} texts in "
             f"{time.monotonic() - embed_started:.1f}s (rss={_self_rss_mib()}MiB)"
         )
     except Exception as ex:
-        log.error(f"[ha_sync] embedding {len(pending)} entities failed: {ex}")
+        log.error(f"[device_sync] embedding {len(pending)} entities failed: {ex}")
         return JSONResponse(
             status_code=500,
-            content={"status": "ERROR", "message": f"HA entity embedding failed: {ex}"},
+            content={"status": "ERROR", "message": f"Device embedding failed: {ex}"},
         )
     write_started = time.monotonic()
     for i, (cid, content, meta, created_at) in enumerate(pending):
         try:
-            _add_item("ha_entities", cid, resolved_user, content, meta, created_at, now_ts, vector=vectors[i], commit=False)
+            _add_item(HOME_DEVICES, cid, resolved_user, content, meta, created_at, now_ts, vector=vectors[i], commit=False)
         except Exception as ex:
-            log.error(f"HA entity sync failed for {cid}: {ex}")
+            log.error(f"Device sync failed for {cid}: {ex}")
     if unchanged:
         _conn().executemany(
             "UPDATE rag_items SET metadata = ?, indexed_at = ? WHERE id = ?",
@@ -2513,12 +2826,13 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         )
     _conn().commit()
     log.info(
-        f"[ha_sync] wrote {len(pending)} items, refreshed {len(unchanged)} unchanged in "
+        f"[device_sync] wrote {len(pending)} items, refreshed {len(unchanged)} unchanged in "
         f"{time.monotonic() - write_started:.1f}s (rss={_self_rss_mib()}MiB)"
     )
 
     return {
         "status": "SUCCESS",
+        "source": source,
         "count": len(entities),
         "refused_count": len(malformed_ids),
         "new_count": new_count,
@@ -2527,25 +2841,39 @@ async def sync_ha(payload: dict, user_id: str | None = None):
     }
 
 
+#: The route's old name.
+sync_ha = sync_devices
+
+
+@app.get("/rag/devices/status", dependencies=[Depends(require_internal)])
 @app.get("/rag/ha/status", dependencies=[Depends(require_internal)])
-async def get_ha_status(user_id: str = "default"):
-    row = _conn().execute(
-        "SELECT metadata FROM rag_items WHERE id = ?",
-        [f"sync_status:{user_id}"],
-    ).fetchone()
-    if row:
-        return {"status": "SUCCESS", "data": json.loads(row["metadata"])}
-    return {"status": "ERROR", "message": "No sync history found"}
+async def get_device_sync_status(user_id: str = "default"):
+    """The user's latest device sync (``data``), and the latest from each hub (``sources``)."""
+    rows = _conn().execute(
+        "SELECT metadata FROM rag_items WHERE collection_name = ? AND user_id = ? AND id LIKE 'sync_status:%'",
+        [HOME_DEVICES, user_id.lower()],
+    ).fetchall()
+    statuses = [json.loads(r["metadata"]) for r in rows if r["metadata"]]
+    if not statuses:
+        return {"status": "ERROR", "message": "No sync history found"}
+    latest = max(statuses, key=lambda m: m.get("timestamp") or 0)
+    return {
+        "status": "SUCCESS",
+        "data": latest,
+        "sources": {m.get("source") or SOURCE_HOMEHUB: m for m in statuses},
+    }
 
 
+@app.get("/rag/devices/new", dependencies=[Depends(require_internal)])
 @app.get("/rag/ha/new", dependencies=[Depends(require_internal)])
 async def get_new_devices(user_id: str = "default", limit: int = 10):
     user_id = user_id.lower()
     last_24h = int(time.time()) - 86400
     rows = _conn().execute(
         "SELECT metadata FROM rag_items "
-        "WHERE collection_name = 'ha_entities' AND user_id = ? AND created_at > ? LIMIT ?",
-        [user_id, last_24h, limit],
+        "WHERE collection_name = ? AND user_id = ? AND created_at > ? "
+        "AND id NOT LIKE 'sync_status:%' LIMIT ?",
+        [HOME_DEVICES, user_id, last_24h, limit],
     ).fetchall()
     return {"status": "SUCCESS", "devices": [json.loads(r["metadata"]) for r in rows]}
 
@@ -2756,19 +3084,19 @@ async def list_nextcloud_resources(user_id: str = "default", limit: int = 15):
 
 @app.get("/rag/resources/ha", dependencies=[Depends(require_internal)])
 async def list_ha_resources(user_id: str = "default", limit: int = 15):
-    """Compact snapshot of the most recently indexed Home Assistant entities.
+    """Compact snapshot of the most recently indexed home devices.
 
-    Lets the gateway render a small [HOME ASSISTANT SNAPSHOT] block listing
-    the entities Raven can read state from or control, without dumping the
-    full HA catalog into the prompt.
+    Lets the gateway render a small snapshot block listing the entities Raven
+    can read state from or control, without dumping the hub's whole catalog
+    into the prompt.
     """
     try:
         target_user = "default"
         rows = _conn().execute(
             "SELECT id, content, metadata, indexed_at FROM rag_items "
-            "WHERE collection_name = 'ha_entities' AND user_id = ? "
+            "WHERE collection_name = ? AND user_id = ? AND id NOT LIKE 'sync_status:%' "
             "ORDER BY indexed_at DESC LIMIT ?",
-            [target_user, limit],
+            [HOME_DEVICES, target_user, limit],
         ).fetchall()
         entities = []
         for r in rows:

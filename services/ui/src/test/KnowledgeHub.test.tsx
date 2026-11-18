@@ -206,7 +206,7 @@ describe('KnowledgeHub', () => {
     vi.mocked(api.globalSearch).mockResolvedValue({
       answer: 'Kitchen light is in the kitchen',
       files: [
-        { name: 'Kitchen', path: 'light.kitchen', collection: 'ha_entities', snippet: 'Kitchen light is in the kitchen' },
+        { name: 'Kitchen', path: 'light.kitchen', collection: 'home_devices', snippet: 'Kitchen light is in the kitchen' },
         { name: 'Budget.md', path: '/Budget.md', collection: 'nextcloud_files', snippet: 'Groceries 400' },
       ],
     });
