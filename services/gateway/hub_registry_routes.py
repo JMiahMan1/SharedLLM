@@ -25,6 +25,9 @@ _KINDS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "labels": ("/hub/labels", "label", ("name", "color", "icon", "description")),
     "zones": ("/hub/zones", "zone", ("name", "latitude", "longitude", "radius", "passive", "icon")),
     "persons": ("/hub/persons", "person", ("name", "jarvis_user", "device_trackers")),
+    "network_devices": ("/hub/network_devices", "device", ("mac", "name", "user_id", "device_type",
+                                                          "notify_on_arrival", "notify_on_departure",
+                                                          "email_on_arrival", "email_on_departure")),
 }
 
 
@@ -98,3 +101,30 @@ def _routes(kind: str) -> None:
 
 for _k in _KINDS:
     _routes(_k)
+
+
+# --- Network device extra endpoints -----------------------------------------------------------
+
+_MAC_RE = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$", re.IGNORECASE)
+
+
+def _mac(mac: str) -> str:
+    mac = mac.strip().lower()
+    if not _MAC_RE.match(mac):
+        raise HTTPException(status_code=404, detail="Invalid MAC address")
+    return mac
+
+
+@router.get("/network_devices/status")
+async def network_devices_status(request: Request):
+    """All known devices with their current network status (Admin > Network > Devices)."""
+    await hub._admin(request)
+    return await hub._answer(*await hub._hub("GET", "/hub/network_devices/status"))
+
+
+@router.get("/network_devices/{mac}/history")
+async def network_device_history(mac: str, request: Request, hours: int = 168):
+    """Arrival/departure history for a device (last N hours, default 1 week)."""
+    await hub._admin(request)
+    mac = _mac(mac)
+    return await hub._answer(*await hub._hub("GET", f"/hub/network_devices/{mac}/history", params={"hours": hours}))

@@ -1,4 +1,4 @@
-"""The ``/hub/floors``, ``/hub/labels``, ``/hub/categories``, ``/hub/zones``, ``/hub/persons`` and ``/hub/tags`` API.
+"""The ``/hub/floors``, ``/hub/labels``, ``/hub/categories``, ``/hub/zones``, ``/hub/persons``, ``/hub/tags`` and ``/hub/network_devices`` API.
 
 | Route | What |
 |---|---|
@@ -13,11 +13,16 @@
 | ``GET /hub/persons``, ``POST /hub/persons`` | The persons and the trackers they can use; ``{"name", "jarvis_user"?, "device_trackers"?}`` |
 | ``PATCH /hub/persons/{id}``, ``DELETE /hub/persons/{id}`` | Change or remove a person |
 | ``GET /hub/tags`` | The imported NFC/QR tags with their names |
+| ``GET /hub/network_devices``, ``POST /hub/network_devices`` | The registered network devices; ``{"mac", "name"?, "user_id"?, "device_type"?, ...}`` makes one |
+| ``PATCH /hub/network_devices/{mac}``, ``DELETE /hub/network_devices/{mac}`` | Change or remove a network device |
+| ``GET /hub/network_devices/status`` | All devices with current network status |
+| ``GET /hub/network_devices/{mac}/history`` | Arrival/departure history for a device |
 
 Admins only, like the rest of ``/hub/*``. See ``registries.py``.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -142,5 +147,45 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
     @router.delete("/hub/persons/{person_id}")
     async def delete_person(person_id: str, request: Request) -> Any:
         return await run(request, lambda: registries.delete_person(runtime, person_id))
+
+    # --- network devices -----------------------------------------------------------------------
+
+    _MAC_RE = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$", re.IGNORECASE)
+
+    def _mac(mac: str) -> str:
+        mac = mac.strip().lower()
+        if not _MAC_RE.match(mac):
+            raise HTTPException(404, detail="Invalid MAC address")
+        return mac
+
+    @router.get("/hub/network_devices")
+    async def list_network_devices(request: Request) -> Any:
+        return await run(request, lambda: registries.list_network_devices(runtime))
+
+    @router.post("/hub/network_devices")
+    async def create_network_device(request: Request) -> Any:
+        body = await body_of(request)
+        return await run(request, lambda: registries.create_network_device(runtime, body))
+
+    @router.patch("/hub/network_devices/{mac}")
+    async def update_network_device(mac: str, request: Request) -> Any:
+        mac = _mac(mac)
+        body = await body_of(request)
+        return await run(request, lambda: registries.update_network_device(runtime, mac, body))
+
+    @router.delete("/hub/network_devices/{mac}")
+    async def delete_network_device(mac: str, request: Request) -> Any:
+        mac = _mac(mac)
+        return await run(request, lambda: registries.delete_network_device(runtime, mac))
+
+    @router.get("/hub/network_devices/status")
+    async def network_devices_status(request: Request) -> Any:
+        return await run(request, lambda: registries.list_network_devices(runtime))
+
+    @router.get("/hub/network_devices/{mac}/history")
+    async def network_device_history(mac: str, request: Request, hours: int = 168) -> Any:
+        mac = _mac(mac)
+        # TODO: implement history from Redis device:history:{mac}
+        return {"mac": mac, "history": []}
 
     return router

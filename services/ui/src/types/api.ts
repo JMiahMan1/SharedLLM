@@ -4810,3 +4810,148 @@ export interface PartyRoomSummary {
   players: string[];
   stage_connected?: boolean;
 }
+
+/* ========================= Garden types ========================= */
+
+export interface GardenPlant {
+  id: string;
+  category: string;
+  species_ref: string;
+  location_id: string | null;
+  nickname: string | null;
+  quantity: number;
+  area_sqft_used: number | null;
+  pot_size_in: number | null;
+  pot_material: string | null;
+  has_drainage: boolean;
+  soil_mix: string | null;
+  window_direction: string | null;
+  distance_from_window: number | null;
+  planted_date: string | null;
+  last_repotted_date: string | null;
+  planting_method: string | null;
+  expected_harvest_start: string | null;
+  expected_harvest_end: string | null;
+  status: string;
+  assigned_to: string | null;
+  skylight_sync_enabled: boolean;
+  notes: string | null;
+  calibration_factor: number;
+  created_at: string;
+  updated_at: string;
+  species: GardenSpecies | null;
+}
+
+export interface GardenSpecies {
+  key: string;
+  category: string;
+  common_name: string;
+  scientific_name: string | null;
+  family: string | null;
+  light_level: string | null;
+  watering_method: string | null;
+  dryness_cue: string | null;
+  water_quality: string | null;
+  humidity_band: string | null;
+  misting_rule: string | null;
+  soil_mix: string | null;
+  temp_min_f: number | null;
+  temp_max_f: number | null;
+  cold_draft_sensitive: number | null;
+  toxicity_level: string | null;
+  toxicity_notes: string | null;
+  common_pests: string | null;
+  symptoms: string | null;
+  grooming_propagation: string | null;
+  fertilizing: string | null;
+  repot_interval_months: number | null;
+  description: string | null;
+  preservation_methods: string | null;
+  usda_acidity_class: string | null;
+  [key: string]: unknown;
+}
+
+export interface GardenLocation {
+  id: string;
+  name: string;
+  kind: string;
+  area_id: string | null;
+  width_ft: number | null;
+  length_ft: number | null;
+  area_sqft: number | null;
+  sun_exposure: string | null;
+  covered: boolean;
+  map_x: number | null;
+  map_y: number | null;
+  rotation_deg: number | null;
+  light_notes: string | null;
+  draft_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GardenProfile {
+  user_id: string;
+  family_size: number;
+  hardiness_zone: string | null;
+  zone_source: string;
+  last_spring_frost_mmdd: string | null;
+  first_fall_frost_mmdd: string | null;
+  units: string;
+  preservation_prefs: string | null;
+  daily_digest_time: string | null;
+  yard_canvas_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GardenTodayTask {
+  plant_id: string;
+  nickname: string | null;
+  common_name: string;
+  scientific_name: string | null;
+  category: string;
+  location_name: string | null;
+  location_id: string | null;
+  action: string;
+  next_due_at: string | null;
+  overdue: boolean;
+  care_cue: string;
+  watering_method: string | null;
+  dryness_cue: string | null;
+  water_quality: string | null;
+  toxicity_level: string | null;
+  toxicity_notes: string | null;
+  has_drainage: boolean;
+  placement_warning: { warning: string; severity: string } | null;
+  calibration_factor: number;
+}
+
+export interface GardenTodaySummary {
+  date: string;
+  due_count: number;
+  overdue_count: number;
+  by_room: Record<string, GardenTodayTask[]>;
+  all: GardenTodayTask[];
+}
+
+export interface GardenCareLog {
+  id: string;
+  action: string;
+  performed_by: string | null;
+  source: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface GardenCareRule {
+  id: string;
+  action: string;
+  interval_days: number | null;
+  winter_multiplier: number | null;
+  calibration_factor: number;
+  rain_skip_enabled: boolean;
+  next_due_at: string | null;
+  snoozed_until: string | null;
+  paused: boolean;
+}

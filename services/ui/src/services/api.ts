@@ -3,6 +3,10 @@ import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from 
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
 import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel, TtsVoices } from '../types/api';
 import type {
+  GardenPlant, GardenSpecies, GardenLocation, GardenProfile,
+  GardenTodaySummary, GardenCareLog, GardenCareRule,
+} from '../types/api';
+import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
 } from '../lib/weather';
 import { storageGetSync, storageSet } from '../lib/storage';
@@ -2616,6 +2620,106 @@ export const api = {
   /** The running fast and the last week's (adults only; `allowed: false` for a minor). */
   async getHealthFasting(): Promise<HealthFastingState> {
     const resp = await apiClient.get('/api/health/fasting');
+    return resp.data;
+  },
+
+  // --- Garden hub (species, profile, locations, plants, today, care) -------
+
+  async gardenSearch(params: { q?: string; category?: string; usda_zone?: number; limit?: number }): Promise<{
+    query: string; category: string | null; usda_zone: number | null; count: number;
+    results: GardenSpecies[]; seed_present: boolean;
+  }> {
+    const resp = await apiClient.get('/api/garden/species/search', { params });
+    return resp.data;
+  },
+
+  async gardenGetSpecies(key: string): Promise<{ key: string; present: boolean; species: GardenSpecies }> {
+    const resp = await apiClient.get(`/api/garden/species/${encodeURIComponent(key)}`);
+    return resp.data;
+  },
+
+  async gardenListSpecies(params?: { category?: string; usda_zone?: number; limit?: number }): Promise<{
+    category: string | null; usda_zone: number | null; count: number; results: GardenSpecies[]; seed_present: boolean;
+  }> {
+    const resp = await apiClient.get('/api/garden/species', { params });
+    return resp.data;
+  },
+
+  async gardenGetProfile(): Promise<GardenProfile> {
+    const resp = await apiClient.get('/api/garden/profile');
+    return resp.data;
+  },
+
+  async gardenUpdateProfile(body: Partial<GardenProfile>): Promise<GardenProfile> {
+    const resp = await apiClient.put('/api/garden/profile', body);
+    return resp.data;
+  },
+
+  async gardenListLocations(): Promise<GardenLocation[]> {
+    const resp = await apiClient.get('/api/garden/locations');
+    return resp.data;
+  },
+
+  async gardenCreateLocation(body: Partial<GardenLocation>): Promise<GardenLocation> {
+    const resp = await apiClient.post('/api/garden/locations', body);
+    return resp.data;
+  },
+
+  async gardenPatchLocation(id: string, body: Partial<GardenLocation>): Promise<GardenLocation> {
+    const resp = await apiClient.patch(`/api/garden/locations/${encodeURIComponent(id)}`, body);
+    return resp.data;
+  },
+
+  async gardenDeleteLocation(id: string): Promise<void> {
+    await apiClient.delete(`/api/garden/locations/${encodeURIComponent(id)}`);
+  },
+
+  async gardenListPlants(): Promise<GardenPlant[]> {
+    const resp = await apiClient.get('/api/garden/plants');
+    return resp.data;
+  },
+
+  async gardenCreatePlant(body: Partial<GardenPlant>): Promise<GardenPlant> {
+    const resp = await apiClient.post('/api/garden/plants', body);
+    return resp.data;
+  },
+
+  async gardenPatchPlant(id: string, body: Partial<GardenPlant>): Promise<GardenPlant> {
+    const resp = await apiClient.patch(`/api/garden/plants/${encodeURIComponent(id)}`, body);
+    return resp.data;
+  },
+
+  async gardenDeletePlant(id: string): Promise<void> {
+    await apiClient.delete(`/api/garden/plants/${encodeURIComponent(id)}`);
+  },
+
+  async gardenToday(): Promise<GardenTodaySummary> {
+    const resp = await apiClient.get('/api/garden/today');
+    return resp.data;
+  },
+
+  async gardenLogCare(plantId: string, body: { action: string; performed_by?: string; source?: string; notes?: string }): Promise<{ ok: boolean; action: string; plant_id: string; logged_by: string; next_due_at: string | null }> {
+    const resp = await apiClient.post(`/api/garden/plants/${encodeURIComponent(plantId)}/care`, body);
+    return resp.data;
+  },
+
+  async gardenSnooze(plantId: string, params?: { still_damp?: boolean; postpone_days?: number }): Promise<{ ok: boolean; plant_id: string; still_damp: boolean; postpone_days: number; calibration_factor: number; next_due_at: string | null }> {
+    const resp = await apiClient.post(`/api/garden/plants/${encodeURIComponent(plantId)}/snooze`, {}, { params });
+    return resp.data;
+  },
+
+  async gardenWaterAll(locationId: string): Promise<{ ok: boolean; location_id: string; location_name: string; watered_count: number; watered: GardenPlant[] }> {
+    const resp = await apiClient.post(`/api/garden/locations/${encodeURIComponent(locationId)}/water-all`);
+    return resp.data;
+  },
+
+  async gardenGetPlantLogs(plantId: string, limit = 100): Promise<{ plant_id: string; count: number; logs: GardenCareLog[] }> {
+    const resp = await apiClient.get(`/api/garden/plants/${encodeURIComponent(plantId)}/logs`, { params: { limit } });
+    return resp.data;
+  },
+
+  async gardenListCareRules(plantId: string): Promise<{ plant_id: string; rules: GardenCareRule[] }> {
+    const resp = await apiClient.get(`/api/garden/plants/${encodeURIComponent(plantId)}/care-rules`);
     return resp.data;
   },
 

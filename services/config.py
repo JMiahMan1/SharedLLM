@@ -95,6 +95,7 @@ GEO_SVC_URL = _net_url("GEO", "http://geo:8009")
 TELEMETRY_SVC_URL = _net_url("TELEMETRY", "http://telemetry:11438")
 BIBLE_SVC_URL = _net_url("BIBLE", "http://bible:8010")
 HEALTH_SVC_URL = _net_url("HEALTH", "http://health:8011")
+GARDEN_SVC_URL = _net_url("GARDEN", "http://garden:8012")
 CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
 SEARXNG_URL = os.getenv(f"{NETWORK_MODE.upper()}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
 # A retired HA host answers through homehub (services/common/ha_redirect.py).
@@ -329,6 +330,7 @@ LOGGING_SVC = LOGGING_SVC_URL
 WORKSPACE_RUNTIME_SVC = WORKSPACE_RUNTIME_SVC_URL
 TELEMETRY_SVC = TELEMETRY_SVC_URL
 HEALTH_SVC = HEALTH_SVC_URL
+GARDEN_SVC = GARDEN_SVC_URL
 
 #: Settings whose blank value means "off", so a blank row in Identity clears the
 #: .env value instead of being ignored. Only the integration switches: most

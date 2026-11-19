@@ -29,6 +29,7 @@ const LazyWidgets: Record<WidgetKey, React.LazyExoticComponent<React.ComponentTy
   workspaces:        lazy(() => import('../widgets/WorkspacesWidget')),
   health_activity:   lazy(() => import('../widgets/HealthActivityWidget')),
   health_today:      lazy(() => import('../widgets/HealthTodayWidget')),
+  garden_today:      lazy(() => import('../widgets/GardenTodayWidget')),
   climate:           lazy(() => import('../widgets/ClimateWidget')),
   presence:          lazy(() => import('../widgets/PresenceWidget')),
   bible_daily:       lazy(() => import('../widgets/BibleDailyWidget')),

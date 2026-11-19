@@ -54,6 +54,8 @@ const Schedules = lazy(() => import('./pages/Schedules'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Wander = lazy(() => import('./pages/Wander'));
 const Health = lazy(() => import('./pages/Health'));
+const Garden = lazy(() => import('./pages/Garden'));
+const PlantDetail = lazy(() => import('./pages/Garden').then((m) => ({ default: m.PlantDetail })));
 const Guardian = lazy(() => import('./pages/Guardian'));
 const Devices = lazy(() => import('./pages/Devices'));
 const FamilyMember = lazy(() => import('./pages/FamilyMember'));
@@ -201,6 +203,8 @@ function App() {
             <Route path="/media/*" element={<ProtectedRoute isMobile={isMobile}><Media /></ProtectedRoute>} />
             <Route path="/wander" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
             <Route path="/fitness" element={<ProtectedRoute isMobile={isMobile}><Health /></ProtectedRoute>} />
+            <Route path="/garden" element={<ProtectedRoute isMobile={isMobile}><Garden /></ProtectedRoute>} />
+            <Route path="/garden/plants/:id" element={<ProtectedRoute isMobile={isMobile}><PlantDetail /></ProtectedRoute>} />
             <Route path="/family/member/:username?" element={<ProtectedRoute isMobile={isMobile}><FamilyMember /></ProtectedRoute>} />
             {/* The family guardian hub; `/guardian?child=…` (older notices) still
                 opens that child's family member page. */}

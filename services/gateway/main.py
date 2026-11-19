@@ -88,8 +88,10 @@ from services.gateway import (
     dashboard_routes,
     discovery_routes,
     drawing,
+    email_routes,
     family_safety,
     fast_lights,
+    garden_routes,
     helper_routes,
     hub_registry_routes,
     light_group_routes,
@@ -848,6 +850,7 @@ app.include_router(app_vetting_routes.router)
 app.include_router(push_routes.router)
 app.include_router(network_routes.router)
 app.include_router(weather_routes.router)
+app.include_router(garden_routes.router)
 app.include_router(calls.router)
 app.include_router(drawing.router)
 app.include_router(mdm.router)
@@ -872,6 +875,7 @@ app.include_router(account_export.router)  # Export my data and restore it (docs
 app.include_router(private_chat.router)  # Private chat: the parents' end-to-end encrypted conversation  # Lists: the hub's to-do lists for every member
 app.include_router(automation_routes.router)  # Automations and schedules
 app.include_router(helper_routes.router)  # Helpers (toggles, numbers, timers...) kept by the hub
+app.include_router(email_routes.router)  # Email settings and notifications
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

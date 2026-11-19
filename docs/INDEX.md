@@ -32,6 +32,7 @@
 - `docs/ACHIEVEMENTS.md`: goals, achievements, opt-in sharing, stars
 - `docs/HEALTH_STEPS.md`: pedometer capture, device ledger, widgets
 - `docs/HEALTH_HUB.md`: Health hub service and UI: profiles, open metric ingestion, sleep, readiness, nutrition, sharing
+- `docs/PLANT_CARE.md`: Garden hub (planned): species-specific houseplant care, personal plant names, kitchen herbs, family-sized outdoor garden planner, harvest-driven recipes, food preservation & Put-Up Pantry, weather automation, and opt-in Home Hub sensors/valves
 - `docs/APP_VETTING.md`: App vetting on children's devices: installed apps, public Play listing and review lookups, Common Sense Media, the local review, the security scan (stalkerware, sideloads, risky access), the MalwareBazaar check, age policy, notices
 - `docs/NOTES.md`: Keep-style notes over Nextcloud markdown (and the Recipes cookbook)
 - `docs/CALENDAR.md`: merged Nextcloud/Skylight/iCal agenda, windows, repeats, edit by UID

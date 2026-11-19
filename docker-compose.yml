@@ -751,6 +751,49 @@ services:
       retries: 5
       start_period: 10s
 
+  # Garden hub: species-smart houseplant care, adaptive cadence, personal
+  # plant names. Mirrors the health service layout: SQLite store at /data,
+  # read-only botanical seed mounted beside it.
+  garden:
+    image: ghcr.io/jmiahman1/sharedllm-garden:latest
+    build:
+      context: .
+      dockerfile: services/garden/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_garden
+    labels:
+      sharedllm.health: "8012/health"
+    restart: unless-stopped
+    mem_limit: 256m
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
+    environment:
+      - HOME=/tmp
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - GARDEN_DATABASE_URL=${GARDEN_DATABASE_URL:-sqlite:////data/garden.db}
+      - PLANT_SEED_PATH=/data/plants-seed.db
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./data/garden:/data
+      - ./data/plants/plants-seed.db:/data/plants-seed.db:ro
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 172.26.0.254
+    networks:
+      - sharedllm
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8012/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
   # Road network for snapping trip routes to roads (services/geo/map_match.py).
   # Built with its map data by .github/workflows/osrm-map.yml (regions in
   # osrm/regions.txt) and pulled here. Self-hosted so the family's locations

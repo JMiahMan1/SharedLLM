@@ -10,6 +10,7 @@ export type WidgetKey =
   | 'workspaces'
   | 'health_activity'
   | 'health_today'
+  | 'garden_today'
   | 'climate'
   | 'presence'
   | 'bible_daily'

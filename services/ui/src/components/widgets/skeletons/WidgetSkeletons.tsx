@@ -249,6 +249,7 @@ const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   workspaces: WorkspacesSkeleton,
   health_activity: HealthActivitySkeleton,
   health_today: HealthActivitySkeleton,
+  garden_today: HealthActivitySkeleton,
   climate: ClimateSkeleton,
   presence: PresenceSkeleton,
   bible_daily: BibleDailySkeleton,

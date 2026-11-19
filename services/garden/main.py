@@ -1,0 +1,961 @@
+"""Jarvis Garden service — Species-Smart Houseplants MVP (Phase 1).
+
+Port 8012, container `sharedllm_garden`.  Stores household garden state in
+`/data/garden.db` (SQLite, `GARDEN_DATABASE_URL` / `GARDEN_DB_PATH` override)
+and reads the read-only botanical seed at `/data/plants-seed.db`
+(`PLANT_SEED_PATH` override; absent seed degrades gracefully).
+
+Auth: `X-Internal-Secret` required on all routes except `GET /health`.
+User/role headers forwarded by the Gateway: `X-User-Id`, `X-User-Role`,
+`X-Is-Admin`, `X-Family-Manage`.
+
+Phase 1 permissions ("open care, guarded structure"):
+  * Everyone (child, teen, adult_child, mother, father, admin): view garden,
+    log watering/care/snooze ("Still damp").
+  * Adults & admins (adult_child, mother, father, admin): add/edit/archive
+    locations, plants, and care rules.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sqlite3
+from collections.abc import Iterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from fastapi import Depends, FastAPI, HTTPException, Path as PathParam, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from sqlmodel import Session, SQLModel, create_engine, select
+
+from services.common.secrets import secret_matches
+from services.common.sqlite import add_missing_columns, apply_sqlite_pragmas
+from services.config import INTERNAL_SECRET
+from services.garden import plant_seed
+from services.garden.cadence import (
+    auto_seed_care_rules,
+    compute_interval,
+    nudge_calibration,
+    placement_fit,
+)
+from services.garden.models import (
+    CareLog,
+    CareLogIn,
+    CareRule,
+    CareRuleIn,
+    GardenProfile,
+    GardenProfileIn,
+    GardenProfileOut,
+    Location,
+    LocationIn,
+    LocationOut,
+    Plant,
+    PlantIn,
+    PlantOut,
+    utcnow,
+)
+from services.shared.info_endpoint import info_router
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+)
+log = logging.getLogger("garden")
+
+DEFAULT_DATABASE_URL = "sqlite:////data/garden.db"
+DEFAULT_SEED_PATH = "/data/plants-seed.db"
+
+ADULT_ROLES = frozenset({"adult_child", "mother", "father", "admin"})
+ALL_ROLES = frozenset({"child", "teen", "adult_child", "mother", "father", "admin"})
+
+
+# --------------------------------------------------------------------------- database
+
+
+def _database_url() -> str:
+    return os.getenv("GARDEN_DATABASE_URL") or os.getenv("GARDEN_DB_PATH") or DEFAULT_DATABASE_URL
+
+
+def _engine():
+    url = _database_url()
+    kwargs: dict[str, Any] = {}
+    if url.startswith("sqlite"):
+        kwargs = {"connect_args": {"check_same_thread": False, "timeout": 30}}
+    engine = create_engine(url, pool_pre_ping=True, **kwargs)
+    apply_sqlite_pragmas(engine)
+    return engine
+
+
+_SEED: plant_seed.PlantSeed | None = None
+
+
+def _seed() -> plant_seed.PlantSeed:
+    global _SEED
+    if _SEED is None:
+        path = os.getenv("PLANT_SEED_PATH") or DEFAULT_SEED_PATH
+        _SEED = plant_seed.PlantSeed(path)
+    return _SEED
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    engine = _db()
+    SQLModel.metadata.create_all(engine)
+    added = add_missing_columns(engine, SQLModel.metadata)
+    if added:
+        log.info("[Garden] added missing column(s): %s", ", ".join(added))
+    log.info("[Garden] ready db=%s seed=%s", _database_url(), _seed().path)
+    yield
+
+
+app = FastAPI(title="Jarvis Garden Service", lifespan=lifespan)
+app.state.engine = None
+
+
+def _db():
+    if app.state.engine is None:
+        app.state.engine = _engine()
+    return app.state.engine
+
+
+def get_session() -> Iterator[Session]:
+    with Session(_db()) as session:
+        yield session
+
+
+# --------------------------------------------------------------------------- auth
+
+
+def _verify_internal_secret(header_secret: str | None) -> bool:
+    return secret_matches(header_secret, INTERNAL_SECRET)
+
+
+@app.middleware("http")
+async def require_internal_secret_middleware(request: Request, call_next):
+    """Only the gateway may call this service. /health is exempt."""
+    if request.url.path.rstrip("/") in ("/health", ""):
+        return await call_next(request)
+    secret = request.headers.get("X-Internal-Secret")
+    if not _verify_internal_secret(secret):
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+    return await call_next(request)
+
+
+app.include_router(info_router)
+
+
+def _user(request: Request) -> str:
+    """The acting username, forwarded by the gateway after authentication."""
+    user = (request.headers.get("X-User-Id") or "").strip().lower()
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+def _role(request: Request) -> str:
+    return (request.headers.get("X-User-Role") or "").strip().lower()
+
+
+def _is_admin(request: Request) -> bool:
+    return (request.headers.get("X-Is-Admin") or "").lower() in ("1", "true", "yes")
+
+
+def _family_manage(request: Request) -> bool:
+    return (request.headers.get("X-Family-Manage") or "").lower() in ("1", "true", "yes")
+
+
+def _require_admin_or_adult(request: Request) -> None:
+    """403 unless the caller is an adult or admin."""
+    role = _role(request)
+    if role not in ADULT_ROLES and not _is_admin(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Adults and admins only: add/edit/archive locations, plants, and care rules.",
+        )
+
+
+def _is_minor_role(role: str) -> bool:
+    return role in ("child", "teen")
+
+
+# --------------------------------------------------------------------------- helpers
+
+
+def _plant_out(row: Plant, species: dict | None = None) -> dict:
+    data = row.model_dump()
+    if species:
+        data["species"] = {
+            "common_name": species.get("common_name"),
+            "scientific_name": species.get("scientific_name"),
+            "family": species.get("family"),
+            "light_level": species.get("light_level"),
+            "watering_method": species.get("watering_method"),
+            "dryness_cue": species.get("dryness_cue"),
+            "water_quality": species.get("water_quality"),
+            "humidity_band": species.get("humidity_band"),
+            "misting_rule": species.get("misting_rule"),
+            "soil_mix": species.get("soil_mix"),
+            "temp_min_f": species.get("temp_min_f"),
+            "temp_max_f": species.get("temp_max_f"),
+            "cold_draft_sensitive": species.get("cold_draft_sensitive"),
+            "toxicity_level": species.get("toxicity_level"),
+            "toxicity_notes": species.get("toxicity_notes"),
+            "common_pests": species.get("common_pests"),
+            "symptoms": species.get("symptoms"),
+            "grooming_propagation": species.get("grooming_propagation"),
+            "fertilizing": species.get("fertilizing"),
+            "repot_interval_months": species.get("repot_interval_months"),
+            "description": species.get("description"),
+            "preservation_methods": species.get("preservation_methods"),
+            "usda_acidity_class": species.get("usda_acidity_class"),
+        }
+    return data
+
+
+def _today_iso() -> str:
+    return datetime.now(UTC).date().isoformat()
+
+
+# --------------------------------------------------------------------------- health
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "garden", "seed_present": _seed().present}
+
+
+# --------------------------------------------------------------------------- species (read-only from botanical seed)
+
+
+@app.get("/species/search")
+def species_search(
+    request: Request,
+    q: str = Query("", description="Free-text search over names/descriptions"),
+    category: str | None = Query(None, description="houseplant | herb | vegetable | fruit | flower"),
+    usda_zone: int | None = Query(None, description="USDA hardiness zone filter"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Search the botanical seed.  Falls back gracefully when the seed is absent."""
+    _user(request)
+    seed = _seed()
+    results = seed.search(q or "", limit, category=category, usda_zone=usda_zone) if q else []
+    # When there's no query but a category/zone filter, list by category instead.
+    if not q and (category or usda_zone is not None):
+        results = seed.list_by_category(category or "houseplant", limit=limit, usda_zone=usda_zone)
+    return {
+        "query": q,
+        "category": category,
+        "usda_zone": usda_zone,
+        "count": len(results),
+        "results": results,
+        "seed_present": seed.present,
+    }
+
+
+@app.get("/species/{key}")
+def species_get(key: str = PathParam(..., description="Botanical seed key")):
+    _require_auth = None  # species read is open to anyone who passed the internal secret
+    seed = _seed()
+    species = seed.get(key)
+    if species is None:
+        raise HTTPException(status_code=404, detail=f"Species {key!r} not found in seed")
+    return {"key": key, "present": True, "species": species}
+
+
+@app.get("/species")
+def species_list(
+    request: Request,
+    category: str | None = Query(None),
+    usda_zone: int | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """List species in a category (or all when no category given)."""
+    _user(request)
+    seed = _seed()
+    if category:
+        results = seed.list_by_category(category, limit=limit, usda_zone=usda_zone)
+    else:
+        results = []
+        for cat in ("houseplant", "herb", "vegetable", "fruit", "flower"):
+            results.extend(seed.list_by_category(cat, limit=limit, usda_zone=usda_zone))
+    return {
+        "category": category,
+        "usda_zone": usda_zone,
+        "count": len(results),
+        "results": results,
+        "seed_present": seed.present,
+    }
+
+
+# --------------------------------------------------------------------------- profile
+
+
+@app.get("/profile")
+def get_profile(request: Request, session: Session = Depends(get_session)):
+    _user(request)
+    profile = session.get(GardenProfile, "household")
+    if profile is None:
+        profile = GardenProfile(user_id="household")
+        session.add(profile)
+        session.commit()
+        session.refresh(profile)
+    return GardenProfileOut.model_validate(profile).model_dump()
+
+
+@app.put("/profile")
+def put_profile(
+    body: GardenProfileIn, request: Request, session: Session = Depends(get_session)
+):
+    _require_admin_or_adult(request)
+    profile = session.get(GardenProfile, "household")
+    if profile is None:
+        profile = GardenProfile(user_id="household")
+        session.add(profile)
+    changes = body.model_dump(exclude_unset=True)
+    for key, value in changes.items():
+        setattr(profile, key, value)
+    profile.updated_at = utcnow()
+    session.commit()
+    session.refresh(profile)
+    return GardenProfileOut.model_validate(profile).model_dump()
+
+
+# --------------------------------------------------------------------------- locations
+
+
+@app.get("/locations")
+def list_locations(request: Request, session: Session = Depends(get_session)):
+    _user(request)
+    rows = session.exec(select(Location).order_by(Location.name)).all()
+    return [LocationOut.model_validate(r).model_dump() for r in rows]
+
+
+@app.post("/locations", status_code=201)
+def create_location(
+    body: LocationIn, request: Request, session: Session = Depends(get_session)
+):
+    _require_admin_or_adult(request)
+    row = Location(**body.model_dump(exclude_unset=True))
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return LocationOut.model_validate(row).model_dump()
+
+
+@app.patch("/locations/{loc_id}")
+def patch_location(
+    loc_id: str,
+    body: LocationIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    _require_admin_or_adult(request)
+    row = session.get(Location, loc_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    row.updated_at = utcnow()
+    session.commit()
+    session.refresh(row)
+    return LocationOut.model_validate(row).model_dump()
+
+
+@app.delete("/locations/{loc_id}", status_code=204)
+def delete_location(
+    loc_id: str, request: Request, session: Session = Depends(get_session)
+):
+    _require_admin_or_adult(request)
+    row = session.get(Location, loc_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+    # Refuse to delete a location that still has plants.
+    plants = session.exec(select(Plant).where(Plant.location_id == loc_id)).all()
+    if plants:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete location: {len(plants)} plant(s) still assigned. Move or archive them first.",
+        )
+    session.delete(row)
+    session.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
+# --------------------------------------------------------------------------- plants
+
+
+@app.get("/plants")
+def list_plants(request: Request, session: Session = Depends(get_session)):
+    _user(request)
+    rows = session.exec(select(Plant).where(Plant.status == "active").order_by(Plant.updated_at.desc())).all()
+    seed = _seed()
+    out = []
+    for row in rows:
+        species = seed.get(row.species_ref) if seed.present else None
+        out.append(_plant_out(row, species))
+    return out
+
+
+@app.post("/plants", status_code=201)
+def create_plant(
+    body: PlantIn, request: Request, session: Session = Depends(get_session)
+):
+    _require_admin_or_adult(request)
+    seed = _seed()
+    species = seed.get(body.species_ref) if seed.present else None
+    if species is None:
+        # Graceful degradation when the seed is absent: still allow creating
+        # a plant with just a species_ref (care cues will be unavailable).
+        species = {}
+
+    row = Plant(**body.model_dump(exclude_unset=True))
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+
+    # Auto-seed species-appropriate care rules (no rules if seed absent).
+    for rule in auto_seed_care_rules(species):
+        session.add(
+            CareRule(
+                plant_id=row.id,
+                action=rule["action"],
+                interval_days=rule["interval_days"],
+                winter_multiplier=rule["winter_multiplier"],
+                rain_skip_enabled=rule["rain_skip_enabled"],
+                next_due_at=_compute_next_due(rule, species, row),
+            )
+        )
+    session.commit()
+
+    species_full = seed.get(row.species_ref) if seed.present else None
+    return _plant_out(row, species_full)
+
+
+def _is_winter() -> bool:
+    """Northern hemisphere winter: Nov-Feb (inclusive)."""
+    month = datetime.now(UTC).month
+    return month in (11, 12, 1, 2)
+
+
+def _compute_next_due(rule: dict, species: dict, plant: Plant | None = None) -> str | None:
+    """First due date for a care rule using compute_interval().
+
+    Uses the plant's pot_material, pot_size_in, soil_mix, window_direction,
+    distance_from_window, calibration_factor, and actual winter check
+    (Nov-Feb in northern hemisphere, not multiplying by winter_multiplier
+    year-round).
+    """
+    interval = rule.get("interval_days")
+    if interval is None:
+        return None
+    winter_mult = rule.get("winter_multiplier") or 1.0
+    season_winter = _is_winter()
+
+    cal = plant.calibration_factor if plant else 1.0
+    result = compute_interval(
+        base_interval_days=interval,
+        winter_multiplier=winter_mult,
+        pot_material=plant.pot_material if plant else None,
+        pot_size_in=plant.pot_size_in if plant else None,
+        soil_mix=plant.soil_mix if plant else None,
+        window_direction=plant.window_direction if plant else None,
+        distance_from_window=plant.distance_from_window if plant else None,
+        season_winter=season_winter,
+        calibration_factor=cal,
+    )
+    due = datetime.now(UTC) + timedelta(days=result.next_due_offset_days)
+    return due.isoformat()
+
+
+@app.patch("/plants/{plant_id}")
+def patch_plant(
+    plant_id: str,
+    body: PlantIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    _require_admin_or_adult(request)
+    row = session.get(Plant, plant_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    row.updated_at = utcnow()
+    session.commit()
+    session.refresh(row)
+    seed = _seed()
+    species = seed.get(row.species_ref) if seed.present else None
+    return _plant_out(row, species)
+
+
+@app.delete("/plants/{plant_id}", status_code=204)
+def delete_plant(
+    plant_id: str, request: Request, session: Session = Depends(get_session)
+):
+    _require_admin_or_adult(request)
+    row = session.get(Plant, plant_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    session.delete(row)
+    session.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
+# --------------------------------------------------------------------------- today
+
+
+@app.get("/today")
+def today(request: Request, session: Session = Depends(get_session)):
+    """Due and overdue care tasks grouped by room/category, with species cues."""
+    _user(request)
+    seed = _seed()
+    now = datetime.now(UTC)
+
+    rules = session.exec(
+        select(CareRule).where(CareRule.paused == False)  # noqa: E712
+    ).all()
+
+    due_tasks = []
+    for rule in rules:
+        plant = session.get(Plant, rule.plant_id)
+        if plant is None or plant.status != "active":
+            continue
+        next_due = rule.next_due_at
+        if next_due:
+            try:
+                due_dt = datetime.fromisoformat(next_due)
+            except ValueError:
+                due_dt = None
+        else:
+            due_dt = None
+        # A rule is due when next_due_at is in the past OR its snooze has
+        # expired (snoozed_until <= now).
+        if due_dt is None:
+            continue
+        if rule.snoozed_until:
+            try:
+                snooze_dt = datetime.fromisoformat(rule.snoozed_until)
+            except ValueError:
+                snooze_dt = None
+            if snooze_dt and snooze_dt > now:
+                continue  # still snoozed, skip
+        if due_dt > now:
+            continue
+        species = seed.get(plant.species_ref) if seed.present else None
+        location = session.get(Location, plant.location_id) if plant.location_id else None
+
+        # Build the species-specific care cue.
+        cue_parts = []
+        if species:
+            wm = species.get("watering_method")
+            dc = species.get("dryness_cue")
+            wq = species.get("water_quality")
+            if wm:
+                cue_parts.append(wm.replace("_", " "))
+            if dc:
+                cue_parts.append(f"{dc.replace('_', ' ')}")
+            if wq:
+                cue_parts.append(wq.replace("_", " "))
+        cue = " · ".join(cue_parts) if cue_parts else "Check plant"
+
+        # Placement warning.
+        placement = None
+        if species:
+            pf = placement_fit(
+                species,
+                window_direction=plant.window_direction,
+                distance_from_window=plant.distance_from_window,
+                has_drainage=bool(plant.has_drainage),
+            )
+            if pf.warning:
+                placement = {"warning": pf.warning, "severity": pf.severity}
+
+        due_tasks.append(
+            {
+                "plant_id": plant.id,
+                "nickname": plant.nickname,
+                "common_name": species.get("common_name") if species else plant.species_ref,
+                "scientific_name": species.get("scientific_name") if species else None,
+                "category": plant.category,
+                "location_name": location.name if location else None,
+                "location_id": plant.location_id,
+                "action": rule.action,
+                "next_due_at": rule.next_due_at,
+                "overdue": due_dt < now if due_dt else False,
+                "care_cue": cue,
+                "watering_method": species.get("watering_method") if species else None,
+                "dryness_cue": species.get("dryness_cue") if species else None,
+                "water_quality": species.get("water_quality") if species else None,
+                "toxicity_level": species.get("toxicity_level") if species else None,
+                "toxicity_notes": species.get("toxicity_notes") if species else None,
+                "has_drainage": plant.has_drainage,
+                "placement_warning": placement,
+                "calibration_factor": rule.calibration_factor,
+            }
+        )
+
+    # Group by location.
+    by_room: dict[str, list[dict]] = {}
+    for task in due_tasks:
+        room = task["location_name"] or "Unplaced"
+        by_room.setdefault(room, []).append(task)
+
+    return {
+        "date": _today_iso(),
+        "due_count": len(due_tasks),
+        "overdue_count": sum(1 for t in due_tasks if t["overdue"]),
+        "by_room": by_room,
+        "all": due_tasks,
+    }
+
+
+# --------------------------------------------------------------------------- care log
+
+
+@app.post("/plants/{plant_id}/care")
+def log_care(
+    plant_id: str,
+    body: CareLogIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Log a care action: advances next_due_at and writes care_logs."""
+    user = _user(request)
+    plant = session.get(Plant, plant_id)
+    if plant is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    if plant.status != "active":
+        raise HTTPException(status_code=409, detail="Plant is not active")
+
+    seed = _seed()
+    species = seed.get(plant.species_ref) if seed.present else None
+
+    # Write the care log.
+    log_row = CareLog(
+        plant_id=plant_id,
+        action=body.action,
+        performed_by=body.performed_by or user,
+        source=body.source,
+        notes=body.notes,
+        sensor_snapshot_json=json.dumps(body.sensor_snapshot) if body.sensor_snapshot else None,
+    )
+    session.add(log_row)
+
+    # Advance the matching care rule's next_due_at using compute_interval.
+    rule = session.exec(
+        select(CareRule).where(CareRule.plant_id == plant_id, CareRule.action == body.action)
+    ).first()
+    if rule:
+        result = compute_interval(
+            base_interval_days=rule.interval_days or 7.0,
+            winter_multiplier=rule.winter_multiplier or 1.0,
+            pot_material=plant.pot_material,
+            pot_size_in=plant.pot_size_in,
+            soil_mix=plant.soil_mix,
+            window_direction=plant.window_direction,
+            distance_from_window=plant.distance_from_window,
+            season_winter=_is_winter(),
+            calibration_factor=rule.calibration_factor or 1.0,
+        )
+        next_due = datetime.now(UTC) + timedelta(days=result.next_due_offset_days)
+        rule.next_due_at = next_due.isoformat()
+        rule.updated_at = utcnow()
+        # Clear snooze when care is actually logged.
+        rule.snoozed_until = None
+        session.add(rule)
+
+    plant.updated_at = utcnow()
+    session.commit()
+    session.refresh(log_row)
+    if rule:
+        session.refresh(rule)
+
+    return {
+        "ok": True,
+        "action": body.action,
+        "plant_id": plant_id,
+        "logged_by": log_row.performed_by,
+        "next_due_at": rule.next_due_at if rule else None,
+    }
+
+
+@app.post("/plants/{plant_id}/snooze")
+def snooze_plant(
+    plant_id: str,
+    request: Request,
+    still_damp: bool = Query(True, description="\"Still damp\" — nudges calibration factor upward"),
+    postpone_days: float = Query(2.0, ge=0.5, le=14.0, description="Days to postpone the next due date"),
+    session: Session = Depends(get_session),
+):
+    """Snooze a plant's watering. "Still damp" nudges calibration_factor upward
+    (self-calibrating) and postpones next_due_at to now + postpone_days."""
+    user = _user(request)
+    plant = session.get(Plant, plant_id)
+    if plant is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+
+    seed = _seed()
+    species = seed.get(plant.species_ref) if seed.present else None
+
+    # Snooze the water care rule: postpone next_due_at to now + postpone_days,
+    # nudge calibration_factor upward if still_damp.
+    rules = session.exec(select(CareRule).where(CareRule.plant_id == plant_id)).all()
+    water_rule = None
+    for rule in rules:
+        if rule.action == "water":
+            water_rule = rule
+            # Self-calibrating: "Still damp" nudges calibration_factor up.
+            new_cal = nudge_calibration(rule.calibration_factor or 1.0, still_damp=still_damp)
+            rule.calibration_factor = new_cal
+            next_due = datetime.now(UTC) + timedelta(days=postpone_days)
+            rule.next_due_at = next_due.isoformat()
+            rule.snoozed_until = next_due.isoformat()
+            rule.updated_at = utcnow()
+            session.add(rule)
+            break
+
+    # Log the snooze as a care entry.
+    session.add(
+        CareLog(
+            plant_id=plant_id,
+            action="snooze",
+            performed_by=user,
+            source="manual",
+            notes=f"still_damp={still_damp}, postpone={postpone_days}d",
+        )
+    )
+    plant.updated_at = utcnow()
+    session.commit()
+
+    return {
+        "ok": True,
+        "plant_id": plant_id,
+        "still_damp": still_damp,
+        "postpone_days": postpone_days,
+        "calibration_factor": water_rule.calibration_factor if water_rule else plant.calibration_factor,
+        "next_due_at": water_rule.next_due_at if water_rule else None,
+    }
+
+
+# --------------------------------------------------------------------------- location batch watering
+
+
+@app.post("/locations/{loc_id}/water-all")
+def water_all(
+    loc_id: str,
+    request: Request,
+    due_only: bool = Query(True, description="Only water due/overdue plants"),
+    session: Session = Depends(get_session),
+):
+    """Batch-water all (due) plants in a room."""
+    user = _user(request)
+    location = session.get(Location, loc_id)
+    if location is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    now = datetime.now(UTC)
+    plants = session.exec(
+        select(Plant).where(Plant.location_id == loc_id, Plant.status == "active")
+    ).all()
+
+    seed = _seed()
+    watered = []
+    for plant in plants:
+        rule = session.exec(
+            select(CareRule).where(CareRule.plant_id == plant.id, CareRule.action == "water")
+        ).first()
+        if rule:
+            # Skip plants that aren't due yet when due_only=True.
+            if due_only and rule.next_due_at:
+                try:
+                    due_dt = datetime.fromisoformat(rule.next_due_at)
+                except ValueError:
+                    due_dt = None
+                if due_dt and due_dt > now:
+                    continue
+            result = compute_interval(
+                base_interval_days=rule.interval_days or 7.0,
+                winter_multiplier=rule.winter_multiplier or 1.0,
+                pot_material=plant.pot_material,
+                pot_size_in=plant.pot_size_in,
+                soil_mix=plant.soil_mix,
+                window_direction=plant.window_direction,
+                distance_from_window=plant.distance_from_window,
+                season_winter=_is_winter(),
+                calibration_factor=rule.calibration_factor or 1.0,
+            )
+            next_due = now + timedelta(days=result.next_due_offset_days)
+            rule.next_due_at = next_due.isoformat()
+            rule.updated_at = utcnow()
+            # Clear any snooze when watering.
+            rule.snoozed_until = None
+            session.add(rule)
+        session.add(
+            CareLog(
+                plant_id=plant.id,
+                location_id=loc_id,
+                action="water",
+                performed_by=user,
+                source="manual",
+                notes=f"batch water room: {location.name}",
+            )
+        )
+        plant.updated_at = utcnow()
+        species = seed.get(plant.species_ref) if seed.present else None
+        watered.append(
+            {
+                "plant_id": plant.id,
+                "nickname": plant.nickname,
+                "common_name": species.get("common_name") if species else plant.species_ref,
+                "next_due_at": rule.next_due_at if rule else None,
+            }
+        )
+
+    session.commit()
+    return {
+        "ok": True,
+        "location_id": loc_id,
+        "location_name": location.name,
+        "watered_count": len(watered),
+        "watered": watered,
+    }
+
+
+# --------------------------------------------------------------------------- care logs
+
+
+@app.get("/plants/{plant_id}/logs")
+def get_plant_logs(
+    plant_id: str,
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    session: Session = Depends(get_session),
+):
+    _user(request)
+    plant = session.get(Plant, plant_id)
+    if plant is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    rows = (
+        session.exec(
+            select(CareLog)
+            .where(CareLog.plant_id == plant_id)
+            .order_by(CareLog.created_at.desc())
+            .limit(limit)
+        )
+        .all()
+    )
+    return {
+        "plant_id": plant_id,
+        "count": len(rows),
+        "logs": [
+            {
+                "id": r.id,
+                "action": r.action,
+                "performed_by": r.performed_by,
+                "source": r.source,
+                "notes": r.notes,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ],
+    }
+
+
+# --------------------------------------------------------------------------- care rules (admin+)
+
+
+@app.get("/plants/{plant_id}/care-rules")
+def list_care_rules(
+    plant_id: str, request: Request, session: Session = Depends(get_session)
+):
+    _user(request)
+    plant = session.get(Plant, plant_id)
+    if plant is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    rows = session.exec(select(CareRule).where(CareRule.plant_id == plant_id)).all()
+    return {
+        "plant_id": plant_id,
+        "rules": [
+            {
+                "id": r.id,
+                "action": r.action,
+                "interval_days": r.interval_days,
+                "winter_multiplier": r.winter_multiplier,
+                "calibration_factor": r.calibration_factor,
+                "rain_skip_enabled": r.rain_skip_enabled,
+                "next_due_at": r.next_due_at,
+                "snoozed_until": r.snoozed_until,
+                "paused": r.paused,
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.post("/plants/{plant_id}/care-rules", status_code=201)
+def create_care_rule(
+    plant_id: str,
+    body: CareRuleIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    _require_admin_or_adult(request)
+    plant = session.get(Plant, plant_id)
+    if plant is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    row = CareRule(
+        plant_id=plant_id,
+        action=body.action,
+        interval_days=body.interval_days,
+        winter_multiplier=body.winter_multiplier,
+        rain_skip_enabled=body.rain_skip_enabled,
+        next_due_at=_compute_next_due(
+            {"interval_days": body.interval_days, "winter_multiplier": body.winter_multiplier or 1.0},
+            {},
+        ),
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return {
+        "id": row.id,
+        "action": row.action,
+        "interval_days": row.interval_days,
+        "winter_multiplier": row.winter_multiplier,
+        "next_due_at": row.next_due_at,
+    }
+
+
+@app.patch("/plants/{plant_id}/care-rules/{rule_id}")
+def patch_care_rule(
+    plant_id: str,
+    rule_id: str,
+    body: CareRuleIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    _require_admin_or_adult(request)
+    rule = session.get(CareRule, rule_id)
+    if rule is None or rule.plant_id != plant_id:
+        raise HTTPException(status_code=404, detail="Care rule not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(rule, key, value)
+    rule.updated_at = utcnow()
+    session.commit()
+    session.refresh(rule)
+    return {"id": rule.id, "action": rule.action, "next_due_at": rule.next_due_at}
+
+
+@app.delete("/plants/{plant_id}/care-rules/{rule_id}", status_code=204)
+def delete_care_rule(
+    plant_id: str, rule_id: str, request: Request, session: Session = Depends(get_session)
+):
+    _require_admin_or_adult(request)
+    rule = session.get(CareRule, rule_id)
+    if rule is None or rule.plant_id != plant_id:
+        raise HTTPException(status_code=404, detail="Care rule not found")
+    session.delete(rule)
+    session.commit()
+    return JSONResponse(status_code=204, content=None)

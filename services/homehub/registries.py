@@ -29,6 +29,7 @@ import logging
 import math
 import re
 import uuid
+from datetime import datetime, UTC
 from typing import Any
 
 import aiohttp
@@ -523,11 +524,176 @@ async def follow_places(runtime: Any, base: str, every_s: float) -> None:
         await asyncio.sleep(every_s)
 
 
-# -- persons --------------------------------------------------------------------------------------------
+# -- network devices ------------------------------------------------------------------------------------
 
-def _stored_persons(runtime: Any) -> list[dict[str, Any]]:
-    persons = runtime.store.get_kv("persons", []) or []
-    return [p for p in persons if isinstance(p, dict)] if isinstance(persons, list) else []
+# Device type enum for known categories
+DEVICE_TYPES = frozenset({"phone", "laptop", "tablet", "watch", "tv", "iot", "printer", "nas", "router", "camera", "other"})
+
+def _stored_devices(runtime: Any) -> list[dict[str, Any]]:
+    """Get all registered network devices from store."""
+    devices = runtime.store.get_kv("network_devices", []) or []
+    return [d for d in devices if isinstance(d, dict)] if isinstance(devices, list) else []
+
+
+def _normalize_mac(mac: str) -> str:
+    """Normalize MAC address to lowercase with colons."""
+    mac = mac.strip().lower()
+    # Convert various formats to aa:bb:cc:dd:ee:ff
+    if "-" in mac:
+        mac = mac.replace("-", ":")
+    if "." in mac:
+        parts = mac.split(".")
+        if len(parts) == 3 and all(len(p) == 4 for p in parts):
+            mac = ":".join(p[:2] for p in parts)
+    return mac.lower()
+
+
+def _validate_device_type(device_type: str | None) -> str | None:
+    if device_type is None:
+        return None
+    dt = device_type.strip().lower()
+    if dt not in DEVICE_TYPES:
+        raise RegistryError(f"device_type must be one of: {', '.join(sorted(DEVICE_TYPES))}")
+    return dt
+
+
+def _device_view(runtime: Any, d: dict[str, Any]) -> dict[str, Any]:
+    """Create a view of a device with computed fields."""
+    return {
+        "mac": d.get("mac"),
+        "name": d.get("name") or d.get("mac"),
+        "user_id": d.get("user_id"),
+        "device_type": d.get("device_type"),
+        "notify_on_arrival": d.get("notify_on_arrival", True),
+        "notify_on_departure": d.get("notify_on_departure", True),
+        "email_on_arrival": d.get("email_on_arrival", False),
+        "email_on_departure": d.get("email_on_departure", True),
+        "last_seen": d.get("last_seen"),
+        "first_seen": d.get("first_seen"),
+        "ip": d.get("ip"),
+        "hostname": d.get("hostname"),
+        "vendor": d.get("vendor"),
+        "is_known": d.get("is_known", False),
+    }
+
+
+def _device_fields(body: dict[str, Any], *, creating: bool, mac: str | None) -> dict[str, Any]:
+    """Validate and extract device fields from request body."""
+    allowed = {"name", "user_id", "device_type", "notify_on_arrival", "notify_on_departure",
+               "email_on_arrival", "email_on_departure"}
+    if not creating:
+        allowed.remove("mac")  # MAC is immutable
+    _unknown(body, allowed, "A network device")
+    
+    out: dict[str, Any] = {}
+    if creating:
+        m = body.get("mac")
+        if not m:
+            raise RegistryError("A network device needs a mac address")
+        out["mac"] = _normalize_mac(m)
+    if "name" in body:
+        out["name"] = _text(body, "name", "A device", required=creating, limit=80)
+    if "user_id" in body:
+        uid = body["user_id"]
+        if uid is not None:
+            uid = str(uid).strip()
+            if not uid:
+                raise RegistryError("user_id must not be empty")
+        out["user_id"] = uid
+    if "device_type" in body:
+        out["device_type"] = _validate_device_type(body["device_type"])
+    if "notify_on_arrival" in body:
+        out["notify_on_arrival"] = bool(body["notify_on_arrival"])
+    if "notify_on_departure" in body:
+        out["notify_on_departure"] = bool(body["notify_on_departure"])
+    if "email_on_arrival" in body:
+        out["email_on_arrival"] = bool(body["email_on_arrival"])
+    if "email_on_departure" in body:
+        out["email_on_departure"] = bool(body["email_on_departure"])
+    return out
+
+
+async def list_network_devices(runtime: Any) -> dict[str, Any]:
+    """List all registered network devices with their current status."""
+    devices = _stored_devices(runtime)
+    
+    # Enrich with current presence from router monitor if available
+    # (would need router_monitor state or network:status from Redis)
+    return {"devices": [_device_view(runtime, d) for d in devices]}
+
+
+async def create_network_device(runtime: Any, body: dict[str, Any]) -> dict[str, Any]:
+    """Register a new network device."""
+    fields = _device_fields(body, creating=True, mac=body.get("mac"))
+    mac = fields["mac"]
+    
+    devices = _stored_devices(runtime)
+    if any(d.get("mac") == mac for d in devices):
+        raise RegistryError(f"Device with MAC {mac} already registered", 409)
+    
+    now = datetime.now(UTC).isoformat()
+    device = {
+        "mac": mac,
+        "name": fields.get("name") or mac,
+        "user_id": fields.get("user_id"),
+        "device_type": fields.get("device_type"),
+        "notify_on_arrival": fields.get("notify_on_arrival", True),
+        "notify_on_departure": fields.get("notify_on_departure", True),
+        "email_on_arrival": fields.get("email_on_arrival", False),
+        "email_on_departure": fields.get("email_on_departure", True),
+        "first_seen": datetime.now(UTC).isoformat(),
+        "last_seen": None,
+        "ip": None,
+        "hostname": None,
+        "vendor": None,
+        "is_known": True,
+    }
+    
+    runtime.store.set_kv("network_devices", [*_stored_devices(runtime), device])
+    return _device_view(runtime, device)
+
+
+async def update_network_device(runtime: Any, mac: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Update a registered network device."""
+    mac = _normalize_mac(mac)
+    devices = _stored_devices(runtime)
+    idx = next((i for i, d in enumerate(devices) if d.get("mac") == mac), None)
+    if idx is None:
+        raise RegistryError("No such device", 404)
+    
+    device = devices[idx]
+    device.update(_device_fields(body, creating=False, mac=mac))
+    runtime.store.set_kv("network_devices", devices)
+    return _device_view(runtime, device)
+
+
+async def delete_network_device(runtime: Any, mac: str) -> dict[str, Any]:
+    """Delete a registered network device."""
+    mac = _normalize_mac(mac)
+    devices = _stored_devices(runtime)
+    if not any(d.get("mac") == mac for d in devices):
+        raise RegistryError("No such device", 404)
+    
+    runtime.store.set_kv("network_devices", [d for d in devices if d.get("mac") != mac])
+    return {"status": "removed", "mac": mac}
+
+
+def _device_status_view(runtime: Any, mac: str) -> dict[str, Any] | None:
+    """Get a device's current network status from router monitor state."""
+    # Would need to query router_monitor state from Redis
+    # For now return basic info
+    devices = _stored_devices(runtime)
+    device = next((d for d in devices if d.get("mac") == mac), None)
+    return _device_view(runtime, device) if device else None
+
+
+async def get_network_device(runtime: Any, mac: str) -> dict[str, Any]:
+    """Get a specific network device with its current status."""
+    mac = _normalize_mac(mac)
+    device = _device_status_view(runtime, mac)
+    if not device:
+        raise RegistryError("No such device", 404)
+    return device
 
 
 def _person_view(runtime: Any, p: dict[str, Any], entity_ids: dict[str, str]) -> dict[str, Any]:
