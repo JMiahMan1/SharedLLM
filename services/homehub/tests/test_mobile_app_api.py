@@ -692,3 +692,116 @@ def test_a_non_admin_never_sees_another_phones_webhook_id(env):
         assert (HOOK in json.dumps(battery)) is visible and (HOOK in json.dumps(one)) is visible
         if not visible:
             assert battery["unique_id"] == "battery_level"
+
+
+# -- a limited user's phone ---------------------------------------------------------------
+
+LIMITED_HOOK = "12" * 32
+
+
+def _limited_phone(env, *, is_admin=False, access=None):
+    """A phone registered by a user whose login provider limits them to ``light.mine``."""
+    users = env["store"].get_kv("users", [])
+    users.append({"id": "u-robin", "name": "Robin Example", "is_active": True,
+                  "provider": {"type": "jarvis", "is_admin": is_admin},
+                  "entity_access": None if is_admin else (access or {"assigned": ["light.mine", "camera.mine"]})})
+    env["store"].set_kv("users", users)
+    return _phone(env["hub"], env["store"], "e-robin", "Robin's Phone", LIMITED_HOOK, user_id="u-robin")
+
+
+def _service_spy(hub):
+    calls = []
+
+    async def svc(_hub, call):
+        calls.append(call.data)
+
+    hub.register_service("light", "turn_on", svc)
+    return calls
+
+
+def test_a_limited_phone_may_only_call_services_on_its_own_entities(env):
+    c, hub = env["client"], env["hub"]
+    _limited_phone(env)
+    calls = _service_spy(hub)
+    r = hook(c, {"type": "call_service", "data": {"domain": "light", "service": "turn_on",
+                                                  "service_data": {"entity_id": "light.other"}}}, LIMITED_HOOK)
+    assert r.status_code == 403
+    assert r.json() == {"success": False, "error": {"code": "unauthorized",
+                                                    "message": "This account may not use light.other"}}
+    # A call naming no entity could reach everything, so it is refused too.
+    assert hook(c, {"type": "call_service", "data": {"domain": "light", "service": "turn_on"}},
+                LIMITED_HOOK).status_code == 403
+    assert calls == []
+    assert hook(c, {"type": "call_service", "data": {"domain": "light", "service": "turn_on",
+                                                     "service_data": {"entity_id": "light.mine"}}},
+                LIMITED_HOOK).status_code == 200
+    assert calls == [{"entity_id": "light.mine"}]
+
+
+def test_a_limited_phone_may_not_render_templates(env):
+    c, hub = env["client"], env["hub"]
+    _limited_phone(env)
+    hub.states.set("sensor.secret", "42")
+    r = hook(c, {"type": "render_template", "data": {"t": {"template": "{{ states('sensor.secret') }}"}}},
+             LIMITED_HOOK)
+    assert r.status_code == 403 and "42" not in r.text
+    assert r.json()["error"]["code"] == "unauthorized"
+
+
+def test_a_limited_phone_may_not_stream_a_camera_it_may_not_see(env):
+    c, hub = env["client"], env["hub"]
+    _limited_phone(env)
+    hub.states.set("camera.door", "idle")
+    hub.states.set("camera.mine", "idle")
+    r = hook(c, {"type": "stream_camera", "data": {"camera_entity_id": "camera.door"}}, LIMITED_HOOK)
+    assert r.status_code == 403 and "camera_proxy" not in r.text
+    ok = hook(c, {"type": "stream_camera", "data": {"camera_entity_id": "camera.mine"}}, LIMITED_HOOK)
+    assert ok.json()["mjpeg_path"] == "/api/camera_proxy_stream/camera.mine"
+
+
+def test_a_limited_phone_fires_only_the_apps_own_events(env):
+    c, hub = env["client"], env["hub"]
+    _limited_phone(env)
+    events = []
+    hub.bus.subscribe(lambda t, d: events.append(t))
+    assert hook(c, {"type": "fire_event", "data": {"event_type": "call_service"}}, LIMITED_HOOK).status_code == 403
+    assert hook(c, {"type": "fire_event", "data": {"event_type": "mobile_app_notification_action",
+                                                   "event_data": {"action": "OK"}}}, LIMITED_HOOK).status_code == 200
+    assert events == ["mobile_app_notification_action"]
+
+
+def test_an_admin_phone_and_a_promoted_user_are_not_limited(env):
+    c, hub = env["client"], env["hub"]
+    _limited_phone(env, is_admin=True)
+    calls = _service_spy(hub)
+    hub.states.set("camera.door", "idle")
+    hub.states.set("sensor.outside", "71")
+    assert hook(c, {"type": "call_service", "data": {"domain": "light", "service": "turn_on",
+                                                     "service_data": {"entity_id": "light.other"}}},
+                LIMITED_HOOK).status_code == 200
+    assert calls == [{"entity_id": "light.other"}]
+    assert hook(c, {"type": "render_template", "data": {"t": {"template": "{{ states('sensor.outside') }}"}}},
+                LIMITED_HOOK).json() == {"t": "71"}
+    assert hook(c, {"type": "stream_camera", "data": {"camera_entity_id": "camera.door"}},
+                LIMITED_HOOK).status_code == 200
+
+
+def test_limits_are_read_on_every_webhook_and_an_unknown_user_gets_nothing(env):
+    c, hub, store = env["client"], env["hub"], env["store"]
+    _limited_phone(env, is_admin=True)
+    calls = _service_spy(hub)
+    body = {"type": "call_service", "data": {"domain": "light", "service": "turn_on",
+                                             "service_data": {"entity_id": "light.other"}}}
+    assert hook(c, body, LIMITED_HOOK).status_code == 200
+    users = store.get_kv("users", [])
+    robin = next(u for u in users if u["id"] == "u-robin")
+    robin["provider"]["is_admin"] = False
+    robin["entity_access"] = {"assigned": ["light.mine"]}
+    store.set_kv("users", users)
+    assert hook(c, body, LIMITED_HOOK).status_code == 403  # demoted: limited at once
+    robin["is_active"] = False
+    store.set_kv("users", users)
+    assert hook(c, {"type": "render_template", "data": {"t": {"template": "x"}}}, LIMITED_HOOK).status_code == 403
+    assert len(calls) == 1
+    # Its own sensors still report.
+    assert hook(c, {"type": "get_config"}, LIMITED_HOOK).status_code == 200
