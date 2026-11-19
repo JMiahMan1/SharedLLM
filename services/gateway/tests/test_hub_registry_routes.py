@@ -39,7 +39,10 @@ def client():
 KINDS = ("areas", "floors", "labels", "zones", "persons")
 ROUTES = ([("get", f"/api/homehub/{k}") for k in KINDS] + [("post", f"/api/homehub/{k}") for k in KINDS]
           + [("patch", f"/api/homehub/{k}/x1") for k in KINDS] + [("delete", f"/api/homehub/{k}/x1") for k in KINDS]
-          + [("get", "/api/homehub/categories"), ("get", "/api/homehub/tags"), ("post", "/api/homehub/zones/sync")])
+          + [("get", "/api/homehub/categories"), ("get", "/api/homehub/tags"), ("post", "/api/homehub/zones/sync")]
+          + [("get", "/api/homehub/users"), ("post", "/api/homehub/users"), ("patch", "/api/homehub/users/u1"),
+             ("get", "/api/homehub/auth/providers"), ("put", "/api/homehub/auth/providers"),
+             ("post", "/api/homehub/auth/providers/jarvis_identity/sync")])
 
 
 @pytest.mark.parametrize("verb,path", ROUTES)
@@ -53,7 +56,7 @@ def test_only_admins_reach_the_registries(client, hub, verb, path):
 @pytest.mark.parametrize("verb,path", ROUTES)
 def test_each_route_reaches_its_hub_path(client, hub, verb, path):
     seen, _ = hub
-    kwargs = {"json": {}} if verb in ("post", "patch") else {}
+    kwargs = {"json": {}} if verb in ("post", "patch", "put") else {}
     assert getattr(client, verb)(path, headers=ADMIN, **kwargs).status_code == 200
     assert seen[-1][0] == verb.upper() and seen[-1][1] == path.replace("/api/homehub/", "/hub/")
 
@@ -95,3 +98,20 @@ def test_these_routes_do_not_shadow_the_other_hub_routes(client, hub):
     client.get("/api/homehub/entries", headers=ADMIN)
     client.get("/api/homehub/discovered", headers=ADMIN)
     assert [s[1] for s in seen] == ["/hub/entries", "/hub/discovered"]
+
+
+def test_users_and_providers_forward_only_their_fields(client, hub):
+    seen, answers = hub
+    client.post("/api/homehub/users", headers=ADMIN, json={"name": "Visitor", "username": "visitor",
+                                                          "password": "made-up-pass", "is_admin": False, "id": "x"})
+    assert seen[-1][2] == {"name": "Visitor", "username": "visitor", "password": "made-up-pass", "is_admin": False}
+    client.patch("/api/homehub/users/u1", headers=ADMIN, json={"is_active": False, "provider": {"type": "x"}})
+    assert seen[-1][2] == {"is_active": False}
+    client.put("/api/homehub/auth/providers", headers=ADMIN, json={"local_logins": False, "x": 1})
+    assert seen[-1] == ("PUT", "/hub/auth/providers", {"local_logins": False})
+    answers[("PUT", "/hub/auth/providers")] = (409, {"message": "No admin could log in"})
+    resp = client.put("/api/homehub/auth/providers", headers=ADMIN, json={"local_logins": False})
+    assert resp.status_code == 409 and resp.json()["detail"] == "No admin could log in"
+    answers[("POST", "/hub/auth/providers/jarvis_identity/sync")] = (502, {"ok": False, "error": "down"})
+    assert client.post("/api/homehub/auth/providers/jarvis_identity/sync", headers=ADMIN).status_code == 502
+    assert client.post("/api/homehub/auth/providers/Bad.Kind/sync", headers=ADMIN).status_code == 404

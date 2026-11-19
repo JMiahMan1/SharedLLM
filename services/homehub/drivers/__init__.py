@@ -43,6 +43,8 @@ DRIVERS: dict[str, str] = {
     "shopping_list": "services.homehub.drivers.todo:ShoppingListDriver",
     # Accounts other services read (app vetting): nothing to drive, the entry is the setting.
     "common_sense_media": "services.homehub.drivers.accounts:AccountDriver",
+    # Jarvis's accounts as the hub's users and logins (services/homehub/auth_providers).
+    "jarvis_identity": "services.homehub.auth_providers.jarvis_identity:JarvisIdentityDriver",
     # Bluetooth: one driver for every BLE sensor parser (services/homehub/bluetooth_parsers.py), and iBeacon tags.
     **{d: "services.homehub.drivers.ble:BLESensorDriver" for d in (
         "bthome", "xiaomi_ble", "qingping", "sensorpush", "thermopro", "inkbird", "ruuvitag_ble", "govee_ble")},

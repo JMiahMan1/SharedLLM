@@ -36,6 +36,7 @@ import AreasPanel from '../components/devices/AreasPanel';
 import LabelsPanel from '../components/devices/LabelsPanel';
 import ZonesPanel from '../components/devices/ZonesPanel';
 import PersonsPanel from '../components/devices/PersonsPanel';
+import LoginProvidersPanel from '../components/devices/LoginProvidersPanel';
 import type { CompanionDevice, MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
 import { confirmDialog } from '../components/ui/confirmDialog';
 
@@ -1374,7 +1375,7 @@ const DEVICE_TABS = [
   { id: 'devices', label: 'Your devices', anchors: ['devices-hardware', 'devices-light-groups', 'devices-duplicates'] },
   { id: 'add', label: 'Add devices', anchors: ['devices-new', 'add-fix'] },
   { id: 'places', label: 'Rooms & places', anchors: ['devices-areas', 'devices-labels', 'devices-zones'] },
-  { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-persons', 'devices-rooms'] },
+  { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-persons', 'devices-logins', 'devices-rooms'] },
   { id: 'family', label: 'Family', anchors: ['devices-family', 'devices-windows', 'devices-folders', 'devices-activity'] },
 ] as const;
 type DeviceTab = (typeof DEVICE_TABS)[number]['id'];
@@ -1568,6 +1569,7 @@ export default function Devices() {
           <div id="devices-integrations" className="scroll-mt-4"><IntegrationsPanel /></div>
           <div id="devices-phones" className="scroll-mt-4"><PhonesPanel /></div>
           <div id="devices-persons" className="scroll-mt-4"><PersonsPanel /></div>
+          <div id="devices-logins" className="scroll-mt-4"><LoginProvidersPanel /></div>
           <div id="devices-rooms" className="scroll-mt-4"><RoomMapPanel /></div>
         </div>
       )}

@@ -36,9 +36,10 @@ def _form_schema() -> list[dict[str, Any]]:
             {"name": "password", "required": True, "type": "string"}]
 
 
-def _form(flow_id: str, errors: dict[str, str] | None = None) -> dict[str, Any]:
+def _form(flow_id: str, errors: dict[str, str] | None = None, message: str | None = None) -> dict[str, Any]:
     return {"type": "form", "flow_id": flow_id, "handler": ["homeassistant", None], "step_id": "init",
-            "data_schema": _form_schema(), "errors": errors or {}, "description_placeholders": None,
+            "data_schema": _form_schema(), "errors": errors or {},
+            "description_placeholders": {"message": message} if message else None,
             "last_step": None, "preview": None}
 
 
@@ -74,6 +75,11 @@ def build_router(runtime: Any, auth: Any) -> APIRouter:
     router = APIRouter()
     ha = HAAuth(runtime.store, auth)
     runtime.ha_auth = ha  # the WebSocket command and tests reach it here
+    from services.homehub.auth_providers.manager import ProviderManager
+
+    # The login providers: the hub's own users always, and the external ones main.py found configured.
+    ProviderManager(runtime, auth, ha, getattr(runtime, "provider_configs", None) or {},
+                    sync_every_s=float(getattr(runtime, "provider_sync_every_s", 60.0) or 60.0))
 
     @router.post("/auth/token")
     async def token(request: Request) -> Response:
@@ -146,12 +152,14 @@ def build_router(runtime: Any, auth: Any) -> APIRouter:
             return _message("Invalid flow specified", 404)
         if data.get("client_id") != flow.client_id:
             return _message("Invalid client id", 400)
-        import asyncio
+        from services.homehub.auth_providers.manager import LoginFailed
 
-        cred = await asyncio.to_thread(ha.validate_login, str(data.get("username") or ""),
-                                       str(data.get("password") or ""))
-        if cred is None:
-            return JSONResponse(_form(flow_id, {"base": "invalid_auth"}))
+        providers = getattr(runtime, "auth_providers", None)
+        try:
+            # Every login goes through the login providers (the hub's own users, and Jarvis's when it is on).
+            cred = await providers.login(str(data.get("username") or ""), str(data.get("password") or ""))
+        except LoginFailed as exc:
+            return JSONResponse(_form(flow_id, {"base": exc.code}, None if exc.code == "invalid_auth" else str(exc)))
         if not verify_redirect_uri(flow.client_id, flow.redirect_uri):
             return _message("Invalid redirect URI", 403)
         return JSONResponse(_flow_response(flow_id, ha.create_code(flow, cred)))
@@ -168,7 +176,10 @@ def build_router(runtime: Any, auth: Any) -> APIRouter:
         client_id, redirect_uri = q.get("client_id", ""), q.get("redirect_uri", "")
         if not verify_client_id(client_id) or not verify_redirect_uri(client_id, redirect_uri):
             return HTMLResponse("<p>This app cannot log in here: unknown client or redirect.</p>", status_code=400)
-        page = AUTHORIZE_PAGE.replace("__PARAMS__", html.escape(json.dumps({
+        providers = getattr(runtime, "auth_providers", None)
+        primary = providers.primary() if providers is not None else "local"
+        heading = "Log in with your Jarvis account" if primary == "jarvis_identity" else "Log in to your home"
+        page = AUTHORIZE_PAGE.replace("__HEADING__", html.escape(heading)).replace("__PARAMS__", html.escape(json.dumps({
             "client_id": client_id, "redirect_uri": redirect_uri, "state": q.get("state"),
             "code_challenge": q.get("code_challenge"), "code_challenge_method": q.get("code_challenge_method"),
         }), quote=True))
@@ -215,7 +226,7 @@ button{cursor:pointer}
 </style></head>
 <body data-params="__PARAMS__">
 <form id="f" autocomplete="on">
-<h1 style="font-size:1.4rem;margin:0 0 .5rem">Log in to your home</h1>
+<h1 style="font-size:1.4rem;margin:0 0 .5rem">__HEADING__</h1>
 <input id="u" name="username" autocomplete="username" placeholder="Username" required>
 <input id="p" name="password" type="password" autocomplete="current-password" placeholder="Password" required>
 <div id="err" role="alert"></div>
@@ -245,7 +256,8 @@ document.getElementById('f').addEventListener('submit',function(e){
       if(P.state){u.searchParams.set('state',P.state);}
       window.location.href=u.toString();return;
     }
-    err.textContent=(j.errors&&j.errors.base)==='invalid_auth'?'Wrong username or password.':(j.message||'Could not log in.');
+    var base=j.errors&&j.errors.base, said=j.description_placeholders&&j.description_placeholders.message;
+    err.textContent=base==='invalid_auth'?'Wrong username or password.':(said||j.message||'Could not log in.');
     if(j.type!=='form'){ready=start();}
   }).catch(function(){err.textContent='The hub could not be reached.';});
 });

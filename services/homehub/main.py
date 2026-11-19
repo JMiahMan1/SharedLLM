@@ -70,6 +70,20 @@ def _household_time_zone(home: dict | None = None) -> str:
         raise SystemExit(f"homehub: {exc}") from None
 
 
+def _provider_configs() -> dict[str, dict[str, str]]:
+    """The login providers this stack configures, read once at startup (auth_providers/manager.py).
+
+    Jarvis's accounts need identity's address and the stack's internal secret; without either the hub runs on
+    its own users only, and says so once.
+    """
+    url = (os.getenv("IDENTITY_SVC_URL") or "").strip().rstrip("/")
+    secret = os.getenv("INTERNAL_SECRET") or ""
+    if url and secret:
+        return {"jarvis_identity": {"url": url, "secret": secret}}
+    log.info("IDENTITY_SVC_URL or INTERNAL_SECRET is not set: logins use the hub's own users only")
+    return {}
+
+
 class Service:
     def __init__(self) -> None:
         self.store = Store(DB_PATH, os.getenv("FERNET_KEY"))
@@ -85,6 +99,8 @@ class Service:
         # Jarvis's own Nextcloud account, read once here: the motion-recording settings can use it.
         self.hub.household_nextcloud = camera_recording.household_account_from_env()
         self.runtime = Runtime(self.hub, self.store)
+        self.runtime.provider_configs = _provider_configs()  # login providers (auth_providers), resolved once
+        self.runtime.provider_sync_every_s = float(os.getenv("HOMEHUB_PROVIDER_SYNC_S", "60"))
         # A stalled loop or a saturated thread pool makes devices look unreachable; this says which.
         self.runtime.loop_monitor = LoopMonitor()
         self._lock = asyncio.Lock()
@@ -104,6 +120,7 @@ class Service:
         # HA's time_date sensors on every hub, imported or not (services/homehub/time_date.py).
         self._bg.append(asyncio.create_task(time_date.run(self.hub)))
         await self._start_people()
+        self._start_login_providers()  # before the drivers: a provider's entry syncs when it loads
         await self._start_bluetooth()  # before the drivers: ESPHome proxies and BLE sensors attach to it
         await self.runtime.start_all()
         # Once: the Common Sense switch moves from identity's settings to an integration.
@@ -119,6 +136,16 @@ class Service:
         self._bg.append(asyncio.create_task(self.runtime.housekeeping()))
         self._bg.append(asyncio.create_task(recorder_statistics.start(self.runtime)))  # recorder statistics
         await self._start_discovery()
+
+    def _start_login_providers(self) -> None:
+        """A provider the stack configures is set up once, on by default (an admin may remove it)."""
+        providers = getattr(self.runtime, "auth_providers", None)
+        if providers is None:
+            return
+        try:
+            providers.ensure_entries()
+        except Exception:
+            log.exception("login providers could not be set up; the hub's own logins still work")
 
     async def _start_helpers(self) -> None:
         """HA's helpers (input_*, counter, timer) with their restored values (services/homehub/helpers.py)."""

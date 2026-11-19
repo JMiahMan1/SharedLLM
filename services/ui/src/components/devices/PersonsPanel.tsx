@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { Pencil, Plus, Trash2, Users } from 'lucide-react';
 import { api } from '../../services/api';
 import { failureText } from '../../lib/discoveredDevices';
-import { createPerson, deletePerson, getPersons, toggled, updatePerson, type Person, type PersonBody, type Tracker } from '../../lib/homeSetup';
+import { createPerson, deletePerson, getPersons, providerLabel, toggled, updatePerson, type Person, type PersonBody, type Tracker } from '../../lib/homeSetup';
 import { confirmDialog } from '../ui/confirmDialog';
 import SetupSection from './SetupSection';
 import { BTN, DANGER, INPUT } from './setupStyles';
@@ -75,18 +75,25 @@ function PersonRow({ person, trackers, taken, users, onChanged }: {
     onError: (err) => toast.error(failureText(err)),
   });
   const names = person.device_trackers.map((id) => trackers.find((t) => t.entity_id === id)?.name || id);
+  const from = providerLabel(person.source);
+  const editable = person.editable !== false;
   return (
     <li className="space-y-2 px-4 py-3" data-testid="person">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-white">{person.name}</p>
+          <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
+            <span className="min-w-0 truncate">{person.name}</span>
+            {from && <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[11px] font-medium text-violet-200"
+              data-testid="person-source">{from}</span>}
+          </p>
           <p className="text-xs text-slate-400">
             {person.jarvis_user ? `Jarvis user ${person.jarvis_user}` : 'No Jarvis user'}
             {person.state ? ` · ${person.state.replace('_', ' ')}` : ''}
           </p>
           <p className="break-words text-xs text-slate-500">{names.length ? names.join(', ') : 'No trackers'}</p>
+          {!editable && <p className="text-xs text-slate-500">Name, user and phones follow their Jarvis account; change them in Jarvis.</p>}
         </div>
-        {!editing && (
+        {!editing && editable && (
           <span className="flex gap-2">
             <button type="button" className={BTN} onClick={() => setEditing(true)} aria-label={`Edit ${person.name}`}>
               <Pencil size={13} /> Edit

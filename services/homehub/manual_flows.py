@@ -16,6 +16,7 @@ up from the Devices page without HA:
 | srp_energy | account, login, time-of-use | entry ``{id, is_tou, name, username, password}``; sensor ``{entry_id}_total_usage`` |
 | roborock | email, then the emailed code | entry ``{username, user_data, base_url}``; one vacuum ``{duid}`` per vacuum, read once it connects |
 | common_sense_media | nothing | entry ``{}`` (one per hub); while it exists telemetry looks apps up on Common Sense Media |
+| jarvis_identity | nothing | entry ``{}`` (one per hub); Jarvis's accounts become the hub's users, persons and logins |
 | sun | nothing | ``sun.sun`` and HA's sun sensors ``{entry_id}-{key}`` (one per hub) |
 | open_meteo | a zone | weather ``{zone}`` for that zone |
 | nws | contact email, location, station | weather ``{lat}_{lon}`` and the observation sensors ``{lat}_{lon}_{key}`` |
@@ -113,6 +114,9 @@ SPECS: dict[str, dict[str, Any]] = {
     "roborock": {"label": "Roborock account", "kind": "cloud", "fields": [EMAIL]},
     "common_sense_media": {"label": "Common Sense Media (app age ratings)", "kind": "cloud", "single": True,
                            "fields": []},
+    # The address and the secret are the stack's (IDENTITY_SVC_URL, INTERNAL_SECRET), never typed in.
+    "jarvis_identity": {"label": "Jarvis accounts (users and logins)", "kind": "service", "single": True,
+                        "fields": []},
     "ibeacon": {"label": "iBeacon tracker (room presence)", "kind": "local", "fields": [
         {"key": "name", "label": "Name", "type": "text", "help": "Whose tag, e.g. Keys or a person's name."},
         {"key": "uuid", "label": "Beacon UUID", "type": "text"},
@@ -151,7 +155,8 @@ SPECS: dict[str, dict[str, Any]] = {
 }
 #: Domains whose devices need no address (the finding is a placeholder).
 NO_ADDRESS = {"matter", "ibeacon", "emporia_vue", "srp_energy", "roborock", "sun", "open_meteo", "nws", "local_todo",
-              "shopping_list", "switch_as_x", "music_assistant", "go2rtc", "mjpeg", "common_sense_media"}
+              "shopping_list", "switch_as_x", "music_assistant", "go2rtc", "mjpeg", "common_sense_media",
+              "jarvis_identity"}
 #: Discovery labels its findings with these when it has one.
 KINDS = {"local": "On the network", "service": "Servers and services", "cloud": "Cloud accounts", "helper": "Helpers"}
 
@@ -569,6 +574,25 @@ async def adopt_common_sense(runtime: Any, finding: dict[str, Any], name: str | 
     return await commit(runtime, common_sense_plan(hub, name))
 
 
+async def adopt_jarvis_identity(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
+                                user_input: dict[str, Any]) -> dict[str, Any]:
+    """Jarvis's accounts as the hub's users: only where the stack gives the hub identity's address and secret."""
+    hub = runtime.hub
+    _single(hub, "jarvis_identity", "Jarvis accounts")
+    providers = getattr(runtime, "auth_providers", None)
+    if providers is None or providers.provider("jarvis_identity") is None:
+        raise FlowError("The hub has no address for Jarvis's identity service: set IDENTITY_SVC_URL and "
+                        "INTERNAL_SECRET for homehub and restart it", 409)
+    entry_id = _new_entry_id()
+    title = name or "Jarvis"
+    entry = ConfigEntry(entry_id=entry_id, domain="jarvis_identity", title=title, data={}, source="user",
+                        unique_id="jarvis_identity")
+    plan = Plan(hub, entry)
+    plan.set_device(title, name_by_user=None, area_id=None, manufacturer="Jarvis", model="Accounts",
+                    entry_type="service", identifiers=[["jarvis_identity", entry_id]])
+    return await commit(runtime, plan)
+
+
 async def check_tasmota(data: dict[str, Any]) -> None:
     """A new Tasmota address or web password: refused only when the device answers that the password is wrong.
 
@@ -753,6 +777,7 @@ FLOWS = {
     "srp_energy": adopt_srp,
     "roborock": adopt_roborock,
     "common_sense_media": adopt_common_sense,
+    "jarvis_identity": adopt_jarvis_identity,
     "sun": adopt_sun,
     "open_meteo": adopt_open_meteo,
     "nws": adopt_nws,

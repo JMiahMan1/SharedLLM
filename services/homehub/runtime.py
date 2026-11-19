@@ -38,6 +38,9 @@ class Runtime:
         self.automations: Any = None  # set by main once the engine is loaded
         self.helpers: Any = None  # HA's helpers (helpers.py), set by main
         self.loop_monitor: Any = None  # loop_monitor.LoopMonitor, set by main
+        self.provider_configs: dict[str, Any] = {}  # login providers the stack configures (main)
+        self.provider_sync_every_s: float = 60.0
+        self.auth_providers: Any = None  # auth_providers.manager.ProviderManager (ha_auth_api)
 
     def load_registry(self) -> None:
         hub = self.hub
