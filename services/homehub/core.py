@@ -100,6 +100,13 @@ class DeviceUnavailable(HubError):
     status = 503
 
 
+class AuthRequired(DeviceUnavailable):
+    """The device answered but wants a password the entry does not have, or refused the one it has.
+
+    An entry failing with this is shown as needing its password (``entries.needs_of``), not as unreachable.
+    """
+
+
 @dataclass
 class State:
     entity_id: str

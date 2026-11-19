@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ChevronRight, ExternalLink, EyeOff, Loader2, Pencil, Power, Tag, Trash2, WifiOff } from 'lucide-react';
+import { ChevronRight, ExternalLink, EyeOff, KeyRound, Loader2, Pencil, Power, Tag, Trash2, WifiOff } from 'lucide-react';
 import DeviceSheet from './DeviceSheet';
 import LabelChips from './LabelChips';
 import DeviceControl from './controls/registry';
@@ -10,7 +10,10 @@ import { accentFor, isActiveState } from '../../lib/deviceIcons';
 import { EntityControl } from '../dashboards/EntityControls';
 import { confirmDialog } from '../ui/confirmDialog';
 import type { HubEntity } from '../../lib/dashboards';
-import { failureStatus, failureText, removeHubDevice, updateHubDevice } from '../../lib/discoveredDevices';
+import {
+  connectionFields, entryNeedsText, failureStatus, failureText, reconfigureEntry, removeHubDevice, updateHubDevice,
+} from '../../lib/discoveredDevices';
+import type { HubEntry } from '../../lib/discoveredDevices';
 import {
   ago, getHardwareDevice, setDeviceDisabled, updateEntity, type HardwareDetail, type HardwareDevice, type HardwareEntity,
 } from '../../lib/hardware';
@@ -142,6 +145,59 @@ function VoiceRow({ entity, deviceName, onChanged }: { entity: HardwareEntity; d
   );
 }
 
+/**
+ * How the hub reaches the device (its address and web password), for a device whose integration entry is its
+ * own: changing them reconfigures the entry, which reloads it. A password is never shown, only whether one is set.
+ */
+function ConnectionSettings({ entry, onChanged }: { entry: HubEntry; onChanged: () => void }) {
+  const fields = connectionFields(entry);
+  const host = fields.find((f) => f.key === 'host');
+  const secret = fields.find((f) => f.key === 'password');
+  const [address, setAddress] = useState(host?.value ?? '');
+  const [password, setPassword] = useState('');
+  const save = useMutation({
+    mutationFn: () => reconfigureEntry(entry.entry_id, { data: {
+      ...(host && address.trim() !== (host.value ?? '') ? { host: address.trim() } : {}),
+      ...(secret && password ? { password } : {}),
+    } }),
+    onSuccess: () => { setPassword(''); toast.success('Saved. The hub is reconnecting to it.'); onChanged(); },
+  });
+  if (!fields.length) return null;
+  const changed = Boolean(password) || (host !== undefined && address.trim() !== (host.value ?? ''));
+  return (
+    <form className="space-y-3 border-t border-white/5 pt-3" data-testid="connection-settings"
+      onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+      <p className="text-xs font-medium text-slate-400">Connection</p>
+      {host && (
+        <label className="block text-xs text-slate-400">
+          {host.label}
+          <input className={`mt-1 font-mono ${INPUT}`} value={address} onChange={(e) => setAddress(e.target.value)}
+            autoComplete="off" spellCheck={false} inputMode="url" />
+          {host.help && <span className="mt-1 block text-[11px] text-slate-500">{host.help}</span>}
+        </label>
+      )}
+      {secret && (
+        <label className="block text-xs text-slate-400">
+          {secret.label}
+          <input className={`mt-1 ${INPUT}`} type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder={secret.set ? 'Unchanged' : 'Not set'} autoComplete="new-password"
+            aria-describedby={entry.needs === 'password' ? `needs-${entry.entry_id}` : undefined} />
+          {entry.needs === 'password' && (
+            <span id={`needs-${entry.entry_id}`} className="mt-1 flex items-center gap-1 text-[11px] text-amber-200">
+              <KeyRound size={12} aria-hidden /> The device asks for this password.
+            </span>
+          )}
+          {secret.help && <span className="mt-1 block text-[11px] text-slate-500">{secret.help}</span>}
+        </label>
+      )}
+      {save.error && <p className="text-sm text-amber-300" role="alert">{failureText(save.error)}</p>}
+      <button type="submit" className={BTN} disabled={save.isPending || !changed}>
+        {save.isPending ? <Loader2 size={14} className="animate-spin" aria-hidden /> : null} Save connection
+      </button>
+    </form>
+  );
+}
+
 function Info({ label, value }: { label: string; value: ReactNode }) {
   if (value === null || value === undefined || value === '') return null;
   return (
@@ -215,12 +271,15 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
           <WifiOff size={18} className="mt-0.5 shrink-0 text-rose-300" aria-hidden />
           <div className="min-w-0 text-sm">
             <p className="font-semibold text-rose-100">
-              {device.status === 'disabled' ? 'Turned off in the hub' : 'Not answering'}
+              {device.status === 'disabled' ? 'Turned off in the hub'
+                : (device.entry && entryNeedsText(device.entry)) || 'Not answering'}
             </p>
             <p className="mt-0.5 text-rose-100/80">
               {device.status === 'disabled'
                 ? 'The hub ignores this device until it is turned back on under Settings.'
-                : device.entry_reason
+                : device.entry?.needs === 'password'
+                  ? 'The device has a web password the hub does not have (or it was changed). Enter it under Settings, Connection.'
+                  : device.entry_reason
                   || `Its controls work again once it reconnects. Check it has power and is on the network.${device.last_seen ? ` Last heard from ${ago(device.last_seen)}.` : ''}`}
             </p>
           </div>
@@ -290,6 +349,7 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
               </div>
             </div>
           )}
+          {device.entry && <ConnectionSettings key={device.entry.entry_id} entry={device.entry} onChanged={onChanged} />}
           <div className="flex flex-wrap gap-2 border-t border-white/5 pt-3">
             <button type="button" className={BTN} disabled={disable.isPending} onClick={() => disable.mutate()}>
               {disable.isPending ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Power size={14} aria-hidden />}

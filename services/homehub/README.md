@@ -55,7 +55,7 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | matter | `matter.py` | WebSocket client of `matter-server` (matter.js 1.5.5, the add-on's server, on the add-on's fabric). See `MATTER.md`. |
 | wiz | `wiz.py` | UDP 38899, no library. See WiZ bulbs below. |
 | esphome | `esphome.py` | aioesphomeapi, push; stale IP falls back to `<device_name>.local`, looked up by mDNS only (never DNS, see the event loop and its thread pools below); user actions become `esphome.<node>_<action>` services |
-| tasmota | `tasmota.py` | HTTP `cm?cmnd=` (HA used MQTT through its own broker, now gone) |
+| tasmota | `tasmota.py` | HTTP `cm?cmnd=` (HA used MQTT through its own broker, now gone); relays, lights, energy |
 | switch_as_x | `switch_as_x.py` | Mirrors the wrapped switch |
 | group (light) | `group.py` | A light group: commands fan out to the member lights, the state follows them. See Light groups below. |
 | cast, roku, webostv, samsungtv, androidtv_remote, dlna_dmr | media drivers | Same client identities HA used, so no TV asks to pair again |
@@ -235,7 +235,10 @@ household time zone, with HA's state text. HA's `time_date` entries load as repl
 
 `discovery.py` replaces HA's "Discovered" panel: mDNS continuously (ESPHome,
 commissionable Matter, unpaired HomeKit, Cast, Android TV Remote, Tasmota), SSDP
-and a WiZ `getSystemConfig` sweep hourly and on demand. Each finding says whether
+and a WiZ `getSystemConfig` sweep every 15 minutes (`HOMEHUB_DISCOVERY_INTERVAL_S`, 900) and on
+demand. Those sweeps also make the kernel learn every live address, so the neighbour table
+the DHCP/ARP and HTTP checks read is current; an address nothing identified is fingerprinted
+over HTTP (below) within a minute of appearing there. Each finding says whether
 the registry already knows it; admins get one notice per new device. `flows.py`
 adds one (HA's data keys and unique_ids): WiZ, Cast, Roku and Tasmota with no
 input, ESPHome with its key when encrypted, Matter by setup code through the
@@ -266,12 +269,70 @@ neighbour table shows at its address; when that MAC turns up at another address,
 address the entry keeps (`host`, `url`, a camera's `mjpeg_url`/`still_image_url`, in its data
 or options) is rewritten, the entry reloads, and admins get one notice that it happened. A
 followed device that stopped answering triggers an early sweep (at most every 10 minutes)
-rather than waiting for the hourly scan. An extender's shared MAC never counts, and a host
+rather than waiting for the next scan. An extender's shared MAC never counts, and a host
 name is left alone. A camera's stream and snapshot URLs can also be changed by hand
 (`PATCH /hub/entries/{id}`).
 
 Every driver can be added by hand (`GET /hub/flows`, grouped as on the network,
 servers, cloud accounts and helpers; `manual_flows.py`); phones add themselves.
+
+## Tasmota (`drivers/tasmota.py`)
+
+**Finding them.** A stock Tasmota build does not announce itself over mDNS, and one given its own
+name in its settings no longer has a `tasmota-*` DHCP host name, so neither mDNS nor the DHCP rules
+see it (HA found them through MQTT discovery, on a broker that went with HA). Discovery therefore
+fingerprints over HTTP every neighbour-table address whose MAC the registry does not know and that
+no other protocol identified: `GET /cm?cmnd=Status 0` on port 80, 2.5 s, 16 at a time. Each new
+MAC (or a known one at a new address) is asked once in the minute's housekeeping and again at every
+active scan. Only Tasmota answers in these ways:
+
+| Reply | What it is |
+|---|---|
+| `Server: Tasmota/<version> (<chip>)` header | Tasmota (version and chip become the finding's details and model) |
+| `Status 0` JSON with `StatusFWR` and `StatusNET` | an open Tasmota: its MAC, device name and firmware |
+| HTTP 401, or HTTP 200 `{"WARNING": "Need user=..."}` (older firmware) | a Tasmota with a web password: `locked` |
+
+A finding is `tasmota:<mac>` (the same id as a DHCP host-name match, so the two merge), named
+from `Status 0` or the address's DHCP host name. A locked one carries `note: "Needs its web
+password"`, its `needs` asks for the password (required), and the admins' one notice per device
+says so. Hosts that announce `_http._tcp` over mDNS without being anything known are
+fingerprinted too. The probe never sends a password.
+
+**Adding them.** One config entry per device (`flows.adopt_tasmota`): `unique_id` the MAC,
+data `{host, mac, username: "admin", password}` (the password only when it has one), encrypted
+at rest with the rest of the entry's data (`store.py`, `FERNET_KEY`) and never returned by an
+API (`reconfigure` says only whether one is `set`). The add flow reads `Status 0` and registers,
+with HA's unique ids: relays `{MAC}_switch_relay_{n}`, a light `{MAC}_light_light_{n}` (the last
+`POWER`, as Tasmota numbers a light after the relays), energy `{MAC}_sensor_sensor_ENERGY_{Key}`.
+A device already set up (by MAC on any Tasmota entry or device) is refused with 409 naming the
+entry to change instead. Add by address (`POST /hub/flows/tasmota`) takes the password too.
+
+**Lights.** The light's type is its PWM channel count (`Channel`, else the `Color` hex), as in
+HA's tasmota integration: 1 dimmable (`brightness`), 2 cold/warm (`color_temp`, CT 153-500
+mireds, 2000-6536 K), 3 RGB (`hs`), 4 RGBW (`hs`, `white`), 5 RGB with cold/warm (`hs`,
+`color_temp`). State comes from `Dimmer`, `CT`, `HSBColor` and `Channel` (white-only channels
+lit means `color_temp`/`white` mode). `light.turn_on` sends `HsbColor1`/`HsbColor2` or `CT`,
+then `White`, then `Dimmer`, each reply carrying the new state; brightness 0 is `Power<n> Off`.
+
+**Web passwords.** Tasmota's `/cm` takes its password only as `user=admin&password=...`
+arguments (its documented form), so that is how the driver sends it; no log line or error text
+carries the request URL (`safe_error`). A 401 or the `Need user=` reply is `AuthRequired`
+(`core.py`): the entry's reason starts with it, `GET /hub/entries` gives `needs: "password"`,
+and the Devices page says "Needs its web password" with an "Enter password" button instead of
+"not answering". A password changed on the device later shows the same way on the next poll.
+
+**Managing them.** Every Tasmota entry offers its address and web password for reconfiguring
+(`entries.DOMAIN_FIELDS`), even one imported from HA with empty data: the address shown is the
+device's `configuration_url`, and saving stores it on the entry as `host`. A new password or
+address is tried on the device first and refused if the device answers that the password is
+wrong; a device that does not answer is saved anyway. The same two fields are under a device's
+Settings, Connection on the Devices page.
+
+**Following them.** A Tasmota entry keeps its `host` where `address_follow.py` rewrites it when
+the router moves the device (by MAC, as for every device set up by IP). An entry imported from HA
+that kept its address only on the device (`configuration_url`) is followed too
+(`DEVICE_URL_FOLLOWED`): the new address is written to the entry's `host` and the device's
+`configuration_url`, and the entry reloads.
 
 | Route (admin) | What (`hardware_api.py`) |
 |---|---|

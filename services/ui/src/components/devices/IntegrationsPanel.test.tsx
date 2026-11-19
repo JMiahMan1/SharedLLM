@@ -13,6 +13,7 @@ vi.mock('../../lib/discoveredDevices', async (importOriginal) => {
     failureStatus: real.failureStatus,
     entriesNeedingAttention: real.entriesNeedingAttention,
     offlineSince: real.offlineSince,
+    entryNeedsText: real.entryNeedsText,
     getEntries: vi.fn(),
     getBuilderLink: vi.fn(),
     getManualFlows: vi.fn(),
@@ -148,6 +149,33 @@ describe('IntegrationsPanel', () => {
     expect(within(health).getByText('1 connection needs attention')).toBeInTheDocument();
     fireEvent.click(within(health).getByRole('button', { name: /Camera Hub: login failed/ }));
     expect(screen.getByRole('button', { name: /Camera Hub/, expanded: true })).toBeInTheDocument();
+  });
+
+  it('says a Tasmota needs its web password, not that it is unreachable, and takes it from the summary', async () => {
+    const tasmota = {
+      entry_id: 'ts1', domain: 'tasmota', label: 'Tasmota', title: 'Desk Plug', state: 'setup_retry',
+      reason: 'AuthRequired: Tasmota 192.0.2.174 needs its web password', needs: 'password' as const,
+      source: 'mqtt', disabled_by: null, entities: 3, unpairs: false, shared: false,
+      reconfigure: [
+        { key: 'host', label: 'Address', type: 'text' as const, value: '192.0.2.174', help: 'Followed by its MAC.' },
+        { key: 'password', label: 'Web password', type: 'password' as const, set: false },
+      ],
+      devices: [],
+    };
+    vi.mocked(hub.getEntries).mockResolvedValue({ ...LIST, entries: [tasmota] });
+    vi.mocked(hub.reconfigureEntry).mockResolvedValue({ ...tasmota, state: 'loaded', reason: null, needs: null });
+    wrap();
+    const row = await screen.findByTestId('offline-entry');
+    expect(within(row).getByText('Tasmota · Needs its web password')).toBeInTheDocument();
+    expect(screen.getByTestId('integration-reason')).toHaveTextContent('Needs its web password');
+    expect(screen.queryByText(/AuthRequired/)).toBeNull();
+    fireEvent.click(within(row).getByRole('button', { name: 'Enter the web password of Desk Plug' }));
+    const dialog = await screen.findByTestId('reconfigure-dialog');
+    expect(within(dialog).getByRole('status')).toHaveTextContent('asks for its web password');
+    const field = within(dialog).getByLabelText('Web password');
+    fireEvent.change(field, { target: { value: 'made-up-pw' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(hub.reconfigureEntry).toHaveBeenCalledWith('ts1', { data: { password: 'made-up-pw' } }));
   });
 
   it('lists what is not answering with how long, and removes it from there', async () => {

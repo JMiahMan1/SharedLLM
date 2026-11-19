@@ -29,3 +29,17 @@ def make_hub(domain: str = "test", data: dict | None = None, entities: list[dict
 @pytest.fixture
 def hub_factory():
     return make_hub
+
+
+@pytest.fixture(autouse=True)
+def _no_http_fingerprints(monkeypatch):
+    """Discovery fingerprints the neighbour table's hosts over HTTP; no test may reach a real LAN that way.
+
+    A test that wants replies sets ``mgr.http_probe`` on its own manager.
+    """
+    from services.homehub.discovery import DiscoveryManager
+
+    async def nothing(self, host, session=None):
+        return None
+
+    monkeypatch.setattr(DiscoveryManager, "http_probe", nothing)

@@ -569,8 +569,27 @@ async def adopt_common_sense(runtime: Any, finding: dict[str, Any], name: str | 
     return await commit(runtime, common_sense_plan(hub, name))
 
 
+async def check_tasmota(data: dict[str, Any]) -> None:
+    """A new Tasmota address or web password: refused only when the device answers that the password is wrong.
+
+    A device that does not answer is saved anyway: it may be switched off, or at an address the hub follows
+    by its MAC once it is back.
+    """
+    from services.homehub import flows
+
+    host = str(data.get("host") or "").strip()
+    if not host:
+        return
+    try:
+        await flows.tasmota_status(host, str(data.get("password") or "") or None)
+    except NeedsInput:
+        raise
+    except Exception as exc:
+        log.info("Tasmota at %s could not be checked (%s); saved as entered", host, type(exc).__name__)
+
+
 #: Settings checked before a reconfigure saves them: ``{domain: (keys that trigger it, async check(new data))}``.
-RECONFIGURE_CHECKS: dict[str, tuple[tuple[str, ...], Any]] = {}
+RECONFIGURE_CHECKS: dict[str, tuple[tuple[str, ...], Any]] = {"tasmota": (("host", "password"), check_tasmota)}
 
 
 SUN_SENSORS = (("next_dawn", "Next dawn", "timestamp"), ("next_dusk", "Next dusk", "timestamp"),
