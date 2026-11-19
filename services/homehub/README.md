@@ -220,8 +220,43 @@ browser would need ffmpeg in the image.
 - `assist_satellite.announce` on an ESPHome voice satellite plays the spoken message through the node's own
   announcement call. `start_conversation` speaks first and then listens, through the hub's voice pipeline
   (below); it is refused by name on a node that does not offer it.
+- ESPHome media players get every URL converted to the format they ask for (see "ESPHome media and voice").
 - Not served: `media_player/browse_media` and `media_source/*` (no Jarvis caller uses them), `androidtv.adb_command`
   (no ADB integration), and the `/api/diagnostics/*` routes.
+
+## ESPHome media and voice (`esphome_audio.py`)
+
+An ESPHome media player lists the audio it wants in `MediaPlayerInfo.supported_formats` (codec, sample rate,
+channels, sample width, purpose: default or announcement). A node fed anything else has to decode and resample
+in software while it plays; an ESP32-S3 voice speaker that wants FLAC at 48 kHz mono, sent a 22050 Hz WAV from a
+Piper voice, stalled and was reset by its watchdog. So, as HA's ESPHome integration does, the hub never hands
+such a node the original URL:
+
+- The driver reads the formats on every connect and publishes them on the media player as the
+  `supported_formats` attribute (for diagnostics).
+- Every URL the hub gives a node goes through `/api/esphome/ffmpeg_proxy/<entry_id>/<token>.<ext>`:
+  `media_player.play_media` (announce or not, enqueued too, from Jarvis, Music Assistant or an automation),
+  `assist_satellite.announce` / `start_conversation` (and their preannounce chime) and the voice pipeline's
+  reply (`TTS_END`). The format is HA's choice: the first default format, or for an announcement the first
+  announcement format. A node that lists none, a codec the hub does not convert to (it knows `flac`, `mp3`,
+  `wav`, `opus`), a source that is not `http(s)`, `extra.bypass_proxy: true`, a missing ffmpeg or no hub
+  address (`HOMEHUB_EXTERNAL_URL` / `EXECUTION_EXTERNAL_HOST`) keep the original URL.
+- The token is the credential (no login, like `/api/tts_proxy/`), unguessable, and expires after
+  `HOMEHUB_ESPHOME_PROXY_TTL_S` (6 h; 10 minutes for a spoken clip); a node keeps at most 8. The source URL
+  never appears in the proxy URL, its response or the log (the log shows scheme, host and path only).
+- A spoken clip of the hub's own is converted once from memory and the result kept with its token (the node
+  fetches a reply twice); the 22050 Hz original still serves every other player and the API-streamed audio.
+  Any other URL is streamed through ffmpeg as the node reads it. Fetching a token again stops its earlier
+  conversion, a node that hangs up stops its ffmpeg, and `media_stop`, `turn_off`, `clear_playlist`, a
+  disconnect or an unload stop every conversion of the node. At most `HOMEHUB_ESPHOME_FFMPEG_MAX` (4) ffmpeg
+  processes run at once; a request that cannot get one in 5 s is a 503. The image has ffmpeg (`Dockerfile`).
+- Execution talks to some nodes itself (alarm and timer alerts, `esphome_client.trigger_device_alert` and
+  media commands): it asks `POST /hub/esphome/audio_url` (admin, `{device, url, formats, announcement}` ->
+  `{url, proxied}`) for the URL to send, and sends the original when the hub cannot answer.
+
+To check a node: its media player's `supported_formats` attribute lists what it asked for; the hub's access
+log shows the node fetching `/api/esphome/ffmpeg_proxy/...` (not `/api/tts_proxy/...`) after each reply; and
+`GET /hub/devices/{id}/restarts` should show no drop after a reply.
 
 ## Voice satellites (`voice_pipeline.py`, `voice_api.py`)
 
