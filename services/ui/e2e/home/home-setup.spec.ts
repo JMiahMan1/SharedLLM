@@ -95,13 +95,40 @@ test.describe('Devices: rooms, floors, labels, zones and people', () => {
     clean(run);
   });
 
-  test('zones: a saved place is shown read-only; a zone is drawn, checked and added', async ({ page }, info) => {
+  test('zones: Home moves but is never removed; a saved place is edited; a zone is drawn and added', async ({ page }, info) => {
     const run = await open(page, '#devices-zones');
     const zones = page.getByTestId('zones');
-    await expect(zones.getByTestId('zone')).toHaveCount(2);
+    await expect(zones.getByTestId('zone')).toHaveCount(1);
+    const home = zones.getByTestId('zone-home');
+    await expect(home.getByTestId('home-note')).toContainText('Home cannot be removed');
+    await expect(home.getByRole('button', { name: 'Remove Home' })).toHaveCount(0);
+    await zones.scrollIntoViewIfNeeded();
+    await snap(page, info, 'devices-zones-list');
+
+    // Move Home: the same editor, without passive.
+    await home.getByRole('button', { name: 'Edit Home' }).click();
+    const homeEditor = home.getByTestId('home-editor');
+    await expect(homeEditor.getByRole('checkbox')).toHaveCount(0);
+    await homeEditor.getByLabel('Latitude').fill('11.25, 21.75');
+    await expect(homeEditor.getByLabel('Longitude')).toHaveValue('21.75');
+    await homeEditor.getByLabel('Radius (metres)').fill('300');
+    await expectTapTargets(homeEditor);
+    await expectNoHorizontalOverflow(page);
+    await homeEditor.getByRole('button', { name: 'Save Home' }).scrollIntoViewIfNeeded();
+    await snap(page, info, 'devices-home-editor');
+    await homeEditor.getByRole('button', { name: 'Save Home' }).click();
+    await expect.poll(() => sent(run.mocks, 'PATCH', '/api/homehub/zones/home')).toEqual(
+      { name: 'Home', latitude: 11.25, longitude: 21.75, radius: 300 });
+    await expect(home).toContainText('300 m');
+
+    // A place saved in Wander says who saved it and is edited here like any zone.
     const place = zones.getByTestId('zone').filter({ hasText: 'Practice field' });
-    await expect(place).toContainText('Saved place in Jarvis');
-    await expect(place.getByRole('button', { name: /Edit/ })).toHaveCount(0);
+    await expect(place).toContainText('Saved in Wander by robin');
+    await expect(place.getByRole('link', { name: /Wander > Places/ })).toHaveAttribute('href', '/wander#wander-places');
+    await place.getByRole('button', { name: /^Edit / }).click();
+    await place.getByTestId('zone-editor').getByLabel('Radius (metres)').fill('180');
+    await place.getByTestId('zone-editor').getByRole('button', { name: 'Save' }).click();
+    await expect.poll(() => sent(run.mocks, 'PATCH', `/api/homehub/zones/${'a'.repeat(32)}`)).toMatchObject({ radius: 180 });
 
     await zones.getByRole('button', { name: 'New zone' }).click();
     const editor = zones.getByTestId('zone-editor');
@@ -116,12 +143,15 @@ test.describe('Devices: rooms, floors, labels, zones and people', () => {
     await expectNoHorizontalOverflow(page);
     await snap(page, info, 'devices-zone-editor');
     await editor.getByRole('button', { name: 'Add zone' }).click();
-    await expect(zones.getByTestId('zone')).toHaveCount(3);
+    await expect(zones.getByTestId('zone')).toHaveCount(2);
     await expect.poll(() => sent(run.mocks, 'POST', '/api/homehub/zones')).toEqual(
       { name: 'Ball park', latitude: 12.5, longitude: -45.25, radius: 250, passive: false });
 
-    await zones.getByRole('button', { name: 'Saved places' }).click();
-    await expect.poll(() => run.mocks.posts.some((p) => p.path === '/api/homehub/zones/sync')).toBe(true);
+    const park = zones.getByTestId('zone').filter({ hasText: 'Ball park' });
+    await park.getByRole('button', { name: 'Remove Ball park' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click();
+    await expect(zones.getByTestId('zone')).toHaveCount(1);
+    await expect(zones.getByRole('button', { name: 'Saved places' })).toHaveCount(0);
     await expectTapTargets(zones);
     clean(run);
   });

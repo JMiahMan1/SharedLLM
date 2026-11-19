@@ -12,7 +12,8 @@ middleware:
   workouts, daily steps, goals and earned achievements back.
 
 Only saved places the person owns leave (the household's shared places belong
-to whoever made them). A restored trip is never shared with anyone: the riders
+to whoever made them). Places live on HomeHub (``hub_places``), so they are read
+from and restored to it; with no HomeHub they are skipped, never kept here. A restored trip is never shared with anyone: the riders
 named on it are dropped, since on another server those names can be other
 people. The location trail, visits, driving events and stars are exported for
 reading and never restored (they are history the server derives).
@@ -27,9 +28,10 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
+from services.geo import hub_places
+
 _USER = re.compile(r"^[a-z0-9_.-]{1,64}$")
 _ID = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
-PLACES_KEY = "geo:places"
 MAX_PAGE = 5000
 #: Fields that tie a trip to other people; a restored trip drops them.
 _TRIP_SHARE_FIELDS = ("is_shared", "shared_with", "shared_group_id", "shared_manually")
@@ -71,8 +73,29 @@ async def _hash_rows(r: Any, key: str, field: str, value: str) -> list[dict[str,
     return [{field: _text(k), value: _text(v)} for k, v in sorted(stored.items(), key=lambda kv: _text(kv[0]))]
 
 
-async def export_user(r: Any, user: str) -> dict[str, list[dict[str, Any]]]:
-    places = [p for p in (_load(v) for v in (await r.hgetall(PLACES_KEY) or {}).values()) if p and p.get("owner") == user]
+class HubPlaces:
+    """The person's places on HomeHub (tests pass a stand-in)."""
+
+    async def all(self) -> list[dict[str, Any]]:
+        return [hub_places.as_saved_place(z) for z in await hub_places.fetch_all()]
+
+    async def add(self, places: list[dict[str, Any]]) -> None:
+        await hub_places.import_places(places)
+
+    async def replace(self, place_id: str, owner: str, place: dict[str, Any]) -> None:
+        await hub_places.update_place(place_id, owner, place)
+
+
+async def _all_places(store: Any) -> list[dict[str, Any]] | None:
+    try:
+        return await store.all()
+    except hub_places.PlacesUnavailable:
+        return None
+
+
+async def export_user(r: Any, user: str, store: Any | None = None) -> dict[str, list[dict[str, Any]]]:
+    every = await _all_places(store or HubPlaces())
+    places = [p for p in every or [] if p.get("owner") == user]
     reminders = [x for x in (_load(v) for v in (await r.hgetall(f"geo:place_reminders:{user}") or {}).values()) if x]
     goal = await r.get(f"geo:steps_goal:{user}")
     return {
@@ -176,19 +199,23 @@ async def _merge_hash(
             await r.hset(key, name, incoming)
 
 
-async def import_user(r: Any, user: str, collections: dict[str, Any], *, dry_run: bool, replace: bool) -> dict[str, Any]:
+async def import_user(r: Any, user: str, collections: dict[str, Any], *, dry_run: bool, replace: bool,
+                      store: Any | None = None) -> dict[str, Any]:
     write = not dry_run
+    store = store or HubPlaces()
     results: dict[str, Any] = {}
 
     def rows(name: str) -> list[Any]:
         value = collections.get(name) or []
         return value[:MAX_IMPORT_ITEMS] if isinstance(value, list) else []
 
-    # Saved places: only the person's own, kept as theirs.
+    # Saved places: only the person's own, kept as theirs, on HomeHub.
     counts = _Counts()
-    every = {k: _load(v) for k, v in ((_text(k), v) for k, v in (await r.hgetall(PLACES_KEY) or {}).items())}
+    listed = await _all_places(store)
+    every = {str(p.get("id")): p for p in listed or []}
+    added: list[dict[str, Any]] = []
     for row in rows("places"):
-        if not isinstance(row, dict) or not _ID.match(str(row.get("id") or "")):
+        if listed is None or not isinstance(row, dict) or not _ID.match(str(row.get("id") or "")):
             counts.skipped += 1
             continue
         place = {**row, "owner": user}
@@ -198,16 +225,23 @@ async def import_user(r: Any, user: str, collections: dict[str, Any], *, dry_run
             current = None
         if current is None:
             counts.add += 1
-        elif current == place:
+            added.append(place)
+            continue
+        if {k: current.get(k) for k in place} == place:
             counts.unchanged += 1
             continue
-        else:
-            counts.conflict += 1
-            if not replace:
-                continue
-        if write:
-            await r.hset(PLACES_KEY, place["id"], json.dumps(place))
-    results["places"] = counts.as_dict()
+        counts.conflict += 1
+        if replace and write:
+            await store.replace(place["id"], user, place)
+    if write and added:
+        await store.add(added)
+    if listed is None and rows("places"):
+        counts_dict = counts.as_dict()
+        counts_dict["errors"] = ["HomeHub is not set up, so places cannot be restored"]
+        results["places"] = counts_dict
+    else:
+        results["places"] = counts.as_dict()
+
 
     counts = _Counts()
     key = f"geo:place_reminders:{user}"
@@ -272,7 +306,7 @@ async def import_user(r: Any, user: str, collections: dict[str, Any], *, dry_run
     return results
 
 
-def build_router(get_redis: Callable[[], Awaitable[Any]]) -> APIRouter:
+def build_router(get_redis: Callable[[], Awaitable[Any]], places: Any | None = None) -> APIRouter:
     router = APIRouter(prefix="/internal/account")
 
     async def _r() -> Any:
@@ -283,7 +317,7 @@ def build_router(get_redis: Callable[[], Awaitable[Any]]) -> APIRouter:
 
     @router.get("/export/{user}")
     async def export_account(user: str) -> dict[str, Any]:
-        return {"service": "geo", "collections": await export_user(await _r(), _user(user))}
+        return {"service": "geo", "collections": await export_user(await _r(), _user(user), places)}
 
     @router.get("/export/{user}/location-history")
     async def export_history(user: str, start: int = Query(0, ge=0), count: int = Query(MAX_PAGE, ge=1, le=MAX_PAGE)) -> dict[str, Any]:
@@ -296,7 +330,7 @@ def build_router(get_redis: Callable[[], Awaitable[Any]]) -> APIRouter:
             raise HTTPException(status_code=422, detail="collections must be an object")
         dry_run = bool(body.get("dry_run", True))
         results = await import_user(await _r(), _user(user), collections, dry_run=dry_run,
-                                    replace=bool(body.get("replace_conflicts", False)))
+                                    replace=bool(body.get("replace_conflicts", False)), store=places)
         return {"service": "geo", "dry_run": dry_run, "collections": results}
 
     return router

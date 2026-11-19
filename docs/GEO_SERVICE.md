@@ -27,8 +27,9 @@ Google.
 |---|---|
 | Health / client | `GET /health`, `GET /` (static map client) |
 | People and places | `GET /people`, `GET /zones`, `GET /people/{id}/history`, `POST /people/{id}/see` (internal secret), `POST /people/{id}/record`, `GET /closest`, `GET /people/{id}/eta`, `GET /people/{id}/telemetry`, `GET /telemetry/{id}`, `GET /android_auto` |
-| Places | `PUT /place-settings/{zone_id}` `{important, notify}` (gateway `PUT /api/geo/places/{zone_id}`, admins only: HA zones have no owner; the body must be an object with `important` a boolean and `notify` a list of family usernames, else 422); `GET /zones` features carry `important` and `notify` |
-| Saved places | `GET /places?viewer=`, `POST /places?owner=`, `PUT/DELETE /places/{place_id}` (gateway `/api/geo/saved-places`). A place the family adds from Wander: a point + radius in Redis, treated exactly like an HA zone, so it shows in `/zones` as a `place.<id>` feature and carries its own `important`/`notify`. `scope` is `family` or `user`; only the owner or an admin may change or remove one |
+| Places | Geo stores no places. Every place is a HomeHub zone (Home, the zones drawn on Devices > Rooms & places or imported from Home Assistant, and the places people save in Wander), read from HomeHub's `GET /hub/zones?all=1` with the internal secret (`services/geo/hub_places.py`) and cached for 5 minutes. `GET /zones?viewer=` answers them as GeoJSON (the family's places plus the viewer's own private ones; `important`, `notify`, `icon`, `owner`, `scope`, `custom` for a place saved in Wander); `POST /zones/refresh` reads them again now (the gateway calls it after a change). With no HomeHub set up there are no places: `/zones` answers `hub_zones: "unavailable"` and an empty list, and nothing falls back to another store |
+| Changing places | Through the gateway, which writes HomeHub: `PUT /api/geo/places/{zone_id}` `{important, notify, icon?}` (admins only; marks a place important and picks who hears), and `/api/geo/saved-places` (anyone adds their own, shared with the family or private; the owner or an admin changes or removes one; nobody, an admin included, sees someone else's private place). Admins also draw zones and move Home on Devices > Rooms & places (`/api/homehub/zones`, `/api/homehub/zones/home`) |
+| Moving places in (once) | At start geo moves what it used to keep (`geo:places`, and `geo:place_settings` for important/notify/icon per zone) into HomeHub with `POST /hub/zones/import`: ids are kept, a family place keeps the `zone.*` entity the old mirror gave it, and presence state and reminders that named `place.<id>` follow it. Idempotent, logged with counts, marked done in `geo:places_moved_to_homehub`, retried every 5 minutes while HomeHub cannot take it. Geo's old keys are left as they were, a backup until a later cleanup |
 | Visit suggestions | `GET /visit-suggestions?user=`, `POST /visit-suggestions/dismiss` `{lat, lon}` (gateway `/api/geo/visit-suggestions`, always the caller). A spot someone has stayed 30+ minutes at on two or more occasions, so Wander can offer to save it as a place |
 | Place reminders | `GET /place-reminders?user=`, `POST /place-reminders?user=` `{zone, on: arrive\|leave, title, url?}`, `DELETE /place-reminders/{id}?user=` (internal secret; gateway `/api/geo/place-reminders`, always the caller). A note's "when I get home" reminder, rung once by that person's own arrival or departure (docs/NOTES.md) |
 | Trips | `GET /trips`, `GET/PATCH /trips/{id}`, `PATCH /trips/{id}/share`, `GET /trips/{id}/route`, `GET /trips/{id}/locations`, `GET /locations/suggestions` |
@@ -52,11 +53,16 @@ who may see the person (sharing consent), never to the person themselves.
   preference, applied by telemetry. Geo's own per-person switch
   (`GET/PUT /presence-alerts`) is gone; the notice sweep moved anyone who had
   it off to `family_presence=false` once.
-- **Important places**: a zone marked important in Wander's Places list
-  (`geo:place_settings`, `services/geo/safety.py`) makes its arrivals and
+- **Important places**: a place marked important (kept with the place on
+  HomeHub, `important` and `notify`) makes its arrivals and
   departures `family_safety` notices (priority 4, tag `place:<user>`) for the
   people chosen for it, or everyone who may see the person when none are
   chosen. Everyone else still gets the ordinary `family_presence` notice.
+- **Private places**: a place someone keeps private (`visibility: private` on
+  HomeHub, known to geo as `place.<id>`) counts only for that person's own
+  arrivals, departures, reminders, long stops and visit suggestions. It never
+  names a spot anyone else sees (a day's stops, a trip's ends, `/place-name`,
+  `/people`), and HomeHub never publishes it as a `zone.*` state.
 - **Place reminders** (`services/geo/place_reminders.py`): the same
   transitions ring the person's own "when I get home" reminders, a `timers`
   notice to them alone, once; then the reminder is removed.

@@ -118,9 +118,10 @@ through `services/common/household_tz.py`, in this order:
    and refuses to start without it). The older `TIMEZONE` variable is read as an
    alias when `TZ` is unset.
 3. **Derived from the home location**, only when the admin turns on "Derive from
-   home location" (setting `timezone_from_location`). The point is the
-   `weather_location` setting (Admin > Weather reminders) or, in the hub, the
-   imported Home Assistant `zone.home`. The lookup is offline (`timezonefinder`).
+   home location" (setting `timezone_from_location`). The point is Home on the
+   home hub (`zone.home`, moved on Devices > Rooms & places; HomeHub passes it)
+   or, on a setup with no hub, the `weather_location` setting (Admin > Weather
+   reminders). The lookup is offline (`timezonefinder`).
 4. **Otherwise the service fails** with:
    `No household time zone is configured: ... Set the household time zone in
    Settings > Household time zone, or TZ in the server's .env (e.g.

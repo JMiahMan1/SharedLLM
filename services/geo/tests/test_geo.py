@@ -71,7 +71,15 @@ def test_people_geojson(client):
     assert "person.noloc" not in ids  # skipped: no coords
 
 
-def test_zones_geojson(client):
+def test_zones_geojson(client, monkeypatch):
+    import services.geo.main as geo
+
+    async def places():
+        return [{"id": "home", "entity_id": "zone.home", "name": "Home", "latitude": 1.0, "longitude": 2.0,
+                 "radius": 100.0, "passive": False, "owner": None, "private": False, "custom": False,
+                 "important": False, "notify": [], "pin": "", "created_at": None}]
+
+    monkeypatch.setattr(geo.hub_places, "fetch_all", places)
     r = client.get("/zones")
     assert r.status_code == 200
     body = r.json()

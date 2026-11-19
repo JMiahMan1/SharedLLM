@@ -50,8 +50,10 @@ export interface ZonePlace {
   radius: number;
   important: boolean;
   notify: string[];
-  /** Home Assistant's zone icon ("mdi:school"), when it has one. */
+  /** The map pin chosen for it ("school"), when it has one. */
   icon?: string;
+  /** Saved by someone in Wander (it has an owner), not Home or a household zone. */
+  custom?: boolean;
 }
 
 /**
@@ -63,7 +65,7 @@ export function zonePlaces(data: unknown): ZonePlace[] {
     | { features?: Array<{ properties?: Record<string, unknown>; geometry?: { coordinates?: [number, number] } }> }
     | undefined;
   return (geoJson?.features ?? [])
-    .map((feature) => {
+    .map((feature): ZonePlace | null => {
       const props = feature.properties || {};
       const coords = feature.geometry?.coordinates;
       const lat = Number(props.latitude ?? coords?.[1]);
@@ -78,6 +80,8 @@ export function zonePlaces(data: unknown): ZonePlace[] {
         radius: Number.isFinite(radius) && radius > 0 ? radius : 100,
         important: props.important === true,
         notify: Array.isArray(props.notify) ? props.notify.map(String) : [],
+        // Saved by someone in Wander (it has an owner), not Home or a household zone.
+        custom: props.custom === true,
         ...(typeof props.icon === 'string' && props.icon ? { icon: props.icon } : {}),
       };
     })

@@ -52,7 +52,7 @@ no "Widget failed" and no page errors.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `weather_location` | empty | `{"name", "latitude", "longitude"}`; empty uses Home Assistant's `zone.home` (re-read hourly) |
+| `weather_location` | empty | `{"name", "latitude", "longitude"}`, used only on a setup with no home hub. With a hub the forecast is for Home (`zone.home`, which an admin moves on Devices > Rooms & places; re-read every 5 minutes), the one home location, and this setting is ignored |
 | `weather_units` | `imperial` | `imperial` (°F, mph, inches) or `metric` (°C, km/h, mm; snow in cm, as Open-Meteo gives it). Each reminder stores the units its threshold was set in (`units`), and changing this converts them, so a 32 °F freeze becomes 0 °C rather than 32 °C |
 | `weather_api_url` | empty | Open-Meteo server; empty is the public one |
 | `weather_reminders` | `[]` | The reminder rules below |

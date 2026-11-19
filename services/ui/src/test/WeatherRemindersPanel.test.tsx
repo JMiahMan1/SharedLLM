@@ -75,7 +75,17 @@ describe('WeatherRemindersPanel', () => {
     expect((tests[0] as { rule: { id: string } }).rule.id).toBe(rule.id);
   });
 
-  it('saves a custom forecast location and units, and rejects a bad one', async () => {
+  it('with a home hub the forecast is for Home, moved on Devices > Rooms & places: no second home here', async () => {
+    render();
+    const note = await screen.findByTestId('forecast-is-home');
+    expect(note.querySelector('a')).toHaveAttribute('href', '/devices#devices-zones');
+    expect(screen.queryByLabelText('Forecast latitude')).toBeNull();
+    expect(screen.getByLabelText('Weather units')).toBeInTheDocument();
+  });
+
+  it('with no home hub saves a custom forecast location and units, and rejects a bad one', async () => {
+    server.use(http.get('/api/integrations/status', () => HttpResponse.json(
+      { homehub: { enabled: false }, home_assistant: { enabled: false } })));
     render();
     await screen.findByText('No weather reminders yet.');
     fireEvent.change(screen.getByLabelText('Forecast latitude'), { target: { value: '120' } });
@@ -100,7 +110,7 @@ describe('WeatherRemindersPanel', () => {
     render();
     await screen.findByText(/at or below 32°F/);
     fireEvent.change(screen.getByLabelText('Weather units'), { target: { value: 'metric' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save location' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save units' }));
     await waitFor(() => expect(saves.map((s) => s.key)).toEqual(['weather_location', 'weather_reminders', 'weather_units']));
     const [pipes, hay] = JSON.parse(saves[1].value);
     expect(pipes).toMatchObject({ threshold: 0, units: 'metric' });

@@ -8,8 +8,8 @@ Each is kept in the store's key-value table in Home Assistant's own shape (the i
 | ``floors`` | ``{floor_id: {floor_id, name, level, icon, aliases}}`` |
 | ``labels`` | ``{label_id: {label_id, name, color, icon, description}}`` |
 | ``categories`` | ``{scope: [{category_id, name, icon}]}`` (HA's automation/script/scene folders; read only) |
-| ``zones`` | ``[{id, name, latitude, longitude, radius, passive, icon}]`` (the zones a person draws) |
-| ``geo_zones`` | the same shape, mirrored from the family's saved places in Jarvis (read only here) |
+| ``zones`` | ``[{id, name, latitude, longitude, radius, passive, icon, owner, owner_name, visibility, important, notify, pin, created_at}]`` (every place but Home; ``owner`` is a hub user id) |
+| ``home_place`` | ``{important, notify, pin}`` for Home (its location is ``core_config``) |
 | ``persons`` | ``[{id, name, user_id, jarvis_user, device_trackers}]`` |
 | ``tags`` | ``[{id, name, last_scanned}]`` (NFC/QR tags; names only, the tag trigger reads them) |
 
@@ -18,26 +18,25 @@ restarts the person manager (``drivers/mobile_app.py``). Each zone and person ge
 (platform ``zone``/``person``, unique id = its id), so renaming one never changes its entity id and the
 automations that name it keep working.
 
-Saved places: the family's shared places (geo ``/zones``, ``scope: family``) are mirrored as read-only zones
-with ``source: geo``. A person's private places stay private: they never become household zones. The mirror
-is kept in the store, so automations that name one still load while geo is down.
+Places: the hub is the only store of the family's places. Home, the zones drawn on Devices > Rooms & places
+(or imported from Home Assistant) and the places people save from Wander are all zones here; a saved place has
+an ``owner`` and a ``visibility`` (``family``, or ``private`` to its owner). A private place never becomes a
+``zone.*`` state. Geo reads every place from ``GET /hub/zones?all=1`` for arrivals, departures and reminders.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
 import re
+import time
 import uuid
+from dataclasses import dataclass
 from typing import Any
-
-import aiohttp
 
 from services.homehub.core import EntityEntry, HubError
 
 log = logging.getLogger("homehub.registries")
 
-GEO_TIMEOUT_S = 10.0
 _JARVIS_USER = re.compile(r"^[a-z0-9_.-]{1,64}$")
 _TRACKER = re.compile(r"^device_tracker\.[a-z0-9_]+$")
 _COLOR = re.compile(r"^(#[0-9a-fA-F]{6}|[a-z_]{1,32})$")
@@ -328,6 +327,38 @@ def _drop_registry_entity(runtime: Any, platform: str, unique_id: str) -> str | 
 
 
 # -- zones ----------------------------------------------------------------------------------------------
+#
+# Every place the family has is a zone here: Home (the hub's core config), the zones drawn on Devices >
+# Rooms & places or imported from Home Assistant, and the places people save from Wander (an owner, and
+# either shared with the family or private to that owner). Geo, the gateway and the UI all read them from
+# here; nothing else stores places.
+#
+# Owners are the hub's own users: ``owner`` is a hub user id, so a standalone hub (no Jarvis) has places
+# owned by the users who sign in to it. When Jarvis's gateway acts for a person it names them by their Jarvis
+# username (``viewer``/``owner``); the hub matches that to its own user (``hub_user_for``: a hub user synced
+# from Jarvis carries ``jarvis_user``, or a person links the username to a hub user) and also keeps the name
+# as ``owner_name``, so a place made before that person's hub user existed is still theirs. The hub never
+# asks Jarvis anything for this.
+#
+# A private place is the owner's alone. It is never published as a ``zone.*`` state and has no entity
+# registry row, so HA-compatible readers (``/api/states``, the websocket, templates, automations, the
+# HA frontend) never see it; geo knows it as ``place.<id>`` for the owner's own arrivals and reminders.
+# Only the stack's internal secret may list every place (``everything``); anyone else sees the family's
+# places plus, when the caller is the gateway acting for a person, that person's own.
+
+#: The icons a place's pin can wear on the family map ("" is automatic, from the name).
+PIN_ICONS = ("home", "school", "work", "church", "store", "gym", "park", "friends", "food", "hospital", "place")
+VISIBILITIES = ("family", "private")
+#: How a private place is known to geo (it has no ``zone.*`` entity).
+PRIVATE_PREFIX = "place."
+#: Home's place settings (important, who hears, its pin); its location is the core config.
+HOME_PLACE_KEY = "home_place"
+MAX_ZONES = 500
+MAX_PRIVATE_PER_OWNER = 200
+_HEX_ID = re.compile(r"^[0-9a-f]{32}$")
+#: Core-config keys a location change may carry, besides the place fields.
+_HOME_LOCATION_KEYS = ("latitude", "longitude", "radius", "elevation")
+
 
 def _stored_zones(runtime: Any, key: str = "zones") -> list[dict[str, Any]]:
     zones = runtime.store.get_kv(key, []) or []
@@ -338,36 +369,113 @@ def _zone_entity_ids(runtime: Any) -> dict[str, str]:
     return {e.unique_id: e.entity_id for e in runtime.hub.entities.values() if e.platform == "zone"}
 
 
+def is_private(zone: dict[str, Any]) -> bool:
+    return zone.get("visibility") == "private"
+
+
+def _clean_viewer(viewer: Any) -> str | None:
+    who = str(viewer or "").strip().lower()
+    return who if _JARVIS_USER.match(who) else None
+
+
+@dataclass(frozen=True)
+class Who:
+    """Who a request acts for: a hub user (``user_id``), and/or the Jarvis username the gateway named."""
+
+    user_id: str | None = None
+    name: str | None = None
+
+
+def hub_user_for(runtime: Any, jarvis_user: str | None) -> str | None:
+    """The hub user a Jarvis username belongs to, from the hub's own records only: a hub user that carries
+    it (``jarvis_user``, set when users are synced from Jarvis), else a person linking it to a hub user."""
+    name = _clean_viewer(jarvis_user)
+    if name is None:
+        return None
+    for u in runtime.store.get_kv("users", []) or []:
+        if isinstance(u, dict) and str(u.get("jarvis_user") or "").lower() == name and u.get("id"):
+            return str(u["id"])
+    for p in _stored_persons(runtime):
+        if str(p.get("jarvis_user") or "").lower() == name and p.get("user_id"):
+            return str(p["user_id"])
+    return None
+
+
+def who_for(runtime: Any, *, user_id: str | None = None, jarvis_user: str | None = None) -> Who:
+    name = _clean_viewer(jarvis_user)
+    return Who(user_id=user_id or hub_user_for(runtime, name), name=name)
+
+
+def owns(zone: dict[str, Any], who: Who | None) -> bool:
+    if who is None:
+        return False
+    if who.user_id and zone.get("owner") == who.user_id:
+        return True
+    return bool(who.name) and str(zone.get("owner_name") or "").lower() == who.name
+
+
+def can_see(zone: dict[str, Any], who: Who | None, everything: bool = False) -> bool:
+    """A family zone is everyone's; a private one only its owner's (and the stack's, for presence)."""
+    return everything or not is_private(zone) or owns(zone, who)
+
+
+def _same_owner(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    return (bool(a.get("owner")) and a.get("owner") == b.get("owner")) or (
+        bool(a.get("owner_name")) and a.get("owner_name") == b.get("owner_name"))
+
+
 def apply_zones(runtime: Any) -> None:
-    """Publish ``zone.home``, the drawn zones and the saved-place zones; drop the states of removed ones."""
+    """Publish ``zone.home`` and every family zone; drop the states of removed or now private ones."""
     from services.homehub.drivers import mobile_app
 
     hub = runtime.hub
     before = {z["entity_id"] for z in getattr(hub, "zone_table", None) or []}
     home = {"name": (hub.location or {}).get("location_name", "Home"), **(hub.location or {})}
-    zones = _stored_zones(runtime) + [{**z, "editable": False} for z in _stored_zones(runtime, "geo_zones")]
-    mobile_app.setup_zones(hub, zones, home)
+    mobile_app.setup_zones(hub, [z for z in _stored_zones(runtime) if not is_private(z)], home)
     after = {z["entity_id"] for z in hub.zone_table}
     for gone in before - after:
         hub.states.remove(gone)
 
 
-def _zone_view(z: dict[str, Any], entity_ids: dict[str, str]) -> dict[str, Any]:
-    return {"id": z.get("id"), "entity_id": entity_ids.get(str(z.get("id"))), "name": z.get("name"),
-            "latitude": z.get("latitude"), "longitude": z.get("longitude"), "radius": z.get("radius"),
-            "passive": bool(z.get("passive")), "icon": z.get("icon"), "source": z.get("source") or "hub",
-            "editable": not z.get("source")}
+def _home_place(runtime: Any) -> dict[str, Any]:
+    raw = runtime.store.get_kv(HOME_PLACE_KEY, None)
+    return raw if isinstance(raw, dict) else {}
 
 
-def list_zones(runtime: Any) -> dict[str, Any]:
-    ids = _zone_entity_ids(runtime)
+def _home_view(runtime: Any) -> dict[str, Any]:
     loc = runtime.hub.location or {}
-    home = {"id": "home", "entity_id": "zone.home", "name": loc.get("location_name") or "Home",
+    place = _home_place(runtime)
+    return {"id": "home", "entity_id": "zone.home", "name": loc.get("location_name") or "Home",
             "latitude": loc.get("latitude"), "longitude": loc.get("longitude"), "radius": loc.get("radius") or 100,
-            "passive": False, "icon": "mdi:home", "source": "home", "editable": False}
-    drawn = [_zone_view(z, ids) for z in _stored_zones(runtime)]
-    places = [_zone_view(z, ids) for z in _stored_zones(runtime, "geo_zones")]
-    return {"zones": [home, *sorted(drawn + places, key=lambda z: str(z["name"] or "").lower())]}
+            "passive": False, "icon": "mdi:home", "source": "home", "editable": True, "removable": False,
+            "owner": None, "owner_name": None, "visibility": "family", "important": bool(place.get("important")),
+            "notify": list(place.get("notify") or []), "pin": str(place.get("pin") or ""), "created_at": None}
+
+
+def _zone_view(z: dict[str, Any], entity_ids: dict[str, str]) -> dict[str, Any]:
+    zid = str(z.get("id"))
+    private = is_private(z)
+    return {"id": z.get("id"), "entity_id": f"{PRIVATE_PREFIX}{zid}" if private else entity_ids.get(zid),
+            "name": z.get("name"), "latitude": z.get("latitude"), "longitude": z.get("longitude"),
+            "radius": z.get("radius"), "passive": bool(z.get("passive")), "icon": z.get("icon"), "source": "hub",
+            "editable": True, "removable": True, "owner": z.get("owner") or None,
+            "owner_name": z.get("owner_name") or None,
+            "visibility": "private" if private else "family", "important": bool(z.get("important")),
+            "notify": list(z.get("notify") or []), "pin": str(z.get("pin") or ""), "created_at": z.get("created_at")}
+
+
+def list_zones(runtime: Any, who: Who | None = None, everything: bool = False) -> dict[str, Any]:
+    """Home first, then the zones the viewer may see, by name."""
+    ids = _zone_entity_ids(runtime)
+    zones = [_zone_view(z, ids) for z in _stored_zones(runtime) if can_see(z, who, everything)]
+    return {"zones": [_home_view(runtime), *sorted(zones, key=lambda z: str(z["name"] or "").lower())]}
+
+
+def get_zone(runtime: Any, zone_id: str, who: Who | None = None, everything: bool = False) -> dict[str, Any]:
+    if zone_id == "home":
+        return _home_view(runtime)
+    _zones, zone = _visible_zone(runtime, zone_id, who, everything)
+    return _zone_view(zone, _zone_entity_ids(runtime))
 
 
 def _number(body: dict[str, Any], key: str, low: float, high: float) -> float:
@@ -379,8 +487,43 @@ def _number(body: dict[str, Any], key: str, low: float, high: float) -> float:
     return float(value)
 
 
-def _zone_fields(body: dict[str, Any], *, creating: bool) -> dict[str, Any]:
-    _unknown(body, {"name", "latitude", "longitude", "radius", "passive", "icon"}, "A zone")
+def _notify(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(u, str) for u in value):
+        raise RegistryError("notify is a list of Jarvis usernames")
+    names = sorted({u.strip().lower() for u in value if u.strip()})
+    bad = [u for u in names if not _JARVIS_USER.match(u)]
+    if bad:
+        raise RegistryError(f"notify names someone who is not a Jarvis username: {', '.join(bad)}")
+    return names
+
+
+def _place_fields(body: dict[str, Any]) -> dict[str, Any]:
+    """The place settings any zone may carry: important, who hears about it, its pin on the map."""
+    out: dict[str, Any] = {}
+    if "important" in body:
+        if not isinstance(body["important"], bool):
+            raise RegistryError("important must be true or false")
+        out["important"] = body["important"]
+    if "notify" in body:
+        out["notify"] = _notify(body["notify"])
+    if "pin" in body:
+        pin = "" if body["pin"] is None else str(body["pin"]).strip().lower()
+        if pin and pin not in PIN_ICONS:
+            raise RegistryError(f"pin must be one of: {', '.join(PIN_ICONS)} (or empty for automatic)")
+        out["pin"] = pin
+    return out
+
+
+def _zone_fields(runtime: Any, body: dict[str, Any], *, creating: bool, trusted: bool) -> dict[str, Any]:
+    """``trusted`` (the stack's internal secret) may also say whose a place is (a Jarvis username); anyone
+    else's places are their own (``create_zone``)."""
+    allowed = {"name", "latitude", "longitude", "radius", "passive", "icon", "important", "notify", "pin",
+               "visibility"}
+    if trusted:
+        allowed |= {"owner"}
+    _unknown(body, allowed, "A zone")
     out: dict[str, Any] = {}
     if creating or "name" in body:
         out["name"] = _text(body, "name", "A zone", required=True, limit=80)
@@ -395,139 +538,282 @@ def _zone_fields(body: dict[str, Any], *, creating: bool) -> dict[str, Any]:
         out["passive"] = body["passive"]
     if "icon" in body:
         out["icon"] = _text(body, "icon", "A zone")
+    out.update(_place_fields(body))
+    if "owner" in body:
+        name = _clean_viewer(body["owner"]) if body["owner"] is not None else None
+        if body["owner"] is not None and name is None:
+            raise RegistryError("owner must be a Jarvis username")
+        out["owner"] = hub_user_for(runtime, name)
+        out["owner_name"] = name
+    if "visibility" in body:
+        if body["visibility"] not in VISIBILITIES:
+            raise RegistryError("visibility must be family or private")
+        out["visibility"] = body["visibility"]
     return out
 
 
-def _zone_name_taken(runtime: Any, name: str, except_id: str | None = None) -> bool:
-    names = [z for z in _stored_zones(runtime) + _stored_zones(runtime, "geo_zones") if z.get("id") != except_id]
+def _zone_name_taken(runtime: Any, name: str, *, zone: dict[str, Any], except_id: str | None = None) -> bool:
+    """A family zone's name is unique among the family's zones and Home; a private one also among its
+    owner's own. Someone else's private place never blocks a name (that would tell you it exists)."""
     home = str((runtime.hub.location or {}).get("location_name") or "Home")
-    return name.lower() == home.lower() or any(str(z.get("name") or "").lower() == name.lower() for z in names)
+    if name.lower() == home.lower():
+        return True
+    for z in _stored_zones(runtime):
+        if z.get("id") == except_id or str(z.get("name") or "").lower() != name.lower():
+            continue
+        if not is_private(z) or (is_private(zone) and _same_owner(z, zone)):
+            return True
+    return False
 
 
-def create_zone(runtime: Any, body: dict[str, Any]) -> dict[str, Any]:
-    fields = _zone_fields(body, creating=True)
-    if _zone_name_taken(runtime, fields["name"]):
-        raise RegistryError(f"There is already a zone named {fields['name']!r}", 409)
-    zone = {"id": uuid.uuid4().hex, "passive": False, "icon": "mdi:map-marker", **fields}
-    zones = [*_stored_zones(runtime), zone]
-    runtime.store.set_kv("zones", zones)
-    _registry_entity(runtime, "zone", zone["id"], zone["name"])
+def _check_limits(runtime: Any, zone: dict[str, Any]) -> None:
+    zones = _stored_zones(runtime)
+    if len(zones) >= MAX_ZONES:
+        raise RegistryError(f"The hub already has {MAX_ZONES} zones", 409)
+    if is_private(zone) and sum(1 for z in zones if is_private(z) and _same_owner(z, zone)) \
+            >= MAX_PRIVATE_PER_OWNER:
+        raise RegistryError(f"You already have {MAX_PRIVATE_PER_OWNER} private places", 409)
+
+
+def _check_private_owner(zone: dict[str, Any]) -> None:
+    if is_private(zone) and not (zone.get("owner") or zone.get("owner_name")):
+        raise RegistryError("A private place needs an owner")
+
+
+def create_zone(runtime: Any, body: dict[str, Any], *, trusted: bool = False,
+                creator: str | None = None) -> dict[str, Any]:
+    """``creator`` is the hub user making it (a hub login, not Jarvis's gateway): the place is theirs."""
+    fields = _zone_fields(runtime, body, creating=True, trusted=trusted)
+    zone = {"id": uuid.uuid4().hex, "passive": False, "icon": "mdi:map-marker", "owner": creator,
+            "owner_name": None, "visibility": "family", "important": False, "notify": [], "pin": "",
+            "created_at": time.time(), **fields}
+    _check_private_owner(zone)
+    if _zone_name_taken(runtime, zone["name"], zone=zone):
+        raise RegistryError(f"There is already a place named {zone['name']!r}", 409)
+    _check_limits(runtime, zone)
+    runtime.store.set_kv("zones", [*_stored_zones(runtime), zone])
+    if not is_private(zone):
+        _registry_entity(runtime, "zone", zone["id"], zone["name"])
     apply_zones(runtime)
     return _zone_view(zone, _zone_entity_ids(runtime))
 
 
-def _editable_zone(runtime: Any, zone_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _visible_zone(runtime: Any, zone_id: str, who: Who | None,
+                  everything: bool) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     zones = _stored_zones(runtime)
     zone = next((z for z in zones if str(z.get("id")) == zone_id), None)
-    if zone is None:
-        if zone_id == "home" or any(str(z.get("id")) == zone_id for z in _stored_zones(runtime, "geo_zones")):
-            raise RegistryError("That zone is not edited here (home is the hub's location; a saved place is "
-                                "changed in Jarvis's places)", 409)
-        raise RegistryError("No such zone", 404)
+    if zone is None or not can_see(zone, who, everything):
+        raise RegistryError("No such zone", 404)  # someone else's private place is not there at all
     return zones, zone
 
 
-def update_zone(runtime: Any, zone_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    zones, zone = _editable_zone(runtime, zone_id)
-    fields = _zone_fields(body, creating=False)
-    if "name" in fields and _zone_name_taken(runtime, fields["name"], zone_id):
-        raise RegistryError(f"There is already a zone named {fields['name']!r}", 409)
+def update_zone(runtime: Any, zone_id: str, body: dict[str, Any], *, who: Who | None = None,
+                everything: bool = False, trusted: bool = False) -> dict[str, Any]:
+    if zone_id == "home":
+        return update_home(runtime, body)
+    zones, zone = _visible_zone(runtime, zone_id, who, everything)
+    fields = _zone_fields(runtime, body, creating=False, trusted=trusted)
+    merged = {**zone, **fields}
+    if is_private(merged) and not (merged.get("owner") or merged.get("owner_name")) and who is not None:
+        merged["owner"], merged["owner_name"] = who.user_id, who.name  # made private by: theirs now
+        fields["owner"], fields["owner_name"] = who.user_id, who.name
+    _check_private_owner(merged)
+    if ("name" in fields or "visibility" in fields) and _zone_name_taken(
+            runtime, merged["name"], zone=merged, except_id=zone_id):
+        raise RegistryError(f"There is already a place named {merged['name']!r}", 409)
+    was_private = is_private(zone)
     zone.update(fields)
     runtime.store.set_kv("zones", zones)
-    _registry_entity(runtime, "zone", zone_id, zone["name"])
+    if is_private(zone):
+        if not was_private:
+            _drop_registry_entity(runtime, "zone", zone_id)  # private now: no household entity
+    else:
+        _registry_entity(runtime, "zone", zone_id, zone["name"])
     apply_zones(runtime)
     return _zone_view(zone, _zone_entity_ids(runtime))
 
 
-def delete_zone(runtime: Any, zone_id: str) -> dict[str, Any]:
-    zones, _zone = _editable_zone(runtime, zone_id)
+def delete_zone(runtime: Any, zone_id: str, *, who: Who | None = None, everything: bool = False) -> dict[str, Any]:
+    if zone_id == "home":
+        raise RegistryError("Home cannot be removed: it is the hub's own location. Move it instead.", 409)
+    zones, zone = _visible_zone(runtime, zone_id, who, everything)
     runtime.store.set_kv("zones", [z for z in zones if str(z.get("id")) != zone_id])
-    entity_id = _drop_registry_entity(runtime, "zone", zone_id)
+    entity_id = None if is_private(zone) else _drop_registry_entity(runtime, "zone", zone_id)
     apply_zones(runtime)
     return {"status": "removed", "id": zone_id, "entity_id": entity_id}
 
 
-def places_to_zones(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """The family's shared saved places from geo's ``/zones``, as hub zones (``id`` = ``geo_<place id>``)."""
-    out = []
-    for f in (payload or {}).get("features") or []:
-        props = f.get("properties") or {}
-        if not props.get("custom") or props.get("scope") != "family":
-            continue  # a drawn zone (possibly our own mirror) or someone's private place
-        place_id = str(props.get("entity_id") or "").removeprefix("place.")
-        coords = (f.get("geometry") or {}).get("coordinates") or []
-        if not place_id or len(coords) < 2:
-            continue
-        out.append({"id": f"geo_{place_id}", "name": str(props.get("friendly_name") or "Saved place"),
-                    "latitude": float(coords[1]), "longitude": float(coords[0]),
-                    "radius": float(props.get("radius") or 150.0), "passive": False,
-                    "icon": "mdi:map-marker-star", "source": "geo"})
-    return out
+# -- Home ---------------------------------------------------------------------------------------------
 
+def update_home(runtime: Any, body: dict[str, Any]) -> dict[str, Any]:
+    """Move Home, resize it, rename it or change its place settings.
 
-async def fetch_places(base: str) -> dict[str, Any]:
-    """Geo's places (``GET /zones``). Geo answers only callers with the stack's internal secret,
-    like ``/people`` (``drivers/mobile_app``); without it every round was a 403 and no saved
-    place ever became a zone."""
-    from services.common.http import get_client
-    from services.homehub.drivers.mobile_app import _geo_settings
-
-    secret = _geo_settings()[1]
-    if not secret:
-        raise RegistryError("INTERNAL_SECRET is not set, so geo will not answer for saved places", 503)
-    try:
-        async with get_client().get(f"{base.rstrip('/')}/zones", headers={"X-Internal-Secret": secret},
-                                    timeout=aiohttp.ClientTimeout(total=GEO_TIMEOUT_S)) as resp:
-            if resp.status != 200:
-                raise RegistryError(f"geo /zones answered HTTP {resp.status}", 502)
-            return await resp.json(content_type=None)
-    except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
-        raise RegistryError(f"geo /zones: {type(exc).__name__}: {exc}", 502) from exc
-
-
-def set_place_zones(runtime: Any, zones: list[dict[str, Any]]) -> dict[str, Any]:
-    """Make the saved-place zones exactly ``zones``: register new ones, drop removed ones, republish."""
-    old = {str(z.get("id")) for z in _stored_zones(runtime, "geo_zones")}
-    new = {str(z["id"]) for z in zones}
-    runtime.store.set_kv("geo_zones", zones)
-    for z in zones:
-        _registry_entity(runtime, "zone", str(z["id"]), z["name"])
-    for gone in old - new:
-        _drop_registry_entity(runtime, "zone", gone)
+    Home's location is the hub's core config (HA's ``core.config``: latitude, longitude, radius,
+    location_name), so ``zone.home``, ``/api/config``, the sun, the weather integration and Jarvis's forecast
+    all follow it. It is saved at once and survives a restart.
+    """
+    _unknown(body, {"name", "latitude", "longitude", "radius", "elevation", "important", "notify", "pin"}, "Home")
+    loc: dict[str, Any] = {}
+    if "name" in body:
+        loc["location_name"] = _text(body, "name", "Home", required=True, limit=80)
+    for key, low, high in (("latitude", -90, 90), ("longitude", -180, 180), ("radius", 1, 100000),
+                           ("elevation", -500, 9000)):
+        if key in body:
+            loc[key] = _number(body, key, low, high)
+    current = runtime.hub.location or {}
+    lat = loc.get("latitude", current.get("latitude"))
+    lon = loc.get("longitude", current.get("longitude"))
+    if ("latitude" in loc or "longitude" in loc) and (lat is None or lon is None):
+        raise RegistryError("Home needs both a latitude and a longitude")
+    if "location_name" in loc and any(
+            not is_private(z) and str(z.get("name") or "").lower() == loc["location_name"].lower()
+            for z in _stored_zones(runtime)):
+        raise RegistryError(f"There is already a place named {loc['location_name']!r}", 409)
+    place = _place_fields(body)
+    if loc:
+        save_core_config(runtime, loc)
+    if place:
+        runtime.store.set_kv(HOME_PLACE_KEY, {**_home_place(runtime), **place})
     apply_zones(runtime)
-    return {"places": len(zones), "added": len(new - old), "removed": len(old - new)}
+    return _home_view(runtime)
 
 
-def geo_url() -> str:
-    """Where geo answers (``GEO_SVC_URL``, read once when the stack's config loads)."""
-    from services.homehub.drivers.mobile_app import _geo_settings
+def save_core_config(runtime: Any, changes: dict[str, Any]) -> dict[str, Any]:
+    """Merge ``changes`` into the stored core config and the live location; HA's ``core_config_updated``."""
+    hub = runtime.hub
+    cfg = runtime.store.get_kv("core_config", {}) or {}
+    cfg = {**(cfg if isinstance(cfg, dict) else {}), **changes}
+    runtime.store.set_kv("core_config", cfg)
+    live = hub.location if isinstance(hub.location, dict) else {}
+    live.update(changes)
+    hub.location = live
+    hub.bus.fire("core_config_updated", {})
+    return cfg
 
-    return _geo_settings()[0]
+
+# -- moving the places geo used to keep ------------------------------------------------------------------
+
+def adopt_mirrored_places(runtime: Any) -> int:
+    """Once: the read-only mirror of the family's saved places (``geo_zones``, ids ``geo_<place id>``)
+    becomes ordinary family zones with the place's own id. Each keeps its ``zone.*`` entity id, so the
+    automations that name one keep working; geo's import then adds the owner and the place settings."""
+    mirror = _stored_zones(runtime, "geo_zones")
+    if not mirror:
+        return 0
+    zones = _stored_zones(runtime)
+    have = {str(z.get("id")) for z in zones}
+    adopted = 0
+    for m in mirror:
+        pid = str(m.get("id") or "").removeprefix("geo_")
+        if not _HEX_ID.match(pid):
+            continue
+        if pid not in have:
+            zones.append({"id": pid, "name": m.get("name") or "Saved place", "latitude": m.get("latitude"),
+                          "longitude": m.get("longitude"), "radius": m.get("radius") or 150.0, "passive": False,
+                          "icon": m.get("icon") or "mdi:map-marker-star", "owner": None, "visibility": "family"})
+            have.add(pid)
+            adopted += 1
+        ent = next((e for e in runtime.hub.entities.values()
+                    if e.platform == "zone" and e.unique_id == f"geo_{pid}"), None)
+        if ent is not None:
+            ent.unique_id = pid
+            runtime.store.save_entity(ent)
+    runtime.store.set_kv("zones", zones)
+    runtime.store.set_kv("geo_zones", [])
+    log.info("places: %d mirrored saved place(s) became zones", adopted)
+    return adopted
 
 
-async def sync_places(runtime: Any, base: str) -> dict[str, Any]:
-    if not base:
-        raise RegistryError("GEO_SVC_URL is not set, so saved places cannot be followed", 503)
-    return set_place_zones(runtime, places_to_zones(await fetch_places(base)))
+def _place_from_geo(runtime: Any, p: dict[str, Any]) -> dict[str, Any]:
+    family = p.get("scope") == "family"
+    name = _clean_viewer(p.get("owner"))
+    return {"name": str(p.get("name") or "Saved place")[:80], "latitude": float(p["lat"]),
+            "longitude": float(p["lon"]), "radius": float(p.get("radius") or 150.0), "passive": False,
+            "icon": "mdi:map-marker-star", "owner": hub_user_for(runtime, name), "owner_name": name,
+            "visibility": "family" if family else "private"}
 
 
-async def follow_places(runtime: Any, base: str, every_s: float) -> None:
-    """Keep the saved-place zones in step with geo; a failed round keeps the last mirror and says why."""
-    last_error: str | None = None
-    while True:
+def _settings_from_geo(s: dict[str, Any]) -> dict[str, Any]:
+    pin = str(s.get("icon") or "").strip().lower()
+    return {"important": bool(s.get("important")),
+            "notify": sorted({str(u).strip().lower() for u in s.get("notify") or [] if _clean_viewer(u)}),
+            "pin": pin if pin in PIN_ICONS else ""}
+
+
+def import_places(runtime: Any, body: dict[str, Any]) -> dict[str, Any]:
+    """Geo's one-time move (idempotent): its saved places and the important/notify/icon it kept per zone.
+
+    ``places`` are geo's records (``id``, ``name``, ``lat``, ``lon``, ``radius``, ``scope``, ``owner``,
+    ``important``, ``notify``, ``icon``, ``created_at``); ``settings`` maps a zone entity id to
+    ``{important, notify, icon}``. A place keeps its id. One already here is not replaced: only what it is
+    missing (its owner, its settings) is filled in, so running it twice changes nothing. ``entity_ids`` says
+    what each ``place.<id>`` is known as now, so geo can carry its presence state and reminders over.
+    """
+    places = body.get("places") or []
+    settings = body.get("settings") or {}
+    if not isinstance(places, list) or not isinstance(settings, dict):
+        raise RegistryError("places is a list and settings an object")
+    zones = _stored_zones(runtime)
+    by_id = {str(z.get("id")): z for z in zones}
+    counts = {"created": 0, "kept": 0, "skipped": 0, "settings": 0, "settings_kept": 0}
+    unmatched: list[str] = []
+    for p in places:
+        pid = str((p or {}).get("id") or "") if isinstance(p, dict) else ""
         try:
-            result = await sync_places(runtime, base)
-            if last_error is not None or result["added"] or result["removed"]:
-                log.info("saved places: %s", result)
-            last_error = None
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            if str(exc) != last_error:
-                log.warning("saved places could not be followed (keeping the last %d): %s",
-                            len(_stored_zones(runtime, "geo_zones")), exc)
-            last_error = str(exc)
-        await asyncio.sleep(every_s)
+            fields = _place_from_geo(runtime, p)
+        except (KeyError, TypeError, ValueError):
+            fields = None
+        if not _HEX_ID.match(pid) or fields is None:
+            counts["skipped"] += 1
+            continue
+        extra = _settings_from_geo(p)
+        existing = by_id.get(pid)
+        if existing is None:
+            zone = {"id": pid, **fields, **extra, "created_at": p.get("created_at") or time.time()}
+            zones.append(zone)
+            by_id[pid] = zone
+            counts["created"] += 1
+        else:
+            for key, value in {**fields, **extra, "created_at": p.get("created_at")}.items():
+                if existing.get(key) in (None, "") and value not in (None, ""):
+                    existing[key] = value
+            existing.setdefault("visibility", fields["visibility"])
+            counts["kept"] += 1
+    runtime.store.set_kv("zones", zones)
+    moved = {str(p.get("id")) for p in places if isinstance(p, dict)}
+    for z in zones:
+        if not is_private(z) and str(z.get("id")) in moved:
+            _registry_entity(runtime, "zone", str(z["id"]), str(z.get("name") or z["id"]))
+    entity_ids = _zone_entity_ids(runtime)
+    by_entity = {entity_ids.get(str(z.get("id"))): z for z in zones if not is_private(z)}
+    for eid, raw in settings.items():
+        if not isinstance(raw, dict):
+            continue
+        values = _settings_from_geo(raw)
+        if eid == "zone.home":
+            if isinstance(runtime.store.get_kv(HOME_PLACE_KEY, None), dict):
+                counts["settings_kept"] += 1
+            else:
+                runtime.store.set_kv(HOME_PLACE_KEY, values)
+                counts["settings"] += 1
+            continue
+        zone = by_entity.get(eid)
+        if zone is None:
+            unmatched.append(str(eid))
+        elif "important" in zone:
+            counts["settings_kept"] += 1
+        else:
+            zone.update(values)
+            counts["settings"] += 1
+    runtime.store.set_kv("zones", zones)
+    apply_zones(runtime)
+    mapping = {}
+    for pid in moved:
+        z = by_id.get(pid)
+        if z is not None:
+            mapping[f"{PRIVATE_PREFIX}{pid}"] = f"{PRIVATE_PREFIX}{pid}" if is_private(z) else entity_ids.get(pid)
+    log.info("places: imported from geo: %s; unmatched settings: %s", counts, unmatched or "none")
+    return {**counts, "unmatched": unmatched, "entity_ids": mapping}
 
 
 # -- persons --------------------------------------------------------------------------------------------

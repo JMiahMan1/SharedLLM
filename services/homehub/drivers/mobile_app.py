@@ -151,7 +151,6 @@ def setup_zones(hub: Hub, zones: list[dict[str, Any]], home: dict[str, Any]) -> 
             "passive": bool(z.get("passive")),
             "icon": z.get("icon") or "mdi:map-marker",
             "editable": bool(z.get("editable", True)),
-            # "geo" for a zone mirrored from the family's saved places (services/homehub/registries.py).
             **({"source": str(z["source"])} if z.get("source") else {}),
         })
     hub.zone_table = table  # type: ignore[attr-defined]

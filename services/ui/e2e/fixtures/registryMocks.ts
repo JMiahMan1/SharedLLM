@@ -27,9 +27,10 @@ export function registryMocks(): RegistryMocks {
     labels: [{ label_id: 'night_lights', name: 'Night lights', color: 'indigo', icon: null, description: null }],
     zones: [
       { id: 'home', entity_id: 'zone.home', name: 'Home', latitude: 10, longitude: 20, radius: 100, passive: false,
-        icon: 'mdi:home', source: 'home', editable: false },
-      { id: 'geo_' + 'a'.repeat(32), entity_id: 'zone.practice_field', name: 'Practice field with a long name',
-        latitude: 10.5, longitude: 20.5, radius: 200, passive: false, icon: 'mdi:map-marker-star', source: 'geo', editable: false },
+        icon: 'mdi:home', source: 'home', editable: true, removable: false, owner_name: null, visibility: 'family' },
+      { id: 'a'.repeat(32), entity_id: 'zone.practice_field', name: 'Practice field with a long name',
+        latitude: 10.5, longitude: 20.5, radius: 200, passive: false, icon: 'mdi:map-marker-star', source: 'hub',
+        editable: true, removable: true, owner_name: 'robin', visibility: 'family' },
     ],
     persons: [{ id: 'p1', entity_id: 'person.robin', name: 'Robin', user_id: null, jarvis_user: 'robin',
       device_trackers: ['device_tracker.robin_s_phone'], state: 'home' }],
@@ -42,7 +43,10 @@ export function registryMocks(): RegistryMocks {
 
   return {
     answer(method, path, body) {
-      if (method === 'POST' && path === '/api/homehub/zones/sync') return { status: 200, body: { places: 1, added: 0, removed: 0 } };
+      // Home moves but is never removed, as the hub answers.
+      if (method === 'DELETE' && path === '/api/homehub/zones/home') {
+        return { status: 409, body: { detail: "Home cannot be removed: it is the hub's own location. Move it instead." } };
+      }
       const m = /^\/api\/homehub\/(areas|floors|labels|zones|persons)(?:\/([^/]+))?$/.exec(path);
       if (!m) return undefined;
       const [, kind, rawId] = m;
@@ -55,7 +59,10 @@ export function registryMocks(): RegistryMocks {
       if (method === 'POST' && !rawId) {
         const id = kind === 'zones' || kind === 'persons' ? `new${next++}` : slug(String(data.name || 'item'));
         const row: Row = { [key]: id, ...data };
-        if (kind === 'zones') Object.assign(row, { entity_id: `zone.${slug(String(data.name))}`, source: 'hub', editable: true });
+        if (kind === 'zones') {
+          Object.assign(row, { entity_id: `zone.${slug(String(data.name))}`, source: 'hub', editable: true, removable: true,
+            owner_name: null, visibility: 'family' });
+        }
         if (kind === 'persons') Object.assign(row, { entity_id: `person.${slug(String(data.name))}`, state: null });
         if (kind === 'areas') Object.assign(row, { labels: [], aliases: [] });
         list.push(row);
