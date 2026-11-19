@@ -808,3 +808,36 @@ async def test_a_wake_word_fixed_in_firmware_is_not_reported_as_missing(env, mon
     st = hub.states.get(WAKE)
     assert st.state == UNAVAILABLE and "fixed in this satellite's firmware" in st.attributes["reason"]
     assert "will not wake" not in caplog.text
+
+
+async def test_a_node_that_asks_for_flac_fetches_the_reply_through_the_ffmpeg_proxy(env, monkeypatch):
+    """The reply URL is converted to the node's announcement format; the audio streamed over the API is not."""
+    from aioesphomeapi import MediaPlayerFormatPurpose, MediaPlayerInfo, MediaPlayerSupportedFormat
+
+    from services.homehub import esphome_audio
+
+    esphome_audio.reset()
+    monkeypatch.setattr(esphome_audio.PROXY, "_have_ffmpeg", True)
+    player = MediaPlayerInfo(object_id="speaker", key=8, name="Speaker", supported_formats=[
+        MediaPlayerSupportedFormat(format="flac", sample_rate=48000, num_channels=1, sample_bytes=2,
+                                   purpose=MediaPlayerFormatPurpose.ANNOUNCEMENT)])
+
+    class Node(VoiceClient):
+        async def device_info_and_list_entities(self):
+            info, _, services = await super().device_info_and_list_entities()
+            return info, [player], services
+
+    be = Backends().install(monkeypatch)
+    streamed = []
+    monkeypatch.setattr(voice_pipeline.BACKENDS, "clip_audio", lambda url: streamed.append(url) or _wav(24000, 0.1))
+    _hub, drv = make_driver(flags=FULL | int(F.SPEAKER))
+    drv._make_client = lambda host: Node(FULL | int(F.SPEAKER))  # type: ignore[method-assign]
+    await drv.async_setup()
+    client = drv._client
+    await run_turn(drv, client, [_silence(0.3), _tone(1.0), _silence(1.0)])
+    url = dict(client.events)[E.VOICE_ASSISTANT_TTS_END]["url"]
+    assert url.startswith(f"http://hub.example.com:8123/api/esphome/ffmpeg_proxy/{drv.entry.entry_id}/")
+    assert url.endswith(".flac") and be.spoken
+    assert streamed == [URL]  # the original clip, for the hub's own stream
+    await drv.async_unload()
+    esphome_audio.reset()
