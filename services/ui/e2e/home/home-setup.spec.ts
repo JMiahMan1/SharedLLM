@@ -159,8 +159,8 @@ test.describe('Devices: rooms, floors, labels, zones and people', () => {
   test('people: a person is linked to a Jarvis user and to trackers no one else has', async ({ page }, info) => {
     const run = await open(page, '#devices-persons');
     const people = page.getByTestId('persons');
-    await expect(people.getByTestId('person')).toHaveCount(1);
-    await expect(people.getByTestId('person')).toContainText("Robin's Phone");
+    await expect(people.getByTestId('person')).toHaveCount(2);
+    await expect(people.getByTestId('person').filter({ hasText: 'Robin' })).toContainText("Robin's Phone");
     await people.getByRole('button', { name: 'New person' }).click();
     const editor = people.getByTestId('person-editor');
     await editor.getByLabel('Name').fill('Sky');
@@ -171,7 +171,7 @@ test.describe('Devices: rooms, floors, labels, zones and people', () => {
     await expectNoHorizontalOverflow(page);
     await snap(page, info, 'devices-people');
     await editor.getByRole('button', { name: 'Add person' }).click();
-    await expect(people.getByTestId('person')).toHaveCount(2);
+    await expect(people.getByTestId('person')).toHaveCount(3);
     await expect.poll(() => sent(run.mocks, 'POST', '/api/homehub/persons')).toEqual(
       { name: 'Sky', jarvis_user: 'sky', device_trackers: ['device_tracker.sky_tablet'] });
 
@@ -180,6 +180,66 @@ test.describe('Devices: rooms, floors, labels, zones and people', () => {
     await people.getByTestId('person-editor').getByRole('button', { name: 'Save' }).click();
     await expect.poll(() => sent(run.mocks, 'PATCH', '/api/homehub/persons/p1')).toEqual(
       { name: 'Robin', jarvis_user: 'robin', device_trackers: [] });
+    clean(run);
+  });
+
+  test('people from Jarvis are marked and read-only; hub people stay editable', async ({ page }, info) => {
+    const run = await open(page, '#devices-persons');
+    const people = page.getByTestId('persons');
+    const avery = people.getByTestId('person').filter({ hasText: 'Avery' });
+    await expect(avery.getByTestId('person-source')).toHaveText('From Jarvis');
+    await expect(avery).toContainText('change them in Jarvis');
+    await expect(avery.getByRole('button')).toHaveCount(0);
+    await expect(people.getByRole('button', { name: 'Edit Robin' })).toBeVisible();
+    await avery.scrollIntoViewIfNeeded();
+    await expectNoHorizontalOverflow(page);
+    await expectTapTargets(people);
+    await snap(page, info, 'devices-people-from-jarvis');
+    clean(run);
+  });
+
+  test('users & logins: providers, primary, sync, the hub-password switch and a hub user', async ({ page }, info) => {
+    const run = await open(page, '#devices-logins');
+    const panel = page.getByTestId('login-providers');
+    await expect(panel.getByTestId('login-provider')).toHaveCount(2);
+    const jarvis = panel.getByTestId('login-provider').filter({ hasText: 'Jarvis' });
+    await expect(jarvis).toContainText('Primary');
+    await expect(jarvis.getByTestId('login-provider-sync')).toContainText('2 users · 1 added · 1 linked');
+    await expect(panel.getByTestId('standalone-users')).toContainText('Visitor');
+    // People only (no service logins); Jarvis users are changed in Jarvis.
+    await expect(panel.getByTestId('hub-user')).toHaveCount(3);
+    const kit = panel.getByTestId('hub-user').filter({ hasText: 'Kit' });
+    await expect(kit).toContainText('From Jarvis');
+    await expect(kit.getByRole('button')).toHaveCount(0);
+    await expectTapTargets(panel);
+    await expectNoHorizontalOverflow(page);
+    await panel.scrollIntoViewIfNeeded();
+    await snap(page, info, 'devices-users-logins');
+
+    await jarvis.getByRole('button', { name: 'Sync Jarvis now' }).click();
+    await expect.poll(() => run.mocks.posts.some((p) => p.path === '/api/homehub/auth/providers/jarvis_identity/sync')).toBe(true);
+    await panel.getByLabel('Primary login').selectOption('local');
+    await expect.poll(() => sent(run.mocks, 'PUT', '/api/homehub/auth/providers')).toEqual({ primary: 'local' });
+    await panel.getByLabel('Allow logins with hub passwords').click();
+    await expect(panel.getByLabel('Allow logins with hub passwords')).not.toBeChecked();
+    await expect.poll(() => sent(run.mocks, 'PUT', '/api/homehub/auth/providers')).toEqual({ local_logins: false });
+    await expect(panel).toContainText('Only Jarvis accounts can log in');
+
+    await panel.getByRole('button', { name: 'New hub user' }).click();
+    const form = panel.getByTestId('hub-user-editor');
+    await form.getByLabel('Name', { exact: true }).fill('Guest');
+    await form.getByLabel('Username').fill('Guest');
+    await form.getByLabel('Password').fill('made-up-pass');
+    await expectTapTargets(form);
+    await expectNoHorizontalOverflow(page);
+    await form.scrollIntoViewIfNeeded();
+    await snap(page, info, 'devices-new-hub-user');
+    await form.getByRole('button', { name: 'Add hub user' }).click();
+    await expect.poll(() => sent(run.mocks, 'POST', '/api/homehub/users')).toEqual(
+      { name: 'Guest', username: 'guest', password: 'made-up-pass', is_admin: false });
+    await expect(panel.getByTestId('hub-user')).toHaveCount(4);
+    await panel.getByTestId('hub-user').filter({ hasText: 'Visitor' }).getByRole('button', { name: 'Make admin' }).click();
+    await expect.poll(() => sent(run.mocks, 'PATCH', '/api/homehub/users/u-visitor')).toEqual({ is_admin: true });
     clean(run);
   });
 });

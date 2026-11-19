@@ -20,6 +20,7 @@ from typing import Any
 import jwt
 
 from services.common.secrets import secret_matches
+from services.homehub.auth_providers.base import EntityAccess
 from services.homehub.store import Store
 
 log = logging.getLogger("homehub.auth")
@@ -31,6 +32,20 @@ class Principal:
     name: str
     is_admin: bool
     token_id: str | None = None
+    #: The entity limits of a user whose login provider sets them; None: no limits.
+    access: EntityAccess | None = None
+    #: The login provider the user comes from (None: the hub's own user).
+    provider: str | None = None
+
+    @property
+    def restricted(self) -> bool:
+        return self.access is not None and not self.is_admin
+
+    def may_view(self, entity_id: str) -> bool:
+        return not self.restricted or self.access.may_view(entity_id)  # type: ignore[union-attr]
+
+    def may_control(self, entity_id: str) -> bool:
+        return not self.restricted or self.access.may_control(entity_id)  # type: ignore[union-attr]
 
 
 class Auth:
@@ -79,13 +94,21 @@ class Auth:
         user = self.users().get(meta.get("user_id") or "")
         if user is None or not user.get("is_active", True):
             return None
-        groups = user.get("group_ids") or []
-        return Principal(
-            user_id=user["id"],
-            name=user.get("name") or "",
-            is_admin=bool(user.get("is_owner")) or "system-admin" in groups,
-            token_id=str(token_id),
-        )
+        return principal_for(user, str(token_id))
+
+
+def principal_for(user: dict[str, Any], token_id: str | None = None) -> Principal:
+    """Who a stored hub user is now: a provider's user by its last sync, a hub user by its own flags."""
+    link = user.get("provider")
+    if isinstance(link, dict):
+        is_admin = bool(link.get("is_admin"))
+        limits = user.get("entity_access")
+        access = None if is_admin or limits is None else EntityAccess.from_snapshot(limits)
+        return Principal(user_id=user["id"], name=user.get("name") or "", is_admin=is_admin, token_id=token_id,
+                         access=access, provider=str(link.get("type") or "") or None)
+    groups = user.get("group_ids") or []
+    return Principal(user_id=user["id"], name=user.get("name") or "",
+                     is_admin=bool(user.get("is_owner")) or "system-admin" in groups, token_id=token_id)
 
 
 def bearer(header: str | None) -> str | None:

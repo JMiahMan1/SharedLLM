@@ -224,6 +224,8 @@ class PersonManager:
                 # The Jarvis username whose fixes this person follows (none: the person's id, as imported).
                 "jarvis_user": str(p["jarvis_user"]).strip().lower() or None if p.get("jarvis_user") else None,
                 "device_trackers": list(p.get("device_trackers") or []),
+                # Kept by a login provider's sync (auth_providers/sync.py): HA's "editable" is then false.
+                "source": p.get("source"),
                 "entity_id": _registry_id(hub, "person", pid, f"person.{slugify(p.get('name') or pid)}"),
             })
         self._unsub = hub.bus.subscribe(self._on_state, "state_changed")
@@ -295,7 +297,7 @@ class PersonManager:
                       attrs)
 
     def _base_attrs(self, p: dict[str, Any]) -> dict[str, Any]:
-        return {"editable": True, "id": p["id"], "device_trackers": list(p["device_trackers"]),
+        return {"editable": not p.get("source"), "id": p["id"], "device_trackers": list(p["device_trackers"]),
                 "user_id": p.get("user_id"), "friendly_name": p["name"]}
 
     def _publish(self, p: dict[str, Any], state: str, attrs: dict[str, Any]) -> None:

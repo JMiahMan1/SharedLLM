@@ -68,12 +68,70 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | mobile_app | `mobile_app.py` | The companion app's own webhooks first (sensors, location, pushes; `MOBILE_APP.md`), Jarvis's reports from geo when it is quiet; persons, zones, `notify.mobile_app_*` |
 | local_todo, shopping_list | `todo.py` | |
 | common_sense_media | `accounts.py` | App vetting's Common Sense Media source (docs/APP_VETTING.md); no entities. Telemetry reads it with the internal secret at `GET /hub/integrations/{domain}`. Added under Devices > Add & fix > Add by address > Cloud accounts. (The abuse.ch key is not a hub integration any more: it is in Accounts & Integrations, moved once by `abuse_ch_move.py`.) |
+| jarvis_identity | `auth_providers/jarvis_identity.py` | Jarvis's accounts as the hub's users, persons and logins. See Users and logins below. |
 
 What each integration's devices can do natively against what the hub exposes
 (and the gaps left) is in `docs/DEVICE_CAPABILITIES.md`. Drivers register the
 entities they own when the registry lacks them (`Driver.ensure_entity`), and
 report the ones their own listing no longer has (`Driver.gone_entities`) to the
 prune dry run, which can now be undone (`POST /hub/prune/restore`).
+
+## Users and logins (`auth_providers/`, `users_api.py`)
+
+The hub has its own users and logins, as Home Assistant did, and can take its users from a login provider
+instead of having them set up by hand. Like HA's auth providers, a provider is a small interface
+(`auth_providers/base.py`): list users (stable id, username, name, picture, admin, disabled, can log in),
+verify a username and password, and give a user's per-entity limits if it has them.
+
+| Provider | Users | Logins | Limits |
+|---|---|---|---|
+| `local` (always) | the HA import's users and the ones an admin adds (Devices > Setup > Users & logins) | hub passwords (bcrypt, sealed in `ha_auth`) | none |
+| `jarvis_identity` | every Jarvis account, mirrored | the Jarvis password, checked by identity | Jarvis's per-entity access |
+
+**Standalone.** With no provider but `local` (no `IDENTITY_SVC_URL` or `INTERNAL_SECRET`, or the Jarvis entry
+removed) everything works as before: the hub's users, passwords, refresh and long-lived tokens, the companion
+app's login. Nothing about identity is required to start.
+
+**Jarvis.** When the stack gives the hub `IDENTITY_SVC_URL` and `INTERNAL_SECRET` (read once at startup), the
+hub adds the `jarvis_identity` integration once, on by default and primary. An admin can remove it in
+Devices > Setup > Integrations (it then stays removed) or add it back there. While it is on:
+
+- **Sync** when the entry loads, every `HOMEHUB_PROVIDER_SYNC_S` (60) seconds, and on "Sync now". One hub user
+  per Jarvis account (keyed by identity's user id): name, picture and roles follow Jarvis; admins are Jarvis's
+  admins and parents (family role father or mother). An account Jarvis removes (or marks disabled) makes the hub
+  user inactive, which ends its sessions; nothing is deleted, so history keeps its names; one that returns is
+  active again. Idempotent; each sync logs its counts and the hub-only users left.
+- **Existing users.** A hub user from the HA import whose login username matches a Jarvis username
+  (case-insensitive) is linked, keeping its id, refresh tokens and long-lived tokens. Users an admin added on
+  the hub, service users and HA's system users are never taken over; unmatched users stay the hub's own.
+- **Persons.** Each Jarvis account that is a person (not the system default account) gets a linked
+  `person.<slug>`: the one already linked to the hub user, else the one whose Jarvis user is the username, else a
+  new one. Its name follows Jarvis (the entity id never changes); trackers of the user's phones (registered with
+  their token, or fed by Jarvis for their username) are attached unless another person has them. These persons
+  are read-only on the hub ("From Jarvis"); the hub's own persons stay editable.
+- **Logins.** `/auth/login_flow` (the companion app and any HA client) sends a Jarvis account's username and
+  password to identity (`POST /api/internal/verify-password`, which shares the sign-in lockout of Jarvis's own
+  login page). The hub stores no password for them and issues its normal refresh and access tokens. An account
+  made in Jarvis since the last sync logs in at once (the hub syncs then). Identity down: existing sessions keep
+  working, new Jarvis logins fail with "cannot be checked right now"; nothing else falls back.
+- **Rights on every request.** A token carries only its user; admin rights and entity limits are read from the
+  user's last sync on each request, so a change in Jarvis applies at the next sync, without logging in again.
+- **Entity limits.** A non-admin Jarvis user's view and control follow Jarvis (`entity_access`: assigned
+  entities, locked ones only with a permit, or every unlocked one by role). REST and WebSocket: states, history,
+  logbook, the entity registry and cameras show only their entities; a service call must name entities they may
+  control; templates, events and every admin or `/hub/*` route are closed to them. Admins see everything.
+- **Primary and hub passwords.** The primary provider decides a username two providers both know and is what
+  the login page asks for. "Hub passwords" off refuses hub-password logins; it can only be turned off while an
+  admin from Jarvis can log in, and counts as on whenever Jarvis is not set up, so the hub cannot be locked.
+
+Admin API: `GET/PUT /hub/auth/providers`, `POST /hub/auth/providers/{type}/sync`, `GET/POST /hub/users`,
+`PATCH /hub/users/{id}` (the hub's own users; Jarvis's answer 409, change them in Jarvis). Users are never
+deleted; deactivate one instead.
+
+**Another provider** (OpenID Connect, say): subclass `AuthProvider`, add it to `manager.PROVIDER_TYPES` and give
+it a config entry domain (driver and manual flow, as `jarvis_identity` has). Sync, persons, admin rights, limits
+and the login routing need no change; only a redirect login (instead of a password) would add a step to
+`ha_auth_api.py`.
 
 ## Cameras
 

@@ -1,4 +1,6 @@
-"""Devices > Home setup: the hub's areas, floors, labels, zones and persons, and its imported categories and tags.
+"""Devices > Home setup: the hub's areas, floors, labels, zones, persons, users and login providers.
+
+Also its imported categories and tags.
 
 Admins only, like the rest of the Devices page's hub routes. Everything is homehub's registry API
 (``services/homehub/entries_api.py`` for areas, ``services/homehub/registries_api.py`` for the rest), reached
@@ -62,6 +64,60 @@ async def list_tags(request: Request):
     """The NFC and QR tags with their names (imported; the tag trigger reads them)."""
     await hub._admin(request)
     return await _send("GET", "/hub/tags")
+
+
+# -- users and login providers (services/homehub/users_api.py) ---------------------------------------
+
+_PROVIDER = re.compile(r"^[a-z0-9_]{2,40}$")
+
+
+@router.get("/auth/providers")
+async def login_providers(request: Request):
+    """Where the hub's users and logins come from: the hub itself, Jarvis; primary; last sync; hub logins."""
+    await hub._admin(request)
+    return await _send("GET", "/hub/auth/providers")
+
+
+@router.put("/auth/providers")
+async def set_login_providers(request: Request):
+    """``{"primary"?, "local_logins"?}``; the hub refuses (409) a change that would leave no admin able to log in."""
+    await hub._admin(request)
+    body = await hub._json(request)
+    return await _send("PUT", "/hub/auth/providers", json={k: body[k] for k in ("primary", "local_logins") if k in body})
+
+
+@router.post("/auth/providers/{kind}/sync")
+async def sync_login_provider(kind: str, request: Request):
+    """Mirror a provider's users and persons into the hub now."""
+    await hub._admin(request)
+    if not _PROVIDER.match(kind or ""):
+        raise HTTPException(status_code=404, detail="No such login provider")
+    return await _send("POST", f"/hub/auth/providers/{kind}/sync")
+
+
+@router.get("/users")
+async def hub_users(request: Request):
+    """The hub's users (no credentials): which come from Jarvis and which are the hub's own."""
+    await hub._admin(request)
+    return await _send("GET", "/hub/users")
+
+
+@router.post("/users")
+async def add_hub_user(request: Request):
+    """A user of the hub only: ``{"name", "username", "password", "is_admin"?}``."""
+    await hub._admin(request)
+    body = await hub._json(request)
+    return await _send("POST", "/hub/users", json={k: body[k] for k in ("name", "username", "password", "is_admin")
+                                                   if k in body})
+
+
+@router.patch("/users/{user_id}")
+async def change_hub_user(user_id: str, request: Request):
+    """``{"name"?, "is_admin"?, "is_active"?, "password"?}`` for one of the hub's own users."""
+    await hub._admin(request)
+    body = await hub._json(request)
+    return await _send("PATCH", f"/hub/users/{_item(user_id, 'user')}",
+                       json={k: body[k] for k in ("name", "is_admin", "is_active", "password") if k in body})
 
 
 def _routes(kind: str) -> None:

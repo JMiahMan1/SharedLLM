@@ -10,13 +10,17 @@ Each is kept in the store's key-value table in Home Assistant's own shape (the i
 | ``categories`` | ``{scope: [{category_id, name, icon}]}`` (HA's automation/script/scene folders; read only) |
 | ``zones`` | ``[{id, name, latitude, longitude, radius, passive, icon, owner, owner_name, visibility, important, notify, pin, created_at}]`` (every place but Home; ``owner`` is a hub user id) |
 | ``home_place`` | ``{important, notify, pin}`` for Home (its location is ``core_config``) |
-| ``persons`` | ``[{id, name, user_id, jarvis_user, device_trackers}]`` |
+| ``persons`` | ``[{id, name, user_id, jarvis_user, device_trackers, source?, provider_key?, avatar?}]`` |
 | ``tags`` | ``[{id, name, last_scanned}]`` (NFC/QR tags; names only, the tag trigger reads them) |
 
 Zones and persons are live: a change republishes ``zone.*`` (what zone triggers and conditions read) and
 restarts the person manager (``drivers/mobile_app.py``). Each zone and person gets an entity registry row
 (platform ``zone``/``person``, unique id = its id), so renaming one never changes its entity id and the
 automations that name it keep working.
+
+A person with ``source`` (a login provider such as ``jarvis_identity``) is made and kept by that provider's
+sync (``services/homehub/auth_providers/sync.py``): it is read-only here and is edited where its user is (in
+Jarvis). Once the provider no longer has the user, the person is the hub's own again and can be edited.
 
 Places: the hub is the only store of the family's places. Home, the zones drawn on Devices > Rooms & places
 (or imported from Home Assistant) and the places people save from Wander are all zones here; a saved place has
@@ -823,12 +827,33 @@ def _stored_persons(runtime: Any) -> list[dict[str, Any]]:
     return [p for p in persons if isinstance(p, dict)] if isinstance(persons, list) else []
 
 
+def person_source(runtime: Any, p: dict[str, Any]) -> str | None:
+    """The login provider that keeps this person (read-only here), or None for the hub's own person."""
+    source = p.get("source")
+    if not source:
+        return None
+    users = {u.get("id"): u for u in runtime.store.get_kv("users", []) or [] if isinstance(u, dict)}
+    link = (users.get(p.get("user_id")) or {}).get("provider")
+    if isinstance(link, dict) and link.get("type") == source and not link.get("removed"):
+        return str(source)
+    return None
+
+
 def _person_view(runtime: Any, p: dict[str, Any], entity_ids: dict[str, str]) -> dict[str, Any]:
     eid = entity_ids.get(str(p.get("id")))
     st = runtime.hub.states.get(eid) if eid else None
+    source = person_source(runtime, p)
     return {"id": p.get("id"), "entity_id": eid, "name": p.get("name"), "user_id": p.get("user_id"),
             "jarvis_user": p.get("jarvis_user"), "device_trackers": list(p.get("device_trackers") or []),
-            "state": st.state if st is not None else None}
+            "state": st.state if st is not None else None, "source": source or "hub", "editable": source is None,
+            "avatar": p.get("avatar") if source else None}
+
+
+def _refuse_synced(runtime: Any, p: dict[str, Any]) -> None:
+    source = person_source(runtime, p)
+    if source:
+        where = "Jarvis" if source == "jarvis_identity" else source
+        raise RegistryError(f"{p.get('name')} comes from {where}; change them there", 409)
 
 
 def _tracker_choices(runtime: Any) -> list[dict[str, Any]]:
@@ -902,6 +927,7 @@ async def update_person(runtime: Any, person_id: str, body: dict[str, Any]) -> d
     person = next((p for p in persons if str(p.get("id")) == person_id), None)
     if person is None:
         raise RegistryError("No such person", 404)
+    _refuse_synced(runtime, person)
     person.update(_person_fields(runtime, body, creating=False, person_id=person_id))
     runtime.store.set_kv("persons", persons)
     eid = _registry_entity(runtime, "person", person_id, str(person.get("name") or person_id))
@@ -911,8 +937,10 @@ async def update_person(runtime: Any, person_id: str, body: dict[str, Any]) -> d
 
 async def delete_person(runtime: Any, person_id: str) -> dict[str, Any]:
     persons = _stored_persons(runtime)
-    if not any(str(p.get("id")) == person_id for p in persons):
+    found = next((p for p in persons if str(p.get("id")) == person_id), None)
+    if found is None:
         raise RegistryError("No such person", 404)
+    _refuse_synced(runtime, found)
     runtime.store.set_kv("persons", [p for p in persons if str(p.get("id")) != person_id])
     entity_id = _drop_registry_entity(runtime, "person", person_id)
     await _restart_persons(runtime)
