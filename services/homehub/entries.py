@@ -70,6 +70,39 @@ def label(domain: str) -> str:
 #: Keys an entry may keep in its options rather than its data; they are changed where they are.
 OPTION_KEYS = {"mjpeg_url", "still_image_url", "username", "password"}
 
+#: The options each integration's driver reads (``PATCH /hub/entries/{id}/options``). A key outside its
+#: integration's set is refused unless the entry already has it (an option HA's import carried): a typo
+#: would otherwise be stored and do nothing, and the entry restarted for it.
+ENTRY_OPTIONS: dict[str, frozenset[str]] = {
+    "androidtv_remote": frozenset({"host", "mac", "cert_file", "key_file"}),
+    "cast": frozenset({"known_hosts"}),
+    "dlna_dmr": frozenset({"url"}),
+    "esphome": frozenset({"host", "allow_service_calls"}),
+    "group": frozenset({"group_type", "entities", "all", "hide_members"}),
+    "matter": frozenset({"url"}),
+    "mjpeg": frozenset({"mjpeg_url", "still_image_url", "username", "password", "authentication", "verify_ssl"}),
+    "mobile_app": frozenset({"jarvis_user", "jarvis_fallback"}),
+    "music_assistant": frozenset({"url", "token"}),
+    "reolink": frozenset({"host", "protocol"}),
+    "roku": frozenset({"host"}),
+    "samsungtv": frozenset({"host", "mac"}),
+    "srp_energy": frozenset({"time_zone", "statistics", "statistics_backfill_days", "tou_backfill_days"}),
+    "switch_as_x": frozenset({"entity_id", "target_domain", "invert", "state_entity_id", "momentary",
+                              "device_class", "travel_s"}),
+    "tasmota": frozenset({"host"}),
+    "webostv": frozenset({"host", "mac"}),
+    "wiz": frozenset({"host"}),
+}
+
+
+def check_option_keys(entry: ConfigEntry, patch: dict[str, Any]) -> None:
+    """Refuse an options patch naming a key the entry's integration does not read (``EntryError`` 400)."""
+    allowed = ENTRY_OPTIONS.get(entry.domain, frozenset()) | set(entry.options or {})
+    unknown = sorted(k for k in patch if k not in allowed)
+    if unknown:
+        known = ", ".join(sorted(allowed)) or "none"
+        raise EntryError(f"{label(entry.domain)} has no option {', '.join(unknown)} (its options: {known})")
+
 
 def _home_of(entry: ConfigEntry, key: str) -> str | None:
     """Where the entry keeps ``key``: "data", "options" (only for OPTION_KEYS), or None."""
@@ -134,9 +167,12 @@ def device_address(hub: Any, entry: ConfigEntry) -> str | None:
 
 
 def needs_of(entry: ConfigEntry) -> str | None:
-    """What a failing entry needs from an admin: "password" when the device refused it (AuthRequired)."""
+    """What a failing entry needs from an admin: the ``needs`` of the AuthRequired that parked it
+    ("password", "login", "pairing", "bindkey"); "password" for an older AuthRequired reason."""
     if entry.disabled_by or entry.state == "loaded":
         return None
+    if entry.needs:
+        return entry.needs
     return "password" if str(entry.reason or "").startswith("AuthRequired") else None
 
 
@@ -418,6 +454,8 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
             log.warning("removing %s %s without unpairing: %s", entry.domain, entry.title, exc)
     await runtime.stop_entry(entry_id)
     ent_ids = [e.entity_id for e in hub.entities.values() if e.config_entry_id == entry_id]
+    leaving = {d.id for d in hub.devices.values() if d.config_entries == [entry_id]}
+    _drop_combinations(runtime, leaving, set(ent_ids))
     _drop_entities(runtime, ent_ids)
     removed_devices = []
     for dev in [d for d in hub.devices.values() if entry_id in d.config_entries]:
@@ -429,6 +467,8 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
             removed_devices.append(dev.id)
     runtime.store.delete_config_entry(entry_id)
     hub.config_entries.pop(entry_id, None)
+    if entry.domain == "switch_as_x":
+        _show_wrapped_switch(runtime, entry)
     log.info("removed %s %s (%d entities, %d devices)", entry.domain, entry.title, len(ent_ids),
              len(removed_devices))
     out: dict[str, Any] = {"status": "removed", "entry_id": entry_id, "domain": entry.domain, "title": entry.title,
@@ -436,6 +476,28 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
     if warning:
         out["warning"] = warning
     return out
+
+
+def _drop_combinations(runtime: Any, device_ids: set[str], entity_ids: set[str]) -> None:
+    """A removed device or entity takes its duplicate combination with it; the other copy shows again."""
+    from services.homehub import duplicates  # duplicates imports this module
+
+    duplicates.drop_for_removal(runtime, device_ids, entity_ids)
+
+
+def _show_wrapped_switch(runtime: Any, entry: ConfigEntry) -> None:
+    """A removed switch_as_x shows its switch again, unless another wrapper or a person hid it."""
+    hub = runtime.hub
+    source = str({**entry.data, **entry.options}.get("entity_id") or "")
+    ent = hub.entities.get(source)
+    if ent is None or ent.hidden_by != "integration":
+        return
+    if any(e.domain == "switch_as_x" and {**e.data, **e.options}.get("entity_id") == source
+           for e in hub.config_entries.values()):
+        return
+    ent.hidden_by = None
+    runtime.store.save_entity(ent)
+    hub.bus.fire("entity_registry_updated", {"action": "update", "entity_id": source})
 
 
 async def remove_device(runtime: Any, device_id: str, *, force: bool = False) -> dict[str, Any]:
@@ -454,6 +516,7 @@ async def remove_device(runtime: Any, device_id: str, *, force: bool = False) ->
         await _remove_matter_node(runtime, entry, dev, force=force)
     children = [d for d in hub.devices.values() if d.via_device_id == dev.id]
     ent_ids = [eid for d in [dev, *children] for eid in hub.device_entities(d.id)]
+    _drop_combinations(runtime, {d.id for d in [dev, *children]}, set(ent_ids))
     _drop_entities(runtime, ent_ids)
     for d in [dev, *children]:
         _drop_device(runtime, d)

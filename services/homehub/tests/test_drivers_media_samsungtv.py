@@ -225,6 +225,19 @@ async def test_errors():
         await drv.async_call(ent, "media_player", "shuffle_set", {})
 
 
+async def test_a_tv_that_refuses_the_token_needs_pairing_and_is_not_retried():
+    class Refuses(FakeWSRemote):
+        async def open(self):
+            raise mod.UnauthorizedError("ms.channel.unauthorized")
+
+    _hub, drv, http = build(WS)
+    rc_http(http, "/dmr")
+    drv.bridge.remote_cls = Refuses
+    with pytest.raises(mod.AuthRequired) as raised:
+        await drv.async_setup()
+    assert raised.value.needs == "pairing"
+
+
 def test_key_names():
     assert samsung_key("Home") == "KEY_HOME"
     assert samsung_key("VolumeUp") == "KEY_VOLUP"

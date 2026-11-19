@@ -34,7 +34,7 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | File | Role |
 |---|---|
 | `core.py` | Hub, states, event bus, registry, service dispatch, the `Driver` base class |
-| `runtime.py` | Loads the store, runs one supervised task per config entry (setup retry with backoff, polling), records history |
+| `runtime.py` | Loads the store, runs one supervised task per config entry (setup retry with backoff, polling), records history. A driver that raises `AuthRequired` (credentials refused; `needs` says what to enter: `password`, `login`, `pairing`, `bindkey`) or `SetupError` (a missing or wrong setting) from setup or poll parks its entry in `setup_error` with no retries, until it is reconfigured, signed in again or reloaded (so does a driver whose constructor rejects the entry's settings). A poll that hangs times out (`POLL_TIMEOUT_S`, 60 s, or the driver's `poll_timeout`). A loaded entry whose poll fails `POLL_FAILURES_UNAVAILABLE` (3) times in a row has its entities marked unavailable and shows `setup_retry` with the reason; the next good poll restores the states it does not publish itself and clears the reason. The first failure and the switch to unavailable are logged once each, not every poll. A flow for an account or device that is already set up (Reolink, Emporia, SRP, Roborock) checks the new login and signs the existing entry in again (`flows.relogin`) |
 | `store.py` | SQLite: registry, sealed credentials, last states, history (30 days), automations |
 | `api.py` | HA REST + WebSocket API, camera proxy, `/hub/*` administration |
 | `auth.py` | Bearer tokens: `INTERNAL_SECRET` or HA JWTs |
@@ -461,6 +461,9 @@ at rest with the rest of the entry's data (`store.py`, `FERNET_KEY`) and never r
 API (`reconfigure` says only whether one is `set`). The add flow reads `Status 0` and registers,
 with HA's unique ids: relays `{MAC}_switch_relay_{n}`, a light `{MAC}_light_light_{n}` (the last
 `POWER`, as Tasmota numbers a light after the relays), energy `{MAC}_sensor_sensor_ENERGY_{Key}`.
+A multi-channel meter (a key that is a list) also gets `..._ENERGY_{Key}_{i}` per channel; the key's
+own sensor is the sum only for power, current and energy (`ADDITIVE_ENERGY`), never voltage, power
+factor or frequency, which show a value only when every channel reads the same.
 A device already set up (by MAC on any Tasmota entry or device) is refused with 409 naming the
 entry to change instead. Add by address (`POST /hub/flows/tasmota`) takes the password too.
 
@@ -477,6 +480,7 @@ carries the request URL (`safe_error`). A 401 or the `Need user=` reply is `Auth
 (`core.py`): the entry's reason starts with it, `GET /hub/entries` gives `needs: "password"`,
 and the Devices page says "Needs its web password" with an "Enter password" button instead of
 "not answering". A password changed on the device later shows the same way on the next poll.
+Either way the entry is parked (`setup_error`) and not retried until the password is entered.
 
 **Managing them.** Every Tasmota entry offers its address and web password for reconfiguring
 (`entries.DOMAIN_FIELDS`), even one imported from HA with empty data: the address shown is the
@@ -889,7 +893,9 @@ State lives in `./data/homehub` (the hub), `./data/matter-server` and
 4. Check `GET /hub/status`: every config entry with its state and unavailable
    count, every automation with its status or the reason it is disabled.
 5. Fix device addresses that changed without HA's discovery:
-   `PATCH /hub/entries/<entry_id>/options {"host": "192.0.2.x"}` reloads that entry.
+   `PATCH /hub/entries/<entry_id>/options {"host": "192.0.2.x"}` reloads that entry. Only the
+   options its integration reads (`entries.ENTRY_OPTIONS`, or ones the entry already has) are
+   accepted; a disabled entry saves them and stays stopped.
 
 **Never run HA and the hub against the same devices at the same time.** In
 particular the Matter fabric storage must have only one live controller.

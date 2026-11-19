@@ -50,18 +50,30 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
-from services.homehub.core import UNKNOWN, DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
+from services.homehub.core import (
+    UNKNOWN,
+    AuthRequired,
+    DeviceUnavailable,
+    Driver,
+    EntityEntry,
+    HubError,
+    ServiceNotFound,
+    SetupError,
+)
 from services.homehub.drivers.mjpeg import CameraTokens
 
 try:  # guarded so the tests can run the driver against fake devices
     from roborock.data import DnDTimer, UserData
     from roborock.devices.cache import InMemoryCache
     from roborock.devices.device_manager import UserParams, create_device_manager
-    from roborock.exceptions import RoborockException
+    from roborock.exceptions import RoborockException, RoborockInvalidCredentials
 except ImportError:  # pragma: no cover - the image installs python-roborock
     DnDTimer = UserData = InMemoryCache = UserParams = create_device_manager = None  # type: ignore[assignment,misc]
 
     class RoborockException(Exception):  # type: ignore[no-redef]
+        pass
+
+    class RoborockInvalidCredentials(RoborockException):  # type: ignore[no-redef]
         pass
 
 SETUP_TIMEOUT = 90.0
@@ -280,7 +292,7 @@ class RoborockDriver(Driver):
     # -- setup ---------------------------------------------------------------
     async def _create_manager(self) -> Any:
         if create_device_manager is None:
-            raise HubError("python-roborock is not installed")
+            raise SetupError("python-roborock is not installed")
         data = self.entry.data
         params = UserParams(username=data["username"], user_data=UserData.from_dict(data["user_data"]),
                             base_url=data.get("base_url"))
@@ -289,6 +301,9 @@ class RoborockDriver(Driver):
     async def async_setup(self) -> None:
         try:
             self.manager = await asyncio.wait_for(self._create_manager(), SETUP_TIMEOUT)
+        except RoborockInvalidCredentials as exc:
+            raise AuthRequired("Roborock no longer accepts the stored sign-in; sign in to the account again",
+                               needs="login") from exc
         except RoborockException as exc:
             self.log.error("Roborock cloud login with the stored token failed for %s: %s "
                            "(if this persists the account must be signed in again)", self.entry.title, exc)

@@ -424,6 +424,38 @@ def test_a_combination_whose_device_is_gone_is_dropped_at_start(env):
     assert store.get_kv(duplicates.COMBINED_KEY) == []
 
 
+async def test_removing_the_main_device_shows_the_fallback_again_and_drops_the_combination(env):
+    hub, store, rt, *_ = env
+    duplicates.combine(rt, {"main": "w1", "fallback": "m1"})
+    assert hub.devices["m1"].hidden_by == "combined"
+    await entries.remove_device(rt, "w1")
+    assert "w1" not in hub.devices and store.get_kv(duplicates.COMBINED_KEY) == []
+    assert not hub.combined and hub.devices["m1"].hidden_by is None
+    assert not hub.is_hidden("light.guest_bath_1_light")
+    assert duplicates.record_of(rt, "m1") is None
+
+
+async def test_removing_the_fallbacks_integration_uncombines_and_restores_the_main(env):
+    hub, store, rt, *_ = env
+    duplicates.combine(rt, {"main": "w1", "fallback": "m1"})
+    w1 = hub.devices["w1"]
+    assert w1.name_by_user == "Guest Bath 1"  # carried over from the Matter copy
+    await entries.remove_entry(rt, "mt", force=True)
+    assert "m1" not in hub.devices and store.get_kv(duplicates.COMBINED_KEY) == []
+    assert not hub.combined
+    # The WiZ copy is itself again: shown, with its own name, as it was before combining.
+    assert (w1.name_by_user, w1.area_id, w1.hidden_by) == (None, None, None)
+    assert hub.states.get("light.wiz_tunable_white_000001").attributes["friendly_name"] == \
+        "WiZ Tunable White 000001"
+
+
+async def test_removing_an_unrelated_device_leaves_combinations_alone(env):
+    hub, store, rt, *_ = env
+    duplicates.combine(rt, {"main": "w1", "fallback": "m1"})
+    await entries.remove_device(rt, "w2")
+    assert len(store.get_kv(duplicates.COMBINED_KEY)) == 1 and hub.devices["m1"].hidden_by == "combined"
+
+
 # -- the API -----------------------------------------------------------------------------------------
 
 def test_the_routes(env):

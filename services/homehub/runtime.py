@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from services.homehub.core import UNAVAILABLE, ConfigEntry, Driver, Hub, utcnow
+from services.homehub.core import UNAVAILABLE, AuthRequired, ConfigEntry, Driver, Hub, SetupError, utcnow
 from services.homehub.drivers import driver_class, replaced_reason
 from services.homehub.store import Store
 
@@ -23,7 +23,9 @@ RETRY_REPORT_EVERY_S = 3600.0
 HISTORY_KEEP_DAYS = 30
 #: A poll that has not answered in this long has hung (a driver may set its own ``poll_timeout``).
 POLL_TIMEOUT_S = 60.0
-#: After this many failed polls in a row the entry's entities turn unavailable, as in HA, until one succeeds.
+#: After this many failed polls in a row the entry's entities turn unavailable, as in HA, and the entry
+#: carries the failure (``setup_retry`` with the reason) until a poll works again. One failed poll is often
+#: a dropped packet; the entities keep their last state through it.
 POLL_FAILURES_UNAVAILABLE = 3
 
 
@@ -127,11 +129,24 @@ class Runtime:
         reported: tuple[str, float] | None = None  # (reason, when) last logged as a warning
         loop = asyncio.get_running_loop()
         while True:
-            driver: Driver = cls(self.hub, entry)
+            try:
+                driver: Driver = cls(self.hub, entry)
+            except Exception as exc:
+                # The entry's own settings are unusable (a constructor checks them): retrying cannot help.
+                entry.state, entry.reason, entry.needs = "setup_error", f"{type(exc).__name__}: {exc}", None
+                self.failing_since.setdefault(entry.entry_id, utcnow())
+                log.warning("%s (%s) cannot be set up and will not be retried until it is changed: %s",
+                            entry.domain, entry.title, entry.reason)
+                first.set()
+                return
             try:
                 await driver.async_setup()
             except asyncio.CancelledError:
                 raise
+            except (AuthRequired, SetupError) as exc:
+                await self._park(entry, driver, exc)
+                first.set()
+                return
             except Exception as exc:
                 delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                 attempt += 1
@@ -153,7 +168,7 @@ class Runtime:
                 await asyncio.sleep(delay)
                 continue
             self.hub.drivers[entry.entry_id] = driver
-            entry.state, entry.reason = "loaded", None
+            entry.state, entry.reason, entry.needs = "loaded", None, None
             self.failing_since.pop(entry.entry_id, None)
             first.set()
             if reported is not None:
@@ -162,11 +177,13 @@ class Runtime:
             log.info("%s (%s) loaded with %d entities", entry.domain, entry.title, len(driver.entities))
             if driver.poll_interval is None:
                 await asyncio.Event().wait()  # push-only: live until cancelled
-            await self._poll_forever(entry, driver)
+            if not await self._poll_forever(entry, driver):
+                return
 
-    async def _poll_forever(self, entry: ConfigEntry, driver: Driver) -> None:
+    async def _poll_forever(self, entry: ConfigEntry, driver: Driver) -> bool:
         """Poll on the driver's interval. A poll that hangs times out; several failures in a row mark the
-        entry's entities unavailable (and say so once), and the next good poll brings them back."""
+        entry's entities unavailable (and say so once), and the next good poll brings them back. Returns
+        False once the entry is parked (credentials refused, a setting wrong): those are never retried."""
         failures = 0
         held: dict[str, tuple[str, dict[str, Any]]] = {}  # states before they were marked unavailable
         while True:
@@ -176,6 +193,11 @@ class Runtime:
                 await asyncio.wait_for(driver.async_poll(), timeout)
             except asyncio.CancelledError:
                 raise
+            except (AuthRequired, SetupError) as exc:
+                # The password was changed or revoked while running (or a setting is wrong): stop asking.
+                self.hub.drivers.pop(entry.entry_id, None)
+                await self._park(entry, driver, exc)
+                return False
             except Exception as exc:
                 failures += 1
                 why = f"no answer in {timeout:g} s" if isinstance(exc, TimeoutError) else str(exc) or type(exc).__name__
@@ -192,10 +214,17 @@ class Runtime:
                     log.warning("%s (%s): %d polls failed in a row; its entities are unavailable until one "
                                 "succeeds", entry.domain, entry.title, failures)
                     driver.mark_unavailable(ents)
+                if failures >= POLL_FAILURES_UNAVAILABLE:
+                    # The entry says why (the Devices page lists it as needing attention) until a poll works.
+                    entry.state, entry.reason = "setup_retry", f"{type(exc).__name__}: {why}"
+                    self.failing_since.setdefault(entry.entry_id, utcnow())
                 continue
             if failures:
                 if failures >= POLL_FAILURES_UNAVAILABLE:
                     self._restore_after_poll(driver, held)
+                    # Only what this loop recorded is cleared: a driver may keep its own state on the entry.
+                    self.failing_since.pop(entry.entry_id, None)
+                    entry.state, entry.reason, entry.needs = "loaded", None, None
                 log.info("%s (%s) polls again after %d failures", entry.domain, entry.title, failures)
             failures = 0
             held.clear()
@@ -207,6 +236,22 @@ class Runtime:
             if e.entity_id in held and st is not None and st.state == UNAVAILABLE:
                 state, attrs = held[e.entity_id]
                 driver.publish(e, state, attrs)
+
+    async def _park(self, entry: ConfigEntry, driver: Driver, exc: Exception) -> None:
+        """Stop retrying an entry that cannot load until an admin acts (bad credentials, a missing setting).
+
+        Reloading or reconfiguring the entry (``start_entry``) tries again.
+        """
+        if isinstance(exc, AuthRequired):
+            entry.state, entry.reason, entry.needs = "setup_error", f"AuthRequired: {exc}", exc.needs
+        else:
+            entry.state, entry.reason, entry.needs = "setup_error", f"{type(exc).__name__}: {exc}", None
+        self.failing_since.setdefault(entry.entry_id, utcnow())
+        log.warning("%s (%s) needs attention and will not be retried until it is changed or reloaded: %s",
+                    entry.domain, entry.title, entry.reason)
+        driver.mark_unavailable()
+        with contextlib.suppress(Exception):
+            await driver.async_unload()
 
     async def wait_first_setups(self, timeout: float) -> list[str]:
         """Wait until every started entry has tried to load once; returns the ones still pending.

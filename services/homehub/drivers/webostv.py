@@ -34,7 +34,16 @@ from typing import Any
 from aiowebostv import WebOsClient
 from aiowebostv.exceptions import WebOsTvCommandError, WebOsTvPairError
 
-from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, HubError, ServiceCall, ServiceNotFound
+from services.homehub.core import (
+    AuthRequired,
+    DeviceUnavailable,
+    Driver,
+    EntityEntry,
+    HubError,
+    ServiceCall,
+    ServiceNotFound,
+    SetupError,
+)
 from services.homehub.drivers.media_common import (
     F,
     as_list,
@@ -89,9 +98,9 @@ class WebOSDriver(Driver):
     # -- connection ---------------------------------------------------------------
     async def async_setup(self) -> None:
         if not self.host:
-            raise HubError("webostv entry has no host")
+            raise SetupError("webostv entry has no host")
         if not self.key:
-            raise HubError("webostv entry has no client_secret; the TV would need to be paired again")
+            raise AuthRequired("webostv entry has no client_secret; pair the TV again", needs="pairing")
         for service, fields in (("command", {"command": {"required": True}, "payload": {}}),
                                 ("button", {"button": {"required": True}}),
                                 ("select_sound_output", {"sound_output": {"required": True}})):
@@ -129,9 +138,10 @@ class WebOSDriver(Driver):
         try:
             await asyncio.wait_for(self.client.connect(), CONNECT_TIMEOUT_S)
         except WebOsTvPairError as exc:
-            # The key was refused: the TV would show "Allow" again, which needs a person. Say so.
-            self.log.error("LG TV %s refused the stored pairing key: %s", self.host, exc)
-            return False
+            # The key was refused: the TV would show "Allow" again, which needs a person. The runtime
+            # parks the entry instead of asking again every poll.
+            raise AuthRequired(f"LG TV {self.host} refused the stored pairing key; pair it again",
+                               needs="pairing") from exc
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # standby, unreachable, or a dropped socket: all mean "off"

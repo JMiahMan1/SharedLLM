@@ -784,15 +784,24 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         patch = await request.json()
         if not isinstance(patch, dict):
             raise HTTPException(400, detail="options must be an object")
+        from services.homehub import entries as entries_mod
+
+        try:
+            entries_mod.check_option_keys(entry, patch)
+        except entries_mod.EntryError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from None
         for k, v in patch.items():
             if v is None:
                 entry.options.pop(k, None)
             else:
                 entry.options[k] = v
         runtime.store.save_config_entry(entry)
+        if entry.disabled_by:
+            # Saved for when it is turned back on; a disabled entry is never started.
+            return {"entry_id": entry_id, "options": entry.options, "state": entry.state}
         await runtime.stop_entry(entry_id)
         runtime.start_entry(entry)
-        return {"entry_id": entry_id, "options": entry.options}
+        return {"entry_id": entry_id, "options": entry.options, "state": "reloading"}
 
     app.include_router(api)
     app.include_router(discovery_api.build_router(runtime, auth))

@@ -190,17 +190,13 @@ async def test_older_firmware_says_need_user_with_http_200():
         await drv.async_setup()
 
 
-async def test_a_password_changed_on_the_device_shows_on_the_entry_until_it_works_again(device):
+async def test_a_password_changed_on_the_device_is_raised_from_the_poll_for_the_runtime_to_park(device):
     bulb, host = await device("ct", password="made-up-pw")
     hub, drv = light_driver(host, password="made-up-pw")
     await drv.async_setup()
     drv.entry.state = "loaded"
     bulb.password = "changed-on-the-device"
-    await drv.async_poll()
+    with pytest.raises(AuthRequired, match="did not accept its web password"):
+        await drv.async_poll()
     assert hub.states.get("light.shelf_bulb").state == "unavailable"
-    assert drv.entry.state == "setup_retry" and drv.entry.reason.startswith("AuthRequired")
-    bulb.password = "made-up-pw"
-    await drv.async_poll()
-    assert drv.entry.state == "loaded" and drv.entry.reason is None
-    assert hub.states.get("light.shelf_bulb").state == "on"
     await drv.async_unload()

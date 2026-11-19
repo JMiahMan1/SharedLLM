@@ -186,17 +186,23 @@
 #   /api/mobile_app/registrations  a new phone (bearer token)
 #   /auth/*                        log in and refresh tokens (HA's OAuth-like flow)
 #   /api/websocket                 the app's live connection and local push (bearer token)
-# Everything else (the REST API, /hub/* administration, camera media) answers
-# 404 from outside; the LAN still reaches the hub on :8123 directly.
+#   /api/camera_proxy/*, /api/camera_proxy_stream/*, /api/image_proxy/*
+#                                  a notification's camera or image picture (the
+#                                  state's rotating ?token=, or a bearer token and
+#                                  an entity the user may see)
+#   /api/tts_proxy/*               spoken audio (the clip's unguessable name is the credential)
+# Everything else (the REST API, /hub/* administration) answers 404 from
+# outside; the LAN still reaches the hub on :8123 directly.
 http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
     log {
         output stdout
         level INFO
-        # A webhook id is a bearer secret and sits in the path: keep it out of the log.
+        # A webhook id and a spoken clip's name are bearer secrets in the path, and a
+        # camera picture's token is one in the query: keep all three out of the log.
         format filter {
             wrap json
             fields {
-                request>uri regexp ^/api/webhook/[^/?]+ /api/webhook/REDACTED
+                request>uri regexp (/api/webhook/|/api/tts_proxy/|[?&]token=)[^/?&]+ ${1}REDACTED
                 request>headers>Authorization delete
                 request>headers>X-Internal-Secret delete
                 request>headers>X-Api-Key delete
@@ -207,7 +213,7 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
             }
         }
     }
-    @companion path /api/webhook/* /api/mobile_app/registrations /auth/* /api/websocket
+    @companion path /api/webhook/* /api/mobile_app/registrations /auth/* /api/websocket /api/camera_proxy/* /api/camera_proxy_stream/* /api/image_proxy/* /api/tts_proxy/*
     handle @companion {
         request_body {
             max_size 1MB

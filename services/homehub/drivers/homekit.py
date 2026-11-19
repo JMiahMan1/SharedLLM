@@ -42,15 +42,28 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
-from services.homehub.core import UNKNOWN, DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
+from services.homehub.core import (
+    UNKNOWN,
+    AuthRequired,
+    DeviceUnavailable,
+    Driver,
+    EntityEntry,
+    HubError,
+    ServiceNotFound,
+    SetupError,
+)
 from services.homehub.drivers import homekit_services as hks
 
 try:  # guarded so the tests can run the driver against a fake pairing
     from aiohomekit.characteristic_cache import CharacteristicCacheMemory
     from aiohomekit.controller.ip.controller import IpController
+    from aiohomekit.exceptions import AuthenticationError
 except ImportError:  # pragma: no cover - the image installs aiohomekit
     CharacteristicCacheMemory = None  # type: ignore[assignment,misc]
     IpController = None  # type: ignore[assignment,misc]
+
+    class AuthenticationError(Exception):  # type: ignore[no-redef]
+        pass
 
 log = logging.getLogger("homehub.homekit_controller")
 
@@ -179,7 +192,7 @@ class HomeKitDriver(Driver):
     # -- setup --------------------------------------------------------------
     async def _make_pairing(self) -> Any:
         if IpController is None:
-            raise HubError("aiohomekit is not installed")
+            raise SetupError("aiohomekit is not installed")
         zc = await _shared_zeroconf()
         if self.entry.data.get("Connection") == "CoAP":  # HomeKit over Thread
             from services.homehub import homekit_thread
@@ -196,17 +209,21 @@ class HomeKitDriver(Driver):
             await self._controller.async_start()
         pairing = self._controller.load_pairing(self.entry.entry_id, dict(self.entry.data))
         if pairing is None:
-            raise HubError("pairing data is not an IP pairing")
+            raise SetupError("pairing data is not an IP pairing")
         return pairing
 
     async def async_setup(self) -> None:
         data = self.entry.data
         if data.get("Connection", "IP") not in ("IP", "CoAP"):
-            raise HubError(f"{data.get('Connection')} HomeKit transport is not supported, only IP and CoAP (Thread)")
+            raise SetupError(f"{data.get('Connection')} HomeKit transport is not supported, only IP and CoAP (Thread)")
         self._pairing = await self._make_pairing()
         try:
             accessories = await asyncio.wait_for(
                 self._pairing.list_accessories_and_characteristics(), REQUEST_TIMEOUT)
+        except AuthenticationError as exc:
+            # The accessory no longer knows this controller (reset or unpaired); retrying cannot help.
+            raise AuthRequired(f"{self.entry.title} no longer accepts the hub's pairing; pair it again",
+                               needs="pairing") from exc
         except Exception as exc:
             raise DeviceUnavailable(f"{self.entry.title}: accessory did not answer: {exc}") from exc
         self.index(accessories)

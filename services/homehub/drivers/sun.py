@@ -1,6 +1,8 @@
 """``sun.sun`` and the sun sensors, computed with astral the way HA's ``sun`` integration does.
 
-The location is the hub's (core config: latitude, longitude, elevation). Events
+The location is the hub's (core config: latitude, longitude, elevation); with no
+latitude or longitude, setup fails with an error naming the setting and is
+retried until the location is set (never computed for 0, 0). Events
 are found like HA's ``get_astral_event_next``: walk UTC dates forward until the
 event is after now, with the observer at the configured elevation. The state
 is ``above_horizon`` while the sun's elevation is above -0.833 degrees (the
@@ -19,7 +21,7 @@ from typing import Any
 from astral import Observer
 from astral import sun as astral_sun
 
-from services.homehub.core import Driver
+from services.homehub.core import Driver, HubError
 
 SUN_ENTITY = "sun.sun"
 HORIZON_DEG = -0.833
@@ -36,9 +38,25 @@ EVENTS: dict[str, Callable[[Observer, date], datetime]] = {
 
 
 def observer_for(location: dict[str, Any]) -> Observer:
-    return Observer(latitude=float(location.get("latitude") or 0.0),
-                    longitude=float(location.get("longitude") or 0.0),
-                    elevation=float(location.get("elevation") or 0.0))
+    """The hub's location as astral's observer. No guessed place: without a latitude and longitude the
+    sun would be computed for 0, 0 (off the coast of Africa) and every sunrise automation would fire at
+    the wrong time, so that is an error naming the setting. The elevation may be left out (sea level)."""
+    coords: dict[str, float] = {}
+    for key, limit in (("latitude", 90.0), ("longitude", 180.0)):
+        raw = location.get(key)
+        try:
+            value = float(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            value = None
+        if value is None or not -limit <= value <= limit:
+            raise HubError(f"the hub has no usable {key} ({raw!r}); set the home location "
+                           "so the sun can be computed")
+        coords[key] = value
+    try:
+        elevation = float(location.get("elevation") or 0.0)
+    except (TypeError, ValueError) as exc:
+        raise HubError(f"the hub's elevation is not a number: {location.get('elevation')!r}") from exc
+    return Observer(latitude=coords["latitude"], longitude=coords["longitude"], elevation=elevation)
 
 
 def next_event(observer: Observer, event: str, now: datetime) -> datetime | None:
