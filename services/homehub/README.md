@@ -893,7 +893,9 @@ State lives in `./data/homehub` (the hub), `./data/matter-server` and
 4. Check `GET /hub/status`: every config entry with its state and unavailable
    count, every automation with its status or the reason it is disabled.
 5. Fix device addresses that changed without HA's discovery:
-   `PATCH /hub/entries/<entry_id>/options {"host": "192.0.2.x"}` reloads that entry.
+   `PATCH /hub/entries/<entry_id>/options {"host": "192.0.2.x"}` reloads that entry. Only the
+   options its integration reads (`entries.ENTRY_OPTIONS`, or ones the entry already has) are
+   accepted; a disabled entry saves them and stays stopped.
 
 **Never run HA and the hub against the same devices at the same time.** In
 particular the Matter fabric storage must have only one live controller.

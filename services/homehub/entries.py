@@ -70,6 +70,39 @@ def label(domain: str) -> str:
 #: Keys an entry may keep in its options rather than its data; they are changed where they are.
 OPTION_KEYS = {"mjpeg_url", "still_image_url", "username", "password"}
 
+#: The options each integration's driver reads (``PATCH /hub/entries/{id}/options``). A key outside its
+#: integration's set is refused unless the entry already has it (an option HA's import carried): a typo
+#: would otherwise be stored and do nothing, and the entry restarted for it.
+ENTRY_OPTIONS: dict[str, frozenset[str]] = {
+    "androidtv_remote": frozenset({"host", "mac", "cert_file", "key_file"}),
+    "cast": frozenset({"known_hosts"}),
+    "dlna_dmr": frozenset({"url"}),
+    "esphome": frozenset({"host", "allow_service_calls"}),
+    "group": frozenset({"group_type", "entities", "all", "hide_members"}),
+    "matter": frozenset({"url"}),
+    "mjpeg": frozenset({"mjpeg_url", "still_image_url", "username", "password", "authentication", "verify_ssl"}),
+    "mobile_app": frozenset({"jarvis_user", "jarvis_fallback"}),
+    "music_assistant": frozenset({"url", "token"}),
+    "reolink": frozenset({"host", "protocol"}),
+    "roku": frozenset({"host"}),
+    "samsungtv": frozenset({"host", "mac"}),
+    "srp_energy": frozenset({"time_zone", "statistics", "statistics_backfill_days", "tou_backfill_days"}),
+    "switch_as_x": frozenset({"entity_id", "target_domain", "invert", "state_entity_id", "momentary",
+                              "device_class", "travel_s"}),
+    "tasmota": frozenset({"host"}),
+    "webostv": frozenset({"host", "mac"}),
+    "wiz": frozenset({"host"}),
+}
+
+
+def check_option_keys(entry: ConfigEntry, patch: dict[str, Any]) -> None:
+    """Refuse an options patch naming a key the entry's integration does not read (``EntryError`` 400)."""
+    allowed = ENTRY_OPTIONS.get(entry.domain, frozenset()) | set(entry.options or {})
+    unknown = sorted(k for k in patch if k not in allowed)
+    if unknown:
+        known = ", ".join(sorted(allowed)) or "none"
+        raise EntryError(f"{label(entry.domain)} has no option {', '.join(unknown)} (its options: {known})")
+
 
 def _home_of(entry: ConfigEntry, key: str) -> str | None:
     """Where the entry keeps ``key``: "data", "options" (only for OPTION_KEYS), or None."""
