@@ -1324,9 +1324,8 @@ class ESPHomeDriver(Driver):
                           ", ".join(f"esphome.{n}" for _, n in self._services))
 
     def _unregister_services(self) -> None:
-        for key in self._services:
-            self.hub.services.pop(key, None)
-            self.hub.service_schemas.pop(key, None)
+        for domain, service in self._services:
+            self.hub.unregister_service(domain, service)
         self._services = []
 
     def _service_handler(self, svc: UserService):

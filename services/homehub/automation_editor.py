@@ -414,7 +414,8 @@ class Editor:
             "kind": item.kind, "id": item.id, "entity_id": item.entity_id, "alias": item.alias,
             "description": item.description, "icon": item.icon,
             "enabled": bool(item.enabled) if item.kind == "automation" else True, "runnable": item.runnable,
-            "unsupported_reason": item.unsupported_reason, "warnings": list(item.warnings),
+            "unsupported_reason": item.unsupported_reason, "waiting_reason": item.waiting_reason,
+            "warnings": list(item.warnings),
             "last_triggered": _iso(item.last_triggered), "last_error": item.last_error, "mode": item.mode,
             "running": len(item.runs), "entities": named_entities(item.config),
         }
@@ -423,7 +424,8 @@ class Editor:
         scene = self.engine.scenes[sid]
         return {"kind": "scene", "id": scene.id, "entity_id": scene.entity_id, "alias": scene.name,
                 "description": "", "icon": scene.icon, "enabled": True, "runnable": True,
-                "unsupported_reason": None, "warnings": [], "last_triggered": _iso(scene.last_activated),
+                "unsupported_reason": None, "waiting_reason": None, "warnings": [],
+                "last_triggered": _iso(scene.last_activated),
                 "last_error": None, "mode": "single", "running": 0, "entities": list(scene.entities)}
 
     def items(self) -> list[dict[str, Any]]:

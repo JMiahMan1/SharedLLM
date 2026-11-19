@@ -616,8 +616,7 @@ class MobileAppDriver(Driver):
             targets[self.notify_slug] = remaining
         else:
             targets.pop(self.notify_slug, None)
-            self.hub.services.pop(("notify", f"mobile_app_{self.notify_slug}"), None)
-            self.hub.service_schemas.pop(("notify", f"mobile_app_{self.notify_slug}"), None)
+            self.hub.unregister_service("notify", f"mobile_app_{self.notify_slug}")
 
     def _manager(self) -> Any:
         return getattr(self.hub, "mobile_app_manager", None)

@@ -751,6 +751,23 @@ under Automations > Helpers in the app. An automation that names a helper which
 does not exist loads disabled and says which one; creating it reloads the
 automations so it loads.
 
+An automation or script that calls a device's own action while no connected
+device offers it waits for that device instead of failing every run. Device
+actions are the names a driver registers per device, declared in
+`drivers.DEVICE_ACTIONS` (an ESPHome node's user-defined actions,
+`esphome.<node>_<action>`, which exist only while the node is connected, and a
+phone's `notify.mobile_app_<phone>`). While one is missing the item stays on,
+its triggers still run (cheaply), and each run is skipped with no error and no
+notice; `waiting_reason` ("needs esphome.x_y, which no connected device
+offers") is in the status (`AutomationEngine.status()`, the editor's list
+and the entity's attributes), and the app lists it with a calm "Waiting for
+its device" badge. Starting to wait and resuming are each logged once at INFO.
+The hub fires `service_registered` / `service_removed` as devices bring and
+take their actions, so the item resumes as soon as the device connects and
+waits again if it goes. A step with `continue_on_error: true` never holds an
+item back. Any other missing service (a typo, a core service that does not
+exist, a name only known from a template) still fails the run visibly.
+
 ## Running
 
 `docker-compose.yml` runs `homehub`, `matter-server` and `music-assistant`, all
