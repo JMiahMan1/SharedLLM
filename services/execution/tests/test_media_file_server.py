@@ -152,3 +152,46 @@ async def test_android_tv_play_video_hands_cast_signed_url(monkeypatch):
     assert mt, f"no mt= in {url}"
     assert verify(mt, "testuser") is True
     assert "token=" not in url
+
+
+def test_tts_clip_answers_head_and_byte_ranges():
+    """A clip advertised ``Accept-Ranges`` but sent the whole body for every range; speakers that fetch
+    in pieces got the wrong bytes. HEAD carries the headers and no body."""
+    media_id = secrets.token_urlsafe(16)
+    exec_main.TEMP_AUDIO_CACHE[media_id] = b"0123456789"
+    try:
+        client = _client()
+        part = client.get(f"/media/{media_id}", params=_authed(), headers={"Range": "bytes=3-6"})
+        assert part.status_code == 206 and part.content == b"3456"
+        assert part.headers["content-range"] == "bytes 3-6/10"
+        head = client.head(f"/media/{media_id}", params=_authed())
+        assert head.status_code == 200 and head.content == b"" and head.headers["content-length"] == "10"
+        assert client.get(f"/media/{media_id}", params=_authed(),
+                          headers={"Range": "bytes=99-"}).status_code == 416
+    finally:
+        exec_main.TEMP_AUDIO_CACHE.pop(media_id, None)
+
+
+def test_video_file_answers_a_byte_range():
+    media_id = secrets.token_urlsafe(16)
+    path = os.path.join(exec_main.TEMP_MEDIA_DIR, f"{media_id}.mp4")
+    with open(path, "wb") as f:
+        f.write(b"abcdefghij")
+    try:
+        resp = _client().get(f"/media/{media_id}", params=_authed(), headers={"Range": "bytes=0-3"})
+        assert resp.status_code == 206 and resp.content == b"abcd"
+    finally:
+        os.unlink(path)
+
+
+def test_main_app_media_route_needs_the_same_signed_token():
+    """The execution API's own /media/{id} copy served clips to anyone who guessed an id."""
+    media_id = secrets.token_urlsafe(16)
+    exec_main.TEMP_AUDIO_CACHE[media_id] = b"wav-bytes"
+    try:
+        client = TestClient(exec_main.app)
+        assert client.get(f"/media/{media_id}").status_code == 403
+        resp = client.get(f"/media/{media_id}", params=_authed())
+        assert resp.status_code == 200 and resp.content == b"wav-bytes"
+    finally:
+        exec_main.TEMP_AUDIO_CACHE.pop(media_id, None)

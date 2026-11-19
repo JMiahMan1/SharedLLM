@@ -180,14 +180,16 @@ async def test_a_speaker_music_assistant_does_not_know_is_reached_over_cast(monk
     monkeypatch.setattr(tv_stage, "discover_cast_devices", AsyncMock(return_value=CASTS))
     played = {}
 
-    def fake_cast(dev, url, volume):
+    def fake_cast(dev, url, volume, restore_after_s=0.0):
         played["dev"] = dev["host"]
+        played["restore_after_s"] = restore_after_s
         return True, "Playing"
 
     monkeypatch.setattr(direct_announce, "_cast_play_sync", fake_cast)
     result = await direct_announce.announce_direct("media_player.study_tv", "http://jarvis/a.wav", 0.5, _ctx())
     assert result["ok"] and result["route"] == "cast_direct"
     assert played["dev"] == "192.0.2.50"
+    assert played["restore_after_s"] > 0  # the volume goes back once the clip has played
 
 
 async def test_when_nothing_reaches_the_speaker_the_error_says_why(monkeypatch):
