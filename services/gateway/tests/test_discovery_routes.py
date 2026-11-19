@@ -238,3 +238,15 @@ def test_capability_queries_pass_only_known_filters(client, hub):
     client.get("/api/homehub/capabilities?ability=announce&ability=volume&area=Den&token=x", headers=ADMIN)
     assert seen[-1][1] == "/api/homehub/capabilities"
     assert seen[-1][2] == [("ability", "announce"), ("ability", "volume"), ("area", "Den")]
+
+
+def test_device_restarts_reach_the_hub_for_admins_only(client, hub):
+    seen, answers = hub
+    assert client.get("/api/homehub/devices/dev1/restarts", headers=KID).status_code == 403
+    assert client.patch("/api/homehub/devices/dev1/restarts", headers=KID, json={}).status_code == 403
+    assert seen == []
+    answers["/hub/devices/dev1/restarts"] = (200, {"supported": True, "events": []})
+    assert client.get("/api/homehub/devices/dev1/restarts", headers=ADMIN).json()["supported"] is True
+    client.patch("/api/homehub/devices/dev1/restarts", headers=ADMIN, json={"log_level": "debug", "extra": 1})
+    assert seen[-1] == ("PATCH", "/hub/devices/dev1/restarts", None, {"log_level": "debug"})
+    assert client.get("/api/homehub/devices/bad%20id/restarts", headers=ADMIN).status_code == 404

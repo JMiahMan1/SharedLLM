@@ -289,6 +289,70 @@ No match, or only failed conditions, answers `{"matched": false}` and Jarvis ans
 `sensor.time_date` and `sensor.time_utc` are published on every hub at the start of each minute, in the
 household time zone, with HA's state text. HA's `time_date` entries load as replaced.
 
+## ESPHome restarts (`esphome_restarts.py`, `restarts_api.py`)
+
+Every ESPHome node is watched for restarts and dropped connections, on the hub's own API connection to it
+(no second connection is opened). Nothing is configured per device: what the monitor reads is found from
+what each node reports.
+
+**While connected** the hub subscribes to the node's log lines at `warning` (entry option `restart_log_level`:
+`off`, `error`, `warning`, `info` or `debug`; set it from the device's Restarts section, which applies it on the
+live connection, and use `debug` only while investigating a node). The last 200 lines are kept in memory, at
+most 20 a second (a burst of 60; the rest are counted, not kept), each cut to 240 characters, with anything
+that looks like a password, key, PSK or token replaced by `[redacted]`. It also reads the node's diagnostic
+sensors, found by what they are: an uptime sensor (seconds, or a boot timestamp) and the `debug` component's
+reset reason, free heap and free PSRAM (the lowest free heap seen is kept too).
+
+**When the connection ends** without the hub ending it, the monitor records the time, the error the client
+saw (ping timeout, connection reset), how long the node had been silent, the last 60 log lines, the memory
+readings, and what the hub was doing with the node: a voice run in progress or how long ago the last one
+ended, an announcement playing, the node's media players and their states, a firmware install. Once the node
+is back it waits up to 8 s for its states and decides:
+
+| Kind | From |
+|---|---|
+| `restart` | the uptime went back or has no reading yet; the boot timestamp moved; a boot message arrived (up to 90 s after); or the node asked to disconnect first (a planned reboot: OTA, restart button) |
+| `drop` | the uptime kept counting: only the connection was lost (Wi-Fi, the network, the hub) |
+| `unknown` | no uptime sensor; the event says how long it was gone and what the error suggests |
+
+A restart carries the reset reason (and a `last crash` text sensor if the node has one); otherwise the cause
+is taken from a crash-like log line before the drop (`Failed to allocate`, `watchdog`, `Guru Meditation`,
+`brownout`, ...). Each event keeps up to 30 lines from after the reconnect, and at most 12,000 characters of
+lines in all. The last 20 events per node are in the hub's store (`esphome_restarts:{entry_id}`), so a hub
+restart keeps them. A node that restarts (or goes offline for an unknown reason) 3 times within an hour sends
+one admin notice; the next waits 6 hours. Dropped connections never notify.
+
+**A node without the debug component** cannot say why it restarted, and without an uptime sensor a restart
+cannot be told from a drop. Its Restarts section says so and shows the YAML to add (generic, for any node):
+
+```yaml
+debug:
+  update_interval: 30s
+
+text_sensor:
+  - platform: debug
+    reset_reason:
+      name: "Reset reason"
+
+sensor:
+  - platform: debug
+    free:
+      name: "Heap free"
+    psram:            # only on an ESP32 with PSRAM
+      name: "PSRAM free"
+  - platform: uptime
+    name: "Uptime"
+```
+
+| Route | What |
+|---|---|
+| `GET /hub/devices/{id}/restarts` | Events (kind, summary, evidence, downtime, reset reason, cause, hint, context, memory, lines before and after), counts for the last hour and day, the log level and buffer, the sensors found, and the YAML guidance when some are missing. `{"supported": false}` for a device that is not an ESPHome node |
+| `PATCH /hub/devices/{id}/restarts` | `{"log_level"}` |
+
+Through the gateway these are `/api/homehub/devices/{id}/restarts` (admins). `/health` carries
+`esphome_restarts`: nodes watched, logs subscribed, nodes without the debug component, the last day's counts
+and the latest event. The hub's log has one line per event (`homehub.esphome.restarts`).
+
 ## New devices (discovery)
 
 `discovery.py` replaces HA's "Discovered" panel: mDNS continuously (ESPHome,

@@ -27,6 +27,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     dashboard_api,
     discovery_api,
     entries_api,  # integrations: reconfigure, remove/unpair, add by address
+    esphome_restarts,  # ESPHome restarts and drops, for /health
     ha_auth_api,
     ha_ws_compat,
     hardware_api,  # the hardware list: integrations, devices, entities, disable, sync
@@ -38,6 +39,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     mobile_app_api,
     prune_api,  # dry-run and apply pruning of stale imported HA data
     registries_api,  # floors, labels, categories, zones, persons, tags
+    restarts_api,  # /hub/devices/{id}/restarts: an ESPHome node's restarts and their causes
     service_logins_api,
     statistics_api,
     users_api,  # the hub's users and its login providers (local, Jarvis)
@@ -232,6 +234,8 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         monitor = getattr(runtime, "loop_monitor", None)
         if monitor is not None:
             out["loop"] = monitor.snapshot()  # stalls and thread-pool waits since start (loop_monitor.py)
+        with contextlib.suppress(Exception):  # a summary must never fail the health check
+            out["esphome_restarts"] = esphome_restarts.health_summary(hub)
         return out
 
     @api.get("/api/")
@@ -697,6 +701,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(prune_api.build_router(runtime, auth))  # /hub/prune/plan, /hub/prune/apply
     app.include_router(service_logins_api.build_router(runtime, auth))  # service logins, Music Assistant link
     app.include_router(voice_api.build_router(runtime, auth))  # voice satellites (voice_pipeline.py)
+    app.include_router(restarts_api.build_router(runtime, auth))  # ESPHome restarts (esphome_restarts.py)
     app.include_router(conversation.build_router(runtime, auth))  # sentence triggers, asked by Jarvis first
     app.include_router(matter_ble.build_router(runtime, auth))  # the household Wi-Fi for new Matter devices
     app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map

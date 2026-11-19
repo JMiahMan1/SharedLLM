@@ -345,6 +345,9 @@ class ESPHomeDriver(Driver):
         from services.homehub.voice_pipeline import SatelliteVoice
 
         self.voice = SatelliteVoice(self)  # the voice pipeline, when the node is a satellite
+        from services.homehub.esphome_restarts import RestartMonitor
+
+        self.restarts = RestartMonitor(self)  # restarts and drops, with the node's log lines around each
         self.local_entities = [e for e in self.entities if "/" not in (e.unique_id or "")
                                and re.match(r"^[0-9A-Fa-f:]{17}-", e.unique_id or "")]
 
@@ -415,6 +418,10 @@ class ESPHomeDriver(Driver):
         self._device_info = device_info
         self._confirm(device_info)
         self._register_services(getattr(device_info, "name", "") or self.device_name, services)
+        try:  # before the states arrive: the monitor reads the node's uptime from them
+            self.restarts.attach(client, infos)
+        except Exception:
+            self.log.exception("ESPHome %s: watching it for restarts failed", self.device_name)
         client.subscribe_home_assistant_states_and_services(
             on_state=self._on_state, on_service_call=self._on_service_call,
             on_state_sub=self._on_state_sub, on_state_request=self._on_state_request)
@@ -444,6 +451,11 @@ class ESPHomeDriver(Driver):
             detach()
 
     async def _on_stop(self, expected_disconnect: bool) -> None:
+        # First, while the voice run and the media state still say what the node was doing.
+        if self._closing:
+            self.restarts.detach()
+        else:
+            self.restarts.on_disconnect(expected_disconnect)
         self._detach_bluetooth()
         self._client = None
         self.voice.detach()
@@ -501,6 +513,7 @@ class ESPHomeDriver(Driver):
                 await self._reconnect_task
         for t in list(self._tasks):
             t.cancel()
+        self.restarts.close()
         self.voice.detach()
         self._unregister_services()
         if self._unsub_bus:
@@ -580,6 +593,7 @@ class ESPHomeDriver(Driver):
             raise HubError("link the ESPHome Device Builder (Devices > Integrations) to install firmware")
         if self._device_info is None:
             raise DeviceUnavailable(f"ESPHome {self.device_name or self.host} is not connected")
+        self.restarts.note("firmware_install", True)
         builder.install(str(getattr(self._device_info, "name", "") or self.device_name))
 
     # -- entity mapping -------------------------------------------------------
@@ -699,6 +713,7 @@ class ESPHomeDriver(Driver):
     def _on_state(self, state: Any) -> None:
         k = (getattr(state, "device_id", 0) or 0, state.key)
         self._last[k] = state
+        self.restarts.on_state(k, state)
         for fut in self._waiters.pop(k, []):
             if not fut.done():
                 fut.set_result(state)
@@ -1023,7 +1038,11 @@ class ESPHomeDriver(Driver):
             if not self.voice.can_converse:
                 raise ServiceNotFound(f"assist_satellite.start_conversation needs the node's voice pipeline, which "
                                       f"{self.device_name} does not offer now; use assist_satellite.announce")
-            return await self.voice.start_conversation(data)
+            self.restarts.note("announcement", True)
+            try:
+                return await self.voice.start_conversation(data)
+            finally:
+                self.restarts.note("announcement", False)
         if service == "timer_event":
             return self._timer_event(data)
         if service != "announce":
@@ -1037,6 +1056,7 @@ class ESPHomeDriver(Driver):
             from services.homehub import tts
 
             media_id = await tts.make_clip(message)
+        self.restarts.note("announcement", True)
         try:
             await client.send_voice_assistant_announcement_await_response(
                 media_id, SATELLITE_ANNOUNCE_TIMEOUT_S, text=message,
@@ -1045,6 +1065,8 @@ class ESPHomeDriver(Driver):
             raise DeviceUnavailable(f"ESPHome {self.device_name}: {exc}") from exc
         except TimeoutError as exc:
             raise DeviceUnavailable(f"ESPHome {self.device_name} did not finish the announcement") from exc
+        finally:
+            self.restarts.note("announcement", False)
         return None
 
     def _timer_event(self, data: dict[str, Any]) -> None:

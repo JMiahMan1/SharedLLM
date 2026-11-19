@@ -263,6 +263,22 @@ async def update_device(device_id: str, request: Request):
     return _answer(*await _hub("PATCH", f"/hub/devices/{_rid(device_id, 'device')}", json=payload))
 
 
+@router.get("/devices/{device_id}/restarts")
+async def device_restarts(device_id: str, request: Request):
+    """An ESPHome node's restarts and drops with their likely cause (homehub esphome_restarts.py)."""
+    await _admin(request)
+    return _answer(*await _hub("GET", f"/hub/devices/{_rid(device_id, 'device')}/restarts"))
+
+
+@router.patch("/devices/{device_id}/restarts")
+async def set_device_restart_logs(device_id: str, request: Request):
+    """The level of the node's log lines the hub keeps for its restarts: ``{"log_level"}``."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("log_level",) if k in body}
+    return _answer(*await _hub("PATCH", f"/hub/devices/{_rid(device_id, 'device')}/restarts", json=payload))
+
+
 @router.delete("/devices/{device_id}")
 async def remove_device(device_id: str, request: Request, force: bool = False):
     await _admin(request)
