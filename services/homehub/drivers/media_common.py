@@ -24,6 +24,14 @@ from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, HubErr
 
 log = logging.getLogger("homehub.media")
 
+#: AVTransport states in which a renderer is still busy with the item it has (Stop it before a new URI).
+TRANSPORT_BUSY = frozenset({"PLAYING", "PAUSED_PLAYBACK", "TRANSITIONING", "RECORDING", "PAUSED_RECORDING"})
+#: States in which a renderer has taken a new URI and will act on Play.
+TRANSPORT_READY = frozenset({"STOPPED", "PAUSED_PLAYBACK", "PLAYING"})
+TRANSPORT_READY_TIMEOUT_S = 5.0
+TRANSPORT_POLL_S = 0.25
+_sleep = asyncio.sleep  # tests replace it
+
 
 class F:
     """HA ``MediaPlayerEntityFeature`` bit values (Jarvis reads ``supported_features``)."""
@@ -121,6 +129,37 @@ def utc_iso(ts: float | None = None) -> str:
 
 def clamp01(value: Any) -> float:
     return max(0.0, min(1.0, float(value)))
+
+
+def _id_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def device_twins(hub: Any, entity: EntityEntry | None, platform: str) -> list[EntityEntry]:
+    """``platform``'s media_players that are the same physical device as ``entity``.
+
+    Only stable identifiers count, never names: the same device entry, a device that shares an
+    identifier or a connection (a MAC) with it, or a player whose unique_id is one of the device's
+    identifiers or the entity's own unique_id (Music Assistant names a Cast player by its cast UUID).
+    """
+    if entity is None:
+        return []
+    dev = hub.devices.get(entity.device_id or "")
+    idents = {(str(i[0]), str(i[1])) for i in (dev.identifiers if dev else []) if len(i) == 2}
+    conns = {(str(c[0]), str(c[1]).lower()) for c in (dev.connections if dev else []) if len(c) == 2}
+    keys = {k for k in [_id_key(entity.unique_id), *(_id_key(i[1]) for i in idents)] if len(k) >= 8}
+    out: list[EntityEntry] = []
+    for e in hub.entities.values():
+        if e is entity or e.platform != platform or e.domain != "media_player" or e.disabled_by:
+            continue
+        other = hub.devices.get(e.device_id or "")
+        same_device = bool(entity.device_id) and e.device_id == entity.device_id
+        shares_id = other is not None and bool(
+            idents & {(str(i[0]), str(i[1])) for i in other.identifiers if len(i) == 2}
+            or conns & {(str(c[0]), str(c[1]).lower()) for c in other.connections if len(c) == 2})
+        if same_device or shares_id or _id_key(e.unique_id) in keys:
+            out.append(e)
+    return out
 
 
 # -- HTTP ---------------------------------------------------------------------
@@ -278,9 +317,33 @@ class UpnpDevice:
         await self.call("RenderingControl", "SetMute", InstanceID=0, Channel="Master",
                         DesiredMute=1 if muted else 0)
 
+    async def transport_state(self) -> str | None:
+        """``CurrentTransportState`` (``PLAYING``, ``STOPPED``, ``TRANSITIONING``...), None when not reported."""
+        try:
+            out = await self.call("AVTransport", "GetTransportInfo", InstanceID=0)
+        except HubError:
+            return None
+        return (out.get("CurrentTransportState") or "").strip().upper() or None
+
     async def set_uri_and_play(self, url: str, mime: str, title: str = "") -> None:
+        """Stop what plays, hand over the new URI, wait until the renderer has taken it, then Play.
+
+        Sending Play straight after SetAVTransportURI raced the renderer: one still loading the URI
+        (``TRANSITIONING``, or ``NO_MEDIA_PRESENT`` before it has it) refused or ignored the Play, and
+        one still playing the old item could keep playing it.
+        """
+        if await self.transport_state() in TRANSPORT_BUSY:
+            with contextlib.suppress(HubError):  # a renderer that refuses Stop may still take the new URI
+                await self.call("AVTransport", "Stop", InstanceID=0)
         await self.call("AVTransport", "SetAVTransportURI", InstanceID=0, CurrentURI=url,
                         CurrentURIMetaData=didl(url, mime, title))
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + TRANSPORT_READY_TIMEOUT_S
+        while True:
+            state = await self.transport_state()
+            if state is None or state in TRANSPORT_READY or loop.time() >= deadline:
+                break
+            await _sleep(TRANSPORT_POLL_S)
         await self.call("AVTransport", "Play", InstanceID=0, Speed="1")
 
 
