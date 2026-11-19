@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { ChevronRight, ExternalLink, EyeOff, KeyRound, Loader2, Pencil, Power, Tag, Trash2, WifiOff } from 'lucide-react';
 import DeviceSheet from './DeviceSheet';
 import LabelChips from './LabelChips';
+import RestartsSection from './RestartsSection';
 import DeviceControl from './controls/registry';
 import DeviceGlyph from './DeviceGlyph';
 import { accentFor, isActiveState } from '../../lib/deviceIcons';
@@ -363,6 +364,8 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
           </div>
         </div>
       </Section>
+
+      {device.domain === 'esphome' && <RestartsSection deviceId={device.id} />}
 
       <details className={`${CARD} group`} data-testid="device-info">
         <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 px-3 text-sm font-semibold text-slate-300 [&::-webkit-details-marker]:hidden">

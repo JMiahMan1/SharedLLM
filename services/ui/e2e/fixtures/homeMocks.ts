@@ -633,6 +633,9 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (p === '/api/homehub/hardware') return json(HARDWARE);
     // No device is in the hub twice here (e2e/home/devices-duplicates.spec.ts mocks some).
     if (p === '/api/homehub/devices/duplicates') return json({ groups: [], integrations: [], rules: [] });
+    // A device's Restarts section (ESPHome only): hidden unless a spec mocks it (e2e/home/devices-restarts.spec.ts).
+    const restarts = /^\/api\/homehub\/devices\/([^/]+)\/restarts$/.exec(p);
+    if (restarts) return json({ supported: false, device_id: decodeURIComponent(restarts[1]) });
     // No light groups yet (e2e/home/light-groups.spec.ts mocks some); the Devices page asks.
     if (p === '/api/homehub/light_groups' && method === 'GET') return json({ groups: [], lights: [] });
     if (p.startsWith('/api/homehub/hardware/')) {
