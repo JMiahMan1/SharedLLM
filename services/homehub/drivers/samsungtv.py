@@ -36,7 +36,15 @@ from samsungtvws.exceptions import ConnectionFailure, UnauthorizedError
 from samsungtvws.legacy.remote import SamsungTVLegacyAsyncRemote
 from samsungtvws.remote import ChannelEmitCommand, SendRemoteKey
 
-from services.homehub.core import AuthRequired, DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
+from services.homehub.core import (
+    AuthRequired,
+    DeviceUnavailable,
+    Driver,
+    EntityEntry,
+    HubError,
+    ServiceNotFound,
+    SetupError,
+)
 from services.homehub.drivers.media_common import (
     F,
     Http,
@@ -294,7 +302,7 @@ class SamsungTVDriver(Driver):
 
     async def async_setup(self) -> None:
         if not self.host:
-            raise HubError("samsungtv entry has no host")
+            raise SetupError("samsungtv entry has no host")
         await self.refresh()
 
     async def async_poll(self) -> None:

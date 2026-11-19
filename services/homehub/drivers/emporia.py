@@ -43,7 +43,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from services.homehub.core import UNKNOWN, AuthRequired, Driver, EntityEntry, HubError
+from services.homehub.core import UNKNOWN, AuthRequired, Driver, EntityEntry, HubError, SetupError
 
 try:  # guarded so the tests can run without the library's cloud stack
     from pyemvue import PyEmVue
@@ -135,7 +135,7 @@ class EmporiaDriver(Driver):
 
     def _new_client(self) -> Any:
         if PyEmVue is None:
-            raise HubError("pyemvue is not installed")
+            raise SetupError("pyemvue is not installed")
         return PyEmVue()
 
     async def _call(self, fn, *args) -> Any:

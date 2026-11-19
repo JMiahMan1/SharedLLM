@@ -48,7 +48,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 
-from services.homehub.core import AuthRequired, DeviceUnavailable, Driver, EntityEntry, ServiceNotFound, utcnow
+from services.homehub.core import (
+    AuthRequired,
+    DeviceUnavailable,
+    Driver,
+    EntityEntry,
+    ServiceNotFound,
+    SetupError,
+    utcnow,
+)
 
 HTTP_TIMEOUT = 5.0
 
@@ -343,7 +351,7 @@ class TasmotaDriver(Driver):
         if not self.entities:
             return
         if not self.host:
-            raise DeviceUnavailable(
+            raise SetupError(
                 f"Tasmota {self.mac or self.entry.title}: no address; set entry data or options 'host'")
         self.status = await self._command("Status 0")
         self._online = True

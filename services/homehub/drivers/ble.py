@@ -21,7 +21,7 @@ from typing import Any
 
 from services.homehub import bluetooth_parsers as parsers
 from services.homehub import bluetooth_presence as bp
-from services.homehub.core import UNAVAILABLE, AuthRequired, DeviceUnavailable, Driver, EntityEntry
+from services.homehub.core import UNAVAILABLE, AuthRequired, DeviceUnavailable, Driver, EntityEntry, SetupError
 
 #: A sensor not heard for this long is unavailable (HA's default for passive Bluetooth devices).
 SILENT_S = 900.0
@@ -49,7 +49,7 @@ class BLESensorDriver(Driver):
 
     async def async_setup(self) -> None:
         if not self.address:
-            raise DeviceUnavailable("this Bluetooth sensor entry has no address")
+            raise SetupError("this Bluetooth sensor entry has no address")
         mgr = _manager(self.hub)
         key = self.entry.data.get("bindkey")
         try:
@@ -145,7 +145,7 @@ class IBeaconDriver(Driver):
         try:
             beacon = bp.beacon_from_dict(self.entry.data)
         except ValueError as exc:
-            raise DeviceUnavailable(f"this iBeacon entry is not valid: {exc}") from exc
+            raise SetupError(f"this iBeacon entry is not valid: {exc}") from exc
         self.key = beacon.key
         mgr.add_tracker(Tracker(beacon.key, "ibeacon", self.entry.entry_id, self.entry.title, beacon.tx_power,
                                 self._entity("_ble_room"), self._entity("_ble_room_distance")))

@@ -58,6 +58,7 @@ from services.homehub.core import (
     EntityEntry,
     HubError,
     ServiceNotFound,
+    SetupError,
 )
 from services.homehub.drivers.mjpeg import CameraTokens
 
@@ -291,7 +292,7 @@ class RoborockDriver(Driver):
     # -- setup ---------------------------------------------------------------
     async def _create_manager(self) -> Any:
         if create_device_manager is None:
-            raise HubError("python-roborock is not installed")
+            raise SetupError("python-roborock is not installed")
         data = self.entry.data
         params = UserParams(username=data["username"], user_data=UserData.from_dict(data["user_data"]),
                             base_url=data.get("base_url"))

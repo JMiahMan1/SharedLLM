@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from services.homehub.core import AuthRequired, Driver, HubError
+from services.homehub.core import AuthRequired, Driver, HubError, SetupError
 
 try:  # guarded so the tests can run without the library
     from srpenergy import client as srp_client
@@ -166,12 +166,12 @@ class SrpEnergyDriver(Driver):
         self.failing = False
         zone = entry.options.get("time_zone") or hub.time_zone
         if not zone:
-            raise HubError("srp_energy needs a time zone: set the entry's time_zone option or the hub's TZ")
+            raise SetupError("srp_energy needs a time zone: set the entry's time_zone option or the hub's TZ")
         self.tz = ZoneInfo(str(zone))
 
     def _new_client(self) -> Any:
         if srp_client is None:
-            raise HubError("srpenergy is not installed")
+            raise SetupError("srpenergy is not installed")
         _with_timeouts(srp_client)
         d = self.entry.data
         return srp_client.SrpEnergyClient(str(d.get("id", "")), d.get("username"), d.get("password"))
@@ -181,7 +181,7 @@ class SrpEnergyDriver(Driver):
             self.client = self._new_client()
         except (TypeError, ValueError) as exc:
             self.log.error("SRP account settings are invalid for %s: %s", self.entry.title, exc)
-            raise HubError(f"SRP settings invalid: {exc}") from exc
+            raise SetupError(f"SRP settings invalid: {exc}") from exc
         await self.refresh(raise_on_error=True)
 
     async def async_poll(self) -> None:

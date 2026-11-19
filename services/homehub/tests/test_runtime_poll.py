@@ -76,13 +76,15 @@ async def test_failures_in_a_row_mark_unavailable_and_a_good_poll_restores(caplo
 
     caplog.clear()
     rt, driver, entry = make()
-    driver.script = ["fail", "hang"] + ["fail"] * (n + 2)
+    # More failures than the test needs: once the script ran out, the next poll would be a good one and could
+    # restore the entities before the assertions below ran (a race that failed about one run in three).
+    driver.script = ["fail", "hang"] + ["fail"] * 1000
     seen: list[str] = []
     rt.hub.bus.subscribe(lambda _t, ev: seen.append(ev["new_state"].state), "state_changed")
     with caplog.at_level(logging.DEBUG, logger="homehub.runtime"):
         task = asyncio.create_task(rt._poll_forever(entry, driver))
         for _ in range(2000):
-            if not driver.script:
+            if driver.polls >= n + 2 and state(rt, "switch.flaky_relay") == UNAVAILABLE:
                 break
             await asyncio.sleep(0.002)
         assert state(rt, "switch.flaky_relay") == UNAVAILABLE

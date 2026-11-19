@@ -23,7 +23,9 @@ RETRY_REPORT_EVERY_S = 3600.0
 HISTORY_KEEP_DAYS = 30
 #: A poll that has not answered in this long has hung (a driver may set its own ``poll_timeout``).
 POLL_TIMEOUT_S = 60.0
-#: After this many failed polls in a row the entry's entities turn unavailable, as in HA, until one succeeds.
+#: After this many failed polls in a row the entry's entities turn unavailable, as in HA, and the entry
+#: carries the failure (``setup_retry`` with the reason) until a poll works again. One failed poll is often
+#: a dropped packet; the entities keep their last state through it.
 POLL_FAILURES_UNAVAILABLE = 3
 
 
@@ -127,7 +129,16 @@ class Runtime:
         reported: tuple[str, float] | None = None  # (reason, when) last logged as a warning
         loop = asyncio.get_running_loop()
         while True:
-            driver: Driver = cls(self.hub, entry)
+            try:
+                driver: Driver = cls(self.hub, entry)
+            except Exception as exc:
+                # The entry's own settings are unusable (a constructor checks them): retrying cannot help.
+                entry.state, entry.reason, entry.needs = "setup_error", f"{type(exc).__name__}: {exc}", None
+                self.failing_since.setdefault(entry.entry_id, utcnow())
+                log.warning("%s (%s) cannot be set up and will not be retried until it is changed: %s",
+                            entry.domain, entry.title, entry.reason)
+                first.set()
+                return
             try:
                 await driver.async_setup()
             except asyncio.CancelledError:
@@ -172,7 +183,7 @@ class Runtime:
     async def _poll_forever(self, entry: ConfigEntry, driver: Driver) -> bool:
         """Poll on the driver's interval. A poll that hangs times out; several failures in a row mark the
         entry's entities unavailable (and say so once), and the next good poll brings them back. Returns
-        False once the entry is parked (its credentials were refused)."""
+        False once the entry is parked (credentials refused, a setting wrong): those are never retried."""
         failures = 0
         held: dict[str, tuple[str, dict[str, Any]]] = {}  # states before they were marked unavailable
         while True:
@@ -182,8 +193,8 @@ class Runtime:
                 await asyncio.wait_for(driver.async_poll(), timeout)
             except asyncio.CancelledError:
                 raise
-            except AuthRequired as exc:
-                # The password was changed or revoked while running: stop asking with the old one.
+            except (AuthRequired, SetupError) as exc:
+                # The password was changed or revoked while running (or a setting is wrong): stop asking.
                 self.hub.drivers.pop(entry.entry_id, None)
                 await self._park(entry, driver, exc)
                 return False
@@ -203,10 +214,17 @@ class Runtime:
                     log.warning("%s (%s): %d polls failed in a row; its entities are unavailable until one "
                                 "succeeds", entry.domain, entry.title, failures)
                     driver.mark_unavailable(ents)
+                if failures >= POLL_FAILURES_UNAVAILABLE:
+                    # The entry says why (the Devices page lists it as needing attention) until a poll works.
+                    entry.state, entry.reason = "setup_retry", f"{type(exc).__name__}: {why}"
+                    self.failing_since.setdefault(entry.entry_id, utcnow())
                 continue
             if failures:
                 if failures >= POLL_FAILURES_UNAVAILABLE:
                     self._restore_after_poll(driver, held)
+                    # Only what this loop recorded is cleared: a driver may keep its own state on the entry.
+                    self.failing_since.pop(entry.entry_id, None)
+                    entry.state, entry.reason, entry.needs = "loaded", None, None
                 log.info("%s (%s) polls again after %d failures", entry.domain, entry.title, failures)
             failures = 0
             held.clear()

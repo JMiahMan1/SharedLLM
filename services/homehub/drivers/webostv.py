@@ -42,6 +42,7 @@ from services.homehub.core import (
     HubError,
     ServiceCall,
     ServiceNotFound,
+    SetupError,
 )
 from services.homehub.drivers.media_common import (
     F,
@@ -95,9 +96,9 @@ class WebOSDriver(Driver):
     # -- connection ---------------------------------------------------------------
     async def async_setup(self) -> None:
         if not self.host:
-            raise HubError("webostv entry has no host")
+            raise SetupError("webostv entry has no host")
         if not self.key:
-            raise HubError("webostv entry has no client_secret; the TV would need to be paired again")
+            raise AuthRequired("webostv entry has no client_secret; pair the TV again", needs="pairing")
         for service, fields in (("command", {"command": {"required": True}, "payload": {}}),
                                 ("button", {"button": {"required": True}}),
                                 ("select_sound_output", {"sound_output": {"required": True}})):

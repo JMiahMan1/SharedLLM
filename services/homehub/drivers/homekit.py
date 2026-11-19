@@ -50,6 +50,7 @@ from services.homehub.core import (
     EntityEntry,
     HubError,
     ServiceNotFound,
+    SetupError,
 )
 from services.homehub.drivers import homekit_services as hks
 
@@ -191,7 +192,7 @@ class HomeKitDriver(Driver):
     # -- setup --------------------------------------------------------------
     async def _make_pairing(self) -> Any:
         if IpController is None:
-            raise HubError("aiohomekit is not installed")
+            raise SetupError("aiohomekit is not installed")
         zc = await _shared_zeroconf()
         if self.entry.data.get("Connection") == "CoAP":  # HomeKit over Thread
             from services.homehub import homekit_thread
@@ -208,13 +209,13 @@ class HomeKitDriver(Driver):
             await self._controller.async_start()
         pairing = self._controller.load_pairing(self.entry.entry_id, dict(self.entry.data))
         if pairing is None:
-            raise HubError("pairing data is not an IP pairing")
+            raise SetupError("pairing data is not an IP pairing")
         return pairing
 
     async def async_setup(self) -> None:
         data = self.entry.data
         if data.get("Connection", "IP") not in ("IP", "CoAP"):
-            raise HubError(f"{data.get('Connection')} HomeKit transport is not supported, only IP and CoAP (Thread)")
+            raise SetupError(f"{data.get('Connection')} HomeKit transport is not supported, only IP and CoAP (Thread)")
         self._pairing = await self._make_pairing()
         try:
             accessories = await asyncio.wait_for(

@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from aiohttp import web
 
-from services.homehub.core import DeviceUnavailable, ServiceNotFound
+from services.homehub.core import DeviceUnavailable, ServiceNotFound, SetupError
 from services.homehub.drivers.tasmota import TasmotaDriver
 from services.homehub.tests.conftest import make_hub
 
@@ -162,7 +162,7 @@ def test_host_comes_from_options_then_data_then_the_device_configuration_url():
 
 async def test_no_address_is_a_clear_setup_error():
     _, drv = make_driver(options={}, data={"discovery_prefix": "tasmota/discovery"})
-    with pytest.raises(DeviceUnavailable, match="no address"):
+    with pytest.raises(SetupError, match="no address"):  # parked, not retried every minute
         await drv.async_setup()
 
 
