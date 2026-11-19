@@ -283,3 +283,33 @@ def test_the_import_brings_labels_categories_and_tags(tmp_path):
                                                   "last_scanned": "2026-01-01T00:00:00+00:00"}]}
     assert registries.list_categories(rt)["categories"]["automation"][0]["name"] == "Lights"
     assert registries.list_floors(rt)["floors"][0]["floor_id"] == "ground"
+
+
+async def test_saved_places_are_asked_for_with_the_internal_secret(monkeypatch):
+    # Geo answers only callers with the stack's internal secret; without it every round was a 403.
+    from aiohttp import web
+
+    seen = []
+
+    async def zones(request):
+        seen.append(request.headers.get("X-Internal-Secret"))
+        if request.headers.get("X-Internal-Secret") != "s3cret":
+            return web.json_response({"detail": "Forbidden"}, status=403)
+        return web.json_response({"features": []})
+
+    app = web.Application()
+    app.router.add_get("/zones", zones)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    try:
+        monkeypatch.setattr(mobile_app, "_geo_settings", lambda: (f"http://127.0.0.1:{port}", "s3cret"))
+        assert await registries.fetch_places(f"http://127.0.0.1:{port}") == {"features": []}
+        assert seen == ["s3cret"]
+        monkeypatch.setattr(mobile_app, "_geo_settings", lambda: (f"http://127.0.0.1:{port}", ""))
+        with pytest.raises(registries.RegistryError, match="INTERNAL_SECRET"):
+            await registries.fetch_places(f"http://127.0.0.1:{port}")
+    finally:
+        await runner.cleanup()

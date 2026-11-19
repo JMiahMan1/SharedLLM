@@ -466,10 +466,17 @@ def places_to_zones(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def fetch_places(base: str) -> dict[str, Any]:
+    """Geo's places (``GET /zones``). Geo answers only callers with the stack's internal secret,
+    like ``/people`` (``drivers/mobile_app``); without it every round was a 403 and no saved
+    place ever became a zone."""
     from services.common.http import get_client
+    from services.homehub.drivers.mobile_app import _geo_settings
 
+    secret = _geo_settings()[1]
+    if not secret:
+        raise RegistryError("INTERNAL_SECRET is not set, so geo will not answer for saved places", 503)
     try:
-        async with get_client().get(f"{base.rstrip('/')}/zones",
+        async with get_client().get(f"{base.rstrip('/')}/zones", headers={"X-Internal-Secret": secret},
                                     timeout=aiohttp.ClientTimeout(total=GEO_TIMEOUT_S)) as resp:
             if resp.status != 200:
                 raise RegistryError(f"geo /zones answered HTTP {resp.status}", 502)
