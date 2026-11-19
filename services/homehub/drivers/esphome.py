@@ -14,8 +14,11 @@ the name may contain ``/`` and is empty for the node's main entity, as in
 is ``sensor``. HA's older ``{node}{platform}{object_id}`` ids are matched too.
 Ids like ``{MAC}-pipeline``, ``-wake_word``, ``-vad_sensitivity`` and
 ``-assist_satellite`` are not on the node at all: HA made them for its voice
-pipeline. They keep their last state and a ``select_option`` on them is
-remembered, nothing more.
+pipeline, and the hub's voice pipeline makes them (plus ``-speech_detection``)
+for a satellite adopted here (``SatelliteVoice.ensure_entities``). The wake
+word select drives the node's own setting, "Finished speaking detection" and
+"Speech detection" are the hub's per-satellite settings, and a ``select_option``
+on any other is remembered, nothing more.
 
 User-defined actions on the node (``api: actions:``) are registered as hub
 services ``esphome.{node_name}_{action}`` (dashes in the node name become
@@ -1130,6 +1133,9 @@ class ESPHomeDriver(Driver):
     def _local_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
         if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word"):
             return self.voice.set_wake_word(str(data.get("option")))  # the node's own setting (awaited below)
+        key = (entity.unique_id or "").rsplit("-", 1)[-1]
+        if entity.domain == "select" and service == "select_option" and key in self.voice.SETTING_SELECTS:
+            return self.voice.select_option(entity, str(data.get("option")))  # the hub's own satellite setting
         if entity.domain == "select" and service == "select_option":
             # Not the node's entity (HA's voice pipeline made it): its attributes are whatever was restored,
             # so the choice is remembered without passing them off as the device's (no publish).

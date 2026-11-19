@@ -268,18 +268,36 @@ The hub does what HA's Assist did for ESPHome voice satellites: on every connect
 1. The node hears its wake word itself and starts a run. Audio comes over the API (`API_AUDIO`) or as UDP
    to a port opened for the run. A node set to detect the wake word on the server is told the hub has no
    wake word engine (set its wake word engine location to On device).
-2. The audio streams to speech to text while an energy VAD finds the end of the command: the silence from
-   the satellite's "Finished speaking detection" select (relaxed 1.25 s, default 0.7 s, aggressive 0.25 s),
-   the node ending its audio, or `HOMEHUB_VOICE_MAX_S`. Nothing heard in `HOMEHUB_VOICE_NO_SPEECH_S` ends the run.
+2. The audio streams to speech to text while an energy VAD finds the command. It starts on 300 ms of speech
+   (the satellite's "Speech detection" select: sensitive 200 ms, default 300 ms, strict 450 ms with a higher
+   gate), so a chime or a knock does not start one; with `webrtcvad` installed (it is in the image),
+   WebRTC's speech detector must also call the start speech, and the end stays loudness alone. A follow-up
+   listen (the reply asked a question, or `start_conversation` spoke) skips its first half second and starts
+   on a 1.5x gate, so the satellite's own reply or chime cannot start the next command. It ends on the
+   silence from the satellite's "Finished speaking detection" select (relaxed 1.25 s, default 0.7 s,
+   aggressive 0.25 s), the node ending its audio, or `HOMEHUB_VOICE_MAX_S`. Nothing heard in
+   `HOMEHUB_VOICE_NO_SPEECH_S` ends the run. A node adopted on the hub gets its `assist_satellite` (the target
+   execution finds by area for announcements, intercom and timers) and these selects on its device, as HA's
+   integration made them; an imported node keeps its own.
 3. Speech to text over Wyoming at `HOMEHUB_VOICE_STT`. Point it at execution's recognising proxy
    (`VOICE_STT_PORT`), not at Whisper: the proxy records who spoke, and the gateway answers as that
    person only on a confident match, otherwise as the household.
 4. The transcript goes, unchanged, to the gateway's `/api/chat` at `HOMEHUB_VOICE_JARVIS_URL`, the path HA's
    conversation agent used, with `voice_context` (the satellite, its area, the conversation id, and what a
    `start_conversation` asked).
-5. The reply is spoken with Jarvis's voice (`tts.make_clip`) and the node fetches the URL; a node with its own
-   speaker (`SPEAKER`) is also sent the audio over the API. A reply that ends in a question sets
-   `continue_conversation`, so the node listens again.
+5. The reply is spoken with Jarvis's voice as it is written, as HA does with streaming TTS. The hub asks the
+   gateway with `"stream": true, "speech_stream": true`; the gateway sends only whole sentences that are safe
+   to say before the answer is finished (never a tool call, nothing of a turn on/off command, whose answer
+   `device_claims` may still correct), then the rest (`services/gateway/speech_stream.py`). `RUN_START` names
+   a growing WAV (`/api/tts_stream/<token>.wav`, through the node's ffmpeg proxy); each sentence is
+   synthesised and appended, and the first sends `INTENT_PROGRESS` with `tts_start_streaming`, on which the
+   node's media player starts playing that URL. `TTS_END` names the same URL (firmware that ignores
+   `INTENT_PROGRESS` plays it then). A playlist of clips is not used: the ESPHome voice assistant plays one
+   URL per reply. An answer that streams no sentence (a shortcut, a device command) is one clip
+   (`tts.make_clip`) as before, as is every reply to a node with its own speaker (`SPEAKER`), which is sent
+   the audio over the API after `TTS_END`. A reply that ends in a question sets `continue_conversation`,
+   so the node listens again. Each run's log line has `stt`, `first_audio` (end of the command to the
+   reply's first audio) and `total`.
 
 Each stage sends HA's event sequence (`RUN_START`, `STT_START`, `STT_VAD_START`/`END`, `STT_END`,
 `INTENT_START`/`END`, `TTS_START`/`END`, `RUN_END`) so the node's lights and screen follow, and every failure
@@ -298,6 +316,9 @@ These are read once when the hub starts; change one and restart the hub.
 | `HOMEHUB_VOICE_STT_TIMEOUT_S`, `HOMEHUB_VOICE_JARVIS_TIMEOUT_S` | 30, 90 | Per-stage limits |
 | `HOMEHUB_VOICE_VAD_MIN_RMS` | 40 | Quietest 16-bit RMS that counts as speech (the room's noise floor x 2.5 usually decides; a run that heard nothing this loud still asks speech to text) |
 | `HOMEHUB_VOICE_CONTINUE` | `1` | `0` never continues a conversation |
+| `HOMEHUB_VOICE_STREAM` | `1` | `0` waits for the whole answer before speaking |
+| `HOMEHUB_VOICE_FOLLOWUP_HOLDOFF_S` | 0.5 | How much of the start of a follow-up listen is not listened to (`0` turns it off) |
+| `HOMEHUB_VOICE_VAD` | `auto` | `energy` never uses WebRTC's speech detector |
 | `HOMEHUB_VOICE_INPUT_GAIN` | `auto` | Boost for the audio sent to speech to text. `auto` lifts a quiet or far voice toward a clear level (up to 16x, never clipping); a number is a fixed multiplier. The loudness gate always measures the unboosted audio. Each run's `levels` (peak, noise floor, speech threshold, boost used) show what to tune |
 
 A missing setting fails the run with an `ERROR` naming it. Per satellite, entry option `voice_pipeline: false`

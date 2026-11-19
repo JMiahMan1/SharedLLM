@@ -13,11 +13,20 @@ wake word:
    detect the wake word is told the hub has no wake word engine.
 2. **Listen.** The audio streams to speech to text as it arrives, and an energy
    VAD (:class:`EnergyVAD`) decides when the person started and stopped talking.
+   A command starts on 300 ms of speech (the satellite's "Speech detection"
+   select: ``sensitive`` 200 ms, ``default``, ``strict`` 450 ms with a higher
+   gate), never on a chime or a knock; WebRTC's speech detector, when installed
+   (``webrtcvad``, ``HOMEHUB_VOICE_VAD``), must also call it speech. A follow-up
+   listen (the reply asked a question, or ``start_conversation`` spoke) skips
+   its first ``HOMEHUB_VOICE_FOLLOWUP_HOLDOFF_S`` and starts on a 1.5x gate, so
+   the satellite's own voice cannot start the next command.
    The silence that ends a command comes from the satellite's "Finished speaking
    detection" select (``relaxed`` 1.25 s, ``default`` 0.7 s, ``aggressive``
    0.25 s, as in HA). The node ending its audio also ends the command. Nothing
    heard within ``HOMEHUB_VOICE_NO_SPEECH_S`` is an error; ``HOMEHUB_VOICE_MAX_S``
-   ends a command that never stops.
+   ends a command that never stops. The satellite's ``assist_satellite`` and
+   these selects are registered when a node is adopted on the hub
+   (:meth:`SatelliteVoice.ensure_entities`), as HA's integration did.
 3. **Speech to text** over Wyoming (``HOMEHUB_VOICE_STT``, ``host:port``). Point it
    at execution's recognising proxy (``VOICE_STT_PORT``, 10310) rather than at
    Whisper itself: the proxy passes the audio to Whisper and records who spoke
@@ -29,9 +38,21 @@ wake word:
    match) and otherwise as the non-admin household. The query is the transcript,
    unchanged, because the gateway finds the speaker by the transcript's words.
    ``voice_context`` names the satellite, its area and the conversation.
-5. **Text to speech** with Jarvis's voice (``tts.make_clip``); the node fetches
-   the URL. A node with its own speaker and no media player (``SPEAKER``) is also
-   sent the audio itself over the API.
+5. **Text to speech** with Jarvis's voice. The reply is spoken as it is written,
+   as HA does with streaming TTS: ``RUN_START`` names a growing stream
+   (``tts.ClipStream`` at ``/api/tts_stream/``, through the node's ffmpeg proxy);
+   the gateway sends whole sentences that are safe to say early
+   (``"speech_stream": true``, ``services/gateway/speech_stream.py``); each is
+   synthesised and appended, and the first one sends ``INTENT_PROGRESS`` with
+   ``tts_start_streaming``, on which the node starts playing that URL. The rest
+   of the reply follows into the same stream and ``TTS_END`` names it (firmware
+   that ignores ``INTENT_PROGRESS`` plays it then). An answer that streamed no
+   sentence (a shortcut, a device command) is spoken whole (``tts.make_clip``)
+   as before, and so is every reply to a node with its own speaker and no media
+   player (``SPEAKER``), which is sent the audio itself over the API after
+   ``TTS_END``. ``HOMEHUB_VOICE_STREAM=0`` turns streaming off. Each run logs
+   ``stt``, ``first_audio`` (end of the command to the reply's first audio) and
+   ``total``.
 
 Each stage sends HA's ``VoiceAssistantEventType`` sequence (``RUN_START``,
 ``STT_START``, ``STT_VAD_START``/``END``, ``STT_END`` with the text,
@@ -65,7 +86,7 @@ import wave
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import aiohttp
 from aioesphomeapi import (
@@ -89,6 +110,30 @@ JARVIS_GUARD_S = 5.0
 PENDING_CONTEXT_S = 60.0
 #: HA's "Finished speaking detection" (VadSensitivity) in seconds of silence.
 FINISHED_SPEAKING_S = {"relaxed": 1.25, "default": 0.7, "aggressive": 0.25}
+
+
+@dataclass(frozen=True)
+class SpeechDetection:
+    """How much sound it takes to start a command (the satellite's "Speech detection" select)."""
+
+    min_speech_s: float  # this much speech before a command starts (a chime or a knock is shorter)
+    threshold_factor: float  # times the loudness gate
+    webrtc_mode: int  # WebRTC VAD aggressiveness, 0 (lenient) to 3 (strict)
+
+
+#: The satellite's "Speech detection" select. A start on 90 ms of sound let a chime or the end of a reply
+#: start a command: 3 of 20 runs (2026-11-19) ended after about 1 s with no words recognised.
+SPEECH_DETECTION = {
+    "sensitive": SpeechDetection(0.2, 0.8, 1),
+    "default": SpeechDetection(0.3, 1.0, 2),
+    "strict": SpeechDetection(0.45, 1.4, 3),
+}
+#: A follow-up listen (after a reply that asked a question, or a start_conversation) begins right after the
+#: satellite spoke: its first moments are not listened to, and the gate is this much higher until speech starts.
+FOLLOW_UP_HOLDOFF_S = 0.5
+FOLLOW_UP_THRESHOLD_FACTOR = 1.5
+#: A run is a follow-up when the satellite's conversation asked to continue this recently.
+FOLLOW_UP_WINDOW_S = 120.0
 #: The select option for "listen for no wake word", as HA labels it.
 NO_WAKE_WORD = "No wake word"
 #: How long the node may take to report its wake words.
@@ -108,7 +153,7 @@ class PipelineError(Exception):
 
 
 # -- settings -------------------------------------------------------------------
-def _float_env(name: str, default: float) -> float:
+def _float_env(name: str, default: float, *, zero_ok: bool = False) -> float:
     raw = os.getenv(name)
     if raw is None or raw == "":
         return default
@@ -116,9 +161,21 @@ def _float_env(name: str, default: float) -> float:
         value = float(raw)
     except ValueError as exc:
         raise HubError(f"{name} must be a number, not {raw!r}") from exc
-    if value <= 0:
-        raise HubError(f"{name} must be more than 0, not {raw!r}")
+    if value < 0 or (value == 0 and not zero_ok):
+        raise HubError(f"{name} must be {'0 or more' if zero_ok else 'more than 0'}, not {raw!r}")
     return value
+
+
+def _flag_env(name: str, default: bool) -> bool:
+    raw = (os.getenv(name) or "").strip().lower()
+    return default if raw == "" else raw not in ("0", "false", "no", "off")
+
+
+def _vad_engine_env() -> str:
+    raw = (os.getenv("HOMEHUB_VOICE_VAD") or "").strip().lower() or "auto"
+    if raw not in ("auto", "energy"):
+        raise HubError(f"HOMEHUB_VOICE_VAD must be auto or energy, not {raw!r}")
+    return raw
 
 
 @dataclass
@@ -137,6 +194,12 @@ class VoiceSettings:
     vad_min_rms: float = 40.0
     #: A fixed boost for the audio sent to speech to text, or None for automatic (``InputGain``).
     input_gain: float | None = None
+    #: Speak the reply as the gateway writes it (a growing stream), not only after the whole answer.
+    stream_replies: bool = True
+    #: How long the start of a follow-up listen is not listened to (the end of the reply, the chime).
+    followup_holdoff_s: float = FOLLOW_UP_HOLDOFF_S
+    #: "auto" adds WebRTC's speech detector to the loudness gate when it is installed; "energy" never does.
+    vad_engine: str = "auto"
     #: Proves to the gateway that the room context (voice_context) comes from the hub.
     internal_secret: str = field(default="", repr=False)
 
@@ -151,10 +214,12 @@ class VoiceSettings:
             no_speech_seconds=_float_env("HOMEHUB_VOICE_NO_SPEECH_S", 8.0),
             stt_timeout=_float_env("HOMEHUB_VOICE_STT_TIMEOUT_S", 30.0),
             jarvis_timeout=_float_env("HOMEHUB_VOICE_JARVIS_TIMEOUT_S", 90.0),
-            continue_conversation=os.getenv("HOMEHUB_VOICE_CONTINUE", "1").strip().lower()
-            not in ("0", "false", "no", "off"),
+            continue_conversation=_flag_env("HOMEHUB_VOICE_CONTINUE", True),
             vad_min_rms=_float_env("HOMEHUB_VOICE_VAD_MIN_RMS", 40.0),
             input_gain=_gain_env("HOMEHUB_VOICE_INPUT_GAIN"),
+            stream_replies=_flag_env("HOMEHUB_VOICE_STREAM", True),
+            followup_holdoff_s=_float_env("HOMEHUB_VOICE_FOLLOWUP_HOLDOFF_S", FOLLOW_UP_HOLDOFF_S, zero_ok=True),
+            vad_engine=_vad_engine_env(),
             internal_secret=os.getenv("INTERNAL_SECRET", "").strip(),
         )
 
@@ -180,6 +245,9 @@ class VoiceSettings:
                 "jarvis_timeout_s": self.jarvis_timeout, "continue_conversation": self.continue_conversation,
                 "vad_min_rms": self.vad_min_rms,
                 "input_gain": "auto" if self.input_gain is None else self.input_gain,
+                "stream_replies": self.stream_replies, "followup_holdoff_s": self.followup_holdoff_s,
+                "vad_engine": self.vad_engine,
+                "speech_detector": "webrtc+energy" if speech_classifier(self.vad_engine, 2) else "energy",
                 "problems": self.problems()}
 
 
@@ -220,16 +288,23 @@ def _parse_address(value: str) -> tuple[str, int] | None:
 class EnergyVAD:
     """Speech start and end from the loudness of 30 ms frames, against the room's own noise floor.
 
-    A frame is speech when its RMS is ``ratio`` times the noise floor and at least ``min_rms`` (a
-    quiet room still hisses; ``HOMEHUB_VOICE_VAD_MIN_RMS``). Speech starts after ``start_frames``
-    speech frames in a row and ends after ``silence_s`` of frames that are not. The floor is the
-    median of the last second of frames that were not speech, so a voice never becomes the floor and
-    a person who starts talking at once is still heard; it starts at ``min_rms / ratio``.
+    A frame is loud when its RMS is ``ratio`` times the noise floor and at least ``min_rms`` (a
+    quiet room still hisses; ``HOMEHUB_VOICE_VAD_MIN_RMS``). A command starts once ``min_speech_s``
+    of speech frames arrived within twice that time (a dip between syllables does not reset it; a
+    chime, a knock or the tail of the satellite's own reply is shorter) and ends after ``silence_s``
+    of frames that are not loud. The floor is the median of the last second of frames that were not
+    loud, so a voice never becomes the floor and a person who starts talking at once is still heard;
+    it starts at ``min_rms / ratio``.
 
     The floor also follows the quietest tenth of the last three seconds, whatever they were taken
     for. Learning only from frames under the threshold could never learn a room louder than
     ``min_rms`` (a TV, music): every frame was "speech", the floor stayed at its start, and every
     run listened its whole 15 s (2026-11-17). Words have gaps, so speech does not lift it.
+
+    ``classifier`` (WebRTC's speech detector, ``speech_classifier``) must also call a loud frame
+    speech before it counts toward the start, which keeps tones and clatter from starting a command;
+    the end is still loudness alone, so a voice the detector doubts is never cut off.
+    ``start_factor`` raises the gate for the start only (a follow-up listen right after a reply).
     """
 
     FRAME_MS = 30
@@ -237,19 +312,28 @@ class EnergyVAD:
     RECENT_FRAMES = 100  # three seconds of all frames
 
     def __init__(self, silence_s: float, *, rate: int = RATE, ratio: float = 2.5, min_rms: float = 250.0,
-                 start_frames: int = 3) -> None:
+                 min_speech_s: float = 0.3, start_factor: float = 1.0,
+                 classifier: Callable[[bytes], bool] | None = None) -> None:
         self.frame_bytes = rate * WIDTH * self.FRAME_MS // 1000
         self.silence_frames = max(1, math.ceil(silence_s * 1000 / self.FRAME_MS))
-        self.ratio, self.min_rms, self.start_frames = ratio, min_rms, start_frames
+        self.ratio, self.min_rms, self.start_factor = ratio, min_rms, start_factor
+        self.start_frames = max(1, math.ceil(min_speech_s * 1000 / self.FRAME_MS))
+        self.classifier = classifier
+        # Within twice that time: the detector misses some frames of real speech, and syllables have gaps.
+        self._window: deque[bool] = deque(maxlen=2 * self.start_frames)
         self._quiet_levels: deque[float] = deque([min_rms / ratio] * self.FLOOR_FRAMES, maxlen=self.FLOOR_FRAMES)
         self._recent: deque[float] = deque(maxlen=self.RECENT_FRAMES)
         self._buf = b""
-        self._run = 0
         self._quiet = 0
         self.in_speech = False
         self.speech_frames = 0
         self.frames = 0
+        self.rejected_frames = 0  # loud frames the classifier said were not speech
         self.peak_rms = 0.0
+
+    @property
+    def engine(self) -> str:
+        return "webrtc+energy" if self.classifier is not None else "energy"
 
     @property
     def floor(self) -> float:
@@ -263,12 +347,18 @@ class EnergyVAD:
         """What arrived, for a "no speech" error: none at all and too quiet need different fixes."""
         if not self.frames:
             return "no audio arrived from the satellite"
-        return (f"{self.frames * self.FRAME_MS / 1000:.1f} s of audio arrived; the loudest moment was "
-                f"{self.peak_rms:.0f} RMS, speech needs {max(self.min_rms, self.floor * self.ratio):.0f} "
-                f"(HOMEHUB_VOICE_VAD_MIN_RMS, or the satellite's volume multiplier)")
+        out = (f"{self.frames * self.FRAME_MS / 1000:.1f} s of audio arrived; the loudest moment was "
+               f"{self.peak_rms:.0f} RMS, speech needs {self.start_threshold():.0f} "
+               f"(HOMEHUB_VOICE_VAD_MIN_RMS, or the satellite's volume multiplier)")
+        if self.rejected_frames:
+            out += f"; {self.rejected_frames * self.FRAME_MS / 1000:.1f} s of loud sound did not sound like speech"
+        return out
 
     def threshold(self) -> float:
         return max(self.min_rms, self.floor * self.ratio)
+
+    def start_threshold(self) -> float:
+        return self.threshold() * self.start_factor
 
     @staticmethod
     def rms(frame: bytes) -> float:
@@ -280,6 +370,17 @@ class EnergyVAD:
             return 0.0
         return math.sqrt(sum(s * s for s in samples) / len(samples))
 
+    def _is_speech(self, frame: bytes) -> bool:
+        classifier = self.classifier
+        if classifier is None:
+            return True
+        try:
+            return bool(classifier(frame))
+        except Exception as exc:  # a detector that fails must not stop the satellite hearing anyone
+            log.warning("the speech detector failed (%s); using loudness alone", exc)
+            self.classifier = None
+            return True
+
     def process(self, pcm: bytes) -> list[str]:
         """Feed audio; returns the edges it crossed, ``"start"`` and/or ``"end"``, in order."""
         self._buf += pcm
@@ -290,25 +391,54 @@ class EnergyVAD:
             self._recent.append(level)
             self.frames += 1
             self.peak_rms = max(self.peak_rms, level)
-            speech = level >= max(self.min_rms, self.floor * self.ratio)
-            if not speech:
+            loud = level >= self.threshold()
+            if not loud:
                 self._quiet_levels.append(level)
             if not self.in_speech:
-                self._run = self._run + 1 if speech else 0
-                if self._run >= self.start_frames:
+                speech = level >= self.start_threshold() and self._is_speech(frame)
+                if level >= self.start_threshold() and not speech:
+                    self.rejected_frames += 1
+                self._window.append(speech)
+                heard = sum(self._window)
+                if heard >= self.start_frames:
                     self.in_speech, self._quiet = True, 0
-                    self.speech_frames += self._run
+                    self.speech_frames += heard
+                    self._window.clear()
                     events.append("start")
-            elif speech:
+            elif loud:
                 self._quiet = 0
                 self.speech_frames += 1
             else:
                 self._quiet += 1
                 if self._quiet >= self.silence_frames:
                     events.append("end")
-                    self.in_speech, self._run = False, 0
+                    self.in_speech = False
                     break
         return events
+
+
+_webrtc_missing_logged = False
+
+
+def speech_classifier(engine: str, mode: int) -> Callable[[bytes], bool] | None:
+    """WebRTC's speech detector for 30 ms frames of 16 kHz audio, or None (loudness alone).
+
+    None when ``engine`` is ``"energy"`` or ``webrtcvad`` is not installed (logged once, so the
+    fallback is seen). Silero would be better at telling a voice from a TV, but it needs a model file
+    the hub image does not ship; WebRTC's detector is a few kilobytes of C with no model to fetch.
+    """
+    global _webrtc_missing_logged
+    if engine == "energy":
+        return None
+    try:
+        import webrtcvad  # type: ignore[import-not-found,unused-ignore]
+    except ImportError:
+        if not _webrtc_missing_logged:
+            _webrtc_missing_logged = True
+            log.warning("webrtcvad is not installed: voice satellites detect speech by loudness alone")
+        return None
+    vad = webrtcvad.Vad(max(0, min(3, int(mode))))
+    return lambda frame: bool(vad.is_speech(frame, RATE))
 
 
 # -- the three services a run uses -----------------------------------------------------
@@ -391,6 +521,9 @@ class Reply(str):
     None is Jarvis's voice. A plain ``str`` subclass, so a reply is still text."""
 
     voice: str | None = None
+    #: Streamed replies: how many sentences were already said, and what is left to say after them.
+    streamed: int = 0
+    rest: str | None = None
 
 
 def chat_reply_text(body: Any) -> str | None:
@@ -409,30 +542,116 @@ def chat_reply_text(body: Any) -> str | None:
     return None
 
 
+def _chat_headers(settings: VoiceSettings) -> dict[str, str]:
+    return {"X-Internal-Secret": settings.internal_secret} if settings.internal_secret else {}
+
+
+def _reply_from_answer(status: int, data: Any) -> Reply:
+    """The reply in a whole (not streamed) gateway answer, or the error it is."""
+    if status != 200 or (isinstance(data, dict) and str(data.get("status") or "").upper() == "ERROR"):
+        detail = (data.get("message") or data.get("detail") or data.get("error")) if isinstance(data, dict) else data
+        raise PipelineError("intent-failed", f"Jarvis could not answer (HTTP {status}): {detail}")
+    reply = chat_reply_text(data)
+    if not reply:
+        raise PipelineError("intent-failed", "Jarvis answered with no text")
+    out = Reply(reply)
+    out.voice = _voice_of(data)
+    return out
+
+
+def _voice_of(data: Any) -> str | None:
+    voice = data.get("voice") if isinstance(data, dict) else None
+    return voice.strip() if isinstance(voice, str) and voice.strip() else None
+
+
 async def ask_jarvis(settings: VoiceSettings, text: str, context: dict[str, Any]) -> str:
     """One conversation turn, through the same ``/api/chat`` HA's conversation agent used."""
     url = f"{settings.jarvis_url}/api/chat"
     body = {"query": text, "stream": False, "voice_context": context}
-    headers = {"X-Internal-Secret": settings.internal_secret} if settings.internal_secret else {}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=settings.jarvis_timeout)) as s, \
-                s.post(url, json=body, headers=headers) as r:
+                s.post(url, json=body, headers=_chat_headers(settings)) as r:
             data = await r.json(content_type=None)
             status = r.status
     except TimeoutError as exc:
         raise PipelineError("intent-timeout", f"Jarvis did not answer within {settings.jarvis_timeout:g} s") from exc
     except (aiohttp.ClientError, OSError, ValueError) as exc:
         raise PipelineError("intent-failed", f"Jarvis at {settings.jarvis_url} is unreachable: {exc}") from exc
-    if status != 200 or (isinstance(data, dict) and str(data.get("status") or "").upper() == "ERROR"):
-        detail = (data.get("message") or data.get("detail")) if isinstance(data, dict) else data
-        raise PipelineError("intent-failed", f"Jarvis could not answer (HTTP {status}): {detail}")
-    reply = chat_reply_text(data)
-    if not reply:
-        raise PipelineError("intent-failed", "Jarvis answered with no text")
-    out = Reply(reply)
-    voice = data.get("voice") if isinstance(data, dict) else None
-    out.voice = voice.strip() if isinstance(voice, str) and voice.strip() else None
-    return out
+    return _reply_from_answer(status, data)
+
+
+#: Called with each sentence the gateway streams and the voice to say it in.
+OnSentence = Callable[[str, str | None], Awaitable[None]]
+
+
+async def read_speech_stream(lines: Any, on_sentence: OnSentence) -> Reply:
+    """A ``speech_stream`` answer (NDJSON lines, as bytes or text): each sentence to ``on_sentence``.
+
+    Returns the whole reply with ``rest`` (what is left to say after the streamed sentences) and
+    ``streamed`` (how many were). An answer that streamed no sentences (a shortcut answered at once,
+    a device command, a gateway without speech streaming) returns its text with ``streamed`` 0.
+    """
+    content: list[str] = []
+    voice: str | None = None
+    streamed = 0
+    async for raw in lines:
+        line = raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw)
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        voice = _voice_of(obj) or voice
+        if obj.get("error"):
+            raise PipelineError("intent-failed", f"Jarvis could not answer: {obj['error']}")
+        text = chat_reply_text(obj) or ""
+        if obj.get("speech") and text:
+            streamed += 1
+            await on_sentence(text, voice)
+            continue
+        if not obj.get("done"):
+            if text:
+                content.append(text)
+            continue
+        if text.startswith("[ERROR]:"):
+            raise PipelineError("intent-failed", f"Jarvis could not answer: {text[8:].strip()}")
+        if text:
+            content.append(text)
+        whole = str(obj.get("reply") or "").strip() or "".join(content).strip()
+        out = Reply(whole)
+        out.voice = voice
+        out.streamed = streamed
+        out.rest = str(obj["speech_rest"]).strip() if "speech_rest" in obj else (None if streamed else whole)
+        if not whole and not streamed:
+            raise PipelineError("intent-failed", "Jarvis answered with no text")
+        return out
+    raise PipelineError("intent-failed", "Jarvis's answer ended before it was finished")
+
+
+async def ask_jarvis_stream(settings: VoiceSettings, text: str, context: dict[str, Any],
+                            on_sentence: OnSentence) -> Reply:
+    """One conversation turn with the reply streamed a sentence at a time (the gateway's ``speech_stream``).
+
+    The gateway sends only sentences that are safe to say before the answer is finished
+    (``services/gateway/speech_stream.py``); a shortcut answer comes back whole, as JSON.
+    """
+    url = f"{settings.jarvis_url}/api/chat"
+    body = {"query": text, "stream": True, "speech_stream": True, "voice_context": context}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=settings.jarvis_timeout)) as s, \
+                s.post(url, json=body, headers=_chat_headers(settings)) as r:
+            kind = (r.headers.get("Content-Type") or "").lower()
+            if r.status != 200 or ("json" in kind and "ndjson" not in kind):
+                return _reply_from_answer(r.status, await r.json(content_type=None))
+            return await read_speech_stream(r.content, on_sentence)
+    except TimeoutError as exc:
+        raise PipelineError("intent-timeout", f"Jarvis did not answer within {settings.jarvis_timeout:g} s") from exc
+    except (aiohttp.ClientError, OSError, ValueError) as exc:
+        raise PipelineError("intent-failed", f"Jarvis at {settings.jarvis_url} is unreachable: {exc}") from exc
 
 
 async def make_speech(text: str, voice: str | None) -> str:
@@ -441,14 +660,33 @@ async def make_speech(text: str, voice: str | None) -> str:
     return await tts.make_clip(text, voice)
 
 
+async def synthesize_speech(text: str, voice: str | None) -> bytes:
+    from services.homehub import tts
+
+    return await tts.synthesize(text, voice)
+
+
+def open_reply_stream() -> tuple[str, Any]:
+    from services.homehub import tts
+
+    return tts.open_stream()
+
+
 @dataclass
 class Backends:
-    """What a run talks to; tests swap these for fakes."""
+    """What a run talks to; tests swap these for fakes.
+
+    ``ask_stream``, ``synth`` and ``open_stream`` stream a reply as it is written; with any of them
+    unset a run waits for the whole answer, as before.
+    """
 
     open_stt: Callable[[VoiceSettings], Any] = lambda s: WyomingSTT(s.stt, s.language)
     ask: Callable[[VoiceSettings, str, dict[str, Any]], Awaitable[str]] = ask_jarvis
     speak: Callable[[str, str | None], Awaitable[str]] = make_speech
     clip_audio: Callable[[str], bytes | None] = field(default=lambda url: _clip_bytes(url))
+    ask_stream: Callable[[VoiceSettings, str, dict[str, Any], OnSentence], Awaitable[Reply]] | None = None
+    synth: Callable[[str, str | None], Awaitable[bytes]] | None = None
+    open_stream: Callable[[], tuple[str, Any]] | None = None
 
 
 def _clip_bytes(url: str) -> bytes | None:
@@ -458,7 +696,7 @@ def _clip_bytes(url: str) -> bytes | None:
     return tts.clip(token)
 
 
-BACKENDS = Backends()
+BACKENDS = Backends(ask_stream=ask_jarvis_stream, synth=synthesize_speech, open_stream=open_reply_stream)
 
 
 # -- audio helpers ------------------------------------------------------------------
@@ -584,17 +822,25 @@ class Run:
     continue_conversation: bool = False
     speech_ms: int | None = None
     heard: str | None = None  # what arrived when the loudness gate heard no speech
-    levels: dict[str, float] | None = None  # microphone levels, to tune the gate and the boost from
+    levels: dict[str, Any] | None = None  # microphone levels, to tune the gate and the boost from
     run_end_sent: bool = False
     aborted: bool = False
+    #: A follow-up listen: the satellite had just spoken (a reply that asked a question, start_conversation).
+    follow_up: bool = False
+    #: How the reply reached the satellite: "stream" (sentence by sentence as written) or "whole".
+    reply_mode: str | None = None
+    #: Sentences spoken before the whole answer was in.
+    streamed_sentences: int = 0
 
     def mark(self, name: str) -> None:
-        self.marks[name] = time.monotonic()
+        self.marks.setdefault(name, time.monotonic())
 
     def timings_ms(self) -> dict[str, int]:
+        """Each stage's time; ``first_audio`` is from the end of the command to the reply's first audio,
+        what the person waits through, and ``total`` the whole run."""
         m, out = self.marks, {}
         spans = (("listen", "listen", "listened"), ("stt", "listened", "transcribed"),
-                 ("intent", "intent", "answered"), ("tts", "tts", "spoken"))
+                 ("intent", "intent", "answered"), ("tts", "tts", "spoken"), ("first_audio", "listened", "first_audio"))
         for name, a, b in spans:
             if a in m and b in m:
                 out[name] = round((m[b] - m[a]) * 1000)
@@ -606,7 +852,68 @@ class Run:
         return {"id": self.id, "started_at": self.started_at, "wake_word": self.wake_word,
                 "outcome": self.outcome, "ended_by": self.ended_by, "error": self.error,
                 "continue_conversation": self.continue_conversation, "speech_ms": self.speech_ms,
-                "heard": self.heard, "levels": self.levels, "timings_ms": self.timings_ms()}
+                "heard": self.heard, "levels": self.levels, "follow_up": self.follow_up,
+                "reply_mode": self.reply_mode, "streamed_sentences": self.streamed_sentences,
+                "timings_ms": self.timings_ms()}
+
+
+class _StreamSpeaker:
+    """Speaks a reply's sentences into one growing stream (``tts.ClipStream``) as the gateway sends them.
+
+    Sentences are spoken in order, one synthesis at a time, while the gateway keeps writing; each one's
+    audio joins the stream the moment it is made. The first one tells the node to start playing
+    (``INTENT_PROGRESS`` with ``tts_start_streaming``, what HA sends with streaming TTS), so the person
+    hears the answer's start while the rest is still being written.
+    """
+
+    def __init__(self, satellite: SatelliteVoice, run: Run, clip_stream: Any) -> None:
+        self.satellite, self.run, self.stream = satellite, run, clip_stream
+        self.node_url = ""
+        self.default_voice: str | None = None
+        self.sentences = 0  # given by the gateway (the rest at the end is not counted)
+        self._queue: asyncio.Queue[tuple[str, str | None] | None] = asyncio.Queue()
+        self._started = False
+        self._task = asyncio.get_running_loop().create_task(self._work(), name=f"voice:{satellite.name}:speak")
+
+    async def say(self, text: str, voice: str | None) -> None:
+        """One sentence from the gateway (``on_sentence``), or the rest of the reply at the end."""
+        if self._task.done():
+            self._task.result()  # synthesis already failed: say so now, not after the whole answer
+        if self.run.reply_mode is None:
+            self.sentences += 1
+        await self._queue.put((text, voice or self.default_voice))
+
+    async def _work(self) -> None:
+        synth = BACKENDS.synth
+        assert synth is not None
+        while (item := await self._queue.get()) is not None:
+            text, voice = item
+            try:
+                audio = await synth(text, voice)
+                self.stream.append(audio)
+            except (HubError, OSError) as exc:
+                raise PipelineError("tts-failed", f"Jarvis's voice could not speak the reply: {exc}") from exc
+            if not self._started:
+                self._started = True
+                self.run.mark("first_audio")
+                self.satellite._event(self.run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_PROGRESS,
+                                      {"tts_start_streaming": "1"})
+                self.satellite._publish_satellite("responding")
+
+    async def finish(self) -> None:
+        """Every sentence said into the stream, and the stream ended (the node's player then finishes)."""
+        await self._queue.put(None)
+        try:
+            await self._task
+        finally:
+            self.stream.close()
+
+    async def abort(self) -> None:
+        if not self._task.done():
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._task
+        self.stream.close()
 
 
 #: Runs kept per satellite, newest first, in the hub's store so a restart or deploy keeps them.
@@ -640,6 +947,9 @@ class SatelliteVoice:
         self._udp_proto: _UDPAudio | None = None
         self._audio_settings: Any = None
         self._pending: tuple[float, dict[str, Any]] | None = None
+        #: The conversation the last reply asked to continue, and when that run ended: the node's next run
+        #: in it is a follow-up listen that starts right after the satellite spoke.
+        self._continued: tuple[str, float] | None = None
         self._tasks: set[asyncio.Task] = set()
         #: The node's own wake words: id -> phrase, what is active, and why they could not be read.
         self.wake_words: dict[str, str] = {}
@@ -707,10 +1017,78 @@ class SatelliteVoice:
         area = self.hub.areas.get(area_id or "")
         return area_id, (area.name if area is not None else None)
 
-    def silence_seconds(self) -> float:
-        sel = self._local("vad_sensitivity")
+    def _select_state(self, suffix: str, options: dict[str, Any]) -> str:
+        sel = self._local(suffix)
         st = self.hub.states.get(sel.entity_id) if sel is not None else None
-        return FINISHED_SPEAKING_S.get(str(st.state) if st is not None else "", FINISHED_SPEAKING_S["default"])
+        state = str(st.state) if st is not None else ""
+        return state if state in options else "default"
+
+    def silence_seconds(self) -> float:
+        """The satellite's "Finished speaking detection": seconds of silence that end a command."""
+        return FINISHED_SPEAKING_S[self._select_state("vad_sensitivity", FINISHED_SPEAKING_S)]
+
+    def speech_detection(self) -> SpeechDetection:
+        """The satellite's "Speech detection": how much sound it takes to start a command."""
+        return SPEECH_DETECTION[self._select_state("speech_detection", SPEECH_DETECTION)]
+
+    # -- the satellite's own entities (HA's esphome integration made them) -------------------------
+    #: unique_id suffix -> (domain, entity name, entity category); the assist_satellite is the device's main entity.
+    LOCAL_ENTITIES: ClassVar[dict[str, tuple[str, str | None, str | None]]] = {
+        "assist_satellite": ("assist_satellite", None, None),
+        "wake_word": ("select", "Wake word", "config"),
+        "vad_sensitivity": ("select", "Finished speaking detection", "config"),
+        "speech_detection": ("select", "Speech detection", "config"),
+    }
+    #: The selects the hub keeps (their options), as against the node's own wake word.
+    SETTING_SELECTS: ClassVar[dict[str, dict[str, Any]]] = {
+        "vad_sensitivity": FINISHED_SPEAKING_S, "speech_detection": SPEECH_DETECTION}
+
+    def ensure_entities(self, device_info: Any) -> list[EntityEntry]:
+        """Register the satellite's entities a node adopted on the hub (not imported from HA) has none of.
+
+        HA's esphome integration created them for every voice satellite: the ``assist_satellite`` (the
+        target execution finds for announcements, intercom and timers, by its area), the wake word and
+        "Finished speaking detection" selects; the hub adds "Speech detection". Ids follow HA's
+        ``{MAC}-{key}``, so an imported satellite keeps its own and nothing is registered twice; an
+        entity a person disabled stays disabled.
+        """
+        from services.homehub.discovery import norm_mac
+
+        mac = norm_mac(str(getattr(device_info, "mac_address", "") or ""))
+        if mac is None:
+            return []
+        mac_upper = ":".join(mac[i:i + 2] for i in range(0, 12, 2)).upper()
+        connections = [["mac", ":".join(mac[i:i + 2] for i in range(0, 12, 2))]]
+        title = (getattr(device_info, "friendly_name", "") or getattr(device_info, "name", "")
+                 or self.driver.entry.title)
+        device = None
+        added = []
+        local = getattr(self.driver, "local_entities", None)
+        for key, (domain, name, category) in self.LOCAL_ENTITIES.items():
+            uid = f"{mac_upper}-{key}"
+            ent = self.driver.registry_entity(domain, uid)
+            if ent is None:
+                if device is None:
+                    device = self.driver.ensure_device(title, connections=connections)
+                info = {"entity_category": category} if category else {}
+                ent = self.driver.ensure_entity(domain, uid, name, device=device, **info)
+                added.append(ent)
+            if isinstance(local, list) and all(e.entity_id != ent.entity_id for e in local):
+                local.append(ent)
+        if added:
+            self.log.info("voice satellite %s: registered %s", self.name, ", ".join(e.entity_id for e in added))
+        return added
+
+    def select_option(self, entity: EntityEntry, option: str) -> None:
+        """A choice on one of the hub's satellite settings ("Finished speaking detection", "Speech detection")."""
+        key = (entity.unique_id or "").rsplit("-", 1)[-1]
+        options = self.SETTING_SELECTS.get(key)
+        if options is None:
+            raise HubError(f"{entity.entity_id} is not one of the satellite's settings")
+        if option not in options:
+            raise HubError(f"{option!r} is not an option of {entity.entity_id}: {', '.join(options)}")
+        self.hub.publish(entity, option, {"options": list(options)})
+        self.log.info("voice satellite %s: %s set to %s", self.name, entity.entity_id, option)
 
     # -- connection ------------------------------------------------------------------
     def attach(self, client: Any, device_info: Any) -> bool:
@@ -721,6 +1099,10 @@ class SatelliteVoice:
         self.flags = int(getattr(device_info, "voice_assistant_feature_flags", 0) or 0)
         if not self.is_satellite:
             return False
+        try:
+            self.ensure_entities(device_info)
+        except Exception:  # its entities are a convenience; the satellite must still be heard
+            self.log.exception("voice satellite %s: registering its entities failed", self.name)
         if not self.enabled:
             self.log.info("voice satellite %s: the pipeline is turned off for it (voice_pipeline: false)", self.name)
             self._publish_satellite("idle")
@@ -834,19 +1216,21 @@ class SatelliteVoice:
         self.hub.publish(ent, state, {"supported_features": features})
 
     def _publish_vad_select(self) -> None:
-        sel = self._local("vad_sensitivity")
-        if sel is None:
-            return
-        cur = self.hub.states.get(sel.entity_id)
-        state = cur.state if cur is not None and cur.state in FINISHED_SPEAKING_S else "default"
-        self.hub.publish(sel, state, {"options": list(FINISHED_SPEAKING_S)})
+        """The hub's satellite settings ("Finished speaking detection", "Speech detection"), as last chosen."""
+        for key, options in self.SETTING_SELECTS.items():
+            sel = self._local(key)
+            if sel is None:
+                continue
+            cur = self.hub.states.get(sel.entity_id)
+            state = cur.state if cur is not None and cur.state in options else "default"
+            self.hub.publish(sel, state, {"options": list(options)})
 
     # -- the node's requests ------------------------------------------------------------
     async def _handle_start(self, conversation_id: str, flags: int, audio_settings: Any,
                             wake_word_phrase: str | None, *_: Any) -> int | None:
         self._cancel_run("a new run started")
         run = Run(id=secrets.token_hex(4), conversation_id=conversation_id or secrets.token_hex(8),
-                  wake_word=wake_word_phrase)
+                  wake_word=wake_word_phrase, follow_up=self._is_follow_up(conversation_id))
         self._run = run
         self._audio = asyncio.Queue()
         self._audio_settings = audio_settings
@@ -860,6 +1244,15 @@ class SatelliteVoice:
         self._task = asyncio.create_task(self._run_pipeline(run, int(flags or 0)),
                                          name=f"voice:{self.name}:{run.id}")
         return port
+
+    def _is_follow_up(self, conversation_id: str | None) -> bool:
+        """The node listens again right after speaking: a reply asked a question, or start_conversation spoke."""
+        now = time.monotonic()
+        if self._pending is not None and now - self._pending[0] <= PENDING_CONTEXT_S:
+            return True
+        continued, self._continued = self._continued, None
+        return (continued is not None and bool(conversation_id) and continued[0] == conversation_id
+                and now - continued[1] <= FOLLOW_UP_WINDOW_S)
 
     async def _open_udp(self, queue: asyncio.Queue) -> int:
         allowed = None
@@ -922,8 +1315,16 @@ class SatelliteVoice:
     async def _run_pipeline(self, run: Run, flags: int) -> None:
         settings: VoiceSettings | None = None
         stt = None
+        speaker: _StreamSpeaker | None = None
         try:
-            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_RUN_START, {})
+            stream = self._open_reply_stream()
+            # HA's RUN_START names the URL of the reply's growing stream; the node plays it when told the
+            # first audio is in (INTENT_PROGRESS with tts_start_streaming).
+            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_RUN_START,
+                        {"url": stream[1]} if stream is not None else {})
+            if stream is not None:
+                speaker = _StreamSpeaker(self, run, stream[0])
+                speaker.node_url = stream[1]
             if flags & int(VoiceAssistantCommandFlag.USE_WAKE_WORD):
                 raise PipelineError("wake-engine-missing", "The hub has no wake word engine; set the satellite's "
                                     "wake word engine location to On device")
@@ -961,7 +1362,11 @@ class SatelliteVoice:
             run.mark("intent")
             try:
                 async with asyncio.timeout(settings.jarvis_timeout + JARVIS_GUARD_S):
-                    reply = await BACKENDS.ask(settings, text, self._context(run))
+                    if speaker is not None and BACKENDS.ask_stream is not None:
+                        speaker.default_voice = settings.tts_voice
+                        reply = await BACKENDS.ask_stream(settings, text, self._context(run), speaker.say)
+                    else:
+                        reply = await BACKENDS.ask(settings, text, self._context(run))
             except TimeoutError as exc:
                 raise PipelineError("intent-timeout",
                                     f"Jarvis did not answer within {settings.jarvis_timeout:g} s") from exc
@@ -975,18 +1380,12 @@ class SatelliteVoice:
             self._publish_satellite("responding")
             self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": reply})
             run.mark("tts")
-            try:
-                # The person's own voice when the gateway chose one, else the hub's
-                # setting, else (None) Jarvis's.
-                url = await BACKENDS.speak(reply, getattr(reply, "voice", None) or settings.tts_voice)
-            except (HubError, OSError) as exc:
-                raise PipelineError("tts-failed", f"Jarvis's voice could not speak the reply: {exc}") from exc
-            run.mark("spoken")
-            # The node fetches the reply in its own announcement format (the hub's ffmpeg proxy), never the
-            # 22050 Hz original it would have to resample while it plays; streamed audio uses the original.
-            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END, {"url": self._node_url(url)})
-            if self.flags & int(VoiceAssistantFeature.SPEAKER):
-                await self._stream_reply(run, url)
+            if speaker is not None and speaker.sentences:
+                await self._finish_streamed_reply(run, reply, speaker)
+            else:
+                if speaker is not None:
+                    await speaker.abort()  # nothing was streamed (a shortcut answer): the whole reply, as before
+                await self._speak_whole_reply(run, settings, reply)
             run.outcome = "ok"
         except asyncio.CancelledError:
             # Superseded, stopped by the node or disconnected: the node is no longer in this run, and a
@@ -1001,10 +1400,64 @@ class SatelliteVoice:
             self.log.exception("voice satellite %s run %s failed", self.name, run.id)
             self._fail(run, PipelineError("pipeline-error", f"The hub's voice pipeline failed: {exc}"))
         finally:
+            if speaker is not None:
+                await speaker.abort()
             if stt is not None:
                 with contextlib.suppress(Exception):
                     await stt.close()
         self._finish(run, settings)
+
+    # -- the reply -----------------------------------------------------------------------
+    def _open_reply_stream(self) -> tuple[Any, str] | None:
+        """A growing stream for this run's reply, and the URL the node plays it from; None to wait for it whole.
+
+        Only for a node that plays replies by URL (its media player). A node with its own speaker
+        (``SPEAKER``) is sent the audio over the API after TTS_END, as before: its firmware plays
+        API audio only once the TTS stage has ended.
+        """
+        try:
+            settings = current_settings()
+        except HubError:
+            return None
+        if (not settings.stream_replies or settings.problems() or BACKENDS.ask_stream is None
+                or BACKENDS.synth is None or BACKENDS.open_stream is None
+                or self.flags & int(VoiceAssistantFeature.SPEAKER)):
+            return None
+        try:
+            url, clip_stream = BACKENDS.open_stream()
+        except HubError as exc:
+            self.log.warning("voice satellite %s: the reply cannot be streamed (%s); it is spoken whole", self.name, exc)
+            return None
+        return clip_stream, self._node_url(url)
+
+    async def _finish_streamed_reply(self, run: Run, reply: str, speaker: _StreamSpeaker) -> None:
+        """The first sentences are playing already: say the rest into the same stream, then end it."""
+        run.reply_mode = "stream"
+        run.streamed_sentences = speaker.sentences
+        rest = getattr(reply, "rest", None)
+        if rest:
+            await speaker.say(rest, getattr(reply, "voice", None))
+        await speaker.finish()
+        run.mark("spoken")
+        # Firmware that started the stream on INTENT_PROGRESS does not play this again; older firmware
+        # that ignores INTENT_PROGRESS plays it now, whole.
+        self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END, {"url": speaker.node_url})
+
+    async def _speak_whole_reply(self, run: Run, settings: VoiceSettings, reply: str) -> None:
+        run.reply_mode = "whole"
+        try:
+            # The person's own voice when the gateway chose one, else the hub's
+            # setting, else (None) Jarvis's.
+            url = await BACKENDS.speak(reply, getattr(reply, "voice", None) or settings.tts_voice)
+        except (HubError, OSError) as exc:
+            raise PipelineError("tts-failed", f"Jarvis's voice could not speak the reply: {exc}") from exc
+        run.mark("spoken")
+        run.mark("first_audio")
+        # The node fetches the reply in its own announcement format (the hub's ffmpeg proxy), never the
+        # 22050 Hz original it would have to resample while it plays; streamed audio uses the original.
+        self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END, {"url": self._node_url(url)})
+        if self.flags & int(VoiceAssistantFeature.SPEAKER):
+            await self._stream_reply(run, url)
 
     def _fail(self, run: Run, exc: PipelineError) -> None:
         run.outcome = "error"
@@ -1029,10 +1482,15 @@ class SatelliteVoice:
             self._close_udp()
         self.runs += 1
         self.last_run = run
+        if run.outcome == "ok" and run.continue_conversation:
+            self._continued = (run.conversation_id, time.monotonic())
         self._record(run)
         t = run.timings_ms()
-        self.log.info("voice satellite %s run %s: %s%s; ended by %s; %s", self.name, run.id, run.outcome,
+        reply = (f"; reply {run.reply_mode}" + (f" ({run.streamed_sentences} sentences early)"
+                                                 if run.streamed_sentences else "")) if run.reply_mode else ""
+        self.log.info("voice satellite %s run %s: %s%s; ended by %s%s%s; %s", self.name, run.id, run.outcome,
                       f" ({run.error['code']})" if run.error else "", run.ended_by or "-",
+                      "; follow-up" if run.follow_up else "", reply,
                       " ".join(f"{k}={v}ms" for k, v in t.items()) or "no timings")
         if self.client is not None and self.subscribed:
             self._publish_satellite("idle")
@@ -1049,7 +1507,14 @@ class SatelliteVoice:
         """Stream the node's audio to speech to text until the person stops talking."""
         queue = self._audio
         assert queue is not None
-        vad = EnergyVAD(self.silence_seconds(), min_rms=settings.vad_min_rms)
+        detection = self.speech_detection()
+        factor = detection.threshold_factor * (FOLLOW_UP_THRESHOLD_FACTOR if run.follow_up else 1.0)
+        vad = EnergyVAD(self.silence_seconds(), min_rms=settings.vad_min_rms, min_speech_s=detection.min_speech_s,
+                        start_factor=factor, classifier=speech_classifier(settings.vad_engine, detection.webrtc_mode))
+        # A follow-up starts as the satellite stops speaking: its first moments (the reply's tail, the
+        # listening chime) go to neither the gate nor speech to text.
+        holdoff = int(settings.followup_holdoff_s * BYTES_PER_S) if run.follow_up else 0
+        holdoff -= holdoff % 2
         loop = asyncio.get_running_loop()
         started = loop.time()
         gain = float(getattr(self._audio_settings, "volume_multiplier", 1.0) or 1.0)
@@ -1072,6 +1537,12 @@ class SatelliteVoice:
             if chunk is None:
                 run.ended_by = "satellite"
                 break
+            if holdoff > 0:
+                skipped = min(holdoff, len(chunk))
+                holdoff -= skipped
+                chunk = chunk[skipped:]
+                if not chunk:
+                    continue
             chunk = _gain(chunk, gain)
             await stt.send(boost.apply(chunk))
             for edge in vad.process(chunk):
@@ -1087,7 +1558,8 @@ class SatelliteVoice:
             run.heard = vad.heard()
         run.speech_ms = vad.speech_frames * EnergyVAD.FRAME_MS
         run.levels = {"peak_rms": round(vad.peak_rms), "noise_floor": round(vad.floor),
-                      "speech_threshold": round(vad.threshold()), "input_gain": round(boost.max_applied, 1)}
+                      "speech_threshold": round(vad.start_threshold()), "input_gain": round(boost.max_applied, 1),
+                      "detector": vad.engine, "not_speech_ms": vad.rejected_frames * EnergyVAD.FRAME_MS}
         self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_VAD_END, {})
 
     def _context(self, run: Run) -> dict[str, Any]:
@@ -1186,6 +1658,9 @@ class SatelliteVoice:
             if self.is_satellite else None,
             "enabled": self.enabled, "subscribed": self.subscribed,
             "finished_speaking_s": self.silence_seconds(),
+            "speech_detection": self._select_state("speech_detection", SPEECH_DETECTION),
+            "min_speech_s": self.speech_detection().min_speech_s,
+            "reply": "whole" if self.flags & int(VoiceAssistantFeature.SPEAKER) else "stream",
             "wake_words": {"available": list(self.wake_words.values()),
                            "active": [self.wake_words.get(w, w) for w in self.active_wake_words],
                            "max_active": self.max_active_wake_words, "error": self.wake_word_error},
@@ -1208,5 +1683,6 @@ def satellites(hub: Any) -> list[dict[str, Any]]:
     return sorted(out, key=lambda s: s["title"] or "")
 
 
-__all__ = ["BACKENDS", "Backends", "EnergyVAD", "InputGain", "PipelineError", "SatelliteVoice", "VoiceSettings",
-           "WyomingSTT", "ask_jarvis", "chat_reply_text", "current_settings", "satellites", "to_satellite_pcm"]
+__all__ = ["BACKENDS", "SPEECH_DETECTION", "Backends", "EnergyVAD", "InputGain", "PipelineError", "SatelliteVoice",
+           "SpeechDetection", "VoiceSettings", "WyomingSTT", "ask_jarvis", "ask_jarvis_stream", "chat_reply_text",
+           "current_settings", "read_speech_stream", "satellites", "speech_classifier", "to_satellite_pcm"]

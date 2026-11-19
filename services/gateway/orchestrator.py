@@ -687,7 +687,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     else:
         # Librarian handles standard single-turn inference
         try:
-            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note)
+            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")))
         except InferenceUnavailable as exc:
             # A mission and the voice assistant have no status code to report
             # on: the answer field is the only channel they have, so the old
@@ -1766,8 +1766,11 @@ def _speaker_line(creds: ResolvedCredentials | None) -> str:
     return f"Speaker: {user}{how}."
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "") -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False) -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
+
+    ``speech_stream`` (a voice satellite) sends ``chunk_callback`` only whole sentences that are safe
+    to say before the answer is finished (``speech_stream.SpeechGate``), never raw model words.
 
     ``event_callback`` receives the turn as it happens, in the part shapes a
     session transcript stores (OpenCode's message parts): ``step``,
@@ -1839,6 +1842,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     #: Every device tool run in this turn, with its result: what an answer may claim (device_claims).
     device_runs: list[tuple[str, str]] = []
+    gate = None
+    if speech_stream and chunk_callback and not event_callback:
+        from services.gateway.speech_stream import SpeechGate
+
+        gate = SpeechGate(chunk_callback, query)
 
     for turn in range(MAX_TURNS):
         log.info(f"[_single_turn_inference] Turn {turn + 1}/{MAX_TURNS}")
@@ -1860,8 +1868,12 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             turn_callback = chunk_callback
         if event_callback:
             turn_callback = _step_stream(turn + 1)
+        if gate is not None:
+            turn_callback = gate.feed
 
         for retry_count in range(MAX_INFERENCE_RETRIES):
+            if gate is not None:
+                await gate.begin_turn()
             try:
                 data = await call_ollama(
                     {
@@ -1921,7 +1933,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 continue
 
             # No tool call; this is our final answer
-            if chunk_callback and turn == 0:
+            if chunk_callback and turn == 0 and gate is None:
                 clean_ans = strip_json_from_response(ans)
                 from services.gateway.llm_providers import strip_thinking_blocks
                 clean_ans = honest_reply(query, strip_thinking_blocks(clean_ans), device_runs)
@@ -2086,8 +2098,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         if turn == MAX_TURNS - 1:
             if event_callback:
                 await event_callback({"type": "step", "n": "final"})
+            if gate is not None:
+                await gate.begin_turn()
             closing = await _closing_turn(messages, model, options,
-                                          _step_stream("final") if event_callback else chunk_callback, tool_result)
+                                          _step_stream("final") if event_callback
+                                          else (gate.feed if gate is not None else chunk_callback), tool_result)
             return honest_reply(query, closing, device_runs)
 
     # Final answer processing: strip JSON/thinking artifacts for clean natural language

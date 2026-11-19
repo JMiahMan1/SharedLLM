@@ -23,12 +23,19 @@ fails the call and says which. ``voices()`` lists both kinds for the automation 
 """
 from __future__ import annotations
 
+import array
+import asyncio
 import base64
+import io
 import logging
 import os
 import re
 import secrets
+import struct
+import sys
 import time
+import wave
+from collections.abc import AsyncIterator
 from typing import Any
 
 import aiohttp
@@ -278,6 +285,137 @@ def register(hub: Hub) -> None:
 
 def reset() -> None:
     _clips.clear()
+    _streams.clear()
 
 
-__all__ = ["clip", "make_clip", "register", "speak", "synthesize", "voices"]
+# -- a reply spoken as it is written ------------------------------------------------------------------
+#: The pause put between two sentences of a streamed reply (each sentence is its own synthesis).
+SENTENCE_GAP_S = 0.12
+#: The size a WAV header gives while the stream is still growing: "to the end of the stream".
+_OPEN_SIZE = 0xFFFFFFFF
+
+
+def wav_pcm(audio: bytes, rate: int | None = None) -> tuple[bytes, int]:
+    """A WAV clip as mono 16-bit PCM, resampled to ``rate`` when given; returns ``(pcm, rate)``."""
+    try:
+        with wave.open(io.BytesIO(audio)) as w:
+            src_rate, width, channels = w.getframerate(), w.getsampwidth(), w.getnchannels()
+            frames = w.readframes(w.getnframes())
+    except (wave.Error, EOFError) as exc:
+        raise HubError(f"the spoken audio is not a WAV clip: {exc}") from exc
+    if width != 2:
+        raise HubError(f"the spoken audio is {width * 8}-bit; a streamed reply needs 16-bit")
+    samples = array.array("h")
+    samples.frombytes(frames[: len(frames) - len(frames) % 2])
+    if sys.byteorder == "big":
+        samples.byteswap()
+    if channels > 1:
+        samples = array.array("h", (sum(samples[i:i + channels]) // channels
+                                    for i in range(0, len(samples) - channels + 1, channels)))
+    out_rate = rate or src_rate
+    if out_rate != src_rate and samples:
+        n = max(1, int(len(samples) * out_rate / src_rate))
+        step = (len(samples) - 1) / max(1, n - 1)
+        resampled = array.array("h")
+        for i in range(n):
+            pos = i * step
+            j = int(pos)
+            nxt = samples[min(j + 1, len(samples) - 1)]
+            resampled.append(int(samples[j] + (nxt - samples[j]) * (pos - j)))
+        samples = resampled
+    if sys.byteorder == "big":
+        samples.byteswap()
+    return samples.tobytes(), out_rate
+
+
+def wav_header(rate: int, data_bytes: int | None) -> bytes:
+    """A 16-bit mono WAV header; ``None`` bytes of data means a stream whose end is not known yet."""
+    size = _OPEN_SIZE if data_bytes is None else data_bytes
+    riff = _OPEN_SIZE if data_bytes is None else 36 + data_bytes
+    return (b"RIFF" + struct.pack("<I", riff) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+            + b"data" + struct.pack("<I", size))
+
+
+class ClipStream:
+    """A spoken reply that grows a sentence at a time, served as one WAV at ``/api/tts_stream/<token>.wav``.
+
+    The first sentence decides the sample rate; later ones are resampled to it. A reader gets the
+    header once the first sentence is in, then every sentence as it arrives, and the end of the
+    stream when ``close`` is called. A reader that starts after the end gets the WAV with its real
+    length. Every reader reads from the start, so a speaker that fetches twice hears it all.
+    """
+
+    def __init__(self) -> None:
+        self.rate: int | None = None
+        self.parts: list[bytes] = []
+        self.closed = False
+        self._changed = asyncio.Event()
+
+    def _notify(self) -> None:
+        self._changed.set()
+        self._changed = asyncio.Event()
+
+    def append(self, audio: bytes) -> float:
+        """Add one sentence's WAV clip; returns its length in seconds."""
+        if self.closed:
+            raise HubError("the streamed reply has already ended")
+        pcm, rate = wav_pcm(audio, self.rate)
+        if self.rate is None:
+            self.rate = rate
+        elif self.parts:
+            self.parts.append(b"\x00\x00" * int(self.rate * SENTENCE_GAP_S))
+        self.parts.append(pcm)
+        self._notify()
+        return len(pcm) / 2 / rate
+
+    def close(self) -> None:
+        if not self.closed:
+            self.closed = True
+            self._notify()
+
+    @property
+    def empty(self) -> bool:
+        return not self.parts
+
+    async def body(self) -> AsyncIterator[bytes]:
+        while self.rate is None and not self.closed:
+            await self._changed.wait()
+        if self.rate is None:
+            return
+        yield wav_header(self.rate, sum(len(p) for p in self.parts) if self.closed else None)
+        sent = 0
+        while True:
+            while sent < len(self.parts):
+                yield self.parts[sent]
+                sent += 1
+            if self.closed:
+                return
+            await self._changed.wait()
+
+
+_streams: dict[str, tuple[float, ClipStream]] = {}
+
+
+def open_stream() -> tuple[str, ClipStream]:
+    """A new growing reply and the URL a speaker fetches it at (fetchable until ``KEEP_S`` after it opened)."""
+    base = _base_url()
+    now = time.monotonic()
+    for t in [t for t, (exp, _) in _streams.items() if exp < now]:
+        _streams.pop(t, None)
+    token = secrets.token_urlsafe(24)
+    clip_stream = ClipStream()
+    _streams[token] = (now + KEEP_S, clip_stream)
+    return f"{base}/api/tts_stream/{token}.wav", clip_stream
+
+
+def stream(token: str) -> ClipStream | None:
+    """The growing reply behind a stream token, while it is fresh."""
+    item = _streams.get(token)
+    if item is None or item[0] < time.monotonic():
+        _streams.pop(token, None)
+        return None
+    return item[1]
+
+
+__all__ = ["ClipStream", "clip", "make_clip", "open_stream", "register", "speak", "stream", "synthesize", "voices",
+           "wav_pcm"]

@@ -268,6 +268,8 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
             res["debug_context"] = debug_context
         return JSONResponse(res)
 
+    reply_voice = _REPLY_VOICE.get()
+
     async def gen():
         msg: dict[str, Any] = {"role": "assistant", "content": message}
         if thinking:
@@ -278,12 +280,14 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
             "message": msg,
             "done": False
         }
+        if reply_voice:
+            chunk["voice"] = reply_voice
         yield json.dumps(chunk) + "\n"
         yield json.dumps({"model": model, "done": True}) + "\n"
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
-def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: str | None = None):
+def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: str | None = None, **extra: Any):
     msg: dict[str, Any] = {"role": "assistant", "content": content}
     if thinking:
         msg["thinking"] = thinking
@@ -291,7 +295,8 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: s
         "model": model,
         "created_at": datetime.now().isoformat() + "Z",
         "message": msg,
-        "done": done
+        "done": done,
+        **{k: v for k, v in extra.items() if v is not None},
     }
 
 
@@ -3643,6 +3648,52 @@ def _voice_context_note(ctx: dict) -> str:
     return ("\n\n[Voice context]\n" + "\n".join(lines)) if lines else ""
 
 
+async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
+    """A voice satellite's answer as NDJSON: safe sentences as they are written, then what is left.
+
+    Each sentence is a chunk with ``"speech": true`` (``speech_stream.SpeechGate`` chose it). The last
+    chunk (``done``) carries the whole ``reply`` and ``speech_rest``, the part of it not yet said
+    (``speech_stream.speech_rest``), or ``error`` when the job failed. Every chunk names the reply's
+    ``voice`` when the gateway chose one.
+    """
+    from services.gateway.speech_stream import speech_rest
+
+    assert job_queue is not None, "Job queue not initialized"
+    spoken: list[str] = []
+    while True:
+        job = await job_queue.get_job_status(job_id)
+        if not job:
+            yield json.dumps(_make_ollama_chunk("", model, True, error="the job was lost", voice=reply_voice)) + "\n"
+            return
+        for chunk in await job_queue.get_chunks(job_id):
+            try:
+                parsed = json.loads(chunk) if isinstance(chunk, str) and chunk.startswith('{"type":') else None
+            except ValueError:
+                parsed = None
+            if not isinstance(parsed, dict):
+                continue  # only the gate's chunks are safe to say
+            if parsed.get("type") == "speech_turn":
+                spoken.clear()
+            elif parsed.get("type") == "speech" and str(parsed.get("text") or "").strip():
+                text = str(parsed["text"]).strip()
+                spoken.append(text)
+                yield json.dumps(_make_ollama_chunk(text, model, speech=True, voice=reply_voice)) + "\n"
+        if job["status"] == JobStatus.COMPLETED:
+            ans = job.get("result")
+            reply = str(ans) if ans is not None else ""
+            if isinstance(ans, str):
+                _thinking, reply = extract_thinking_and_content(ans)
+            reply = reply.strip()
+            yield json.dumps(_make_ollama_chunk("", model, True, reply=reply, speech_rest=speech_rest(reply, spoken),
+                                                voice=reply_voice)) + "\n"
+            return
+        if job["status"] == JobStatus.FAILED:
+            err = str(job.get("error") or "Job failed")
+            yield json.dumps(_make_ollama_chunk("", model, True, error=err, voice=reply_voice)) + "\n"
+            return
+        await asyncio.sleep(0.05)
+
+
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
@@ -3676,6 +3727,8 @@ async def chat_handler(request: Request, background_tasks=None):
 
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
+    # Only with a voice context (an internal caller's satellite) and only in Ollama's shape.
+    speech_stream = bool(body.get("speech_stream")) and bool(should_stream) and not is_openai and bool(voice_context)
     explicit_model = str(body.get("model") or "").strip()
     show_thinking = body.get("show_thinking", False) or body.get("think", False)
 
@@ -4366,6 +4419,9 @@ async def chat_handler(request: Request, background_tasks=None):
         "grounded": grounded,
         "show_thinking": show_thinking,
         "is_openai": is_openai,
+        # A voice satellite speaking the answer as it is written: only safe whole sentences are
+        # streamed (speech_stream.py), and the end of the stream says what is left to say.
+        "speech_stream": speech_stream,
     }
 
     assert job_queue is not None, "Job queue not initialized"
@@ -4381,6 +4437,9 @@ async def chat_handler(request: Request, background_tasks=None):
         is_standard_client = True
 
     if is_standard_client:
+        if should_stream and speech_stream:
+            return StreamingResponse(_speech_stream_gen(job_id, selected_model, _REPLY_VOICE.get()),
+                                     media_type="application/x-ndjson")
         if should_stream:
             async def standard_stream_gen():
                 last_pos = -1

@@ -103,7 +103,7 @@ def _error(status: int, message: str) -> JSONResponse:
 #: Each of these filters or checks by entity (``Principal.may_view`` / ``may_control``).
 LIMITED_PATHS = ("/api/", "/api/config", "/api/states", "/api/services", "/api/events", "/api/history/period",
                  "/api/logbook", "/api/camera_proxy/", "/api/image_proxy/", "/api/camera_proxy_stream/",
-                 "/api/config/entity_registry", "/api/mobile_app/registrations", "/api/tts_proxy/", "/api/webhook/",
+                 "/api/config/entity_registry", "/api/mobile_app/registrations", "/api/tts_proxy/", "/api/tts_stream/", "/api/webhook/",
                  "/api/websocket", "/auth/")
 #: WebSocket commands a limited user may send besides the core ones api.py checks itself.
 LIMITED_WS = {"auth/current_user", "mobile_app/push_notification_channel", "mobile_app/push_notification_confirm",
@@ -502,6 +502,24 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             return _error(404, "Not found")
         return clip_response(audio, "audio/wav", request.headers.get("range"), head=request.method == "HEAD",
                              headers={"Cache-Control": "no-store"})
+
+    @api.api_route("/api/tts_stream/{name}", methods=["GET", "HEAD"])
+    async def tts_stream(name: str, request: Request) -> Response:
+        """A spoken reply that grows a sentence at a time (``tts.ClipStream``), as one WAV.
+
+        A voice satellite starts playing it while the rest of the answer is still being written. The
+        unguessable token is the credential, as for ``/api/tts_proxy/``. No ``Range``: the length is
+        not known until the reply ends.
+        """
+        from services.homehub import tts
+
+        clip_stream = tts.stream(name.rsplit(".", 1)[0])
+        if clip_stream is None or (clip_stream.closed and clip_stream.empty):
+            return _error(404, "Not found")
+        headers = {"Cache-Control": "no-store"}
+        if request.method == "HEAD":
+            return Response(b"", media_type="audio/wav", headers=headers)
+        return StreamingResponse(clip_stream.body(), media_type="audio/wav", headers=headers)
 
     @api.api_route("/api/esphome/ffmpeg_proxy/{device}/{name}", methods=["GET", "HEAD"])
     async def esphome_ffmpeg_proxy(device: str, name: str, request: Request) -> Response:

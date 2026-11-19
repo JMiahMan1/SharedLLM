@@ -7,6 +7,9 @@ pyjwt>=2.9.0
 astral>=3.2
 zeroconf>=0.154.0
 aioesphomeapi>=46.28.0
+# Voice satellites (voice_pipeline.py): WebRTC's speech detector filters what starts a command (a chime,
+# a knock). A few KB of C with no model to fetch; the same pin execution uses. Without it, loudness alone.
+webrtcvad-wheels==2.0.14.post1
 aiohomekit>=4.0.1
 pychromecast>=14.1.1
 aiowebostv>=0.10.0
