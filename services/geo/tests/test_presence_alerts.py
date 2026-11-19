@@ -267,7 +267,8 @@ async def test_an_important_place_is_a_safety_notice_for_the_chosen_people(world
     monkeypatch.setattr(geo, "_tracked_users", tracked)
     monkeypatch.setattr(geo, "_viewer_may_see", may_see)
     r = R()
-    await geo.safety.save_place_setting(r, "zone.work", True, ["Sam", "kate"])
+    # Important, and who hears, are kept with the place on HomeHub.
+    geo._zone_cache.update({"at": time.time(), "zones": [HOME, {**WORK, "important": True, "notify": ["sam", "kate"]}]})
     t = time.time()
     await geo._presence_transition(r, "leo", 39.8225, -105.1257, t)
     await geo._presence_transition(r, "leo", 39.8725, -105.2257, t + 60)
@@ -283,7 +284,7 @@ async def test_an_important_place_is_a_safety_notice_for_the_chosen_people(world
 @pytest.mark.asyncio
 async def test_an_important_place_is_family_safety_for_everyone_when_none_chosen(world):
     r = R()
-    await geo.safety.save_place_setting(r, "zone.work", True, [])
+    geo._zone_cache.update({"at": time.time(), "zones": [HOME, {**WORK, "important": True, "notify": []}]})
     t = time.time()
     await geo._presence_transition(r, "alex", 39.8725, -105.2257, t)
     await geo._presence_transition(r, "alex", 39.8225, -105.1257, t + 60)

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Crosshair, MapPin, Pencil, Plus, ShieldAlert, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -8,6 +9,8 @@ import { confirmDialog } from '../ui/confirmDialog';
 import Toggle from '../ui/Toggle';
 import type { SavedPlace, SavedPlaceInput, VisitSuggestion } from '../../types/api';
 import { PLACE_KINDS, placeKind, placePinHtml } from '../../lib/avatarMarker';
+import { PLACES_ADMIN_LINK } from '../../lib/homeSetup';
+import { useIntegrations } from '../../hooks/useIntegrations';
 
 export interface PlaceSetting {
   id: string;
@@ -26,10 +29,10 @@ export interface PlaceMember {
 interface Props {
   places: PlaceSetting[];
   members: PlaceMember[];
-  /** Whether the viewer may change the Home Assistant place settings
+  /** Whether the viewer may change the household places' settings
    *  (admins only; the server refuses everyone else). */
   canEdit: boolean;
-  /** Called after a Home Assistant place is saved, so the caller can reload. */
+  /** Called after a household place is saved, so the caller can reload. */
   onSaved: () => void;
   /** The signed-in person, so their own saved places can be edited. */
   currentUser: string;
@@ -80,7 +83,7 @@ function IconPicker({ name, value, disabled, onChange }: { name: string; value: 
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="glass-input min-h-11 min-w-0 max-w-full px-2 text-xs sm:min-h-9"
+        className="glass-input min-h-11 min-w-0 max-w-full px-2 text-xs"
       >
         <option value="">Automatic</option>
         {PLACE_KINDS.map((k) => (
@@ -104,20 +107,25 @@ function minutesLabel(seconds: number): string {
 }
 
 /**
- * The family's places, in two kinds.
+ * The family's places, all kept on the home hub (HomeHub), in two kinds.
  *
- * Home Assistant zones (a school, a grandparent's house) are drawn in Home
- * Assistant; an admin marks one important so arriving or leaving becomes a
- * family safety notice to the people picked, or everyone who may see the
- * person. Places saved here are added from Wander: one shared family list plus
- * each person's own private places, and whoever adds one owns it.
+ * Home and the household's zones (a school, a grandparent's house) are drawn
+ * by an admin on Devices > Rooms & places; an admin marks one important so
+ * arriving or leaving becomes a family safety notice to the people picked, or
+ * everyone who may see the person. Places saved here are added from Wander:
+ * one shared family list plus each person's own private places, and whoever
+ * adds one owns it. With no home hub there are no places at all.
  */
 export default function PlacesPanel({ places, members, canEdit, onSaved, currentUser, isAdmin }: Props) {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
 
-  const savedQuery = useQuery<SavedPlace[]>({ queryKey: ['saved-places'], queryFn: api.getSavedPlaces });
+  const integrations = useIntegrations();
+  const noHub = integrations.settled && !integrations.homehub;
+  const savedQuery = useQuery<SavedPlace[]>({
+    queryKey: ['saved-places'], queryFn: api.getSavedPlaces, enabled: integrations.homehub, retry: false,
+  });
   const suggestionsQuery = useQuery<VisitSuggestion[]>({ queryKey: ['visit-suggestions'], queryFn: api.getVisitSuggestions });
   const savedPlaces = savedQuery.data ?? [];
   const suggestions = suggestionsQuery.data ?? [];
@@ -208,6 +216,24 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
       d ? { ...d, notify: d.notify.includes(username) ? d.notify.filter((u) => u !== username) : [...d.notify, username] } : d,
     );
 
+  if (noHub) {
+    return (
+      <div id="wander-places" className="glass-panel scroll-mt-4 space-y-2 rounded-2xl border border-white/5 p-4" data-testid="places-panel">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <MapPin size={15} className="text-purple-400" /> Places
+        </h3>
+        <p className="text-xs text-slate-400" data-testid="places-need-hub">
+          Places live on the home hub, which is not connected, so there are none to show.{' '}
+          {isAdmin ? (
+            <Link to="/identity" className="inline-flex min-h-11 items-center text-purple-300 underline">Connect HomeHub in Accounts &amp; Integrations</Link>
+          ) : (
+            'Ask an admin to connect it.'
+          )}
+        </p>
+      </div>
+    );
+  }
+
   const showPanel = places.length > 0 || savedPlaces.length > 0 || suggestions.length > 0 || draft !== null;
   if (!showPanel) return null;
 
@@ -235,15 +261,22 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
   );
 
   return (
-    <div className="glass-panel space-y-4 rounded-2xl border border-white/5 p-4" data-testid="places-panel">
+    <div id="wander-places" className="glass-panel scroll-mt-4 space-y-4 rounded-2xl border border-white/5 p-4" data-testid="places-panel">
       <div>
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <MapPin size={15} className="text-purple-400" /> Places
         </h3>
-        <p className="mt-1 text-xs text-slate-500">
-          {canEdit
-            ? 'Mark a place important to get a safety alert when someone arrives or leaves. Places from the home hub are drawn there; the ones you add here live in Wander.'
-            : 'Arriving at or leaving an important place sends a safety alert. You can add your own places here.'}
+        <p className="mt-1 text-xs text-slate-500" data-testid="places-help">
+          {canEdit ? (
+            <>
+              Mark a place important to get a safety alert when someone arrives or leaves. Home and the household&apos;s
+              zones are drawn on{' '}
+              <Link to={PLACES_ADMIN_LINK} className="inline-flex min-h-11 items-center text-purple-300 underline">Devices &gt; Rooms &amp; places</Link>;
+              the ones you add here are yours, shared with the family or just for you.
+            </>
+          ) : (
+            'Arriving at or leaving an important place sends a safety alert. You can add your own places here, shared with the family or just for you.'
+          )}
         </p>
       </div>
 
@@ -299,7 +332,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
             type="button"
             data-testid="add-place"
             onClick={() => setDraft({ ...EMPTY_DRAFT })}
-            className="max-sm:min-h-11 glass-button flex min-h-9 items-center gap-1.5 px-3 text-xs text-slate-300"
+            className="glass-button flex min-h-11 items-center gap-1.5 px-3 text-xs text-slate-300"
           >
             <Plus size={14} /> Add place
           </button>
@@ -338,7 +371,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                             icon: place.icon ?? '',
                           })
                         }
-                        className="glass-button flex h-11 w-11 items-center justify-center p-0 text-slate-300 sm:h-9 sm:w-9"
+                        className="glass-button flex h-11 w-11 items-center justify-center p-0 text-slate-300"
                       >
                         <Pencil size={14} />
                       </button>
@@ -350,7 +383,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                             removePlace.mutate(place);
                           }
                         }}
-                        className="glass-button flex h-11 sm:h-9 w-11 sm:w-9 items-center justify-center p-0 text-rose-300"
+                        className="glass-button flex h-11 w-11 items-center justify-center p-0 text-rose-300"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -401,7 +434,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                 placeholder="Longitude"
                 className="glass-input w-full min-w-0 flex-1 px-2 py-1 text-sm sm:w-32"
               />
-              <button type="button" onClick={useMyLocation} className="max-sm:min-h-11 glass-button flex min-h-9 items-center gap-1.5 px-2 text-xs text-slate-300">
+              <button type="button" onClick={useMyLocation} className="glass-button flex min-h-11 items-center gap-1.5 px-2 text-xs text-slate-300">
                 <Crosshair size={13} /> Use mine
               </button>
             </div>
@@ -420,7 +453,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                     type="button"
                     aria-pressed={draft.scope === scope}
                     onClick={() => setDraft({ ...draft, scope })}
-                    className={`max-sm:min-h-11 min-h-9 rounded-full border px-3 text-xs ${
+                    className={`min-h-11 rounded-full border px-3 text-xs ${
                       draft.scope === scope
                         ? 'border-purple-400/60 bg-purple-500/20 text-purple-100'
                         : 'border-white/10 text-slate-400 hover:text-slate-200'
@@ -446,11 +479,11 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                 type="button"
                 onClick={submitDraft}
                 disabled={savePlace.isPending}
-                className="max-sm:min-h-11 glass-button min-h-9 px-3 text-xs text-emerald-200 disabled:opacity-60"
+                className="glass-button min-h-11 px-3 text-xs text-emerald-200 disabled:opacity-60"
               >
                 {draft.id ? 'Save place' : 'Add place'}
               </button>
-              <button type="button" onClick={() => setDraft(null)} className="max-sm:min-h-11 glass-button min-h-9 px-3 text-xs text-slate-400">
+              <button type="button" onClick={() => setDraft(null)} className="glass-button min-h-11 px-3 text-xs text-slate-400">
                 Cancel
               </button>
             </div>
@@ -489,7 +522,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                         important: true,
                       })
                     }
-                    className="max-sm:min-h-11 glass-button min-h-9 px-3 text-xs text-emerald-200"
+                    className="glass-button min-h-11 px-3 text-xs text-emerald-200"
                   >
                     Add as a place
                   </button>
@@ -497,7 +530,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                     type="button"
                     aria-label={`Not a place: ${spot.place}`}
                     onClick={() => dismiss.mutate(spot)}
-                    className="max-sm:min-h-11 glass-button min-h-9 px-3 text-xs text-slate-400"
+                    className="glass-button min-h-11 px-3 text-xs text-slate-400"
                   >
                     Not a place
                   </button>

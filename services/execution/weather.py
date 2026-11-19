@@ -1,8 +1,9 @@
 """Household weather: the forecast, weather reminders and weather-vs-energy.
 
 The forecast comes from Open-Meteo (``services/common/weather.py``); this
-module decides *where* (the ``weather_location`` setting, else Home
-Assistant's ``zone.home``), caches it in Redis, and runs one loop every
+module decides *where* (the home hub's Home, ``zone.home``, which an admin
+moves on Devices > Rooms & places; the ``weather_location`` setting only on a
+setup with no home hub), caches it in Redis, and runs one loop every
 15 minutes that does three things:
 
 1. **Refreshes the home forecast** (``weather:forecast:*``, fresh for 15 min,
@@ -215,32 +216,36 @@ def parse_rules(raw: str | None, units: str = "imperial") -> list[dict]:
 # --------------------------------------------------------------------------
 
 _home_cache: tuple[float, dict | None] = (0.0, None)
-HOME_TTL_S = 3600
+#: How long Home's location is reused; moving Home shows in the forecast within this.
+HOME_TTL_S = 300
 
 
 async def home_location(cfg: dict | None = None) -> dict | None:
-    """The ``weather_location`` setting, else Home Assistant's ``zone.home``."""
+    """Where the household is: the home hub's Home (``zone.home``), the one home location.
+
+    The ``weather_location`` setting is only for a setup with no home hub at all; with a hub it is not
+    a second home (moving Home on Devices > Rooms & places moves the forecast too).
+    """
     global _home_cache
     cfg = cfg if cfg is not None else await settings()
-    chosen = parse_location(cfg.get(SETTING_LOCATION))
-    if chosen:
-        return {**chosen, "name": chosen["name"] or "Home"}
+    from services import config
+
+    if not config.any_home_hub():
+        chosen = parse_location(cfg.get(SETTING_LOCATION))
+        return {**chosen, "name": chosen["name"] or "Home"} if chosen else None
     if time.time() - _home_cache[0] < HOME_TTL_S and _home_cache[1]:
         return _home_cache[1]
-    from services import config
     from services.execution import ha_client, hardware_router
     from services.execution.main import resolve_first_user
 
-    if not config.any_home_hub():
-        # No home hub to ask for zone.home: only the weather_location setting places the home.
-        return _home_cache[1]
     hub_url, hub_token = hardware_router.hub_pair(await resolve_first_user() or {})
     if not hub_url or not hub_token:
         log.warning("[weather] no weather_location set and %s", hardware_router.NO_HUB_MESSAGE)
         return _home_cache[1]
     state = await ha_client.get_state(hub_url, hub_token, "zone.home", account="system account")
     attrs = (state or {}).get("attributes") or {}
-    loc = parse_location({"name": "Home", "latitude": attrs.get("latitude"), "longitude": attrs.get("longitude")})
+    loc = parse_location({"name": attrs.get("friendly_name") or "Home", "latitude": attrs.get("latitude"),
+                          "longitude": attrs.get("longitude")})
     if loc:
         _home_cache = (time.time(), loc)
     return loc or _home_cache[1]
@@ -714,7 +719,7 @@ async def forecast_route(latitude: float | None = None, longitude: float | None 
         if not loc:
             # 404, not 503: nothing to retry until an admin sets a location (the app
             # retries 503s), and the widget explains this case by its status.
-            raise HTTPException(status_code=404, detail="No home location: set one in Admin > Weather reminders or add a home zone on the home hub")
+            raise HTTPException(status_code=404, detail="No home location: an admin sets Home on Devices > Rooms & places (or, with no home hub, in Admin > Weather reminders)")
     fc = await forecast_for(loc, cfg, units=units if units in wx.UNITS else None)
     if not fc:
         raise HTTPException(status_code=502, detail="The weather service did not answer")

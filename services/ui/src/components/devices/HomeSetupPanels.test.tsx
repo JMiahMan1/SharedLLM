@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import AreasPanel from './AreasPanel';
 import LabelChips from './LabelChips';
 import PersonsPanel from './PersonsPanel';
@@ -13,7 +14,7 @@ vi.mock('../../lib/homeSetup', async (importOriginal) => {
     ...real,
     getAreas: vi.fn(), getFloors: vi.fn(), createArea: vi.fn(), updateArea: vi.fn(), deleteArea: vi.fn(),
     createFloor: vi.fn(), updateFloor: vi.fn(), deleteFloor: vi.fn(),
-    getZones: vi.fn(), createZone: vi.fn(), updateZone: vi.fn(), deleteZone: vi.fn(), syncZones: vi.fn(),
+    getZones: vi.fn(), createZone: vi.fn(), updateZone: vi.fn(), deleteZone: vi.fn(), updateHome: vi.fn(),
     getPersons: vi.fn(), createPerson: vi.fn(), updatePerson: vi.fn(), deletePerson: vi.fn(),
   };
 });
@@ -31,7 +32,7 @@ const m = vi.mocked(setup);
 
 function wrap(ui: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(<MemoryRouter><QueryClientProvider client={client}>{ui}</QueryClientProvider></MemoryRouter>);
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -90,27 +91,61 @@ describe('LabelChips', () => {
   });
 });
 
+const HOME: setup.Zone = { id: 'home', entity_id: 'zone.home', name: 'Home', latitude: 10, longitude: 20, radius: 100,
+  passive: false, icon: 'mdi:home', source: 'home', editable: true, removable: false, owner_name: null,
+  visibility: 'family' };
+const SAVED: setup.Zone = { id: 'a1', entity_id: 'zone.pond', name: 'Pond', latitude: 1, longitude: 2, radius: 150,
+  passive: false, icon: null, source: 'hub', editable: true, removable: true, owner_name: 'sky', visibility: 'family' };
+
 describe('ZonesPanel', () => {
-  it('shows saved places read-only and refuses a zone with no radius before sending it', async () => {
-    m.getZones.mockResolvedValue([
-      { id: 'geo_1', entity_id: 'zone.field', name: 'Field', latitude: 1, longitude: 2, radius: 100, passive: false,
-        icon: null, source: 'geo', editable: false },
-    ]);
+  it('moves Home but never offers to remove it', async () => {
+    m.getZones.mockResolvedValue([HOME, SAVED]);
+    m.updateHome.mockResolvedValue({ ...HOME, latitude: 11, longitude: 21, radius: 250 });
+    wrap(<ZonesPanel />);
+    const home = await screen.findByTestId('zone-home');
+    expect(within(home).getByTestId('home-note')).toHaveTextContent('Home cannot be removed');
+    expect(within(home).queryByRole('button', { name: 'Remove Home' })).toBeNull();
+    fireEvent.click(within(home).getByRole('button', { name: 'Edit Home' }));
+    const editor = within(home).getByTestId('home-editor');
+    expect(within(editor).queryByRole('checkbox')).toBeNull(); // Home is never passive
+    fireEvent.change(within(editor).getByLabelText('Latitude'), { target: { value: '11, 21' } });
+    fireEvent.change(within(editor).getByLabelText('Radius (metres)'), { target: { value: '250' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save Home' }));
+    await waitFor(() => expect(m.updateHome).toHaveBeenCalledWith(
+      { name: 'Home', latitude: 11, longitude: 21, radius: 250 }));
+    expect(m.updateZone).not.toHaveBeenCalled();
+  });
+
+  it('shows who saved a place in Wander, and edits and removes it like any zone', async () => {
+    m.getZones.mockResolvedValue([HOME, SAVED]);
+    m.deleteZone.mockResolvedValue({ entity_id: 'zone.pond' });
+    wrap(<ZonesPanel />);
+    const zone = await screen.findByTestId('zone');
+    expect(zone).toHaveTextContent('Saved in Wander by sky');
+    expect(within(zone).getByRole('link', { name: /Wander > Places/ })).toHaveAttribute('href', '/wander#wander-places');
+    expect(within(zone).getByRole('button', { name: 'Edit Pond' })).toBeInTheDocument();
+    fireEvent.click(within(zone).getByRole('button', { name: 'Remove Pond' }));
+    await waitFor(() => expect(m.deleteZone).toHaveBeenCalledWith('a1'));
+    expect(screen.queryByRole('button', { name: /Saved places/ })).toBeNull(); // no mirror to follow any more
+  });
+
+  it('refuses a zone with no radius before sending it', async () => {
+    m.getZones.mockResolvedValue([HOME]);
     m.createZone.mockResolvedValue({ id: 'z', entity_id: 'zone.park', name: 'Park', latitude: 1, longitude: 2, radius: 50,
       passive: false, icon: null, source: 'hub', editable: true });
     wrap(<ZonesPanel />);
-    const zone = await screen.findByTestId('zone');
-    expect(within(zone).queryByRole('button', { name: /Edit/ })).toBeNull();
+    await screen.findByTestId('zone-home');
     fireEvent.click(screen.getByRole('button', { name: 'New zone' }));
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Park' } });
-    fireEvent.change(screen.getByLabelText('Latitude'), { target: { value: '1, 2' } });
-    expect(screen.getByLabelText('Longitude')).toHaveValue('2');
-    fireEvent.change(screen.getByLabelText('Radius (metres)'), { target: { value: '' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add zone' }));
+    const editor = screen.getByTestId('zone-editor');
+    fireEvent.change(within(editor).getByLabelText('Name'), { target: { value: 'Park' } });
+    fireEvent.change(within(editor).getByLabelText('Latitude'), { target: { value: '1, 2' } });
+    expect(within(editor).getByLabelText('Longitude')).toHaveValue('2');
+    fireEvent.change(within(editor).getByLabelText('Radius (metres)'), { target: { value: '' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Add zone' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('The radius is 1 to 100000 metres.');
     expect(m.createZone).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Radius (metres)'), { target: { value: '50' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add zone' }));
+    fireEvent.change(within(editor).getByLabelText('Radius (metres)'), { target: { value: '50' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Add zone' }));
     await waitFor(() => expect(m.createZone).toHaveBeenCalledWith(
       { name: 'Park', latitude: 1, longitude: 2, radius: 50, passive: false }));
   });

@@ -47,10 +47,27 @@ def client(monkeypatch):
     monkeypatch.setattr(geo, "get_redis", redis)
     monkeypatch.setattr(geo, "INTERNAL_SECRET", "s3cret")
     c = TestClient(geo.app, headers={"X-Internal-Secret": "s3cret"})
-    r.h["geo:places"] = {
-        "p1": json.dumps({"id": "p1", "owner": "lee", "name": "Gym", "scope": "user"}),
-        "p2": json.dumps({"id": "p2", "owner": "max", "name": "Max's office", "scope": "family"}),
+    # Places live on HomeHub (services/geo/hub_places.py); a stand-in hub keeps them here.
+    hub = {
+        "p1": {"id": "p1", "entity_id": "place.p1", "owner": "lee", "name": "Gym", "private": True,
+               "latitude": 1.0, "longitude": 2.0, "radius": 100.0, "important": False, "notify": [], "pin": ""},
+        "p2": {"id": "p2", "entity_id": "zone.office", "owner": "max", "name": "Max's office", "private": False,
+               "latitude": 3.0, "longitude": 4.0, "radius": 100.0, "important": False, "notify": [], "pin": ""},
     }
+    r.hub = hub
+
+    async def fetch_all():
+        return list(hub.values())
+
+    async def import_places(places):
+        for p in places:
+            hub.setdefault(p["id"], {"id": p["id"], "entity_id": "place." + p["id"], "owner": p["owner"],
+                                     "name": p["name"], "private": p.get("scope") != "family",
+                                     "latitude": p["lat"], "longitude": p["lon"], "radius": p["radius"],
+                                     "important": p["important"], "notify": p["notify"], "pin": p["icon"]})
+
+    monkeypatch.setattr(geo.hub_places, "fetch_all", fetch_all)
+    monkeypatch.setattr(geo.hub_places, "import_places", import_places)
     trip = {"id": "t1", "user_id": "lee", "start_time": 100, "updated_at": 200, "distance_miles": 3.2,
             "is_shared": True, "shared_with": ["max"]}
     r.kv["geo:trip:t1"] = json.dumps(trip)
@@ -97,8 +114,22 @@ def test_restore_to_a_new_account_drops_sharing_and_avoids_taken_ids(client):
     restored = [json.loads(r.kv[f"geo:trip:{i}"]) for i in r.z["geo:trips:user:sky"]]
     assert all("shared_with" not in t for t in restored)
     assert all(t["user_id"] == "sky" for t in restored)
-    owners = {json.loads(v)["owner"] for v in r.h["geo:places"].values()}
+    owners = {p["owner"] for p in r.hub.values()}
     assert owners == {"lee", "max", "sky"}
+
+
+def test_with_no_homehub_places_are_skipped_not_kept_in_geo(client, monkeypatch):
+    c, r = client
+
+    async def unavailable():
+        raise geo.hub_places.PlacesUnavailable("HomeHub is not set up.")
+
+    data = c.get("/internal/account/export/lee").json()["collections"]
+    monkeypatch.setattr(geo.hub_places, "fetch_all", unavailable)
+    assert c.get("/internal/account/export/lee").json()["collections"]["places"] == []
+    out = c.post("/internal/account/import/sky", json={"collections": data, "dry_run": False}).json()["collections"]
+    assert out["places"]["skipped"] == 1 and "HomeHub" in out["places"]["errors"][0]
+    assert "geo:places" not in r.h
 
 
 def test_restore_never_overwrites_newer_without_asking(client):

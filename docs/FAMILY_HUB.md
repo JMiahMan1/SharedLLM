@@ -77,8 +77,10 @@ events"), and the tab no longer links out to `/calendar` or `/notes` either.
   reading wobbling around 15% or two phones on one account never repeat it
   the same day). The announcement runs after the location upload has been
   answered. Geo sends important places and long stops (GEO_SERVICE.md,
-  Notices). Only admins can mark places important (Wander's Places panel shows
-  the settings read only to everyone else).
+  Notices). Every place lives on the home hub (HomeHub). Only admins mark the
+  household's places important and draw zones or move Home (Devices > Rooms &
+  places); Wander's Places panel shows those settings read only to everyone
+  else, and anyone adds, changes and removes their own saved places there.
 - **Job notices** (category `jobs`): a finished song (with "expires in 30
   minutes"), Jarvis's improved drawing and a finished audiobook conversion
   notify whoever asked; the first two open `/family?tab=create`.

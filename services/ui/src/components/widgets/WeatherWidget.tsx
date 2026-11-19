@@ -116,7 +116,9 @@ export default function WeatherWidget({ settingsButton, userSettings }: IWidgetP
           <CloudOff size={28} className="text-slate-600" aria-hidden="true" />
           <p className="max-w-[16rem] text-xs text-slate-400" role="status">
             {noPlace
-              ? 'No home location for the forecast yet. An admin can set one in Admin > Weather reminders.'
+              ? anyHub
+                ? 'No home location for the forecast yet. An admin sets Home on Devices > Rooms & places.'
+                : 'No home location for the forecast yet. An admin can set one in Admin > Weather reminders.'
               : 'The forecast is unavailable right now. It will try again shortly.'}
           </p>
         </div>

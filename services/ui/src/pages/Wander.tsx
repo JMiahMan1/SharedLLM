@@ -1018,7 +1018,7 @@ const Wander = () => {
         )}
 
         <PlacesPanel
-          places={places.filter((p) => p.id.startsWith('zone.'))}
+          places={places.filter((p) => p.id.startsWith('zone.') && !p.custom)}
           members={familyMembers.map((m) => ({ username: m.id.replace(/^(person|user)\./, '').toLowerCase(), name: m.name }))}
           canEdit={Boolean(user?.is_admin)}
           currentUser={currentUsername}

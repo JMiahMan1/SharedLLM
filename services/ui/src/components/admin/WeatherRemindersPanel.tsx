@@ -1,9 +1,12 @@
 import { useState, type FC } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CloudRain, Send, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { SavedPlace, UserProfile } from '../../types/api';
 import { api } from '../../services/api';
+import { useIntegrations } from '../../hooks/useIntegrations';
+import { PLACES_ADMIN_LINK } from '../../lib/homeSetup';
 import EntitySearchDropdown from '../ui/EntitySearchDropdown';
 import HelpTooltip from '../ui/HelpTooltip';
 import { confirmDialog } from '../ui/confirmDialog';
@@ -64,7 +67,11 @@ const actionLabel = (a: WeatherAction) =>
 const placeKey = (loc: WeatherLocation | null | undefined) =>
   loc ? `${loc.latitude.toFixed(4)},${loc.longitude.toFixed(4)}` : 'home';
 
-/** Where the forecast is for, and its units; starts from the saved values. */
+/**
+ * Where the forecast is for, and its units; starts from the saved values. With a home hub the forecast is
+ * for Home (one home location, moved on Devices > Rooms & places), so only the units are chosen here; the
+ * latitude and longitude below are the home only on a setup with no hub.
+ */
 const ForecastPlaceForm: FC<{
   initial: WeatherSettings;
   saving: boolean;
@@ -74,6 +81,7 @@ const ForecastPlaceForm: FC<{
   const [lat, setLat] = useState(initial.location ? String(initial.location.latitude) : '');
   const [lon, setLon] = useState(initial.location ? String(initial.location.longitude) : '');
   const [units, setUnits] = useState<WeatherUnits>(initial.units);
+  const { anyHub } = useIntegrations();
 
   const fillFromDevice = () => {
     if (!navigator.geolocation) {
@@ -91,6 +99,10 @@ const ForecastPlaceForm: FC<{
   };
 
   const saveLocation = () => {
+    if (anyHub) {
+      onSave(initial.location ?? null, units);
+      return;
+    }
     if (!lat.trim() && !lon.trim()) {
       onSave(null, units);
       return;
@@ -106,9 +118,17 @@ const ForecastPlaceForm: FC<{
   return (
     <fieldset className="mb-6 rounded-xl border border-white/5 bg-black/20 p-3">
       <legend className="px-1 text-[11px] font-semibold text-slate-300">Forecast location and units</legend>
-      <p className="mb-3 text-[11px] text-slate-500">
-        Leave latitude and longitude empty to use the home hub&apos;s home zone.
-      </p>
+      {anyHub ? (
+        <p className="mb-3 text-[11px] text-slate-400" data-testid="forecast-is-home">
+          The forecast is for Home, the home hub&apos;s location. Move it on{' '}
+          <Link to={PLACES_ADMIN_LINK} className="inline-flex min-h-11 items-center text-purple-300 underline">Devices &gt; Rooms &amp; places</Link>.
+        </p>
+      ) : (
+        <p className="mb-3 text-[11px] text-slate-500">
+          With no home hub, this is the home location (the forecast, and the time zone when it is derived from it).
+        </p>
+      )}
+      {!anyHub && (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_120px_120px_auto]">
         <input
           value={locName}
@@ -141,6 +161,7 @@ const ForecastPlaceForm: FC<{
           Use mine
         </button>
       </div>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-xs text-slate-400">
           Units
@@ -160,7 +181,7 @@ const ForecastPlaceForm: FC<{
           onClick={saveLocation}
           className="glass-button px-4 py-2 text-[10px] font-black uppercase tracking-widest disabled:opacity-40 pointer-coarse:min-h-11"
         >
-          Save location
+          {anyHub ? 'Save units' : 'Save location'}
         </button>
       </div>
     </fieldset>

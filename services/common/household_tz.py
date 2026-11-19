@@ -8,9 +8,10 @@ asks this module, so one setting governs Jarvis and the hub. The order
    set by an admin in Settings > Household time zone.
 2. The ``TZ`` environment variable from ``.env`` (the older ``TIMEZONE``
    variable is read as an alias when ``TZ`` is unset).
-3. Derived from the household's home location (the ``weather_location``
-   setting, or Home Assistant's ``zone.home`` when the caller passes it), only
-   when the admin has turned on ``timezone_from_location``. Offline lookup
+3. Derived from the household's home location (the home hub's Home,
+   ``zone.home``, when the caller passes it, as HomeHub does; else the
+   ``weather_location`` setting, which is the home only on a setup with no hub),
+   only when the admin has turned on ``timezone_from_location``. Offline lookup
    with ``timezonefinder``.
 4. Otherwise :class:`HouseholdTimeZoneError`, whose message names all three.
 
@@ -45,7 +46,8 @@ HOW_TO_SET = (
     "Set the household time zone in Settings > Household time zone, "
     "or TZ in the server's .env (e.g. TZ=America/Denver), "
     "or turn on 'Derive from home location' with a home location set "
-    "(Admin > Weather reminders or Home Assistant's zone.home). See docs/CONFIG.md, 'Time zone'."
+    "(Home on the home hub, set on Devices > Rooms & places; with no hub, Admin > Weather reminders). "
+    "See docs/CONFIG.md, 'Time zone'."
 )
 
 
@@ -122,7 +124,9 @@ def resolve(
         problems.append(f"TZ {zone!r} is not a valid IANA time zone")
 
     if _truthy(settings.get(SETTING_DERIVE)):
-        point = _parse_location(settings.get(SETTING_LOCATION)) or _parse_location(home)
+        # The home hub's Home is the one home location when the caller knows it; the weather_location
+        # setting is the home only for a setup with no hub.
+        point = _parse_location(home) or _parse_location(settings.get(SETTING_LOCATION))
         if point is None:
             problems.append("'Derive from home location' is on but no home location is set")
         else:

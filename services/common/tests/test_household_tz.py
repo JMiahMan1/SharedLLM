@@ -52,6 +52,13 @@ def test_a_home_point_from_the_caller_counts_as_the_location(monkeypatch):
     assert htz.resolve({"timezone_from_location": "on"}, env={}, home={"latitude": 39.7, "longitude": -105.0})[0] == "America/Denver"
 
 
+def test_the_hubs_home_wins_over_the_weather_setting(monkeypatch):
+    monkeypatch.setattr(htz, "zone_from_location", lambda lat, lon: "America/Denver" if lat < 40 else "America/Chicago")
+    settings = {"timezone_from_location": "true", "weather_location": {"latitude": 41.0, "longitude": -88.0}}
+    assert htz.resolve(settings, env={}, home={"latitude": 39.7, "longitude": -105.0})[0] == "America/Denver"
+    assert htz.resolve(settings, env={})[0] == "America/Chicago"  # no hub: the setting is the home
+
+
 def test_derive_on_without_a_location_says_so():
     with pytest.raises(htz.HouseholdTimeZoneError, match="no home location is set"):
         htz.resolve({"timezone_from_location": "true"}, env={})

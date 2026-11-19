@@ -609,7 +609,7 @@ DEFAULT_GLOBAL_SETTINGS = [
 
     # --- WEATHER (Open-Meteo; category "weather", docs/WEATHER.md) ---
     {"key": "weather_reminders", "value": "[]", "description": "Weather reminders (JSON list of {id, kind, title, note, people, hours, threshold, location}). kind is rain, snow, freeze, heat or wind; people empty = everyone; location empty = home. Edit in Admin > Users & Devices > Weather reminders."},
-    {"key": "weather_location", "value": "", "description": "Where the household forecast is for, as JSON {name, latitude, longitude}; empty uses Home Assistant's zone.home"},
+    {"key": "weather_location", "value": "", "description": "Where the household forecast is for on a setup with no home hub, as JSON {name, latitude, longitude}; with a hub, Home (zone.home, set on Devices > Rooms & places) is used and this is ignored"},
     {"key": "weather_units", "value": "imperial", "description": "Weather units: imperial (°F, mph, inches) or metric (°C, km/h, mm). Reminder thresholds are in these units."},
     {"key": "weather_metrics", "value": "[]", "description": "Home Assistant sensors tracked against the weather (JSON list of {name, label, entity_id, mode, unit}); mode is power, counter, mean or on_time. Edit in Admin > Users & Devices > Weather integrations."},
     {"key": "weather_hooks", "value": "[]", "description": "Weather events sent to other services (JSON list of {id, events, service, path, filter}); events: forecast.updated, condition.changed, alert.started, day.completed; service is any configured *_SVC_URL name. Edit in Admin > Weather integrations."},
