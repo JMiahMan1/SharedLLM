@@ -400,6 +400,8 @@ class Driver:
     platform: str = ""
     #: Seconds between :meth:`async_poll` calls; ``None`` means push-only.
     poll_interval: float | None = 30.0
+    #: Seconds one :meth:`async_poll` may take before it counts as failed; ``None`` uses the runtime's default.
+    poll_timeout: float | None = None
 
     def __init__(self, hub: Hub, entry: ConfigEntry) -> None:
         self.hub = hub
