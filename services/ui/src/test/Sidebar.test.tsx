@@ -58,5 +58,18 @@ describe('Sidebar Component', () => {
       const homeButtons = screen.getAllByRole('button', { name: /^Home/ });
       expect(homeButtons[homeButtons.length - 1]).toHaveAttribute('aria-expanded', 'true');
     });
+
+    it('collapses and expands the desktop icon rail and remembers it', () => {
+      localStorage.removeItem('jarvis_sidebar_rail_v1');
+      renderWithProviders(<Sidebar />);
+      const collapseBtn = screen.getByRole('button', { name: 'Collapse sidebar' });
+      expect(collapseBtn).toHaveAttribute('aria-pressed', 'false');
+      fireEvent.click(collapseBtn);
+      expect(localStorage.getItem('jarvis_sidebar_rail_v1')).toBe('1');
+      const expandBtn = screen.getByRole('button', { name: 'Expand sidebar' });
+      expect(expandBtn).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(expandBtn);
+      expect(localStorage.getItem('jarvis_sidebar_rail_v1')).toBe('0');
+    });
   });
 });

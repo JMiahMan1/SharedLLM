@@ -175,7 +175,7 @@ export default function GamePlayer({ slug, title, src, frameRef, onClose, emoji,
             else closeRef.current();
           }}
           aria-label="Close game"
-          className="absolute left-[calc(10px+env(safe-area-inset-left))] top-[calc(8px+env(safe-area-inset-top))] flex h-11 w-11 items-center justify-center rounded-2xl border border-white/20 bg-black/35 text-xl text-white backdrop-blur"
+          className="absolute left-[calc(10px+var(--safe-left))] top-[calc(8px+var(--safe-top))] flex h-11 w-11 items-center justify-center rounded-2xl border border-white/20 bg-black/35 text-xl text-white backdrop-blur"
           data-testid="family-player-close"
         >
           ✕

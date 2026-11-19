@@ -311,6 +311,23 @@ function GameRound({
     }
   };
 
+  // Keyboard shortcuts (1-4) for fast play on tablets with keyboards & desktops.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || submitting) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      const digit = Number(e.key);
+      if (Number.isInteger(digit) && digit >= 1 && digit <= question.options.length) {
+        e.preventDefault();
+        choose(question.options[digit - 1]);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, question, submitting]);
+
   return (
     <div className="space-y-4" data-testid="bible-game-round">
       <div className="flex items-center gap-3">
@@ -493,10 +510,17 @@ function AttemptReview({
     queryFn: () => api.getBibleGameReview(attemptId),
     retry: false,
   });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Game answers">
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-full sm:max-w-xl max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,var(--safe-bottom))] space-y-3">
+      <div className="relative w-full sm:max-w-xl max-h-[85dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,var(--safe-bottom))] space-y-3">
         <div className="flex items-center gap-2">
           <h2 className="flex-1 text-base font-bold text-white capitalize">
             {data ? `${mine ? 'Your' : `${data.username}'s`} ${data.name} · ${data.correct}/${data.total}` : 'Answers'}

@@ -232,7 +232,7 @@ class ErrorBoundary extends Component<Props, State> {
       return (
         <div
           role="alert"
-          className="min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans"
+          className="min-h-dvh flex items-center justify-center bg-slate-950 p-4 safe-area-top safe-area-bottom font-sans"
         >
           <div className="bg-slate-900 border border-white/10 rounded-xl p-8 max-w-2xl w-full text-center shadow-2xl">
             <ShieldAlert className="w-14 h-14 text-amber-400 mx-auto mb-5" />

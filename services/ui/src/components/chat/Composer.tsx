@@ -344,7 +344,7 @@ export default function Composer({
             <p className="text-[11px] font-semibold text-purple-200">Replying to {replyTo.actor_display_name || 'message'}</p>
             <p className="truncate text-xs text-slate-400">{plainText(replyTo.message)}</p>
           </div>
-          <button type="button" aria-label="Cancel reply" className="p-1 text-slate-400 hover:text-slate-100" onClick={onCancelReply}>
+          <button type="button" aria-label="Cancel reply" className="flex items-center justify-center p-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11 rounded-lg text-slate-400 hover:text-slate-100" onClick={onCancelReply}>
             <X size={14} />
           </button>
         </div>

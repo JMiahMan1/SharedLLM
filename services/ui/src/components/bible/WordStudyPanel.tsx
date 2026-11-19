@@ -230,7 +230,7 @@ export default function WordStudyPanel({
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Word study">
       <button type="button" aria-label="Close word study" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
-        className="relative w-full min-w-0 sm:max-w-lg bg-slate-950/97 border border-white/10 border-b-0 sm:border-b rounded-t-3xl sm:rounded-2xl p-4 pb-[max(1rem,var(--safe-bottom))] max-h-[85vh] overflow-y-auto overflow-x-hidden overscroll-contain"
+        className="relative w-full min-w-0 sm:max-w-lg bg-slate-950/97 border border-white/10 border-b-0 sm:border-b rounded-t-3xl sm:rounded-2xl p-4 pb-[max(1rem,var(--safe-bottom))] max-h-[85dvh] overflow-y-auto overflow-x-hidden overscroll-contain"
         data-testid="bible-word-study"
       >
         <div className="mb-3 flex items-center gap-2">

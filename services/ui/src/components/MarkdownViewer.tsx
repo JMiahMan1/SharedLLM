@@ -91,7 +91,7 @@ const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ markdown, onTestExample
                         const prompt = text.match(/"([^"]+)"/)?.[1] || text.match(/\*([^*]+)\*/)?.[1];
                         if (prompt) onTestExample(prompt);
                       }}
-                      className="ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-indigo-400 hover:text-indigo-300 transition-colors opacity-0 group-hover:opacity-100"
+                      className="ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-indigo-400 hover:text-indigo-300 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 pointer-coarse:min-h-11 pointer-coarse:px-2"
                     >
                       <Play className="w-3 h-3 fill-current" />
                       Test in Chat

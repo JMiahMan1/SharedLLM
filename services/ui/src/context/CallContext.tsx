@@ -947,7 +947,7 @@ function CallOverlay({
   return (
     <div className="fixed inset-0 z-[120] flex h-[100dvh] w-full items-stretch justify-center bg-slate-950/70 sm:pointer-events-none sm:h-auto sm:items-end sm:justify-end sm:bg-transparent sm:p-5">
       <section
-        className="flex h-full max-h-[100dvh] w-full flex-col overflow-hidden border-white/10 bg-slate-950 shadow-2xl sm:pointer-events-auto sm:h-auto sm:max-h-[calc(100vh-2.5rem)] sm:w-[430px] sm:rounded-3xl sm:border"
+        className="flex h-full max-h-[100dvh] w-full flex-col overflow-hidden border-white/10 bg-slate-950 shadow-2xl sm:pointer-events-auto sm:h-auto sm:max-h-[calc(100dvh-2.5rem)] sm:w-[430px] sm:rounded-3xl sm:border"
         data-testid="call-overlay"
         role="dialog"
         aria-modal="true"

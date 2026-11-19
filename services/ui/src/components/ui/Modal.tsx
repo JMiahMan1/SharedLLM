@@ -99,8 +99,8 @@ const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size, fullScr
             exit={{ opacity: 0, y: 24 }}
             className={
               fullScreen
-                ? 'glass-panel relative z-10 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none shadow-2xl shadow-black/50'
-                : `glass-panel w-full ${maxWClass} max-h-[90vh] sm:max-h-[90vh] overflow-hidden flex flex-col relative z-10 shadow-2xl shadow-black/50 rounded-t-2xl sm:rounded-2xl safe-area-bottom`
+                ? 'glass-panel relative z-10 flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none shadow-2xl shadow-black/50 safe-area-top safe-area-bottom'
+                : `glass-panel w-full ${maxWClass} max-h-[90dvh] overflow-hidden flex flex-col relative z-10 shadow-2xl shadow-black/50 rounded-t-2xl sm:rounded-2xl safe-area-bottom`
             }
           >
             <div className={`border-b border-white/5 flex items-center justify-between bg-white/5 ${fullScreen ? 'px-3 py-2' : 'p-4 sm:p-6'}`}>

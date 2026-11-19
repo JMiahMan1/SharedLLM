@@ -307,7 +307,7 @@ export function DeviceDetailSheet({ device, onClose }: DeviceDetailSheetProps) {
         data-testid="device-detail-scrim"
       />
       <div
-        className="relative w-full sm:max-w-lg bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,var(--safe-bottom))] max-h-[85vh] overflow-y-auto"
+        className="relative w-full sm:max-w-lg bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,var(--safe-bottom))] max-h-[85dvh] overflow-y-auto"
         data-testid="device-detail-sheet"
       >
         <div className="flex items-start justify-between gap-3 mb-3">

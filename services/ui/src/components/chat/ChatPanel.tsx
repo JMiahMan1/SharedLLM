@@ -960,7 +960,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           <div className="shrink-0 space-y-2 border-t border-white/5 bg-white/[0.03] p-3" data-testid="poll-form">
             <div className="flex items-center justify-between">
               <p className="text-sm font-semibold text-slate-100">New poll</p>
-              <button type="button" aria-label="Close poll form" className="p-1 text-slate-400" onClick={() => setShowPollForm(false)}>
+              <button type="button" aria-label="Close poll form" className="flex items-center justify-center p-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11 rounded-lg text-slate-400 hover:text-slate-100" onClick={() => setShowPollForm(false)}>
                 <X size={15} />
               </button>
             </div>

@@ -204,4 +204,14 @@ describe('Header notifications bell', () => {
     fireEvent.click(await screen.findByRole('button', { name: /notifications, 2 new/i }));
     expect(screen.getByRole('button', { name: /^notifications$/i })).toBeTruthy();
   });
+
+  it('focuses global search on Ctrl/Cmd+K and navigates with keyboard', async () => {
+    renderHeader();
+    const input = screen.getByLabelText('Search pages, tabs and settings');
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: 'Bible' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByText('Bible Page')).toBeTruthy());
+  });
 });

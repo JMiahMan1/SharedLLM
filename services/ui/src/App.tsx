@@ -82,7 +82,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
   const locked = useLockedMode();
   
   if (isLoading) return (
-    <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
+    <div className="h-dvh w-screen flex items-center justify-center bg-slate-950">
       <div className="flex flex-col items-center gap-4">
         <div className="animate-pulse text-indigo-500 font-bold text-xl">Initializing Jarvis OS...</div>
         <div className="w-48 h-1 bg-slate-800 rounded-full overflow-hidden">
@@ -106,9 +106,9 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
   }
   
   return (
-    <div className="app-shell flex h-screen overflow-hidden">
+    <div className="app-shell flex h-dvh overflow-hidden">
       <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden relative">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
         <Header />
         <DeployBanner />
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 scroll-smooth">
