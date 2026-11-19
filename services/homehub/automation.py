@@ -55,6 +55,10 @@ log = logging.getLogger("homehub.automation")
 MAX_SLEEP = 30.0
 MODES = ("single", "restart", "queued", "parallel")
 DEFAULT_MAX = 10
+#: HA's ``max_exceeded``: the level a run that is not started is logged at (``silent`` logs nothing).
+MAX_EXCEEDED_LEVELS = {"silent": None, "critical": logging.CRITICAL, "error": logging.ERROR,
+                       "warning": logging.WARNING, "info": logging.INFO, "debug": logging.DEBUG,
+                       "notset": logging.NOTSET}
 # Entities that exist without a registry entry.
 ALWAYS_KNOWN = {"zone.home", "sun.sun", *(f"sensor.{oid}" for oid in time_date.SENSORS)}
 # Helper integrations whose entities HA kept in its own storage. When none of
@@ -428,6 +432,7 @@ class Item:
     config: dict[str, Any]
     mode: str = "single"
     max: int = DEFAULT_MAX
+    max_exceeded: str = "warning"
     triggers: list[dict[str, Any]] = field(default_factory=list)
     conditions: list[dict[str, Any]] = field(default_factory=list)
     actions: list[dict[str, Any]] = field(default_factory=list)
@@ -443,6 +448,8 @@ class Item:
     last_error: str | None = None
     runs: set[asyncio.Task] = field(default_factory=set)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    #: Held while a restart-mode run stops the old runs and starts its own, so two triggers cannot both start one.
+    start_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     detach: list[Callable[[], None]] = field(default_factory=list)
     calls_scripts: set[str] = field(default_factory=set)
     #: Services its actions name literally (templates are only known at run time), as ``domain.service``.
@@ -670,7 +677,7 @@ class AutomationEngine:
     async def run_script(self, script_id: str, variables: dict[str, Any] | None = None, *,
                          wait: bool = True) -> Any:
         item = self.scripts[script_id]
-        task = self._start_run(item, self._script_variables(item, variables or {}))
+        task = await self._start_run(item, self._script_variables(item, variables or {}))
         if task is None or not wait:
             return None
         return await task
@@ -761,6 +768,10 @@ class AutomationEngine:
             raise Unsupported(f"unknown mode {mode!r}")
         item.mode = mode
         item.max = int(conf.get("max") or DEFAULT_MAX)
+        level = str(conf.get("max_exceeded") or "warning").lower()
+        if level not in MAX_EXCEEDED_LEVELS:
+            raise Unsupported(f"unknown max_exceeded {level!r}")
+        item.max_exceeded = level
         item.icon = conf.get("icon")
         item.description = str(conf.get("description") or "")
         item.variables = dict(conf.get("variables") or {})
@@ -1036,23 +1047,47 @@ class AutomationEngine:
             return None
         item.last_triggered = self.clock.now()
         self._persist(item)
-        task = self._start_run(item, variables)
+        task = await self._start_run(item, variables)
         self._publish(item)
         return task
 
     # -- runs ----------------------------------------------------------------------
-    def _start_run(self, item: Item, variables: dict[str, Any]) -> asyncio.Task | None:
+    def _max_exceeded(self, item: Item, message: str, *args: Any) -> None:
+        level = MAX_EXCEEDED_LEVELS.get(item.max_exceeded, logging.WARNING)
+        if level is not None:
+            log.log(level, "%s: " + message, item.entity_id, *args)
+
+    async def _start_run(self, item: Item, variables: dict[str, Any]) -> asyncio.Task | None:
         if self._refresh_waiting(item):
             return None
+        if item.mode == "restart":
+            async with item.start_lock:
+                await self._stop_for_restart(item)
+                return self._begin_run(item, variables)
         if item.mode == "single" and item.runs:
-            log.warning("%s: already running", item.entity_id)
+            self._max_exceeded(item, "already running")
             return None
-        if item.mode == "restart" and item.runs:
-            for t in list(item.runs):
-                t.cancel()
         if item.mode in ("queued", "parallel") and len(item.runs) >= item.max:
-            log.warning("%s: maximum number of runs exceeded (%s)", item.entity_id, item.max)
+            self._max_exceeded(item, "maximum number of runs exceeded (%s)", item.max)
             return None
+        return self._begin_run(item, variables)
+
+    async def _stop_for_restart(self, item: Item) -> None:
+        """HA's restart: the running runs are stopped, and have finished stopping, before the new one starts.
+
+        A run that restarts its own item is cancelled but not waited for (it cannot wait for itself); it stops at
+        its next await, after the new run has started.
+        """
+        me = asyncio.current_task()
+        others = [t for t in item.runs if t is not me]
+        for t in others:
+            t.cancel()
+        if others:
+            await asyncio.gather(*others, return_exceptions=True)
+        if me is not None and me in item.runs:
+            me.cancel()
+
+    def _begin_run(self, item: Item, variables: dict[str, Any]) -> asyncio.Task:
         if item.kind == "script":
             item.last_triggered = self.clock.now()
             self._persist(item)
@@ -1253,6 +1288,7 @@ class AutomationEngine:
                     if not self.check_conditions(rep["while"], v):
                         break
                     await iteration(i)
+                    await asyncio.sleep(0)  # a loop of steps that never wait must still let the hub run
                     if i >= 10000:
                         raise HubError("repeat while ran 10000 times; stopping")
             elif "until" in rep:
@@ -1260,6 +1296,7 @@ class AutomationEngine:
                 while True:
                     i += 1
                     await iteration(i)
+                    await asyncio.sleep(0)  # a loop of steps that never wait must still let the hub run
                     if self.check_conditions(rep["until"], v):
                         break
                     if i >= 10000:
@@ -1522,6 +1559,13 @@ class AutomationEngine:
         now = self.clock.now()
         today = now.astimezone(self.tz).date()
         times = self._sun_times(today)
+        if c.get("before") == "sunrise" and c.get("after") == "sunset":
+            # HA's one OR: after sunset or before sunrise is the night, which no single day's AND can be.
+            sunrise, sunset = times["sunrise"], times["sunset"]
+            if sunrise is None or sunset is None:
+                return False
+            return (now < sunrise + parse_duration(c.get("before_offset"))
+                    or now > sunset + parse_duration(c.get("after_offset")))
         if c.get("before"):
             ev = times[c["before"]]
             if ev is None or not now < ev + parse_duration(c.get("before_offset")):
@@ -2056,7 +2100,7 @@ class AutomationEngine:
         if not item.runnable:
             raise HubError(f"script.{sid} is disabled: {item.unsupported_reason}")
         data = {k: v for k, v in call.data.items() if k not in ("entity_id", "target", "area_id", "device_id")}
-        task = self._start_run(item, self._script_variables(item, data))
+        task = await self._start_run(item, self._script_variables(item, data))
         if task is None:
             return None
         response = await task
@@ -2066,7 +2110,7 @@ class AutomationEngine:
         variables = call.data.get("variables") or {}
         for item in self._items_for(call, self.scripts):
             if item.runnable:
-                self._start_run(item, self._script_variables(item, dict(variables)))
+                await self._start_run(item, self._script_variables(item, dict(variables)))
 
     async def _svc_script_off(self, hub: Any, call: ServiceCall) -> None:
         for item in self._items_for(call, self.scripts):
@@ -2077,7 +2121,7 @@ class AutomationEngine:
             if item.runs:
                 await self._cancel_runs(item)
             elif item.runnable:
-                self._start_run(item, self._script_variables(item, {}))
+                await self._start_run(item, self._script_variables(item, {}))
 
     async def _svc_scene_on(self, hub: Any, call: ServiceCall) -> None:
         by_entity = {s.entity_id: s for s in self.scenes.values()}
