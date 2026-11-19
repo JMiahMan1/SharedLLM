@@ -480,15 +480,20 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         if not principal(request).may_view(entity_id):
             raise HTTPException(404, detail="Entity not found.")
 
-    @api.get("/api/tts_proxy/{name}")
-    async def tts_proxy(name: str) -> Response:
-        """Spoken audio for a speaker; the unguessable token is the credential, as in HA."""
+    @api.api_route("/api/tts_proxy/{name}", methods=["GET", "HEAD"])
+    async def tts_proxy(name: str, request: Request) -> Response:
+        """Spoken audio for a speaker; the unguessable token is the credential, as in HA.
+
+        Speakers probe with HEAD and fetch in pieces with ``Range``, so both are answered properly.
+        """
+        from services.common.audio_clip import clip_response
         from services.homehub import tts
 
         audio = tts.clip(name.rsplit(".", 1)[0])
         if audio is None:
             return _error(404, "Not found")
-        return Response(audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+        return clip_response(audio, "audio/wav", request.headers.get("range"), head=request.method == "HEAD",
+                             headers={"Cache-Control": "no-store"})
 
     @api.api_route("/api/esphome/ffmpeg_proxy/{device}/{name}", methods=["GET", "HEAD"])
     async def esphome_ffmpeg_proxy(device: str, name: str, request: Request) -> Response:

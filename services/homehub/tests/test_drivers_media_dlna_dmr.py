@@ -1,6 +1,7 @@
 """dlna_dmr: state from AVTransport/RenderingControl, play_media as SetAVTransportURI + Play."""
 from __future__ import annotations
 
+import asyncio
 from xml.sax.saxutils import escape
 
 import pytest
@@ -97,6 +98,55 @@ async def test_play_media_sets_uri_with_didl_then_plays():
     assert "http://jarvis/a.mp3?x=1&amp;y=2" in set_uri
     assert "audio/mpeg" in set_uri and "DIDL-Lite" in set_uri
     assert any("<u:Play " in b for b in sent[sent.index(set_uri):])
+
+
+async def test_play_media_stops_then_waits_for_the_renderer_before_play(monkeypatch):
+    """Play straight after SetAVTransportURI raced a renderer still loading the URI (or still playing the
+    old item). Now: Stop what plays, SetURI, poll GetTransportInfo until it is ready, then Play."""
+    from services.homehub.drivers import media_common
+
+    async def no_wait(_s):
+        return None
+
+    monkeypatch.setattr(media_common, "_sleep", no_wait)
+    hub, drv, http, _sent = build()
+    await drv.async_setup()
+    states = iter(["PLAYING", "TRANSITIONING", "NO_MEDIA_PRESENT", "STOPPED"])
+    order: list[str] = []
+
+    def info(body):
+        st = next(states, "STOPPED")
+        order.append(f"info:{st}")
+        return soap_reply("GetTransportInfo", AVT, CurrentTransportState=st)
+
+    def note(action):
+        def h(body):
+            order.append(action)
+            return soap_reply(action, AVT)
+        return h
+
+    http.route("POST", "/AVTransport1", soap_router({
+        "GetTransportInfo": info, "Stop": note("Stop"), "SetAVTransportURI": note("SetAVTransportURI"),
+        "Play": note("Play")}))
+    await drv.async_call(hub.entities[ENT], "media_player", "play_media",
+                         {"media_content_id": "http://jarvis/a.wav", "media_content_type": "music"})
+    assert order[:7] == ["info:PLAYING", "Stop", "SetAVTransportURI", "info:TRANSITIONING",
+                         "info:NO_MEDIA_PRESENT", "info:STOPPED", "Play"]
+
+
+async def test_play_is_still_sent_when_the_renderer_never_reports_ready(monkeypatch):
+    from services.homehub.drivers import media_common
+
+    async def no_wait(_s):
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(media_common, "_sleep", no_wait)
+    monkeypatch.setattr(media_common, "TRANSPORT_READY_TIMEOUT_S", 0.05)
+    hub, drv, _http, sent = build(state="TRANSITIONING")
+    await drv.async_setup()
+    await drv.async_call(hub.entities[ENT], "media_player", "play_media",
+                         {"media_content_id": "http://jarvis/a.wav", "media_content_type": "music"})
+    assert "<u:Play " in sent[-1]
 
 
 async def test_volume_mute_seek_and_unknown_service():
