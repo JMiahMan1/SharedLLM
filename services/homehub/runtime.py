@@ -21,6 +21,10 @@ RETRY_DELAYS = (5, 10, 30, 60)
 # an hour: seven unplugged gadgets were writing 2,500 warnings in 12 hours.
 RETRY_REPORT_EVERY_S = 3600.0
 HISTORY_KEEP_DAYS = 30
+#: A poll that has not answered in this long has hung (a driver may set its own ``poll_timeout``).
+POLL_TIMEOUT_S = 60.0
+#: After this many failed polls in a row the entry's entities turn unavailable, as in HA, until one succeeds.
+POLL_FAILURES_UNAVAILABLE = 3
 
 
 class Runtime:
@@ -158,14 +162,51 @@ class Runtime:
             log.info("%s (%s) loaded with %d entities", entry.domain, entry.title, len(driver.entities))
             if driver.poll_interval is None:
                 await asyncio.Event().wait()  # push-only: live until cancelled
-            while True:
-                await asyncio.sleep(driver.poll_interval or 30.0)
-                try:
-                    await driver.async_poll()
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    log.warning("%s (%s) poll failed: %s", entry.domain, entry.title, exc)
+            await self._poll_forever(entry, driver)
+
+    async def _poll_forever(self, entry: ConfigEntry, driver: Driver) -> None:
+        """Poll on the driver's interval. A poll that hangs times out; several failures in a row mark the
+        entry's entities unavailable (and say so once), and the next good poll brings them back."""
+        failures = 0
+        held: dict[str, tuple[str, dict[str, Any]]] = {}  # states before they were marked unavailable
+        while True:
+            await asyncio.sleep(driver.poll_interval or 30.0)
+            timeout = float(getattr(driver, "poll_timeout", None) or POLL_TIMEOUT_S)
+            try:
+                await asyncio.wait_for(driver.async_poll(), timeout)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                failures += 1
+                why = f"no answer in {timeout:g} s" if isinstance(exc, TimeoutError) else str(exc) or type(exc).__name__
+                if failures == 1:
+                    log.warning("%s (%s) poll failed: %s", entry.domain, entry.title, why)
+                else:
+                    log.debug("%s (%s) poll failed (%d in a row): %s", entry.domain, entry.title, failures, why)
+                if failures == POLL_FAILURES_UNAVAILABLE:
+                    ents = driver.entities
+                    for e in ents:
+                        st = self.hub.states.get(e.entity_id)
+                        if st is not None and st.state != UNAVAILABLE:
+                            held[e.entity_id] = (st.state, dict(st.attributes))
+                    log.warning("%s (%s): %d polls failed in a row; its entities are unavailable until one "
+                                "succeeds", entry.domain, entry.title, failures)
+                    driver.mark_unavailable(ents)
+                continue
+            if failures:
+                if failures >= POLL_FAILURES_UNAVAILABLE:
+                    self._restore_after_poll(driver, held)
+                log.info("%s (%s) polls again after %d failures", entry.domain, entry.title, failures)
+            failures = 0
+            held.clear()
+
+    def _restore_after_poll(self, driver: Driver, held: dict[str, tuple[str, dict[str, Any]]]) -> None:
+        """Entities the good poll did not publish get back the state they had before they were marked unavailable."""
+        for e in driver.entities:
+            st = self.hub.states.get(e.entity_id)
+            if e.entity_id in held and st is not None and st.state == UNAVAILABLE:
+                state, attrs = held[e.entity_id]
+                driver.publish(e, state, attrs)
 
     async def wait_first_setups(self, timeout: float) -> list[str]:
         """Wait until every started entry has tried to load once; returns the ones still pending.

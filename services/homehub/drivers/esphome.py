@@ -85,6 +85,7 @@ from aioesphomeapi import (
     VoiceAssistantTimerEventType,
 )
 
+from services.homehub import esphome_audio
 from services.homehub.core import (
     UNAVAILABLE,
     UNKNOWN,
@@ -459,6 +460,7 @@ class ESPHomeDriver(Driver):
         self._detach_bluetooth()
         self._client = None
         self.voice.detach()
+        self.stop_audio()  # a node that went away reads no more audio
         if self._closing:
             return
         self.log.warning("ESPHome %s (%s) disconnected%s; reconnecting", self.device_name, self.host,
@@ -515,6 +517,7 @@ class ESPHomeDriver(Driver):
             t.cancel()
         self.restarts.close()
         self.voice.detach()
+        self.stop_audio()
         self._unregister_services()
         if self._unsub_bus:
             self._unsub_bus()
@@ -819,7 +822,28 @@ class ESPHomeDriver(Driver):
             a["supported_features"] = f
         elif isinstance(info, MediaPlayerInfo):
             a["supported_features"] = int(info.feature_flags_compat(self._api_version or APIVersion(1, 10)))
+            formats = esphome_audio.supported_formats(info)
+            if formats:  # what the node asked to be sent; the hub converts to it (esphome_audio.py)
+                a["supported_formats"] = [f.public() for f in formats]
         return a
+
+    # -- audio in the node's own format ---------------------------------------------
+    def _media_players(self) -> list[MediaPlayerInfo]:
+        return [i for i in self._infos.values() if isinstance(i, MediaPlayerInfo)]
+
+    def media_url_for(self, url: str, *, announcement: bool, info: MediaPlayerInfo | None = None) -> str:
+        """The URL to give the node for ``url``: the hub's ffmpeg proxy in the format the node asked for.
+
+        ``info`` is the media player that will play it; without one (a voice reply, a satellite
+        announcement) the formats of all the node's media players count, in order, as in HA.
+        """
+        players = [info] if info is not None else self._media_players()
+        formats = [f for p in players for f in esphome_audio.supported_formats(p)]
+        return esphome_audio.proxied_url(self.entry.entry_id, url, formats, announcement=announcement)
+
+    def stop_audio(self) -> None:
+        """Stop the ffmpeg conversions still feeding this node."""
+        esphome_audio.PROXY.stop_device(self.entry.entry_id)
 
     def _light_modes(self, info: LightInfo) -> list[Any]:
         try:
@@ -1056,11 +1080,15 @@ class ESPHomeDriver(Driver):
             from services.homehub import tts
 
             media_id = await tts.make_clip(message)
+        # The node plays announcements in its announcement format; HA proxies both clips the same way.
+        media_id = self.media_url_for(media_id, announcement=True)
+        preannounce = str(data.get("preannounce_media_id") or "")
+        if preannounce:
+            preannounce = self.media_url_for(preannounce, announcement=True)
         self.restarts.note("announcement", True)
         try:
             await client.send_voice_assistant_announcement_await_response(
-                media_id, SATELLITE_ANNOUNCE_TIMEOUT_S, text=message,
-                preannounce_media_id=str(data.get("preannounce_media_id") or ""))
+                media_id, SATELLITE_ANNOUNCE_TIMEOUT_S, text=message, preannounce_media_id=preannounce)
         except APIConnectionError as exc:
             raise DeviceUnavailable(f"ESPHome {self.device_name}: {exc}") from exc
         except TimeoutError as exc:
@@ -1309,6 +1337,8 @@ class ESPHomeDriver(Driver):
             service = "turn_on" if off else "turn_off"
         if service in simple:
             c.media_player_command(info.key, command=simple[service], device_id=dev)
+            if service in ("media_stop", "turn_off", "clear_playlist"):
+                self.stop_audio()
         elif service == "volume_set":
             c.media_player_command(info.key, volume=float(data["volume_level"]), device_id=dev)
         elif service == "volume_mute":
@@ -1322,6 +1352,9 @@ class ESPHomeDriver(Driver):
             if not url:
                 raise HubError("play_media needs media_content_id")
             announce = data.get("announce")
+            extra = data.get("extra") if isinstance(data.get("extra"), dict) else {}
+            if not extra.get("bypass_proxy"):  # HA's escape hatch: the URL exactly as given
+                url = self.media_url_for(url, announcement=bool(announce), info=info)
             if data.get("enqueue") in ("add", "next"):
                 c.media_player_command(info.key, command=MediaPlayerCommand.ENQUEUE, media_url=url, device_id=dev)
             else:

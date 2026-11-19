@@ -354,6 +354,8 @@ class Helpers:
         self.problems: list[str] = []
         self._timers: dict[str, _Timer] = {}
         self._started = False
+        #: Timer events waiting for the automations (see :meth:`hold_events`); None when they go out at once.
+        self._held: list[tuple[str, dict[str, Any]]] | None = None
         try:
             self.tz = ZoneInfo(getattr(hub, "time_zone", None) or "UTC")
         except Exception:
@@ -794,8 +796,28 @@ class Helpers:
             extra["remaining"] = fmt_duration(t.remaining)
         self._publish(h, t.status, extra)
 
+    def hold_events(self) -> None:
+        """Keep timer events back until :meth:`release_events`.
+
+        The hub starts the helpers before the automations (which name them), and the automations attach only
+        once the integrations have loaded. A timer that ran out while the hub was down finishes on restore, so
+        its ``timer.finished`` would reach nobody; held, it reaches the automations that wait for it.
+        """
+        if self._held is None:
+            self._held = []
+
+    def release_events(self) -> None:
+        """Send the held timer events, in the order they happened, and send later ones at once."""
+        held, self._held = self._held or [], None
+        for event_type, data in held:
+            self.hub.bus.fire(event_type, data)
+
     def _fire(self, event: str, h: Helper, **extra: Any) -> None:
-        self.hub.bus.fire(f"timer.{event}", {"entity_id": h.entity_id, **extra})
+        data = {"entity_id": h.entity_id, **extra}
+        if self._held is not None:
+            self._held.append((f"timer.{event}", data))
+            return
+        self.hub.bus.fire(f"timer.{event}", data)
 
     def _cancel_task(self, t: _Timer) -> None:
         if t.task is not None and not t.task.done():

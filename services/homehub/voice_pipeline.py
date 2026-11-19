@@ -982,7 +982,9 @@ class SatelliteVoice:
             except (HubError, OSError) as exc:
                 raise PipelineError("tts-failed", f"Jarvis's voice could not speak the reply: {exc}") from exc
             run.mark("spoken")
-            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END, {"url": url})
+            # The node fetches the reply in its own announcement format (the hub's ffmpeg proxy), never the
+            # 22050 Hz original it would have to resample while it plays; streamed audio uses the original.
+            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_END, {"url": self._node_url(url)})
             if self.flags & int(VoiceAssistantFeature.SPEAKER):
                 await self._stream_reply(run, url)
             run.outcome = "ok"
@@ -1107,6 +1109,11 @@ class SatelliteVoice:
                 ctx.update(extra)
         return ctx
 
+    def _node_url(self, url: str) -> str:
+        """``url`` as the node should fetch it: converted to its announcement format when it asks for one."""
+        convert = getattr(self.driver, "media_url_for", None)
+        return convert(url, announcement=True) if convert is not None else url
+
     async def _stream_reply(self, run: Run, url: str) -> None:
         """A node with its own speaker gets the reply's audio itself, paced a little faster than real time."""
         audio = BACKENDS.clip_audio(url)
@@ -1154,10 +1161,11 @@ class SatelliteVoice:
             extra["extra_system_prompt"] = str(data["extra_system_prompt"])
         self._pending = (time.monotonic(), extra)
         preannounce = data.get("preannounce", True) is not False
+        preannounce_id = str(data.get("preannounce_media_id") or "") if preannounce else ""
         try:
             await self.client.send_voice_assistant_announcement_await_response(
-                media_id, ANNOUNCE_TIMEOUT_S, text=message,
-                preannounce_media_id=str(data.get("preannounce_media_id") or "") if preannounce else "",
+                self._node_url(media_id), ANNOUNCE_TIMEOUT_S, text=message,
+                preannounce_media_id=self._node_url(preannounce_id) if preannounce_id else "",
                 start_conversation=True)
         except APIConnectionError as exc:
             raise DeviceUnavailable(f"ESPHome {self.name}: {exc}") from exc

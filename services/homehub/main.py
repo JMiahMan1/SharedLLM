@@ -150,6 +150,9 @@ class Service:
         from services.homehub.helpers import Helpers
 
         manager = Helpers(self.hub, self.store)
+        # A timer that ran out while the hub was down finishes now; its timer.finished waits for the
+        # automations (released in _start_automations), or no automation would ever hear it.
+        manager.hold_events()
         await manager.start()
         self.runtime.helpers = manager  # the /hub/helpers API reads it from here
         if manager.problems:
@@ -212,6 +215,10 @@ class Service:
             await automation_api.start(self.runtime)
         except Exception:
             log.exception("automation engine could not start")
+        finally:
+            helpers = getattr(self.runtime, "helpers", None)
+            if helpers is not None:
+                helpers.release_events()  # the timer events held since startup, now that triggers listen
 
     async def stop(self) -> None:
         helpers = getattr(self.runtime, "helpers", None)

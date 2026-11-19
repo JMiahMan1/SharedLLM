@@ -10,10 +10,12 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from services.common.secrets import secret_matches
@@ -59,6 +61,11 @@ _BOUNDARY = "frame"
 _NO_STORE = {"Cache-Control": "no-store"}
 #: HA's history SIGNIFICANT_DOMAINS: attribute-only changes count as significant for these.
 SIGNIFICANT_DOMAINS = frozenset({"climate", "device_tracker", "humidifier", "thermostat", "water_heater"})
+#: HA's logbook leaves these domains out entirely: they change all the time and none of it reads as an event.
+LOGBOOK_ALWAYS_CONTINUOUS = frozenset({"counter", "proximity"})
+#: Set ("true") on a history or logbook answer whose window held more rows than one answer carries: the oldest
+#: rows were left out. A header, so HA clients reading the body see HA's shape unchanged.
+TRUNCATED_HEADER = "X-HomeHub-History-Truncated"
 #: A snapshot stream gives up after this many failed frames in a row (a camera gone to sleep for good).
 SNAPSHOT_STREAM_MAX_FAILURES = 5
 #: WebSocket commands other modules add (``async fn(conn, id, msg)``), e.g. mobile_app's push channel.
@@ -188,6 +195,56 @@ def config_payload(runtime: Runtime) -> dict[str, Any]:
         "currency": loc.get("currency", "USD"), "country": loc.get("country"), "language": loc.get("language", "en"),
         "safe_mode": False, "debug": False, "homehub": True,
     }
+
+
+def logbook_continuous(entity_id: str, attributes: dict[str, Any] | None) -> bool:
+    """HA's logbook filter: counters, proximity, and sensors with a unit or a state class are measurements."""
+    domain = entity_id.split(".", 1)[0]
+    if domain in LOGBOOK_ALWAYS_CONTINUOUS:
+        return True
+    attrs = attributes or {}
+    return domain == "sensor" and ("unit_of_measurement" in attrs or "state_class" in attrs)
+
+
+async def history_by_entity(runtime: Runtime, ids: list[str] | None, start: datetime, end: datetime | None, *,
+                            changes_only: bool, start_state: bool) -> tuple[dict[str, list[dict[str, Any]]], bool]:
+    """Recorded rows per entity (oldest first) and whether older rows were left out.
+
+    With ``changes_only``, attribute-only changes are still kept for HA's SIGNIFICANT_DOMAINS (a tracker moving
+    while it stays "not_home" is a change of position). With ``start_state``, each entity's series begins with
+    its state at ``start`` (HA's include_start_time_state), timed at ``start``. That state is left out when the
+    window was truncated: it would claim to last until the oldest row kept, across the rows left out.
+    """
+    store = runtime.store
+    keep_all = [i for i in ids or [] if i.split(".", 1)[0] in SIGNIFICANT_DOMAINS] if changes_only else []
+    rest = [i for i in ids or [] if i not in keep_all]
+    rows: list[dict[str, Any]] = []
+    truncated = False
+    if keep_all:
+        got, cut = await asyncio.to_thread(store.history_page, keep_all, start, end, changes_only=False)
+        rows += got
+        truncated |= cut
+    if rest or not ids:
+        got, cut = await asyncio.to_thread(store.history_page, rest or None, start, end, changes_only=changes_only)
+        rows += got
+        truncated |= cut
+    by_entity: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        by_entity.setdefault(r["entity_id"], []).append(r)
+    if start_state and not truncated:
+        known = [s.entity_id for s in runtime.hub.states.all()]
+        wanted = list(ids) if ids else list(dict.fromkeys([*by_entity, *known]))
+        at = await asyncio.to_thread(store.states_at, wanted, start)
+        when = start.astimezone(UTC).isoformat()
+        merged: dict[str, list[dict[str, Any]]] = {}
+        for eid in wanted:
+            series = by_entity.get(eid, [])
+            if eid in at:
+                series = [{**at[eid], "last_changed": when, "last_updated": when}, *series]
+            if series:
+                merged[eid] = series
+        by_entity = merged
+    return by_entity, truncated
 
 
 def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | None = None) -> FastAPI:
@@ -350,7 +407,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
 
     @api.get("/api/history/period")
     @api.get("/api/history/period/{start}")
-    async def history(request: Request, start: str | None = None) -> list[list[dict[str, Any]]]:
+    async def history(request: Request, start: str | None = None) -> Response:
         p = principal(request)
         q = request.query_params
         start_dt = parse_time(start) or datetime.now(UTC) - timedelta(days=1)
@@ -359,20 +416,9 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         minimal = "minimal_response" in q
         no_attrs = "no_attributes" in q
         changes_only = "significant_changes_only" in q and q.get("significant_changes_only") not in ("0", "false")
-        # HA keeps every attribute change of these domains as significant: a tracker moving while it stays
-        # "not_home" is a change of position, which is what a trip replay reads.
-        keep_all = [i for i in ids if i.split(".", 1)[0] in SIGNIFICANT_DOMAINS] if changes_only else []
-        rest = [i for i in ids if i not in keep_all]
-        rows = []
-        if keep_all:
-            rows += await asyncio.to_thread(runtime.store.history, keep_all, start_dt, end_dt, changes_only=False)
-        if rest or not ids:
-            rows += await asyncio.to_thread(runtime.store.history, rest or None, start_dt, end_dt,
-                                            changes_only=changes_only)
-        by_entity: dict[str, list[dict[str, Any]]] = {}
-        for r in rows:
-            if p.may_view(r["entity_id"]):
-                by_entity.setdefault(r["entity_id"], []).append(r)
+        found, truncated = await history_by_entity(runtime, ids or None, start_dt, end_dt, changes_only=changes_only,
+                                                   start_state="skip_initial_state" not in q)
+        by_entity = {eid: items for eid, items in found.items() if p.may_view(eid)}
         for eid in ids:
             if eid not in by_entity and p.may_view(eid) and (st := hub.states.get(eid)) is not None:
                 by_entity[eid] = [st.as_dict()]
@@ -386,20 +432,29 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
                     r = {"state": r["state"], "last_changed": r["last_changed"]}
                 series.append(r)
             out.append(series)
-        return out
+        return JSONResponse(jsonable_encoder(out), headers={TRUNCATED_HEADER: "true"} if truncated else None)
 
     @api.get("/api/logbook")
     @api.get("/api/logbook/{start}")
-    async def logbook(request: Request, start: str | None = None) -> list[dict[str, Any]]:
+    async def logbook(request: Request, start: str | None = None) -> Response:
         p = principal(request)
         q = request.query_params
         start_dt = parse_time(start) or datetime.now(UTC) - timedelta(days=1)
         end_dt = parse_time(q.get("end_time"))
         ids = [q["entity"]] if q.get("entity") else None
-        rows = await asyncio.to_thread(runtime.store.history, ids, start_dt, end_dt, changes_only=True)
-        rows = [r for r in rows if p.may_view(r["entity_id"])]
-        return [{"when": r["last_changed"], "state": r["state"], "entity_id": r["entity_id"],
-                 "name": r["attributes"].get("friendly_name") or r["entity_id"]} for r in rows]
+        rows, truncated = await asyncio.to_thread(runtime.store.history_page, ids, start_dt, end_dt,
+                                                  changes_only=True)
+        out = []
+        for r in rows:
+            eid = r["entity_id"]
+            if not p.may_view(eid):
+                continue
+            cur = hub.states.get(eid)
+            if logbook_continuous(eid, r["attributes"]) or (cur is not None and logbook_continuous(eid, cur.attributes)):
+                continue  # HA's logbook leaves measurements out, asked for by name or not
+            out.append({"when": r["last_changed"], "state": r["state"], "entity_id": eid,
+                        "name": r["attributes"].get("friendly_name") or eid})
+        return JSONResponse(out, headers={TRUNCATED_HEADER: "true"} if truncated else None)
 
     async def _camera_driver(entity_id: str) -> tuple[Any, Any]:
         ent = hub.entities.get(entity_id)
@@ -439,6 +494,56 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             return _error(404, "Not found")
         return clip_response(audio, "audio/wav", request.headers.get("range"), head=request.method == "HEAD",
                              headers={"Cache-Control": "no-store"})
+
+    @api.api_route("/api/esphome/ffmpeg_proxy/{device}/{name}", methods=["GET", "HEAD"])
+    async def esphome_ffmpeg_proxy(device: str, name: str, request: Request) -> Response:
+        """Audio converted to the format an ESPHome media player asked for (``esphome_audio.py``).
+
+        The unguessable token is the credential, as for ``/api/tts_proxy/`` and in HA.
+        """
+        from services.homehub import esphome_audio
+
+        conv = esphome_audio.PROXY.lookup(device, name)
+        if conv is None:
+            return _error(404, "Not found")
+        headers = {"Cache-Control": "no-store"}
+        media_type = conv.fmt.content_type
+        if request.method == "HEAD":
+            return Response(b"", media_type=media_type, headers=headers)
+        try:
+            if conv.source_url is None:
+                return Response(await esphome_audio.PROXY.clip_audio(conv), media_type=media_type, headers=headers)
+            body = await esphome_audio.PROXY.open_stream(conv)
+        except esphome_audio.ProxyError as exc:
+            return _error(exc.status, exc.message)
+        return StreamingResponse(body, media_type=media_type, headers=headers)
+
+    @api.post("/hub/esphome/audio_url")
+    async def esphome_audio_url(request: Request) -> Response:
+        """A proxy URL for a node the caller talks to itself (execution's alarm and timer alerts).
+
+        ``{"device", "url", "formats": [MediaPlayerSupportedFormat fields], "announcement"}`` ->
+        ``{"url", "proxied"}``; the URL comes back unchanged when no format applies. Admins only.
+        """
+        admin(request)
+        from services.homehub import esphome_audio
+
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "Data should be valid JSON.")
+        if not isinstance(body, dict) or not str(body.get("url") or ""):
+            return _error(400, "url is required")
+        device = str(body.get("device") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", device):
+            return _error(400, "device must be 1 to 64 letters, digits, '-' or '_'")
+        try:
+            formats = [esphome_audio.AudioFormat.from_dict(f) for f in body.get("formats") or []]
+        except (TypeError, ValueError, AttributeError):
+            return _error(400, "formats must be a list of {format, sample_rate, num_channels, sample_bytes, purpose}")
+        url = str(body["url"])
+        out = esphome_audio.proxied_url(device, url, formats, announcement=bool(body.get("announcement")))
+        return JSONResponse({"url": out, "proxied": out != url})
 
     @api.post("/api/tts_get_url")
     async def tts_get_url(request: Request) -> Response:
@@ -863,16 +968,28 @@ class WSConnection:
                 else:
                     await self.result(mid, registry_view(ent, self.principal))
             elif kind == "history/history_during_period":
+                # HA's defaults: significant changes only, with each entity's state at the start time.
                 start = parse_time(msg.get("start_time")) or datetime.now(UTC) - timedelta(days=1)
-                rows = await asyncio.to_thread(self.runtime.store.history, msg.get("entity_ids"), start,
-                                               parse_time(msg.get("end_time")))
+                found, truncated = await history_by_entity(
+                    self.runtime, msg.get("entity_ids") or None, start, parse_time(msg.get("end_time")),
+                    changes_only=bool(msg.get("significant_changes_only", True)),
+                    start_state=bool(msg.get("include_start_time_state", True)))
+                if truncated:
+                    log.warning("history_during_period from %s held more rows than one answer carries; "
+                                "the oldest were left out", start.isoformat())
                 out: dict[str, list[dict[str, Any]]] = {}
-                for r in rows:
-                    if not self._sees(r["entity_id"]):
+                for eid, rows in found.items():
+                    if not self._sees(eid):
                         continue
-                    out.setdefault(r["entity_id"], []).append({
-                        "s": r["state"], "a": {} if msg.get("no_attributes") else r["attributes"],
-                        "lu": datetime.fromisoformat(r["last_updated"]).timestamp()})
+                    for i, r in enumerate(rows):
+                        lu = datetime.fromisoformat(r["last_updated"]).timestamp()
+                        lc = datetime.fromisoformat(r["last_changed"]).timestamp()
+                        item: dict[str, Any] = {"s": r["state"], "lu": lu}
+                        if not (msg.get("minimal_response") and i > 0):
+                            item["a"] = {} if msg.get("no_attributes") else r["attributes"]
+                        if lc != lu:
+                            item["lc"] = lc
+                        out.setdefault(eid, []).append(item)
                 await self.result(mid, out)
             elif kind in WS_COMMANDS:
                 if self.restricted and kind.startswith("config/entity_registry/"):

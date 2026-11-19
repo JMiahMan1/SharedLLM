@@ -1173,3 +1173,104 @@ async def test_household_cyd_scripts_and_syncs() -> None:
         assert len([p for p in pushes if p[0] == c["playlists_service"]]) == 2  # time_pattern /10
     finally:
         await eng.stop()
+
+
+# -- core correctness: sun night, restart, max_exceeded, busy repeats ---------------------------------
+
+async def test_sun_after_sunset_before_sunrise_is_the_night(hub: Hub, engine: AutomationEngine) -> None:
+    """HA reads this one pair as OR: no single day is both after its sunset and before its sunrise."""
+    night = {"condition": "sun", "after": "sunset", "before": "sunrise"}
+    assert not await cond(engine, night)  # START is noon local
+    engine.clock.set(datetime(2026, 11, 12, 5, 0, tzinfo=UTC))  # 22:00 local, after sunset
+    assert await cond(engine, night)
+    engine.clock.set(datetime(2026, 11, 12, 12, 0, tzinfo=UTC))  # 05:00 local, before sunrise
+    assert await cond(engine, night)
+    # The offsets still move each edge: 05:00 is not before "two hours before sunrise".
+    assert not await cond(engine, {**night, "before_offset": "-02:00:00"})
+    # Other pairs stay an AND.
+    assert not await cond(engine, {"condition": "sun", "after": "sunrise", "before": "sunrise"})
+
+
+async def test_restart_waits_for_the_old_run_to_stop_before_starting(hub: Hub, engine: AutomationEngine) -> None:
+    order: list[str] = []
+
+    async def slow(_hub: Hub, call: ServiceCall) -> None:
+        n = call.data["n"]
+        order.append(f"start {n}")
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            for _ in range(5):  # a run that takes a few turns of the loop to clean up
+                await asyncio.sleep(0)
+            order.append(f"stopped {n}")
+
+    hub.register_service("test", "slow", slow)
+    await run(engine, [auto([{"trigger": "event", "event_type": "go"}],
+                            [{"action": "test.slow", "data": {"n": "{{ trigger.event.data.n }}"}}], mode="restart")])
+    hub.bus.fire("go", {"n": 1})
+    await settle()
+    hub.bus.fire("go", {"n": 2})
+    await settle()
+    assert order == ["start 1", "stopped 1", "start 2"]
+    assert len(engine.automations["a1"].runs) == 1
+
+
+async def test_a_script_restarting_itself_starts_the_new_run(hub: Hub, engine: AutomationEngine) -> None:
+    calls = record(hub, "test.note")
+    scripts = {"again": {"mode": "restart", "sequence": [
+        {"action": "test.note", "data": {"n": "{{ n }}"}},
+        {"if": ["{{ n < 3 }}"], "then": [{"action": "script.turn_on", "target": {"entity_id": "script.again"},
+                                          "data": {"variables": {"n": "{{ n + 1 }}"}}}]},
+        {"delay": 5}]}}
+    await run(engine, [], scripts)
+    await hub.call_service("script", "turn_on", {"entity_id": "script.again", "variables": {"n": 1}})
+    await advance(engine, 30)
+    assert [c[1]["n"] for c in calls] == [1, 2, 3]
+
+
+@pytest.mark.parametrize(("mode", "level", "logged"), [
+    ("single", None, True), ("single", "silent", False), ("queued", "silent", False),
+    ("parallel", "info", True), ("parallel", "silent", False)])
+async def test_max_exceeded_sets_how_a_skipped_run_is_logged(hub: Hub, engine: AutomationEngine, caplog,
+                                                            mode: str, level: str | None, logged: bool) -> None:
+    import logging
+
+    calls = record(hub, "test.note")
+    extra: dict[str, Any] = {"max": 1} if mode != "single" else {}
+    if level:
+        extra["max_exceeded"] = level
+    await run(engine, [auto([{"trigger": "event", "event_type": "go"}], [{"delay": 10}, NOTE], mode=mode, **extra)])
+    with caplog.at_level(logging.DEBUG, logger="homehub.automation"):
+        hub.bus.fire("go", {})
+        await settle()
+        hub.bus.fire("go", {})
+        await settle()
+    said = [r for r in caplog.records if "already running" in r.getMessage() or "exceeded" in r.getMessage()]
+    assert bool(said) == logged
+    if level == "info":
+        assert said[0].levelno == logging.INFO
+    await advance(engine, 30)
+    assert len(calls) == 1
+
+
+async def test_an_unknown_max_exceeded_is_refused(hub: Hub, engine: AutomationEngine) -> None:
+    await engine.load([auto([{"trigger": "event", "event_type": "go"}], [NOTE], max_exceeded="loudly")], {}, [], None)
+    assert "max_exceeded" in (engine.automations["a1"].unsupported_reason or "")
+
+
+@pytest.mark.parametrize("kind", ["while", "until"])
+async def test_a_repeat_that_never_waits_still_lets_the_hub_run(hub: Hub, engine: AutomationEngine,
+                                                                kind: str) -> None:
+    """Steps that never await would spin a loop 10,000 times before anything else (a state change) could run."""
+    hub.states.set("input_boolean.keep_going", "on")
+    on = "is_state('input_boolean.keep_going', 'on')"
+    rep = {"while": ["{{ " + on + " }}"]} if kind == "while" else {"until": ["{{ not " + on + " }}"]}
+
+    async def later(_hub: Hub, _call: ServiceCall) -> None:  # answers at once; the switch flips on the next turn
+        asyncio.get_running_loop().call_soon(lambda: hub.states.set("input_boolean.keep_going", "off"))
+
+    hub.register_service("test", "later", later)
+    await run_script(engine, [{"action": "test.later"},
+                              {"repeat": {**rep, "sequence": [{"variables": {"x": "{{ repeat.index }}"}}]}},
+                              {"variables": {"x": 0}}])
+    assert engine.scripts["s"].last_error is None
