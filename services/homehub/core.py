@@ -427,6 +427,10 @@ class Driver:
     poll_interval: float | None = 30.0
     #: Seconds one :meth:`async_poll` may take before it counts as failed; ``None`` uses the runtime's default.
     poll_timeout: float | None = None
+    #: Attributes of this driver's entities that history leaves out (HA's ``_unrecorded_attributes``), on top of
+    #: the recorder's per-domain ones (recorder.py): values that churn without meaning anything later, such as a
+    #: rotating token or a signal reading. The live state and the restored state keep them.
+    unrecorded_attributes: frozenset[str] = frozenset()
 
     def __init__(self, hub: Hub, entry: ConfigEntry) -> None:
         self.hub = hub
@@ -592,6 +596,8 @@ class Hub:
         self.platform_drivers: dict[str, Any] = {}
         self.services: dict[tuple[str, str], ServiceHandler] = {}
         self.service_schemas: dict[tuple[str, str], dict[str, Any]] = {}
+        #: Services only an admin may call over the API (HA's ``async_register_admin_service``): recorder purges.
+        self.admin_services: set[tuple[str, str]] = set()
         self.time_zone = time_zone
         self.location = location or {}
         self.started_at = utcnow()

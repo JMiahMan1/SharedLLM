@@ -41,6 +41,7 @@ class Runtime:
         #: When each entry that is failing now first failed (this run of the hub).
         self.failing_since: dict[str, datetime] = {}
         self._unsub_record = None
+        self.recorder: Any = None  # recorder.Recorder, from start_recording
         self.automations: Any = None  # set by main once the engine is loaded
         self.helpers: Any = None  # HA's helpers (helpers.py), set by main
         self.loop_monitor: Any = None  # loop_monitor.LoopMonitor, set by main
@@ -75,18 +76,16 @@ class Runtime:
             if st.entity_id in hub.entities:
                 hub.states.set(st.entity_id, st.state, st.attributes, restore=st)
 
-    def start_recording(self) -> None:
-        def on_change(_t: str, ev: dict[str, Any]) -> None:
-            new, old = ev.get("new_state"), ev.get("old_state")
-            if new is None:
-                return
-            try:
-                self.store.save_last_state(new)
-                self.store.record(new, state_changed=old is None or old.state != new.state)
-            except Exception:
-                log.exception("recording %s failed", new.entity_id)
+    def start_recording(self, *, threaded: bool | None = None) -> None:
+        """History and restore states (recorder.py): a writer thread commits them in batches off the loop."""
+        from services.homehub import recorder
 
-        self._unsub_record = self.hub.bus.subscribe(on_change, "state_changed")
+        if self.recorder is not None:
+            self.recorder.stop()
+        self.recorder = recorder.Recorder(self.hub, self.store, threaded=threaded)
+        self.recorder.start()
+        recorder.register_services(self.hub, self.recorder)
+        self._unsub_record = self.recorder.detach
 
     async def start_all(self) -> None:
         for entry in list(self.hub.config_entries.values()):
@@ -269,7 +268,11 @@ class Runtime:
         while True:
             await asyncio.sleep(3600)
             try:
-                n = await asyncio.to_thread(self.store.prune_history, HISTORY_KEEP_DAYS)
+                rec = self.recorder
+                if rec is not None:  # the retention setting, on the writer's own connection
+                    n = await rec.purge(rec.keep_days)
+                else:
+                    n = await asyncio.to_thread(self.store.prune_history, HISTORY_KEEP_DAYS)
                 if n:
                     log.info("pruned %d history rows", n)
             except Exception:
@@ -278,8 +281,10 @@ class Runtime:
     async def shutdown(self) -> None:
         for entry_id in list(self._tasks):
             await self.stop_entry(entry_id)
-        if self._unsub_record:
-            self._unsub_record()
+        rec, self.recorder, self._unsub_record = self.recorder, None, None
+        if rec is not None:
+            rec.detach()  # on the loop, where the bus is used
+            await asyncio.to_thread(rec.stop)  # commits what the writer still holds
 
     def entry_status(self) -> list[dict[str, Any]]:
         out = []
