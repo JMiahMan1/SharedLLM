@@ -46,7 +46,7 @@ log = logging.getLogger("homehub.hardware")
 DISCOVERY_SOURCES: dict[str, list[str]] = {
     "esphome": ["zeroconf"], "matter": ["zeroconf"], "homekit_controller": ["zeroconf"],
     "cast": ["zeroconf"], "androidtv_remote": ["zeroconf"], "music_assistant": ["zeroconf"],
-    "tasmota": ["zeroconf", "dhcp"], "reolink": ["zeroconf", "dhcp"], "roborock": ["dhcp"],
+    "tasmota": ["zeroconf", "dhcp", "http"], "reolink": ["zeroconf", "dhcp"], "roborock": ["dhcp"],
     "wiz": ["udp", "dhcp"], "roku": ["ssdp"], "samsungtv": ["ssdp"], "webostv": ["ssdp"], "dlna_dmr": ["ssdp"],
 }
 #: Integrations that add themselves (an app registers) or are part of the hub.

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ArrowRightLeft, EyeOff, Loader2, Network, Plus, Radar, RefreshCw, Undo2, Wifi } from 'lucide-react';
+import { ArrowRightLeft, EyeOff, KeyRound, Loader2, Network, Plus, Radar, RefreshCw, Undo2, Wifi } from 'lucide-react';
 import AdoptDeviceDialog from './AdoptDeviceDialog';
 import MatterAddDialog from './MatterAddDialog';
 import MatterWifiSettings from './MatterWifiSettings';
@@ -218,6 +218,11 @@ export default function NewDevicesPanel() {
                 {d.label}{d.model ? ` · ${d.model}` : ''}{d.host ? ` · ${d.host}` : ''}
                 {d.last_seen ? ` · ${seen(d.last_seen)}` : ''}
               </p>
+              {d.note && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-amber-200" data-testid="new-device-note">
+                  <KeyRound size={12} aria-hidden /> {d.note}
+                </p>
+              )}
               {d.unsupported && <p className="mt-1 text-xs text-amber-300/90">{d.unsupported}</p>}
             </div>
             <div className="flex gap-2">
@@ -274,7 +279,7 @@ export default function NewDevicesPanel() {
       {adopting && (
         <AdoptDeviceDialog
           title={`Add ${adopting.name || adopting.host}`}
-          intro={`${adopting.label}${adopting.host ? ` at ${adopting.host}` : ''}`}
+          intro={`${adopting.label}${adopting.host ? ` at ${adopting.host}` : ''}${adopting.note ? `. ${adopting.note}.` : ''}`}
           needs={adopting.needs}
           areas={areas}
           onSubmit={({ name, areaId, input }) => adoptDevice(adopting.id, { name, area_id: areaId, input })}

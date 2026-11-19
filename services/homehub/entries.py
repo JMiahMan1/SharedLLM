@@ -38,6 +38,16 @@ RECONFIGURABLE: dict[str, dict[str, Any]] = {
     "password": {"label": "Password", "type": "password", "secret": True},
     "noise_psk": {"label": "Encryption key", "type": "password", "secret": True},
 }
+#: Fields offered for every entry of these integrations, even one that does not keep them yet: an entry
+#: imported from HA kept a Tasmota device's address only on its device (``configuration_url``) and had no
+#: password. Per field, what the UI shows instead of the generic label and help.
+DOMAIN_FIELDS: dict[str, dict[str, dict[str, Any]]] = {
+    "tasmota": {
+        "host": {"help": "The device's IP address. The hub follows it by its MAC when the router changes it."},
+        "password": {"label": "Web password",
+                     "help": "The password of the device's own web page. Leave empty to keep the stored one."},
+    },
+}
 #: Entries that are infrastructure for many devices: removing one of their
 #: devices must not remove the entry itself.
 SHARED_ENTRIES = {"matter", "cast", "music_assistant", "mobile_app"}
@@ -102,14 +112,42 @@ def _spec_fields(entry: ConfigEntry, hub: Any = None) -> dict[str, dict[str, Any
 
 
 def _field_meta(entry: ConfigEntry, key: str, hub: Any = None) -> dict[str, Any] | None:
+    if key in DOMAIN_FIELDS.get(entry.domain, {}):
+        return {**RECONFIGURABLE[key], **DOMAIN_FIELDS[entry.domain][key]}
     return RECONFIGURABLE.get(key) or _spec_fields(entry, hub).get(key)
+
+
+def device_address(hub: Any, entry: ConfigEntry) -> str | None:
+    """The address on the entry's one device (``configuration_url``), for an entry that keeps none itself."""
+    if hub is None:
+        return None
+    from urllib.parse import urlparse
+
+    devices = [d for d in hub.devices.values() if entry.entry_id in (d.config_entries or [])]
+    urls = {str(d.configuration_url) for d in devices if d.configuration_url}
+    if len(urls) != 1:
+        return None
+    parts = urlparse(urls.pop())
+    if not parts.hostname:
+        return None
+    return parts.hostname + (f":{parts.port}" if parts.port else "")
+
+
+def needs_of(entry: ConfigEntry) -> str | None:
+    """What a failing entry needs from an admin: "password" when the device refused it (AuthRequired)."""
+    if entry.disabled_by or entry.state == "loaded":
+        return None
+    return "password" if str(entry.reason or "").startswith("AuthRequired") else None
 
 
 def reconfigure_fields(entry: ConfigEntry, hub: Any = None) -> list[dict[str, Any]]:
     """What an admin may change: the generic keys the entry has, then its integration's setup fields."""
     out = []
     seen: set[str] = set()
-    candidates = [(k, m) for k, m in RECONFIGURABLE.items() if _home_of(entry, k) is not None]
+    own = DOMAIN_FIELDS.get(entry.domain, {})
+    candidates = [(k, {**RECONFIGURABLE[k], **extra}) for k, extra in own.items()]
+    candidates += [(k, m) for k, m in RECONFIGURABLE.items() if _home_of(entry, k) is not None
+                   and not (own and k == "username")]  # Tasmota's web user is always admin
     candidates += [(k, m) for k, m in _spec_fields(entry, hub).items() if k not in RECONFIGURABLE]
     for key, meta in candidates:
         if key in seen:
@@ -125,6 +163,8 @@ def reconfigure_fields(entry: ConfigEntry, hub: Any = None) -> list[dict[str, An
             field["set"] = bool(value)
         else:
             current = entry.options.get(key) if key == "host" and entry.options.get("host") else value
+            if key == "host" and not current and key in own:
+                current = device_address(hub, entry)
             field["value"] = "" if current is None else ("1" if current is True else "" if current is False
                                                           else str(current))
         out.append(field)
@@ -161,7 +201,7 @@ def summary(runtime: Any, entry: ConfigEntry) -> dict[str, Any]:
     return {
         "entry_id": entry.entry_id, "domain": entry.domain, "label": label(entry.domain), "title": entry.title,
         "state": entry.state, "reason": entry.reason, "source": entry.source, "disabled_by": entry.disabled_by,
-        "offline_since": offline_since(runtime, entry),
+        "offline_since": offline_since(runtime, entry), "needs": needs_of(entry),
         "devices": sorted((dev_view(d) for d in devices), key=lambda d: d["name"].lower()),
         "entities": len(ents), "reconfigure": reconfigure_fields(entry, hub),
         "unpairs": entry.domain in _unpair_hooks(), "shared": entry.domain in SHARED_ENTRIES,
@@ -257,6 +297,12 @@ async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -
     if "host" in changes and str(changes.get("host") or "").strip():
         # An address override from the import would win over the new address.
         options.pop("host", None)
+    if entry.domain in DOMAIN_FIELDS:
+        # Kept on the entry from now on, where address_follow updates it when DHCP moves the device.
+        if not data.get("host") and not options.get("host") and (where := device_address(runtime.hub, entry)):
+            data["host"] = where
+        if data.get("password") and not data.get("username"):
+            data["username"] = "admin"  # Tasmota's web user is always admin
     await _check_changes(entry.domain, changes, data)
     old = (dict(entry.data), dict(entry.options), entry.title)
     entry.data, entry.options = data, options

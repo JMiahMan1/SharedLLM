@@ -45,6 +45,7 @@ from xml.etree import ElementTree as ET
 from services.homehub.core import ConfigEntry
 from services.homehub.discovery import norm_mac
 from services.homehub.flows import (
+    TASMOTA_PASSWORD,
     FlowError,
     NeedsInput,
     Pending,
@@ -177,7 +178,7 @@ MANUAL: dict[str, dict[str, Any]] = {
     "reolink": {"label": "Reolink camera, NVR or Home Hub", "fields": [HOST, USERNAME, PASSWORD]},
     "roku": {"label": "Roku", "fields": [HOST]},
     "wiz": {"label": "WiZ light", "fields": [HOST]},
-    "tasmota": {"label": "Tasmota", "fields": [HOST]},
+    "tasmota": {"label": "Tasmota", "fields": [HOST, TASMOTA_PASSWORD]},
     "esphome": {"label": "ESPHome node", "fields": [HOST]},
     "esphome_builder": {"label": "ESPHome Device Builder", "fields": [
         BUILDER_URL, {**USERNAME, "optional": True}, {**PASSWORD, "optional": True}]},

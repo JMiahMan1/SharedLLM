@@ -58,6 +58,28 @@ describe('NewDevicesPanel', () => {
     expect(screen.queryByText('Old Bulb · WiZ')).toBeNull();
   });
 
+  it('a locked Tasmota says it needs its web password and asks for it when added', async () => {
+    const lamp: DiscoveredDevice = {
+      ...base, id: 'tasmota:020000000a01', integration: 'tasmota', label: 'Tasmota', name: 'Shelf-Bulb', model: 'ESP8266EX',
+      host: '192.0.2.51', mac: '020000000a01', source: 'http', note: 'Needs its web password',
+      needs: [{ key: 'password', label: 'Web password', type: 'password', help: 'The device\'s own web page.' }],
+    };
+    vi.mocked(discovered.getDiscovered).mockResolvedValue({ devices: [lamp] });
+    vi.mocked(discovered.adoptDevice).mockResolvedValue({ status: 'adopted', entry_id: 'e9', name: 'Shelf-Bulb',
+      entities: ['light.shelf_bulb'] });
+    wrap();
+    const row = await screen.findByTestId('new-device');
+    expect(within(row).getByTestId('new-device-note')).toHaveTextContent('Needs its web password');
+    fireEvent.click(within(row).getByRole('button', { name: 'Add Shelf-Bulb' }));
+    const dialog = await screen.findByTestId('adopt-dialog');
+    const add = within(dialog).getByRole('button', { name: /Add/ });
+    expect(add).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/Web password/), { target: { value: 'made-up-pw' } });
+    fireEvent.click(add);
+    await waitFor(() => expect(discovered.adoptDevice).toHaveBeenCalledWith('tasmota:020000000a01',
+      { input: { password: 'made-up-pw' } }));
+  });
+
   it('asks for the key, shows the hub\'s refusal, and adds on the right key', async () => {
     vi.mocked(discovered.adoptDevice)
       .mockResolvedValueOnce({ status: 'needs_input', message: 'Enter the node\'s encryption key.', error: 'That key was not accepted.',

@@ -6,13 +6,24 @@ of findings:
 - **mDNS**, continuously (python-zeroconf; the hub runs on the host network):
   ESPHome nodes, commissionable Matter devices, unpaired HomeKit accessories
   (``sf=1``), Google Cast, Android TV Remote, and Tasmota on ``_http._tcp``.
-- **SSDP** M-SEARCH, on an interval and on demand: Roku, Samsung and LG TVs,
+- **SSDP** M-SEARCH, every 15 minutes and on demand: Roku, Samsung and LG TVs,
   DLNA renderers. Replies to a multicast M-SEARCH are unicast datagrams from
   the device, which a stateful firewall does not match to the outgoing
   multicast and drops, so the same search is also sent unicast to every
   address of the subnet; those replies are tracked and get through.
 - **WiZ**, on an interval and on demand: ``getSystemConfig`` to UDP 38899, as a
   broadcast and as a unicast sweep of the subnet (same firewall reason).
+- **HTTP fingerprint**, for addresses nothing else identified: every MAC the
+  neighbour table shows that the registry does not know is asked
+  ``GET /cm?cmnd=Status 0`` once (housekeeping, so a device that comes up is
+  found within a minute of the hub seeing it) and again at every active scan.
+  Tasmota answers it in a way nothing else does: its ``Server: Tasmota/<version>``
+  header, its ``Status 0`` JSON, or, with a web password set, HTTP 401 (or
+  ``{"WARNING": "Need user=..."}`` on older firmware). A locked device is
+  listed as needing its web password. Tasmota does not announce itself over
+  mDNS unless built with it, and a device renamed in its settings no longer has
+  a ``tasmota-*`` DHCP host name, so this is how those are found. Hosts that
+  announce ``_http._tcp`` over mDNS without being anything known are asked too.
 - **DHCP/ARP**, with every active scan: the kernel's neighbour table
   (``/proc/net/arp``, ``HOMEHUB_ARP_TABLE``) gives each live address its MAC,
   and a reverse lookup its DHCP host name. Both are matched against the
@@ -61,13 +72,14 @@ log = logging.getLogger("homehub.discovery")
 KV_KEY = "discovery"
 #: A finding not seen for this long is dropped.
 EXPIRE_S = 24 * 3600
-#: Active scans (SSDP and the WiZ sweep) run this often...
-SCAN_INTERVAL_S = float(os.getenv("HOMEHUB_DISCOVERY_INTERVAL_S", "3600"))
+#: Active scans (SSDP and the WiZ sweep) run this often. Their unicast sweeps are also what makes the
+#: kernel learn every live address, which the neighbour table (DHCP/ARP, HTTP fingerprints) reads...
+SCAN_INTERVAL_S = float(os.getenv("HOMEHUB_DISCOVERY_INTERVAL_S", "900"))
 #: ...and an on-demand scan at most this often; a sooner request gets the last results.
 MIN_SCAN_GAP_S = 60.0
 #: Housekeeping (expiry, saving, mDNS freshness) runs every this many seconds.
 HOUSEKEEPING_S = 60.0
-#: A device the hub follows by MAC that stopped answering gets a sweep this soon, not at the hourly scan.
+#: A device the hub follows by MAC that stopped answering gets a sweep this soon, not at the next scan.
 FOLLOW_SCAN_S = 600.0
 #: The first active scan waits this long after start, so drivers connect first.
 STARTUP_DELAY_S = 20.0
@@ -77,6 +89,12 @@ NOTIFY_DELAY_S = 15.0
 NOTIFY_SUMMARY_OVER = 3
 #: At most this many addresses are swept.
 MAX_SWEEP_HOSTS = 1024
+#: An unidentified neighbour is fingerprinted over HTTP once, again at each active scan, and when its address
+#: changes; a request that does not answer within this long is nothing we add.
+HTTP_PROBE_TIMEOUT_S = 2.5
+HTTP_PROBE_CONCURRENCY = 16
+#: At most this many new neighbours are fingerprinted per housekeeping pass (the rest wait a minute).
+HTTP_PROBE_PER_PASS = 64
 
 WIZ_PORT = 38899
 SSDP_ADDR = ("239.255.255.250", 1900)
@@ -452,6 +470,48 @@ def parse_dhcp(host: str, mac: str, hostname: str | None) -> dict[str, Any] | No
     }
 
 
+def parse_tasmota_http(host: str, mac: str | None, status: int, headers: dict[str, str], body: str,
+                       hostname: str | None = None) -> dict[str, Any] | None:
+    """One ``GET /cm?cmnd=Status 0`` reply -> a Tasmota finding, or None when it is not Tasmota.
+
+    ``headers`` are lower-cased names. A device with a web password answers 401 (or the WARNING reply of older
+    firmware); it is still recognisably Tasmota by its ``Server`` header or that reply, and is ``locked``.
+    """
+    server = str(headers.get("server") or "")
+    payload: Any = None
+    with contextlib.suppress(ValueError):
+        payload = json.loads(body) if body.strip().startswith("{") else None
+    warning = str(payload.get("WARNING") or "") if isinstance(payload, dict) else ""
+    by_server = server.lower().startswith("tasmota")
+    by_status = isinstance(payload, dict) and isinstance(payload.get("StatusFWR"), dict) and \
+        isinstance(payload.get("StatusNET"), dict)
+    by_warning = "need user=" in warning.lower()
+    if not (by_server or by_status or by_warning):
+        return None
+    locked = status == 401 or by_warning
+    version = hardware = None
+    if by_server:
+        m = re.match(r"tasmota/(\S+)(?:\s*\(([^)]*)\))?", server, re.IGNORECASE)
+        if m:
+            version, hardware = m.group(1), m.group(2)
+    name = None
+    if by_status and not locked:
+        fwr, net, st = payload["StatusFWR"], payload["StatusNET"], payload.get("Status") or {}
+        mac = norm_mac(net.get("Mac")) or mac
+        version = str(fwr.get("Version") or "").split("(")[0] or version
+        hardware = fwr.get("Hardware") or hardware
+        friendly = st.get("FriendlyName") or []
+        name = st.get("DeviceName") or (friendly[0] if isinstance(friendly, list) and friendly else None)
+    short = (hostname or "").split(".")[0] or None
+    mac = norm_mac(mac)
+    return {
+        "id": make_id("tasmota", mac or host), "integration": "tasmota",
+        "name": name or short or f"Tasmota at {host}", "model": hardware, "manufacturer": "Tasmota",
+        "host": host, "port": 80, "mac": mac, "ids": [mac] if mac else [], "source": "http",
+        "props": {"locked": locked, "version": version, "hostname": short},
+    }
+
+
 # -- what the registry already knows ----------------------------------------------
 
 class KnownIndex:
@@ -601,6 +661,10 @@ class DiscoveryManager:
         self._mdns_seen: dict[str, str] = {}   # finding id -> "type|name" still announced
         self._mdns_pending: set[tuple[str, str]] = set()
         self._notify_task: asyncio.Task | None = None
+        #: MAC (or host) -> (address, when) of the last HTTP fingerprint, so housekeeping asks each once.
+        self._probed: dict[str, tuple[str, float]] = {}
+        #: Hosts that announced ``_http._tcp`` without being anything known: fingerprinted next pass.
+        self._http_candidates: set[str] = set()
 
     # -- lifecycle ---------------------------------------------------------------
     def load(self) -> None:
@@ -665,6 +729,13 @@ class DiscoveryManager:
             await self.follow_addresses()
         except Exception:
             log.exception("following devices to new addresses failed")
+        try:
+            if await self._scan_http(every=False):
+                await self.flush_notices()
+        except RuntimeError:
+            pass  # no neighbour table here
+        except Exception:
+            log.exception("fingerprinting new neighbours failed")
         t = now()
         for fid in list(self._mdns_seen):
             if fid in self.findings:
@@ -717,6 +788,7 @@ class DiscoveryManager:
 
         needs = flows.needs_for(f)
         unsupported = flows.unsupported_reason(f)
+        note = "Needs its web password" if integration == "tasmota" and props.get("locked") else None
         entry = self.hub.config_entries.get(entry_id or "")
         moved = None
         new_host = str(f.get("host") or "").lower()
@@ -736,7 +808,7 @@ class DiscoveryManager:
             "entry_title": entry.title if (known and entry is not None) else None,
             "ignored": ignored, "new": not known and not ignored,
             "adoptable": not known and unsupported is None, "unsupported": unsupported,
-            "needs": needs, "details": {k: v for k, v in props.items() if k not in ("location",)},
+            "needs": needs, "note": note, "details": {k: v for k, v in props.items() if k not in ("location",)},
         }
 
     def list(self, *, new_only: bool = False) -> list[dict[str, Any]]:
@@ -794,9 +866,11 @@ class DiscoveryManager:
         def one(p: dict[str, Any]) -> dict[str, Any]:
             where = f" at {p['host']}" if p.get("host") else ""
             action = "Add it" if p["adoptable"] else "See it"
+            note = f" {p['note']} to be added." if p.get("note") else ""
             return notify.notice(
                 "@admins", "admin", f"New device found: {p['name']}",
-                f"A {p['label']} device{where} is on the network and not set up yet. {action} on the Devices page.",
+                f"A {p['label']} device{where} is on the network and not set up yet.{note} "
+                f"{action} on the Devices page.",
                 url="/devices", priority=2, tag=f"admin:new-device:{p['id']}", once=f"homehub:new-device:{p['id']}",
                 kind="admin", audience="parents")
 
@@ -842,7 +916,7 @@ class DiscoveryManager:
                     self.runtime.start_entry(entry)
             await self._notify_followed(move)
         # A followed device that stopped answering and is not in the table: sweep now, so the kernel
-        # learns where it went, instead of waiting for the hourly scan.
+        # learns where it went, instead of waiting for the next scan.
         if not moves and now() - self._last_active >= FOLLOW_SCAN_S and address_follow.lost(self.hub, neighbours):
             self._last_active = now()  # one early sweep per FOLLOW_SCAN_S
             asyncio.get_running_loop().create_task(self.scan(reason="a followed device stopped answering"))
@@ -947,6 +1021,9 @@ class DiscoveryManager:
             log.exception("could not read mDNS service %s", name)
             return None
         if finding is None:
+            stype = service_type if service_type.endswith(".") else service_type + "."
+            if stype == "_http._tcp.local." and host and ":" not in host:
+                self._http_candidates.add(host)  # maybe Tasmota built with mDNS: fingerprint it
             return None
         is_new = finding["id"] not in self.findings
         stored = self.record(finding)
@@ -966,7 +1043,9 @@ class DiscoveryManager:
             before = set(self.findings)
             counts: dict[str, Any] = {}
             # DHCP/ARP last: the sweeps above make the kernel resolve every live address.
-            for label, job in (("ssdp", self._scan_ssdp), ("wiz", self._scan_wiz), ("dhcp", self._scan_dhcp)):
+            jobs = (("ssdp", self._scan_ssdp), ("wiz", self._scan_wiz), ("dhcp", self._scan_dhcp),
+                    ("http", lambda: self._scan_http(every=True)))
+            for label, job in jobs:
                 try:
                     counts[label] = await job()
                 except Exception as exc:
@@ -1150,6 +1229,94 @@ class DiscoveryManager:
             found += 1
         log.debug("dhcp: %d neighbours, %d matched, %d MACs filled in", len(neighbours), found, filled)
         return found
+
+    # HTTP fingerprints ---------------------------------------------------------------
+    async def http_probe(self, host: str, session: Any = None) -> tuple[int, dict[str, str], str] | None:
+        """``GET /cm?cmnd=Status 0`` on port 80: ``(status, lower-cased headers, body)``, or None (no answer)."""
+        import aiohttp
+
+        async def get(s: Any) -> tuple[int, dict[str, str], str]:
+            async with s.get(f"http://{host}/cm", params={"cmnd": "Status 0"}, allow_redirects=False) as resp:
+                body = (await resp.content.read(64 * 1024)).decode("utf-8", "replace")
+                return resp.status, {k.lower(): v for k, v in resp.headers.items()}, body
+
+        try:
+            if session is not None:
+                return await get(session)
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=HTTP_PROBE_TIMEOUT_S)) as s:
+                return await get(s)
+        except Exception as exc:
+            log.debug("http fingerprint %s: %s", host, exc or type(exc).__name__)
+            return None
+
+    def _http_targets(self, neighbours: dict[str, str], every: bool) -> list[tuple[str, str | None]]:
+        """Addresses to fingerprint: unidentified neighbours (and mDNS ``_http`` hosts), new ones unless ``every``."""
+        proxied = shared_macs(neighbours)
+        index = KnownIndex(self.hub)
+        claimed = {str(f.get("host")) for f in self.findings.values()
+                   if f.get("host") and f.get("integration") != "tasmota"}
+        claimed |= {str(f.get("mac")) for f in self.findings.values()
+                    if f.get("mac") and f.get("integration") != "tasmota"}
+        out: list[tuple[str, str | None]] = []
+        seen_hosts = set()
+        for host, mac in [*neighbours.items(), *((h, None) for h in sorted(self._http_candidates))]:
+            if host in seen_hosts:
+                continue
+            seen_hosts.add(host)
+            if mac is not None and (mac in proxied or token(mac) in index.tokens or mac in claimed):
+                continue  # an extender's MAC, a device that is set up, or one another protocol identified
+            if host in claimed or _is_loopback(host):
+                continue
+            key = mac or host
+            prev = self._probed.get(key)
+            if not every and prev is not None and prev[0] == host:
+                continue
+            out.append((host, mac))
+        return out
+
+    async def _scan_http(self, *, every: bool) -> int:
+        """Fingerprint unidentified neighbours over HTTP; returns how many new findings it made."""
+        neighbours = parse_arp(self.read_arp())
+        targets = self._http_targets(neighbours, every)
+        if not every:
+            targets = targets[:HTTP_PROBE_PER_PASS]
+        if not targets:
+            return 0
+        import aiohttp
+
+        sem = asyncio.Semaphore(HTTP_PROBE_CONCURRENCY)
+        replies: dict[str, tuple[int, dict[str, str], str] | None] = {}
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=HTTP_PROBE_TIMEOUT_S)) as session:
+
+            async def one(host: str) -> None:
+                async with sem:
+                    replies[host] = await self.http_probe(host, session)
+
+            await asyncio.gather(*(one(h) for h, _m in targets))
+        t = now()
+        new = 0
+        for host, mac in targets:
+            self._probed[mac or host] = (host, t)
+            self._http_candidates.discard(host)
+            reply = replies.get(host)
+            if reply is None:
+                continue
+            status, headers, body = reply
+            f = parse_tasmota_http(host, mac, status, headers, body)
+            if f is None:
+                continue
+            if not f["props"].get("hostname") and DHCP_HOSTNAMES:
+                name = await self.reverse_name(host)
+                f = parse_tasmota_http(host, mac, status, headers, body, name)
+            if f is None:
+                continue
+            if f["id"] not in self.findings:
+                new += 1
+            # A finding the DHCP host name made has the same id (tasmota:<mac>): this adds what HTTP told.
+            self.record(f)
+        if new:
+            log.info("http: %d new Tasmota device(s) among %d fingerprinted", new, len(targets))
+        return new
 
     # WiZ ---------------------------------------------------------------------------
     async def _scan_wiz(self) -> int:

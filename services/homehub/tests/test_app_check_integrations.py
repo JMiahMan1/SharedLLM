@@ -61,7 +61,7 @@ def test_common_sense_is_a_cloud_account_one_per_hub(rt):
 def test_abuse_ch_is_no_hub_integration_any_more(rt):
     listed = {f["domain"] for f in manual_flows.manual_list(rt.hub)}
     assert "malwarebazaar" not in listed and "malwarebazaar" not in manual_flows.FLOWS
-    assert manual_flows.RECONFIGURE_CHECKS == {}
+    assert "malwarebazaar" not in manual_flows.RECONFIGURE_CHECKS
     assert driver_class("malwarebazaar") is None
 
 
