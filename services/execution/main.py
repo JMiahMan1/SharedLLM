@@ -33,7 +33,7 @@ from services.config import (
 )
 
 # Now import everything from sibling modules
-from services.execution import device_registry, ha_client, ha_health, hardware_router
+from services.execution import announce_clips, device_registry, ha_client, ha_health, hardware_router
 from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
 from services.execution.artifacts import artifact_name, create_artifact
 from services.execution.handlers import (
@@ -638,6 +638,8 @@ def cache_temp_audio(media_id: str, audio_bytes: bytes) -> None:
         _TEMP_AUDIO_CACHE_BYTES -= len(previous)
     TEMP_AUDIO_CACHE[media_id] = audio_bytes
     _TEMP_AUDIO_CACHE_BYTES += len(audio_bytes)
+    # Its real length, so an announcement waits for exactly this clip before restoring the speaker.
+    announce_clips.remember(media_id, audio_bytes)
     while len(TEMP_AUDIO_CACHE) > 1 and (
         len(TEMP_AUDIO_CACHE) > TEMP_AUDIO_CACHE_MAX_ENTRIES
         or _TEMP_AUDIO_CACHE_BYTES > TEMP_AUDIO_CACHE_MAX_BYTES
@@ -701,6 +703,55 @@ async def temp_media_prune_loop() -> None:
         await asyncio.sleep(TEMP_MEDIA_PRUNE_INTERVAL_SECONDS)
 
 
+async def serve_media_file(media_id: str, request: Request):
+    """One media file for a device, behind the signed media token (``?user=&mt=``).
+
+    Devices probe with HEAD and fetch with ``Range``: TTS clips answer a real
+    ``206`` (``clip_response``) and files on disk go through Starlette's
+    ``FileResponse``, which does the same. In-progress ``.part`` files ARE
+    served (progressive playback) but only behind the same token.
+    """
+    from fastapi.responses import FileResponse
+
+    from services.common.audio_clip import clip_response
+    from services.shared.media_token import verify as verify_media_token
+
+    # Auth first: signed media token is the only credential devices can present.
+    mt = request.query_params.get("mt")
+    user = request.query_params.get("user", "")
+    if not mt or not verify_media_token(mt, user):
+        raise HTTPException(status_code=403, detail="Signed media token required")
+
+    if "/" in media_id or "\\" in media_id or ".." in media_id:
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    head = request.method == "HEAD"
+    wanted = request.headers.get("range")
+
+    # TTS audio from memory cache, else from disk (.wav)
+    cached_audio = get_temp_audio(media_id)
+    if cached_audio is None:
+        wav_path = os.path.join(TEMP_AUDIO_DIR, f"{media_id}.wav")
+        if os.path.exists(wav_path):
+            cached_audio = await asyncio.to_thread(_read_bytes, wav_path)
+    if cached_audio is not None:
+        return clip_response(cached_audio, "audio/wav", wanted, head=head)
+
+    # Video files from disk (.mp4), then the .mp4.part of a download still in
+    # progress (progressive playback must not wait for the full download).
+    for suffix in (".mp4", ".mp4.part"):
+        path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}{suffix}")
+        if os.path.exists(path):
+            return FileResponse(path=path, media_type="video/mp4", headers={"Cache-Control": "no-cache"})
+
+    raise HTTPException(status_code=404, detail="Media not found")
+
+
+def _read_bytes(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
 def create_media_server_app():
     """Build the FastAPI app for the media file server (port 8888).
 
@@ -709,69 +760,14 @@ def create_media_server_app():
     (progressive playback) but only behind the same token auth.
     """
     from fastapi import FastAPI, HTTPException, Request
-    from fastapi.responses import FileResponse, Response
-
-    from services.shared.media_token import verify as verify_media_token
+    from fastapi.responses import FileResponse
 
     media_app = FastAPI(title="Media Server")
 
     @media_app.get("/media/{media_id}")
     @media_app.head("/media/{media_id}")
     async def serve_media(media_id: str, request: Request):  # pyright: ignore[reportUnusedFunction]
-        # Auth first: signed media token is the only credential devices can present.
-        mt = request.query_params.get("mt")
-        user = request.query_params.get("user", "")
-        if not mt or not verify_media_token(mt, user):
-            raise HTTPException(status_code=403, detail="Signed media token required")
-
-        if "/" in media_id or "\\" in media_id or ".." in media_id:
-            raise HTTPException(status_code=404, detail="Media not found")
-
-        # TTS audio from memory cache
-        cached_audio = get_temp_audio(media_id)
-        if cached_audio is not None:
-            return Response(
-                content=cached_audio,
-                media_type="audio/wav",
-                headers={"Accept-Ranges": "bytes"},
-            )
-
-        # TTS audio from disk (.wav)
-        wav_path = os.path.join(TEMP_AUDIO_DIR, f"{media_id}.wav")
-        if os.path.exists(wav_path):
-            return FileResponse(
-                path=wav_path,
-                media_type="audio/wav",
-                headers={"Accept-Ranges": "bytes"},
-            )
-
-        # Video files from disk (.mp4); FileResponse handles Range automatically
-        mp4_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
-        if os.path.exists(mp4_path):
-            return FileResponse(
-                path=mp4_path,
-                media_type="video/mp4",
-                headers={
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "no-cache",
-                },
-            )
-
-        # Progressive download: serve .mp4.part files while download is in progress.
-        # Kept intentionally (progressive playback must not wait for the full
-        # download); it is now gated behind the signed media token like everything else.
-        part_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4.part")
-        if os.path.exists(part_path):
-            return FileResponse(
-                path=part_path,
-                media_type="video/mp4",
-                headers={
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "no-cache",
-                },
-            )
-
-        raise HTTPException(status_code=404, detail="Media not found")
+        return await serve_media_file(media_id, request)
 
     @media_app.get("/stage/{sid}/{name}")
     async def serve_stage_stream(sid: str, name: str):  # pyright: ignore[reportUnusedFunction]
@@ -802,17 +798,29 @@ def get_public_host():
         pass
     raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set and no compose IP was discovered.")
 
+#: Players that never publish the announcement's URL as their media_content_id: a TV (or the
+#: player beside it) and an ESPHome satellite only say they are playing.
+_STATE_ONLY_VERIFY = frozenset({"roku", "samsung", "webos", "android_tv", "bravia", "generic_tv",
+                                "esphome", "music_assistant"})
+
+
 async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_media_url: str, timeout: int = 10, device_type: str = "unknown") -> dict[str, Any]:
     """Verify that a media player actually started playing the expected content.
 
-    For speakers/Chromecast: requires 'playing' state with matching media URL.
-    For TVs: accepts 'on' or 'idle' state since TVs don't always report 'playing' for audio.
+    Proof is the player saying so, never a state it was already in:
+
+    * any player whose ``media_content_id`` is the announcement's URL has it (playing, or idle
+      again once a short clip has ended);
+    * a Cast device or speaker must be ``playing`` with the URL;
+    * a TV, a Music Assistant player and an ESPHome satellite must go to ``playing``. They do not
+      publish the URL (the hub's ESPHome driver never does), and ``on`` or ``idle`` is what a TV
+      reports whether or not anything played, so those no longer count.
 
     Returns dict with: verified (bool), state, media_content_id, app_name, detail
     """
     import time
     start = time.time()
-    is_tv = device_type in ("roku", "samsung", "webos", "android_tv", "bravia", "generic_tv")
+    state_only = device_type in _STATE_ONLY_VERIFY
     state_resp: dict | None = None
 
     while time.time() - start < timeout:
@@ -825,28 +833,17 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
         attrs = state_resp.get("attributes", {})
         current_media = attrs.get("media_content_id", "")
         app_name = attrs.get("app_name", attrs.get("app_id", ""))
+        has_url = bool(expected_media_url) and expected_media_url in str(current_media or "")
 
-        # For TVs: accept 'on' or 'idle' as success (TVs don't report 'playing' for audio)
-        if is_tv and current_state in ("on", "idle", "playing"):
-            log.info(f"[verify_playback] TV device {entity_id} state='{current_state}' (acceptable for TV)")
+        if (current_state == "playing" and (has_url or state_only)) or (
+                has_url and current_state in ("idle", "paused", "on")):
+            log.info(f"[verify_playback] CONFIRMED on {entity_id}: state='{current_state}' media={str(current_media)[:60]}")
             return {
                 "verified": True,
                 "state": current_state,
                 "media_content_id": current_media,
                 "app_name": app_name,
-                "detail": f"Playback confirmed on TV (state='{current_state}')"
-            }
-
-        # For speakers/Chromecast: require 'playing' state with matching media URL
-        if current_state == "playing" and expected_media_url in str(current_media):
-            log.info(f"[verify_playback] CONFIRMED playing: {entity_id} -> {current_media[:60]}")
-            await asyncio.sleep(1)
-            return {
-                "verified": True,
-                "state": current_state,
-                "media_content_id": current_media,
-                "app_name": app_name,
-                "detail": "Playback confirmed via state transition to 'playing'"
+                "detail": f"Playback confirmed (state='{current_state}'{', announcement URL' if has_url else ''})"
             }
 
         await asyncio.sleep(0.5)
@@ -863,33 +860,13 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
     }
 
 @app.get("/media/{media_id}")
-async def get_temp_media(media_id: str):
-    """Serves transient audio/video files for HA playback."""
-    from fastapi.responses import FileResponse, Response
+@app.head("/media/{media_id}")
+async def get_temp_media(media_id: str, request: Request):
+    """The same files as the media server on 8888, behind the same signed media token.
 
-    # Check audio cache first
-    cached_audio = get_temp_audio(media_id)
-    if cached_audio is not None:
-        return Response(content=cached_audio, media_type="audio/wav")
-
-    # Check video files on disk
-    video_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
-    if os.path.exists(video_path):
-        return FileResponse(
-            video_path,
-            media_type="video/mp4",
-            headers={
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "no-cache",
-            }
-        )
-
-    # Return 503 (Service Unavailable) for media that's being prepared
-    # This tells HA to retry instead of treating it as a permanent 404
-    raise HTTPException(
-        status_code=503,
-        detail="Media not ready or expired"
-    )
+    This copy on the main app used to answer anyone who guessed an id.
+    """
+    return await serve_media_file(media_id, request)
 
 def _ok(message: str, service: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service=service, detail=detail)
@@ -1629,13 +1606,14 @@ async def execute_trigger(payload: dict[str, Any]):
                         if state_str == "off":
                             await ha_client.call_service(ha_url, ha_token, own_domain, "turn_on", full_entity_id)
                             await asyncio.sleep(2)
+                        # An announcement, so a player that can speaks over what it plays and goes back to it.
                         result = await ha_client.call_service(
                             ha_url,
                             ha_token,
                             own_domain,
                             "play_media",
                             full_entity_id,
-                            {"media_content_id": media_url, "media_content_type": "audio/wav"},
+                            {"media_content_id": media_url, "media_content_type": "audio/wav", "announce": True},
                         )
                     log.info(f"HA/TV alert result on {full_entity_id}: {result}")
                     # HA failures come back as {"ok": False}, they do not raise. This
@@ -2448,8 +2426,12 @@ async def execute_announce(req: AnnouncementRequest):
             await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
             await asyncio.sleep(2.0)
 
-    # 2. Set volume
-    await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
+    # 2. Set volume. A Music Assistant player is not touched here: it is handed the level as the
+    # announcement's announce_volume and sets and restores it itself.
+    from services.execution.announce_handlers import _is_ma_player
+    target_attrs = (initial_state or {}).get("attributes") or {}
+    if not _is_ma_player(target_attrs, target_player):
+        await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
 
     # 3. TTS & Dispatch
     result = {"ok": False, "error": "No engine selected"}
@@ -2536,10 +2518,8 @@ async def execute_announce(req: AnnouncementRequest):
         if attrs.get("_ma_player_entity"):
             fallback_target = attrs["_ma_player_entity"]
             log.info(f"[announce] Using MA player for fallback: {fallback_target}")
-        result = await ha_client.call_service(ha_url, ha_token, "music_assistant", "play_announcement", fallback_target, {
-            "url": media_url,
-            "use_pre_announce": False
-        })
+        from services.execution.announce_handlers import ma_play_announcement
+        result = await ma_play_announcement(ha_url, ha_token, fallback_target, media_url, req.volume or 0)
 
     # Last resort: local Piper (try tts.piper, then tts.speak with tts.piper entity)
     if not result.get("ok") and not ha_down:
@@ -2555,17 +2535,26 @@ async def execute_announce(req: AnnouncementRequest):
 
     # 4. Verify playback actually happened (through HA; a direct play was
     # confirmed by the route that made it, and HA cannot be asked anyway)
-    if result.get("ok") and media_url and not direct:
-        log.info(f"[announce] Verifying playback on {target_player}...")
+    # A route that confirmed delivery itself (Roku's ECP launch, an LG toast) has nothing to poll for.
+    if result.get("ok") and media_url and not direct and not result.get("method"):
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components,
                                      platform=announce_idx.tv_platform(target_player) if announce_idx else None)
+        # The handler may have played it on the TV's Cast, AirPlay or Music Assistant player: watch that one.
+        verify_target = result.get("target") or target_player
+        if verify_target != target_player:
+            from services.execution.announce_handlers import _is_ma_player
+            sib = await ha_client.get_state(ha_url, ha_token, verify_target) or {}
+            sib_attrs = sib.get("attributes") or {}
+            device_type = "music_assistant" if _is_ma_player(sib_attrs, verify_target) else detect_tv_type(
+                verify_target, sib.get("state", "unknown"), sib_attrs, loaded_components)
+        log.info(f"[announce] Verifying playback on {verify_target} ({device_type})...")
 
         # TVs need longer verification timeout
         verify_timeout = 30 if device_type in ("samsung", "webos", "roku") else 15
 
-        verification = await verify_playback(ha_url, ha_token, target_player, media_url, timeout=verify_timeout, device_type=device_type)
+        verification = await verify_playback(ha_url, ha_token, verify_target, media_url, timeout=verify_timeout, device_type=device_type)
         if verification["verified"]:
             log.info(f"[announce] Playback VERIFIED: {verification['detail']}")
         else:
@@ -2592,9 +2581,9 @@ async def execute_announce(req: AnnouncementRequest):
             "announce",
         )
 
-    # Wait for announcement audio to finish before restoring
+    # Wait for the announcement to finish before restoring: the clip's real length, read from its header
     if result.get("ok"):
-        await asyncio.sleep(10)
+        await asyncio.sleep(announce_clips.restore_delay(media_url))
 
     # 6. Restore initial state for ALL devices
     device_type = detect_tv_type(target_player, initial_state.get("state", "unknown") if initial_state else "unknown", initial_state.get("attributes", {}) if initial_state else {}, loaded_components,

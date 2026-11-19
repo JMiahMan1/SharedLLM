@@ -49,7 +49,9 @@ from services.homehub.drivers.media_common import (
     as_list,
     clamp01,
     clean,
+    device_twins,
     known_macs,
+    mime_for,
     remember_mac,
     remote_command_list,
     send_command_list,
@@ -261,6 +263,8 @@ class WebOSDriver(Driver):
                 self._publish()
                 return None
             return await self.async_call(entity, domain, "turn_on", data)
+        if service == "play_media":
+            self._refuse_audio(entity, data)
         client = await self.require_client()
         live_tv = client.tv_state.current_app_id == LIVE_TV_APP_ID
         try:
@@ -363,6 +367,35 @@ class WebOSDriver(Driver):
         else:
             # URLs open in the TV's browser, the same call Jarvis's TV stage makes.
             await client.request("system.launcher/open", {"target": media_id})
+
+    def _refuse_audio(self, entity: EntityEntry, data: dict[str, Any]) -> None:
+        """An announcement or an audio URL is refused: the TV can only open a URL in its web browser, which
+        put a blank page over the picture and usually played nothing. The error names where to send it."""
+        mtype = str(data.get("media_content_type") or "").lower()
+        if mtype in ("channel", "app"):
+            return
+        media_id = str(data.get("media_content_id") or "")
+        if not (data.get("announce") or _is_audio(mtype, media_id)):
+            return
+        players = [e.entity_id for e in device_twins(self.hub, entity, "music_assistant")]
+        where = (f"announce on its AirPlay / Music Assistant player ({', '.join(players)})" if players
+                 else "announce on the TV's AirPlay / Music Assistant player instead")
+        raise HubError(f"the LG TV cannot play audio or announcements (it would open the URL in its web browser); "
+                       f"{where}")
+
+
+#: Paths the hub and Jarvis serve spoken clips from, which have no file extension to go by.
+_CLIP_PATHS = ("/api/tts_proxy/", "/media/tts-")
+
+
+def _is_audio(mtype: str, media_id: str) -> bool:
+    if mtype in ("music", "audio", "podcast", "track") or mtype.startswith("audio/"):
+        return True
+    path = media_id.split("?", 1)[0].split("#", 1)[0].lower()
+    if any(p in path for p in _CLIP_PATHS):
+        return True
+    has_ext = "." in path.rsplit("/", 1)[-1]
+    return has_ext and mime_for(None, path).startswith("audio/")
 
 
 async def _webostv_service(hub, call: ServiceCall) -> Any:

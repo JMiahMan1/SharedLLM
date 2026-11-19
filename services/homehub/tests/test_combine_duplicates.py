@@ -298,6 +298,39 @@ async def test_a_main_that_does_not_answer_in_time_hands_over(env, monkeypatch):
     assert wiz.calls == [("light.wiz_tunable_white_000001", "turn_on")]
 
 
+async def test_a_slow_main_is_not_doubled_by_its_fallback_for_play_media(monkeypatch):
+    """A Cast TV that switches app before loading took longer than the main's 6 s, the fallback played the
+    same clip too, and the main's load finished anyway: every announcement was heard twice, seconds apart.
+    play_media now waits for the main and moves on only when it fails."""
+    monkeypatch.setattr(core, "COMBINED_MAIN_TIMEOUT_S", 0.05)
+
+    class Player(Driver):
+        poll_interval = None
+
+        def __init__(self, hub, entry, delay):
+            super().__init__(hub, entry)
+            self.delay, self.calls = delay, []
+
+        async def async_call(self, entity, domain, service, data):
+            await asyncio.sleep(self.delay)
+            self.calls.append((entity.entity_id, service))
+
+    hub = Hub()
+    drivers = {}
+    for eid, entry_id, delay in (("media_player.tv_cast", "cast", 0.2), ("media_player.tv_ma", "ma", 0)):
+        entry = ConfigEntry(entry_id=entry_id, domain=entry_id)
+        hub.config_entries[entry_id] = entry
+        hub.entities[eid] = EntityEntry(entity_id=eid, platform=entry_id, config_entry_id=entry_id)
+        drivers[entry_id] = hub.drivers[entry_id] = Player(hub, entry, delay)
+    pair = ("media_player.tv_cast", "media_player.tv_ma")
+    hub.combined = {pair[0]: pair, pair[1]: pair}
+    await hub.call_service("media_player", "play_media", {
+        "entity_id": "media_player.tv_cast", "media_content_id": "http://x/clip.wav", "announce": True})
+    assert drivers["cast"].calls == [("media_player.tv_cast", "play_media")] and drivers["ma"].calls == []
+    await hub.call_service("media_player", "volume_set", {"entity_id": "media_player.tv_cast", "volume_level": 0.3})
+    assert drivers["ma"].calls == [("media_player.tv_ma", "volume_set")]  # other commands still hand over
+
+
 async def test_a_main_known_to_be_unavailable_is_skipped(env):
     hub, _store, rt, matter, wiz = env
     duplicates.combine(rt, {"main": "m1", "fallback": "w1"})

@@ -317,3 +317,137 @@ def test_media_image_type_is_what_pychromecast_builds():
     ms = MediaStatus()
     ms.media_metadata = {"images": [{"url": "u"}]}
     assert isinstance(ms.images[0], MediaImage)
+
+
+# -- announcements: speak over what plays, then put it back -------------------------------------------
+
+CLIP = "http://hub.example.com:8123/api/tts_proxy/abc.wav"
+
+
+def _media(content_id, state, **kw):
+    return SimpleNamespace(content_id=content_id, player_state=state, content_type=kw.get("content_type", "video/mp4"),
+                           current_time=kw.get("position", 0), adjusted_current_time=kw.get("position", 0),
+                           stream_type=kw.get("stream_type", "BUFFERED"), title=kw.get("title"),
+                           duration=kw.get("duration"), idle_reason=kw.get("idle_reason"),
+                           player_is_paused=state == "PAUSED", player_is_idle=state == "IDLE",
+                           supports_pause=True, supports_seek=True, supports_queue_next=False,
+                           supports_queue_prev=False, images=[], last_updated=None, artist=None, album_name=None,
+                           album_artist=None, track=None, series_title=None, season=None, episode=None,
+                           media_is_tvshow=False, media_is_movie=False, media_is_musictrack=False)
+
+
+async def _connected(setup, monkeypatch):
+    hub, drv, made = setup
+    monkeypatch.setattr(mod, "ANNOUNCE_POLL_S", 0.01)
+    await drv.async_setup()
+    FakeBrowser.instances[-1].appear(STUDY, "Study TV")
+    await settle()
+    return hub, drv, made[STUDY]
+
+
+async def _clip_plays_and_ends(drv, cc):
+    """The device takes the clip, plays it and goes idle; then the driver's restore runs."""
+    cc.media_controller.status = _media(CLIP, "PLAYING", content_type="audio/wav")
+    await asyncio.sleep(0.05)
+    cc.media_controller.status = _media(CLIP, "IDLE", content_type="audio/wav", idle_reason="FINISHED")
+    task = drv.announcing[STUDY]["task"]
+    await asyncio.wait_for(task, 5)
+
+
+async def test_an_announcement_resumes_the_media_receivers_item_at_its_position(setup, monkeypatch):
+    hub, drv, cc = await _connected(setup, monkeypatch)
+    cc.media_controller.status = _media("http://films/movie.mp4", "PLAYING", position=42.0, title="Movie")
+    await drv.async_call(hub.entities["media_player.study_tv_cast"], "media_player", "play_media", {
+        "media_content_id": CLIP, "media_content_type": "music", "announce": True,
+        "extra": {"announce_volume": 70}})
+    assert ("set_volume", 0.7) in cc.calls
+    assert cc.media_controller.calls[-1][1] == (CLIP, "audio/wav")
+    await _clip_plays_and_ends(drv, cc)
+    name, args, kw = cc.media_controller.calls[-1]
+    assert (name, args) == ("play_media", ("http://films/movie.mp4", "video/mp4"))
+    assert kw["current_time"] == 42.0 and kw["autoplay"] is True and kw["title"] == "Movie"
+    assert cc.calls[-1] == ("set_volume", 0.4)  # the volume from before the announcement
+    assert STUDY not in drv.announcing
+    assert hub.states.get("media_player.study_tv_cast").attributes["supported_features"] & F.MEDIA_ANNOUNCE
+
+
+async def test_an_announcement_over_another_app_starts_that_app_again(setup, monkeypatch):
+    hub, drv, cc = await _connected(setup, monkeypatch)
+    cc.status.app_id = "CC32E753"  # another app's receiver holds the session
+    await drv.async_call(hub.entities["media_player.study_tv_cast"], "media_player", "play_media", {
+        "media_content_id": CLIP, "media_content_type": "music", "announce": True})
+    cc.status.app_id = "CC1AD845"
+    await _clip_plays_and_ends(drv, cc)
+    assert ("start_app", "CC32E753") in cc.calls
+    assert not any(c[0] == "set_volume" for c in cc.calls)  # no announce_volume, nothing to put back
+
+
+async def test_an_announcement_on_an_idle_device_leaves_it_idle(setup, monkeypatch):
+    hub, drv, cc = await _connected(setup, monkeypatch)
+    cc.idle = True
+    await drv.async_call(hub.entities["media_player.study_tv_cast"], "media_player", "play_media", {
+        "media_content_id": CLIP, "media_content_type": "music", "announce": True})
+    cc.idle = False
+    await _clip_plays_and_ends(drv, cc)
+    assert cc.calls[-1] == ("quit_app",)
+
+
+async def test_back_to_back_announcements_put_back_what_was_there_before_the_first(setup, monkeypatch):
+    hub, drv, cc = await _connected(setup, monkeypatch)
+    cc.media_controller.status = _media("http://films/movie.mp4", "PLAYING", position=10.0)
+    ent = hub.entities["media_player.study_tv_cast"]
+    data = {"media_content_id": CLIP, "media_content_type": "music", "announce": True}
+    await drv.async_call(ent, "media_player", "play_media", data)
+    first = drv.announcing[STUDY]["task"]
+    cc.media_controller.status = _media(CLIP, "PLAYING", content_type="audio/wav")
+    await drv.async_call(ent, "media_player", "play_media", data)
+    await asyncio.sleep(0)
+    assert first.cancelled()
+    await _clip_plays_and_ends(drv, cc)
+    assert cc.media_controller.calls[-1][1] == ("http://films/movie.mp4", "video/mp4")
+
+
+async def test_an_announcement_goes_to_the_music_assistant_twin_when_it_has_a_queue(setup, monkeypatch):
+    from services.homehub.core import ConfigEntry, Driver, EntityEntry
+
+    hub, drv, cc = await _connected(setup, monkeypatch)
+    played = []
+
+    class FakeMA(Driver):
+        poll_interval = None
+
+        async def async_call(self, entity, domain, service, data):
+            played.append((entity.entity_id, service, data))
+
+    ma_entry = ConfigEntry(entry_id="ma", domain="music_assistant")
+    hub.config_entries["ma"] = ma_entry
+    hub.drivers["ma"] = FakeMA(hub, ma_entry)
+    # Music Assistant names a Cast player by its cast UUID, on its own device entry.
+    hub.entities["media_player.study_tv_ma"] = EntityEntry(
+        entity_id="media_player.study_tv_ma", platform="music_assistant", unique_id=STUDY.replace("-", ""),
+        config_entry_id="ma", device_id="ma-device")
+    hub.states.set("media_player.study_tv_ma", "playing", {"active_queue": "queue1"})
+    await drv.async_call(hub.entities["media_player.study_tv_cast"], "media_player", "play_media", {
+        "media_content_id": CLIP, "media_content_type": "music", "announce": True,
+        "extra": {"announce_volume": 60}})
+    assert played == [("media_player.study_tv_ma", "play_media", {
+        "media_content_id": CLIP, "media_content_type": "music", "announce": True,
+        "extra": {"announce_volume": 60}})]
+    assert not any(c[0] == "play_media" for c in cc.media_controller.calls)
+    assert STUDY not in drv.announcing
+
+
+def test_the_wait_is_bounded_by_a_hub_clips_own_length():
+    import struct
+
+    from services.homehub import tts
+
+    rate = 8000
+    body = b"\x00\x00" * rate * 4  # 4 s of 16-bit mono
+    wav = (b"RIFF" + struct.pack("<I", 36 + len(body)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate,
+           rate * 2, 2, 16) + b"data" + struct.pack("<I", len(body)) + body)
+    tts.reset()
+    tts._clips["abc"] = (10**12, wav)
+    assert mod._clip_limit(CLIP, {}) == pytest.approx(4.0 + mod.ANNOUNCE_MARGIN_S)
+    assert mod._clip_limit("http://elsewhere/x.wav", {}) == mod.ANNOUNCE_UNKNOWN_S
+    assert mod._clip_limit("http://elsewhere/x.wav", {"duration": 2}) == pytest.approx(2 + mod.ANNOUNCE_MARGIN_S)

@@ -79,6 +79,23 @@ def test_proxy_serves_fresh_clips_without_a_bearer_and_404s_unknown_tokens(tmp_p
     assert client.get("/api/tts_proxy/nope.wav").status_code == 404
 
 
+def test_proxy_answers_head_and_byte_ranges(tmp_path):
+    """Speakers probe a clip with HEAD and fetch it in pieces; a 405 or a full body for a range broke playback."""
+    client = _api_client(tmp_path)
+    tts.reset()
+    tts._clips["abc"] = (10**12, b"0123456789")
+    head = client.head("/api/tts_proxy/abc.wav")
+    assert head.status_code == 200 and head.content == b""
+    assert head.headers["content-length"] == "10" and head.headers["accept-ranges"] == "bytes"
+    part = client.get("/api/tts_proxy/abc.wav", headers={"Range": "bytes=2-5"})
+    assert part.status_code == 206 and part.content == b"2345"
+    assert part.headers["content-range"] == "bytes 2-5/10"
+    tail = client.get("/api/tts_proxy/abc.wav", headers={"Range": "bytes=-3"})
+    assert tail.status_code == 206 and tail.content == b"789"
+    assert client.get("/api/tts_proxy/abc.wav", headers={"Range": "bytes=50-"}).status_code == 416
+    assert client.head("/api/tts_proxy/nope.wav").status_code == 404
+
+
 def _api_client(tmp_path):
     from cryptography.fernet import Fernet
 

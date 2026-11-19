@@ -130,6 +130,29 @@ async def test_media_services():
         await drv.async_call(ent, "media_player", "select_source", {"source": "Nope"})
 
 
+@pytest.mark.parametrize("data", [
+    {"media_content_id": "http://hub.example.com:8123/api/tts_proxy/abc.wav", "media_content_type": "music"},
+    {"media_content_id": "http://192.0.2.5:8888/media/tts-1a2b3c4d?user=u&mt=t", "media_content_type": "url"},
+    {"media_content_id": "http://192.0.2.5/chime.mp3", "media_content_type": "url"},
+    {"media_content_id": "http://j/stage", "media_content_type": "url", "announce": True},
+])
+async def test_audio_and_announcements_are_refused_not_opened_in_the_browser(data):
+    """The TV opened any URL in its web browser: a clip there is a blank page over the picture and no sound.
+    The error names the TV's own AirPlay / Music Assistant player, found by the MAC both devices report."""
+    from services.homehub.core import DeviceEntry, EntityEntry
+
+    hub, drv, h = build()
+    hub.devices["dev1"].connections = [["mac", "02:00:00:00:01:60"]]
+    hub.devices["ma1"] = DeviceEntry(id="ma1", name="TV AirPlay", connections=[["mac", "02:00:00:00:01:60"]])
+    hub.entities["media_player.tv_airplay"] = EntityEntry(
+        entity_id="media_player.tv_airplay", platform="music_assistant", unique_id="ap0200000001",
+        device_id="ma1", config_entry_id="ma")
+    await drv.async_setup()
+    with pytest.raises(HubError, match=r"cannot play audio.*media_player\.tv_airplay"):
+        await drv.async_call(hub.entities[ENT], "media_player", "play_media", data)
+    assert not any(c[0] == "request" for c in h["c"].calls)
+
+
 async def test_webostv_command_and_button_services():
     hub, drv, h = build()
     await drv.async_setup()

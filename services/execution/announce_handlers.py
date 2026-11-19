@@ -15,6 +15,7 @@ import re
 from typing import Any
 
 from services.common.entity_ids import usable_entity_id
+from services.execution import announce_clips
 
 log = logging.getLogger("execution.announce")
 
@@ -122,6 +123,95 @@ def _is_ma_player(attrs: dict, entity_id: str = "") -> bool:
             or attrs.get("mass_player_type")
             or attrs.get("active_queue") is not None
         )
+
+
+# -- playing an announcement ------------------------------------------------------------------
+#
+# Every announcement is a ``play_media`` with ``announce: true``, so a player that can speak over
+# what it plays (Music Assistant, ESPHome, the hub's Cast driver) does so and then goes back to it,
+# instead of the announcement replacing it. A Music Assistant player is given the level as
+# ``extra.announce_volume`` and sets and restores it itself. Any other player is turned up here and
+# put back once the clip has played: after the clip's real length (``announce_clips``), never a guess.
+
+
+def announce_media_data(media_url: str, content_type: str = "url", announce_volume: float | None = None) -> dict:
+    """``media_player.play_media`` data for an announcement."""
+    data: dict[str, Any] = {"media_content_id": media_url, "media_content_type": content_type, "announce": True}
+    if announce_volume is not None and announce_volume > 0:
+        data["extra"] = {"announce_volume": round(min(1.0, float(announce_volume)) * 100)}
+    return data
+
+
+async def raise_volume_for_announce(ha_url: str, ha_token: str, entity_id: str, volume: float) -> float | None:
+    """Turn ``entity_id`` to ``volume``; the volume to put back afterwards, or None when there is none."""
+    if not volume or volume <= 0:
+        return None
+    ha_client = _get_ha_client()
+    previous = announce_clips.pending_volume(entity_id)
+    pending = previous is not None
+    if previous is None:
+        with contextlib.suppress(Exception):
+            st = await ha_client.get_state(ha_url, ha_token, entity_id)
+            level = ((st or {}).get("attributes") or {}).get("volume_level")
+            previous = float(level) if isinstance(level, (int, float)) else None
+    if previous is not None and not pending and abs(previous - volume) < 0.01:
+        return None
+    with contextlib.suppress(Exception):
+        await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", entity_id,
+                                     {"volume_level": volume})
+    return previous
+
+
+def restore_volume_after_announce(ha_url: str, ha_token: str, entity_id: str, previous: float | None,
+                                  media_url: str, played: bool) -> None:
+    """Put the volume back once the clip has played (at once when it did not play)."""
+    if previous is None:
+        return
+    ha_client = _get_ha_client()
+
+    async def set_volume(eid: str, level: float) -> None:
+        await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", eid, {"volume_level": level})
+
+    delay = announce_clips.restore_delay(media_url) if played else 0.0
+    announce_clips.schedule_volume_restore(entity_id, previous, delay, set_volume)
+
+
+async def announce_play(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float,
+                        content_type: str = "url") -> dict[str, Any]:
+    """Announce on a player that does not set the announcement volume itself."""
+    ha_client = _get_ha_client()
+    previous = await raise_volume_for_announce(ha_url, ha_token, entity_id, volume)
+    res = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id,
+                                       announce_media_data(media_url, content_type))
+    restore_volume_after_announce(ha_url, ha_token, entity_id, previous, media_url, bool(res.get("ok")))
+    return _played_on(res, entity_id)
+
+
+def _played_on(res: Any, entity_id: str) -> dict[str, Any]:
+    """Name the player that took the clip, so playback is verified on it and not on the TV it stands for."""
+    if isinstance(res, dict) and res.get("ok"):
+        res = {**res, "target": res.get("target") or entity_id}
+    return res
+
+
+async def announce_play_ma(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float,
+                           content_type: str = "url") -> dict[str, Any]:
+    """Announce on a Music Assistant player: it ducks, sets ``announce_volume`` and restores everything."""
+    ha_client = _get_ha_client()
+    res = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id,
+                                       announce_media_data(media_url, content_type, volume))
+    return _played_on(res, entity_id)
+
+
+async def ma_play_announcement(ha_url: str, ha_token: str, entity_id: str, media_url: str,
+                               volume: float) -> dict[str, Any]:
+    """``music_assistant.play_announcement`` with the level as ``announce_volume``."""
+    ha_client = _get_ha_client()
+    data: dict[str, Any] = {"url": media_url, "use_pre_announce": False}
+    if volume and volume > 0:
+        data["announce_volume"] = round(min(1.0, float(volume)) * 100)
+    res = await ha_client.call_service(ha_url, ha_token, "music_assistant", "play_announcement", entity_id, data)
+    return _played_on(res, entity_id)
 
 
 #: Words that say what kind of device an entity is (or whose it is by brand), never where it is.
@@ -577,17 +667,8 @@ async def announce_cast(
     message: str = "",
 ) -> dict[str, Any]:
     """Cast devices support direct URL playback."""
-    ha_client = _get_ha_client()
     log.info(f"[announce.cast] Playing URL on {entity_id}: {media_url[:60]}")
-    if volume > 0:
-        with contextlib.suppress(Exception):
-            await ha_client.call_service(
-                ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": volume}
-            )
-    return await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    return await announce_play(ha_url, ha_token, entity_id, media_url, volume)
 
 
 async def announce_roku(
@@ -661,19 +742,15 @@ async def announce_roku(
         ma_target = companions.get("ma_sibling")
         if ma_target:
             log.info(f"[announce.roku] Trying Music Assistant sibling {ma_target}")
-            ma_res = await ha_client.call_service(
-                ha_url, ha_token, "media_player", "play_media", ma_target,
-                {"media_content_id": media_url, "media_content_type": "url"},
-            )
+            ma_res = await announce_play_ma(ha_url, ha_token, ma_target, media_url, volume)
             if ma_res.get("ok"):
                 return ma_res
 
     # 4. Final fallback: direct media_player.play_media
     log.info("[announce.roku] Fallback: play_media with URL")
-    return await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    return await ha_client.call_service(
+        ha_url, ha_token, "media_player", "play_media", entity_id, announce_media_data(media_url, "url")
+    )
 
 
 async def announce_webos(
@@ -695,12 +772,6 @@ async def announce_webos(
         with contextlib.suppress(Exception):
             await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", entity_id, {})
             await asyncio.sleep(2)
-
-    if volume > 0:
-        with contextlib.suppress(Exception):
-            await ha_client.call_service(
-                ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": volume}
-            )
 
     toast_ok = False
     companions: dict[str, Any] = {}
@@ -737,24 +808,22 @@ async def announce_webos(
             if res_cmd.get("ok"):
                 toast_ok = True
 
-    # 2. Play audio stream on the TV via media_player.play_media
-    play_res = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
-    if play_res.get("ok"):
-        return play_res
-
-    # 3. Fallback: play audio via Music Assistant / AirPlay sibling (e.g. media_player.den_tv_airplay)
+    # 2. The TV's AirPlay / Music Assistant player first: it plays audio itself and puts back what was
+    #    playing. The TV's own play_media opens a URL in its web browser, which is no way to play a clip
+    #    (the hub's LG driver refuses audio for that reason).
     ma_sibling = companions.get("ma_sibling")
     if ma_sibling and ma_sibling != entity_id:
-        log.info(f"[announce.webos] Trying AirPlay/MA sibling {ma_sibling}")
-        ma_res = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", ma_sibling, {
-            "media_content_id": media_url,
-            "media_content_type": "url",
-        })
+        log.info(f"[announce.webos] Announcing on AirPlay/MA sibling {ma_sibling}")
+        ma_res = await ma_play_announcement(ha_url, ha_token, ma_sibling, media_url, volume)
+        if not ma_res.get("ok"):
+            ma_res = await announce_play_ma(ha_url, ha_token, ma_sibling, media_url, volume)
         if ma_res.get("ok"):
             return ma_res
+
+    # 3. Last: the TV's own play_media (a Home Assistant webOS integration may still take it)
+    play_res = await announce_play(ha_url, ha_token, entity_id, media_url, volume)
+    if play_res.get("ok"):
+        return play_res
 
     if toast_ok:
         return {"ok": True, "method": "webos_toast"}
@@ -802,33 +871,21 @@ async def announce_android_tv(
 
     if cast_sibling:
         log.info(f"[announce.android_tv] Routing audio to Cast sibling {cast_sibling}")
-        if volume > 0:
-            with contextlib.suppress(Exception):
-                await ha_client.call_service(
-                    ha_url, ha_token, "media_player", "volume_set", cast_sibling, {"volume_level": volume}
-                )
-        cast_res = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", cast_sibling, {
-            "media_content_id": media_url,
-            "media_content_type": "url",
-        })
+        cast_res = await announce_play(ha_url, ha_token, cast_sibling, media_url, volume)
         if cast_res.get("ok"):
             return cast_res
 
     if ma_sibling and ma_sibling != entity_id:
         log.info(f"[announce.android_tv] Routing audio to Music Assistant sibling {ma_sibling}")
-        ma_res = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", ma_sibling, {
-            "media_content_id": media_url,
-            "media_content_type": "url",
-        })
+        ma_res = await announce_play_ma(ha_url, ha_token, ma_sibling, media_url, volume)
         if ma_res.get("ok"):
             return ma_res
 
     # 3. Try direct media_player.play_media on entity_id
     log.info(f"[announce.android_tv] Trying direct play_media on {entity_id}")
-    result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    result = await ha_client.call_service(
+        ha_url, ha_token, "media_player", "play_media", entity_id, announce_media_data(media_url, "url")
+    )
     if result.get("ok"):
         return result
 
@@ -881,12 +938,11 @@ async def announce_samsung(
         # If a room Cast companion is available on a legacy Samsung TV, we don't need a full 15s wait
         await asyncio.sleep(4 if cast_sibling else 10)
 
-    # Set volume for announcement
+    # Set volume for announcement (put back once the clip has played, below)
+    previous_volume = None
     if volume > 0:
         log.info(f"[announce.samsung] Setting volume to {volume}")
-        await ha_client.call_service(
-            ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": volume}
-        )
+        previous_volume = await raise_volume_for_announce(ha_url, ha_token, entity_id, volume)
         await asyncio.sleep(0.5)
 
     # Unmute if needed
@@ -904,58 +960,46 @@ async def announce_samsung(
     # Strategy 1: Music Assistant sibling (works even when MA entity was 'off' and app_id was None)
     if ma_entity:
         log.info(f"[announce.samsung] Using MA player for playback: {ma_entity}")
-        result = await ha_client.call_service(
-            ha_url, ha_token, "music_assistant", "play_announcement", ma_entity,
-            {"url": media_url, "use_pre_announce": False},
-        )
+        result = await ma_play_announcement(ha_url, ha_token, ma_entity, media_url, volume)
         if not result.get("ok"):
-            result = await ha_client.call_service(
-                ha_url, ha_token, "music_assistant", "play_media", ma_entity,
-                {"media_id": media_url},
-            )
-        if not result.get("ok"):
-            result = await ha_client.call_service(
-                ha_url, ha_token, "media_player", "play_media", ma_entity,
-                {"media_content_id": media_url, "media_content_type": "url"},
-            )
+            # Still as an announcement: music_assistant.play_media would replace the player's queue.
+            result = await announce_play_ma(ha_url, ha_token, ma_entity, media_url, volume)
         if result.get("ok"):
             playback_ok = True
 
     # Strategy 2: DLNA DMR sibling (e.g. media_player.den_tv_dlna)
     if not playback_ok and dlna_entity:
         log.info(f"[announce.samsung] Trying DLNA renderer {dlna_entity}")
-        result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", dlna_entity, {
-            "media_content_id": media_url,
-            "media_content_type": "music",
-        })
+        result = await ha_client.call_service(
+            ha_url, ha_token, "media_player", "play_media", dlna_entity, announce_media_data(media_url, "music")
+        )
         if result.get("ok"):
             playback_ok = True
 
     # Strategy 3: Room Cast companion (e.g. a legacy Orsay Samsung with a Cast dongle in the same room)
     if not playback_ok and cast_sibling:
         log.info(f"[announce.samsung] Routing legacy Samsung audio to room Cast companion {cast_sibling}")
-        result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", cast_sibling, {
-            "media_content_id": media_url,
-            "media_content_type": "url",
-        })
+        result = await ha_client.call_service(
+            ha_url, ha_token, "media_player", "play_media", cast_sibling, announce_media_data(media_url, "url")
+        )
         if result.get("ok"):
             playback_ok = True
 
     # Strategy 4: Direct play_media on Samsung entity
     if not playback_ok:
         log.info(f"[announce.samsung] Trying direct media_player.play_media on {entity_id}")
-        result = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-            "media_content_id": media_url,
-            "media_content_type": "url",
-        })
+        result = await ha_client.call_service(
+            ha_url, ha_token, "media_player", "play_media", entity_id, announce_media_data(media_url, "url")
+        )
         if result.get("ok"):
             playback_ok = True
 
     if was_off and playback_ok and not cast_sibling:
         log.info("[announce.samsung] Waiting for announcement to complete before restoring TV to off...")
-        await asyncio.sleep(5)
+        await asyncio.sleep(announce_clips.restore_delay(media_url))
         log.info(f"[announce.samsung] Restoring TV to off state (was {initial_state})")
         await ha_client.call_service(ha_url, ha_token, "media_player", "turn_off", entity_id, {})
+    restore_volume_after_announce(ha_url, ha_token, entity_id, previous_volume, media_url, playback_ok)
 
     return result
 
@@ -973,10 +1017,9 @@ async def announce_bravia(
     """Sony Bravia TV."""
     ha_client = _get_ha_client()
     log.info(f"[announce.bravia] Trying play_media on {entity_id}")
-    return await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    return await ha_client.call_service(
+        ha_url, ha_token, "media_player", "play_media", entity_id, announce_media_data(media_url, "url")
+    )
 
 
 async def announce_music_assistant(
@@ -989,18 +1032,9 @@ async def announce_music_assistant(
     attributes: dict | None = None,
     message: str = "",
 ) -> dict[str, Any]:
-    """Music Assistant integration."""
-    ha_client = _get_ha_client()
-    log.info(f"[announce.mass] Using media_player.play_media on {entity_id}")
-    if volume > 0:
-        with contextlib.suppress(Exception):
-            await ha_client.call_service(
-                ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": volume}
-            )
-    return await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    """Music Assistant: it ducks what plays, sets ``announce_volume`` and restores both itself."""
+    log.info(f"[announce.mass] Using media_player.play_media (announce) on {entity_id}")
+    return await announce_play_ma(ha_url, ha_token, entity_id, media_url, volume)
 
 
 async def announce_esphome(
@@ -1014,17 +1048,8 @@ async def announce_esphome(
     message: str = "",
 ) -> dict[str, Any]:
     """ESPHome media player."""
-    ha_client = _get_ha_client()
     log.info(f"[announce.esphome] Trying play_media on {entity_id}")
-    if volume > 0:
-        with contextlib.suppress(Exception):
-            await ha_client.call_service(
-                ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": volume}
-            )
-    return await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    return await announce_play(ha_url, ha_token, entity_id, media_url, volume)
 
 
 async def announce_dlna(
@@ -1040,10 +1065,9 @@ async def announce_dlna(
     """DLNA renderer."""
     ha_client = _get_ha_client()
     log.info(f"[announce.dlna] Trying play_media on {entity_id}")
-    return await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    return await ha_client.call_service(
+        ha_url, ha_token, "media_player", "play_media", entity_id, announce_media_data(media_url, "url")
+    )
 
 
 async def announce_generic_tv(
@@ -1059,10 +1083,9 @@ async def announce_generic_tv(
     """Generic TV fallback: check room companions first, then direct play_media."""
     ha_client = _get_ha_client()
     log.info(f"[announce.generic_tv] Trying play_media on {entity_id}")
-    res = await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    res = await ha_client.call_service(
+        ha_url, ha_token, "media_player", "play_media", entity_id, announce_media_data(media_url, "url")
+    )
     if res.get("ok"):
         return res
     idx = await routing_index(ha_url, ha_token)
@@ -1074,7 +1097,7 @@ async def announce_generic_tv(
             if sib and sib != entity_id:
                 sib_res = await ha_client.call_service(
                     ha_url, ha_token, "media_player", "play_media", sib,
-                    {"media_content_id": media_url, "media_content_type": "url"},
+                    announce_media_data(media_url),
                 )
                 if sib_res.get("ok"):
                     return sib_res
@@ -1092,17 +1115,8 @@ async def announce_speaker(
     message: str = "",
 ) -> dict[str, Any]:
     """Generic speaker."""
-    ha_client = _get_ha_client()
     log.info(f"[announce.speaker] Trying play_media on {entity_id}")
-    if volume > 0:
-        with contextlib.suppress(Exception):
-            await ha_client.call_service(
-                ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": volume}
-            )
-    return await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    return await announce_play(ha_url, ha_token, entity_id, media_url, volume)
 
 
 async def announce_unknown(
@@ -1122,10 +1136,9 @@ async def announce_unknown(
         f"[announce.unknown] Playing media on {entity_id}: {media_url[:60]} "
         f"(app_id={(attributes or {}).get('app_id', '?')})"
     )
-    return await ha_client.call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
-        "media_content_id": media_url,
-        "media_content_type": "url",
-    })
+    return await ha_client.call_service(
+        ha_url, ha_token, "media_player", "play_media", entity_id, announce_media_data(media_url, "url")
+    )
 
 
 TV_HANDLER_MAP = {

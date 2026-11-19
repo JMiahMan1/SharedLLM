@@ -27,6 +27,12 @@ UPDATE_INSTALL = 1
 UPDATE_SKIP_SERVICES = ("skip", "clear_skipped")
 #: How long a combined device's main copy has to carry out a command before the fallback gets it.
 COMBINED_MAIN_TIMEOUT_S = 6.0
+#: Commands that start playback are not handed to the fallback just because the main is slow: a Cast TV that
+#: first switches app and then loads takes longer than 6 s, and the main's worker thread carries on after the
+#: wait is given up, so the fallback played the same clip a few seconds after the main did (announcements
+#: heard twice). They wait this long, past every media driver's own load timeout, and move on only on an error.
+COMBINED_PLAY_SERVICES = frozenset({("media_player", "play_media")})
+COMBINED_PLAY_TIMEOUT_S = 40.0
 
 # Entity services a domain answers. A driver may support fewer; the hub only
 # refuses a service no driver of that domain could ever handle.
@@ -811,16 +817,18 @@ class Hub:
         if skipped_main:
             order.reverse()
         errors: list[tuple[str, BaseException]] = []
+        main_timeout = COMBINED_PLAY_TIMEOUT_S if (domain, service) in COMBINED_PLAY_SERVICES \
+            else COMBINED_MAIN_TIMEOUT_S
         for i, (ent, drv) in enumerate(order):
             try:
                 job = drv.async_call(ent, domain, service, dict(data))
                 if i == 0 and len(order) > 1:
-                    result = await asyncio.wait_for(job, COMBINED_MAIN_TIMEOUT_S)
+                    result = await asyncio.wait_for(job, main_timeout)
                 else:
                     result = await job
             except Exception as exc:  # any failure of one copy is a reason to try the other
                 if isinstance(exc, TimeoutError):
-                    exc = DeviceUnavailable(f"did not answer in {COMBINED_MAIN_TIMEOUT_S:g} s")
+                    exc = DeviceUnavailable(f"did not answer in {main_timeout:g} s")
                 errors.append((ent.entity_id, exc))
                 continue
             if ent.entity_id != main_id:
