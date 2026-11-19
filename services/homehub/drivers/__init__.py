@@ -51,6 +51,14 @@ DRIVERS: dict[str, str] = {
     "ibeacon": "services.homehub.drivers.ble:IBeaconDriver",
 }
 
+#: Actions a device brings with it, by service domain: the name prefixes under which a driver registers one
+#: service per device while that device is connected (ESPHome's user-defined actions, ``esphome.<node>_<action>``)
+#: or set up (a phone's ``notify.mobile_app_<phone>``). A call to such a name that nothing offers right now is a
+#: device that is away, not a typo, so automations wait for it instead of failing (automation.py).
+DEVICE_ACTIONS: dict[str, tuple[str, ...]] = {
+    "esphome": ("",),
+    "notify": ("mobile_app_",),
+}
 
 #: Home Assistant's own integrations that came over with its data but have nothing to drive here,
 #: because the hub does the job itself or the job does not exist outside Home Assistant. They show

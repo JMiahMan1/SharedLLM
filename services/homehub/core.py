@@ -918,8 +918,26 @@ class Hub:
     # -- services -----------------------------------------------------------
     def register_service(self, domain: str, service: str, handler: ServiceHandler,
                          schema: dict[str, Any] | None = None) -> None:
+        new = (domain, service) not in self.services
         self.services[(domain, service)] = handler
         self.service_schemas[(domain, service)] = schema or {}
+        if new:
+            # HA's event: automations waiting for a device's own action resume on it.
+            self.bus.fire("service_registered", {"domain": domain, "service": service})
+
+    def unregister_service(self, domain: str, service: str) -> None:
+        if self.services.pop((domain, service), None) is not None:
+            self.bus.fire("service_removed", {"domain": domain, "service": service})
+        self.service_schemas.pop((domain, service), None)
+
+    def is_device_action(self, domain: str, service: str) -> bool:
+        """Whether ``domain.service`` names an action a device brings with it (it exists only while the device
+        is connected or set up), as opposed to a service the hub or an integration always has. Which names are
+        device actions is declared by the drivers that register them (``drivers.DEVICE_ACTIONS``)."""
+        from services.homehub.drivers import DEVICE_ACTIONS
+
+        return any(service.startswith(prefix) and len(service) > len(prefix)
+                   for prefix in DEVICE_ACTIONS.get(domain, ()))
 
     def resolve_targets(self, data: dict[str, Any]) -> list[str]:
         """``entity_id`` / ``target`` / ``area_id`` / ``device_id`` -> entity ids (HA's rules)."""

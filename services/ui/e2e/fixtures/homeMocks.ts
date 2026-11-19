@@ -161,7 +161,7 @@ const MOTION_RECORDING = {
   ],
 };
 
-const AUTOMATION = {
+export const AUTOMATION = {
   kind: 'automation', id: 'a1', entity_id: 'automation.porch_at_dusk', alias: 'Porch light at dusk', description: null, icon: null,
   enabled: true, runnable: true, unsupported_reason: null, warnings: [], last_triggered: iso(-600), last_error: null,
   mode: 'single', running: 0, entities: ['light.living_lamp'],
@@ -342,6 +342,8 @@ function mirrorRoomWrite(rooms: typeof ROOMS, method: string, path: string, body
 export interface HomeOptions {
   /** What the Rooms page reads (default ROOMS); `{ floors: [], areas: [], unassigned: [] }` is a home with no rooms. */
   rooms?: typeof ROOMS;
+  /** What the Automations page lists (default: one ordinary automation). */
+  automations?: Array<Record<string, unknown>>;
 }
 
 /** Answer every server call for the home pages as `role`. */
@@ -510,7 +512,9 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (p === '/api/dashboard/prefs') return json({ climate_power: {}, hidden: [] });
     if (p === '/api/homehub/climate') return json(climateOverview(role));
     if (p === '/api/homehub/schedules') return json({ schedules: [], can_edit: role === 'admin' });
-    if (p === '/api/homehub/automations') return json({ items: [AUTOMATION], can_edit: role === 'admin' });
+    if (p === '/api/homehub/automations') {
+      return json({ items: options.automations ?? [AUTOMATION], can_edit: role === 'admin' });
+    }
     if (p === '/api/homehub/automations/catalog') {
       return json({
         triggers: [{ type: 'time', label: 'At a time', fields: [{ name: 'at', label: 'Time', kind: 'time', required: true }] },

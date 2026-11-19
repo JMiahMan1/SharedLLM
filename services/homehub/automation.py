@@ -445,6 +445,11 @@ class Item:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     detach: list[Callable[[], None]] = field(default_factory=list)
     calls_scripts: set[str] = field(default_factory=set)
+    #: Services its actions name literally (templates are only known at run time), as ``domain.service``.
+    calls_services: set[str] = field(default_factory=set)
+    #: Set while it calls a device's own action that no connected device offers: its runs are skipped
+    #: quietly until the device comes back (not an error, and not unsupported: nothing is wrong with it).
+    waiting_reason: str | None = None
 
     @property
     def runnable(self) -> bool:
@@ -499,6 +504,7 @@ class AutomationEngine:
         self._unsubs: list[Callable[[], None]] = []
         self._tasks: set[asyncio.Task] = set()
         self._services_registered = False
+        self._service_watch: Callable[[], None] | None = None
         self._check_refs = False
         # Hooks for automation_editor.py (None = off): ``config_hook(kind, id, conf) -> conf`` rewrites a
         # config before it is parsed (the stored remap of renamed entities), ``tracer`` records runs,
@@ -525,6 +531,9 @@ class AutomationEngine:
         elif not self.blueprints and self.store is not None:
             self.blueprints = dict(self._kv("blueprints") or {})
         self._check_refs = bool(getattr(self.hub, "entities", None))
+        # A reload rebuilds every item; one that was already waiting is not announced again.
+        was_waiting = {(i.kind, i.id): i.waiting_reason
+                       for i in [*self.scripts.values(), *self.automations.values()] if i.waiting_reason}
         self.scripts = {}
         self.automations = {}
         self.scenes = {}
@@ -539,6 +548,10 @@ class AutomationEngine:
             item = self._build_item("automation", aid, conf, used_ids)
             self.automations[item.id] = item
         self._propagate_script_support()
+        for item in [*self.scripts.values(), *self.automations.values()]:
+            item.waiting_reason = was_waiting.get((item.kind, item.id))
+            self._refresh_waiting(item, publish=False)
+        self._watch_services()
         for idx, conf in enumerate(scenes or []):
             self._build_scene(dict(conf or {}), idx, used_ids)
         self._build_schedules(schedules, used_ids)
@@ -619,6 +632,7 @@ class AutomationEngine:
                 "enabled": item.enabled and item.runnable,
                 "last_triggered": item.last_triggered.isoformat() if item.last_triggered else None,
                 "last_error": item.last_error, "unsupported_reason": item.unsupported_reason,
+                "waiting_reason": item.waiting_reason,
                 "warnings": list(item.warnings), "mode": item.mode, "running": len(item.runs),
             })
         for s in self.schedules.values():
@@ -626,7 +640,7 @@ class AutomationEngine:
                 "kind": "schedule", "id": s.id, "entity_id": s.entity_id, "alias": s.name,
                 "enabled": s.enabled and s.unsupported_reason is None,
                 "last_triggered": s.last_run.isoformat() if s.last_run else None, "last_error": s.last_error,
-                "unsupported_reason": s.unsupported_reason, "warnings": [],
+                "unsupported_reason": s.unsupported_reason, "waiting_reason": None, "warnings": [],
                 "next_trigger": s.next_trigger.isoformat() if s.next_trigger else None,
             })
         return out
@@ -937,6 +951,60 @@ class AutomationEngine:
             except Exception:
                 log.exception("trigger of %s could not attach", item.entity_id)
 
+    # -- waiting for a device's own action ---------------------------------------------
+    def _missing_device_actions(self, item: Item) -> list[str]:
+        """The device actions ``item`` calls that no connected device offers right now.
+
+        Only names a driver declares as a device's own (``Hub.is_device_action``): any other missing service
+        is a typo or something the hub does not have, and still fails the run where everyone can see it.
+        """
+        is_device_action = getattr(self.hub, "is_device_action", None)
+        if is_device_action is None:
+            return []
+        missing = []
+        for name in sorted(item.calls_services):
+            domain, service = name.split(".", 1)
+            if (domain, service) not in self.hub.services and is_device_action(domain, service):
+                missing.append(name)
+        return missing
+
+    def _refresh_waiting(self, item: Item, *, publish: bool = True) -> bool:
+        """Re-check whether ``item`` waits for a device; logs and publishes only a change. True while waiting."""
+        missing = self._missing_device_actions(item) if item.runnable else []
+        reason = (f"needs {', '.join(missing)}, which no connected device offers" if missing else None)
+        if reason != item.waiting_reason:
+            if reason:
+                log.info("%s waits for its device: %s; its runs are skipped until the device connects",
+                         item.entity_id, reason)
+            else:
+                log.info("%s: its device's actions are offered again; runs resume", item.entity_id)
+            item.waiting_reason = reason
+            if publish:
+                self._publish(item)
+        return reason is not None
+
+    def _watch_services(self) -> None:
+        """Follow devices' actions coming and going, so a waiting item resumes (or waits again) on its own."""
+        if self._service_watch is not None:
+            return
+        bus = getattr(self.hub, "bus", None)
+        if bus is None:
+            return
+
+        def changed(_event: str, data: dict[str, Any]) -> None:
+            name = f"{data.get('domain')}.{data.get('service')}"
+            for item in [*self.scripts.values(), *self.automations.values()]:
+                if name in item.calls_services:
+                    self._refresh_waiting(item)
+
+        unsubs = [bus.subscribe(changed, "service_registered"), bus.subscribe(changed, "service_removed")]
+
+        def stop() -> None:
+            for u in unsubs:
+                u()
+
+        self._service_watch = stop
+
     def _fire(self, item: Item, trig: dict[str, Any], data: dict[str, Any]) -> None:
         if not self._running or not item.enabled or not item.runnable:
             return
@@ -949,6 +1017,8 @@ class AutomationEngine:
     async def _handle_trigger(self, item: Item, trig_vars: dict[str, Any], *, skip_condition: bool = False,
                               extra: dict[str, Any] | None = None) -> asyncio.Task | None:
         """Check the conditions and start a run; returns the run, or None when none started."""
+        if self._refresh_waiting(item):
+            return None  # its device is away: skipped quietly, said once when it started waiting
         variables: dict[str, Any] = {"this": templating.wrap_state(self.hub, self.hub.states.get(item.entity_id)),
                                      "trigger": trig_vars}
         variables.update(self._render_variables(item.trigger_variables, variables))
@@ -972,6 +1042,8 @@ class AutomationEngine:
 
     # -- runs ----------------------------------------------------------------------
     def _start_run(self, item: Item, variables: dict[str, Any]) -> asyncio.Task | None:
+        if self._refresh_waiting(item):
+            return None
         if item.mode == "single" and item.runs:
             log.warning("%s: already running", item.entity_id)
             return None
@@ -2046,6 +2118,8 @@ class AutomationEngine:
             attrs["max"] = item.max
         if item.icon:
             attrs["icon"] = item.icon
+        if item.waiting_reason:
+            attrs["waiting_reason"] = item.waiting_reason
         if item.kind == "automation":
             attrs["id"] = item.id
             if item.unsupported_reason:
@@ -2699,6 +2773,9 @@ class _ParseContext:
             if "." not in name:
                 raise Unsupported(f"invalid service {name!r}")
             domain, service = name.split(".", 1)
+            if not a.get("continue_on_error"):
+                # A step allowed to fail never holds the whole item back (see AutomationEngine._refresh_waiting).
+                self.item.calls_services.add(f"{domain}.{service}")
             self.need_helper(domain, f"action {name}")
             if domain == "script" and service not in ("turn_on", "turn_off", "toggle", "reload"):
                 self.item.calls_scripts.add(service)
