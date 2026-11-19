@@ -103,7 +103,24 @@ class DeviceUnavailable(HubError):
 class AuthRequired(DeviceUnavailable):
     """The device answered but wants a password the entry does not have, or refused the one it has.
 
-    An entry failing with this is shown as needing its password (``entries.needs_of``), not as unreachable.
+    Raised from a driver's setup or poll, it parks the entry in ``setup_error`` with no retries (HA's
+    ``ConfigEntryAuthFailed``): trying a refused password again only locks the account (a Reolink camera locks
+    it after a few tries). The entry shows what it needs (``needs``, read by ``entries.needs_of``) until an
+    admin enters it, which reloads the entry. ``needs`` is ``"password"`` (the device's own password),
+    ``"login"`` (an account's username and password), ``"pairing"`` (pair again: a TV or accessory that
+    forgot the hub) or ``"bindkey"`` (a BLE sensor's encryption key).
+    """
+
+    def __init__(self, message: str = "", *, needs: str = "password") -> None:
+        super().__init__(message)
+        self.needs = needs
+
+
+class SetupError(HubError):
+    """A setup that cannot succeed however often it is tried (a required setting is missing or wrong).
+
+    The entry is parked in ``setup_error`` with this reason, with no retries, until an admin changes or
+    reloads it (HA's ``ConfigEntryError``). Anything else a setup raises is retried.
     """
 
 
@@ -248,6 +265,8 @@ class ConfigEntry:
     unique_id: str | None = None
     state: str = "not_loaded"  # loaded | setup_error | not_loaded | setup_retry
     reason: str | None = None
+    #: What a parked entry needs from an admin (``AuthRequired.needs``); None otherwise. Not stored.
+    needs: str | None = None
 
     def public(self) -> dict[str, Any]:
         """What HA's config_entries API shows: never the credentials in ``data``."""

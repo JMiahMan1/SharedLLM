@@ -110,6 +110,7 @@ class Store:
         secret = public.pop("data")
         public["state"] = "not_loaded"
         public["reason"] = None
+        public["needs"] = None
         self._exec("INSERT OR REPLACE INTO config_entries(entry_id, doc, secret) VALUES (?, ?, ?)",
                    (entry.entry_id, json.dumps(public, default=str), self.box.seal(secret)))
 

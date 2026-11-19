@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from services.homehub.core import Driver, HubError
+from services.homehub.core import AuthRequired, Driver, HubError
 
 try:  # guarded so the tests can run without the library
     from srpenergy import client as srp_client
@@ -99,6 +99,23 @@ def normalize_hourly(raw: list[dict[str, Any]], tz: Any) -> list[dict[str, Any]]
     return out
 
 
+def _login_refused(resp: Any) -> bool:
+    """Whether SRP's ``login/authorize`` refused the credentials.
+
+    401 is a refusal; a 200 whose JSON ``message`` is not srpenergy's own success text (``validate()``
+    checks for exactly "Log in successful.") is too. A 403 is SRP's bot blocking, not the password.
+    """
+    if resp.status_code == 401:
+        return True
+    if resp.status_code != 200:
+        return False
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and "message" in body and body["message"] != "Log in successful."
+
+
 def fetch_hourly(client: Any, start: datetime, end: datetime, tz: Any) -> list[dict[str, Any]]:
     """SRP's hourly detail, with the period columns, through srpenergy's own endpoints and headers (blocking)."""
     if srp_client is None or not hasattr(client, "_check_response"):
@@ -109,6 +126,8 @@ def fetch_hourly(client: Any, start: datetime, end: datetime, tz: Any) -> list[d
         session.headers.update(srp_client.BROWSER_HEADERS)
         resp = session.post(srp_client.BASE_USAGE_URL + "login/authorize",
                             data={"username": client.username, "password": client.password})
+        if _login_refused(resp):
+            raise AuthRequired("SRP did not accept the username and password", needs="login")
         client._check_response(resp, "login/authorize")
         resp = session.get(srp_client.BASE_USAGE_URL + "login/antiforgerytoken")
         if "xsrf-token" not in resp.cookies:
@@ -264,6 +283,9 @@ class SrpEnergyDriver(Driver):
             # longer fetch, catching statistics up, is cut back to that).
             day_rows = rows if fetch_from >= start else [r for r in rows if r["start"].date() >= start.date()]
             value = round(sum(r["kwh"] for r in day_rows), 2)
+        except AuthRequired:
+            self.mark_unavailable()
+            raise  # never retried with the same password: the runtime parks the entry
         except Exception as exc:
             if not self.failing:
                 self.log.error("SRP usage fetch failed for %s: %s", self.entry.title, exc)

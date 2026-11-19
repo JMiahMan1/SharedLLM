@@ -91,6 +91,21 @@ async def test_unreachable_tv_is_off_and_setup_does_not_fail():
     assert hub.states.get(ENT).state == "playing"
 
 
+async def test_a_refused_pairing_key_needs_pairing_instead_of_asking_every_poll():
+    from aiowebostv.exceptions import WebOsTvPairError
+
+    _hub, drv, _h = build()
+
+    class Refuses(FakeClient):
+        async def connect(self):
+            raise WebOsTvPairError("Unable to pair")
+
+    drv.client_factory = lambda host, client_key=None, connect_timeout=None: Refuses(host, client_key)
+    with pytest.raises(mod.AuthRequired) as raised:
+        await drv.async_setup()
+    assert raised.value.needs == "pairing"
+
+
 async def test_media_services():
     hub, drv, h = build()
     await drv.async_setup()

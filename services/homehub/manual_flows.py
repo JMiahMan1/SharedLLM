@@ -47,6 +47,7 @@ from services.homehub.flows import (
     _existing_entry,
     _new_entry_id,
     commit,
+    relogin,
     slugify,
 )
 
@@ -445,14 +446,16 @@ async def adopt_emporia(runtime: Any, finding: dict[str, Any], name: str | None,
 
     hub = runtime.hub
     v = _required(user_input, [EMAIL, PASSWORD], "Sign in to Emporia.")
-    if _existing_entry(hub, "emporia_vue", v["email"].lower()):
-        raise FlowError("This Emporia account is already set up", 409)
+    existing = _existing_entry(hub, "emporia_vue", v["email"].lower())
     try:
         devices = await emporia_login(v["email"], v["password"])
     except (NeedsInput, FlowError):
         raise
     except Exception as exc:
         raise FlowError(f"Emporia's cloud did not answer: {exc or type(exc).__name__}", 502) from exc
+    if existing is not None:
+        # Already set up: the password changed. Sign the entry in again; its devices and history stay.
+        return await relogin(runtime, existing, {"email": v["email"], "password": v["password"]})
     if not devices:
         raise FlowError("This Emporia account has no devices", 400)
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="emporia_vue", title=name or v["email"],
@@ -480,14 +483,16 @@ async def adopt_srp(runtime: Any, finding: dict[str, Any], name: str | None, are
     v = _required(user_input, fields, "Sign in to SRP.")
     if not re.fullmatch(r"\d{9}", v["id"]):
         raise NeedsInput(fields, "Sign in to SRP.", "The billing account is the 9-digit number on the bill.")
-    if _existing_entry(hub, "srp_energy", v["id"]):
-        raise FlowError("This SRP account is already set up", 409)
+    existing = _existing_entry(hub, "srp_energy", v["id"])
     try:
         ok = await srp_login(v["id"], v["username"], v["password"])
     except Exception as exc:
         raise FlowError(f"SRP did not answer: {exc or type(exc).__name__}", 502) from exc
     if not ok:
         raise NeedsInput(fields, "Sign in to SRP.", "SRP did not accept that login for this account.")
+    if existing is not None:
+        # Already set up: the login changed. Sign the entry in again; its statistics stay.
+        return await relogin(runtime, existing, {"username": v["username"], "password": v["password"]})
     title = name or f"SRP account {v['id'][-4:]}"
     entry_id = _new_entry_id()
     entry = ConfigEntry(entry_id=entry_id, domain="srp_energy", title=title, source="user", unique_id=v["id"],
@@ -499,23 +504,6 @@ async def adopt_srp(runtime: Any, finding: dict[str, Any], name: str | None, are
     plan.add_entity("sensor", f"{entry_id}_total_usage", "Energy usage", original_device_class="energy",
                     unit_of_measurement="kWh", capabilities={"state_class": "total_increasing"})
     return await commit(runtime, plan)
-
-
-async def _relogin(runtime: Any, entry: ConfigEntry, login: dict[str, Any]) -> dict[str, Any]:
-    """Replace an existing cloud entry's login and reconnect it; nothing else about it changes."""
-    old = dict(entry.data)
-    entry.data = {**entry.data, **login}
-    try:
-        runtime.store.save_config_entry(entry)
-    except RuntimeError as exc:
-        entry.data = old
-        raise FlowError(str(exc), 503) from exc
-    await runtime.stop_entry(entry.entry_id)
-    if not entry.disabled_by:
-        runtime.start_entry(entry)
-    log.info("%s %s signed in again", entry.domain, entry.title)
-    return {"status": "adopted", "entry_id": entry.entry_id, "domain": entry.domain, "title": entry.title,
-            "name": entry.title, "entities": [], "message": f"{entry.title} is signed in again."}
 
 
 async def adopt_roborock(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
@@ -548,7 +536,7 @@ async def adopt_roborock(runtime: Any, finding: dict[str, Any], name: str | None
                              "That code was not accepted.") from exc
         raise FlowError(f"Roborock did not answer: {exc or name_}", 502) from exc
     if existing is not None:
-        return await _relogin(runtime, existing, {"username": email, "user_data": user_data, "base_url": base_url})
+        return await relogin(runtime, existing, {"username": email, "user_data": user_data, "base_url": base_url})
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="roborock", title=name or email, source="user",
                         unique_id=email.lower(), data={"username": email, "user_data": user_data, "base_url": base_url})
     result = await commit(runtime, Plan(hub, entry))

@@ -154,6 +154,28 @@ def _area(hub: Any, area: str | None) -> str | None:
     return found
 
 
+async def relogin(runtime: Any, entry: ConfigEntry, login: dict[str, Any]) -> dict[str, Any]:
+    """Replace an existing entry's login and reconnect it; nothing else about it changes (HA's reauth).
+
+    The "already set up" answer of a flow whose login changed: an account or device that refuses its old
+    password is signed in again in place, so a changed password never means removing the entry. The new
+    login was checked by the flow before this is called.
+    """
+    old = dict(entry.data)
+    entry.data = {**entry.data, **login}
+    try:
+        runtime.store.save_config_entry(entry)
+    except RuntimeError as exc:
+        entry.data = old
+        raise FlowError(str(exc), 503) from exc
+    await runtime.stop_entry(entry.entry_id)
+    if not entry.disabled_by:
+        runtime.start_entry(entry)
+    log.info("%s %s signed in again", entry.domain, entry.title)
+    return {"status": "adopted", "entry_id": entry.entry_id, "domain": entry.domain, "title": entry.title,
+            "name": entry.title, "entities": [], "message": f"{entry.title} is signed in again."}
+
+
 def _existing_entry(hub: Any, domain: str, unique_id: str | None) -> ConfigEntry | None:
     if not unique_id:
         return None

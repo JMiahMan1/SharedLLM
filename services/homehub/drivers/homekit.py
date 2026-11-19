@@ -42,15 +42,27 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
-from services.homehub.core import UNKNOWN, DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
+from services.homehub.core import (
+    UNKNOWN,
+    AuthRequired,
+    DeviceUnavailable,
+    Driver,
+    EntityEntry,
+    HubError,
+    ServiceNotFound,
+)
 from services.homehub.drivers import homekit_services as hks
 
 try:  # guarded so the tests can run the driver against a fake pairing
     from aiohomekit.characteristic_cache import CharacteristicCacheMemory
     from aiohomekit.controller.ip.controller import IpController
+    from aiohomekit.exceptions import AuthenticationError
 except ImportError:  # pragma: no cover - the image installs aiohomekit
     CharacteristicCacheMemory = None  # type: ignore[assignment,misc]
     IpController = None  # type: ignore[assignment,misc]
+
+    class AuthenticationError(Exception):  # type: ignore[no-redef]
+        pass
 
 log = logging.getLogger("homehub.homekit_controller")
 
@@ -207,6 +219,10 @@ class HomeKitDriver(Driver):
         try:
             accessories = await asyncio.wait_for(
                 self._pairing.list_accessories_and_characteristics(), REQUEST_TIMEOUT)
+        except AuthenticationError as exc:
+            # The accessory no longer knows this controller (reset or unpaired); retrying cannot help.
+            raise AuthRequired(f"{self.entry.title} no longer accepts the hub's pairing; pair it again",
+                               needs="pairing") from exc
         except Exception as exc:
             raise DeviceUnavailable(f"{self.entry.title}: accessory did not answer: {exc}") from exc
         self.index(accessories)

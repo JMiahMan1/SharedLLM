@@ -414,6 +414,31 @@ async def test_reolink_asks_for_the_login_and_creates_entities_by_capability(rt,
     assert drv.locate(uids[f"{hub_uid}_hub_status_led"]) == (None, "status_led")
 
 
+async def test_a_reolink_hub_whose_password_changed_signs_in_again_in_place(rt, monkeypatch):  # noqa: F811
+    from reolink_aio.exceptions import CredentialsInvalidError
+
+    good = {"password": "first"}
+
+    async def connect(host, username, password):
+        if password != good["password"]:
+            raise CredentialsInvalidError("bad login")
+        return FakeApi()
+
+    monkeypatch.setattr(pairing, "reolink_connect", connect)
+    finding = reolink_finding()
+    first = await flows.adopt(rt, finding, {"input": {"username": "admin", "password": "first"}})
+    entry = rt.hub.config_entries[first["entry_id"]]
+    entities_before = set(rt.hub.entities)
+    good["password"] = "second"  # changed on the hub
+    with pytest.raises(flows.NeedsInput):
+        await flows.adopt(rt, finding, {"input": {"username": "admin", "password": "first"}})
+    again = await flows.adopt(rt, finding, {"input": {"username": "admin", "password": "second"}})
+    assert again["entry_id"] == entry.entry_id and "signed in again" in again["message"]
+    assert entry.data["password"] == "second" and entry.data["uid"] == "95270000HUBUID00"
+    assert set(rt.hub.entities) == entities_before
+    assert rt.stopped == [entry.entry_id] and rt.started[-1] == entry.entry_id
+
+
 async def test_a_camera_without_uid_is_keyed_by_its_mac(rt, monkeypatch):  # noqa: F811
     async def connect(host, username, password):
         return FakeApi(nvr=False)

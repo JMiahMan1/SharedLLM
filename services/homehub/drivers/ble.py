@@ -21,7 +21,7 @@ from typing import Any
 
 from services.homehub import bluetooth_parsers as parsers
 from services.homehub import bluetooth_presence as bp
-from services.homehub.core import UNAVAILABLE, DeviceUnavailable, Driver, EntityEntry
+from services.homehub.core import UNAVAILABLE, AuthRequired, DeviceUnavailable, Driver, EntityEntry
 
 #: A sensor not heard for this long is unavailable (HA's default for passive Bluetooth devices).
 SILENT_S = 900.0
@@ -67,6 +67,10 @@ class BLESensorDriver(Driver):
             self._unsub = None
 
     async def async_poll(self) -> None:
+        if self._decrypt_error_logged:
+            # The parser said the key does not decrypt the sensor (HA's xiaomi_ble/bthome reauth): park it.
+            raise AuthRequired(f"{self.entry.title}: the stored bindkey does not decrypt this sensor; enter its key",
+                               needs="bindkey")
         mgr = getattr(self.hub, "bluetooth", None)
         if mgr is None or self._last_heard is None or mgr.clock() - self._last_heard > SILENT_S:
             stale = [e for e in self.entities if (s := self.hub.states.get(e.entity_id)) is None

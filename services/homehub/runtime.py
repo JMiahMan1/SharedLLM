@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from services.homehub.core import UNAVAILABLE, ConfigEntry, Driver, Hub, utcnow
+from services.homehub.core import UNAVAILABLE, AuthRequired, ConfigEntry, Driver, Hub, SetupError, utcnow
 from services.homehub.drivers import driver_class, replaced_reason
 from services.homehub.store import Store
 
@@ -132,6 +132,10 @@ class Runtime:
                 await driver.async_setup()
             except asyncio.CancelledError:
                 raise
+            except (AuthRequired, SetupError) as exc:
+                await self._park(entry, driver, exc)
+                first.set()
+                return
             except Exception as exc:
                 delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                 attempt += 1
@@ -153,7 +157,7 @@ class Runtime:
                 await asyncio.sleep(delay)
                 continue
             self.hub.drivers[entry.entry_id] = driver
-            entry.state, entry.reason = "loaded", None
+            entry.state, entry.reason, entry.needs = "loaded", None, None
             self.failing_since.pop(entry.entry_id, None)
             first.set()
             if reported is not None:
@@ -162,11 +166,13 @@ class Runtime:
             log.info("%s (%s) loaded with %d entities", entry.domain, entry.title, len(driver.entities))
             if driver.poll_interval is None:
                 await asyncio.Event().wait()  # push-only: live until cancelled
-            await self._poll_forever(entry, driver)
+            if not await self._poll_forever(entry, driver):
+                return
 
-    async def _poll_forever(self, entry: ConfigEntry, driver: Driver) -> None:
+    async def _poll_forever(self, entry: ConfigEntry, driver: Driver) -> bool:
         """Poll on the driver's interval. A poll that hangs times out; several failures in a row mark the
-        entry's entities unavailable (and say so once), and the next good poll brings them back."""
+        entry's entities unavailable (and say so once), and the next good poll brings them back. Returns
+        False once the entry is parked (its credentials were refused)."""
         failures = 0
         held: dict[str, tuple[str, dict[str, Any]]] = {}  # states before they were marked unavailable
         while True:
@@ -176,6 +182,11 @@ class Runtime:
                 await asyncio.wait_for(driver.async_poll(), timeout)
             except asyncio.CancelledError:
                 raise
+            except AuthRequired as exc:
+                # The password was changed or revoked while running: stop asking with the old one.
+                self.hub.drivers.pop(entry.entry_id, None)
+                await self._park(entry, driver, exc)
+                return False
             except Exception as exc:
                 failures += 1
                 why = f"no answer in {timeout:g} s" if isinstance(exc, TimeoutError) else str(exc) or type(exc).__name__
@@ -207,6 +218,22 @@ class Runtime:
             if e.entity_id in held and st is not None and st.state == UNAVAILABLE:
                 state, attrs = held[e.entity_id]
                 driver.publish(e, state, attrs)
+
+    async def _park(self, entry: ConfigEntry, driver: Driver, exc: Exception) -> None:
+        """Stop retrying an entry that cannot load until an admin acts (bad credentials, a missing setting).
+
+        Reloading or reconfiguring the entry (``start_entry``) tries again.
+        """
+        if isinstance(exc, AuthRequired):
+            entry.state, entry.reason, entry.needs = "setup_error", f"AuthRequired: {exc}", exc.needs
+        else:
+            entry.state, entry.reason, entry.needs = "setup_error", f"{type(exc).__name__}: {exc}", None
+        self.failing_since.setdefault(entry.entry_id, utcnow())
+        log.warning("%s (%s) needs attention and will not be retried until it is changed or reloaded: %s",
+                    entry.domain, entry.title, entry.reason)
+        driver.mark_unavailable()
+        with contextlib.suppress(Exception):
+            await driver.async_unload()
 
     async def wait_first_setups(self, timeout: float) -> list[str]:
         """Wait until every started entry has tried to load once; returns the ones still pending.

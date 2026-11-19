@@ -162,12 +162,13 @@ export default function IntegrationsPanel() {
                       {[entry.label, entryNeedsText(entry) || offlineSince(entry.offline_since)].filter(Boolean).join(' · ')}
                     </span>
                   </button>
-                  {entry.needs === 'password' && entry.reconfigure.some((f) => f.key === 'password') && (
+                  {(entry.needs === 'password' || entry.needs === 'login')
+                    && entry.reconfigure.some((f) => f.key === 'password') && (
                     <button
                       type="button"
                       onClick={() => setEditing(entry)}
                       className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white"
-                      aria-label={`Enter the web password of ${entry.title}`}
+                      aria-label={`Enter the ${entry.needs === 'login' ? 'login' : 'web password'} of ${entry.title}`}
                     >
                       <KeyRound size={14} /> Enter password
                     </button>

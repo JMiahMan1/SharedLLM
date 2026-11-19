@@ -163,11 +163,35 @@ async def test_cloud_failure_marks_unavailable_without_raising():
     assert float(val(hub, "sensor.main_panel_123_1min")) == pytest.approx(3.0)
 
 
-@pytest.mark.parametrize("result", [False, RuntimeError("NotAuthorized")])
-async def test_login_failure_raises_for_retry(result, caplog):
-    with pytest.raises(em.HubError):
-        await setup(FakeVue(ok=result))
+async def test_a_cloud_failure_at_login_raises_for_retry(caplog):
+    with pytest.raises(em.HubError) as raised:
+        await setup(FakeVue(ok=RuntimeError("Connection reset by peer")))
+    assert not isinstance(raised.value, em.AuthRequired)
     assert "Emporia cloud login" in caplog.text
+
+
+class CognitoRefusal(Exception):
+    """botocore's ClientError shape, as Cognito answers a wrong password or an unknown account."""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.response = {"Error": {"Code": code, "Message": "Incorrect username or password."}}
+
+
+@pytest.mark.parametrize("result", [False, CognitoRefusal("NotAuthorizedException"),
+                                    CognitoRefusal("UserNotFoundException")])
+async def test_a_refused_login_needs_the_login_and_is_not_retried(result):
+    with pytest.raises(em.AuthRequired) as raised:
+        await setup(FakeVue(ok=result))
+    assert raised.value.needs == "login"
+
+
+async def test_signed_in_with_no_customer_record_is_not_a_password_problem():
+    vue = FakeVue(ok=False)
+    vue.auth = SimpleNamespace(tokens={"id_token": "made-up"})
+    with pytest.raises(em.HubError) as raised:
+        await setup(vue)
+    assert not isinstance(raised.value, em.AuthRequired)
 
 
 async def test_disabled_scales_are_not_fetched():

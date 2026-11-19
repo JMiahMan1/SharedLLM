@@ -134,9 +134,12 @@ def device_address(hub: Any, entry: ConfigEntry) -> str | None:
 
 
 def needs_of(entry: ConfigEntry) -> str | None:
-    """What a failing entry needs from an admin: "password" when the device refused it (AuthRequired)."""
+    """What a failing entry needs from an admin: the ``needs`` of the AuthRequired that parked it
+    ("password", "login", "pairing", "bindkey"); "password" for an older AuthRequired reason."""
     if entry.disabled_by or entry.state == "loaded":
         return None
+    if entry.needs:
+        return entry.needs
     return "password" if str(entry.reason or "").startswith("AuthRequired") else None
 
 

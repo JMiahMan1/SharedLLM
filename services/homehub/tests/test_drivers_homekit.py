@@ -329,6 +329,23 @@ async def test_setup_raises_when_the_accessory_is_silent():
         await driver.async_setup()
 
 
+async def test_an_accessory_that_forgot_the_pairing_needs_pairing_again():
+    hub, entry = make_hub("homekit_controller", {"Connection": "IP"}, ECOBEE_ENTITIES)
+    driver = HomeKitDriver(hub, entry)
+
+    class Forgot(FakePairing):
+        async def list_accessories_and_characteristics(self):
+            raise homekit.AuthenticationError("Pair verify step 4")
+
+    async def make_pairing():
+        return Forgot(ECOBEE)
+
+    driver._make_pairing = make_pairing
+    with pytest.raises(homekit.AuthRequired) as raised:
+        await driver.async_setup()
+    assert raised.value.needs == "pairing"
+
+
 async def test_non_ip_pairing_is_refused():
     hub, entry = make_hub("homekit_controller", {"Connection": "BLE"}, ECOBEE_ENTITIES)
     with pytest.raises(HubError):

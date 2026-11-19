@@ -178,6 +178,25 @@ describe('IntegrationsPanel', () => {
     await waitFor(() => expect(hub.reconfigureEntry).toHaveBeenCalledWith('ts1', { data: { password: 'made-up-pw' } }));
   });
 
+  it('says an account that refused its login needs it again and offers to enter it', async () => {
+    const srp = {
+      entry_id: 'srp1', domain: 'srp_energy', label: 'SRP Energy', title: 'Power Bill', state: 'setup_error',
+      reason: 'AuthRequired: SRP did not accept the username and password', needs: 'login' as const,
+      source: 'user', disabled_by: null, entities: 1, unpairs: false, shared: false,
+      reconfigure: [
+        { key: 'username', label: 'Username', type: 'text' as const, value: 'someone' },
+        { key: 'password', label: 'Password', type: 'password' as const, set: true },
+      ],
+      devices: [],
+    };
+    vi.mocked(hub.getEntries).mockResolvedValue({ ...LIST, entries: [srp] });
+    wrap();
+    const row = await screen.findByTestId('offline-entry');
+    expect(within(row).getByText('SRP Energy · Needs its login again')).toBeInTheDocument();
+    fireEvent.click(within(row).getByRole('button', { name: 'Enter the login of Power Bill' }));
+    expect(await screen.findByTestId('reconfigure-dialog')).toBeInTheDocument();
+  });
+
   it('lists what is not answering with how long, and removes it from there', async () => {
     wrap();
     const row = await screen.findByTestId('offline-entry');

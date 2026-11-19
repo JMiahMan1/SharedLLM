@@ -360,13 +360,11 @@ class TasmotaDriver(Driver):
             self._online = False
             self.mark_unavailable()
             if isinstance(exc, AuthRequired):
-                # The password was changed on the device: say so on the entry, as a failed setup would.
-                self.entry.state, self.entry.reason = "setup_retry", f"{type(exc).__name__}: {exc}"
+                # The password was changed on the device: the runtime parks the entry until it is entered.
+                raise
             return
         if not self._online:
             self.log.info("Tasmota %s (%s) is back", self.mac, self.host)
-        if self.entry.state == "setup_retry":
-            self.entry.state, self.entry.reason = "loaded", None
         self._online = True
         self._publish_all()
 

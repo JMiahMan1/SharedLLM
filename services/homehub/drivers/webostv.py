@@ -34,7 +34,15 @@ from typing import Any
 from aiowebostv import WebOsClient
 from aiowebostv.exceptions import WebOsTvCommandError, WebOsTvPairError
 
-from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, HubError, ServiceCall, ServiceNotFound
+from services.homehub.core import (
+    AuthRequired,
+    DeviceUnavailable,
+    Driver,
+    EntityEntry,
+    HubError,
+    ServiceCall,
+    ServiceNotFound,
+)
 from services.homehub.drivers.media_common import (
     F,
     as_list,
@@ -127,9 +135,10 @@ class WebOSDriver(Driver):
         try:
             await asyncio.wait_for(self.client.connect(), CONNECT_TIMEOUT_S)
         except WebOsTvPairError as exc:
-            # The key was refused: the TV would show "Allow" again, which needs a person. Say so.
-            self.log.error("LG TV %s refused the stored pairing key: %s", self.host, exc)
-            return False
+            # The key was refused: the TV would show "Allow" again, which needs a person. The runtime
+            # parks the entry instead of asking again every poll.
+            raise AuthRequired(f"LG TV {self.host} refused the stored pairing key; pair it again",
+                               needs="pairing") from exc
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # standby, unreachable, or a dropped socket: all mean "off"

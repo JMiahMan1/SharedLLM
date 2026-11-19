@@ -641,3 +641,17 @@ async def test_the_gateway_sets_and_clears_a_jarvis_phones_beacon_through_the_ad
     stored = {e.entry_id: e for e in store.load_config_entries()}[entry.entry_id]
     assert stored.data["app_data"] == {"push_url": "https://push.example.invalid/x", "push_token": "tok",
                                        "ble_beacon": None}
+
+
+async def test_a_bindkey_that_does_not_decrypt_parks_the_sensor_for_its_key():
+    from services.homehub.core import AuthRequired
+    from services.homehub.drivers.ble import BLESensorDriver
+    from services.homehub.tests.conftest import make_hub
+
+    _hub, entry = make_hub("xiaomi_ble", {"address": "02:00:00:00:00:09", "bindkey": "00" * 16})
+    driver = BLESensorDriver(_hub, entry)
+    await driver.async_poll()  # nothing heard yet: nothing to say
+    driver._decrypt_error_logged = True  # what _on_adv records when the parser cannot verify the key
+    with pytest.raises(AuthRequired) as raised:
+        await driver.async_poll()
+    assert raised.value.needs == "bindkey"
