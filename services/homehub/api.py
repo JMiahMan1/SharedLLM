@@ -40,6 +40,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     matter_ble,  # new Wi-Fi Matter devices over Bluetooth, and their household Wi-Fi
     mobile_app_api,
     prune_api,  # dry-run and apply pruning of stale imported HA data
+    recorder,  # /hub/recorder: what history keeps, purges, the size report
     registries_api,  # floors, labels, categories, zones, persons, tags
     restarts_api,  # /hub/devices/{id}/restarts: an ESPHome node's restarts and their causes
     service_logins_api,
@@ -123,8 +124,11 @@ def call_allowed(hub: Any, p: Principal | None, domain: str, service: str, data:
     """None when this caller may make this call, else why not. Only limited users are checked.
 
     A limited user's call must name entities, and every one of them must be theirs to control. A script is
-    named by its service (``script.<name>``) as often as by an entity.
+    named by its service (``script.<name>``) as often as by an entity. Admin services (``hub.admin_services``,
+    the recorder's purges) are refused to everyone but admins.
     """
+    if p is not None and not p.is_admin and (domain, service) in getattr(hub, "admin_services", ()):
+        return f"{domain}.{service} is for admins only"
     if p is None or not p.restricted:
         return None
     targets = hub.resolve_targets(data)
@@ -293,6 +297,10 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             out["loop"] = monitor.snapshot()  # stalls and thread-pool waits since start (loop_monitor.py)
         with contextlib.suppress(Exception):  # a summary must never fail the health check
             out["esphome_restarts"] = esphome_restarts.health_summary(hub)
+        rec = getattr(runtime, "recorder", None)
+        if rec is not None:
+            with contextlib.suppress(Exception):  # size and backlog; the full report is GET /hub/recorder/size
+                out["recorder"] = rec.health()
         return out
 
     @api.get("/api/")
@@ -813,6 +821,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(live_video_api.build_router(runtime, auth))  # real-time camera video (go2rtc)
     app.include_router(camera_recording_api.build_router(runtime, auth))  # motion recording to Nextcloud
     app.include_router(statistics_api.build_router(runtime, auth))  # long-term statistics, energy
+    app.include_router(recorder.build_router(runtime, auth))  # recorder settings, size report (admins)
     app.include_router(dashboard_api.build_router(runtime, auth))  # Jarvis's Home/Climate pages
     app.include_router(ha_auth_api.build_router(runtime, auth))  # also starts the login providers
     app.include_router(users_api.build_router(runtime, auth))  # hub users and login providers (admins)
