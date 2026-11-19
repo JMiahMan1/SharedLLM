@@ -96,6 +96,24 @@ async def test_lists_shopping_and_switch_as_x(rt):
         await add(rt, "switch_as_x", {"entity_id": "switch.example_plug", "target_domain": "fan"})
 
 
+async def test_switch_as_x_hides_the_switch_it_wraps_and_removing_it_shows_it_again(rt):
+    from services.homehub import entries
+
+    rt.hub.entities["switch.example_plug"] = EntityEntry("switch.example_plug", "esphome", "u1")
+    rt.hub.entities["switch.kept_hidden"] = EntityEntry("switch.kept_hidden", "esphome", "u3", hidden_by="user")
+    out = await add(rt, "switch_as_x", {"entity_id": "switch.example_plug", "target_domain": "light"})
+    kept = await add(rt, "switch_as_x", {"entity_id": "switch.kept_hidden", "target_domain": "fan"})
+    plug = rt.hub.entities["switch.example_plug"]
+    assert plug.hidden_by == "integration"
+    assert rt.store.load_entities() and next(e for e in rt.store.load_entities()
+                                             if e.entity_id == "switch.example_plug").hidden_by == "integration"
+    assert rt.hub.entities["switch.kept_hidden"].hidden_by == "user"
+    await entries.remove_entry(rt, out["entry_id"])
+    assert plug.hidden_by is None
+    await entries.remove_entry(rt, kept["entry_id"])
+    assert rt.hub.entities["switch.kept_hidden"].hidden_by == "user"  # a person hid it: theirs to show
+
+
 async def test_a_relay_and_a_door_sensor_become_a_garage_door(rt):
     rt.hub.entities["switch.example_opener"] = EntityEntry("switch.example_opener", "esphome", "u2")
     rt.hub.entities["binary_sensor.example_door"] = EntityEntry("binary_sensor.example_door", "esphome", "u3")

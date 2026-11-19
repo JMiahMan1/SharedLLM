@@ -432,6 +432,8 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
             removed_devices.append(dev.id)
     runtime.store.delete_config_entry(entry_id)
     hub.config_entries.pop(entry_id, None)
+    if entry.domain == "switch_as_x":
+        _show_wrapped_switch(runtime, entry)
     log.info("removed %s %s (%d entities, %d devices)", entry.domain, entry.title, len(ent_ids),
              len(removed_devices))
     out: dict[str, Any] = {"status": "removed", "entry_id": entry_id, "domain": entry.domain, "title": entry.title,
@@ -439,6 +441,21 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
     if warning:
         out["warning"] = warning
     return out
+
+
+def _show_wrapped_switch(runtime: Any, entry: ConfigEntry) -> None:
+    """A removed switch_as_x shows its switch again, unless another wrapper or a person hid it."""
+    hub = runtime.hub
+    source = str({**entry.data, **entry.options}.get("entity_id") or "")
+    ent = hub.entities.get(source)
+    if ent is None or ent.hidden_by != "integration":
+        return
+    if any(e.domain == "switch_as_x" and {**e.data, **e.options}.get("entity_id") == source
+           for e in hub.config_entries.values()):
+        return
+    ent.hidden_by = None
+    runtime.store.save_entity(ent)
+    hub.bus.fire("entity_registry_updated", {"action": "update", "entity_id": source})
 
 
 async def remove_device(runtime: Any, device_id: str, *, force: bool = False) -> dict[str, Any]:

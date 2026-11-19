@@ -751,7 +751,14 @@ async def adopt_switch_as_x(runtime: Any, finding: dict[str, Any], name: str | N
     ent = plan.add_entity(v["target_domain"], entry_id, None, device=dev)
     if dev is None:
         ent.original_name, ent.has_entity_name, ent.area_id = title, False, area_id
-    return await commit(runtime, plan)
+    result = await commit(runtime, plan)
+    # HA's switch_as_x hides the switch it wraps, so the device shows once (as the light, the cover...);
+    # removing the wrapper shows it again (entries.remove_entry). A switch someone hid stays theirs.
+    if not wrapped.hidden_by:
+        wrapped.hidden_by = "integration"
+        runtime.store.save_entity(wrapped)
+        hub.bus.fire("entity_registry_updated", {"action": "update", "entity_id": wrapped.entity_id})
+    return result
 
 
 FLOWS = {
