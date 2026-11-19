@@ -583,3 +583,72 @@ def test_importer_stores_the_helpers(tmp_path) -> None:
 def test_fmt_duration() -> None:
     assert fmt_duration(timedelta(hours=1, seconds=5)) == "1:00:05"
     assert fmt_duration(timedelta(seconds=-3)) == "0:00:00"
+
+
+# -- startup order: timer events wait for the automations ------------------------------------------------
+
+async def test_a_timer_that_ran_out_while_down_finishes_once_automations_listen() -> None:
+    """The helpers start before the automations; a timer.finished from the restore must still reach them."""
+    items = {"timer": [{"id": "laundry", "name": "Laundry", "duration": 60, "restore": True}]}
+    store = FakeStore()
+    m, hub, clock = await make(items, store=store)
+    await call(hub, "timer.start", "timer.laundry")
+    await m.stop()
+    clock.advance(600)  # down for ten minutes: the timer ran out meanwhile
+
+    hub2 = restarted_hub(hub)
+    seen = events(hub2)
+    m2 = Helpers(hub2, store, now=clock)
+    m2.hold_events()
+    await m2.start()
+    assert hub2.states.get("timer.laundry").state == "idle"
+    assert seen == []  # held: no automation is listening yet
+
+    eng = AutomationEngine(hub2, FakeStore(), clock=FakeClock(START))
+    heard: list[str] = []
+
+    async def note(_hub: Hub, call_: Any) -> None:
+        heard.append(call_.data["t"])
+
+    hub2.register_service("test", "note", note)
+    await eng.load([{"id": "done", "alias": "Done", "triggers": [
+        {"trigger": "event", "event_type": "timer.finished", "event_data": {"entity_id": "timer.laundry"}}],
+        "actions": [{"action": "test.note", "data": {"t": "{{ trigger.event.data.entity_id }}"}}]}], {}, [])
+    await eng.start()
+    m2.release_events()
+    await settle()
+    assert [t for t, _ in seen] == ["timer.finished"] and heard == ["timer.laundry"]
+    await call(hub2, "timer.start", "timer.laundry")  # after the release, events go out at once
+    assert [t for t, _ in seen] == ["timer.finished", "timer.started"]
+    await eng.stop()
+    await m2.stop()
+
+
+async def test_the_service_releases_held_timer_events_after_starting_automations(tmp_path, monkeypatch) -> None:
+    import importlib
+
+    from services.homehub import automation_api
+
+    monkeypatch.setenv("HOMEHUB_DB", str(tmp_path / "hub.db"))  # main builds its Service on import
+    monkeypatch.setenv("TZ", "Etc/UTC")
+    main = importlib.import_module("services.homehub.main")
+    store = Store(str(tmp_path / "hub.db"))
+    hub = Hub(time_zone="Etc/GMT+7")
+    svc = object.__new__(main.Service)
+    svc.store, svc.hub, svc.runtime = store, hub, Runtime(hub, store)
+    order: list[str] = []
+    hub.bus.subscribe(lambda t, _d: order.append(t) if t.startswith("timer.") else None)
+    store.set_kv(STORE_KEY, {"timer": [{"id": "oven", "name": "Oven", "duration": 60}]})
+    await svc._start_helpers()
+    await call(hub, "timer.start", "timer.oven")  # before the automations: held
+    assert order == []
+
+    async def started(_runtime: Any) -> None:
+        order.append("automations")
+
+    monkeypatch.setattr(automation_api, "start", started)
+    await svc._start_automations()
+    assert order == ["automations", "timer.started"]
+    if svc.runtime.automations is not None:
+        await svc.runtime.automations.stop()
+    await svc.runtime.helpers.stop()
