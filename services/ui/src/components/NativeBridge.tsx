@@ -117,7 +117,9 @@ export default function NativeBridge() {
   const [nudge, setNudge] = useState<Nudge | null>(null);
   useEffect(() => {
     if (!native) return;
-    const handle = ChatNotify.addListener('nudge', ({ body, path }) => {
+    const handle = ChatNotify.addListener('nudge', ({ body, path, kind }) => {
+      // A reply reminder is gentle: never the full-screen card, even from a phone that sent one here.
+      if (kind === 'private_reminder') return;
       setNudge({ body: body || 'You were nudged in your private chat', path: path && path.startsWith('/') ? path : '/family' });
     });
     return () => {

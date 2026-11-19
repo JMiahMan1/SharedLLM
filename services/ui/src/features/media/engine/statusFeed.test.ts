@@ -12,7 +12,7 @@ vi.mock('../../../services/api', () => ({
 const seedOffice = () => useMediaStore.getState().actions.ingest({
   type: 'ma-players',
   webPlayerId: 'me',
-  players: [{ player_id: 'office', name: 'Office', available: true, state: 'playing', powered: true }],
+  players: [{ player_id: 'study', name: 'Study', available: true, state: 'playing', powered: true }],
 });
 
 function web(listMaPlayers: SharedPlayer['listMaPlayers']): SharedPlayer {
@@ -31,7 +31,7 @@ describe('useMediaStatusFeed Music Assistant list', () => {
     const listMaPlayers = vi.fn().mockResolvedValue(null);
     const { unmount } = renderHook(() => useMediaStatusFeed(web(listMaPlayers)));
     await waitFor(() => expect(listMaPlayers).toHaveBeenCalled());
-    expect(useMediaStore.getState().players['ma:office']).toBeDefined();
+    expect(useMediaStore.getState().players['ma:study']).toBeDefined();
     unmount();
   });
 
@@ -42,7 +42,7 @@ describe('useMediaStatusFeed Music Assistant list', () => {
     ]);
     const { unmount } = renderHook(() => useMediaStatusFeed(web(listMaPlayers)));
     await waitFor(() => expect(useMediaStore.getState().players['ma:den']).toBeDefined());
-    expect(useMediaStore.getState().players['ma:office']).toBeUndefined();
+    expect(useMediaStore.getState().players['ma:study']).toBeUndefined();
     unmount();
   });
 });
@@ -64,7 +64,7 @@ describe('useMediaStatusFeed and the home hub', () => {
     const { unmount } = renderHook(() => useMediaStatusFeed(web(listMaPlayers), { hub: false }));
     await waitFor(() => expect(useMediaStore.getState().statusReadAt).not.toBeNull());
     expect(useMediaStore.getState().statusReadError).toBe(false);
-    expect(useMediaStore.getState().players['ma:office']).toBeDefined();
+    expect(useMediaStore.getState().players['ma:study']).toBeDefined();
     expect(api.mediaStatus).not.toHaveBeenCalled();
     unmount();
   });

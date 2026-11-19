@@ -45,6 +45,7 @@ from xml.etree import ElementTree as ET
 from services.homehub.core import ConfigEntry
 from services.homehub.discovery import norm_mac
 from services.homehub.flows import (
+    TASMOTA_PASSWORD,
     FlowError,
     NeedsInput,
     Pending,
@@ -52,6 +53,7 @@ from services.homehub.flows import (
     _existing_entry,
     _new_entry_id,
     commit,
+    relogin,
 )
 
 log = logging.getLogger("homehub.pairing")
@@ -177,7 +179,7 @@ MANUAL: dict[str, dict[str, Any]] = {
     "reolink": {"label": "Reolink camera, NVR or Home Hub", "fields": [HOST, USERNAME, PASSWORD]},
     "roku": {"label": "Roku", "fields": [HOST]},
     "wiz": {"label": "WiZ light", "fields": [HOST]},
-    "tasmota": {"label": "Tasmota", "fields": [HOST]},
+    "tasmota": {"label": "Tasmota", "fields": [HOST, TASMOTA_PASSWORD]},
     "esphome": {"label": "ESPHome node", "fields": [HOST]},
     "esphome_builder": {"label": "ESPHome Device Builder", "fields": [
         BUILDER_URL, {**USERNAME, "optional": True}, {**PASSWORD, "optional": True}]},
@@ -895,8 +897,11 @@ async def adopt_reolink(runtime: Any, finding: dict[str, Any], name: str | None,
         if not host_uid:
             raise FlowError("The Reolink device reported neither its UID nor its MAC address", 502)
         entry_uid = mac or host_uid
-        if _existing_entry(hub, "reolink", entry_uid):
-            raise FlowError("This Reolink device is already set up", 409)
+        existing = _existing_entry(hub, "reolink", entry_uid)
+        if existing is not None:
+            # Already set up: its login (or address) changed. The new one was just accepted, so the
+            # entry signs in again in place; its cameras, entities and recordings stay.
+            return await relogin(runtime, existing, {"host": host, "username": username, "password": password})
         title = str(getattr(api, "nvr_name", "") or finding.get("name") or "Reolink")
         data: dict[str, Any] = {"host": host, "port": getattr(api, "port", None),
                                 "use_https": getattr(api, "use_https", None), "username": username,

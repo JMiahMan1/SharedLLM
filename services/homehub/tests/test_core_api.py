@@ -297,23 +297,14 @@ async def test_service_starts_people_and_zones(tmp_path, monkeypatch):
     errors, warnings = [], []
     monkeypatch.setattr(main.log, "exception", lambda *a, **k: errors.append(a))
     monkeypatch.setattr(main.log, "warning", lambda *a, **k: warnings.append(a))
-    monkeypatch.setattr(main.registries, "geo_url", lambda: "")
+    svc.store.set_kv("geo_zones", [{"id": "geo_" + "c" * 32, "name": "Pool", "latitude": 39.9, "longitude": -105.2,
+                                    "radius": 150, "source": "geo"}])
     await svc._start_people()
     assert not errors
     assert svc.hub.states.get("zone.home") is not None and svc.hub.states.get("zone.work") is not None
-    # No geo: the saved-place mirror says it is off instead of quietly doing nothing.
-    assert not svc._bg and any("GEO_SVC_URL" in str(w[0]) for w in warnings)
-
-    monkeypatch.setattr(main.registries, "geo_url", lambda: "http://geo.test")
-    followed = []
-
-    async def follow(runtime, base, every):
-        followed.append((base, every))
-
-    monkeypatch.setattr(main.registries, "follow_places", follow)
-    await svc._start_people()
-    await svc._bg[0]
-    assert followed == [("http://geo.test", main.GEO_PLACES_EVERY_S)]
+    # The old mirror of saved places is an ordinary zone now, and nothing follows geo any more.
+    assert svc.hub.states.get("zone.pool") is not None and svc.store.get_kv("geo_zones") == []
+    assert not svc._bg and not hasattr(main, "GEO_PLACES_EVERY_S")
 
 
 async def test_runtime_reports_when_every_entry_has_tried_to_load(tmp_path, monkeypatch):
@@ -417,3 +408,28 @@ async def test_a_device_that_stays_off_is_reported_once_not_on_every_retry(tmp_p
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "setup failed" in r.getMessage()]
     assert len(warnings) == 1
     assert hub.config_entries["x"].state == "setup_retry"
+
+
+def test_entry_options_are_checked_per_integration_and_a_disabled_entry_stays_stopped(setup, monkeypatch):
+    hub, store, runtime, _driver, auth = setup
+    started, stopped = [], []
+
+    async def stop(entry_id):
+        stopped.append(entry_id)
+
+    monkeypatch.setattr(runtime, "start_entry", lambda entry: started.append(entry.entry_id))
+    monkeypatch.setattr(runtime, "stop_entry", stop)
+    hub.config_entries["t1"] = ConfigEntry("t1", "tasmota", "Desk plug", options={"legacy_flag": True})
+    hub.config_entries["off"] = ConfigEntry("off", "reolink", "Garage hub", disabled_by="user")
+    with TestClient(build_app(runtime, auth)) as c:
+        r = c.patch("/hub/entries/t1/options", headers=H, json={"hots": "192.0.2.9"})
+        assert r.status_code == 400 and "no option hots" in r.json()["message"] and "host" in r.json()["message"]
+        assert "hots" not in hub.config_entries["t1"].options and started == []
+        # Its own option, and one an import carried (kept, and removable), are fine.
+        r = c.patch("/hub/entries/t1/options", headers=H, json={"host": "192.0.2.9", "legacy_flag": None})
+        assert r.status_code == 200 and r.json()["options"] == {"host": "192.0.2.9"}
+        assert started == ["t1"] and stopped == ["t1"]
+        r = c.patch("/hub/entries/off/options", headers=H, json={"protocol": "rtmp"})
+        assert r.status_code == 200 and r.json()["options"] == {"protocol": "rtmp"}
+        assert started == ["t1"] and stopped == ["t1"]  # saved, never started while disabled
+        assert next(e for e in store.load_config_entries() if e.entry_id == "off").options == {"protocol": "rtmp"}

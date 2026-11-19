@@ -7,9 +7,9 @@
 | ``GET /hub/labels``, ``POST /hub/labels`` | The labels; ``{"name", "color"?, "icon"?, "description"?}`` makes one |
 | ``PATCH /hub/labels/{id}``, ``DELETE /hub/labels/{id}`` | Change one; remove one (and take it off everything) |
 | ``GET /hub/categories`` | The imported automation/script/scene categories, by scope |
-| ``GET /hub/zones``, ``POST /hub/zones`` | Home, the drawn zones and the saved-place zones; ``{"name", "latitude", "longitude", "radius"?, "passive"?, "icon"?}`` makes one |
-| ``PATCH /hub/zones/{id}``, ``DELETE /hub/zones/{id}`` | Change or remove a drawn zone (home and saved places answer 409) |
-| ``POST /hub/zones/sync`` | Follow the family's saved places now (the hub also does it every few minutes) |
+| ``GET /hub/zones``, ``POST /hub/zones`` | Every place: Home, the drawn zones and the places saved in Wander; ``{"name", "latitude", "longitude", "radius"?, "passive"?, "icon"?, "important"?, "notify"?, "pin"?}`` makes one |
+| ``GET``, ``PATCH``, ``DELETE /hub/zones/{id}`` | One place; change it; remove it. ``home`` is Home: it moves (``latitude``, ``longitude``, ``radius``, ``name``) but is never removed (409) |
+| ``POST /hub/zones/import`` | Geo's one-time move of its saved places and place settings (internal secret only; idempotent) |
 | ``GET /hub/persons``, ``POST /hub/persons`` | The persons and the trackers they can use; ``{"name", "jarvis_user"?, "device_trackers"?}`` |
 | ``PATCH /hub/persons/{id}``, ``DELETE /hub/persons/{id}`` | Change or remove a person |
 | ``GET /hub/tags`` | The imported NFC/QR tags with their names |
@@ -19,6 +19,12 @@
 | ``GET /hub/network_devices/{mac}/history`` | Arrival/departure history for a device |
 
 Admins only, like the rest of ``/hub/*``. See ``registries.py``.
+
+Places belong to the hub's own users. A hub login sees and changes the family's places and its own private
+ones, and what it makes is its own. The stack's internal secret (Jarvis's gateway and geo) may pass ``viewer``
+(a Jarvis username, matched to the hub user it belongs to) to act for that person, or ``all=1`` (geo's
+presence) for every place. Nobody sees someone else's private place, admins included; the gateway decides
+who may change which place (the owner, or an admin for anything not private).
 """
 from __future__ import annotations
 
@@ -30,18 +36,32 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from services.homehub import registries
-from services.homehub.auth import Auth, bearer
+from services.homehub.auth import Auth, Principal, bearer
 from services.homehub.core import HubError
 
 
 def build_router(runtime: Any, auth: Auth) -> APIRouter:
     router = APIRouter()
 
-    def admin(request: Request) -> None:
+    def admin(request: Request) -> Principal:
         tok = bearer(request.headers.get("authorization")) or request.headers.get("x-internal-secret")
         p = auth.authenticate(tok)
         if p is None or not p.is_admin:
             raise HTTPException(401, detail="Unauthorized")
+        return p
+
+    def scope(request: Request) -> dict[str, Any]:
+        """Whose places the caller sees. A hub login sees the family's places and its own private ones; the
+        stack's own secret may act for a Jarvis user (``viewer``) or, for geo's presence, see all (``all``)."""
+        p = admin(request)
+        if p.user_id != "internal":
+            return {"who": registries.Who(user_id=p.user_id), "everything": False}
+        q = request.query_params
+        return {"who": registries.who_for(runtime, jarvis_user=q.get("viewer")) if q.get("viewer") else None,
+                "everything": q.get("all") in ("1", "true")}
+
+    def trusted(request: Request) -> bool:
+        return admin(request).user_id == "internal"
 
     async def body_of(request: Request) -> dict[str, Any]:
         admin(request)
@@ -110,25 +130,39 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
 
     @router.get("/hub/zones")
     async def list_zones(request: Request) -> Any:
-        return await run(request, lambda: registries.list_zones(runtime))
+        who = scope(request)
+        return await run(request, lambda: registries.list_zones(runtime, **who))
 
-    @router.post("/hub/zones/sync")
-    async def sync_zones(request: Request) -> Any:
-        return await run(request, lambda: registries.sync_places(runtime, registries.geo_url()))
+    @router.post("/hub/zones/import")
+    async def import_places(request: Request) -> Any:
+        body = await body_of(request)
+        if not trusted(request):
+            raise HTTPException(403, detail="Only Jarvis's own services import places")
+        return await run(request, lambda: registries.import_places(runtime, body))
 
     @router.post("/hub/zones")
     async def create_zone(request: Request) -> Any:
         body = await body_of(request)
-        return await run(request, lambda: registries.create_zone(runtime, body))
+        p = admin(request)
+        inside = p.user_id == "internal"
+        return await run(request, lambda: registries.create_zone(runtime, body, trusted=inside,
+                                                                 creator=None if inside else p.user_id))
+
+    @router.get("/hub/zones/{zone_id}")
+    async def get_zone(zone_id: str, request: Request) -> Any:
+        who = scope(request)
+        return await run(request, lambda: registries.get_zone(runtime, zone_id, **who))
 
     @router.patch("/hub/zones/{zone_id}")
     async def update_zone(zone_id: str, request: Request) -> Any:
         body = await body_of(request)
-        return await run(request, lambda: registries.update_zone(runtime, zone_id, body))
+        who, inside = scope(request), trusted(request)
+        return await run(request, lambda: registries.update_zone(runtime, zone_id, body, trusted=inside, **who))
 
     @router.delete("/hub/zones/{zone_id}")
     async def delete_zone(zone_id: str, request: Request) -> Any:
-        return await run(request, lambda: registries.delete_zone(runtime, zone_id))
+        who = scope(request)
+        return await run(request, lambda: registries.delete_zone(runtime, zone_id, **who))
 
     @router.get("/hub/persons")
     async def list_persons(request: Request) -> Any:

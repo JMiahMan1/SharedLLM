@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 if os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
-    pytest.skip("Skipping local Office TV media control test in CI.", allow_module_level=True)
+    pytest.skip("Skipping local TV media control test in CI.", allow_module_level=True)
 
 HA_URL = os.getenv("HA_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
@@ -16,7 +16,7 @@ LIVE_TEST_URL = os.getenv("LIVE_TEST_URL")
 GATEWAY_URL = LIVE_TEST_URL if LIVE_TEST_URL else "http://localhost:11435"
 # The TV under test comes from the run, never from the repo:
 #   LIVE_TV_ENTITY  its Music Assistant queue entity id (e.g. media_player.<room>_tv)
-#   LIVE_TV_NAME    the name you would say to Jarvis (e.g. "Office TV")
+#   LIVE_TV_NAME    the name you would say to Jarvis (e.g. "Den TV")
 QUEUE_ENTITY_ID = os.getenv("LIVE_TV_ENTITY", "")
 TV_NAME = os.getenv("LIVE_TV_NAME", "")
 if not (QUEUE_ENTITY_ID and TV_NAME and HA_URL and HA_TOKEN):
@@ -72,13 +72,13 @@ def wait_for(predicate, timeout: int = 20, interval: float = 2.0):
 
 
 @pytest.mark.local_only
-def test_office_tv_music_controls(client):
+def test_tv_music_controls(client):
     """
     Local-only hardware test:
-    verify play, pause, next, back, and stop on the Office TV Music Assistant queue.
+    verify play, pause, next, back, and stop on the test TV's Music Assistant queue.
     """
     initial = summarize_state(QUEUE_ENTITY_ID)
-    print(f"\n[Test] Initial Office TV state: {initial}")
+    print(f"\n[Test] Initial TV state: {initial}")
 
     send_chat(client, f"Play Brandon Lake on {TV_NAME}")
     play_state = wait_for(
@@ -87,7 +87,7 @@ def test_office_tv_music_controls(client):
             and state.get("media_artist") == "Brandon Lake" else None
         )
     )
-    assert play_state, "Office TV did not start Brandon Lake playback."
+    assert play_state, "The TV did not start Brandon Lake playback."
     print(f"[Test] After play: {play_state}")
 
     send_chat(client, f"Pause the {TV_NAME}")
@@ -98,7 +98,7 @@ def test_office_tv_music_controls(client):
         timeout=10,
         interval=1.0,
     )
-    assert pause_state, "Office TV did not pause."
+    assert pause_state, "The TV did not pause."
     print(f"[Test] After pause: {pause_state}")
 
     previous_title = pause_state.get("media_title")
@@ -109,7 +109,7 @@ def test_office_tv_music_controls(client):
             and state.get("media_title") != previous_title else None
         )
     )
-    assert next_state, "Office TV did not advance to a new track."
+    assert next_state, "The TV did not advance to a new track."
     print(f"[Test] After next: {next_state}")
 
     next_title = next_state.get("media_title")
@@ -133,7 +133,7 @@ def test_office_tv_music_controls(client):
             timeout=8,
             interval=1.0,
         )
-    assert back_state, "Office TV back command did not move away from the current track."
+    assert back_state, "The TV back command did not move away from the current track."
     print(f"[Test] After back: {back_state}")
 
     send_chat(client, f"Stop the music on {TV_NAME}")
@@ -144,7 +144,7 @@ def test_office_tv_music_controls(client):
         timeout=10,
         interval=1.0,
     )
-    assert stop_state, "Office TV did not stop playback."
+    assert stop_state, "The TV did not stop playback."
     print(f"[Test] After stop: {stop_state}")
 
 

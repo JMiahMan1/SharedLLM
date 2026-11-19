@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import json
 import re
+import time
 from typing import Any
 from uuid import UUID
 
@@ -32,7 +33,7 @@ from pychromecast.discovery import CastBrowser, SimpleCastListener
 from pychromecast.response_handler import WaitResponse
 
 from services.homehub.core import UNAVAILABLE, DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
-from services.homehub.drivers.media_common import F, clamp01, clean, mime_for
+from services.homehub.drivers.media_common import F, clamp01, clean, device_twins, mime_for
 
 MEDIA_RECEIVER_APP_ID = "CC1AD845"
 # An Android/Google TV reports its foreground Android app (Spotify, YouTube) under this id.
@@ -41,6 +42,12 @@ _NO_REMOTE = object()
 COMMAND_TIMEOUT_S = 10.0
 # Loading media may first switch the TV from another app (Spotify, YouTube) to the media receiver.
 LOAD_TIMEOUT_S = 30.0
+# An announcement waits for its clip to end before putting back what was playing: the clip's own
+# length when it is known (a hub clip's WAV header, the ``duration`` Cast reports), this when not.
+ANNOUNCE_UNKNOWN_S = 30.0
+ANNOUNCE_MAX_S = 600.0
+ANNOUNCE_MARGIN_S = 3.0
+ANNOUNCE_POLL_S = 0.25
 
 
 def _squash(text: Any) -> str:
@@ -88,6 +95,8 @@ class CastDriver(Driver):
         self.zconf: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connecting: set[str] = set()
+        #: cast key -> {"snap": what to put back, "task": the task that will} while an announcement plays.
+        self.announcing: dict[str, dict[str, Any]] = {}
 
     # Seams the tests replace.
     @staticmethod
@@ -169,6 +178,9 @@ class CastDriver(Driver):
             self.publish_key(key)
 
     async def async_unload(self) -> None:
+        for pending in list(self.announcing.values()):
+            pending["task"].cancel()
+        self.announcing.clear()
         for cc in list(self.casts.values()):
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(asyncio.to_thread(cc.disconnect, 2), 5)
@@ -197,7 +209,7 @@ class CastDriver(Driver):
         ms = self._media_status(cc)
         app_id = getattr(cc, "app_id", None) or getattr(cs, "app_id", None)
         # An Android/Google TV's own apps report through Cast as "AndroidNativeApp", and that
-        # report can be false: the Office TV's built-in Spotify app said Spotify was paused or
+        # report can be false: one Google TV's built-in Spotify app said Spotify was paused or
         # "playing" though Spotify was never played on it. So a native app's session counts
         # only while the TV is awake and, when Jarvis also has the TV's remote connection,
         # that app is the one on screen. Real playback in the app still shows.
@@ -219,7 +231,7 @@ class CastDriver(Driver):
             state = "off"
         else:
             state = "on"
-        sf = F.TURN_ON | F.TURN_OFF | F.PLAY_MEDIA | F.BROWSE_MEDIA
+        sf = F.TURN_ON | F.TURN_OFF | F.PLAY_MEDIA | F.BROWSE_MEDIA | F.MEDIA_ANNOUNCE
         if getattr(cs, "volume_control_type", "attenuation") != "fixed":
             sf |= F.VOLUME_MUTE | F.VOLUME_SET | F.VOLUME_STEP
         attrs: dict[str, Any] = {
@@ -339,7 +351,10 @@ class CastDriver(Driver):
         elif service == "media_seek":
             await self._run(mc.seek, float(data.get("seek_position") or 0))
         elif service == "play_media":
-            await self._play_media(cc, data)
+            if data.get("announce") and str(data.get("media_content_type") or "") != "cast":
+                await self._announce(entity, cc, data)
+            else:
+                await self._play_media(cc, data)
         else:
             raise ServiceNotFound(f"cast cannot run media_player.{service}")
         self.publish_key(str(UUID(entity.unique_id)))
@@ -369,6 +384,178 @@ class CastDriver(Driver):
         if data.get("enqueue") in ("add", "next"):
             kwargs["enqueue"] = True
         await self._run(_load_and_wait, cc, media_id, mime_for(mtype, media_id), kwargs, _timeout=LOAD_TIMEOUT_S)
+
+
+    # -- announcements ------------------------------------------------------------------
+    async def _announce(self, entity: EntityEntry, cc: Any, data: dict[str, Any]) -> None:
+        """Speak over what the device plays, then put it back (HA's ``announce: true``).
+
+        A Cast device has no announcement channel of its own: loading a clip replaces the running app.
+        When the device's Music Assistant player has a queue, Music Assistant does the announcement
+        (it ducks and resumes its own queue). Otherwise what plays is noted, the clip is played, and
+        once it has ended (IDLE, bounded by the clip's length) the Default Media Receiver's item is
+        loaded again at its position, or the app that was running is started again, and the volume
+        is put back. tts.speak, Jarvis and automations all come through here.
+        """
+        media_id = str(data.get("media_content_id") or "")
+        mtype = str(data.get("media_content_type") or "")
+        if not media_id:
+            raise HubError("play_media needs media_content_id")
+        extra = dict(data.get("extra") or {})
+        twin = self._ma_twin(entity)
+        twin_driver = self.hub._driver_for(twin) if twin is not None else None
+        if twin is not None and twin_driver is not None:
+            self.log.info("cast %s: announcing through Music Assistant player %s", entity.entity_id, twin.entity_id)
+            # Straight to its driver: through the hub's dispatch, a twin combined with this entity would come
+            # straight back here.
+            await twin_driver.async_call(twin, "media_player", "play_media", {
+                "media_content_id": media_id, "media_content_type": mtype or "music", "announce": True,
+                "extra": {k: extra[k] for k in ("announce_volume", "use_pre_announce") if k in extra}})
+            return
+        key = str(UUID(entity.unique_id))
+        pending = self.announcing.pop(key, None)
+        if pending is not None:  # one announcement after another: put back what was there before the first
+            pending["task"].cancel()
+            snap = pending["snap"]
+        else:
+            snap = _snapshot(cc)
+        level = _announce_level(extra.get("announce_volume"))
+        try:
+            if level is not None:
+                snap["raised"] = True
+                await self._run(cc.set_volume, level)
+            await self._run(_load_and_wait, cc, media_id, mime_for(mtype, media_id), {"stream_type": "BUFFERED"},
+                            _timeout=LOAD_TIMEOUT_S)
+        except Exception:
+            with contextlib.suppress(Exception):
+                await self._run(_restore, cc, snap, media_id, _timeout=LOAD_TIMEOUT_S)
+            raise
+        limit = _clip_limit(media_id, extra)
+        task = asyncio.ensure_future(self._finish_announcement(key, cc, media_id, snap, limit))
+        self.announcing[key] = {"snap": snap, "task": task}
+
+    def _ma_twin(self, entity: EntityEntry) -> EntityEntry | None:
+        """The device's Music Assistant player, when it has a queue to come back to."""
+        for twin in device_twins(self.hub, entity, "music_assistant"):
+            # Its own state: a twin combined with this entity shows the combined (Cast) state under its id.
+            st = self.hub.copy_states.get(twin.entity_id) or self.hub.states.get(twin.entity_id)
+            if st is not None and st.state != UNAVAILABLE and st.attributes.get("active_queue"):
+                return twin
+        return None
+
+    async def _finish_announcement(self, key: str, cc: Any, media_id: str, snap: dict[str, Any], limit: float) -> None:
+        try:
+            await self._run(_wait_for_clip_end, cc, media_id, limit, _timeout=limit)
+            await self._run(_restore, cc, snap, media_id, _timeout=LOAD_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # the device went away mid-clip; nothing more can be put back
+            self.log.warning("cast %s: could not put back what was playing after an announcement: %s", key, exc)
+        finally:
+            current = self.announcing.get(key)
+            if current is not None and current["task"] is asyncio.current_task():
+                self.announcing.pop(key, None)
+            self.publish_key(key)
+
+
+def _announce_level(value: Any) -> float | None:
+    """``extra.announce_volume`` as Music Assistant takes it (0-100), or a 0-1 level."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        level = float(value)
+    except (TypeError, ValueError):
+        return None
+    if level <= 0:
+        return None
+    return clamp01(level / 100 if level > 1 else level)
+
+
+def _clip_limit(media_id: str, extra: dict[str, Any]) -> float:
+    """Longest wait for the clip to end: its length (when known) plus a margin."""
+    seconds: float | None = None
+    with contextlib.suppress(TypeError, ValueError):
+        if extra.get("duration") is not None:
+            seconds = float(extra["duration"])
+    if seconds is None and "/api/tts_proxy/" in media_id:
+        from services.common.audio_clip import wav_duration
+        from services.homehub import tts
+
+        token = media_id.split("?", 1)[0].rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        seconds = wav_duration(tts.clip(token))
+    if seconds is None:
+        return ANNOUNCE_UNKNOWN_S
+    return min(ANNOUNCE_MAX_S, max(0.0, seconds)) + ANNOUNCE_MARGIN_S
+
+
+def _snapshot(cc: Any) -> dict[str, Any]:
+    """What to put back after an announcement: the app, the media receiver's item and position, the volume."""
+    cs = cc.status
+    snap: dict[str, Any] = {"app_id": cc.app_id, "idle": bool(cc.is_idle),
+                            "volume": getattr(cs, "volume_level", None), "muted": getattr(cs, "volume_muted", None)}
+    ms = CastDriver._media_status(cc)
+    if cc.app_id == MEDIA_RECEIVER_APP_ID and ms is not None and ms.content_id \
+            and ms.player_state in ("PLAYING", "BUFFERING", "PAUSED"):
+        live = str(getattr(ms, "stream_type", "") or "").upper() == "LIVE"
+        position = getattr(ms, "adjusted_current_time", None)
+        if position is None:
+            position = ms.current_time
+        snap["media"] = {"content_id": ms.content_id, "content_type": ms.content_type or "video/mp4",
+                         "position": None if live else position, "paused": ms.player_state == "PAUSED",
+                         "stream_type": "LIVE" if live else "BUFFERED", "title": ms.title}
+    return snap
+
+
+def _wait_for_clip_end(cc: Any, media_id: str, limit: float, sleep: Any = time.sleep) -> None:
+    """Until the clip has played (IDLE after it started, or another item loaded), at most ``limit`` seconds.
+
+    Cast's own ``duration`` for the clip shortens the wait when it is known.
+    """
+    begun = time.monotonic()
+    deadline = begun + limit
+    seen = started = False
+    while time.monotonic() < deadline:
+        ms = cc.media_controller.status
+        state = getattr(ms, "player_state", None)
+        cid = getattr(ms, "content_id", None)
+        if cid == media_id:
+            seen = True
+        elif cid and seen:  # something else was loaded over the clip
+            return
+        if seen and state in ("PLAYING", "BUFFERING"):
+            started = True
+        elif seen and state == "IDLE" and (started or getattr(ms, "idle_reason", None)):
+            return
+        duration = getattr(ms, "duration", None) if seen else None
+        if isinstance(duration, (int, float)) and duration > 0:
+            deadline = min(deadline, begun + duration + ANNOUNCE_MARGIN_S)
+        sleep(ANNOUNCE_POLL_S)
+
+
+def _restore(cc: Any, snap: dict[str, Any], announced: str) -> None:
+    """Put back what an announcement replaced (runs in a worker thread)."""
+    media = snap.get("media")
+    app_id = snap.get("app_id")
+    if media and media["content_id"] != announced:
+        if cc.app_id != MEDIA_RECEIVER_APP_ID:
+            cc.start_app(MEDIA_RECEIVER_APP_ID, timeout=LOAD_TIMEOUT_S)
+        kwargs: dict[str, Any] = {"autoplay": not media["paused"], "stream_type": media["stream_type"]}
+        if media.get("position"):
+            kwargs["current_time"] = media["position"]
+        if media.get("title"):
+            kwargs["title"] = media["title"]
+        cc.media_controller.play_media(media["content_id"], media["content_type"], **kwargs)
+    elif app_id and app_id not in (MEDIA_RECEIVER_APP_ID, ANDROID_NATIVE_APP_ID) and not snap.get("idle"):
+        cc.start_app(app_id, timeout=LOAD_TIMEOUT_S)  # an app's own session cannot be resumed; its app can
+    else:
+        cc.quit_app()  # nothing was playing (or an Android app Cast cannot start): leave the receiver
+    volume = snap.get("volume")
+    if isinstance(volume, (int, float)) and (
+            snap.get("raised") or abs(float(getattr(cc.status, "volume_level", volume) or 0) - volume) > 0.005):
+        cc.set_volume(volume)
+    muted = snap.get("muted")
+    if isinstance(muted, bool) and getattr(cc.status, "volume_muted", muted) != muted:
+        cc.set_volume_muted(muted)
 
 
 def _load_and_wait(cc: Any, media_id: str, mime: str, kwargs: dict[str, Any]) -> None:

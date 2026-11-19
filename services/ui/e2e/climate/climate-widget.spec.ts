@@ -2,7 +2,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 import { mockClimateApi, shotPath, type ClimateMocks, type ClimateScenario } from '../fixtures/climateMocks';
 
 const ALL_ROOMS = [
-  'climate.living_room', 'climate.kitchen', 'climate.bedroom', 'climate.nursery', 'climate.office',
+  'climate.living_room', 'climate.kitchen', 'climate.bedroom', 'climate.nursery', 'climate.study',
 ];
 
 async function boot(page: Page, scenario: ClimateScenario): Promise<ClimateMocks> {

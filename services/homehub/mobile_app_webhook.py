@@ -701,12 +701,40 @@ class MobileAppManager:
         wid = str(entry.data.get("webhook_id") or "")
         channel = self.channels.get(wid) if wid else None
         if channel is not None:
-            await channel.send(dict(data), lambda d: self.relay(entry, d))
+            await channel.send(dict(data), lambda d: self.unconfirmed(entry, d))
             return "local"
         if (entry.data.get("app_data") or {}).get("push_url"):
             await self.relay(entry, data)
             return "relay"
         raise HubError(f"{entry.title} is not connected for push notifications")
+
+    async def unconfirmed(self, entry: ConfigEntry, data: dict[str, Any]) -> str:
+        """A local push the app did not confirm in time: the push relay, else a Jarvis notice to the phone's user.
+
+        Never dropped without a word: answers how it went ("relay", "jarvis") or "dropped", which is logged
+        as a warning naming the phone.
+        """
+        payload = {k: v for k, v in data.items() if k != "hass_confirm_id"}
+        if (entry.data.get("app_data") or {}).get("push_url"):
+            try:
+                await self.relay(entry, payload)
+                return "relay"
+            except HubError as exc:
+                log.warning("push to %s was not confirmed and its relay failed: %s", entry.title, exc)
+        from services.homehub.drivers.mobile_app import MobileAppDriver, _send
+
+        drv = self.hub.drivers.get(entry.entry_id)
+        user = drv.jarvis_user() if isinstance(drv, MobileAppDriver) else entry.options.get("jarvis_user")
+        if user:
+            try:
+                if await _send([user], payload):
+                    log.info("push to %s was not confirmed; sent as a Jarvis notice to %s", entry.title, user)
+                    return "jarvis"
+            except Exception as exc:
+                log.warning("push to %s was not confirmed and the Jarvis notice failed: %s", entry.title, exc)
+        log.warning("push to %s was not confirmed and could not be sent another way (no relay%s): dropped",
+                    entry.title, "" if user else " and no Jarvis user")
+        return "dropped"
 
     async def relay(self, entry: ConfigEntry, data: dict[str, Any]) -> None:
         d = entry.data
@@ -779,11 +807,52 @@ def _ok() -> WebhookResult:
     return WebhookResult(200, {})
 
 
+#: Events a limited user's phone may fire: the companion apps' own (notification actions, iOS actions,
+#: Android zone and widget events). Anything else could stand in for a hub event (``call_service``,
+#: ``state_changed``) or trigger an automation the user may not run, so it is the admins', as over REST.
+APP_EVENT_PREFIXES = ("mobile_app_", "ios.", "android.")
+
+
+def webhook_principal(mgr: MobileAppManager, entry: ConfigEntry) -> Any:
+    """The user the phone was registered by, as they are now (admin flag and entity limits from the last sync).
+
+    Looked up on every webhook, so a user demoted or limited after registering their phone is limited at once.
+    None when the registration names no user, or one that no longer exists or is deactivated: such a phone
+    may still report its own sensors, but may not read or control anything else.
+    """
+    from services.homehub.auth import principal_for
+
+    user_id = str(entry.data.get("user_id") or "")
+    if not user_id:
+        return None
+    user = next((u for u in mgr.store.get_kv("users", []) or [] if u.get("id") == user_id), None)
+    if user is None or not user.get("is_active", True):
+        return None
+    return principal_for(user)
+
+
+def _refused(message: str) -> WebhookResult:
+    return _error("unauthorized", message, 403)
+
+
+def _no_user(entry: ConfigEntry) -> WebhookResult:
+    return _refused(f"{entry.title} is not registered to an active user")
+
+
 @command("call_service")
 async def _call_service(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -> WebhookResult:
     if not isinstance(data, dict) or not data.get("domain") or not data.get("service"):
         return _ok()
     service_data = data.get("service_data") if isinstance(data.get("service_data"), dict) else {}
+    from services.homehub.api import call_allowed
+
+    principal = webhook_principal(mgr, entry)
+    if principal is None:
+        return _no_user(entry)
+    refused = call_allowed(mgr.hub, principal, str(data["domain"]), str(data["service"]), service_data)
+    if refused:
+        log.warning("call_service from %s refused: %s", entry.title, refused)
+        return _refused(refused)
     try:
         await mgr.hub.call_service(str(data["domain"]), str(data["service"]), service_data)
     except Exception as exc:
@@ -796,6 +865,11 @@ async def _call_service(mgr: MobileAppManager, entry: ConfigEntry, data: Any) ->
 async def _fire_event(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -> WebhookResult:
     if isinstance(data, dict) and data.get("event_type"):
         event_data = data.get("event_data") if isinstance(data.get("event_data"), dict) else {}
+        principal = webhook_principal(mgr, entry)
+        if principal is None:
+            return _no_user(entry)
+        if principal.restricted and not str(data["event_type"]).startswith(APP_EVENT_PREFIXES):
+            return _refused(f"This account may not fire {data['event_type']}")
         mgr.hub.bus.fire(str(data["event_type"]), event_data)
     return _ok()
 
@@ -804,6 +878,12 @@ async def _fire_event(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -> W
 async def _render_template(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -> WebhookResult:
     from services.homehub import templating
 
+    # A template reads the whole hub, so only admins render one (as over REST and the WebSocket).
+    principal = webhook_principal(mgr, entry)
+    if principal is None:
+        return _no_user(entry)
+    if not principal.is_admin:
+        return _refused("Templates read every entity, so only an administrator's phone may render them")
     resp: dict[str, Any] = {}
     for key, item in (data.items() if isinstance(data, dict) else []):
         if not isinstance(item, dict) or "template" not in item:
@@ -842,8 +922,10 @@ def _tracker_state(hub: Hub, data: dict[str, Any], lat: float | None, lon: float
 async def _update_location(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -> WebhookResult:
     if not isinstance(data, dict):
         return _ok()
-    tracker = mgr.find_entity("device_tracker", str(entry.data.get("device_id") or "")) \
-        or next((e for e in mgr.hub.entities.values()
+    tracker = mgr.find_entity("device_tracker", str(entry.data.get("device_id") or ""))
+    if tracker is not None and tracker.config_entry_id != entry.entry_id:
+        tracker = None  # another phone's tracker with the same device id: never this phone's to move
+    tracker = tracker or next((e for e in mgr.hub.entities.values()
                  if e.config_entry_id == entry.entry_id and e.domain == "device_tracker"), None)
     if tracker is None:
         return _ok()
@@ -926,6 +1008,11 @@ async def _stream_camera(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -
     st = mgr.hub.states.get(eid)
     if st is None or not eid.startswith("camera."):
         return WebhookResult(400, {"success": False}, encrypt_for=entry)
+    principal = webhook_principal(mgr, entry)
+    if principal is None:
+        return _no_user(entry)
+    if not principal.may_view(eid):
+        return _refused(f"This account may not use {eid}")
     # The hub relays MJPEG (or a snapshot stream) but has no HLS, as the README explains.
     return WebhookResult(200, {"mjpeg_path": f"/api/camera_proxy_stream/{eid}", "hls_path": None},
                          encrypt_for=entry)

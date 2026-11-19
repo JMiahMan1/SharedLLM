@@ -24,6 +24,13 @@ def _load_env_files():
                 os.environ.setdefault(_k, _v)
 
 
+# Live-test opt-in (see TESTING.md, "Live tests"). Read from the runner's own
+# environment BEFORE any env file is loaded: a SHAREDLLM_RUN_LIVE line in .env
+# must never be what points a bare `pytest` at a deployed stack.
+_LIVE_ENV_VAR = "SHAREDLLM_RUN_LIVE"
+_TRUTHY = {"1", "true", "yes"}
+_LIVE_FROM_RUNNER = os.environ.get(_LIVE_ENV_VAR, "").strip().lower() in _TRUTHY
+
 # Ensure root is in PYTHONPATH for imports across services
 _root = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
@@ -241,6 +248,11 @@ if not _PASSTHROUGH:
 # Load real env config (.env.test > .env) for any var not pinned above.
 _load_env_files()
 
+# Whatever .env said, the live opt-in is the runner's alone.
+os.environ.pop(_LIVE_ENV_VAR, None)
+if _LIVE_FROM_RUNNER:
+    os.environ[_LIVE_ENV_VAR] = "1"
+
 if _PASSTHROUGH:
     # Honour the real deployment for the vars a live run needs, but keep the
     # values that would otherwise silently point tests at production storage.
@@ -264,6 +276,55 @@ def _isolate_environ():
     finally:
         os.environ.clear()
         os.environ.update(saved)
+
+
+# Config modules that derive their constants once, at import, and that code
+# under test reads through the package attribute (``from services import
+# config``) at call time.
+_CONFIG_MODULES = ("services.config", "services.gateway.config")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_modules():
+    """Undo a test's re-import, reload or attribute edits of the config modules.
+
+    _isolate_environ restores os.environ, but services.config copies it into
+    module attributes once. Two kinds of test changed that copy for everyone
+    after them:
+
+    * ``del sys.modules["services.config"]`` then ``import services.config``
+      (test_config_resolution.py) binds a NEW module to sys.modules and to the
+      ``services.config`` package attribute. Every test module collected
+      before that still holds the OLD object, so its
+      ``monkeypatch.setattr(config, "HA_URL", ...)`` patched a module nobody
+      read any more: hub_login does ``from services import config`` at call
+      time and saw the new module's defaults. That is how 29 execution tests
+      (test_hub_login_*, test_media_hub_login, test_piper_tts) passed alone and
+      failed after services/tests in one run.
+    * ``importlib.reload(services.config)`` (test_mass_config.py) re-runs the
+      module in place against the test's own environment and leaves those
+      values behind.
+
+    Snapshot the module objects, the package attributes and each module's
+    namespace, and put all three back after every test.
+    """
+    saved = []
+    for name in _CONFIG_MODULES:
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        parent_name, _, attr = name.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        saved.append((name, mod, parent, attr, getattr(parent, attr, None), dict(vars(mod))))
+    yield
+    for name, mod, parent, attr, parent_attr, namespace in saved:
+        sys.modules[name] = mod
+        if parent is not None and parent_attr is not None:
+            setattr(parent, attr, parent_attr)
+        current = vars(mod)
+        if current != namespace:
+            current.clear()
+            current.update(namespace)
 
 
 @pytest.fixture(autouse=True)
@@ -344,6 +405,12 @@ def temp_chroma_dir():
 
 
 def pytest_configure(config):
+    # --run-live is the same opt-in as SHAREDLLM_RUN_LIVE=1 from the shell. It
+    # is exported here, before collection imports any test module, so a module
+    # that probes a live gateway at import time can check it too
+    # (services/tests/test_raven_user_cases.py, test_gateway_model_selection.py).
+    if config.getoption("--run-live", default=False):
+        os.environ[_LIVE_ENV_VAR] = "1"
     config.addinivalue_line("markers", "local_only: requires local running servers (--run-local to enable)")
     config.addinivalue_line("markers", "server_only: requires remote running servers (--run-server to enable)")
     config.addinivalue_line("markers", "integration: tests that verify inter-service communication")
@@ -351,14 +418,34 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "unit: pure logic tests with no I/O")
 
 
+# Directories whose tests drive a deployed stack (SERVER_IP, GATEWAY_URL,
+# LIVE_TEST_URL, INTERNAL_SECRET, GH_TOKEN...). Everything collected under them
+# is skipped unless the run opts in with --run-live or SHAREDLLM_RUN_LIVE=1.
+_LIVE_DIRS = tuple(
+    os.path.join(_root, d) + os.sep
+    for d in (os.path.join("tests", "integration"), os.path.join("test", "integration"), os.path.join("test", "local"), "scripts")
+)
+
+
+def _is_live_item(item) -> bool:
+    path = str(getattr(item, "path", "") or getattr(item, "fspath", ""))
+    return path.startswith(_LIVE_DIRS) or item.get_closest_marker("live") is not None
+
+
 def pytest_collection_modifyitems(config, items):
     skip_local = pytest.mark.skip(reason="Skipping: requires local running servers (--run-local to enable)")
     skip_server = pytest.mark.skip(reason="Skipping: requires remote running servers (--run-server to enable)")
+    skip_live = pytest.mark.skip(
+        reason="Skipping: targets a deployed stack (opt in with --run-live or SHAREDLLM_RUN_LIVE=1; .env cannot opt in)"
+    )
 
     run_local = config.getoption("--run-local", default=False)
     run_server = config.getoption("--run-server", default=False)
+    run_live = os.environ.get(_LIVE_ENV_VAR) == "1"
 
     for item in items:
+        if not run_live and _is_live_item(item):
+            item.add_marker(skip_live)
         if "local_only" in item.keywords and not run_local:
             item.add_marker(skip_local)
         if "server_only" in item.keywords and not run_server:
@@ -368,3 +455,9 @@ def pytest_collection_modifyitems(config, items):
 def pytest_addoption(parser):
     parser.addoption("--run-local", action="store_true", default=False, help="Run tests requiring local running servers")
     parser.addoption("--run-server", action="store_true", default=False, help="Run tests requiring remote running servers")
+    parser.addoption(
+        "--run-live",
+        action="store_true",
+        default=False,
+        help="Run tests that target a deployed stack (tests/integration, test/local, ...). Same as SHAREDLLM_RUN_LIVE=1.",
+    )

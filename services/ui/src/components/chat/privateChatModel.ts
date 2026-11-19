@@ -24,6 +24,20 @@ export interface PrivateChatInfo {
   backup_key?: BackupKeyInfo | null;
 }
 
+/** My reply reminder setting for one chat, and the server's rules (services/gateway/private_chat_reminders.py). */
+export interface PrivateChatReminders {
+  /** Reminders to me when I have read a message and not answered (default on). */
+  enabled: boolean;
+  /** The server has the feature on at all. */
+  available: boolean;
+  delay_s: number;
+  /** The shorter wait when my device saw a question in the message. */
+  question_delay_s: number;
+  /** Household quiet hours, e.g. "21:30-07:30", or null. */
+  quiet: string | null;
+  daily_max: number;
+}
+
 export interface PrivateChatStatus {
   /** A parent (father or mother) with a chat account. */
   eligible: boolean;
@@ -63,6 +77,23 @@ export function canNudge(messages: TalkMessage[], myActorIds: ReadonlySet<string
   const latest = sent[sent.length - 1];
   if (!latest || !isMine(latest, myActorIds)) return false;
   return (lastCommonRead ?? 0) < Number(latest.id);
+}
+
+function hours(seconds: number): string {
+  const h = Math.round((seconds / 3600) * 10) / 10;
+  if (h < 1) return `${Math.max(1, Math.round(seconds / 60))} minutes`;
+  return h === 1 ? '1 hour' : `${h} hours`;
+}
+
+/** The reply reminder rules in words, for the switch in the chat's settings. */
+export function reminderSummary(r: PrivateChatReminders, partnerName: string): string {
+  const quiet = r.quiet ? `, never between ${r.quiet.replace('-', ' and ')}` : '';
+  const most = r.daily_max === 1 ? 'once a day' : `${r.daily_max} times a day`;
+  return (
+    `When you have read a message from ${partnerName} and not answered, Jarvis reminds you once after ${hours(r.delay_s)} ` +
+    `(${hours(r.question_delay_s)} if your phone sees a question in it)${quiet}, at most ${most}. ` +
+    'The reminder never says what was written. Applies on all your devices.'
+  );
 }
 
 /** The server's reason from an axios error (detail), else the error's own message. */

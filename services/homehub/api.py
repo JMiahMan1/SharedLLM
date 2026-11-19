@@ -10,10 +10,12 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from services.common.secrets import secret_matches
@@ -27,6 +29,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     dashboard_api,
     discovery_api,
     entries_api,  # integrations: reconfigure, remove/unpair, add by address
+    esphome_restarts,  # ESPHome restarts and drops, for /health
     ha_auth_api,
     ha_ws_compat,
     hardware_api,  # the hardware list: integrations, devices, entities, disable, sync
@@ -37,9 +40,12 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     matter_ble,  # new Wi-Fi Matter devices over Bluetooth, and their household Wi-Fi
     mobile_app_api,
     prune_api,  # dry-run and apply pruning of stale imported HA data
+    recorder,  # /hub/recorder: what history keeps, purges, the size report
     registries_api,  # floors, labels, categories, zones, persons, tags
+    restarts_api,  # /hub/devices/{id}/restarts: an ESPHome node's restarts and their causes
     service_logins_api,
     statistics_api,
+    users_api,  # the hub's users and its login providers (local, Jarvis)
     voice_api,  # /hub/voice: the voice satellites and their runs
 )
 from services.homehub.auth import Auth, Principal, bearer
@@ -56,6 +62,11 @@ _BOUNDARY = "frame"
 _NO_STORE = {"Cache-Control": "no-store"}
 #: HA's history SIGNIFICANT_DOMAINS: attribute-only changes count as significant for these.
 SIGNIFICANT_DOMAINS = frozenset({"climate", "device_tracker", "humidifier", "thermostat", "water_heater"})
+#: HA's logbook leaves these domains out entirely: they change all the time and none of it reads as an event.
+LOGBOOK_ALWAYS_CONTINUOUS = frozenset({"counter", "proximity"})
+#: Set ("true") on a history or logbook answer whose window held more rows than one answer carries: the oldest
+#: rows were left out. A header, so HA clients reading the body see HA's shape unchanged.
+TRUNCATED_HEADER = "X-HomeHub-History-Truncated"
 #: A snapshot stream gives up after this many failed frames in a row (a camera gone to sleep for good).
 SNAPSHOT_STREAM_MAX_FAILURES = 5
 #: WebSocket commands other modules add (``async fn(conn, id, msg)``), e.g. mobile_app's push channel.
@@ -86,6 +97,59 @@ def parse_time(raw: str | None) -> datetime | None:
 
 def _error(status: int, message: str) -> JSONResponse:
     return JSONResponse({"message": message}, status_code=status)
+
+
+#: What a user whose login provider limits their entities may call (everything else is the admins').
+#: Each of these filters or checks by entity (``Principal.may_view`` / ``may_control``).
+LIMITED_PATHS = ("/api/", "/api/config", "/api/states", "/api/services", "/api/events", "/api/history/period",
+                 "/api/logbook", "/api/camera_proxy/", "/api/image_proxy/", "/api/camera_proxy_stream/",
+                 "/api/config/entity_registry", "/api/mobile_app/registrations", "/api/tts_proxy/", "/api/tts_stream/", "/api/webhook/",
+                 "/api/websocket", "/auth/")
+#: WebSocket commands a limited user may send besides the core ones api.py checks itself.
+LIMITED_WS = {"auth/current_user", "mobile_app/push_notification_channel", "mobile_app/push_notification_confirm",
+              "network/url", "config/entity_registry/list_for_display", "config/entity_registry/get_entries"}
+
+
+def limited_path_ok(path: str) -> bool:
+    for allowed in LIMITED_PATHS:
+        if allowed.endswith("/") and allowed != "/api/":
+            if path.startswith(allowed):
+                return True
+        elif path == allowed or path.startswith(allowed + "/"):
+            return True
+    return False
+
+
+def call_allowed(hub: Any, p: Principal | None, domain: str, service: str, data: dict[str, Any]) -> str | None:
+    """None when this caller may make this call, else why not. Only limited users are checked.
+
+    A limited user's call must name entities, and every one of them must be theirs to control. A script is
+    named by its service (``script.<name>``) as often as by an entity. Admin services (``hub.admin_services``,
+    the recorder's purges) are refused to everyone but admins.
+    """
+    if p is not None and not p.is_admin and (domain, service) in getattr(hub, "admin_services", ()):
+        return f"{domain}.{service} is for admins only"
+    if p is None or not p.restricted:
+        return None
+    targets = hub.resolve_targets(data)
+    if not targets and domain == "script" and service not in ("turn_on", "turn_off", "toggle", "reload"):
+        targets = [f"script.{service}"]
+    if not targets:
+        return f"{domain}.{service} needs an entity this account may use"
+    denied = [t for t in targets if not p.may_control(t)]
+    if denied:
+        return f"This account may not use {denied[0]}"
+    return None
+
+
+def _event_visible(p: Principal | None, data: dict[str, Any]) -> bool:
+    if p is None or not p.restricted:
+        return True
+    eid = data.get("entity_id")
+    if isinstance(eid, str) and eid and not p.may_view(eid):
+        return False
+    ids = data.get("entity_ids")
+    return not (isinstance(ids, list) and any(not p.may_view(str(i)) for i in ids))
 
 
 def _frame(img: bytes) -> bytes:
@@ -137,6 +201,56 @@ def config_payload(runtime: Runtime) -> dict[str, Any]:
     }
 
 
+def logbook_continuous(entity_id: str, attributes: dict[str, Any] | None) -> bool:
+    """HA's logbook filter: counters, proximity, and sensors with a unit or a state class are measurements."""
+    domain = entity_id.split(".", 1)[0]
+    if domain in LOGBOOK_ALWAYS_CONTINUOUS:
+        return True
+    attrs = attributes or {}
+    return domain == "sensor" and ("unit_of_measurement" in attrs or "state_class" in attrs)
+
+
+async def history_by_entity(runtime: Runtime, ids: list[str] | None, start: datetime, end: datetime | None, *,
+                            changes_only: bool, start_state: bool) -> tuple[dict[str, list[dict[str, Any]]], bool]:
+    """Recorded rows per entity (oldest first) and whether older rows were left out.
+
+    With ``changes_only``, attribute-only changes are still kept for HA's SIGNIFICANT_DOMAINS (a tracker moving
+    while it stays "not_home" is a change of position). With ``start_state``, each entity's series begins with
+    its state at ``start`` (HA's include_start_time_state), timed at ``start``. That state is left out when the
+    window was truncated: it would claim to last until the oldest row kept, across the rows left out.
+    """
+    store = runtime.store
+    keep_all = [i for i in ids or [] if i.split(".", 1)[0] in SIGNIFICANT_DOMAINS] if changes_only else []
+    rest = [i for i in ids or [] if i not in keep_all]
+    rows: list[dict[str, Any]] = []
+    truncated = False
+    if keep_all:
+        got, cut = await asyncio.to_thread(store.history_page, keep_all, start, end, changes_only=False)
+        rows += got
+        truncated |= cut
+    if rest or not ids:
+        got, cut = await asyncio.to_thread(store.history_page, rest or None, start, end, changes_only=changes_only)
+        rows += got
+        truncated |= cut
+    by_entity: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        by_entity.setdefault(r["entity_id"], []).append(r)
+    if start_state and not truncated:
+        known = [s.entity_id for s in runtime.hub.states.all()]
+        wanted = list(ids) if ids else list(dict.fromkeys([*by_entity, *known]))
+        at = await asyncio.to_thread(store.states_at, wanted, start)
+        when = start.astimezone(UTC).isoformat()
+        merged: dict[str, list[dict[str, Any]]] = {}
+        for eid in wanted:
+            series = by_entity.get(eid, [])
+            if eid in at:
+                series = [{**at[eid], "last_changed": when, "last_updated": when}, *series]
+            if series:
+                merged[eid] = series
+        by_entity = merged
+    return by_entity, truncated
+
+
 def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | None = None) -> FastAPI:
     app = FastAPI(title="homehub", docs_url=None, redoc_url=None, openapi_url=None)
     hub = runtime.hub
@@ -156,6 +270,16 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             raise HTTPException(401, detail="Unauthorized")
         return p
 
+    @app.middleware("http")
+    async def _limited_users(request: Request, call_next: Any) -> Response:
+        """A user with entity limits reaches only the routes that apply them (``LIMITED_PATHS``)."""
+        token = bearer(request.headers.get("authorization"))
+        if token and not limited_path_ok(request.url.path):
+            p = auth.authenticate(token)
+            if p is not None and p.restricted:
+                return PlainTextResponse("401: Unauthorized", status_code=401)
+        return await call_next(request)
+
     @app.exception_handler(HTTPException)
     async def _http_exc(_request: Request, exc: HTTPException) -> Response:
         if exc.status_code == 401:
@@ -165,9 +289,19 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     @app.get("/health")
     async def health() -> dict[str, Any]:
         entries = runtime.entry_status()
-        return {"status": "ok", "service": "homehub", "entries": len(entries),
-                "loaded": sum(1 for e in entries if e["state"] == "loaded"),
-                "entities": len(hub.states.all()), "started_at": hub.started_at.isoformat()}
+        out = {"status": "ok", "service": "homehub", "entries": len(entries),
+               "loaded": sum(1 for e in entries if e["state"] == "loaded"),
+               "entities": len(hub.states.all()), "started_at": hub.started_at.isoformat()}
+        monitor = getattr(runtime, "loop_monitor", None)
+        if monitor is not None:
+            out["loop"] = monitor.snapshot()  # stalls and thread-pool waits since start (loop_monitor.py)
+        with contextlib.suppress(Exception):  # a summary must never fail the health check
+            out["esphome_restarts"] = esphome_restarts.health_summary(hub)
+        rec = getattr(runtime, "recorder", None)
+        if rec is not None:
+            with contextlib.suppress(Exception):  # size and backlog; the full report is GET /hub/recorder/size
+                out["recorder"] = rec.health()
+        return out
 
     @api.get("/api/")
     async def root(request: Request) -> dict[str, str]:
@@ -181,14 +315,14 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
 
     @api.get("/api/states")
     async def get_states(request: Request) -> list[dict[str, Any]]:
-        principal(request)
-        return [s.as_dict() for s in hub.states.all()]
+        p = principal(request)
+        return [s.as_dict() for s in hub.states.all() if p.may_view(s.entity_id)]
 
     @api.get("/api/states/{entity_id}")
     async def get_state(entity_id: str, request: Request) -> Response:
-        principal(request)
+        p = principal(request)
         st = hub.states.get(entity_id)
-        if st is None:
+        if st is None or not p.may_view(entity_id):
             return _error(404, "Entity not found.")
         return JSONResponse(st.as_dict())
 
@@ -211,7 +345,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
 
     @api.post("/api/services/{domain}/{service}")
     async def call_service(domain: str, service: str, request: Request) -> Response:
-        principal(request)
+        p = principal(request)
         raw = await request.body()
         try:
             data = json.loads(raw) if raw else {}
@@ -219,6 +353,9 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             return _error(400, "Data should be valid JSON.")
         if not isinstance(data, dict):
             return _error(400, "Data should be a JSON object.")
+        refused = call_allowed(hub, p, domain, service, data)
+        if refused:
+            return _error(403, refused)
         want_response = "return_response" in request.query_params
         try:
             result = await hub.call_service(domain, service, data, return_response=want_response)
@@ -262,7 +399,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     @api.get("/api/config/entity_registry/list")
     async def entity_registry_rest(request: Request) -> list[dict[str, Any]]:
         p = principal(request)
-        return [registry_view(e, p) for e in hub.entities.values()]
+        return [registry_view(e, p) for e in hub.entities.values() if p.may_view(e.entity_id)]
 
     @api.post("/api/template")
     async def template(request: Request) -> Response:
@@ -278,8 +415,8 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
 
     @api.get("/api/history/period")
     @api.get("/api/history/period/{start}")
-    async def history(request: Request, start: str | None = None) -> list[list[dict[str, Any]]]:
-        principal(request)
+    async def history(request: Request, start: str | None = None) -> Response:
+        p = principal(request)
         q = request.query_params
         start_dt = parse_time(start) or datetime.now(UTC) - timedelta(days=1)
         end_dt = parse_time(q.get("end_time"))
@@ -287,21 +424,11 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         minimal = "minimal_response" in q
         no_attrs = "no_attributes" in q
         changes_only = "significant_changes_only" in q and q.get("significant_changes_only") not in ("0", "false")
-        # HA keeps every attribute change of these domains as significant: a tracker moving while it stays
-        # "not_home" is a change of position, which is what a trip replay reads.
-        keep_all = [i for i in ids if i.split(".", 1)[0] in SIGNIFICANT_DOMAINS] if changes_only else []
-        rest = [i for i in ids if i not in keep_all]
-        rows = []
-        if keep_all:
-            rows += await asyncio.to_thread(runtime.store.history, keep_all, start_dt, end_dt, changes_only=False)
-        if rest or not ids:
-            rows += await asyncio.to_thread(runtime.store.history, rest or None, start_dt, end_dt,
-                                            changes_only=changes_only)
-        by_entity: dict[str, list[dict[str, Any]]] = {}
-        for r in rows:
-            by_entity.setdefault(r["entity_id"], []).append(r)
+        found, truncated = await history_by_entity(runtime, ids or None, start_dt, end_dt, changes_only=changes_only,
+                                                   start_state="skip_initial_state" not in q)
+        by_entity = {eid: items for eid, items in found.items() if p.may_view(eid)}
         for eid in ids:
-            if eid not in by_entity and (st := hub.states.get(eid)) is not None:
+            if eid not in by_entity and p.may_view(eid) and (st := hub.states.get(eid)) is not None:
                 by_entity[eid] = [st.as_dict()]
         out = []
         for _eid, items in by_entity.items():
@@ -313,19 +440,29 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
                     r = {"state": r["state"], "last_changed": r["last_changed"]}
                 series.append(r)
             out.append(series)
-        return out
+        return JSONResponse(jsonable_encoder(out), headers={TRUNCATED_HEADER: "true"} if truncated else None)
 
     @api.get("/api/logbook")
     @api.get("/api/logbook/{start}")
-    async def logbook(request: Request, start: str | None = None) -> list[dict[str, Any]]:
-        principal(request)
+    async def logbook(request: Request, start: str | None = None) -> Response:
+        p = principal(request)
         q = request.query_params
         start_dt = parse_time(start) or datetime.now(UTC) - timedelta(days=1)
         end_dt = parse_time(q.get("end_time"))
         ids = [q["entity"]] if q.get("entity") else None
-        rows = await asyncio.to_thread(runtime.store.history, ids, start_dt, end_dt, changes_only=True)
-        return [{"when": r["last_changed"], "state": r["state"], "entity_id": r["entity_id"],
-                 "name": r["attributes"].get("friendly_name") or r["entity_id"]} for r in rows]
+        rows, truncated = await asyncio.to_thread(runtime.store.history_page, ids, start_dt, end_dt,
+                                                  changes_only=True)
+        out = []
+        for r in rows:
+            eid = r["entity_id"]
+            if not p.may_view(eid):
+                continue
+            cur = hub.states.get(eid)
+            if logbook_continuous(eid, r["attributes"]) or (cur is not None and logbook_continuous(eid, cur.attributes)):
+                continue  # HA's logbook leaves measurements out, asked for by name or not
+            out.append({"when": r["last_changed"], "state": r["state"], "entity_id": eid,
+                        "name": r["attributes"].get("friendly_name") or eid})
+        return JSONResponse(out, headers={TRUNCATED_HEADER: "true"} if truncated else None)
 
     async def _camera_driver(entity_id: str) -> tuple[Any, Any]:
         ent = hub.entities.get(entity_id)
@@ -348,17 +485,91 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
                 valid.add(st.attributes["access_token"])
             if any(secret_matches(token, v) for v in valid):
                 return
-        principal(request)
+        if not principal(request).may_view(entity_id):
+            raise HTTPException(404, detail="Entity not found.")
 
-    @api.get("/api/tts_proxy/{name}")
-    async def tts_proxy(name: str) -> Response:
-        """Spoken audio for a speaker; the unguessable token is the credential, as in HA."""
+    @api.api_route("/api/tts_proxy/{name}", methods=["GET", "HEAD"])
+    async def tts_proxy(name: str, request: Request) -> Response:
+        """Spoken audio for a speaker; the unguessable token is the credential, as in HA.
+
+        Speakers probe with HEAD and fetch in pieces with ``Range``, so both are answered properly.
+        """
+        from services.common.audio_clip import clip_response
         from services.homehub import tts
 
         audio = tts.clip(name.rsplit(".", 1)[0])
         if audio is None:
             return _error(404, "Not found")
-        return Response(audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+        return clip_response(audio, "audio/wav", request.headers.get("range"), head=request.method == "HEAD",
+                             headers={"Cache-Control": "no-store"})
+
+    @api.api_route("/api/tts_stream/{name}", methods=["GET", "HEAD"])
+    async def tts_stream(name: str, request: Request) -> Response:
+        """A spoken reply that grows a sentence at a time (``tts.ClipStream``), as one WAV.
+
+        A voice satellite starts playing it while the rest of the answer is still being written. The
+        unguessable token is the credential, as for ``/api/tts_proxy/``. No ``Range``: the length is
+        not known until the reply ends.
+        """
+        from services.homehub import tts
+
+        clip_stream = tts.stream(name.rsplit(".", 1)[0])
+        if clip_stream is None or (clip_stream.closed and clip_stream.empty):
+            return _error(404, "Not found")
+        headers = {"Cache-Control": "no-store"}
+        if request.method == "HEAD":
+            return Response(b"", media_type="audio/wav", headers=headers)
+        return StreamingResponse(clip_stream.body(), media_type="audio/wav", headers=headers)
+
+    @api.api_route("/api/esphome/ffmpeg_proxy/{device}/{name}", methods=["GET", "HEAD"])
+    async def esphome_ffmpeg_proxy(device: str, name: str, request: Request) -> Response:
+        """Audio converted to the format an ESPHome media player asked for (``esphome_audio.py``).
+
+        The unguessable token is the credential, as for ``/api/tts_proxy/`` and in HA.
+        """
+        from services.homehub import esphome_audio
+
+        conv = esphome_audio.PROXY.lookup(device, name)
+        if conv is None:
+            return _error(404, "Not found")
+        headers = {"Cache-Control": "no-store"}
+        media_type = conv.fmt.content_type
+        if request.method == "HEAD":
+            return Response(b"", media_type=media_type, headers=headers)
+        try:
+            if conv.source_url is None:
+                return Response(await esphome_audio.PROXY.clip_audio(conv), media_type=media_type, headers=headers)
+            body = await esphome_audio.PROXY.open_stream(conv)
+        except esphome_audio.ProxyError as exc:
+            return _error(exc.status, exc.message)
+        return StreamingResponse(body, media_type=media_type, headers=headers)
+
+    @api.post("/hub/esphome/audio_url")
+    async def esphome_audio_url(request: Request) -> Response:
+        """A proxy URL for a node the caller talks to itself (execution's alarm and timer alerts).
+
+        ``{"device", "url", "formats": [MediaPlayerSupportedFormat fields], "announcement"}`` ->
+        ``{"url", "proxied"}``; the URL comes back unchanged when no format applies. Admins only.
+        """
+        admin(request)
+        from services.homehub import esphome_audio
+
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "Data should be valid JSON.")
+        if not isinstance(body, dict) or not str(body.get("url") or ""):
+            return _error(400, "url is required")
+        device = str(body.get("device") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", device):
+            return _error(400, "device must be 1 to 64 letters, digits, '-' or '_'")
+        try:
+            formats = [esphome_audio.AudioFormat.from_dict(f) for f in body.get("formats") or []]
+        except (TypeError, ValueError, AttributeError):
+            return _error(400, "formats must be a list of {format, sample_rate, num_channels, sample_bytes, purpose}")
+        url = str(body["url"])
+        out = esphome_audio.proxied_url(device, url, formats, announcement=bool(body.get("announcement")))
+        return JSONResponse({"url": out, "proxied": out != url})
 
     @api.post("/api/tts_get_url")
     async def tts_get_url(request: Request) -> Response:
@@ -498,7 +709,11 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
 
         principal(request)
         if entity_id is not None:
-            return {"entity_id": entity_id, "exposed": exposure.is_exposed(hub, entity_id)}
+            ent = hub.entities.get(entity_id)
+            st = hub.states.get(entity_id)
+            name = hub.friendly_name(ent) if ent is not None else (st.attributes.get("friendly_name") if st else None)
+            # ``name``: what Jarvis says when it has to refuse (never the entity id).
+            return {"entity_id": entity_id, "exposed": exposure.is_exposed(hub, entity_id), "name": name}
         return {"assistant": exposure.ASSISTANT, "entity_ids": exposure.exposed_entities(hub)}
 
     def _recording_driver(entity_id: str) -> tuple[Any, Any]:
@@ -595,15 +810,24 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         patch = await request.json()
         if not isinstance(patch, dict):
             raise HTTPException(400, detail="options must be an object")
+        from services.homehub import entries as entries_mod
+
+        try:
+            entries_mod.check_option_keys(entry, patch)
+        except entries_mod.EntryError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from None
         for k, v in patch.items():
             if v is None:
                 entry.options.pop(k, None)
             else:
                 entry.options[k] = v
         runtime.store.save_config_entry(entry)
+        if entry.disabled_by:
+            # Saved for when it is turned back on; a disabled entry is never started.
+            return {"entry_id": entry_id, "options": entry.options, "state": entry.state}
         await runtime.stop_entry(entry_id)
         runtime.start_entry(entry)
-        return {"entry_id": entry_id, "options": entry.options}
+        return {"entry_id": entry_id, "options": entry.options, "state": "reloading"}
 
     app.include_router(api)
     app.include_router(discovery_api.build_router(runtime, auth))
@@ -615,12 +839,15 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(live_video_api.build_router(runtime, auth))  # real-time camera video (go2rtc)
     app.include_router(camera_recording_api.build_router(runtime, auth))  # motion recording to Nextcloud
     app.include_router(statistics_api.build_router(runtime, auth))  # long-term statistics, energy
+    app.include_router(recorder.build_router(runtime, auth))  # recorder settings, size report (admins)
     app.include_router(dashboard_api.build_router(runtime, auth))  # Jarvis's Home/Climate pages
-    app.include_router(ha_auth_api.build_router(runtime, auth))
+    app.include_router(ha_auth_api.build_router(runtime, auth))  # also starts the login providers
+    app.include_router(users_api.build_router(runtime, auth))  # hub users and login providers (admins)
     app.include_router(mobile_app_api.build_router(runtime, auth))
     app.include_router(prune_api.build_router(runtime, auth))  # /hub/prune/plan, /hub/prune/apply
     app.include_router(service_logins_api.build_router(runtime, auth))  # service logins, Music Assistant link
     app.include_router(voice_api.build_router(runtime, auth))  # voice satellites (voice_pipeline.py)
+    app.include_router(restarts_api.build_router(runtime, auth))  # ESPHome restarts (esphome_restarts.py)
     app.include_router(conversation.build_router(runtime, auth))  # sentence triggers, asked by Jarvis first
     app.include_router(matter_ble.build_router(runtime, auth))  # the household Wi-Fi for new Matter devices
     app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map
@@ -697,8 +924,11 @@ class WSConnection:
                 await self.send({"id": mid, "type": "pong"})
             elif kind == "supported_features":
                 await self.result(mid)
+            elif self.restricted and kind not in CORE_WS and kind not in LIMITED_WS:
+                await self.error(mid, "unauthorized", "This account may not do that")
             elif kind == "get_states":
-                await self.result(mid, [s.as_dict() for s in hub.states.all()])
+                p = self.principal
+                await self.result(mid, [s.as_dict() for s in hub.states.all() if p is None or p.may_view(s.entity_id)])
             elif kind == "get_config":
                 await self.result(mid, config_payload(self.runtime))
             elif kind == "get_services":
@@ -707,6 +937,10 @@ class WSConnection:
                 data = dict(msg.get("service_data") or {})
                 if msg.get("target"):
                     data["target"] = msg["target"]
+                refused = call_allowed(hub, self.principal, msg["domain"], msg["service"], data)
+                if refused:
+                    await self.error(mid, "unauthorized", refused)
+                    return
                 res = await hub.call_service(msg["domain"], msg["service"], data,
                                              return_response=bool(msg.get("return_response")))
                 await self.result(mid, {"context": {"id": mid, "parent_id": None, "user_id": None},
@@ -715,6 +949,8 @@ class WSConnection:
                 event_type = msg.get("event_type")
 
                 async def forward(etype: str, data: dict[str, Any], _mid: int = mid) -> None:
+                    if not _event_visible(self.principal, data):
+                        return
                     with contextlib.suppress(Exception):
                         await self.send({"id": _mid, "type": "event", "event": {
                             "event_type": etype, "data": data, "origin": "LOCAL",
@@ -759,25 +995,43 @@ class WSConnection:
             elif kind == "config/device_registry/list":
                 await self.result(mid, [d.public() for d in hub.devices.values()])
             elif kind == "config/entity_registry/list":
-                await self.result(mid, [registry_view(e, self.principal) for e in hub.entities.values()])
+                await self.result(mid, [registry_view(e, self.principal) for e in hub.entities.values()
+                                        if self._sees(e.entity_id)])
             elif kind == "config/entity_registry/get":
                 ent = hub.entities.get(msg.get("entity_id", ""))
-                if ent is None:
+                if ent is None or not self._sees(ent.entity_id):
                     await self.error(mid, "not_found", "Entity not found")
                 else:
                     await self.result(mid, registry_view(ent, self.principal))
             elif kind == "history/history_during_period":
+                # HA's defaults: significant changes only, with each entity's state at the start time.
                 start = parse_time(msg.get("start_time")) or datetime.now(UTC) - timedelta(days=1)
-                rows = await asyncio.to_thread(self.runtime.store.history, msg.get("entity_ids"), start,
-                                               parse_time(msg.get("end_time")))
+                found, truncated = await history_by_entity(
+                    self.runtime, msg.get("entity_ids") or None, start, parse_time(msg.get("end_time")),
+                    changes_only=bool(msg.get("significant_changes_only", True)),
+                    start_state=bool(msg.get("include_start_time_state", True)))
+                if truncated:
+                    log.warning("history_during_period from %s held more rows than one answer carries; "
+                                "the oldest were left out", start.isoformat())
                 out: dict[str, list[dict[str, Any]]] = {}
-                for r in rows:
-                    out.setdefault(r["entity_id"], []).append({
-                        "s": r["state"], "a": {} if msg.get("no_attributes") else r["attributes"],
-                        "lu": datetime.fromisoformat(r["last_updated"]).timestamp()})
+                for eid, rows in found.items():
+                    if not self._sees(eid):
+                        continue
+                    for i, r in enumerate(rows):
+                        lu = datetime.fromisoformat(r["last_updated"]).timestamp()
+                        lc = datetime.fromisoformat(r["last_changed"]).timestamp()
+                        item: dict[str, Any] = {"s": r["state"], "lu": lu}
+                        if not (msg.get("minimal_response") and i > 0):
+                            item["a"] = {} if msg.get("no_attributes") else r["attributes"]
+                        if lc != lu:
+                            item["lc"] = lc
+                        out.setdefault(eid, []).append(item)
                 await self.result(mid, out)
             elif kind in WS_COMMANDS:
-                await WS_COMMANDS[kind](self, mid, msg)
+                if self.restricted and kind.startswith("config/entity_registry/"):
+                    await WS_COMMANDS[kind](_FilteredConn(self), mid, msg)
+                else:
+                    await WS_COMMANDS[kind](self, mid, msg)
             else:
                 await self.error(mid, "unknown_command", f"Unknown command: {kind}")
         except HubError as exc:
@@ -787,6 +1041,13 @@ class WSConnection:
         except Exception as exc:
             log.exception("ws command %s failed", kind)
             await self.error(mid, "unknown_error", str(exc))
+
+    @property
+    def restricted(self) -> bool:
+        return self.principal is not None and self.principal.restricted
+
+    def _sees(self, entity_id: str) -> bool:
+        return self.principal is None or self.principal.may_view(entity_id)
 
     async def _subscribe_entities(self, mid: int, entity_ids: list[str] | None) -> None:
         """The compressed state feed newer HA clients use (``a`` added, ``c`` changed, ``r`` removed)."""
@@ -798,7 +1059,7 @@ class WSConnection:
 
         async def forward(_etype: str, data: dict[str, Any]) -> None:
             eid = data.get("entity_id")
-            if wanted and eid not in wanted:
+            if (wanted and eid not in wanted) or not self._sees(str(eid or "")):
                 return
             new = data.get("new_state")
             payload = {"r": [eid]} if new is None else {"a": {eid: compress(new)}}
@@ -807,5 +1068,35 @@ class WSConnection:
 
         self.subs[mid] = self.hub.bus.subscribe(forward, "state_changed")
         await self.result(mid)
-        initial = {s.entity_id: compress(s) for s in self.hub.states.all() if not wanted or s.entity_id in wanted}
+        initial = {s.entity_id: compress(s) for s in self.hub.states.all()
+                   if (not wanted or s.entity_id in wanted) and self._sees(s.entity_id)}
         await self.send({"id": mid, "type": "event", "event": {"a": initial}})
+
+
+#: The WebSocket commands api.py answers itself; each one checks a limited user's entities.
+CORE_WS = {"ping", "supported_features", "get_states", "get_config", "get_services", "call_service",
+           "subscribe_events", "subscribe_entities", "unsubscribe_events", "config_entries/get",
+           "config/area_registry/list", "config/floor_registry/list", "config/label_registry/list",
+           "config/device_registry/list", "config/entity_registry/list", "config/entity_registry/get",
+           "history/history_during_period"}
+
+
+class _FilteredConn:
+    """A connection whose answers drop the entities its limited user may not see (registry commands)."""
+
+    def __init__(self, conn: WSConnection) -> None:
+        self._conn = conn
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+    async def result(self, mid: int, result: Any = None) -> None:
+        sees = self._conn._sees
+        if isinstance(result, dict) and isinstance(result.get("entities"), list):
+            result = {**result, "entities": [e for e in result["entities"]
+                                             if not isinstance(e, dict) or sees(str(e.get("ei") or e.get("entity_id") or ""))]}
+        elif isinstance(result, dict):
+            result = {k: v for k, v in result.items() if sees(str(k))}
+        elif isinstance(result, list):
+            result = [e for e in result if not isinstance(e, dict) or sees(str(e.get("entity_id") or ""))]
+        await self._conn.result(mid, result)

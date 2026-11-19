@@ -19,7 +19,7 @@ function player() {
     maxReconnectAttempts: 10, playerId: 'me', connect: vi.fn(), reconnect: vi.fn(), play: vi.fn().mockResolvedValue(undefined),
     enqueue: vi.fn().mockResolvedValue(undefined), pause: vi.fn(), stop: vi.fn(), next: vi.fn(), previous: vi.fn(), seek: vi.fn(),
     setVolume: vi.fn(), setMuted: vi.fn(), maCommand: vi.fn(),
-    listMaPlayers: vi.fn().mockResolvedValue([{ player_id: 'office', name: 'Office MA', available: true, state: 'idle', powered: true }]),
+    listMaPlayers: vi.fn().mockResolvedValue([{ player_id: 'study', name: 'Study MA', available: true, state: 'idle', powered: true }]),
   };
 }
 
@@ -88,10 +88,10 @@ describe('ItemContextMenu (P5-T7)', () => {
 
   it('adds to a Music Assistant speaker\'s queue through the gateway', async () => {
     renderMedia();
-    await chooseOutput(/Office MA/);
+    await chooseOutput(/Study MA/);
     await userEvent.click((await openMenu()).getByRole('menuitem', { name: 'Add to queue' }));
     await waitFor(() => expect(maSent).toContainEqual({
-      command: 'player_queues/play_media', args: { queue_id: 'office', media: ['library://track/7'], option: 'add' },
+      command: 'player_queues/play_media', args: { queue_id: 'study', media: ['library://track/7'], option: 'add' },
     }));
     expect(web.state.enqueue).not.toHaveBeenCalled();
   });

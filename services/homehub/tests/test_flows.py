@@ -208,7 +208,7 @@ async def test_tasmota_asks_for_a_password_then_adds_relays_and_energy(rt, monke
     async def status(host, password):
         if password != "pw":
             raise flows.NeedsInput([flows.TASMOTA_PASSWORD], "asks", None)
-        return {"Status": {"DeviceName": "Loft Plug", "FriendlyName": ["Loft Plug"]},
+        return {"Status": {"DeviceName": "Desk Plug", "FriendlyName": ["Desk Plug"]},
                 "StatusNET": {"Mac": "AA:BB:CC:DD:EE:07"}, "StatusFWR": {"Version": "14.1.0"},
                 "StatusSTS": {"POWER": "ON"}, "StatusSNS": {"ENERGY": {"Power": 12, "Total": 1.5}}}
 
@@ -219,7 +219,7 @@ async def test_tasmota_asks_for_a_password_then_adds_relays_and_energy(rt, monke
     result = await flows.adopt(rt, finding, {"input": {"password": "pw"}})
     hub = rt.hub
     entry = hub.config_entries[result["entry_id"]]
-    assert entry.data == {"host": "192.0.2.90", "username": "admin", "password": "pw"}
+    assert entry.data == {"host": "192.0.2.90", "mac": "aa:bb:cc:dd:ee:07", "username": "admin", "password": "pw"}
     from services.homehub.drivers.tasmota import TasmotaDriver
 
     drv = TasmotaDriver(hub, entry)

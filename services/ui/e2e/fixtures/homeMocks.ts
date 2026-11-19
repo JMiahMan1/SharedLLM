@@ -161,7 +161,7 @@ const MOTION_RECORDING = {
   ],
 };
 
-const AUTOMATION = {
+export const AUTOMATION = {
   kind: 'automation', id: 'a1', entity_id: 'automation.porch_at_dusk', alias: 'Porch light at dusk', description: null, icon: null,
   enabled: true, runnable: true, unsupported_reason: null, warnings: [], last_triggered: iso(-600), last_error: null,
   mode: 'single', running: 0, entities: ['light.living_lamp'],
@@ -321,9 +321,36 @@ export interface HomeMocks {
   posts: Array<{ path: string; body: unknown }>;
 }
 
+/** A room added, renamed or removed through the hub's area routes also changes what the Rooms page reads. */
+function mirrorRoomWrite(rooms: typeof ROOMS, method: string, path: string, body: unknown,
+  answer: { status: number; body: unknown }): void {
+  const m = /^\/api\/homehub\/areas(?:\/([^/]+))?$/.exec(path);
+  if (!m || answer.status !== 200) return;
+  const id = m[1] ? decodeURIComponent(m[1]) : null;
+  const sent = (body ?? {}) as { name?: string; floor_id?: string | null };
+  if (method === 'POST' && !id) {
+    const row = answer.body as { area_id: string; name: string; floor_id?: string | null };
+    rooms.areas.push({ area_id: row.area_id, name: row.name, floor_id: row.floor_id ?? null, icon: null, entities: [] });
+    return;
+  }
+  const at = rooms.areas.findIndex((a) => a.area_id === id);
+  if (at < 0) return;
+  if (method === 'DELETE') rooms.areas.splice(at, 1);
+  if (method === 'PATCH') rooms.areas[at] = { ...rooms.areas[at], ...sent } as (typeof ROOMS)['areas'][number];
+}
+
+export interface HomeOptions {
+  /** What the Rooms page reads (default ROOMS); `{ floors: [], areas: [], unassigned: [] }` is a home with no rooms. */
+  rooms?: typeof ROOMS;
+  /** What the Automations page lists (default: one ordinary automation). */
+  automations?: Array<Record<string, unknown>>;
+}
+
 /** Answer every server call for the home pages as `role`. */
-export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
+export async function mockHome(page: Page, role: Role, options: HomeOptions = {}): Promise<HomeMocks> {
   const unmocked: string[] = [];
+  // The Rooms page's answer, changed by room writes so a room added, renamed or removed shows on the next read.
+  const rooms = structuredClone(options.rooms ?? ROOMS);
   const posts: HomeMocks['posts'] = [];
   const profile = PROFILES[role];
   // Camera turns an admin sets, so the list read after a rotate says the new one.
@@ -356,7 +383,10 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       try { body = request.postDataJSON(); } catch { body = null; }
       posts.push({ path: p, body });
       const registry = registries.answer(method, p, body);
-      if (registry) return json(registry.body, registry.status);
+      if (registry) {
+        mirrorRoomWrite(rooms, method, p, body, registry);
+        return json(registry.body, registry.status);
+      }
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
       if (method === 'POST' && /^\/api\/homehub\/schedules\/[^/]+\/enabled$/.test(p)) return json({ schedule_id: p.split('/')[4], enabled: false });
       if (p === '/api/homehub/automations/validate') return json({ valid: true, errors: [], unsupported_reason: null, warnings: [] });
@@ -463,7 +493,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/info') return json({ service: 'jarvis-ui', version: 'e2e', git_sha: 'e2e' });
 
     // The home pages.
-    if (p === '/api/dashboard/rooms') return json(ROOMS);
+    if (p === '/api/dashboard/rooms') return json(rooms);
     if (p === '/api/dashboard/climate') return json({ thermostats: [DASH_THERMOSTAT] });
     if (p === '/api/dashboard/history') return json({ series: {} });
     if (p === '/api/dashboard/logbook') return json(logbook(url.searchParams.get('area_id')));
@@ -482,7 +512,9 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/dashboard/prefs') return json({ climate_power: {}, hidden: [] });
     if (p === '/api/homehub/climate') return json(climateOverview(role));
     if (p === '/api/homehub/schedules') return json({ schedules: [], can_edit: role === 'admin' });
-    if (p === '/api/homehub/automations') return json({ items: [AUTOMATION], can_edit: role === 'admin' });
+    if (p === '/api/homehub/automations') {
+      return json({ items: options.automations ?? [AUTOMATION], can_edit: role === 'admin' });
+    }
     if (p === '/api/homehub/automations/catalog') {
       return json({
         triggers: [{ type: 'time', label: 'At a time', fields: [{ name: 'at', label: 'Time', kind: 'time', required: true }] },
@@ -600,7 +632,12 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (registry) return json(registry.body, registry.status);
     if (p === '/api/homehub/hardware') return json(HARDWARE);
     // No device is in the hub twice here (e2e/home/devices-duplicates.spec.ts mocks some).
-    if (p === '/api/homehub/devices/duplicates') return json({ groups: [], integrations: [] });
+    if (p === '/api/homehub/devices/duplicates') return json({ groups: [], integrations: [], rules: [] });
+    // A device's Restarts section (ESPHome only): hidden unless a spec mocks it (e2e/home/devices-restarts.spec.ts).
+    const restarts = /^\/api\/homehub\/devices\/([^/]+)\/restarts$/.exec(p);
+    if (restarts) return json({ supported: false, device_id: decodeURIComponent(restarts[1]) });
+    // No light groups yet (e2e/home/light-groups.spec.ts mocks some); the Devices page asks.
+    if (p === '/api/homehub/light_groups' && method === 'GET') return json({ groups: [], lights: [] });
     if (p.startsWith('/api/homehub/hardware/')) {
       return json(detailFor(decodeURIComponent(p.split('/').pop() || ''), initialStates(), voices));
     }

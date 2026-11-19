@@ -47,11 +47,12 @@ from zoneinfo import ZoneInfo
 import aiohttp
 from reolink_aio.api import Host
 from reolink_aio.enums import ConnectionEnum, DayNightEnum, VodRequestType
-from reolink_aio.exceptions import ReolinkError
+from reolink_aio.exceptions import CredentialsInvalidError, ReolinkError
 from reolink_aio.typings import VOD_trigger, parse_file_name
 
 from services.homehub.core import (
     UNAVAILABLE,
+    AuthRequired,
     DeviceUnavailable,
     Driver,
     EntityEntry,
@@ -183,6 +184,10 @@ class ReolinkDriver(Driver):
         try:
             await self.host.get_host_data()
             await self.host.get_states()
+        except CredentialsInvalidError as exc:
+            # Never retried: the hub locks the account after a few wrong passwords.
+            raise AuthRequired(f"Reolink hub at {address} did not accept its username and password",
+                               needs="login") from exc
         except ReolinkError as exc:
             raise DeviceUnavailable(f"Reolink hub at {address}: {exc}") from exc
         self._last_wake = time.monotonic()
@@ -245,6 +250,9 @@ class ReolinkDriver(Driver):
                 self._last_wake = time.monotonic()
             if not host.baichuan.events_active:
                 await host.get_motion_state_all_ch()
+        except CredentialsInvalidError as exc:
+            self.mark_unavailable()
+            raise AuthRequired("Reolink hub no longer accepts its username and password", needs="login") from exc
         except ReolinkError as exc:
             self.mark_unavailable()
             raise DeviceUnavailable(f"Reolink hub: {exc}") from exc

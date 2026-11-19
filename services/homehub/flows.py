@@ -12,7 +12,7 @@ entry is started (``runtime.start_entry``).
 | cast | none | an entity ``media_player`` (unique_id = cast UUID) on the one ``cast`` entry, its host added to ``known_hosts`` |
 | roku | none | entry ``{host}`` (unique_id = serial); media_player and remote ``{serial}``, diagnostics ``{serial}_{key}`` |
 | esphome | ``noise_psk`` when the node is encrypted | entry ``{host, port, password, noise_psk, device_name}``; one entity per node entity, ``{MAC}/{device_id}/{platform}/{name}`` |
-| tasmota | ``password`` when the web UI has one | entry ``{host}``; relays ``{MAC}_switch_relay_{n}``, energy ``{MAC}_sensor_sensor_ENERGY_{Key}`` |
+| tasmota | ``password`` when the web UI has one | one entry per device ``{host, mac, username?, password?}``; relays ``{MAC}_switch_relay_{n}``, a light ``{MAC}_light_light_{n}``, energy ``{MAC}_sensor_sensor_ENERGY_{Key}`` |
 | matter | the setup code | commissioned through the Matter Server; entities in HA's Matter scheme on the existing ``matter`` entry |
 
 The flows that pair with the device (HomeKit, Android TV Remote, Samsung, LG
@@ -91,6 +91,10 @@ SETUP_CODE = {"key": "code", "label": "Setup code", "type": "text",
               "help": "The QR code's text (MT:...) or the 11 or 21 digit pairing code on the device or its box."}
 TASMOTA_PASSWORD = {"key": "password", "label": "Web password", "type": "password", "optional": True,
                     "help": "Only if the device's web UI asks for one."}
+#: Asked for when the device answered that it wants its web password.
+TASMOTA_PASSWORD_REQUIRED = {"key": "password", "label": "Web password", "type": "password",
+                             "help": "The password of the device's own web page (on the device: Configuration, "
+                                     "Other, Web Admin Password)."}
 
 
 def needs_for(finding: dict[str, Any]) -> list[dict[str, Any]]:
@@ -101,6 +105,8 @@ def needs_for(finding: dict[str, Any]) -> list[dict[str, Any]]:
         return [NOISE_PSK]
     if integration == "matter":
         return [SETUP_CODE]
+    if integration == "tasmota":
+        return [TASMOTA_PASSWORD_REQUIRED] if props.get("locked") else [TASMOTA_PASSWORD]
     from services.homehub import manual_flows, pairing  # both import this module
 
     extra = manual_flows.needs_for(finding)
@@ -146,6 +152,28 @@ def _area(hub: Any, area: str | None) -> str | None:
     if found is None:
         raise FlowError(f"There is no area {area!r}", 400)
     return found
+
+
+async def relogin(runtime: Any, entry: ConfigEntry, login: dict[str, Any]) -> dict[str, Any]:
+    """Replace an existing entry's login and reconnect it; nothing else about it changes (HA's reauth).
+
+    The "already set up" answer of a flow whose login changed: an account or device that refuses its old
+    password is signed in again in place, so a changed password never means removing the entry. The new
+    login was checked by the flow before this is called.
+    """
+    old = dict(entry.data)
+    entry.data = {**entry.data, **login}
+    try:
+        runtime.store.save_config_entry(entry)
+    except RuntimeError as exc:
+        entry.data = old
+        raise FlowError(str(exc), 503) from exc
+    await runtime.stop_entry(entry.entry_id)
+    if not entry.disabled_by:
+        runtime.start_entry(entry)
+    log.info("%s %s signed in again", entry.domain, entry.title)
+    return {"status": "adopted", "entry_id": entry.entry_id, "domain": entry.domain, "title": entry.title,
+            "name": entry.title, "entities": [], "message": f"{entry.title} is signed in again."}
 
 
 def _existing_entry(hub: Any, domain: str, unique_id: str | None) -> ConfigEntry | None:
@@ -276,20 +304,23 @@ async def roku_device_info(host: str) -> dict[str, str]:
 
 
 async def tasmota_status(host: str, password: str | None) -> dict[str, Any]:
+    """``Status 0`` from the device; NeedsInput when it wants its web password."""
     import aiohttp
 
-    auth = aiohttp.BasicAuth("admin", password) if password else None
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session, \
-            session.get(f"http://{host}/cm", params={"cmnd": "Status 0"}, auth=auth) as resp:
-        if resp.status == 401:
-            raise NeedsInput([TASMOTA_PASSWORD], "This Tasmota device asks for its web password.",
-                             "The password was not accepted." if password else None)
-        if resp.status != 200:
-            raise FlowError(f"The Tasmota device at {host} answered HTTP {resp.status}", 502)
-        body = await resp.json(content_type=None)
-    if isinstance(body, dict) and body.get("WARNING"):
-        raise NeedsInput([TASMOTA_PASSWORD], "This Tasmota device asks for its web password.",
+    from services.homehub.drivers.tasmota import cm_params, needs_password, safe_error
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session, \
+                session.get(f"http://{host}/cm", params=cm_params("Status 0", password)) as resp:
+            body = None if resp.status == 401 else await resp.json(content_type=None)
+            status = resp.status
+    except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
+        raise FlowError(f"The Tasmota device at {host} did not answer: {safe_error(exc, password)}", 502) from None
+    if needs_password(status, body):
+        raise NeedsInput([TASMOTA_PASSWORD_REQUIRED], "This Tasmota device asks for its web password.",
                          "The password was not accepted." if password else None)
+    if status != 200:
+        raise FlowError(f"The Tasmota device at {host} answered HTTP {status}", 502)
     if not isinstance(body, dict):
         raise FlowError("The Tasmota device sent an unexpected reply", 502)
     return body
@@ -515,8 +546,29 @@ TASMOTA_ENERGY = ("Power", "Voltage", "Current", "Total", "Today", "Yesterday", 
                   "ReactivePower", "Factor", "TotalStartTime")
 
 
+def tasmota_entry_for_mac(hub: Any, mac: str) -> ConfigEntry | None:
+    """The Tasmota entry that already has the device with this MAC (by its unique_id, data or device)."""
+    want = norm_mac(mac)
+    for e in hub.config_entries.values():
+        if e.domain != "tasmota" or e.source == "ignore":
+            continue
+        if norm_mac(e.unique_id) == want or norm_mac((e.data or {}).get("mac")) == want:
+            return e
+    for dev in hub.devices.values():
+        if any(t == "mac" and norm_mac(v) == want for t, v in (dev.connections or [])):
+            for entry_id in dev.config_entries:
+                e = hub.config_entries.get(entry_id)
+                if e is not None and e.domain == "tasmota" and e.source != "ignore":
+                    return e
+    return None
+
+
 async def adopt_tasmota(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
                         user_input: dict[str, Any]) -> dict[str, Any]:
+    """One entry per device: ``{host, mac, username, password}`` (the password only when it has one).
+
+    Relays, a light (HA's ``{MAC}_light_light_{n}``) and energy sensors are read from ``Status 0``.
+    """
     hub, host = runtime.hub, str(finding.get("host") or "")
     password = str(user_input.get("password") or "") or None
     try:
@@ -529,33 +581,52 @@ async def adopt_tasmota(runtime: Any, finding: dict[str, Any], name: str | None,
     if mac is None:
         raise FlowError("The Tasmota device did not report its MAC address", 502)
     mac_up = mac.upper()
-    if _existing_entry(hub, "tasmota", mac_up):
-        raise FlowError("This Tasmota device is already set up", 409)
+    existing = tasmota_entry_for_mac(hub, mac)
+    if existing is not None:
+        raise FlowError(f"This Tasmota device is already set up as {existing.title}. "
+                        "Change its address or password there (Devices, Integrations, Reconfigure).", 409)
     st = status.get("Status") or {}
     friendly = st.get("FriendlyName") or []
     title = st.get("DeviceName") or (friendly[0] if friendly else None) or finding.get("name") or host
-    data: dict[str, Any] = {"host": host}
+    data: dict[str, Any] = {"host": host, "mac": ":".join(mac[i:i + 2] for i in range(0, 12, 2))}
     if password:
         data.update({"username": "admin", "password": password})
-    entry = ConfigEntry(entry_id=_new_entry_id(), domain="tasmota", title=title, data=data, source="zeroconf",
-                        unique_id=mac_up)
+    entry = ConfigEntry(entry_id=_new_entry_id(), domain="tasmota", title=title, data=data,
+                        source="user" if finding.get("source") == "user" else "zeroconf", unique_id=mac_up)
     plan = Plan(hub, entry)
-    from services.homehub.drivers.tasmota import ENERGY_META, device_fields
+    from services.homehub.drivers.tasmota import (
+        ADDITIVE_ENERGY,
+        ENERGY_META,
+        color_modes,
+        device_fields,
+        has_light,
+        light_index,
+    )
 
     plan.set_device(title, name_by_user=name, area_id=area_id, **device_fields(status, host))
     sts = status.get("StatusSTS") or {}
     relays = sorted(int(k[5:] or 1) for k in sts if re.fullmatch(r"POWER\d*", k))
+    light = light_index(sts) if has_light(sts) else None
+    if light is not None:
+        relays = [n for n in relays if n - 1 != light]
+        plan.add_entity("light", f"{mac_up}_light_light_{light}", None,
+                        capabilities={"supported_color_modes": color_modes(sts)})
     for n in relays:
         label = friendly[n - 1] if 0 < n <= len(friendly) and len(relays) > 1 else None
         plan.add_entity("switch", f"{mac_up}_switch_relay_{n - 1}", label)
     energy = (status.get("StatusSNS") or {}).get("ENERGY") or {}
     for key in TASMOTA_ENERGY:
-        if key in energy:
-            meta = ENERGY_META.get(key, {})
-            plan.add_entity("sensor", f"{mac_up}_sensor_sensor_ENERGY_{key}", f"Energy {key}",
-                            original_device_class=meta.get("device_class"),
-                            unit_of_measurement=meta.get("unit_of_measurement"),
-                            capabilities={"state_class": meta["state_class"]} if meta.get("state_class") else None)
+        if key not in energy:
+            continue
+        meta = ENERGY_META.get(key, {})
+        kwargs = {"original_device_class": meta.get("device_class"),
+                  "unit_of_measurement": meta.get("unit_of_measurement"),
+                  "capabilities": {"state_class": meta["state_class"]} if meta.get("state_class") else None}
+        channels = energy[key] if isinstance(energy[key], list) else None
+        if channels is None or key in ADDITIVE_ENERGY:  # a multi-channel voltage has no one value
+            plan.add_entity("sensor", f"{mac_up}_sensor_sensor_ENERGY_{key}", f"Energy {key}", **kwargs)
+        for i in range(len(channels or [])):
+            plan.add_entity("sensor", f"{mac_up}_sensor_sensor_ENERGY_{key}_{i}", f"Energy {key} {i + 1}", **kwargs)
     return await commit(runtime, plan)
 
 

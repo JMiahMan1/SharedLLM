@@ -12,8 +12,8 @@ from services.homehub.drivers.androidtv_remote import AndroidTVRemoteDriver, key
 from services.homehub.drivers.media_common import F
 from services.homehub.tests.conftest import make_hub
 
-MP = "media_player.office_tv"
-REMOTE = "remote.office_tv_remote"
+MP = "media_player.study_tv"
+REMOTE = "remote.study_tv_remote"
 MAC = "02:00:00:00:01:01"
 CERT = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"
 KEY = "-----BEGIN PRIVATE KEY-----\nBBBB\n-----END PRIVATE KEY-----\n"
@@ -64,7 +64,7 @@ class FakeRemote:
 
 
 def build(fail=None, data_extra=None):
-    data = {"host": "192.0.2.88", "mac": MAC.upper(), "name": "Office TV", "cert_pem": CERT, "key_pem": KEY}
+    data = {"host": "192.0.2.88", "mac": MAC.upper(), "name": "Study TV", "cert_pem": CERT, "key_pem": KEY}
     data.update(data_extra or {})
     hub, entry = make_hub("androidtv_remote", data, [{"entity_id": MP, "unique_id": MAC},
                                                      {"entity_id": REMOTE, "unique_id": MAC}])

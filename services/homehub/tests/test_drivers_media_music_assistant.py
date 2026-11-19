@@ -14,7 +14,7 @@ from services.homehub.drivers.music_assistant import MAConnection, MusicAssistan
 from services.homehub.tests.conftest import make_hub
 
 TOKEN = "ma-token"
-OFFICE = "media_player.den_speaker"
+STUDY = "media_player.den_speaker"
 ROKU = "ROKU_2N0000000001"
 
 
@@ -49,9 +49,9 @@ class FakeConn:
         self.server_info = {"base_url": "http://192.0.2.205:8095", "schema_version": 28}
         self.connected = False
         self.sent: list[tuple[str, dict]] = []
-        self.players = [player(OFFICE, "Den Speaker Smart Speaker"),
-                        player(ROKU, "Taylors TV", supported_features=["power", "volume_mute"], powered=False)]
-        self.queues = [queue(OFFICE), queue(ROKU, active=False, state="idle", current_item=None)]
+        self.players = [player(STUDY, "Den Speaker Smart Speaker"),
+                        player(ROKU, "Playroom TV", supported_features=["power", "volume_mute"], powered=False)]
+        self.queues = [queue(STUDY), queue(ROKU, active=False, state="idle", current_item=None)]
         self.replies: dict[str, object] = {}
 
     async def connect(self):
@@ -74,9 +74,9 @@ class FakeConn:
 
 def build(options=None):
     hub, entry = make_hub("music_assistant", {"url": "http://d5369777-music-assistant:8094", "token": TOKEN}, [
-        {"entity_id": "media_player.office_speaker", "unique_id": OFFICE},
-        {"entity_id": "button.office_speaker_favorite_current_song", "unique_id": OFFICE + "_favorite_now_playing"},
-        {"entity_id": "media_player.taylors_tv", "unique_id": ROKU},
+        {"entity_id": "media_player.study_speaker", "unique_id": STUDY},
+        {"entity_id": "button.study_speaker_favorite_current_song", "unique_id": STUDY + "_favorite_now_playing"},
+        {"entity_id": "media_player.playroom_tv", "unique_id": ROKU},
         {"entity_id": "media_player.rv_tv_2", "unique_id": "upa4e88d93e22f"},
     ], options=options)
     drv = MusicAssistantDriver(hub, entry)
@@ -104,7 +104,7 @@ def test_url_precedence(monkeypatch):
 async def test_state_mapping():
     hub, drv, _made = build()
     await drv.async_setup()
-    st = hub.states.get("media_player.office_speaker")
+    st = hub.states.get("media_player.study_speaker")
     assert st.state == "playing"
     a = st.attributes
     assert a["media_title"] == "Song" and a["media_artist"] == "Band" and a["media_album_name"] == "LP"
@@ -112,15 +112,15 @@ async def test_state_mapping():
     assert a["media_duration"] == 200 and a["media_position"] == 42.0
     assert a["entity_picture"].startswith("http://192.0.2.205:8095/imageproxy?path=/art/7.jpg&provider=filesystem")
     assert a["volume_level"] == 0.35 and a["is_volume_muted"] is False
-    assert a["app_id"] == "music_assistant" and a["active_queue"] == OFFICE and a["mass_player_id"] == OFFICE
+    assert a["app_id"] == "music_assistant" and a["active_queue"] == STUDY and a["mass_player_id"] == STUDY
     assert a["shuffle"] is False and a["repeat"] == "off"
     assert a["supported_features"] == 7796671  # the value HA stored for a powered, volume-capable MA player
-    roku = hub.states.get("media_player.taylors_tv")
+    roku = hub.states.get("media_player.playroom_tv")
     assert roku.state == "off"
-    assert roku.attributes["supported_features"] == 7795643  # HA's value for Taylor's TV
+    assert roku.attributes["supported_features"] == 7795643  # HA's value for the playroom TV
     assert roku.attributes["active_queue"] is None
     assert hub.states.get("media_player.rv_tv_2").state == "unavailable"
-    assert hub.states.get("button.office_speaker_favorite_current_song").state == "unknown"
+    assert hub.states.get("button.study_speaker_favorite_current_song").state == "unknown"
     for s in ("play_media", "play_announcement", "get_library", "search", "get_queue", "transfer_queue"):
         assert ("music_assistant", s) in hub.services
 
@@ -141,22 +141,22 @@ async def test_events_update_state():
     hub, drv, made = build()
     await drv.async_setup()
     c = made["c"]
-    c.on_event({"event": "queue_updated", "object_id": OFFICE, "data": queue(OFFICE, state="paused")})
-    assert hub.states.get("media_player.office_speaker").state == "paused"
-    c.on_event({"event": "queue_time_updated", "object_id": OFFICE, "data": 99})
-    assert hub.states.get("media_player.office_speaker").attributes["media_position"] == 99
-    c.on_event({"event": "player_updated", "object_id": OFFICE,
-                "data": player(OFFICE, "Office", available=False)})
-    assert hub.states.get("media_player.office_speaker").state == "unavailable"
+    c.on_event({"event": "queue_updated", "object_id": STUDY, "data": queue(STUDY, state="paused")})
+    assert hub.states.get("media_player.study_speaker").state == "paused"
+    c.on_event({"event": "queue_time_updated", "object_id": STUDY, "data": 99})
+    assert hub.states.get("media_player.study_speaker").attributes["media_position"] == 99
+    c.on_event({"event": "player_updated", "object_id": STUDY,
+                "data": player(STUDY, "Study", available=False)})
+    assert hub.states.get("media_player.study_speaker").state == "unavailable"
     c.on_close()
-    assert hub.states.get("media_player.taylors_tv").state == "unavailable"
+    assert hub.states.get("media_player.playroom_tv").state == "unavailable"
 
 
 async def test_media_player_services():
     hub, drv, made = build()
     await drv.async_setup()
     c = made["c"]
-    ent = hub.entities["media_player.office_speaker"]
+    ent = hub.entities["media_player.study_speaker"]
     c.sent.clear()
     await drv.async_call(ent, "media_player", "media_pause", {})
     await drv.async_call(ent, "media_player", "volume_set", {"volume_level": 0.42})
@@ -166,13 +166,13 @@ async def test_media_player_services():
     await drv.async_call(ent, "media_player", "turn_off", {})
     await drv.async_call(ent, "media_player", "media_seek", {"seek_position": 61.6})
     assert c.sent == [
-        ("players/cmd/pause", {"player_id": OFFICE}),
-        ("players/cmd/volume_set", {"player_id": OFFICE, "volume_level": 42}),
-        ("players/cmd/volume_mute", {"player_id": OFFICE, "muted": True}),
-        ("player_queues/shuffle", {"queue_id": OFFICE, "shuffle_enabled": True}),
-        ("player_queues/repeat", {"queue_id": OFFICE, "repeat_mode": "all"}),
-        ("players/cmd/power", {"player_id": OFFICE, "powered": False}),
-        ("players/cmd/seek", {"player_id": OFFICE, "position": 62}),
+        ("players/cmd/pause", {"player_id": STUDY}),
+        ("players/cmd/volume_set", {"player_id": STUDY, "volume_level": 42}),
+        ("players/cmd/volume_mute", {"player_id": STUDY, "muted": True}),
+        ("player_queues/shuffle", {"queue_id": STUDY, "shuffle_enabled": True}),
+        ("player_queues/repeat", {"queue_id": STUDY, "repeat_mode": "all"}),
+        ("players/cmd/power", {"player_id": STUDY, "powered": False}),
+        ("players/cmd/seek", {"player_id": STUDY, "position": 62}),
     ]
     c.sent.clear()
     await drv.async_call(ent, "media_player", "play_media", {"media_content_id": "library://playlist/3",
@@ -181,13 +181,13 @@ async def test_media_player_services():
                                                              "media_content_type": "music", "announce": True,
                                                              "extra": {"announce_volume": 60}})
     assert c.sent == [
-        ("player_queues/play_media", {"queue_id": OFFICE, "media": ["library://playlist/3"], "option": "add"}),
-        ("players/cmd/play_announcement", {"player_id": OFFICE, "url": "http://j/tts.wav", "volume_level": 60}),
+        ("player_queues/play_media", {"queue_id": STUDY, "media": ["library://playlist/3"], "option": "add"}),
+        ("players/cmd/play_announcement", {"player_id": STUDY, "url": "http://j/tts.wav", "volume_level": 60}),
     ]
-    btn = hub.entities["button.office_speaker_favorite_current_song"]
+    btn = hub.entities["button.study_speaker_favorite_current_song"]
     await drv.async_call(btn, "button", "press", {})
-    assert c.sent[-1] == ("players/add_currently_playing_to_favorites", {"player_id": OFFICE})
-    assert hub.states.get("button.office_speaker_favorite_current_song").state != "unknown"
+    assert c.sent[-1] == ("players/add_currently_playing_to_favorites", {"player_id": STUDY})
+    assert hub.states.get("button.study_speaker_favorite_current_song").state != "unknown"
     with pytest.raises(DeviceUnavailable):
         await drv.async_call(hub.entities["media_player.rv_tv_2"], "media_player", "media_play", {})
 
@@ -199,16 +199,16 @@ async def test_music_assistant_play_media_resolves_names():
     c.replies["music/item_by_name"] = {"uri": "spotify://track/abc", "name": "Song"}
     c.sent.clear()
     await hub.call_service("music_assistant", "play_media", {
-        "entity_id": "media_player.office_speaker", "media_id": "Amazing Grace", "media_type": "track",
+        "entity_id": "media_player.study_speaker", "media_id": "Amazing Grace", "media_type": "track",
         "artist": "Choir", "enqueue": "replace", "radio_mode": True})
     assert c.sent == [
         ("music/item_by_name", {"name": "Amazing Grace", "artist": "Choir", "media_type": "track"}),
-        ("player_queues/play_media", {"queue_id": OFFICE, "media": ["spotify://track/abc"], "option": "replace",
+        ("player_queues/play_media", {"queue_id": STUDY, "media": ["spotify://track/abc"], "option": "replace",
                                       "radio_mode": True}),
     ]
     c.replies["music/item_by_name"] = None
     with pytest.raises(HubError, match="found nothing"):
-        await hub.call_service("music_assistant", "play_media", {"entity_id": "media_player.office_speaker",
+        await hub.call_service("music_assistant", "play_media", {"entity_id": "media_player.study_speaker",
                                                                  "media_id": "nonexistent"})
 
 
@@ -217,8 +217,8 @@ async def test_play_announcement_service_keys():
     await drv.async_setup()
     c = made["c"]
     await hub.call_service("music_assistant", "play_announcement", {
-        "entity_id": "media_player.office_speaker", "url": "http://j/a.wav", "use_pre_announce": False})
-    assert c.sent[-1] == ("players/cmd/play_announcement", {"player_id": OFFICE, "url": "http://j/a.wav",
+        "entity_id": "media_player.study_speaker", "url": "http://j/a.wav", "use_pre_announce": False})
+    assert c.sent[-1] == ("players/cmd/play_announcement", {"player_id": STUDY, "url": "http://j/a.wav",
                                                             "pre_announce": False})
 
 
@@ -250,20 +250,20 @@ async def test_search_get_library_get_queue_transfer():
     assert res["response"]["items"][0]["name"] == "Worship"
     assert res["response"]["media_type"] == "playlist"
 
-    c.replies["player_queues/get_active_queue"] = queue(OFFICE)
-    res = await hub.call_service("music_assistant", "get_queue", {"entity_id": "media_player.office_speaker"},
+    c.replies["player_queues/get_active_queue"] = queue(STUDY)
+    res = await hub.call_service("music_assistant", "get_queue", {"entity_id": "media_player.study_speaker"},
                                  return_response=True)
-    q = res["response"]["media_player.office_speaker"]
-    assert q["queue_id"] == OFFICE and q["items"] == 12
+    q = res["response"]["media_player.study_speaker"]
+    assert q["queue_id"] == STUDY and q["items"] == 12
     assert q["current_item"]["media_item"]["album"]["name"] == "LP"
 
-    await hub.call_service("music_assistant", "transfer_queue", {"entity_id": "media_player.taylors_tv",
+    await hub.call_service("music_assistant", "transfer_queue", {"entity_id": "media_player.playroom_tv",
                                                                  "auto_play": True})
-    assert c.sent[-1] == ("player_queues/transfer", {"source_queue_id": OFFICE, "target_queue_id": ROKU,
+    assert c.sent[-1] == ("player_queues/transfer", {"source_queue_id": STUDY, "target_queue_id": ROKU,
                                                      "auto_play": True})
-    await hub.call_service("music_assistant", "transfer_queue", {"entity_id": "media_player.office_speaker",
-                                                                 "source_player": "media_player.taylors_tv"})
-    assert c.sent[-1] == ("player_queues/transfer", {"source_queue_id": ROKU, "target_queue_id": OFFICE})
+    await hub.call_service("music_assistant", "transfer_queue", {"entity_id": "media_player.study_speaker",
+                                                                 "source_player": "media_player.playroom_tv"})
+    assert c.sent[-1] == ("player_queues/transfer", {"source_queue_id": ROKU, "target_queue_id": STUDY})
 
 
 async def test_setup_fails_cleanly_when_ma_is_down():
@@ -366,34 +366,34 @@ async def test_join_and_unjoin_group_players_through_set_members():
     from services.homehub.core import DeviceEntry, EntityEntry
 
     hub, drv, made = build()
-    hub.devices["dev2"] = DeviceEntry(id="dev2", name="Living Room TV", area_id="office", config_entries=["cast1"])
-    hub.entities["media_player.taylors_tv"].device_id = "dev2"
+    hub.devices["dev2"] = DeviceEntry(id="dev2", name="Living Room TV", area_id="study", config_entries=["cast1"])
+    hub.entities["media_player.playroom_tv"].device_id = "dev2"
     hub.entities["media_player.living_room_cast"] = EntityEntry(
         entity_id="media_player.living_room_cast", unique_id="02000000-0000-0000-0000-000000000001",
         platform="cast", config_entry_id="cast1", device_id="dev2")
     await drv.async_setup()
     c = made["c"]
-    c.players.append(player("media_player.loft_speaker", "Loft Speaker"))  # MA's HA player provider: id = entity id
+    c.players.append(player("media_player.attic_speaker", "Attic Speaker"))  # MA's HA player provider: id = entity id
     await drv.refresh()
     c.sent.clear()
     await hub.call_service("media_player", "join", {
-        "entity_id": "media_player.office_speaker",
+        "entity_id": "media_player.study_speaker",
         # an MA entity, the Cast entity of a device MA also plays on, and an HA-provider player id
-        "group_members": ["media_player.taylors_tv", "media_player.living_room_cast", "media_player.loft_speaker"]})
-    assert c.sent[-1] == ("players/cmd/set_members", {"target_player": OFFICE,
-                                                      "player_ids_to_add": [ROKU, "media_player.loft_speaker"]})
+        "group_members": ["media_player.playroom_tv", "media_player.living_room_cast", "media_player.attic_speaker"]})
+    assert c.sent[-1] == ("players/cmd/set_members", {"target_player": STUDY,
+                                                      "player_ids_to_add": [ROKU, "media_player.attic_speaker"]})
     with pytest.raises(HubError, match="not a Music Assistant player"):
-        await hub.call_service("media_player", "join", {"entity_id": "media_player.office_speaker",
+        await hub.call_service("media_player", "join", {"entity_id": "media_player.study_speaker",
                                                         "group_members": ["media_player.nowhere"]})
     with pytest.raises(HubError, match="other than the leader"):
-        await hub.call_service("media_player", "join", {"entity_id": "media_player.office_speaker",
-                                                        "group_members": "media_player.office_speaker"})
+        await hub.call_service("media_player", "join", {"entity_id": "media_player.study_speaker",
+                                                        "group_members": "media_player.study_speaker"})
     # a member leaves its leader's group; a leader dissolves its own
-    drv.players[ROKU]["synced_to"] = OFFICE
-    await hub.call_service("media_player", "unjoin", {"entity_id": "media_player.taylors_tv"})
-    assert c.sent[-1] == ("players/cmd/set_members", {"target_player": OFFICE, "player_ids_to_remove": [ROKU]})
-    await hub.call_service("media_player", "unjoin", {"entity_id": "media_player.office_speaker"})
-    assert c.sent[-1] == ("players/cmd/ungroup", {"player_id": OFFICE})
+    drv.players[ROKU]["synced_to"] = STUDY
+    await hub.call_service("media_player", "unjoin", {"entity_id": "media_player.playroom_tv"})
+    assert c.sent[-1] == ("players/cmd/set_members", {"target_player": STUDY, "player_ids_to_remove": [ROKU]})
+    await hub.call_service("media_player", "unjoin", {"entity_id": "media_player.study_speaker"})
+    assert c.sent[-1] == ("players/cmd/ungroup", {"player_id": STUDY})
 
 
 async def test_gone_entities_are_only_players_music_assistant_no_longer_lists():
@@ -406,12 +406,12 @@ async def test_gone_entities_are_only_players_music_assistant_no_longer_lists():
     # A player MA lists but cannot reach is unavailable, not gone; so is its favourite button.
     made["c"].players[1]["available"] = False
     await drv.refresh()
-    assert hub.states.get("media_player.taylors_tv").state == "unavailable"
+    assert hub.states.get("media_player.playroom_tv").state == "unavailable"
     assert set(drv.gone_entities()) == {"media_player.rv_tv_2"}
     # When MA drops a player, its button goes with it; with MA unreachable nothing is called gone.
     made["c"].players = made["c"].players[1:]
     await drv.refresh()
-    assert set(drv.gone_entities()) == {"media_player.rv_tv_2", "media_player.office_speaker",
-                                        "button.office_speaker_favorite_current_song"}
+    assert set(drv.gone_entities()) == {"media_player.rv_tv_2", "media_player.study_speaker",
+                                        "button.study_speaker_favorite_current_song"}
     made["c"].connected = False
     assert drv.gone_entities() == {}

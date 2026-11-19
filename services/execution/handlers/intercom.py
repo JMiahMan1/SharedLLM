@@ -56,10 +56,11 @@ def _find_assist_satellite_for_room_or_entities(
 
     With the hub's capability index the room is the hub area its name or alias
     names (``UnknownAreaError`` when there is none) and the satellite is one on
-    the same device or in the same area as a target; a plain HA (no index)
-    matches room words in entity ids.
+    the same device or in the same area as a target; a plain HA (no index, logged
+    by ``routing_index``) matches the room as said against what is left of each
+    satellite's entity id after device-kind words.
     """
-    from services.execution.announce_handlers import _room_slug_from_entity, resolve_tv_companions
+    from services.execution.announce_handlers import _name_room_guess, resolve_tv_companions
 
     if idx is not None:
         for eid in target_entities:
@@ -86,8 +87,7 @@ def _find_assist_satellite_for_room_or_entities(
             eid = str(st.get("entity_id") or "")
             if not eid.startswith("assist_satellite."):
                 continue
-            attrs = st.get("attributes") or {}
-            slug = _room_slug_from_entity(eid, str(attrs.get("friendly_name") or ""))
+            slug = _name_room_guess(eid)
             if room_norm in eid.lower() or slug == room_norm:
                 return eid
     return None

@@ -118,7 +118,7 @@ body {
   }
 
   body {
-    @apply min-h-screen overflow-x-hidden;
+    @apply min-h-dvh overflow-x-hidden;
     background-color: var(--color-bg-base);
     background-image:
       var(--site-pattern, none),
@@ -126,6 +126,12 @@ body {
       radial-gradient(ellipse 60% 40% at 80% 100%, var(--site-bg-glow-b) 0%, transparent 60%);
     background-attachment: fixed;
     color: var(--site-text);
+  }
+
+  /* Clear keyboard focus ring without cluttering mouse/touch taps. */
+  :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--site-accent-focus);
+    outline-offset: 2px;
   }
 
   /* A <select> is as wide as its longest option, and those are often people's
@@ -137,6 +143,15 @@ body {
   /* Smooth scrolling for all scroll containers */
   * {
     scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -176,10 +191,12 @@ body {
     transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   }
 
-  .glass-card:hover {
-    background: var(--site-card-bg-hover);
-    border-color: var(--color-border-mid);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 1px 0 var(--color-border-soft) inset;
+  @media (hover: hover) {
+    .glass-card:hover {
+      background: var(--site-card-bg-hover);
+      border-color: var(--color-border-mid);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 1px 0 var(--color-border-soft) inset;
+    }
   }
 
   /* Inputs */
@@ -230,10 +247,12 @@ body {
     }
   }
 
-  .glass-button:hover {
-    background: var(--site-accent-hover);
-    border-color: var(--site-accent-focus);
-    box-shadow: 0 0 16px var(--site-glow);
+  @media (hover: hover) {
+    .glass-button:hover {
+      background: var(--site-accent-hover);
+      border-color: var(--site-accent-focus);
+      box-shadow: 0 0 16px var(--site-glow);
+    }
   }
 
   .glass-button:active {

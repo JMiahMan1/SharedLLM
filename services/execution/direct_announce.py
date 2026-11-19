@@ -47,18 +47,36 @@ def find_cast(devices: list[dict[str, Any]], entity_id: str) -> dict[str, Any] |
     return None
 
 
-def _cast_play_sync(dev: dict[str, Any], url: str, volume: float | None) -> tuple[bool, str]:
+def _connect_cast(dev: dict[str, Any]) -> Any:
     import pychromecast  # pyright: ignore[reportMissingImports]
 
+    cc = pychromecast.get_chromecast_from_host(
+        (dev["host"], int(dev.get("port") or 8009), None, None, None), timeout=CAST_PLAY_TIMEOUT_S
+    )
+    cc.wait(timeout=CAST_PLAY_TIMEOUT_S)
+    return cc
+
+
+def _cast_play_sync(dev: dict[str, Any], url: str, volume: float | None, restore_after_s: float = 0.0,
+                    connect: Any = _connect_cast, sleep: Any = time.sleep) -> tuple[bool, str]:
+    """Play ``url`` on a Cast device; when the volume was changed for it, put it back after the clip.
+
+    The volume used to be left at the announcement level for good. The clip's own length bounds the
+    wait (``restore_after_s``); the device going idle again ends it sooner.
+    """
     cc = None
+    previous: float | None = None
+    started = False
     try:
-        cc = pychromecast.get_chromecast_from_host(
-            (dev["host"], int(dev.get("port") or 8009), None, None, None), timeout=CAST_PLAY_TIMEOUT_S
-        )
-        cc.wait(timeout=CAST_PLAY_TIMEOUT_S)
+        cc = connect(dev)
         if volume is not None:
             with contextlib.suppress(Exception):
-                cc.set_volume(max(0.0, min(1.0, float(volume))))
+                level = getattr(cc.status, "volume_level", None)
+                previous = float(level) if isinstance(level, (int, float)) else None
+                target = max(0.0, min(1.0, float(volume)))
+                if previous is not None and abs(previous - target) < 0.01:
+                    previous = None
+                cc.set_volume(target)
         mc = cc.media_controller
         mc.play_media(url, "audio/wav")
         mc.block_until_active(timeout=CAST_PLAY_TIMEOUT_S)
@@ -66,15 +84,32 @@ def _cast_play_sync(dev: dict[str, Any], url: str, volume: float | None) -> tupl
         while time.time() < deadline:
             state = getattr(mc.status, "player_state", "") or ""
             if state in ("PLAYING", "BUFFERING"):
+                started = True
                 return True, f"Playing on {cc.name or dev.get('name') or 'the speaker'}"
-            time.sleep(0.3)
+            sleep(0.3)
         return False, "the Cast device did not start playing"
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
     finally:
         if cc is not None:
+            if previous is not None:
+                with contextlib.suppress(Exception):
+                    if started:
+                        _wait_until_done(cc.media_controller, url, restore_after_s, sleep)
+                    cc.set_volume(previous)
             with contextlib.suppress(Exception):
                 cc.disconnect(timeout=2)
+
+
+def _wait_until_done(mc: Any, url: str, limit_s: float, sleep: Any) -> None:
+    """Until the clip ends (idle, or something else loaded), at most ``limit_s`` seconds."""
+    waited = 0.0
+    while waited < limit_s:
+        status = mc.status
+        if getattr(status, "player_state", "") == "IDLE" or (getattr(status, "content_id", url) or url) != url:
+            return
+        sleep(0.5)
+        waited += 0.5
 
 
 async def announce_direct(entity_id: str, media_url: str, volume: float | None, ctx: Any) -> dict[str, Any]:
@@ -100,7 +135,10 @@ async def announce_direct(entity_id: str, media_url: str, volume: float | None, 
 
     dev = find_cast(await tv_stage.discover_cast_devices(), entity_id)
     if dev:
-        ok, detail = await asyncio.to_thread(_cast_play_sync, dev, media_url, volume)
+        from services.execution import announce_clips
+
+        delay = announce_clips.restore_delay(media_url)
+        ok, detail = await asyncio.to_thread(_cast_play_sync, dev, media_url, volume, delay)
         if ok:
             log.info(f"[announce/direct] {entity_id} -> Cast {dev.get('name')} at {dev.get('host')}")
             return {"ok": True, "route": "cast_direct", "target": dev.get("name") or entity_id}

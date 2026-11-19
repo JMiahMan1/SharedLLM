@@ -16,6 +16,7 @@ up from the Devices page without HA:
 | srp_energy | account, login, time-of-use | entry ``{id, is_tou, name, username, password}``; sensor ``{entry_id}_total_usage`` |
 | roborock | email, then the emailed code | entry ``{username, user_data, base_url}``; one vacuum ``{duid}`` per vacuum, read once it connects |
 | common_sense_media | nothing | entry ``{}`` (one per hub); while it exists telemetry looks apps up on Common Sense Media |
+| jarvis_identity | nothing | entry ``{}`` (one per hub); Jarvis's accounts become the hub's users, persons and logins |
 | sun | nothing | ``sun.sun`` and HA's sun sensors ``{entry_id}-{key}`` (one per hub) |
 | open_meteo | a zone | weather ``{zone}`` for that zone |
 | nws | contact email, location, station | weather ``{lat}_{lon}`` and the observation sensors ``{lat}_{lon}_{key}`` |
@@ -46,6 +47,7 @@ from services.homehub.flows import (
     _existing_entry,
     _new_entry_id,
     commit,
+    relogin,
     slugify,
 )
 
@@ -113,6 +115,9 @@ SPECS: dict[str, dict[str, Any]] = {
     "roborock": {"label": "Roborock account", "kind": "cloud", "fields": [EMAIL]},
     "common_sense_media": {"label": "Common Sense Media (app age ratings)", "kind": "cloud", "single": True,
                            "fields": []},
+    # The address and the secret are the stack's (IDENTITY_SVC_URL, INTERNAL_SECRET), never typed in.
+    "jarvis_identity": {"label": "Jarvis accounts (users and logins)", "kind": "service", "single": True,
+                        "fields": []},
     "ibeacon": {"label": "iBeacon tracker (room presence)", "kind": "local", "fields": [
         {"key": "name", "label": "Name", "type": "text", "help": "Whose tag, e.g. Keys or a person's name."},
         {"key": "uuid", "label": "Beacon UUID", "type": "text"},
@@ -151,7 +156,8 @@ SPECS: dict[str, dict[str, Any]] = {
 }
 #: Domains whose devices need no address (the finding is a placeholder).
 NO_ADDRESS = {"matter", "ibeacon", "emporia_vue", "srp_energy", "roborock", "sun", "open_meteo", "nws", "local_todo",
-              "shopping_list", "switch_as_x", "music_assistant", "go2rtc", "mjpeg", "common_sense_media"}
+              "shopping_list", "switch_as_x", "music_assistant", "go2rtc", "mjpeg", "common_sense_media",
+              "jarvis_identity"}
 #: Discovery labels its findings with these when it has one.
 KINDS = {"local": "On the network", "service": "Servers and services", "cloud": "Cloud accounts", "helper": "Helpers"}
 
@@ -440,14 +446,16 @@ async def adopt_emporia(runtime: Any, finding: dict[str, Any], name: str | None,
 
     hub = runtime.hub
     v = _required(user_input, [EMAIL, PASSWORD], "Sign in to Emporia.")
-    if _existing_entry(hub, "emporia_vue", v["email"].lower()):
-        raise FlowError("This Emporia account is already set up", 409)
+    existing = _existing_entry(hub, "emporia_vue", v["email"].lower())
     try:
         devices = await emporia_login(v["email"], v["password"])
     except (NeedsInput, FlowError):
         raise
     except Exception as exc:
         raise FlowError(f"Emporia's cloud did not answer: {exc or type(exc).__name__}", 502) from exc
+    if existing is not None:
+        # Already set up: the password changed. Sign the entry in again; its devices and history stay.
+        return await relogin(runtime, existing, {"email": v["email"], "password": v["password"]})
     if not devices:
         raise FlowError("This Emporia account has no devices", 400)
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="emporia_vue", title=name or v["email"],
@@ -475,14 +483,16 @@ async def adopt_srp(runtime: Any, finding: dict[str, Any], name: str | None, are
     v = _required(user_input, fields, "Sign in to SRP.")
     if not re.fullmatch(r"\d{9}", v["id"]):
         raise NeedsInput(fields, "Sign in to SRP.", "The billing account is the 9-digit number on the bill.")
-    if _existing_entry(hub, "srp_energy", v["id"]):
-        raise FlowError("This SRP account is already set up", 409)
+    existing = _existing_entry(hub, "srp_energy", v["id"])
     try:
         ok = await srp_login(v["id"], v["username"], v["password"])
     except Exception as exc:
         raise FlowError(f"SRP did not answer: {exc or type(exc).__name__}", 502) from exc
     if not ok:
         raise NeedsInput(fields, "Sign in to SRP.", "SRP did not accept that login for this account.")
+    if existing is not None:
+        # Already set up: the login changed. Sign the entry in again; its statistics stay.
+        return await relogin(runtime, existing, {"username": v["username"], "password": v["password"]})
     title = name or f"SRP account {v['id'][-4:]}"
     entry_id = _new_entry_id()
     entry = ConfigEntry(entry_id=entry_id, domain="srp_energy", title=title, source="user", unique_id=v["id"],
@@ -494,23 +504,6 @@ async def adopt_srp(runtime: Any, finding: dict[str, Any], name: str | None, are
     plan.add_entity("sensor", f"{entry_id}_total_usage", "Energy usage", original_device_class="energy",
                     unit_of_measurement="kWh", capabilities={"state_class": "total_increasing"})
     return await commit(runtime, plan)
-
-
-async def _relogin(runtime: Any, entry: ConfigEntry, login: dict[str, Any]) -> dict[str, Any]:
-    """Replace an existing cloud entry's login and reconnect it; nothing else about it changes."""
-    old = dict(entry.data)
-    entry.data = {**entry.data, **login}
-    try:
-        runtime.store.save_config_entry(entry)
-    except RuntimeError as exc:
-        entry.data = old
-        raise FlowError(str(exc), 503) from exc
-    await runtime.stop_entry(entry.entry_id)
-    if not entry.disabled_by:
-        runtime.start_entry(entry)
-    log.info("%s %s signed in again", entry.domain, entry.title)
-    return {"status": "adopted", "entry_id": entry.entry_id, "domain": entry.domain, "title": entry.title,
-            "name": entry.title, "entities": [], "message": f"{entry.title} is signed in again."}
 
 
 async def adopt_roborock(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
@@ -543,7 +536,7 @@ async def adopt_roborock(runtime: Any, finding: dict[str, Any], name: str | None
                              "That code was not accepted.") from exc
         raise FlowError(f"Roborock did not answer: {exc or name_}", 502) from exc
     if existing is not None:
-        return await _relogin(runtime, existing, {"username": email, "user_data": user_data, "base_url": base_url})
+        return await relogin(runtime, existing, {"username": email, "user_data": user_data, "base_url": base_url})
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="roborock", title=name or email, source="user",
                         unique_id=email.lower(), data={"username": email, "user_data": user_data, "base_url": base_url})
     result = await commit(runtime, Plan(hub, entry))
@@ -569,8 +562,46 @@ async def adopt_common_sense(runtime: Any, finding: dict[str, Any], name: str | 
     return await commit(runtime, common_sense_plan(hub, name))
 
 
+async def adopt_jarvis_identity(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
+                                user_input: dict[str, Any]) -> dict[str, Any]:
+    """Jarvis's accounts as the hub's users: only where the stack gives the hub identity's address and secret."""
+    hub = runtime.hub
+    _single(hub, "jarvis_identity", "Jarvis accounts")
+    providers = getattr(runtime, "auth_providers", None)
+    if providers is None or providers.provider("jarvis_identity") is None:
+        raise FlowError("The hub has no address for Jarvis's identity service: set IDENTITY_SVC_URL and "
+                        "INTERNAL_SECRET for homehub and restart it", 409)
+    entry_id = _new_entry_id()
+    title = name or "Jarvis"
+    entry = ConfigEntry(entry_id=entry_id, domain="jarvis_identity", title=title, data={}, source="user",
+                        unique_id="jarvis_identity")
+    plan = Plan(hub, entry)
+    plan.set_device(title, name_by_user=None, area_id=None, manufacturer="Jarvis", model="Accounts",
+                    entry_type="service", identifiers=[["jarvis_identity", entry_id]])
+    return await commit(runtime, plan)
+
+
+async def check_tasmota(data: dict[str, Any]) -> None:
+    """A new Tasmota address or web password: refused only when the device answers that the password is wrong.
+
+    A device that does not answer is saved anyway: it may be switched off, or at an address the hub follows
+    by its MAC once it is back.
+    """
+    from services.homehub import flows
+
+    host = str(data.get("host") or "").strip()
+    if not host:
+        return
+    try:
+        await flows.tasmota_status(host, str(data.get("password") or "") or None)
+    except NeedsInput:
+        raise
+    except Exception as exc:
+        log.info("Tasmota at %s could not be checked (%s); saved as entered", host, type(exc).__name__)
+
+
 #: Settings checked before a reconfigure saves them: ``{domain: (keys that trigger it, async check(new data))}``.
-RECONFIGURE_CHECKS: dict[str, tuple[tuple[str, ...], Any]] = {}
+RECONFIGURE_CHECKS: dict[str, tuple[tuple[str, ...], Any]] = {"tasmota": (("host", "password"), check_tasmota)}
 
 
 SUN_SENSORS = (("next_dawn", "Next dawn", "timestamp"), ("next_dusk", "Next dusk", "timestamp"),
@@ -720,7 +751,14 @@ async def adopt_switch_as_x(runtime: Any, finding: dict[str, Any], name: str | N
     ent = plan.add_entity(v["target_domain"], entry_id, None, device=dev)
     if dev is None:
         ent.original_name, ent.has_entity_name, ent.area_id = title, False, area_id
-    return await commit(runtime, plan)
+    result = await commit(runtime, plan)
+    # HA's switch_as_x hides the switch it wraps, so the device shows once (as the light, the cover...);
+    # removing the wrapper shows it again (entries.remove_entry). A switch someone hid stays theirs.
+    if not wrapped.hidden_by:
+        wrapped.hidden_by = "integration"
+        runtime.store.save_entity(wrapped)
+        hub.bus.fire("entity_registry_updated", {"action": "update", "entity_id": wrapped.entity_id})
+    return result
 
 
 FLOWS = {
@@ -734,6 +772,7 @@ FLOWS = {
     "srp_energy": adopt_srp,
     "roborock": adopt_roborock,
     "common_sense_media": adopt_common_sense,
+    "jarvis_identity": adopt_jarvis_identity,
     "sun": adopt_sun,
     "open_meteo": adopt_open_meteo,
     "nws": adopt_nws,

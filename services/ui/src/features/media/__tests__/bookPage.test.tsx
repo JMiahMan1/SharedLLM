@@ -128,12 +128,12 @@ describe('Audiobookshelf progress write-back (journey 8)', () => {
   it('saves a remote speaker\'s position, and stops once it plays something else', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { actions } = useMediaStore.getState();
-    actions.ingest({ type: 'player', output_id: 'ma:office', state: 'playing', item: { uri: 'library://audiobook/7', title: 'B', duration: 1000 }, position: 50 });
-    actions.setAbsSession({ itemId: 'book-1', title: 'B', outputId: 'ma:office', durationSec: null, startedAt: 1 });
+    actions.ingest({ type: 'player', output_id: 'ma:study', state: 'playing', item: { uri: 'library://audiobook/7', title: 'B', duration: 1000 }, position: 50 });
+    actions.setAbsSession({ itemId: 'book-1', title: 'B', outputId: 'ma:study', durationSec: null, startedAt: 1 });
     render(<Reporter p={null as unknown as SharedPlayer} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(PROGRESS_INTERVAL_MS); });
     await waitFor(() => expect(progress[0]).toMatchObject({ item_id: 'book-1', duration: 1000 }));
-    act(() => actions.ingest({ type: 'player', output_id: 'ma:office', item: { uri: 'library://track/1', title: 'Song' } }));
+    act(() => actions.ingest({ type: 'player', output_id: 'ma:study', item: { uri: 'library://track/1', title: 'Song' } }));
     await act(async () => { await vi.advanceTimersByTimeAsync(PROGRESS_INTERVAL_MS); });
     expect(useMediaStore.getState().absSession).toBeNull();
   });

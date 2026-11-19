@@ -5,6 +5,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { mediaHandlers } from './msw/handlers/media';
 import { resetMediaStore } from '../features/media/store/mediaStore';
+import { resetBlobUrlCache } from '../lib/blobUrlCache';
 
 const defaultUser = {
   id: 1,
@@ -42,7 +43,7 @@ const resetMockState = () => {
     { username: 'sam', source: 'Home Assistant', display_name: 'Sam' },
   ];
   devices = [
-    { id: 1, device_id: 'media_player.office_speaker', user_id: 1, username: 'default' },
+    { id: 1, device_id: 'media_player.study_speaker', user_id: 1, username: 'default' },
     { id: 2, device_id: 'media_player.living_room_tv', user_id: 1, username: 'default' },
   ];
   settings = [
@@ -1070,7 +1071,7 @@ export const server = setupServer(
     result: [
       { entity_id: 'light.living_room', friendly_name: 'Living Room Light', state: 'off', domain: 'light', area_id: 'living_room' },
       { entity_id: 'switch.coffee_maker', friendly_name: 'Coffee Maker', state: 'on', domain: 'switch', area_id: 'kitchen' },
-      { entity_id: 'media_player.office_speaker', friendly_name: 'Office Speaker', state: 'playing', domain: 'media_player', area_id: 'office' }
+      { entity_id: 'media_player.study_speaker', friendly_name: 'Study Speaker', state: 'playing', domain: 'media_player', area_id: 'study' }
     ]
   })),
   http.post('/execute/ha_service', () => HttpResponse.json({
@@ -1199,6 +1200,10 @@ afterEach(() => {
   server.resetHandlers();
   // The media store is a module singleton; each test starts from a fresh one.
   resetMediaStore();
+  // Attachment object URLs are cached for the life of the page. Kept across
+  // tests, a picture one test loaded showed in the next without the request
+  // that test waits for, so the result depended on the order tests ran in.
+  resetBlobUrlCache();
   telemetrySchedules = [];
   notesWriteCalls.length = 0;
   notesCheckOffCalls.length = 0;

@@ -104,11 +104,11 @@ public class MediaStatusTest {
         JSONObject radio = new JSONObject()
             .put("detail", new JSONObject()
                 .put("active", new JSONObject()
-                    .put("entity_id", "media_player.office")
-                    .put("friendly_name", "Office Speaker")
+                    .put("entity_id", "media_player.study")
+                    .put("friendly_name", "Study Speaker")
                     .put("state", "playing")));
         MediaStatus.Lines lines = MediaStatus.fromJson(radio);
-        assertEquals("Office Speaker", lines.title);
+        assertEquals("Study Speaker", lines.title);
         // No artist, so the second line carries the state.
         assertEquals("playing", lines.subtitle);
     }
@@ -118,8 +118,8 @@ public class MediaStatusTest {
         JSONObject radio = new JSONObject()
             .put("detail", new JSONObject()
                 .put("active", new JSONObject()
-                    .put("entity_id", "media_player.office_tv")
-                    .put("friendly_name", "Office TV")
+                    .put("entity_id", "media_player.study_tv")
+                    .put("friendly_name", "Study TV")
                     .put("state", "playing")
                     .put("source", "Live TV")));
         assertEquals("Live TV", MediaStatus.fromJson(radio).title);

@@ -1,27 +1,16 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Building2, DoorOpen, Pencil, Plus, Trash2 } from 'lucide-react';
 import { failureText } from '../../lib/discoveredDevices';
 import {
-  areasByFloor, createArea, createFloor, deleteArea, deleteFloor, getAreas, getFloors, updateArea, updateFloor,
-  type Area, type Floor,
+  areasByFloor, createFloor, deleteFloor, getAreas, getFloors, updateFloor, type Area, type Floor,
 } from '../../lib/homeSetup';
+import { AREAS_KEY, FLOORS_KEY, useRoomActions, useRoomsRefresh } from '../../hooks/useRoomActions';
 import { confirmDialog } from '../ui/confirmDialog';
+import { AddRoomForm, RenameRoomForm } from './RoomForms';
 import SetupSection from './SetupSection';
 import { BTN, DANGER, INPUT } from './setupStyles';
-
-const AREAS = ['homehub-areas'];
-const FLOORS = ['homehub-floors'];
-
-function useRefresh() {
-  const queryClient = useQueryClient();
-  return () => {
-    void queryClient.invalidateQueries({ queryKey: AREAS });
-    void queryClient.invalidateQueries({ queryKey: FLOORS });
-    void queryClient.invalidateQueries({ queryKey: ['homehub-hardware'] });
-  };
-}
 
 function levelOf(text: string): number | null {
   const n = Number.parseInt(text, 10);
@@ -29,7 +18,7 @@ function levelOf(text: string): number | null {
 }
 
 function FloorRow({ floor }: { floor: Floor }) {
-  const refresh = useRefresh();
+  const refresh = useRoomsRefresh();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(floor.name);
   const [level, setLevel] = useState(floor.level == null ? '' : String(floor.level));
@@ -79,34 +68,18 @@ function FloorRow({ floor }: { floor: Floor }) {
 }
 
 function AreaRow({ area, floors }: { area: Area; floors: Floor[] }) {
-  const refresh = useRefresh();
+  const { update, remove, confirmRemove } = useRoomActions();
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(area.name);
-  const save = useMutation({
-    mutationFn: (body: Parameters<typeof updateArea>[1]) => updateArea(area.area_id, body),
-    onSuccess: () => { setEditing(false); refresh(); },
-    onError: (err) => toast.error(failureText(err)),
-  });
-  const remove = useMutation({
-    mutationFn: () => deleteArea(area.area_id),
-    onSuccess: () => { toast.success(`${area.name} was removed.`); refresh(); },
-    onError: (err) => toast.error(failureText(err)),
-  });
   return (
     <li className="space-y-2 px-4 py-3" data-testid="area">
       {editing ? (
-        <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (name.trim()) save.mutate({ name: name.trim() }); }}>
-          <input className={`${INPUT} flex-1 basis-40`} value={name} autoFocus aria-label={`New name for ${area.name}`}
-            onChange={(e) => setName(e.target.value)} />
-          <button type="submit" className={BTN} disabled={save.isPending || !name.trim()}>Save</button>
-          <button type="button" className={BTN} onClick={() => setEditing(false)}>Cancel</button>
-        </form>
+        <RenameRoomForm room={area} onDone={() => setEditing(false)} />
       ) : (
         <p className="truncate text-sm font-semibold text-white">{area.name}</p>
       )}
       <div className="flex flex-wrap items-center gap-2">
         <select className={`${INPUT} flex-1 basis-40 sm:max-w-xs`} value={area.floor_id || ''} aria-label={`Floor of ${area.name}`}
-          disabled={save.isPending} onChange={(e) => save.mutate({ floor_id: e.target.value || null })}>
+          disabled={update.isPending} onChange={(e) => update.mutate({ id: area.area_id, body: { floor_id: e.target.value || null } })}>
           <option value="">No floor</option>
           {floors.map((f) => <option key={f.floor_id} value={f.floor_id}>{f.name}</option>)}
         </select>
@@ -116,11 +89,7 @@ function AreaRow({ area, floors }: { area: Area; floors: Floor[] }) {
           </button>
         )}
         <button type="button" className={DANGER} disabled={remove.isPending} aria-label={`Remove ${area.name}`}
-          onClick={async () => {
-            if (await confirmDialog({ title: `Remove ${area.name}?`,
-              body: 'Its devices keep working, with no room. Automations that name the room stop finding it.',
-              confirmLabel: 'Remove', danger: true })) remove.mutate();
-          }}>
+          onClick={() => void confirmRemove(area)}>
           <Trash2 size={13} />
         </button>
       </div>
@@ -130,18 +99,11 @@ function AreaRow({ area, floors }: { area: Area; floors: Floor[] }) {
 
 /** Rooms and floors: add, rename, remove, and put each room on a floor. */
 export default function AreasPanel() {
-  const refresh = useRefresh();
-  const areas = useQuery({ queryKey: AREAS, queryFn: getAreas, retry: false });
-  const floors = useQuery({ queryKey: FLOORS, queryFn: getFloors, retry: false });
-  const [newArea, setNewArea] = useState('');
-  const [newAreaFloor, setNewAreaFloor] = useState('');
+  const refresh = useRoomsRefresh();
+  const areas = useQuery({ queryKey: AREAS_KEY, queryFn: getAreas, retry: false });
+  const floors = useQuery({ queryKey: FLOORS_KEY, queryFn: getFloors, retry: false });
   const [newFloor, setNewFloor] = useState('');
   const [newLevel, setNewLevel] = useState('');
-  const addArea = useMutation({
-    mutationFn: () => createArea({ name: newArea.trim(), floor_id: newAreaFloor || null }),
-    onSuccess: (a) => { toast.success(`${a.name} was added.`); setNewArea(''); refresh(); },
-    onError: (err) => toast.error(failureText(err)),
-  });
   const addFloor = useMutation({
     mutationFn: () => createFloor({ name: newFloor.trim(), level: levelOf(newLevel) }),
     onSuccess: (f) => { toast.success(`${f.name} was added.`); setNewFloor(''); setNewLevel(''); refresh(); },
@@ -178,17 +140,7 @@ export default function AreasPanel() {
         </div>
       ))}
 
-      <form className="flex flex-wrap items-end gap-2 border-t border-white/5 px-4 py-3"
-        onSubmit={(e) => { e.preventDefault(); if (newArea.trim()) addArea.mutate(); }}>
-        <input className={`${INPUT} flex-1 basis-40`} value={newArea} placeholder="New room" aria-label="New room name"
-          onChange={(e) => setNewArea(e.target.value)} />
-        <select className={`${INPUT} flex-1 basis-32 sm:max-w-xs`} value={newAreaFloor} aria-label="Floor of the new room"
-          onChange={(e) => setNewAreaFloor(e.target.value)}>
-          <option value="">No floor</option>
-          {floorList.map((f) => <option key={f.floor_id} value={f.floor_id}>{f.name}</option>)}
-        </select>
-        <button type="submit" className={BTN} disabled={addArea.isPending || !newArea.trim()}><Plus size={14} /> Add room</button>
-      </form>
+      <AddRoomForm floors={floorList} className="border-t border-white/5 px-4 py-3" />
     </SetupSection>
   );
 }

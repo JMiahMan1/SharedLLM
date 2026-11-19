@@ -31,8 +31,13 @@ export interface Label {
   description: string | null;
 }
 
-export type ZoneSource = 'home' | 'hub' | 'geo';
+/** "home" is Home (the hub's own location); every other place is a "hub" zone. */
+export type ZoneSource = 'home' | 'hub';
 
+/**
+ * A place on HomeHub, the only store of the family's places: Home, a zone drawn for the household, or a place
+ * someone saved in Wander (it has an owner, and is shared with the family or private to them).
+ */
 export interface Zone {
   id: string;
   entity_id: string | null;
@@ -44,6 +49,13 @@ export interface Zone {
   icon: string | null;
   source: ZoneSource;
   editable: boolean;
+  /** False only for Home: it moves, but there is always one. */
+  removable?: boolean;
+  /** The Jarvis username of whoever saved it in Wander; null for Home and household zones. */
+  owner_name?: string | null;
+  visibility?: 'family' | 'private';
+  important?: boolean;
+  notify?: string[];
 }
 
 export interface Person {
@@ -54,6 +66,11 @@ export interface Person {
   jarvis_user: string | null;
   device_trackers: string[];
   state: string | null;
+  /** ``hub`` for the hub's own person; otherwise the login provider that keeps it (``jarvis_identity``). */
+  source?: string;
+  /** False for a person a login provider keeps: it is changed where its user is (Jarvis). */
+  editable?: boolean;
+  avatar?: string | null;
 }
 
 export interface Tracker {
@@ -63,6 +80,8 @@ export interface Tracker {
 }
 
 export type ZoneBody = { name: string; latitude: number; longitude: number; radius: number; passive: boolean };
+/** What moving Home takes: no passive (Home is always where people are). */
+export type HomeBody = Omit<ZoneBody, 'passive'>;
 export type PersonBody = { name: string; jarvis_user: string | null; device_trackers: string[] };
 
 /** The query key every view of the labels shares, so a change shows everywhere at once. */
@@ -121,8 +140,9 @@ export async function updateZone(id: string, body: Partial<ZoneBody>): Promise<Z
 export async function deleteZone(id: string): Promise<{ entity_id: string | null }> {
   return (await apiClient.delete(item('zones', id))).data;
 }
-export async function syncZones(): Promise<{ places: number; added: number; removed: number }> {
-  return (await apiClient.post('/api/homehub/zones/sync', {})).data;
+/** Move, resize or rename Home (admins). It is the hub's location: zone.home, the forecast and arrivals follow. */
+export async function updateHome(body: Partial<HomeBody>): Promise<Zone> {
+  return (await apiClient.patch(item('zones', 'home'), body)).data;
 }
 
 export async function getPersons(): Promise<{ persons: Person[]; trackers: Tracker[] }> {
@@ -209,5 +229,120 @@ export function zoneForm(zone?: Zone): ZoneForm {
 }
 
 export const ZONE_SOURCE_LABEL: Record<ZoneSource, string> = {
-  home: 'Home (the hub location)', hub: 'Drawn here', geo: 'Saved place in Jarvis',
+  home: 'Home (where the hub is)', hub: 'For the household',
 };
+
+/** Where a place came from, in a few words: Home, a household zone, or who saved it in Wander. */
+export function zoneOrigin(zone: Zone): string {
+  if (zone.source === 'home') return ZONE_SOURCE_LABEL.home;
+  if (zone.owner_name) {
+    return `Saved in Wander by ${zone.owner_name}${zone.visibility === 'private' ? ' (private)' : ''}`;
+  }
+  return ZONE_SOURCE_LABEL.hub;
+}
+
+/** Where an admin edits the household's places (Devices > Rooms & places). */
+export const PLACES_ADMIN_LINK = '/devices#devices-zones';
+/** Where everyone keeps their own places (Wander > Places). */
+export const WANDER_PLACES_LINK = '/wander#wander-places';
+
+/** Setup > Users & logins: where the hub's users and logins come from (services/homehub/users_api.py). */
+export interface ProviderSync {
+  ok: boolean;
+  at?: string;
+  failed_at?: string;
+  error?: string;
+  provider_users?: number;
+  users_added?: number;
+  users_matched?: number;
+  users_updated?: number;
+  users_disabled?: number;
+  users_reactivated?: number;
+  persons_created?: number;
+  persons_linked?: number;
+  persons_renamed?: number;
+  trackers_attached?: number;
+  standalone_users?: string[];
+}
+
+export interface LoginProvider {
+  type: string;
+  label: string;
+  external: boolean;
+  configured: boolean;
+  active: boolean;
+  primary: boolean;
+  entry_id: string | null;
+  state: string | null;
+  reason: string | null;
+  users: number;
+  inactive_users: number;
+  last_sync: ProviderSync | null;
+}
+
+export interface LoginProviders {
+  providers: LoginProvider[];
+  primary: string;
+  local_logins: boolean;
+  local_logins_setting: boolean;
+  external_admins: string[];
+  standalone_users: string[];
+}
+
+export interface HubUser {
+  id: string;
+  name: string;
+  /** ``local`` (the hub's own), ``service``, ``system`` or a login provider (``jarvis_identity``). */
+  source: string;
+  username: string | null;
+  is_admin: boolean;
+  is_owner: boolean;
+  is_active: boolean;
+  hub_login: boolean;
+  editable: boolean;
+  provider: { type: string; username: string; roles: string[]; avatar: string | null; removed: boolean } | null;
+}
+
+export type NewHubUser = { name: string; username: string; password: string; is_admin: boolean };
+
+export async function getLoginProviders(): Promise<LoginProviders> {
+  return (await apiClient.get('/api/homehub/auth/providers')).data;
+}
+export async function setLoginProviders(body: { primary?: string; local_logins?: boolean }): Promise<LoginProviders> {
+  return (await apiClient.put('/api/homehub/auth/providers', body)).data;
+}
+export async function syncLoginProvider(type: string): Promise<ProviderSync> {
+  return (await apiClient.post(`/api/homehub/auth/providers/${encodeURIComponent(type)}/sync`, {})).data;
+}
+export async function getHubUsers(): Promise<HubUser[]> {
+  return (await apiClient.get('/api/homehub/users')).data.users ?? [];
+}
+export async function createHubUser(body: NewHubUser): Promise<HubUser> {
+  return (await apiClient.post('/api/homehub/users', body)).data;
+}
+export async function updateHubUser(id: string, body: Partial<{ name: string; is_admin: boolean; is_active: boolean; password: string }>): Promise<HubUser> {
+  return (await apiClient.patch(item('users', id), body)).data;
+}
+
+/** "From Jarvis" for a person or user a login provider keeps. */
+export function providerLabel(source: string | undefined | null): string | null {
+  if (!source || source === 'hub' || source === 'local' || source === 'service' || source === 'system') return null;
+  return source === 'jarvis_identity' ? 'From Jarvis' : `From ${source}`;
+}
+
+/** What the last sync did, in a line: "3 users · 1 added · 2 people linked". */
+export function syncSummary(sync: ProviderSync | null | undefined): string {
+  if (!sync) return 'Not synced yet';
+  if (!sync.ok) return `Last sync failed: ${sync.error || 'no answer'}`;
+  const parts = [`${sync.provider_users ?? 0} users`];
+  const add = (n: number | undefined, word: string) => { if (n) parts.push(`${n} ${word}`); };
+  add(sync.users_added, 'added');
+  add(sync.users_matched, 'linked');
+  add(sync.users_updated, 'changed');
+  add(sync.users_disabled, 'disabled');
+  add(sync.users_reactivated, 'back');
+  add(sync.persons_created, sync.persons_created === 1 ? 'person added' : 'people added');
+  add(sync.persons_linked, sync.persons_linked === 1 ? 'person linked' : 'people linked');
+  add(sync.trackers_attached, sync.trackers_attached === 1 ? 'phone attached' : 'phones attached');
+  return parts.join(' · ');
+}

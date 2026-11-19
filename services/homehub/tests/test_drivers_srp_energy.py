@@ -67,6 +67,37 @@ async def test_login_failure_raises_on_setup_and_marks_unavailable(caplog):
     assert "SRP usage fetch failed" in caplog.text
 
 
+class _Resp:
+    def __init__(self, status, body):
+        self.status_code, self._body = status, body
+
+    def json(self):
+        if isinstance(self._body, Exception):
+            raise self._body
+        return self._body
+
+
+def test_only_a_clear_refusal_counts_as_a_bad_login():
+    assert srp._login_refused(_Resp(401, {}))
+    assert srp._login_refused(_Resp(200, {"message": "Invalid username or password."}))
+    assert not srp._login_refused(_Resp(200, {"message": "Log in successful."}))
+    assert not srp._login_refused(_Resp(200, {}))  # no message: not a refusal anyone stated
+    assert not srp._login_refused(_Resp(200, ValueError("not JSON")))
+    assert not srp._login_refused(_Resp(403, {}))  # SRP's bot blocking, not the password
+    assert not srp._login_refused(_Resp(500, {}))
+
+
+@pytest.mark.parametrize("on_setup", [True, False])
+async def test_a_refused_login_is_raised_from_setup_and_poll_for_the_runtime_to_park(on_setup):
+    hub, driver = await setup(FakeClient(srp.AuthRequired("SRP did not accept the username and password",
+                                                          needs="login")))
+    if not on_setup:
+        driver.client = driver._new_client()  # set up before the password changed
+    with pytest.raises(srp.AuthRequired):
+        await (driver.async_setup() if on_setup else driver.async_poll())
+    assert hub.states.get("sensor.srp_energy_home_energy_usage").state == "unavailable"
+
+
 async def test_poll_failure_does_not_raise_and_recovers():
     client = FakeClient()
     hub, driver = await setup(client)

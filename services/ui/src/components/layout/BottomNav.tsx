@@ -86,14 +86,17 @@ const BottomNav = () => {
           <div
             ref={moreSheetRef}
             tabIndex={-1}
-            className="relative w-full max-w-lg mx-auto app-bar backdrop-blur-2xl border-t rounded-t-2xl p-3 pb-[max(0.75rem,var(--safe-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.85)] outline-none"
+            role="dialog"
+            aria-modal="true"
+            aria-label="More pages"
+            className="relative w-full max-w-2xl mx-auto app-bar backdrop-blur-2xl border-t rounded-t-2xl p-3 pb-[max(0.75rem,var(--safe-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.85)] outline-none"
           >
             <div className="flex items-center justify-between px-2 pb-2">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">More</span>
               <button
                 type="button"
                 aria-label="Close menu"
-                className="p-2 -m-1 text-slate-400 hover:text-slate-200"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-xl -mr-2 -my-1 text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
                 onClick={() => {
                   trigger('light');
                   setMoreOpen(false);
@@ -106,7 +109,7 @@ const BottomNav = () => {
               {moreSections.map((section) => (
                 <section key={section.key} aria-label={section.label} data-testid={`more-section-${section.key}`}>
                   <h2 className="px-2 pb-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500">{section.label}</h2>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {section.pages.map((item) => (
                       <NavLink
                         key={item.path}
@@ -141,7 +144,7 @@ const BottomNav = () => {
         className="fixed bottom-0 left-0 right-0 z-50 app-bar backdrop-blur-2xl border-t shadow-[0_-8px_30px_rgba(0,0,0,0.85)]"
         style={{ paddingBottom: 'var(--safe-bottom)' }}
       >
-        <div className="flex items-center justify-around h-16 w-full max-w-lg mx-auto px-1">
+        <div className="flex items-center justify-around h-16 w-full max-w-xl mx-auto px-1">
           {pinnedItems.map((item) => (
             <NavLink
               key={item.path}
@@ -150,7 +153,7 @@ const BottomNav = () => {
               onClick={handleTap}
               className={({ isActive }) =>
                 cn(
-                  'flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 flex-1 min-w-0 transition-colors',
+                  'flex flex-col items-center justify-center gap-1 min-h-11 py-1.5 px-0.5 flex-1 min-w-0 transition-colors',
                   isActive
                     ? 'text-purple-400 font-bold'
                     : 'text-slate-400 hover:text-slate-200'
@@ -172,7 +175,7 @@ const BottomNav = () => {
             aria-expanded={moreOpen}
             aria-label="More pages"
             className={cn(
-              'flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 flex-1 min-w-0 transition-colors',
+              'flex flex-col items-center justify-center gap-1 min-h-11 py-1.5 px-0.5 flex-1 min-w-0 transition-colors',
               moreOpen || moreActive
                 ? 'text-purple-400 font-bold'
                 : 'text-slate-400 hover:text-slate-200'

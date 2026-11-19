@@ -13,11 +13,11 @@ from services.homehub.drivers.samsungtv import HA_LEGACY_ID, HA_NAME, LegacyBrid
 from services.homehub.tests.conftest import make_hub
 from services.homehub.tests.media_fakes import AVT, RC, FakeHttp, device_xml, soap_reply, soap_router
 
-LEGACY = {"host": "192.0.2.82", "mac": "02:00:00:00:01:03", "method": "legacy", "model": "UN46EH5300",
-          "name": "UN46EH5300", "port": 55000, "manufacturer": "Samsung Electronics",
+LEGACY = {"host": "192.0.2.82", "mac": "02:00:00:00:01:03", "method": "legacy", "model": "UN00XX0000",
+          "name": "UN00XX0000", "port": 55000, "manufacturer": "Samsung Electronics",
           "ssdp_main_tv_agent_location": "http://192.0.2.82:7676/smp_10_",
           "ssdp_rendering_control_location": "http://192.0.2.82:7676/smp_18_"}
-WS = {"host": "192.0.2.115", "mac": "02:00:00:00:01:04", "method": "websocket", "model": "QN75Q900RBFXZA",
+WS = {"host": "192.0.2.115", "mac": "02:00:00:00:01:04", "method": "websocket", "model": "QN00XX0000AFXZA",
       "port": 8002, "token": "12345678", "ssdp_main_tv_agent_location": None,
       "ssdp_rendering_control_location": "http://192.0.2.115:9197/dmr"}
 
@@ -223,6 +223,19 @@ async def test_errors():
         await drv.async_call(ent, "media_player", "play_media", {"media_content_id": "x", "media_content_type": "app"})
     with pytest.raises(ServiceNotFound):
         await drv.async_call(ent, "media_player", "shuffle_set", {})
+
+
+async def test_a_tv_that_refuses_the_token_needs_pairing_and_is_not_retried():
+    class Refuses(FakeWSRemote):
+        async def open(self):
+            raise mod.UnauthorizedError("ms.channel.unauthorized")
+
+    _hub, drv, http = build(WS)
+    rc_http(http, "/dmr")
+    drv.bridge.remote_cls = Refuses
+    with pytest.raises(mod.AuthRequired) as raised:
+        await drv.async_setup()
+    assert raised.value.needs == "pairing"
 
 
 def test_key_names():

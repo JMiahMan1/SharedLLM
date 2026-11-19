@@ -6,7 +6,7 @@ import { renderWithProviders } from './render';
 import { server } from './setup';
 
 const devices = [
-  { name: 'office-light', host: '192.0.2.87', port: 6053, noise_psk: 'secret', ha_entity_id: 'light.office_light' },
+  { name: 'study-light', host: '192.0.2.87', port: 6053, noise_psk: 'secret', ha_entity_id: 'light.study_light' },
   { name: 'garage-door', host: '192.0.2.88', port: 6053 },
 ];
 
@@ -54,17 +54,17 @@ describe('HardwarePanel', () => {
   it('renders configured devices with route badges', async () => {
     renderWithProviders(<HardwarePanel />);
 
-    expect(await screen.findByText('office-light')).toBeInTheDocument();
+    expect(await screen.findByText('study-light')).toBeInTheDocument();
     expect(screen.getByText('garage-door')).toBeInTheDocument();
     // Mapped device shows Both badge, unmapped shows Direct
     expect(screen.getByText('Both')).toBeInTheDocument();
     expect(screen.getByText('Direct')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('light.office_light')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('light.study_light')).toBeInTheDocument();
   });
 
   it('adds a device and persists it via the settings API', async () => {
     renderWithProviders(<HardwarePanel />);
-    await screen.findByText('office-light');
+    await screen.findByText('study-light');
 
     fireEvent.change(screen.getByLabelText('New device name'), { target: { value: 'attic-fan' } });
     fireEvent.change(screen.getByLabelText('New device host'), { target: { value: '192.0.2.90' } });
@@ -92,13 +92,13 @@ describe('HardwarePanel', () => {
 
   it('tests a connection and reports entity count', async () => {
     renderWithProviders(<HardwarePanel />);
-    await screen.findByText('office-light');
+    await screen.findByText('study-light');
 
     fireEvent.click(screen.getAllByRole('button', { name: /test/i })[0]);
 
     // The connection test must hit /execute/esphome for the right device
     await waitFor(() => {
-      expect(listCalls).toContain('office-light');
+      expect(listCalls).toContain('study-light');
     });
     // and the button settles back once the mutation completes
     await waitFor(() => {
@@ -109,9 +109,9 @@ describe('HardwarePanel', () => {
   it('rejects a duplicate device name without saving', async () => {
     const before = JSON.stringify(storedDevices);
     renderWithProviders(<HardwarePanel />);
-    await screen.findByText('office-light');
+    await screen.findByText('study-light');
 
-    fireEvent.change(screen.getByLabelText('New device name'), { target: { value: 'office-light' } });
+    fireEvent.change(screen.getByLabelText('New device name'), { target: { value: 'study-light' } });
     fireEvent.change(screen.getByLabelText('New device host'), { target: { value: '10.0.0.1' } });
     fireEvent.click(screen.getByRole('button', { name: /add device/i }));
 

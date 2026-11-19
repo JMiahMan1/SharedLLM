@@ -15,6 +15,8 @@ try:
 except ImportError:
     from .. import hardware_router  # type: ignore[attr-defined]
 
+from services.execution.spoken_names import spoken_name
+
 log = logging.getLogger("execution.light")
 
 #: How long to watch a light after a command before saying what it did. A hub
@@ -41,7 +43,7 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
     if not ha_client.authorize_action(ctx.model_dump(), domain, req.action):
         return ExecutionResult(
             status="FAILURE",
-            message=f"Access Denied: You are not authorized to perform '{req.action}' on {full_entity_id}. Admin privileges required.",
+            message=f"You can't switch {_spoken_name(full_entity_id)}: it needs an admin.",
             service="light_control"
         )
 
@@ -55,20 +57,20 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
 
     current = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
     friendly = _spoken_name(full_entity_id)
+    was_unavailable = False
     if current:
         current_state = current.get("state", "").lower()
-        friendly = current.get("attributes", {}).get("friendly_name", full_entity_id)
+        friendly = spoken_name(full_entity_id, (current.get("attributes") or {}).get("friendly_name"))
 
         if current_state == "unavailable":
+            # Still send it: the hub tries the device anyway (a bulb switched back on at the wall, or one the
+            # hub missed for a moment, answers), and says so if it does not. Refusing here left bulbs on
+            # in a room that had been asked to turn off (2026-11-18).
+            was_unavailable = True
+        elif current_state == "unknown":
             return ExecutionResult(
                 status="FAILURE",
-                message=f"The light '{friendly}' ({full_entity_id}) is currently unavailable on the home hub. The device may be powered off, disconnected from WiFi, or not responding to MQTT. Please check the physical device and its network connection.",
-                service="light_control", detail={"confirmed": False, "state": "unavailable", "name": friendly},
-            )
-        if current_state == "unknown":
-            return ExecutionResult(
-                status="FAILURE",
-                message=f"The light '{friendly}' ({full_entity_id}) has an unknown state on the home hub. It may be initializing or misconfigured.",
+                message=f"{friendly} has an unknown state on the home hub. It may be starting up or set up wrong.",
                 service="light_control", detail={"confirmed": False, "state": "unknown", "name": friendly},
             )
 
@@ -77,7 +79,7 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
             or req.color_temp is not None
             or req.rgb_color is not None
         )
-        if req.action in ("turn_on", "turn_off"):
+        if req.action in ("turn_on", "turn_off") and not was_unavailable:
             target_state = "on" if req.action == "turn_on" else "off"
             if current_state == target_state and not (req.action == "turn_on" and has_attributes):
                 return ExecutionResult(
@@ -100,7 +102,9 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
         ctx, domain, req.action, full_entity_id, service_data or None,
         service_name="light_control",
     )
-    if result.status != "SUCCESS" or req.action not in ("turn_on", "turn_off"):
+    if result.status != "SUCCESS":
+        return _not_done(result, friendly, full_entity_id, was_unavailable)
+    if req.action not in ("turn_on", "turn_off"):
         return result
     target = "on" if req.action == "turn_on" else "off"
     if (result.detail or {}).get("route") != "ha" or current is None:
@@ -112,9 +116,22 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
     return await _confirmed(ctx, full_entity_id, friendly, req, result)
 
 
+def _not_done(result: ExecutionResult, friendly: str, entity_id: str, was_unavailable: bool) -> ExecutionResult:
+    """A command the hub could not carry out, named as the person knows the light (never its id)."""
+    detail = {**(result.detail or {}), "confirmed": False, "name": friendly}
+    silent = was_unavailable or detail.get("status_code") == 503  # 503: the hub's "the device did not answer"
+    if silent:
+        detail["state"] = "unavailable"
+        message = (f"{friendly} is not responding on the home hub. It may be powered off or disconnected from "
+                   "Wi-Fi. Please check the light and its network connection.")
+    else:
+        message = result.message
+    return ExecutionResult(status=result.status, message=message, service=result.service, detail=detail)
+
+
 def _spoken_name(entity_id: str) -> str:
-    """What to call a device when the hub gives no friendly name: light.hall_lamp -> hall lamp."""
-    return entity_id.split(".", 1)[-1].replace("_", " ")
+    """What to call a device when the hub gives no friendly name: light.example_lamp -> Example Lamp (never the id)."""
+    return spoken_name(entity_id)
 
 
 async def _confirmed(ctx, entity_id: str, friendly: str, req: LightControlRequest, sent: ExecutionResult) -> ExecutionResult:
@@ -130,7 +147,8 @@ async def _confirmed(ctx, entity_id: str, friendly: str, req: LightControlReques
         current = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id)
         if current:
             state = str(current.get("state", "")).lower()
-            friendly = current.get("attributes", {}).get("friendly_name") or friendly
+            friendly = spoken_name(entity_id, current.get("attributes", {}).get("friendly_name")) \
+                if current.get("attributes", {}).get("friendly_name") else friendly
             if state == target:
                 level = _brightness_pct(current) if target == "on" else None
                 said = f"{friendly} is on at {level}%." if level is not None and req.brightness_pct is not None else f"{friendly} is {target}."
@@ -170,13 +188,15 @@ async def handle_lights(req: LightsControlRequest, may_control=None) -> Executio
     are counted as done.
     """
     ids = list(dict.fromkeys(e for e in req.entity_ids if e))
+    names = {eid: spoken_name(eid, (req.names or {}).get(eid)) for eid in ids}
     allowed: list[str] = []
-    refused: list[str] = []
+    refused: dict[str, str] = {}  # entity -> why: "refused" (not theirs), "voice_off", "unchecked"
     for eid in ids:
-        if may_control is None or await may_control(eid):
+        answer = True if may_control is None else await may_control(eid)
+        if answer is True:
             allowed.append(eid)
         else:
-            refused.append(eid)
+            refused[eid] = answer if isinstance(answer, str) else "refused"
 
     async def one(eid: str) -> ExecutionResult:
         single = LightControlRequest(user_context=req.user_context, entity_id=eid, action=req.action,
@@ -190,17 +210,17 @@ async def handle_lights(req: LightsControlRequest, may_control=None) -> Executio
 
     results = dict(zip(allowed, await asyncio.gather(*(one(e) for e in allowed)), strict=True))
     target = "on" if req.action == "turn_on" else "off"
-    outcomes = [_outcome(eid, results.get(eid), target) for eid in ids if eid in results]
-    outcomes += [{"entity_id": eid, "name": _spoken_name(eid), "result": "refused"} for eid in refused]
+    outcomes = [_outcome(eid, results.get(eid), target, names[eid]) for eid in ids if eid in results]
+    outcomes += [{"entity_id": eid, "name": names[eid], "result": why} for eid, why in refused.items()]
     message, status = summarize(req.label, target, outcomes)
     log.info("[lights] %s %s: %s", req.label or "lights", target, message)
     return ExecutionResult(status=status, message=message, service="light_control",
                            detail={"outcomes": outcomes, "target": target})
 
 
-def _outcome(eid: str, res: ExecutionResult | None, target: str) -> dict:
+def _outcome(eid: str, res: ExecutionResult | None, target: str, said: str | None = None) -> dict:
     detail = (res.detail if res else None) or {}
-    name = detail.get("name") or _spoken_name(eid)
+    name = said or spoken_name(eid, detail.get("name"))
     if res is None:
         kind = "failed"
     elif res.status == "SUCCESS" and detail.get("confirmed"):
@@ -231,6 +251,10 @@ def _reason(kind: str, names: list[str], target: str) -> str:
         return f"{who} still {'shows' if one else 'show'} {'on' if target == 'off' else 'off'}"
     if kind == "refused":
         return f"{who} {'isn' if one else 'aren'}'t yours to switch"
+    if kind == "voice_off":
+        return f"voice can't control {who}"
+    if kind == "unchecked":
+        return f"I couldn't check whether voice may control {who}"
     if kind == "sent":
         return f"I couldn't check {who}"
     return f"{who} didn't answer"
@@ -253,12 +277,18 @@ def summarize(label: str, target: str, outcomes: list[dict]) -> tuple[str, str]:
             return f"{o['name']} is already {target}.", "SUCCESS"
         if o["result"] == "done":
             return f"{o['name']} is {target}.", "SUCCESS"
+        if o["result"] == "voice_off":
+            return (f"Voice can't control {o['name']}. An admin can turn on 'Voice can control' for it in "
+                    "Devices.", "FAILURE")
         return f"{o['name']} is not {target}: {_reason(o['result'], [o['name']], target)}.", "PARTIAL"
     problems: dict[str, list[str]] = {}
     for o in outcomes:
         if o["result"] not in ("done", "already"):
             problems.setdefault(o["result"], []).append(o["name"])
     why = "; ".join(_reason(kind, names, target) for kind, names in problems.items())
+    if set(problems) == {"voice_off"} and not good:
+        return (f"Voice can't control the {what}. An admin can turn on 'Voice can control' for them in Devices.",
+                "FAILURE")
     if len(good) == total:
         already = all(o["result"] == "already" for o in outcomes)
         return f"The {what} are {'already ' if already else ''}{target}.", "SUCCESS"

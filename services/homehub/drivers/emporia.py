@@ -43,7 +43,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from services.homehub.core import UNKNOWN, Driver, EntityEntry, HubError
+from services.homehub.core import UNKNOWN, AuthRequired, Driver, EntityEntry, HubError, SetupError
 
 try:  # guarded so the tests can run without the library's cloud stack
     from pyemvue import PyEmVue
@@ -100,6 +100,17 @@ def month_reset(local_now: datetime, start_day: int) -> datetime:
     return candidate
 
 
+
+#: Amazon Cognito's answers (Emporia's login) for a wrong password or an unknown account.
+_COGNITO_REFUSALS = frozenset({"NotAuthorizedException", "UserNotFoundException"})
+
+
+def _refused_login(exc: BaseException) -> bool:
+    """Whether the login failed because the account refused the credentials (not a network error)."""
+    response = getattr(exc, "response", None)
+    code = (response.get("Error") or {}).get("Code") if isinstance(response, dict) else None
+    return code in _COGNITO_REFUSALS or type(exc).__name__ in _COGNITO_REFUSALS
+
 class EmporiaDriver(Driver):
     platform = "emporia_vue"
     poll_interval = 60.0
@@ -124,7 +135,7 @@ class EmporiaDriver(Driver):
 
     def _new_client(self) -> Any:
         if PyEmVue is None:
-            raise HubError("pyemvue is not installed")
+            raise SetupError("pyemvue is not installed")
         return PyEmVue()
 
     async def _call(self, fn, *args) -> Any:
@@ -137,11 +148,16 @@ class EmporiaDriver(Driver):
         try:
             ok = await self._call(vue.login, data.get("email"), data.get("password"))
         except Exception as exc:
+            if _refused_login(exc):
+                raise AuthRequired("Emporia did not accept the email and password", needs="login") from exc
             self.log.error("Emporia cloud login failed for %s: %s", self.entry.title, exc)
             raise HubError(f"Emporia login failed: {exc}") from exc
         if not ok:
-            self.log.error("Emporia cloud login refused for %s (check the email and password)", self.entry.title)
-            raise HubError("Emporia login refused")
+            # pyemvue answers False both when Cognito refuses the password (NotAuthorizedException, and then
+            # it holds no tokens) and when a signed-in account has no customer record.
+            if not getattr(getattr(vue, "auth", None), "tokens", None):
+                raise AuthRequired("Emporia did not accept the email and password", needs="login")
+            raise HubError("Emporia signed in but sent no customer record")
         self.vue = vue
         devices = await self._call(vue.get_devices)
         self.devices = {}

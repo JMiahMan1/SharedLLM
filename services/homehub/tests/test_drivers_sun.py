@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
+from services.homehub.core import HubError
 from services.homehub.drivers import sun
 from services.homehub.tests.conftest import make_hub
 
@@ -60,3 +63,19 @@ async def test_driver_publishes_sun_and_sensors():
     assert hub.states.get("sun.sun").state == "below_horizon"
     await drv.async_setup()  # now: whatever the real time is, it must not fail
     assert hub.states.get("sun.sun").state in ("above_horizon", "below_horizon")
+
+
+@pytest.mark.parametrize("location", [{}, {"latitude": 39.9}, {"latitude": None, "longitude": -105.3},
+                                      {"latitude": "north", "longitude": -105.3},
+                                      {"latitude": 95.0, "longitude": -105.3}])
+async def test_no_location_fails_setup_instead_of_using_null_island(location):
+    hub, entry = make_hub("sun")
+    hub.location = location
+    with pytest.raises(HubError, match="home location"):
+        await sun.SunDriver(hub, entry).async_setup()
+    assert hub.states.get("sun.sun") is None
+
+
+def test_the_equator_and_the_prime_meridian_are_real_places():
+    state, _a = sun.sun_state({"latitude": 0, "longitude": 0}, at(12))
+    assert state == "above_horizon"

@@ -12,7 +12,7 @@ import type {
 import { storageGetSync, storageSet } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
-import type { MessageMark, PrivateChatInfo, PrivateChatStatus } from '../components/chat/privateChatModel';
+import type { MessageMark, PrivateChatInfo, PrivateChatReminders, PrivateChatStatus } from '../components/chat/privateChatModel';
 import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto';
 import { configureBackupKeys, type BackupKeyUpload } from '../lib/privateChatBackupKey';
 import type { RestoreBatch, RestoreClient, RestoreCounts } from '../lib/privateChatBackupFile';
@@ -4024,6 +4024,29 @@ export const api = {
     return resp.data;
   },
 
+  /** My reply reminder setting for this chat (kept on the server, so it holds on every device). */
+  async getPrivateChatReminders(token: string): Promise<PrivateChatReminders> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/reminders`);
+    return resp.data;
+  },
+
+  async setPrivateChatReminders(token: string, enabled: boolean): Promise<PrivateChatReminders> {
+    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/reminders`, { enabled });
+    return resp.data;
+  },
+
+  /**
+   * One bit about the partner's newest message: it asks something (decided on this device from the
+   * text, lib/privateChatReminders.ts). The server learns the bit and the id, nothing else.
+   */
+  async flagPrivateChatExpectsReply(token: string, messageId: number, expectsReply: boolean): Promise<{ message_id: number; expects_reply: boolean }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/expects-reply`, {
+      message_id: messageId,
+      expects_reply: expectsReply,
+    });
+    return resp.data;
+  },
+
   /** Every edited or reacted-to message's sealed edit and reactions, with whether I have seen each reaction. */
   async getPrivateChatMarks(token: string): Promise<{ marks: MessageMark[] }> {
     const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/marks`);
@@ -4965,7 +4988,7 @@ export const api = {
     if (resp.data?.status === 'FAILURE') {
       throw new Error(resp.data.message || 'Could not read your devices');
     }
-    return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string; attributes?: Record<string, number | string | boolean | string[] | null>; last_changed?: string; last_updated?: string }) => {
+    return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string; device_class?: string | null; attributes?: Record<string, number | string | boolean | string[] | null>; last_changed?: string; last_updated?: string }) => {
       const ts = e.last_updated || e.last_changed;
       let lastActivated: number | undefined;
       if (ts) {
@@ -4979,7 +5002,8 @@ export const api = {
         domain: e.domain,
         room: e.area_id || undefined,
         last_activated: lastActivated,
-        attributes: e.attributes || undefined,
+        // The search answers device_class beside the attributes; the safety checks read it there.
+        attributes: e.device_class ? { ...(e.attributes || {}), device_class: e.device_class } : e.attributes || undefined,
       };
     });
   },

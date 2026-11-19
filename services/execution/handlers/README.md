@@ -14,6 +14,23 @@ isolated to prevent cross-contamination between device types.
 | `media.py` | All platforms | Unified routing: detects platform and delegates |
 | `video.py` | All platforms | yt-dlp URL resolution and local streaming |
 
+## Rooms and device types come from the hub
+
+Nothing in code knows a household's rooms or devices. A room is one of the
+hub's areas (its name, an alias or its id: `capability_index.area_id_for`,
+`area_in_text`, `in_area`); a TV's companions (Cast dongle, remote, Music
+Assistant player, voice satellite) are the entities on the same device or in
+the same area (`CapabilityIndex.nearby`); a TV's platform is the integration
+that owns it (`CapabilityIndex.tv_platform`). With the index, an entity it does
+not know gets no room companions, whatever its name says.
+
+Only a plain Home Assistant (no capability index, HTTP 404, logged by
+`routing_index`) falls back to names: the room as said is matched against what
+is left of each entity id once device-kind and platform words and numbers are
+taken off (`announce_handlers._name_room_guess`), and the platform is read from
+attributes and protocol words (`chromecast`, `cast`, `webos`, `esphome`...).
+That fallback holds no room or device names of its own.
+
 ## Device Discovery & Profiling
 
 Three new modules provide network-level device management:
@@ -59,7 +76,7 @@ and control method documentation.
 | `profile_device(entity_id, ha_url, ha_token)` | Full profile for one device |
 | `profile_all_media_devices(ha_url, ha_token)` | Profile all media_player entities |
 | `build_capability_map(ha_url, ha_token)` | Friendly-name → capabilities dict |
-| `resolve_by_friendly_name(cap_map, query)` | Fuzzy match "taylors tv" → entity_id + caps |
+| `resolve_by_friendly_name(cap_map, query)` | Fuzzy match "den tv" → entity_id + caps |
 
 ### Supported Device Types & Control Methods
 

@@ -256,7 +256,8 @@ that, every save of an opened note stacked another header on top.
   from), so a reminder set while already at home waits for the next time
   they come back. The gateway (`GET/POST /api/geo/place-reminders`,
   `DELETE /api/geo/place-reminders/{id}`, `services/gateway/family_safety.py`)
-  always acts for the caller; geo refuses a zone it does not have, a link
+  always acts for the caller; geo refuses a zone it does not have (the
+  family's places on the home hub, or the caller's own private place), a link
   outside the app (the timers' own rule, `services/common/links.py`), and
   more than 50 waiting per person. The panel reads places with Wander's
   `zonePlaces`, and both reminders change through one set-then-cancel path

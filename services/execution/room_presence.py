@@ -198,7 +198,7 @@ async def may_see_room(viewer: str, subject: str) -> bool:
 
 
 def in_room(room: str) -> str:
-    """"in the Den", but "in Alex's Room" and "in the Loft" (no doubled article)."""
+    """"in the Den", but "in Alex's Room" and "in the Attic" (no doubled article)."""
     r = room.strip()
     if r.lower().startswith("the ") or "'s " in r or r.endswith("'s"):
         return f"in {r}"

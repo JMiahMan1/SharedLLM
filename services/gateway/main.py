@@ -104,6 +104,7 @@ from services.gateway import (
     private_chat_marks,
     private_chat_messages,
     private_chat_preview,
+    private_chat_reminders,
     push_routes,
     recipe_images,
     room_presence,
@@ -269,6 +270,8 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
             res["debug_context"] = debug_context
         return JSONResponse(res)
 
+    reply_voice = _REPLY_VOICE.get()
+
     async def gen():
         msg: dict[str, Any] = {"role": "assistant", "content": message}
         if thinking:
@@ -279,12 +282,14 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
             "message": msg,
             "done": False
         }
+        if reply_voice:
+            chunk["voice"] = reply_voice
         yield json.dumps(chunk) + "\n"
         yield json.dumps({"model": model, "done": True}) + "\n"
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
-def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: str | None = None):
+def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: str | None = None, **extra: Any):
     msg: dict[str, Any] = {"role": "assistant", "content": content}
     if thinking:
         msg["thinking"] = thinking
@@ -292,7 +297,8 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: s
         "model": model,
         "created_at": datetime.now().isoformat() + "Z",
         "message": msg,
-        "done": done
+        "done": done,
+        **{k: v for k, v in extra.items() if v is not None},
     }
 
 
@@ -688,7 +694,6 @@ from services.gateway.http_client import (
     recreate_http_client,
     retry_http_request,
     close_all_clients,
-    borrow_http_client,
 )
 
 
@@ -741,6 +746,18 @@ async def shared_http_client():
     """
     yield get_http_client()
 
+
+@asynccontextmanager
+async def borrow_http_client():
+    """``shared_http_client`` under its older name, defined here like it.
+
+    Both resolve ``get_http_client`` through this module at call time, so a
+    test that patches ``main.get_http_client`` reaches every route. Importing
+    the http_client module's copy made the ~60 routes that borrow a client
+    bypass that patch and open real connections (a 503 "service restarting"
+    in the storage purge and maintenance tests).
+    """
+    yield get_http_client()
 
 
 # Global config validation state
@@ -870,6 +887,7 @@ app.include_router(private_chat_export.router)  # Export, back up and restore th
 app.include_router(private_chat_marks.router)  # Edits and reactions on private chat messages, sealed on the device
 app.include_router(private_chat_messages.router)  # The private chat's sealed messages, kept here instead of on Talk
 app.include_router(private_chat_preview.router)  # Link previews the sender's device seals into a private message
+app.include_router(private_chat_reminders.router)  # Gentle reply reminders in the private chat (metadata only)
 app.include_router(beloved_routes.router)  # Beloved: the couple's page inside the private chat (one father, one mother)
 app.include_router(account_export.router)  # Export my data and restore it (docs/ACCOUNT_EXPORT.md)
 app.include_router(private_chat.router)  # Private chat: the parents' end-to-end encrypted conversation  # Lists: the hub's to-do lists for every member
@@ -1222,7 +1240,7 @@ def should_search_storage_for_code_query(query: str) -> bool:
 def extract_media_request(query: str) -> tuple[str | None, str | None]:
     """
     Pull a likely media search string and target device name from commands like:
-    - Play Brandon Lake on Office TV
+    - Play Brandon Lake on Den TV
     - Listen to jazz on the kitchen speaker
     """
     cleaned = (query or "").strip().strip("?.!")
@@ -1298,7 +1316,7 @@ def is_plain_media_command(query: str) -> bool:
     """A skip / next / previous / pause / stop / resume of what is playing.
 
     It names something that plays ("skip this track", "stop the music on the
-    office TV") or is the bare command ("skip", "pause please"). "Stop the
+    den TV") or is the bare command ("skip", "pause please"). "Stop the
     timer" and "pause the vacuum" are not.
     """
     if not extract_media_transport_command(query):
@@ -3634,6 +3652,52 @@ def _voice_context_note(ctx: dict) -> str:
     return ("\n\n[Voice context]\n" + "\n".join(lines)) if lines else ""
 
 
+async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
+    """A voice satellite's answer as NDJSON: safe sentences as they are written, then what is left.
+
+    Each sentence is a chunk with ``"speech": true`` (``speech_stream.SpeechGate`` chose it). The last
+    chunk (``done``) carries the whole ``reply`` and ``speech_rest``, the part of it not yet said
+    (``speech_stream.speech_rest``), or ``error`` when the job failed. Every chunk names the reply's
+    ``voice`` when the gateway chose one.
+    """
+    from services.gateway.speech_stream import speech_rest
+
+    assert job_queue is not None, "Job queue not initialized"
+    spoken: list[str] = []
+    while True:
+        job = await job_queue.get_job_status(job_id)
+        if not job:
+            yield json.dumps(_make_ollama_chunk("", model, True, error="the job was lost", voice=reply_voice)) + "\n"
+            return
+        for chunk in await job_queue.get_chunks(job_id):
+            try:
+                parsed = json.loads(chunk) if isinstance(chunk, str) and chunk.startswith('{"type":') else None
+            except ValueError:
+                parsed = None
+            if not isinstance(parsed, dict):
+                continue  # only the gate's chunks are safe to say
+            if parsed.get("type") == "speech_turn":
+                spoken.clear()
+            elif parsed.get("type") == "speech" and str(parsed.get("text") or "").strip():
+                text = str(parsed["text"]).strip()
+                spoken.append(text)
+                yield json.dumps(_make_ollama_chunk(text, model, speech=True, voice=reply_voice)) + "\n"
+        if job["status"] == JobStatus.COMPLETED:
+            ans = job.get("result")
+            reply = str(ans) if ans is not None else ""
+            if isinstance(ans, str):
+                _thinking, reply = extract_thinking_and_content(ans)
+            reply = reply.strip()
+            yield json.dumps(_make_ollama_chunk("", model, True, reply=reply, speech_rest=speech_rest(reply, spoken),
+                                                voice=reply_voice)) + "\n"
+            return
+        if job["status"] == JobStatus.FAILED:
+            err = str(job.get("error") or "Job failed")
+            yield json.dumps(_make_ollama_chunk("", model, True, error=err, voice=reply_voice)) + "\n"
+            return
+        await asyncio.sleep(0.05)
+
+
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
@@ -3667,6 +3731,8 @@ async def chat_handler(request: Request, background_tasks=None):
 
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
+    # Only with a voice context (an internal caller's satellite) and only in Ollama's shape.
+    speech_stream = bool(body.get("speech_stream")) and bool(should_stream) and not is_openai and bool(voice_context)
     explicit_model = str(body.get("model") or "").strip()
     show_thinking = body.get("show_thinking", False) or body.get("think", False)
 
@@ -3944,7 +4010,7 @@ async def chat_handler(request: Request, background_tasks=None):
             if not resolved_entity and not light_set:
                 resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
-            # A named player ("on the office TV") or else the last one used while it plays;
+            # A named player ("on the den TV") or else the last one used while it plays;
             # of players that match, the one playing (resolve_media_target "transport").
             named = engine.extract_target(query, intent)
             active_cache = cached_device_id if cached_state in ACTIVE_MEDIA_STATES else None
@@ -4357,6 +4423,9 @@ async def chat_handler(request: Request, background_tasks=None):
         "grounded": grounded,
         "show_thinking": show_thinking,
         "is_openai": is_openai,
+        # A voice satellite speaking the answer as it is written: only safe whole sentences are
+        # streamed (speech_stream.py), and the end of the stream says what is left to say.
+        "speech_stream": speech_stream,
     }
 
     assert job_queue is not None, "Job queue not initialized"
@@ -4372,6 +4441,9 @@ async def chat_handler(request: Request, background_tasks=None):
         is_standard_client = True
 
     if is_standard_client:
+        if should_stream and speech_stream:
+            return StreamingResponse(_speech_stream_gen(job_id, selected_model, _REPLY_VOICE.get()),
+                                     media_type="application/x-ndjson")
         if should_stream:
             async def standard_stream_gen():
                 last_pos = -1
@@ -11793,7 +11865,7 @@ async def update_raven_config(request: Request):
     url = str(body.get("speech_server_url") or "").strip()
     if url and not re.fullmatch(r"https?://[^\s/]+(:\d+)?/?", url):
         # Checked before anything is saved, so a typo never becomes the setting.
-        raise HTTPException(status_code=400, detail="Give the address as http://<host>:<port>, e.g. http://192.168.2.43:8082")
+        raise HTTPException(status_code=400, detail="Give the address as http://<host>:<port>, e.g. http://192.0.2.10:8082")
 
     async with borrow_http_client() as client:
         for k, v in body.items():

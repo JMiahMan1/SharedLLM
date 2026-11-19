@@ -46,12 +46,12 @@ const KITCHEN = {
   ma_player_id: 'kitchen',
   group_members: [] as string[],
 };
-const OFFICE = {
-  entity_id: 'media_player.office',
-  friendly_name: 'Office Speaker',
+const STUDY = {
+  entity_id: 'media_player.study',
+  friendly_name: 'Study Speaker',
   state: 'idle',
   volume_level: 0.2,
-  ma_player_id: 'office',
+  ma_player_id: 'study',
   group_members: [] as string[],
 };
 const TV = {
@@ -64,7 +64,7 @@ const TV = {
   group_members: [] as string[],
 };
 
-function status(players = [KITCHEN, OFFICE, TV]) {
+function status(players = [KITCHEN, STUDY, TV]) {
   return {
     status: 'SUCCESS',
     detail: { active: KITCHEN, all_players: players },
@@ -74,7 +74,7 @@ function status(players = [KITCHEN, OFFICE, TV]) {
 function maList(extra: unknown[] = []) {
   return [
     { player_id: 'kitchen', name: 'Kitchen Speaker', state: 'playing', available: true, volume_level: 42 },
-    { player_id: 'office', name: 'Office Speaker', state: 'idle', available: true, volume_level: 20 },
+    { player_id: 'study', name: 'Study Speaker', state: 'idle', available: true, volume_level: 20 },
     { player_id: 'web-1', name: 'This Browser', state: 'playing', available: true },
     ...extra,
   ];
@@ -113,10 +113,12 @@ describe('OutputSheet', () => {
     renderSheet();
 
     expect(screen.getByRole('dialog', { name: 'Output' })).toBeTruthy();
-    expect(await screen.findByText('Kitchen Speaker')).toBeTruthy();
+    // The hub's players are read only once the integrations status says a hub
+    // is connected, so the first refresh lists Music Assistant alone. Wait for
+    // a hub-only player before checking what the merged list holds.
+    expect(await screen.findByText('Loft TV')).toBeTruthy();
     expect(screen.getAllByText('Kitchen Speaker')).toHaveLength(1);
-    expect(screen.getAllByText('Office Speaker')).toHaveLength(1);
-    expect(screen.getByText('Loft TV')).toBeTruthy();
+    expect(screen.getAllByText('Study Speaker')).toHaveLength(1);
     expect(screen.getByText('TVs')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'This device' })).toBeTruthy();
     expect(screen.getByText('Active')).toBeTruthy();
@@ -132,12 +134,12 @@ describe('OutputSheet', () => {
     const value = player();
     const { onClose } = renderSheet(value);
 
-    await screen.findByText('Office Speaker');
-    await userEvent.click(screen.getByRole('button', { name: 'Play here on Office Speaker' }));
+    await screen.findByText('Study Speaker');
+    await userEvent.click(screen.getByRole('button', { name: 'Play here on Study Speaker' }));
 
     expect(value.maCommand).toHaveBeenCalledWith('player_queues/transfer', {
       source_queue_id: 'web-1',
-      target_queue_id: 'office',
+      target_queue_id: 'study',
     });
     expect(value.pause).toHaveBeenCalled();
     await waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -166,7 +168,8 @@ describe('OutputSheet', () => {
   it('reads the status silently so the poll never re-fires the connectivity toast', async () => {
     renderSheet();
     await screen.findByText('Kitchen Speaker');
-    expect(api.mediaStatus).toHaveBeenCalledWith({ silent: true });
+    // Read after the integrations status lands, which can be after MA's list.
+    await waitFor(() => expect(api.mediaStatus).toHaveBeenCalledWith({ silent: true }));
   });
 
   it('shows no volume slider for a speaker that reports none', async () => {
@@ -189,7 +192,7 @@ describe('OutputSheet', () => {
   });
 
   it('shows an unknown group volume rather than guessing a level', async () => {
-    withMa({ 'web-1': { group_members: ['web-1', 'office'], can_group_with: ['office'] } });
+    withMa({ 'web-1': { group_members: ['web-1', 'study'], can_group_with: ['study'] } });
     renderSheet();
 
     const panel = await screen.findByTestId('group-members');
@@ -224,39 +227,39 @@ describe('OutputSheet', () => {
   }
 
   it('offers grouping only with speakers Music Assistant can keep in sync', async () => {
-    withMa({ 'web-1': { can_group_with: ['office'] } });
+    withMa({ 'web-1': { can_group_with: ['study'] } });
     renderSheet();
-    await screen.findByText('Office Speaker');
+    await screen.findByText('Study Speaker');
 
     expect(screen.queryByRole('checkbox', { name: /Group Kitchen Speaker/ })).toBeNull();
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Group Office Speaker with This device' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Group Study Speaker with This device' }));
 
     await waitFor(() => expect(sendMaRemoteCommand).toHaveBeenCalledWith('players/cmd/set_members', {
       target_player: 'web-1',
-      player_ids_to_add: ['office'],
+      player_ids_to_add: ['study'],
       player_ids_to_remove: [],
     }));
     expect(screen.getByText(/Only speakers that can play in sync with This device/)).toBeTruthy();
   });
 
   it('removes a speaker from the group from the member list', async () => {
-    withMa({ 'web-1': { group_members: ['web-1', 'office'], can_group_with: ['office'] } });
+    withMa({ 'web-1': { group_members: ['web-1', 'study'], can_group_with: ['study'] } });
     renderSheet();
 
     const members = await screen.findByTestId('group-members');
-    expect(members.textContent).toContain('Office Speaker');
-    expect((screen.getByRole('checkbox', { name: 'Group Office Speaker with This device' }) as HTMLInputElement).checked).toBe(true);
-    await userEvent.click(screen.getByRole('button', { name: 'Remove Office Speaker from the group' }));
+    expect(members.textContent).toContain('Study Speaker');
+    expect((screen.getByRole('checkbox', { name: 'Group Study Speaker with This device' }) as HTMLInputElement).checked).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Study Speaker from the group' }));
 
     await waitFor(() => expect(sendMaRemoteCommand).toHaveBeenCalledWith('players/cmd/set_members', {
       target_player: 'web-1',
       player_ids_to_add: [],
-      player_ids_to_remove: ['office'],
+      player_ids_to_remove: ['study'],
     }));
   });
 
   it('sets one volume for the whole group', async () => {
-    withMa({ 'web-1': { group_members: ['web-1', 'office'], can_group_with: ['office'], group_volume: 40 } });
+    withMa({ 'web-1': { group_members: ['web-1', 'study'], can_group_with: ['study'], group_volume: 40 } });
     renderSheet();
     const slider = await screen.findByRole('slider', { name: 'Group volume' });
     expect((slider as HTMLInputElement).value).toBe('40');
@@ -269,12 +272,12 @@ describe('OutputSheet', () => {
 
   it('leads with a playing speaker when this device has nothing, and can end its group', async () => {
     vi.mocked(api.mediaStatus).mockResolvedValue(status([
-      { ...KITCHEN, group_members: ['media_player.kitchen', 'media_player.office', 'media_player.den'] },
-      OFFICE,
+      { ...KITCHEN, group_members: ['media_player.kitchen', 'media_player.study', 'media_player.den'] },
+      STUDY,
       TV,
     ]) as never);
     withMa({
-      kitchen: { group_members: ['kitchen', 'office', 'den'], can_group_with: ['office', 'den'] },
+      kitchen: { group_members: ['kitchen', 'study', 'den'], can_group_with: ['study', 'den'] },
     });
     renderSheet(player({ mediaTitle: null, isPlaying: false }));
     await screen.findByTestId('group-members');
@@ -283,13 +286,13 @@ describe('OutputSheet', () => {
     await waitFor(() => expect(sendMaRemoteCommand).toHaveBeenCalledWith('players/cmd/set_members', {
       target_player: 'kitchen',
       player_ids_to_add: [],
-      player_ids_to_remove: ['office', 'den'],
+      player_ids_to_remove: ['study', 'den'],
     }));
   });
 
   it('says so when nothing can play in sync with the leader', async () => {
     renderSheet();
-    await screen.findByText('Office Speaker');
+    await screen.findByText('Study Speaker');
     expect(screen.queryByRole('checkbox', { name: /Group/ })).toBeNull();
     expect(screen.getByText('No other speaker can play in sync with This device.')).toBeTruthy();
   });
@@ -320,7 +323,7 @@ describe('OutputSheet', () => {
     vi.mocked(api.getIntegrationsStatus).mockResolvedValue({ homehub: { enabled: false }, home_assistant: { enabled: false } } as never);
     renderSheet();
 
-    expect(await screen.findByText('Office Speaker')).toBeTruthy();
+    expect(await screen.findByText('Study Speaker')).toBeTruthy();
     expect(screen.getByText('Kitchen Speaker')).toBeTruthy();
     expect(screen.queryByText('Loft TV')).toBeNull();
     expect(api.mediaStatus).not.toHaveBeenCalled();

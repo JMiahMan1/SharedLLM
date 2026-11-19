@@ -64,62 +64,62 @@ def _patch_ha(monkeypatch, states, calls):
 async def test_feature_supported_play_uses_media_player_service(monkeypatch):
     calls = []
     states = {
-        "media_player.office_tv": _state(
-            "media_player.office_tv",
+        "media_player.study_tv": _state(
+            "media_player.study_tv",
             {"app_id": "com.google.android.youtube.tv", "supported_features": 16384},
         )
     }
     _patch_ha(monkeypatch, states, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "play"))
+    result = await media.handle_media_transport(_request("study_tv", "play"))
 
     assert result.status == "SUCCESS"
     assert calls == [{
         "domain": "media_player",
         "service": "media_play",
-        "entity_id": "media_player.office_tv",
+        "entity_id": "media_player.study_tv",
         "data": None,
     }]
 
 
 async def test_android_play_without_feature_bit_falls_back_to_remote(monkeypatch):
     calls = []
-    states = {"media_player.office_tv": _state("media_player.office_tv", dict(ANDROID_ATTRS))}
+    states = {"media_player.study_tv": _state("media_player.study_tv", dict(ANDROID_ATTRS))}
     _patch_ha(monkeypatch, states, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "play"))
+    result = await media.handle_media_transport(_request("study_tv", "play"))
 
     assert result.status == "SUCCESS"
     assert calls == [{
         "domain": "remote",
         "service": "send_command",
-        "entity_id": "remote.office_tv",
+        "entity_id": "remote.study_tv",
         "data": {"command": ["MEDIA_PLAY"]},
     }]
 
 
 async def test_android_home_uses_remote_command(monkeypatch):
     calls = []
-    states = {"media_player.office_tv": _state("media_player.office_tv", dict(ANDROID_ATTRS))}
+    states = {"media_player.study_tv": _state("media_player.study_tv", dict(ANDROID_ATTRS))}
     _patch_ha(monkeypatch, states, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "home"))
+    result = await media.handle_media_transport(_request("study_tv", "home"))
 
     assert result.status == "SUCCESS"
     assert calls == [{
         "domain": "remote",
         "service": "send_command",
-        "entity_id": "remote.office_tv",
+        "entity_id": "remote.study_tv",
         "data": {"command": ["HOME"]},
     }]
 
 
 async def test_android_unknown_command_fails_without_calls(monkeypatch):
     calls = []
-    states = {"media_player.office_tv": _state("media_player.office_tv", dict(ANDROID_ATTRS))}
+    states = {"media_player.study_tv": _state("media_player.study_tv", dict(ANDROID_ATTRS))}
     _patch_ha(monkeypatch, states, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "seek"))
+    result = await media.handle_media_transport(_request("study_tv", "seek"))
 
     assert result.status == "FAILURE"
     assert "Unsupported Android TV command" in result.message
@@ -173,36 +173,36 @@ async def test_roku_stop_without_feature_bit_fails(monkeypatch):
 async def test_find_cast_sibling_excludes_wrong_bitmask(monkeypatch):
     async def fake_get_states(ha_url, ha_token):
         return [
-            _state("media_player.office_tv", {"friendly_name": "Office TV"}),
+            _state("media_player.study_tv", {"friendly_name": "Study TV"}),
             _state(
-                "media_player.office_tv_chrome",
-                {"friendly_name": "Office TV Chrome", "supported_features": 8424, "cast_type": "cast"},
+                "media_player.study_tv_cast",
+                {"friendly_name": "Study TV Chrome", "supported_features": 8424, "cast_type": "cast"},
             ),
         ]
 
     monkeypatch.setattr(android_tv.ha_client, "get_states", fake_get_states)
 
-    assert await android_tv._find_cast_sibling("http://ha.test", "token", "media_player.office_tv") is None
+    assert await android_tv._find_cast_sibling("http://ha.test", "token", "media_player.study_tv") is None
 
 
 async def test_find_cast_sibling_returns_play_media_candidate(monkeypatch):
     async def fake_get_states(ha_url, ha_token):
         return [
-            _state("media_player.office_tv", {"friendly_name": "Office TV"}),
+            _state("media_player.study_tv", {"friendly_name": "Study TV"}),
             _state(
-                "media_player.office_tv_chrome",
-                {"friendly_name": "Office TV Chrome", "supported_features": 512, "cast_type": "cast"},
+                "media_player.study_tv_cast",
+                {"friendly_name": "Study TV Chrome", "supported_features": 512, "cast_type": "cast"},
             ),
         ]
 
     monkeypatch.setattr(android_tv.ha_client, "get_states", fake_get_states)
 
-    assert await android_tv._find_cast_sibling("http://ha.test", "token", "media_player.office_tv") == "media_player.office_tv_chrome"
+    assert await android_tv._find_cast_sibling("http://ha.test", "token", "media_player.study_tv") == "media_player.study_tv_cast"
 
 
 def _patch_ha_standard(monkeypatch, calls):
     async def fake_get_state(ha_url, ha_token, entity_id):
-        return _state(entity_id, {"friendly_name": "Office TV", "supported_features": 0})
+        return _state(entity_id, {"friendly_name": "Study TV", "supported_features": 0})
 
     async def fake_call_service(ha_url, ha_token, domain, service, entity_id, data=None):
         calls.append({
@@ -221,13 +221,13 @@ async def test_shuffle_set_uses_media_player_service(monkeypatch):
     calls = []
     _patch_ha_standard(monkeypatch, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "shuffle_set", shuffle=True))
+    result = await media.handle_media_transport(_request("study_tv", "shuffle_set", shuffle=True))
 
     assert result.status == "SUCCESS"
     assert calls == [{
         "domain": "media_player",
         "service": "shuffle_set",
-        "entity_id": "media_player.office_tv",
+        "entity_id": "media_player.study_tv",
         "data": {"shuffle": True},
     }]
 
@@ -236,7 +236,7 @@ async def test_shuffle_set_requires_shuffle_value(monkeypatch):
     calls = []
     _patch_ha_standard(monkeypatch, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "shuffle_set"))
+    result = await media.handle_media_transport(_request("study_tv", "shuffle_set"))
 
     assert result.status == "FAILURE"
     assert "shuffle_set requires shuffle" in result.message
@@ -247,13 +247,13 @@ async def test_repeat_set_uses_media_player_service(monkeypatch):
     calls = []
     _patch_ha_standard(monkeypatch, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "repeat_set", repeat="all"))
+    result = await media.handle_media_transport(_request("study_tv", "repeat_set", repeat="all"))
 
     assert result.status == "SUCCESS"
     assert calls == [{
         "domain": "media_player",
         "service": "repeat_set",
-        "entity_id": "media_player.office_tv",
+        "entity_id": "media_player.study_tv",
         "data": {"repeat": "all"},
     }]
 
@@ -262,7 +262,7 @@ async def test_repeat_set_requires_repeat_value(monkeypatch):
     calls = []
     _patch_ha_standard(monkeypatch, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "repeat_set"))
+    result = await media.handle_media_transport(_request("study_tv", "repeat_set"))
 
     assert result.status == "FAILURE"
     assert "repeat_set requires repeat" in result.message
@@ -274,14 +274,14 @@ async def test_join_uses_media_player_service(monkeypatch):
     _patch_ha_standard(monkeypatch, calls)
 
     result = await media.handle_media_transport(
-        _request("office_tv", "join", group_members=["media_player.kitchen"]),
+        _request("study_tv", "join", group_members=["media_player.kitchen"]),
     )
 
     assert result.status == "SUCCESS"
     assert calls == [{
         "domain": "media_player",
         "service": "join",
-        "entity_id": "media_player.office_tv",
+        "entity_id": "media_player.study_tv",
         "data": {"group_members": ["media_player.kitchen"]},
     }]
 
@@ -290,7 +290,7 @@ async def test_join_requires_group_members(monkeypatch):
     calls = []
     _patch_ha_standard(monkeypatch, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "join"))
+    result = await media.handle_media_transport(_request("study_tv", "join"))
 
     assert result.status == "FAILURE"
     assert "join requires group_members" in result.message
@@ -301,13 +301,13 @@ async def test_unjoin_uses_media_player_service(monkeypatch):
     calls = []
     _patch_ha_standard(monkeypatch, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", "unjoin"))
+    result = await media.handle_media_transport(_request("study_tv", "unjoin"))
 
     assert result.status == "SUCCESS"
     assert calls == [{
         "domain": "media_player",
         "service": "unjoin",
-        "entity_id": "media_player.office_tv",
+        "entity_id": "media_player.study_tv",
         "data": None,
     }]
 
@@ -323,16 +323,16 @@ from pydantic import ValidationError  # noqa: E402
 async def test_android_dpad_keys_are_real_remote_keys(monkeypatch, key, atv):
     """The Remote page's arrows used to all send "home"; each key must reach the TV."""
     calls = []
-    states = {"media_player.office_tv": _state("media_player.office_tv", dict(ANDROID_ATTRS))}
+    states = {"media_player.study_tv": _state("media_player.study_tv", dict(ANDROID_ATTRS))}
     _patch_ha(monkeypatch, states, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", key))
+    result = await media.handle_media_transport(_request("study_tv", key))
 
     assert result.status == "SUCCESS"
     assert calls == [{
         "domain": "remote",
         "service": "send_command",
-        "entity_id": "remote.office_tv",
+        "entity_id": "remote.study_tv",
         "data": {"command": [atv]},
     }]
 
@@ -353,16 +353,16 @@ async def test_power_uses_turn_on_off_when_advertised(monkeypatch, command, serv
     """TURN_ON (128) / TURN_OFF (256) beat a brand POWER toggle, which can't tell on from off."""
     calls = []
     attrs = {"app_id": "com.google.android.youtube.tv", "supported_features": 128 | 256}
-    states = {"media_player.office_tv": _state("media_player.office_tv", attrs)}
+    states = {"media_player.study_tv": _state("media_player.study_tv", attrs)}
     _patch_ha(monkeypatch, states, calls)
 
-    result = await media.handle_media_transport(_request("office_tv", command))
+    result = await media.handle_media_transport(_request("study_tv", command))
 
     assert result.status == "SUCCESS"
     assert calls == [{
         "domain": "media_player",
         "service": service,
-        "entity_id": "media_player.office_tv",
+        "entity_id": "media_player.study_tv",
         "data": None,
     }]
 
@@ -381,11 +381,11 @@ async def test_generic_power_off_calls_a_real_ha_service(monkeypatch):
 
 def test_unknown_transport_command_is_rejected():
     with pytest.raises(ValidationError):
-        _request("office_tv", "unmute")
+        _request("study_tv", "unmute")
 
 
 async def test_remote_keys_go_to_the_device_registry_companion(monkeypatch):
-    """Live: media_player.office_tv is driven by remote.office_tv_remote. HA says
+    """Live: media_player.study_tv is driven by remote.study_tv_remote. HA says
     "ok" to a call on a remote that does not exist, so a guessed name failed silently."""
     from services.execution import ha_client
 
@@ -393,18 +393,18 @@ async def test_remote_keys_go_to_the_device_registry_companion(monkeypatch):
 
     async def registry(ha_url, ha_token, template):
         templates.append(template)
-        return "remote.office_tv_remote"
+        return "remote.study_tv_remote"
 
     monkeypatch.setattr(ha_client, "_render_template", registry)
     calls = []
-    states = {"media_player.office_tv": _state("media_player.office_tv", dict(ANDROID_ATTRS))}
+    states = {"media_player.study_tv": _state("media_player.study_tv", dict(ANDROID_ATTRS))}
     _patch_ha(monkeypatch, states, calls)
 
-    await media.handle_media_transport(_request("office_tv", "up"))
-    await media.handle_media_transport(_request("office_tv", "down"))
+    await media.handle_media_transport(_request("study_tv", "up"))
+    await media.handle_media_transport(_request("study_tv", "down"))
 
-    assert [c["entity_id"] for c in calls] == ["remote.office_tv_remote", "remote.office_tv_remote"]
-    assert "device_id('media_player.office_tv')" in templates[0]
+    assert [c["entity_id"] for c in calls] == ["remote.study_tv_remote", "remote.study_tv_remote"]
+    assert "device_id('media_player.study_tv')" in templates[0]
     assert len(templates) == 1  # cached: one lookup, not one per key press
 
 
@@ -413,12 +413,12 @@ async def test_companion_remote_falls_back_to_a_matching_name(monkeypatch):
 
     async def states(ha_url, ha_token):
         return [
-            _state("media_player.taylors_tv", {"friendly_name": "Taylors TV"}),
-            _state("remote.tcl_roku_tv", {"friendly_name": "Taylors TV Roku"}),
+            _state("media_player.playroom_tv", {"friendly_name": "Playroom TV"}),
+            _state("remote.tcl_roku_tv", {"friendly_name": "Playroom TV Roku"}),
         ]
 
     monkeypatch.setattr(ha_client, "get_states", states)
-    assert await ha_client.find_companion_remote("http://ha.test", "t", "media_player.taylors_tv") == "remote.tcl_roku_tv"
+    assert await ha_client.find_companion_remote("http://ha.test", "t", "media_player.playroom_tv") == "remote.tcl_roku_tv"
 
 
 async def test_companion_remote_never_templates_an_unsafe_entity_id(monkeypatch):
@@ -437,10 +437,10 @@ async def test_companion_remote_never_templates_an_unsafe_entity_id(monkeypatch)
 
 # A Cast TV playing Music Assistant's stream: the Cast entity cannot skip a
 # track (HA answered 400 Bad Request), its Music Assistant twin holds the queue.
-CAST_ATTRS = {"friendly_name": "Master Bedroom TV", "app_id": "CC1AD845", "supported_features": 152463}
+CAST_ATTRS = {"friendly_name": "Guest Room TV", "app_id": "CC1AD845", "supported_features": 152463}
 MA_TWIN_ATTRS = {
-    "friendly_name": "Master Bedroom TV", "app_id": "music_assistant",
-    "active_queue": "media_player.master_bedroom_tv", "supported_features": 7796671,
+    "friendly_name": "Guest Room TV", "app_id": "music_assistant",
+    "active_queue": "media_player.guest_room_tv", "supported_features": 7796671,
 }
 
 
@@ -448,8 +448,8 @@ def _cast_with_twin(monkeypatch, twin_state):
     from services.execution import ha_client
 
     states = {
-        "media_player.master_bedroom_tv": _state("media_player.master_bedroom_tv", CAST_ATTRS, "playing"),
-        "media_player.master_bedroom_tv_2": _state("media_player.master_bedroom_tv_2", MA_TWIN_ATTRS, twin_state),
+        "media_player.guest_room_tv": _state("media_player.guest_room_tv", CAST_ATTRS, "playing"),
+        "media_player.guest_room_tv_2": _state("media_player.guest_room_tv_2", MA_TWIN_ATTRS, twin_state),
     }
     calls: list = []
     _patch_ha(monkeypatch, states, calls)
@@ -465,20 +465,20 @@ def _cast_with_twin(monkeypatch, twin_state):
 @pytest.mark.parametrize("command,service", [("next", "media_next_track"), ("previous", "media_previous_track")])
 async def test_skip_on_a_cast_tv_goes_to_its_music_assistant_queue(monkeypatch, command, service):
     calls = _cast_with_twin(monkeypatch, "playing")
-    result = await media.handle_media_transport(_request("media_player.master_bedroom_tv", command))
+    result = await media.handle_media_transport(_request("media_player.guest_room_tv", command))
     assert result.status == "SUCCESS"
-    assert calls == [{"domain": "media_player", "service": service, "entity_id": "media_player.master_bedroom_tv_2", "data": None}]
+    assert calls == [{"domain": "media_player", "service": service, "entity_id": "media_player.guest_room_tv_2", "data": None}]
 
 
 @pytest.mark.asyncio
 async def test_pause_stays_on_the_tv_when_music_assistant_is_not_playing_there(monkeypatch):
     calls = _cast_with_twin(monkeypatch, "idle")
-    await media.handle_media_transport(_request("media_player.master_bedroom_tv", "pause"))
-    assert [c["entity_id"] for c in calls] == ["media_player.master_bedroom_tv"]
+    await media.handle_media_transport(_request("media_player.guest_room_tv", "pause"))
+    assert [c["entity_id"] for c in calls] == ["media_player.guest_room_tv"]
 
 
 @pytest.mark.asyncio
 async def test_volume_stays_on_the_tv(monkeypatch):
     calls = _cast_with_twin(monkeypatch, "playing")
-    await media.handle_media_transport(_request("media_player.master_bedroom_tv", "volume_set", volume_level=0.3))
-    assert [c["entity_id"] for c in calls] == ["media_player.master_bedroom_tv"]
+    await media.handle_media_transport(_request("media_player.guest_room_tv", "volume_set", volume_level=0.3))
+    assert [c["entity_id"] for c in calls] == ["media_player.guest_room_tv"]

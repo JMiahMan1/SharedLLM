@@ -35,17 +35,35 @@ def test_the_host_comes_from_the_environment_not_the_file():
 def test_only_the_companion_apps_paths_reach_the_hub():
     site = _site()
     matcher = re.search(r"@companion path (.+)", site).group(1).split()
-    assert matcher == ["/api/webhook/*", "/api/mobile_app/registrations", "/auth/*", "/api/websocket"]
+    # The app's own paths, plus the pictures and audio a notification links to: each of those is guarded by
+    # the hub itself (a rotating token, or a bearer token and may_view; a TTS clip's unguessable name).
+    assert matcher == ["/api/webhook/*", "/api/mobile_app/registrations", "/auth/*", "/api/websocket",
+                       "/api/camera_proxy/*", "/api/camera_proxy_stream/*", "/api/image_proxy/*",
+                       "/api/tts_proxy/*"]
     assert site.count("reverse_proxy") == 1  # nothing else is proxied
     assert re.search(r"handle \{\s*respond 404\s*\}", site)
-    for blocked in ("/hub", "/api/states", "/api/services", "/api/camera_proxy", "/api/template"):
-        assert blocked not in site
+    code = "\n".join(line for line in site.splitlines() if not line.strip().startswith("#"))
+    for blocked in ("/hub", "/api/states", "/api/services", "/api/template", "/api/config", "/api/history"):
+        assert blocked not in code
+
+
+def _log_redaction():
+    """The access log's URI filter, as Python: the pattern, and Go's ``${1}`` as ``\\g<1>``."""
+    m = re.search(r"request>uri regexp (\S+) (\S+)", _site())
+    return re.compile(m.group(1)), m.group(2).replace("${1}", r"\g<1>")
 
 
 def test_webhook_ids_and_tokens_stay_out_of_the_access_log():
     site = _site()
-    assert "request>uri regexp ^/api/webhook/[^/?]+ /api/webhook/REDACTED" in site
-    assert "request>headers>Authorization delete" in site
+    pattern, repl = _log_redaction()
+    secret = "ab" * 32
+    assert pattern.sub(repl, f"/api/webhook/{secret}") == "/api/webhook/REDACTED"
+    assert pattern.sub(repl, f"/api/tts_proxy/{secret}.wav") == "/api/tts_proxy/REDACTED"
+    assert pattern.sub(repl, f"/api/camera_proxy/camera.door?token={secret}&width=640") == \
+        "/api/camera_proxy/camera.door?token=REDACTED&width=640"
+    assert pattern.sub(repl, "/api/websocket") == "/api/websocket"
+    for header in ("Authorization", "X-Internal-Secret", "X-Api-Key", "X-Webhook-Secret", "Cookie"):
+        assert f"request>headers>{header} delete" in site
 
 
 def test_compose_gives_caddy_the_host_name_and_a_way_to_the_hub():

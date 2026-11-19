@@ -8,7 +8,7 @@ not ask again; the websocket TV also needs the ``token`` from the entry.
 Volume and mute go through UPnP RenderingControl at the entry's
 ``ssdp_rendering_control_location``, as HA does, because neither remote
 protocol can read the volume. Power on is Wake-on-LAN to every MAC the
-registry knows (the Q900 wakes on LAN; the 2012 EH5300 generally does not).
+registry knows (a 2016+ Tizen set wakes on LAN; a 2011-2015 Orsay set generally does not).
 URLs play through the same UPnP device's AVTransport when it has one.
 
 What the TV is comes from the TV: the websocket models' REST ``/api/v2/``
@@ -36,7 +36,15 @@ from samsungtvws.exceptions import ConnectionFailure, UnauthorizedError
 from samsungtvws.legacy.remote import SamsungTVLegacyAsyncRemote
 from samsungtvws.remote import ChannelEmitCommand, SendRemoteKey
 
-from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
+from services.homehub.core import (
+    AuthRequired,
+    DeviceUnavailable,
+    Driver,
+    EntityEntry,
+    HubError,
+    ServiceNotFound,
+    SetupError,
+)
 from services.homehub.drivers.media_common import (
     F,
     Http,
@@ -126,7 +134,8 @@ class LegacyBridge:
                     await asyncio.sleep(delay)
                 await remote.control(key)
         except UnauthorizedError as exc:
-            raise HubError(f"the TV refused the remote: allow '{HA_NAME}' on its screen ({exc})") from exc
+            raise AuthRequired(f"the TV refused the remote: allow '{HA_NAME}' on its screen ({exc})",
+                               needs="pairing") from exc
         except ConnectionFailure as exc:
             raise DeviceUnavailable(f"Samsung {self.host} did not answer: {exc}") from exc
         finally:
@@ -222,7 +231,8 @@ class WebsocketBridge:
                 await self.remote.open()
             except UnauthorizedError as exc:
                 self.remote = None
-                raise HubError(f"Samsung {self.host} refused the token; allow '{HA_NAME}' on the TV") from exc
+                raise AuthRequired(f"Samsung {self.host} refused the token; allow '{HA_NAME}' on the TV",
+                                   needs="pairing") from exc
             except (ConnectionFailure, OSError, TimeoutError) as exc:
                 self.remote = None
                 raise DeviceUnavailable(f"Samsung {self.host} did not answer: {exc}") from exc
@@ -292,7 +302,7 @@ class SamsungTVDriver(Driver):
 
     async def async_setup(self) -> None:
         if not self.host:
-            raise HubError("samsungtv entry has no host")
+            raise SetupError("samsungtv entry has no host")
         await self.refresh()
 
     async def async_poll(self) -> None:
@@ -334,6 +344,8 @@ class SamsungTVDriver(Driver):
             return
         try:
             apps = await self.bridge.app_list()
+        except AuthRequired:
+            raise  # the TV refused the hub: the runtime parks the entry until it is allowed again
         except HubError as exc:
             self.log.debug("Samsung %s did not list its apps: %s", self.host, exc)
             return

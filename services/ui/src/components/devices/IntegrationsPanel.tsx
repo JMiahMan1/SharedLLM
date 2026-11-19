@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
-  ChevronDown, ChevronRight, ExternalLink, Loader2, Pencil, Plug, Power, RefreshCw, RotateCw, Settings2, Trash2, Wrench,
+  ChevronDown, ChevronRight, ExternalLink, KeyRound, Loader2, Pencil, Plug, Power, RefreshCw, RotateCw, Settings2, Trash2,
+  Wrench,
 } from 'lucide-react';
 import Modal from '../ui/Modal';
 import AdoptDeviceDialog from './AdoptDeviceDialog';
@@ -12,6 +13,7 @@ import {
   failureText,
   getBuilderLink,
   entriesNeedingAttention,
+  entryNeedsText,
   getEntries,
   getManualFlows,
   offlineSince,
@@ -157,9 +159,20 @@ export default function IntegrationsPanel() {
                   >
                     <span className="block truncate text-sm font-semibold text-amber-100">{entry.title}</span>
                     <span className="block truncate text-xs text-slate-400">
-                      {[entry.label, offlineSince(entry.offline_since)].filter(Boolean).join(' · ')}
+                      {[entry.label, entryNeedsText(entry) || offlineSince(entry.offline_since)].filter(Boolean).join(' · ')}
                     </span>
                   </button>
+                  {(entry.needs === 'password' || entry.needs === 'login')
+                    && entry.reconfigure.some((f) => f.key === 'password') && (
+                    <button
+                      type="button"
+                      onClick={() => setEditing(entry)}
+                      className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white"
+                      aria-label={`Enter the ${entry.needs === 'login' ? 'login' : 'web password'} of ${entry.title}`}
+                    >
+                      <KeyRound size={14} /> Enter password
+                    </button>
+                  )}
                   {!entry.shared && (
                     <button
                       type="button"
@@ -253,7 +266,9 @@ export default function IntegrationsPanel() {
                   )}
                 </span>
               </div>
-              {entry.reason && entry.state !== 'loaded' && <p className="mt-1 text-xs text-amber-300/80">{entry.reason}</p>}
+              {entry.reason && entry.state !== 'loaded' && (
+                <p className="mt-1 text-xs text-amber-300/80" data-testid="integration-reason">{entryNeedsText(entry) || entry.reason}</p>
+              )}
               {isOpen && (
                 <ul className="mt-2 space-y-2 pl-5">
                   {entry.devices.length === 0 && <li className="text-xs text-slate-500">No devices.</li>}
@@ -344,6 +359,11 @@ function ReconfigureDialog({ entry, onClose, onSaved }: { entry: HubEntry; onClo
   return (
     <Modal isOpen onClose={onClose} title={`Reconfigure ${entry.title}`} size="md">
       <form className="space-y-3" data-testid="reconfigure-dialog" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        {entry.needs === 'password' && (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100" role="status">
+            The device asks for its web password. Enter it below; when the device answers, the hub tries it before saving.
+          </p>
+        )}
         <label className="block text-xs text-slate-400">
           Name
           <input className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
@@ -371,7 +391,7 @@ function ReconfigureDialog({ entry, onClose, onSaved }: { entry: HubEntry; onClo
                 value={values[f.key] || ''}
                 placeholder={f.type === 'password' && f.set ? 'Unchanged' : undefined}
                 onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                autoComplete="off"
+                autoComplete={f.type === 'password' ? 'new-password' : 'off'}
                 spellCheck={false}
               />
               {f.help && <span className="mt-1 block text-[11px] text-slate-500">{f.help}</span>}

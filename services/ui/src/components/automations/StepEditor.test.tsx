@@ -31,7 +31,7 @@ const CATALOG: Catalog = {
     ] },
     { type: 'parallel', label: 'Run steps at the same time', fields: [] },
   ],
-  devices: [{ id: 'dev1', name: 'Desk lamp', area: 'Office' }],
+  devices: [{ id: 'dev1', name: 'Desk lamp', area: 'Study' }],
   services: [{ domain: 'light', services: { turn_on: { fields: { brightness_pct: { name: 'Brightness', selector: { number: {} } } } } } }],
   entities: [
     { entity_id: 'light.porch', name: 'Porch light', domain: 'light' },
@@ -130,7 +130,7 @@ describe('StepList', () => {
     render(<Harness group="action" initial={[{ device_id: '', domain: 'light', type: '' }]} onChange={onChange} />);
     await userEvent.selectOptions(screen.getByRole('combobox', { name: /^Device/ }), 'dev1');
     expect(onChange).toHaveBeenLastCalledWith([{ device_id: 'dev1', domain: 'light', type: '' }]);
-    expect(screen.getByRole('option', { name: 'Desk lamp (Office)' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Desk lamp (Study)' })).toBeTruthy();
   });
 
   it('runs steps in parallel as a nested list', async () => {

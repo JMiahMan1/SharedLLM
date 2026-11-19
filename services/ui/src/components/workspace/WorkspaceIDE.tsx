@@ -1605,7 +1605,7 @@ export default function WorkspaceIDE({
   const statusMission = missions[0];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0e1a] text-slate-200">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0e1a] text-slate-200 safe-area-top safe-area-bottom">
       {/* Title bar */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-[#0d1222]">
         <div className="flex items-center gap-2 min-w-0">
@@ -1618,7 +1618,7 @@ export default function WorkspaceIDE({
         <div className="flex items-center gap-1">
           <button
             onClick={() => setShowSecrets(true)}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+            className="flex items-center justify-center p-1.5 pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
             aria-label="Secrets & Environment"
             title="Secrets & Environment"
           >
@@ -1626,7 +1626,7 @@ export default function WorkspaceIDE({
           </button>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+            className="flex items-center justify-center p-1.5 pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
             aria-label="Close"
           >
             <X size={18} />
@@ -1843,7 +1843,7 @@ export default function WorkspaceIDE({
                           e.stopPropagation();
                           deleteEntry(entry);
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-400 rounded"
+                        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 p-1 pointer-coarse:min-h-9 pointer-coarse:min-w-9 flex items-center justify-center text-slate-500 hover:text-red-400 rounded"
                         title="Delete"
                       >
                         <Trash2 size={13} />
@@ -1868,7 +1868,7 @@ export default function WorkspaceIDE({
                 <span className="text-xs text-slate-400">
                   {gitStatus?.branch ? `Branch: ${gitStatus.branch}` : 'Not a git repo'}
                 </span>
-                <button onClick={refreshGit} disabled={gitBusy || !gitEnabled} className="p-1 text-slate-400 hover:text-white disabled:opacity-30" title="Refresh">
+                <button onClick={refreshGit} disabled={gitBusy || !gitEnabled} className="flex items-center justify-center p-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-white disabled:opacity-30 rounded" title="Refresh">
                   <RefreshCw size={14} className={gitBusy ? 'animate-spin' : ''} />
                 </button>
               </div>
@@ -2087,7 +2087,7 @@ export default function WorkspaceIDE({
                           e.stopPropagation();
                           void deleteChat(c.id);
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-red-400 rounded"
+                        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 p-0.5 pointer-coarse:min-h-9 pointer-coarse:min-w-9 flex items-center justify-center text-slate-500 hover:text-red-400 rounded"
                       >
                         <X size={12} />
                       </button>
@@ -2209,7 +2209,7 @@ export default function WorkspaceIDE({
                         e.stopPropagation();
                         closeTab(t.path);
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-red-400 rounded"
+                      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 p-0.5 pointer-coarse:min-h-8 pointer-coarse:min-w-8 flex items-center justify-center text-slate-500 hover:text-red-400 rounded"
                       title="Close tab"
                     >
                       <X size={12} />
@@ -2226,20 +2226,20 @@ export default function WorkspaceIDE({
                       <span className="text-sm text-slate-300 truncate">{active.path}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <button onClick={downloadImage} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="Download">
+                      <button onClick={downloadImage} className="flex items-center justify-center p-1.5 pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="Download">
                         <Download size={15} />
                       </button>
                     </div>
                   </div>
-                  <div className="flex-1 min-h-0 flex">
-                    <div className="flex-1 min-w-0 flex items-center justify-center bg-black/40 p-4 overflow-auto">
+                  <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+                    <div className="flex-1 min-w-0 min-h-0 flex items-center justify-center bg-black/40 p-4 overflow-auto">
                       {active.imageUrl ? (
                         <ImageViewer url={active.imageUrl} />
                       ) : (
                         <span className="text-sm text-slate-600">No preview</span>
                       )}
                     </div>
-                    <div className="w-80 shrink-0 border-l border-white/10 bg-[#0c1120] overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
+                    <div className="w-full lg:w-80 shrink-0 max-h-[45dvh] lg:max-h-none border-t lg:border-t-0 lg:border-l border-white/10 bg-[#0c1120] overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
                       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500">
                         <Wand2 size={13} className="text-indigo-400" /> Stable Diffusion
                       </div>

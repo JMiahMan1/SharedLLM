@@ -82,7 +82,7 @@ async def handle_media_status(req: MediaStatusRequest, perms: EntityPermissions 
 
         # Music Assistant players are preferred for the "active" slot, but we
         # must not drop cast/Chrome/HA players that carry real now-playing
-        # metadata; otherwise Office TV shows "No Active Playback" while
+        # metadata; otherwise a Cast TV shows "No Active Playback" while
         # transport still works via entity_id.
         is_ma = is_music_assistant_player(attrs, entity_id)
         has_metadata = bool(media_title or media_artist or media_album or entity_picture)

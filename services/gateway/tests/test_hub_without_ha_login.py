@@ -21,7 +21,7 @@ STATES = [
      "attributes": {"friendly_name": "Shopping List", "supported_features": 15}},
     {"entity_id": "todo.workshop", "state": "0", "attributes": {"friendly_name": "Workshop", "supported_features": 15}},
     {"entity_id": "light.den", "state": "on", "attributes": {}},
-    {"entity_id": "light.office", "state": "on", "attributes": {}},
+    {"entity_id": "light.study", "state": "on", "attributes": {}},
 ]
 
 
@@ -101,7 +101,7 @@ def test_lists_are_read_and_written_with_the_hubs_login(client, upstream, no_log
 
 def test_dashboard_settings_no_longer_503_and_hide_what_the_caller_may_not_see(client, upstream, no_login):
     mock_upstream(upstream, "GET", f"{HUB}/api/homehub/dashboard/prefs", payload={
-        "climate_power": {"climate.hall": ["sensor.hall_power"]}, "hidden": ["light.den", "light.office"]})
+        "climate_power": {"climate.hall": ["sensor.hall_power"]}, "hidden": ["light.den", "light.study"]})
     resp = client.get("/api/dashboard/prefs")
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"climate_power": {}, "hidden": ["light.den"]}
@@ -116,7 +116,7 @@ def test_a_player_picture_comes_through_the_hub_only_for_a_player_the_caller_may
     assert ok.status_code == 200
     assert _auth(upstream, "GET", f"{HUB}/api/media_player_proxy") == [f"Bearer {SECRET}"]
     other = client.get("/api/media/imageproxy",
-                       params={"path": "/api/media_player_proxy/light.office", "service": "ha"})
+                       params={"path": "/api/media_player_proxy/light.study", "service": "ha"})
     assert other.status_code == 403
     states = client.get("/api/media/imageproxy", params={"path": "/api/states", "service": "ha"})
     assert states.status_code == 403
@@ -131,11 +131,11 @@ def test_the_media_stream_uses_the_hubs_login_and_publishes_only_visible_players
     published = []
     hub = media_events.MediaEventHub("kid")
     monkeypatch.setattr(hub, "ingest_ha_state", published.append)
-    (source,) = media_events._build_sources(hub, {"user": "kid"}, lambda eid: eid == "media_player.kids_room")
+    (source,) = media_events._build_sources(hub, {"user": "kid"}, lambda eid: eid == "media_player.playroom")
     assert (source._ha_url, source._ha_token) == (HUB, SECRET)
-    source._on_state({"entity_id": "media_player.kids_room", "state": "playing"})
-    source._on_state({"entity_id": "media_player.office", "state": "playing"})
-    assert [s["entity_id"] for s in published] == ["media_player.kids_room"]
+    source._on_state({"entity_id": "media_player.playroom", "state": "playing"})
+    source._on_state({"entity_id": "media_player.study", "state": "playing"})
+    assert [s["entity_id"] for s in published] == ["media_player.playroom"]
 
 
 def test_without_any_hub_the_media_stream_has_no_hub_source(monkeypatch):

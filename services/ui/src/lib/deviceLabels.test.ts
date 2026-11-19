@@ -83,7 +83,7 @@ describe('parseMaPlayerList', () => {
   const prodReply = {
     result: [
       { player_id: 'wsp-9mn', name: BLOB_NAME, available: true, state: 'idle', powered: true },
-      { player_id: 'loft-samsung-q900', name: 'Loft Samsung Q900', available: false, state: 'off' },
+      { player_id: 'attic-samsung-qled', name: 'Attic Samsung QLED', available: false, state: 'off' },
       { player_id: 'sendspin-js', name: 'Sendspin JS Client (u9mn)' },
       { player_id: 'no-name-here', available: true },
       { name: 'missing an id entirely' },

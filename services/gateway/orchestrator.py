@@ -51,6 +51,21 @@ VOICE_HISTORY_MESSAGES = 4
 VOICE_HISTORY_CHARS = 400
 
 
+#: The place a request ends on: "... on the den speaker", "... in the sunroom" (any wording a household uses).
+_TRAILING_PLACE_RE = re.compile(r"\b(?:on|to|in|via|using)\s+the\s+([A-Za-z][A-Za-z' ]*?)\s*[.!?]*\s*$", re.IGNORECASE)
+
+
+def _trailing_place(query: str) -> str | None:
+    """The place a request ends on ("play jazz in the den" -> "den"), or None.
+
+    Nothing here knows any room: execution matches what was said against the
+    hub's areas (names and aliases) and then its device names, so every
+    household's own rooms work without a list of room words in code.
+    """
+    m = _TRAILING_PLACE_RE.search(query or "")
+    return m.group(1).strip() if m else None
+
+
 def _voice_history(history: list, query: str = "") -> list:
     """The last exchanges of a spoken conversation, each cut to a sentence or two.
 
@@ -672,7 +687,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     else:
         # Librarian handles standard single-turn inference
         try:
-            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note)
+            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")))
         except InferenceUnavailable as exc:
             # A mission and the voice assistant have no status code to report
             # on: the answer field is the only channel they have, so the old
@@ -1446,13 +1461,11 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     payload["action"] = "list"
 
             if action == "announcementrequest" and not payload.get("entity_id") and not payload.get("device_name"):
-                device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Z][A-Za-z\s]+?)(?:\s+(?:speaker|tv|device|display|cast|chrome))", query)
-                if not device_match:
-                    device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?((?:Office|Living Room|Loft|Bedroom|Kitchen|Bathroom)[A-Za-z\s]*?)(?:\b)", query)
-                if device_match:
-                    device_name = device_match.group(1).strip()
-                    if not any(t in device_name.lower() for t in ["tv", "speaker", "display", "cast", "chrome"]):
-                        type_match = re.search(r"(speaker|tv|display|cast|chrome)", query, re.IGNORECASE)
+                device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Z][A-Za-z\s]+?)(?:\s+(?:speaker|tv|device|display|chromecast|cast))", query)
+                device_name = device_match.group(1).strip() if device_match else _trailing_place(query)
+                if device_name:
+                    if not any(t in device_name.lower() for t in ["tv", "speaker", "display", "cast"]):
+                        type_match = re.search(r"(speaker|tv|display|chromecast|cast)", query, re.IGNORECASE)
                         if type_match:
                             device_name += " " + type_match.group(1)
                     payload["device_name"] = device_name
@@ -1466,15 +1479,13 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                 if "podcast" in query.lower() and not payload.get("media_type"):
                     payload["media_type"] = "podcast"
                 if not payload.get("entity_id") and not payload.get("device_name"):
-                    device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Za-z\s]+?)\s+\b(speaker|tv|device|display|cast|chrome)\b", query, re.IGNORECASE)
+                    device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Za-z\s]+?)\s+\b(speaker|tv|device|display|chromecast|cast)\b", query, re.IGNORECASE)
                     if device_match:
                         device_base = device_match.group(1).strip().title()
                         device_type = device_match.group(2).strip().title()
                         payload["device_name"] = f"{device_base} {device_type}"
-                    else:
-                        device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?\b((?:Office|Living Room|Loft|Bedroom|Kitchen|Bathroom)[A-Za-z\s]*?)\b", query, re.IGNORECASE)
-                        if device_match:
-                            payload["device_name"] = device_match.group(1).strip().title()
+                    elif place := _trailing_place(query):
+                        payload["device_name"] = place.title()
 
             if action == "noterequest" and not payload.get("action"):
                 if payload.get("content") or payload.get("title"):
@@ -1755,8 +1766,11 @@ def _speaker_line(creds: ResolvedCredentials | None) -> str:
     return f"Speaker: {user}{how}."
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "") -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False) -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
+
+    ``speech_stream`` (a voice satellite) sends ``chunk_callback`` only whole sentences that are safe
+    to say before the answer is finished (``speech_stream.SpeechGate``), never raw model words.
 
     ``event_callback`` receives the turn as it happens, in the part shapes a
     session transcript stores (OpenCode's message parts): ``step``,
@@ -1828,6 +1842,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     #: Every device tool run in this turn, with its result: what an answer may claim (device_claims).
     device_runs: list[tuple[str, str]] = []
+    gate = None
+    if speech_stream and chunk_callback and not event_callback:
+        from services.gateway.speech_stream import SpeechGate
+
+        gate = SpeechGate(chunk_callback, query)
 
     for turn in range(MAX_TURNS):
         log.info(f"[_single_turn_inference] Turn {turn + 1}/{MAX_TURNS}")
@@ -1849,8 +1868,12 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             turn_callback = chunk_callback
         if event_callback:
             turn_callback = _step_stream(turn + 1)
+        if gate is not None:
+            turn_callback = gate.feed
 
         for retry_count in range(MAX_INFERENCE_RETRIES):
+            if gate is not None:
+                await gate.begin_turn()
             try:
                 data = await call_ollama(
                     {
@@ -1898,7 +1921,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 if not _tc_inner or not _tc_inner.group(1).strip():
                     log.warning("[_single_turn_inference] Empty tool_code detected, retrying with explicit format reminder")
                     messages.append({"role": "assistant", "content": ans})
-                    messages.append({"role": "user", "content": "You output empty tool tags. You MUST emit a JSON object like {\"tool\": \"LightControlRequest\", \"entity_id\": \"light.hall_lamp\", \"action\": \"turn_off\"}. Do not output anything else."})
+                    messages.append({"role": "user", "content": "You output empty tool tags. You MUST emit a JSON object like {\"tool\": \"LightControlRequest\", \"entity_id\": \"light.example_lamp\", \"action\": \"turn_off\"}. Do not output anything else."})
                     continue
 
             # Detect thinking-only response where content was empty outside <think>
@@ -1910,7 +1933,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 continue
 
             # No tool call; this is our final answer
-            if chunk_callback and turn == 0:
+            if chunk_callback and turn == 0 and gate is None:
                 clean_ans = strip_json_from_response(ans)
                 from services.gateway.llm_providers import strip_thinking_blocks
                 clean_ans = honest_reply(query, strip_thinking_blocks(clean_ans), device_runs)
@@ -2075,8 +2098,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         if turn == MAX_TURNS - 1:
             if event_callback:
                 await event_callback({"type": "step", "n": "final"})
+            if gate is not None:
+                await gate.begin_turn()
             closing = await _closing_turn(messages, model, options,
-                                          _step_stream("final") if event_callback else chunk_callback, tool_result)
+                                          _step_stream("final") if event_callback
+                                          else (gate.feed if gate is not None else chunk_callback), tool_result)
             return honest_reply(query, closing, device_runs)
 
     # Final answer processing: strip JSON/thinking artifacts for clean natural language

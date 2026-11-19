@@ -259,7 +259,7 @@ export default function WeekPlan({
 
       {picking && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={`Pick ${picking}'s dinner`} onClick={() => setPicking(null)}>
-          <div className="glass-panel flex max-h-[85vh] w-full max-w-lg flex-col rounded-t-3xl border border-white/10 p-4 pb-[max(1rem,var(--safe-bottom))] sm:rounded-3xl" onClick={(event) => event.stopPropagation()}>
+          <div className="glass-panel flex max-h-[85dvh] w-full max-w-lg flex-col rounded-t-3xl border border-white/10 p-4 pb-[max(1rem,var(--safe-bottom))] sm:rounded-3xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-white"><CalendarDays size={15} /> {picking}&apos;s dinner</h3>
               <button type="button" onClick={() => setPicking(null)} aria-label="Close" className="flex h-11 w-11 items-center justify-center text-slate-400 hover:text-white"><X size={16} /></button>

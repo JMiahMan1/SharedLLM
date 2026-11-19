@@ -21,6 +21,23 @@ const has = (e: Pick<HubEntity, 'attributes'>, bit: number) => (features(e) & bi
 /** The words that say a media player is a TV when its device_class does not. */
 const TV_WORDS = /\b(tv|television|roku|chromecast|apple tv|shield|fire ?tv|projector|bravia|webos|tizen)\b/i;
 
+/** Cover device classes (Home Assistant's) that are a way into the home: opening one lets someone in. */
+export const ENTRANCE_COVER_CLASSES: ReadonlySet<string> = new Set(['garage', 'gate', 'door']);
+
+/**
+ * Is this entity a garage door, gate or door, by its domain and HA device_class (never its name or id)?
+ * The safety checks before opening something ask this.
+ */
+export function isEntranceCover(e: { entity_id: string; attributes?: Record<string, unknown> | null }): boolean {
+  const dc = e.attributes?.device_class;
+  return e.entity_id.split('.')[0] === 'cover' && typeof dc === 'string' && ENTRANCE_COVER_CLASSES.has(dc);
+}
+
+/** Does this service open something people pass through or that locks: a lock, a cover, an entrance? */
+export function opensSomething(domain: string, service: string): boolean {
+  return service === 'unlock' || service === 'open_cover' || (service === 'turn_on' && (domain === 'lock' || domain === 'cover'));
+}
+
 /** Which control an entity gets. */
 export function controlKind(e: Pick<HubEntity, 'domain' | 'device_class' | 'attributes' | 'name'>): ControlKind {
   switch (e.domain) {

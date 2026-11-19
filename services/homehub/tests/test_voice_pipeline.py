@@ -185,6 +185,12 @@ def settings_from_the_test(monkeypatch):
     monkeypatch.setattr(voice_pipeline, "current_settings", VoiceSettings.from_env)
 
 
+@pytest.fixture(autouse=True)
+def loudness_alone(monkeypatch):
+    """The stand-in voice is a tone: whether WebRTC's detector is installed must not decide these tests."""
+    monkeypatch.setattr(voice_pipeline, "speech_classifier", lambda _engine, _mode: None)
+
+
 @pytest.fixture
 def env(monkeypatch):
     for k, v in {"HOMEHUB_VOICE_STT": "127.0.0.1:10310", "HOMEHUB_VOICE_JARVIS_URL": "http://jarvis.example.com",
@@ -323,7 +329,9 @@ async def test_a_question_continues_the_conversation(env, monkeypatch):
     await run_turn(drv, drv._client, [_tone(0.6), _silence(1.0)])
     assert dict(drv._client.events)[E.VOICE_ASSISTANT_INTENT_END]["continue_conversation"] == "1"
     monkeypatch.setenv("HOMEHUB_VOICE_CONTINUE", "0")
-    await run_turn(drv, drv._client, [_tone(0.6), _silence(1.0)])
+    # The node's next run is the follow-up listen: its first half second is not listened to.
+    await run_turn(drv, drv._client, [_silence(0.6), _tone(0.6), _silence(1.0)])
+    assert drv.voice.last_run.follow_up
     assert drv._client.events[-4] == (E.VOICE_ASSISTANT_INTENT_END,
                                       {"conversation_id": "conv-1", "continue_conversation": "0"})
     await drv.async_unload()
@@ -523,7 +531,7 @@ async def test_a_command_that_never_stops_is_cut_at_the_max_duration(env, monkey
     client = drv._client
     await client.handlers["start"]("c", 0, None, None)
     task = drv.voice._task
-    await speak_to(client, [_tone(0.2)])
+    await speak_to(client, [_tone(0.4)])
     await asyncio.sleep(0.4)  # the person keeps talking past the limit; no more audio is needed to end it
     await asyncio.wait_for(task, 5)
     assert drv.voice.last_run.ended_by == "max_duration" and drv.voice.last_run.outcome == "ok"
@@ -611,7 +619,9 @@ async def test_start_conversation_speaks_first_and_the_next_run_knows_the_questi
                             "extra_system_prompt": "The person was asked about the lights."})
     assert drv._client.announced == [{"media_id": URL, "text": "Should I turn off the lights?",
                                       "preannounce_media_id": "", "start_conversation": True}]
-    await run_turn(drv, drv._client, [_tone(0.5), _silence(1.0)], wake=None)
+    # The node listens as soon as it has spoken: the first half second (its chime) is not listened to.
+    await run_turn(drv, drv._client, [_tone(0.5, amplitude=3000), _tone(0.5), _silence(1.0)], wake=None)
+    assert drv.voice.last_run.follow_up
     ctx = be.asked[0][1]
     assert ctx["asked"] == "Should I turn off the lights?" and ctx["started_by"] == "start_conversation"
     assert ctx["extra_system_prompt"] == "The person was asked about the lights."
@@ -808,3 +818,36 @@ async def test_a_wake_word_fixed_in_firmware_is_not_reported_as_missing(env, mon
     st = hub.states.get(WAKE)
     assert st.state == UNAVAILABLE and "fixed in this satellite's firmware" in st.attributes["reason"]
     assert "will not wake" not in caplog.text
+
+
+async def test_a_node_that_asks_for_flac_fetches_the_reply_through_the_ffmpeg_proxy(env, monkeypatch):
+    """The reply URL is converted to the node's announcement format; the audio streamed over the API is not."""
+    from aioesphomeapi import MediaPlayerFormatPurpose, MediaPlayerInfo, MediaPlayerSupportedFormat
+
+    from services.homehub import esphome_audio
+
+    esphome_audio.reset()
+    monkeypatch.setattr(esphome_audio.PROXY, "_have_ffmpeg", True)
+    player = MediaPlayerInfo(object_id="speaker", key=8, name="Speaker", supported_formats=[
+        MediaPlayerSupportedFormat(format="flac", sample_rate=48000, num_channels=1, sample_bytes=2,
+                                   purpose=MediaPlayerFormatPurpose.ANNOUNCEMENT)])
+
+    class Node(VoiceClient):
+        async def device_info_and_list_entities(self):
+            info, _, services = await super().device_info_and_list_entities()
+            return info, [player], services
+
+    be = Backends().install(monkeypatch)
+    streamed = []
+    monkeypatch.setattr(voice_pipeline.BACKENDS, "clip_audio", lambda url: streamed.append(url) or _wav(24000, 0.1))
+    _hub, drv = make_driver(flags=FULL | int(F.SPEAKER))
+    drv._make_client = lambda host: Node(FULL | int(F.SPEAKER))  # type: ignore[method-assign]
+    await drv.async_setup()
+    client = drv._client
+    await run_turn(drv, client, [_silence(0.3), _tone(1.0), _silence(1.0)])
+    url = dict(client.events)[E.VOICE_ASSISTANT_TTS_END]["url"]
+    assert url.startswith(f"http://hub.example.com:8123/api/esphome/ffmpeg_proxy/{drv.entry.entry_id}/")
+    assert url.endswith(".flac") and be.spoken
+    assert streamed == [URL]  # the original clip, for the hub's own stream
+    await drv.async_unload()
+    esphome_audio.reset()

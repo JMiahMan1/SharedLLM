@@ -399,6 +399,20 @@ async def test_login_failure_is_raised_for_retry_and_logged(caplog):
     assert "login with the stored token failed" in caplog.text
 
 
+async def test_revoked_credentials_need_a_new_login_instead_of_retrying():
+    from services.homehub.tests.conftest import make_hub
+    hub, entry = make_hub("roborock", DATA, ENTITIES)
+    driver = RoborockDriver(hub, entry)
+
+    async def create():
+        raise rr.RoborockInvalidCredentials("invalid credentials")
+
+    driver._create_manager = create
+    with pytest.raises(rr.AuthRequired) as raised:
+        await driver.async_setup()
+    assert raised.value.needs == "login"
+
+
 async def test_real_library_builds_params_from_ha_user_data(monkeypatch):
     """The stored ``user_data`` dict goes through UserData.from_dict unchanged."""
     if rr.create_device_manager is None:

@@ -108,12 +108,12 @@ _sweep_cache: dict[str, Any] = {"at": 0.0, "key": "", "devices": []}
 # --------------------------------------------------------------------------- names
 
 def _norm(name: str) -> str:
-    """Compare device names across integrations ("Office TV" == "office_tv")."""
+    """Compare device names across integrations ("Den TV" == "den_tv")."""
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
 
 
 def _name_keys(name: str) -> set[str]:
-    """A name and its variant without a trailing Cast word ("Office TV Chromecast")."""
+    """A name and its variant without a trailing Cast word ("Den TV Chromecast")."""
     base = _norm(name)
     keys = {base} if base else set()
     stripped = re.sub(r"(chromecast|googlecast|chrome|cast)$", "", base)
@@ -581,7 +581,7 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
         if cast_entity:
             candidate_names.append(names_by_entity.get(cast_entity, ""))
         # A TV's Music Assistant player is usually named for the Chromecast
-        # that drives it ("Master Bedroom TV" for the Samsung's dongle).
+        # that drives it ("Den TV" for the dongle plugged into a Samsung).
         if companions.get("ma_sibling") and companions["ma_sibling"] != eid:
             candidate_names.append(names_by_entity.get(companions["ma_sibling"], ""))
         cast_dev = cast_by_uuid.get(cast_uuids.get(cast_entity, "")) if cast_entity else None

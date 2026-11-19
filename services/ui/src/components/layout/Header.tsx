@@ -56,7 +56,9 @@ const Header = () => {
   const account = accountProfile ?? user;
   const [navQuery, setNavQuery] = useState('');
   const [navOpen, setNavOpen] = useState(false);
+  const [navActiveIndex, setNavActiveIndex] = useState(0);
   const navRef = useRef<HTMLDivElement>(null);
+  const navInputRef = useRef<HTMLInputElement>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileMenuRef = useDialogFocus<HTMLDivElement>(profileOpen, () => setProfileOpen(false));
   const [showNotifications, setShowNotifications] = useState(false);
@@ -99,6 +101,12 @@ const Header = () => {
       if (e.key === 'Escape') {
         setProfileOpen(false);
         setShowNotifications(false);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        navInputRef.current?.focus();
+        navInputRef.current?.select();
+        setNavOpen(true);
       }
     };
     document.addEventListener('mousedown', onClick);
@@ -171,32 +179,50 @@ const Header = () => {
           <Search size={20} />
         </div>
         <input
+          ref={navInputRef}
           type="text"
           value={navQuery}
-          onChange={(e) => { setNavQuery(e.target.value); setNavOpen(true); }}
+          onChange={(e) => { setNavQuery(e.target.value); setNavOpen(true); setNavActiveIndex(0); }}
           onFocus={() => setNavOpen(true)}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') { setNavOpen(false); setNavQuery(''); }
-            if (e.key === 'Enter' && matches[0]) {
-              navigate(matches[0].path);
-              setNavOpen(false); setNavQuery('');
+            if (e.key === 'Escape') { setNavOpen(false); setNavQuery(''); navInputRef.current?.blur(); }
+            if (e.key === 'ArrowDown' && matches.length > 0) {
+              e.preventDefault();
+              setNavOpen(true);
+              setNavActiveIndex((i) => (i + 1) % matches.length);
+            }
+            if (e.key === 'ArrowUp' && matches.length > 0) {
+              e.preventDefault();
+              setNavOpen(true);
+              setNavActiveIndex((i) => (i - 1 + matches.length) % matches.length);
+            }
+            if (e.key === 'Enter' && matches.length > 0) {
+              const target = matches[navActiveIndex] ?? matches[0];
+              navigate(target.path);
+              setNavOpen(false); setNavQuery(''); setNavActiveIndex(0);
             }
           }}
           placeholder="Search pages, tabs & settings…"
           data-global-search
-          className="w-full glass-input pl-11 md:pl-12 h-10 text-sm md:h-12 md:text-lg"
+          className="w-full glass-input pl-11 md:pl-12 lg:pr-14 h-10 text-sm md:h-12 md:text-lg"
           aria-label="Search pages, tabs and settings"
         />
+        {!navQuery && (
+          <kbd className="pointer-events-none hidden lg:inline-flex items-center gap-0.5 absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+            ⌘K
+          </kbd>
+        )}
         {navOpen && navQuery.trim() && (
-          <div className="absolute top-14 left-0 right-0 z-50 glass-menu p-2 max-h-96 overflow-y-auto">
+          <div className="absolute top-12 md:top-14 left-0 right-0 z-50 glass-menu p-2 max-h-96 overflow-y-auto">
             {matches.length === 0 ? (
               <p className="text-xs text-slate-500 px-3 py-3">No matches found.</p>
             ) : (
-              matches.map((m) => (
+              matches.map((m, idx) => (
                 <button
                   key={`${m.path}-${m.label}`}
-                  onClick={() => { navigate(m.path); setNavOpen(false); setNavQuery(''); }}
-                  className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-white/5 transition-colors"
+                  onClick={() => { navigate(m.path); setNavOpen(false); setNavQuery(''); setNavActiveIndex(0); }}
+                  onMouseEnter={() => setNavActiveIndex(idx)}
+                  className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 pointer-coarse:min-h-11 rounded-lg text-left transition-colors ${idx === navActiveIndex ? 'bg-white/10' : 'hover:bg-white/5'}`}
                 >
                   <span className="text-sm text-white font-medium">{m.label}</span>
                   <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 bg-white/5 px-2 py-0.5 rounded-md">
@@ -253,7 +279,7 @@ const Header = () => {
                   </button>
                 )}
               </div>
-              <div className="space-y-2 max-h-[60vh] sm:max-h-72 overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-[60dvh] sm:max-h-72 overflow-y-auto pr-1">
                 {visible.length === 0 ? (
                   notificationsLoading ? (
                     <p className="flex items-center justify-center gap-2 py-6 text-xs text-slate-500">
@@ -346,7 +372,7 @@ const Header = () => {
                 size={44}
                 className="border border-white/20"
               />
-              <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-slate-950 border border-white/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-slate-950 border border-white/20 flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity">
                 <ChevronUp size={10} />
               </div>
             </button>

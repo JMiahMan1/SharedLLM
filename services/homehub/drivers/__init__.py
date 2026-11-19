@@ -43,12 +43,22 @@ DRIVERS: dict[str, str] = {
     "shopping_list": "services.homehub.drivers.todo:ShoppingListDriver",
     # Accounts other services read (app vetting): nothing to drive, the entry is the setting.
     "common_sense_media": "services.homehub.drivers.accounts:AccountDriver",
+    # Jarvis's accounts as the hub's users and logins (services/homehub/auth_providers).
+    "jarvis_identity": "services.homehub.auth_providers.jarvis_identity:JarvisIdentityDriver",
     # Bluetooth: one driver for every BLE sensor parser (services/homehub/bluetooth_parsers.py), and iBeacon tags.
     **{d: "services.homehub.drivers.ble:BLESensorDriver" for d in (
         "bthome", "xiaomi_ble", "qingping", "sensorpush", "thermopro", "inkbird", "ruuvitag_ble", "govee_ble")},
     "ibeacon": "services.homehub.drivers.ble:IBeaconDriver",
 }
 
+#: Actions a device brings with it, by service domain: the name prefixes under which a driver registers one
+#: service per device while that device is connected (ESPHome's user-defined actions, ``esphome.<node>_<action>``)
+#: or set up (a phone's ``notify.mobile_app_<phone>``). A call to such a name that nothing offers right now is a
+#: device that is away, not a typo, so automations wait for it instead of failing (automation.py).
+DEVICE_ACTIONS: dict[str, tuple[str, ...]] = {
+    "esphome": ("",),
+    "notify": ("mobile_app_",),
+}
 
 #: Home Assistant's own integrations that came over with its data but have nothing to drive here,
 #: because the hub does the job itself or the job does not exist outside Home Assistant. They show

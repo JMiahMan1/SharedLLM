@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, KeyRound, Plus, Trash2, Eye, EyeOff, Save, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type Workspace } from '../../services/api';
@@ -68,17 +68,36 @@ export function WorkspaceSecrets({ workspace, onClose }: WorkspaceSecretsProps) 
     }
   };
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Secrets and Environment"
+      onClick={onClose}
+    >
       <div
-        className="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-[#0d1222] border border-white/10 rounded-xl shadow-2xl"
+        className="w-full max-w-lg max-h-[85dvh] overflow-y-auto bg-[#0d1222] border border-white/10 rounded-t-2xl sm:rounded-xl shadow-2xl safe-area-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <div className="flex items-center gap-2 text-white font-semibold">
             <KeyRound size={18} className="text-indigo-400" /> Secrets &amp; Environment
           </div>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close secrets dialog"
+            className="flex items-center justify-center p-1.5 pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg"
+          >
             <X size={18} />
           </button>
         </div>
@@ -97,10 +116,12 @@ export function WorkspaceSecrets({ workspace, onClose }: WorkspaceSecretsProps) 
               <div className="space-y-1">
                 {visibleExisting.map((k) => (
                   <div key={k} className="flex items-center justify-between bg-white/5 rounded px-2 py-1.5">
-                    <span className="font-mono text-slate-200">{k}</span>
+                    <span className="font-mono text-slate-200 truncate">{k}</span>
                     <button
+                      type="button"
                       onClick={() => toggleDelete(k)}
-                      className="text-slate-400 hover:text-red-400 p-1"
+                      aria-label={`Delete ${k}`}
+                      className="flex items-center justify-center text-slate-400 hover:text-red-400 p-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11 rounded"
                       title="Delete on save"
                     >
                       <Trash2 size={15} />
@@ -119,34 +140,37 @@ export function WorkspaceSecrets({ workspace, onClose }: WorkspaceSecretsProps) 
 
           <div>
             <div className="text-slate-300 mb-1">Add a secret</div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
               <input
                 value={newKey}
                 onChange={(e) => setNewKey(e.target.value)}
                 aria-label="Secret key"
                 placeholder="KEY"
-                className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1.5 font-mono text-slate-200 outline-none focus:border-indigo-400"
+                className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded px-2 py-1.5 font-mono text-slate-200 outline-none focus:border-indigo-400"
               />
-              <div className="flex-1 relative">
+              <div className="flex-1 min-w-0 relative">
                 <input
                   type={reveal['new'] ? 'text' : 'password'}
                   value={newValue}
                   onChange={(e) => setNewValue(e.target.value)}
                   aria-label="Secret value"
                   placeholder="value"
-                  className="w-full bg-white/5 border border-white/10 rounded px-2 py-1.5 font-mono text-slate-200 outline-none focus:border-indigo-400"
+                  className="w-full bg-white/5 border border-white/10 rounded px-2 py-1.5 pr-9 font-mono text-slate-200 outline-none focus:border-indigo-400"
                 />
                 <button
                   type="button"
+                  aria-label={reveal['new'] ? 'Hide secret value' : 'Show secret value'}
                   onClick={() => setReveal((p) => ({ ...p, new: !p.new }))}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center h-8 w-8 pointer-coarse:h-10 pointer-coarse:w-10 text-slate-400 hover:text-white rounded"
                 >
                   {reveal['new'] ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
               <button
+                type="button"
                 onClick={addRow}
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded"
+                aria-label="Add secret"
+                className="flex items-center justify-center p-1.5 pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-white hover:bg-white/10 rounded border border-white/10 sm:border-transparent"
                 title="Add"
               >
                 <Plus size={16} />

@@ -33,7 +33,7 @@ function renderWidget() {
 describe('DeviceControlWidget rooms', () => {
   beforeEach(() => {
     vi.mocked(api.getDeviceStates).mockResolvedValue([
-      { entity_id: 'light.desk', friendly_name: 'Desk Lamp', state: 'off', domain: 'light', room: 'office' },
+      { entity_id: 'light.desk', friendly_name: 'Desk Lamp', state: 'off', domain: 'light', room: 'study' },
       { entity_id: 'switch.tv_plug', friendly_name: 'TV Plug', state: 'off', domain: 'switch' },
     ]);
     vi.mocked(apiClient.post).mockClear();
@@ -42,15 +42,17 @@ describe('DeviceControlWidget rooms', () => {
   it('groups by Home Assistant area and never invents a room', async () => {
     renderWidget();
     fireEvent.click(await screen.findByRole('button', { name: 'Rooms' }));
-    expect(await screen.findByText('Office (1)')).toBeInTheDocument();
+    expect(await screen.findByText('Study (1)')).toBeInTheDocument();
     expect(screen.getByText('No room (1)')).toBeInTheDocument();
     // The old name heuristic filed "TV Plug" under a made-up "Living Room".
     expect(screen.queryByText(/Living Room/)).toBeNull();
   });
 
-  it('asks before opening the garage when presence says away', async () => {
+  it('asks before opening a garage door (by its device_class) when presence says away', async () => {
+    vi.mocked(api.getUserPresence).mockClear();
     vi.mocked(api.getDeviceStates).mockResolvedValue([
-      { entity_id: 'cover.garage_door', friendly_name: 'Garage Door', state: 'closed', domain: 'cover' },
+      { entity_id: 'cover.side_entrance', friendly_name: 'Side Entrance', state: 'closed', domain: 'cover',
+        attributes: { device_class: 'garage' } },
     ]);
     vi.mocked(api.getUserPresence).mockResolvedValue({ status: 'SUCCESS', user_id: 'kid', presence: { room: 'not_home', confidence: 1 } });
     const confirm = confirmMock;
@@ -62,6 +64,22 @@ describe('DeviceControlWidget rooms', () => {
     expect(api.getUserPresence).toHaveBeenCalledWith('kid');
     expect(apiClient.post).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
+  });
+
+  it('never reads "garage" out of an id: a blind is confirmed as a cover, without the away check', async () => {
+    vi.mocked(api.getUserPresence).mockClear();
+    vi.mocked(api.getDeviceStates).mockResolvedValue([
+      { entity_id: 'cover.garage_blind', friendly_name: 'Garage Blind', state: 'closed', domain: 'cover',
+        attributes: { device_class: 'blind' } },
+    ]);
+    confirmMock.mockClear();
+    confirmMock.mockResolvedValue(false);
+    renderWidget();
+    fireEvent.click(await screen.findByRole('button', { name: 'All (1)' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Open/ }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Open it?' })));
+    expect(api.getUserPresence).not.toHaveBeenCalled();
+    expect(apiClient.post).not.toHaveBeenCalled();
   });
 
   it('uses the thermostat own modes and repaints after a mode command', async () => {

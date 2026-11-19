@@ -3156,6 +3156,40 @@ def login(req: LoginRequest, request: Request, session: Session = Depends(get_se
         is_admin=user.is_admin
     )
 
+_DUMMY_PASSWORD_HASH = "pbkdf2_sha256$" + "00" * 16 + "$" + "00" * 32
+
+
+@app.post("/api/internal/verify-password")
+def internal_verify_password(
+    body: dict,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
+):
+    """Internal: is this the account's password? For HomeHub's login with a Jarvis account.
+
+    Answers ``{"ok": true, "id", "username"}`` or 401; never the password, its hash or an API key, and it
+    issues no session. The same per-username failure counter as ``/api/auth/login`` applies (five failures in
+    fifteen minutes lock the username out of both), so a caller cannot use this route to guess around it.
+    There is no per-address limit: every request comes from the calling service, which keeps its own.
+    """
+    username = str((body or {}).get("username") or "").strip().lower()
+    password = str((body or {}).get("password") or "")
+    now = time.monotonic()
+    user_key = f"user:{username}"
+    if not username or len(username) > 128 or len(password) > 1024:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    if len(_recent_failures(user_key, now)) >= _LOGIN_MAX_PER_USER:
+        raise HTTPException(status_code=429, detail="Too many sign-in attempts. Wait fifteen minutes, then try again.")
+    user = session.exec(select(User).where(User.username == username)).first()
+    # An unknown username costs the same hashing time as a known one, so timing does not say which exist.
+    stored = user.password_hash if user and user.password_hash else _DUMMY_PASSWORD_HASH
+    if not verify_password(password, stored) or not user or not user.password_hash:
+        _recent_failures(user_key, now).append(now)
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    _LOGIN_FAILURES.pop(user_key, None)
+    return {"ok": True, "id": user.id, "username": user.username}
+
+
 @app.post("/api/auth/change-password")
 def change_password(body: ChangePasswordRequest, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     # Body model, not query param: the gateway proxies JSON bodies here and a
@@ -6632,7 +6666,7 @@ def internal_guard_tamper(username: str, body: dict, session: Session = Depends(
     return {
         "username": subject.username, "parents": parents, "notify": parents,
         "display_name": subject.display_name or subject.username,
-        # The reporting device's kind when it is registered: "Noah's tablet ...".
+        # The reporting device's kind when it is registered: "Sam's tablet ...".
         "device": _device_word(session, subject.username, str((body or {}).get("device_key") or "")),
     }
 

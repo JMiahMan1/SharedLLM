@@ -820,7 +820,7 @@ export function DeviceSetupDialog({
         aria-modal="true"
         aria-label="Climate widget devices"
         onClick={(e) => e.stopPropagation()}
-        className="glass-panel flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-2xl sm:max-w-md sm:rounded-2xl safe-area-bottom"
+        className="glass-panel flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-t-2xl sm:max-w-md sm:rounded-2xl safe-area-bottom"
       >
         <header className="flex items-center justify-between gap-2 border-b border-white/5 px-4 py-3">
           <div className="min-w-0">

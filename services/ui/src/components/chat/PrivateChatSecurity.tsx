@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { BellRing, ChevronRight, Download, Fingerprint, FolderOpen, KeyRound, Link2, Loader2, Timer, TriangleAlert } from 'lucide-react';
+import { BellRing, ChevronRight, Download, Fingerprint, FolderOpen, KeyRound, Link2, Loader2, MessageCircleQuestionMark, Timer, TriangleAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { changePasswordRequest } from '../../lib/privateChatCrypto';
@@ -11,7 +11,7 @@ import { deviceUnlockAvailable, deviceUnlockEnabled, deviceUnlockError, deviceUn
 import Sheet from './Sheet';
 import { OpenPrivateBackup, PrivateChatExportSheet } from './PrivateChatBackup';
 import type { PrivateVault } from '../../lib/privateChatCrypto';
-import { errorText, MIN_PASSWORD_LENGTH, passwordProblem } from './privateChatModel';
+import { errorText, MIN_PASSWORD_LENGTH, passwordProblem, reminderSummary, type PrivateChatReminders } from './privateChatModel';
 
 type Mode = 'menu' | 'password' | 'phone' | 'preview' | 'backup' | 'open';
 
@@ -72,6 +72,8 @@ export default function PrivateChatSecurity({
   const [linkPreviews, setLinkPreviewsState] = useState(() => linkPreviewsOn(token));
   const [phone, setPhone] = useState<{ available: boolean; enabled: boolean }>({ available: false, enabled: false });
   const [preview, setPreview] = useState<{ available: boolean; enabled: boolean }>({ available: false, enabled: false });
+  // Reply reminders: kept on the server per person, so the choice holds on every device.
+  const [reminders, setReminders] = useState<PrivateChatReminders | null>(null);
   const [current, setCurrent] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -94,6 +96,34 @@ export default function PrivateChatSecurity({
       live = false;
     };
   }, [token]);
+
+  useEffect(() => {
+    let live = true;
+    api
+      .getPrivateChatReminders(token)
+      .then((value) => {
+        if (live) setReminders(value);
+      })
+      .catch(() => {
+        // An older server without reminders: the switch is simply not shown.
+      });
+    return () => {
+      live = false;
+    };
+  }, [token]);
+
+  const toggleReminders = async () => {
+    if (!reminders || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      setReminders(await api.setPrivateChatReminders(token, !reminders.enabled));
+    } catch (e) {
+      setError(errorText(e, 'Could not save the reminder setting'));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const reset = (next: Mode) => {
     setCurrent('');
@@ -422,6 +452,33 @@ export default function PrivateChatSecurity({
             </span>
           </button>
         </div>
+        {reminders?.available && (
+          <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2" data-testid="private-reminders">
+            <MessageCircleQuestionMark size={16} className="shrink-0 text-rose-200" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-white" id="private-reminders-label">
+                Reply reminders
+              </p>
+              <p className="text-xs leading-relaxed text-slate-400" data-testid="private-reminders-summary">
+                {reminderSummary(reminders, partnerName)}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={reminders.enabled}
+              aria-labelledby="private-reminders-label"
+              disabled={busy}
+              onClick={() => void toggleReminders()}
+              data-testid="private-reminders-toggle"
+              className="flex min-h-11 min-w-11 shrink-0 items-center justify-center disabled:opacity-50"
+            >
+              <span className={`relative h-6 w-11 rounded-full transition-colors ${reminders.enabled ? 'bg-rose-600' : 'bg-white/15'}`}>
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${reminders.enabled ? 'left-[22px]' : 'left-0.5'}`} />
+              </span>
+            </button>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => reset('password')}

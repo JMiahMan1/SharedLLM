@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from services.homehub.core import UNAVAILABLE, ConfigEntry, Driver, Hub, utcnow
+from services.homehub.core import UNAVAILABLE, AuthRequired, ConfigEntry, Driver, Hub, SetupError, utcnow
 from services.homehub.drivers import driver_class, replaced_reason
 from services.homehub.store import Store
 
@@ -21,6 +21,12 @@ RETRY_DELAYS = (5, 10, 30, 60)
 # an hour: seven unplugged gadgets were writing 2,500 warnings in 12 hours.
 RETRY_REPORT_EVERY_S = 3600.0
 HISTORY_KEEP_DAYS = 30
+#: A poll that has not answered in this long has hung (a driver may set its own ``poll_timeout``).
+POLL_TIMEOUT_S = 60.0
+#: After this many failed polls in a row the entry's entities turn unavailable, as in HA, and the entry
+#: carries the failure (``setup_retry`` with the reason) until a poll works again. One failed poll is often
+#: a dropped packet; the entities keep their last state through it.
+POLL_FAILURES_UNAVAILABLE = 3
 
 
 class Runtime:
@@ -35,8 +41,13 @@ class Runtime:
         #: When each entry that is failing now first failed (this run of the hub).
         self.failing_since: dict[str, datetime] = {}
         self._unsub_record = None
+        self.recorder: Any = None  # recorder.Recorder, from start_recording
         self.automations: Any = None  # set by main once the engine is loaded
         self.helpers: Any = None  # HA's helpers (helpers.py), set by main
+        self.loop_monitor: Any = None  # loop_monitor.LoopMonitor, set by main
+        self.provider_configs: dict[str, Any] = {}  # login providers the stack configures (main)
+        self.provider_sync_every_s: float = 60.0
+        self.auth_providers: Any = None  # auth_providers.manager.ProviderManager (ha_auth_api)
 
     def load_registry(self) -> None:
         hub = self.hub
@@ -46,6 +57,10 @@ class Runtime:
         hub.areas = {a.area_id: a for a in self.store.load_areas()}
         # A hidden device's entities follow it, whatever registered them since (a resync, an import).
         hub.reconcile_hidden()
+        # Combined duplicates (one device, a main and a fallback) are in place before any driver publishes.
+        from services.homehub import duplicates
+
+        duplicates.load_combinations(self)
         hub.floors = self.store.get_kv("floors", {}) or {}
         cfg = self.store.get_kv("core_config", {}) or {}
         if cfg:
@@ -61,18 +76,16 @@ class Runtime:
             if st.entity_id in hub.entities:
                 hub.states.set(st.entity_id, st.state, st.attributes, restore=st)
 
-    def start_recording(self) -> None:
-        def on_change(_t: str, ev: dict[str, Any]) -> None:
-            new, old = ev.get("new_state"), ev.get("old_state")
-            if new is None:
-                return
-            try:
-                self.store.save_last_state(new)
-                self.store.record(new, state_changed=old is None or old.state != new.state)
-            except Exception:
-                log.exception("recording %s failed", new.entity_id)
+    def start_recording(self, *, threaded: bool | None = None) -> None:
+        """History and restore states (recorder.py): a writer thread commits them in batches off the loop."""
+        from services.homehub import recorder
 
-        self._unsub_record = self.hub.bus.subscribe(on_change, "state_changed")
+        if self.recorder is not None:
+            self.recorder.stop()
+        self.recorder = recorder.Recorder(self.hub, self.store, threaded=threaded)
+        self.recorder.start()
+        recorder.register_services(self.hub, self.recorder)
+        self._unsub_record = self.recorder.detach
 
     async def start_all(self) -> None:
         for entry in list(self.hub.config_entries.values()):
@@ -115,11 +128,24 @@ class Runtime:
         reported: tuple[str, float] | None = None  # (reason, when) last logged as a warning
         loop = asyncio.get_running_loop()
         while True:
-            driver: Driver = cls(self.hub, entry)
+            try:
+                driver: Driver = cls(self.hub, entry)
+            except Exception as exc:
+                # The entry's own settings are unusable (a constructor checks them): retrying cannot help.
+                entry.state, entry.reason, entry.needs = "setup_error", f"{type(exc).__name__}: {exc}", None
+                self.failing_since.setdefault(entry.entry_id, utcnow())
+                log.warning("%s (%s) cannot be set up and will not be retried until it is changed: %s",
+                            entry.domain, entry.title, entry.reason)
+                first.set()
+                return
             try:
                 await driver.async_setup()
             except asyncio.CancelledError:
                 raise
+            except (AuthRequired, SetupError) as exc:
+                await self._park(entry, driver, exc)
+                first.set()
+                return
             except Exception as exc:
                 delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                 attempt += 1
@@ -141,7 +167,7 @@ class Runtime:
                 await asyncio.sleep(delay)
                 continue
             self.hub.drivers[entry.entry_id] = driver
-            entry.state, entry.reason = "loaded", None
+            entry.state, entry.reason, entry.needs = "loaded", None, None
             self.failing_since.pop(entry.entry_id, None)
             first.set()
             if reported is not None:
@@ -150,14 +176,81 @@ class Runtime:
             log.info("%s (%s) loaded with %d entities", entry.domain, entry.title, len(driver.entities))
             if driver.poll_interval is None:
                 await asyncio.Event().wait()  # push-only: live until cancelled
-            while True:
-                await asyncio.sleep(driver.poll_interval or 30.0)
-                try:
-                    await driver.async_poll()
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    log.warning("%s (%s) poll failed: %s", entry.domain, entry.title, exc)
+            if not await self._poll_forever(entry, driver):
+                return
+
+    async def _poll_forever(self, entry: ConfigEntry, driver: Driver) -> bool:
+        """Poll on the driver's interval. A poll that hangs times out; several failures in a row mark the
+        entry's entities unavailable (and say so once), and the next good poll brings them back. Returns
+        False once the entry is parked (credentials refused, a setting wrong): those are never retried."""
+        failures = 0
+        held: dict[str, tuple[str, dict[str, Any]]] = {}  # states before they were marked unavailable
+        while True:
+            await asyncio.sleep(driver.poll_interval or 30.0)
+            timeout = float(getattr(driver, "poll_timeout", None) or POLL_TIMEOUT_S)
+            try:
+                await asyncio.wait_for(driver.async_poll(), timeout)
+            except asyncio.CancelledError:
+                raise
+            except (AuthRequired, SetupError) as exc:
+                # The password was changed or revoked while running (or a setting is wrong): stop asking.
+                self.hub.drivers.pop(entry.entry_id, None)
+                await self._park(entry, driver, exc)
+                return False
+            except Exception as exc:
+                failures += 1
+                why = f"no answer in {timeout:g} s" if isinstance(exc, TimeoutError) else str(exc) or type(exc).__name__
+                if failures == 1:
+                    log.warning("%s (%s) poll failed: %s", entry.domain, entry.title, why)
+                else:
+                    log.debug("%s (%s) poll failed (%d in a row): %s", entry.domain, entry.title, failures, why)
+                if failures == POLL_FAILURES_UNAVAILABLE:
+                    ents = driver.entities
+                    for e in ents:
+                        st = self.hub.states.get(e.entity_id)
+                        if st is not None and st.state != UNAVAILABLE:
+                            held[e.entity_id] = (st.state, dict(st.attributes))
+                    log.warning("%s (%s): %d polls failed in a row; its entities are unavailable until one "
+                                "succeeds", entry.domain, entry.title, failures)
+                    driver.mark_unavailable(ents)
+                if failures >= POLL_FAILURES_UNAVAILABLE:
+                    # The entry says why (the Devices page lists it as needing attention) until a poll works.
+                    entry.state, entry.reason = "setup_retry", f"{type(exc).__name__}: {why}"
+                    self.failing_since.setdefault(entry.entry_id, utcnow())
+                continue
+            if failures:
+                if failures >= POLL_FAILURES_UNAVAILABLE:
+                    self._restore_after_poll(driver, held)
+                    # Only what this loop recorded is cleared: a driver may keep its own state on the entry.
+                    self.failing_since.pop(entry.entry_id, None)
+                    entry.state, entry.reason, entry.needs = "loaded", None, None
+                log.info("%s (%s) polls again after %d failures", entry.domain, entry.title, failures)
+            failures = 0
+            held.clear()
+
+    def _restore_after_poll(self, driver: Driver, held: dict[str, tuple[str, dict[str, Any]]]) -> None:
+        """Entities the good poll did not publish get back the state they had before they were marked unavailable."""
+        for e in driver.entities:
+            st = self.hub.states.get(e.entity_id)
+            if e.entity_id in held and st is not None and st.state == UNAVAILABLE:
+                state, attrs = held[e.entity_id]
+                driver.publish(e, state, attrs)
+
+    async def _park(self, entry: ConfigEntry, driver: Driver, exc: Exception) -> None:
+        """Stop retrying an entry that cannot load until an admin acts (bad credentials, a missing setting).
+
+        Reloading or reconfiguring the entry (``start_entry``) tries again.
+        """
+        if isinstance(exc, AuthRequired):
+            entry.state, entry.reason, entry.needs = "setup_error", f"AuthRequired: {exc}", exc.needs
+        else:
+            entry.state, entry.reason, entry.needs = "setup_error", f"{type(exc).__name__}: {exc}", None
+        self.failing_since.setdefault(entry.entry_id, utcnow())
+        log.warning("%s (%s) needs attention and will not be retried until it is changed or reloaded: %s",
+                    entry.domain, entry.title, entry.reason)
+        driver.mark_unavailable()
+        with contextlib.suppress(Exception):
+            await driver.async_unload()
 
     async def wait_first_setups(self, timeout: float) -> list[str]:
         """Wait until every started entry has tried to load once; returns the ones still pending.
@@ -175,7 +268,11 @@ class Runtime:
         while True:
             await asyncio.sleep(3600)
             try:
-                n = await asyncio.to_thread(self.store.prune_history, HISTORY_KEEP_DAYS)
+                rec = self.recorder
+                if rec is not None:  # the retention setting, on the writer's own connection
+                    n = await rec.purge(rec.keep_days)
+                else:
+                    n = await asyncio.to_thread(self.store.prune_history, HISTORY_KEEP_DAYS)
                 if n:
                     log.info("pruned %d history rows", n)
             except Exception:
@@ -184,8 +281,10 @@ class Runtime:
     async def shutdown(self) -> None:
         for entry_id in list(self._tasks):
             await self.stop_entry(entry_id)
-        if self._unsub_record:
-            self._unsub_record()
+        rec, self.recorder, self._unsub_record = self.recorder, None, None
+        if rec is not None:
+            rec.detach()  # on the loop, where the bus is used
+            await asyncio.to_thread(rec.stop)  # commits what the writer still holds
 
     def entry_status(self) -> list[dict[str, Any]]:
         out = []

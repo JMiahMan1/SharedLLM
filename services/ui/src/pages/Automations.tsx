@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle, Download, History, Loader2, Play, Plus, Search, SlidersHorizontal, Upload, Workflow, Wrench,
+  AlertTriangle, Download, History, Hourglass, Loader2, Play, Plus, Search, SlidersHorizontal, Upload, Workflow, Wrench,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
@@ -187,6 +187,14 @@ function ItemRow({ item, canEdit, onOpen, onTraces, onRun, onEnabled, running }:
               <AlertTriangle size={11} aria-hidden />{item.unsupported_reason}
             </span>
           )}
+          {item.waiting_reason && (
+            <span className="mt-1 block text-[11px] text-slate-400" data-testid="automation-waiting">
+              <span className="mr-2 inline-flex items-center gap-1 rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-sky-200">
+                <Hourglass size={11} aria-hidden />Waiting for its device
+              </span>
+              <span className="[overflow-wrap:anywhere]">{item.waiting_reason}</span>
+            </span>
+          )}
           {item.last_error && <span className="mt-1 block text-[11px] text-red-300">{item.last_error}</span>}
         </button>
         {item.kind === 'automation' && (
@@ -199,7 +207,7 @@ function ItemRow({ item, canEdit, onOpen, onTraces, onRun, onEnabled, running }:
         {item.kind !== 'scene' && (
           <button type="button" className={BUTTON} onClick={onTraces} aria-label={`Runs of ${name}`}><History size={14} /> Runs</button>
         )}
-        {canEdit && item.runnable && (
+        {canEdit && item.runnable && !item.waiting_reason && (
           <button type="button" className={BUTTON} onClick={onRun} disabled={running} aria-label={`Run ${name} now`}>
             {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} {item.kind === 'scene' ? 'Activate' : 'Run now'}
           </button>

@@ -11,10 +11,10 @@ export interface Place {
   name: string;
 }
 
-/** The family's places (Home Assistant zones, as Wander reads them), by name. */
+/** The family's places and your own private ones (all on the home hub, as Wander reads them), by name. */
 function placesFrom(data: unknown): Place[] {
   return zonePlaces(data)
-    .filter((p) => p.id.startsWith('zone.'))
+    .filter((p) => p.id.startsWith('zone.') || p.id.startsWith('place.'))
     .map((p) => ({ zone: p.id, name: p.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

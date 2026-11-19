@@ -96,6 +96,24 @@ async def test_lists_shopping_and_switch_as_x(rt):
         await add(rt, "switch_as_x", {"entity_id": "switch.example_plug", "target_domain": "fan"})
 
 
+async def test_switch_as_x_hides_the_switch_it_wraps_and_removing_it_shows_it_again(rt):
+    from services.homehub import entries
+
+    rt.hub.entities["switch.example_plug"] = EntityEntry("switch.example_plug", "esphome", "u1")
+    rt.hub.entities["switch.kept_hidden"] = EntityEntry("switch.kept_hidden", "esphome", "u3", hidden_by="user")
+    out = await add(rt, "switch_as_x", {"entity_id": "switch.example_plug", "target_domain": "light"})
+    kept = await add(rt, "switch_as_x", {"entity_id": "switch.kept_hidden", "target_domain": "fan"})
+    plug = rt.hub.entities["switch.example_plug"]
+    assert plug.hidden_by == "integration"
+    assert rt.store.load_entities() and next(e for e in rt.store.load_entities()
+                                             if e.entity_id == "switch.example_plug").hidden_by == "integration"
+    assert rt.hub.entities["switch.kept_hidden"].hidden_by == "user"
+    await entries.remove_entry(rt, out["entry_id"])
+    assert plug.hidden_by is None
+    await entries.remove_entry(rt, kept["entry_id"])
+    assert rt.hub.entities["switch.kept_hidden"].hidden_by == "user"  # a person hid it: theirs to show
+
+
 async def test_a_relay_and_a_door_sensor_become_a_garage_door(rt):
     rt.hub.entities["switch.example_opener"] = EntityEntry("switch.example_opener", "esphome", "u2")
     rt.hub.entities["binary_sensor.example_door"] = EntityEntry("binary_sensor.example_door", "esphome", "u3")
@@ -276,6 +294,40 @@ async def test_an_expired_roborock_login_signs_in_again_and_keeps_its_entry(rt, 
     assert again["entry_id"] == first["entry_id"] and set(rt.hub.config_entries) == entries_before
     assert rt.hub.config_entries[first["entry_id"]].data["user_data"] == {"token": "second"}
     assert "signed in again" in again["message"]
+
+
+async def test_an_srp_account_whose_password_changed_signs_in_again_in_place(rt, monkeypatch):
+    async def login(account, user, password):
+        return password in ("first", "second")
+
+    monkeypatch.setattr(manual_flows, "srp_login", login)
+    first = await add(rt, "srp_energy", {"id": "123456789", "username": "alex", "password": "first"})
+    entry = rt.hub.config_entries[first["entry_id"]]
+    entry.state, entry.reason, entry.needs = "setup_error", "AuthRequired: refused", "login"
+    entities_before = set(rt.hub.entities)
+    with pytest.raises(NeedsInput):  # a wrong new password changes nothing
+        await add(rt, "srp_energy", {"id": "123456789", "username": "alex", "password": "wrong"})
+    assert entry.data["password"] == "first"
+    again = await add(rt, "srp_energy", {"id": "123456789", "username": "alex", "password": "second"})
+    assert again["entry_id"] == first["entry_id"] and "signed in again" in again["message"]
+    assert entry.data["password"] == "second" and entry.data["is_tou"] is False
+    assert set(rt.hub.entities) == entities_before
+    assert rt.stopped == [entry.entry_id] and rt.started[-1] == entry.entry_id
+
+
+async def test_an_emporia_account_whose_password_changed_signs_in_again_in_place(rt, monkeypatch):
+    async def login(email, password):
+        return [SimpleNamespace(device_gid=100001, device_name="Panel", model="VUE002", firmware="f",
+                                channels=[SimpleNamespace(channel_num="1,2,3", name=None)])]
+
+    monkeypatch.setattr(manual_flows, "emporia_login", login)
+    first = await add(rt, "emporia_vue", {"email": "alex@example.com", "password": "old"})
+    entries_before, entities_before = set(rt.hub.config_entries), set(rt.hub.entities)
+    again = await add(rt, "emporia_vue", {"email": "Alex@Example.com", "password": "new"})
+    assert again["entry_id"] == first["entry_id"] and again["status"] == "adopted"
+    assert set(rt.hub.config_entries) == entries_before and set(rt.hub.entities) == entities_before
+    data = rt.hub.config_entries[first["entry_id"]].data
+    assert data["password"] == "new" and data["enable_1m"] is True
 
 
 async def test_go2rtc_is_one_per_hub(rt, monkeypatch):

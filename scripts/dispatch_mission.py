@@ -3,7 +3,8 @@
 Dispatch a Raven mission to the live server.
 
 Usage:
-    export INTERNAL_SECRET=<from .env on server>
+    export GATEWAY_URL=http://<server>:8080      # or pass --gateway
+    export INTERNAL_SECRET=<from .env on server> # or DEPLOY_HOST=user@host to read it over ssh
     python scripts/dispatch_mission.py missions/space_shooter_python.py
     python scripts/dispatch_mission.py missions/meal_planner_game.py
 
@@ -19,9 +20,10 @@ import argparse
 import httpx
 from pathlib import Path
 
-# Live server configuration
-DEFAULT_GATEWAY_URL = "http://192.168.2.205:8080"
-DEFAULT_SERVER = "jeremiah@192.168.2.205"
+# Live server configuration: from the environment, never written here.
+DEFAULT_GATEWAY_URL = os.getenv("GATEWAY_URL", "")
+DEPLOY_HOST = os.getenv("DEPLOY_HOST", "")
+DEPLOY_DIR = os.getenv("DEPLOY_DIR", "SharedLLM")
 
 
 def load_mission_spec(path: str) -> dict:
@@ -72,10 +74,12 @@ def get_internal_secret() -> str:
         return secret
     
     # Try to read from server
+    if not DEPLOY_HOST:
+        return ""
     import subprocess
     try:
         result = subprocess.run(
-            ["ssh", DEFAULT_SERVER, "cat /home/jeremiah/SharedLLM/.env | grep INTERNAL_SECRET | cut -d= -f2"],
+            ["ssh", DEPLOY_HOST, f"grep INTERNAL_SECRET {DEPLOY_DIR}/.env | cut -d= -f2"],
             capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -97,10 +101,12 @@ def main():
     parser.add_argument("--timeout", type=int, default=3600, help="Timeout in seconds")
     
     args = parser.parse_args()
+    if not args.gateway:
+        parser.error("no gateway URL: pass --gateway or set GATEWAY_URL")
     
     internal_secret = get_internal_secret()
     if not internal_secret:
-        print("ERROR: INTERNAL_SECRET not found. Set env var or ensure SSH access to server.")
+        print("ERROR: INTERNAL_SECRET not found. Set it, or DEPLOY_HOST (user@host) for ssh access to the server.")
         sys.exit(1)
     
     # Build mission spec

@@ -151,7 +151,52 @@ async def expose_new_entities_set(conn: Any, mid: int, msg: dict[str, Any]) -> N
     await conn.result(mid)
 
 
+#: What HA's ``config/core/update`` takes besides the location (the hub stores them as HA does).
+_CORE_OTHER = {"unit_system": str, "currency": str, "country": str, "language": str,
+               "external_url": str, "internal_url": str}
+
+
+async def core_update(conn: Any, mid: int, msg: dict[str, Any]) -> None:
+    """HA's ``config/core/update`` (admins): moving Home here is the same change as Devices > Rooms & places.
+
+    ``latitude``, ``longitude``, ``radius``, ``elevation`` and ``location_name`` go through the hub's Home
+    (``registries.update_home``: zone.home, the sun and Jarvis's forecast follow at once, and it is saved).
+    ``time_zone`` is refused: one household setting governs Jarvis and the hub (docs/CONFIG.md, "Time zone").
+    """
+    from services.homehub import registries
+
+    if not _admin_only(conn):
+        await conn.error(mid, "unauthorized", "Only an admin can change the hub's location")
+        return
+    fields = {k: v for k, v in msg.items() if k not in ("id", "type")}
+    if "time_zone" in fields:
+        await conn.error(mid, "not_supported", "The time zone is the household's setting (Admin > Settings), "
+                                               "not the hub's")
+        return
+    unknown = sorted(set(fields) - set(_CORE_OTHER) - {"latitude", "longitude", "radius", "elevation",
+                                                       "location_name"})
+    if unknown:
+        await conn.error(mid, "invalid_format", f"config/core/update cannot change {', '.join(unknown)}")
+        return
+    other = {k: fields.pop(k) for k in list(fields) if k in _CORE_OTHER}
+    if any(v is not None and not isinstance(v, str) for v in other.values()):
+        await conn.error(mid, "invalid_format", f"{', '.join(sorted(other))} must be text")
+        return
+    if "location_name" in fields:
+        fields["name"] = fields.pop("location_name")
+    try:
+        if fields:
+            registries.update_home(conn.runtime, fields)
+        if other:
+            registries.save_core_config(conn.runtime, other)
+    except registries.RegistryError as exc:
+        await conn.error(mid, "invalid_format", str(exc))
+        return
+    await conn.result(mid)
+
+
 COMMANDS = {
+    "config/core/update": core_update,
     "homeassistant/expose_entity": expose_entity,
     "homeassistant/expose_entity/list": expose_entity_list,
     "homeassistant/expose_new_entities/get": expose_new_entities_get,

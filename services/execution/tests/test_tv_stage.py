@@ -25,16 +25,16 @@ def _cast(name, uuid, cast_type="cast", host="10.0.0.9"):
 
 def test_android_tv_and_its_cast_sibling_are_one_screen_with_cast_first():
     ha = [
-        _ha_tv("media_player.office_tv", "Office TV", "android_tv",
-               cast_sibling="media_player.office_tv_2", remote_sibling="remote.office_tv"),
-        _ha_tv("media_player.office_tv_2", "Office TV", "cast"),
+        _ha_tv("media_player.study_tv", "Study TV", "android_tv",
+               cast_sibling="media_player.study_tv_2", remote_sibling="remote.study_tv"),
+        _ha_tv("media_player.study_tv_2", "Study TV", "cast"),
     ]
-    screens = tv_stage.build_screens(ha, [_cast("Office TV", "u-1")])
-    assert [s["id"] for s in screens] == ["ha:media_player.office_tv"]
-    office = screens[0]
-    assert office["methods"][:2] == ["cast_web", "android_link"]
-    assert office["cast"]["host"] == "10.0.0.9"
-    assert office["display"] == "web"
+    screens = tv_stage.build_screens(ha, [_cast("Study TV", "u-1")])
+    assert [s["id"] for s in screens] == ["ha:media_player.study_tv"]
+    study = screens[0]
+    assert study["methods"][:2] == ["cast_web", "android_link"]
+    assert study["cast"]["host"] == "10.0.0.9"
+    assert study["display"] == "web"
 
 
 def test_cast_sibling_name_matches_mdns_even_when_tv_name_differs():
@@ -58,10 +58,10 @@ def test_roku_gets_a_live_stream_and_is_labelled_video():
 
 
 def test_lg_and_samsung_use_their_own_browsers():
-    ha = [_ha_tv("media_player.lg", "Living Room", "webos"), _ha_tv("media_player.sam", "Loft", "samsung")]
+    ha = [_ha_tv("media_player.lg", "Living Room", "webos"), _ha_tv("media_player.sam", "Attic", "samsung")]
     by_name = {s["name"]: s for s in tv_stage.build_screens(ha, [])}
     assert by_name["Living Room"]["methods"][:2] == ["webos_direct", "webos_browser"]
-    assert by_name["Loft"]["methods"][0] == "samsung_browser"
+    assert by_name["Attic"]["methods"][0] == "samsung_browser"
     assert all(s["display"] == "web" for s in by_name.values())
 
 
@@ -92,8 +92,8 @@ def test_validate_page_url_rejects_non_http():
 
 def test_show_falls_back_to_the_next_method_and_reports_every_attempt(monkeypatch):
     screen = tv_stage.build_screens(
-        [_ha_tv("media_player.office_tv", "Office TV", "android_tv",
-                cast_sibling="media_player.office_tv_2", remote_sibling="remote.office_tv")], [],
+        [_ha_tv("media_player.study_tv", "Study TV", "android_tv",
+                cast_sibling="media_player.study_tv_2", remote_sibling="remote.study_tv")], [],
     )[0]
 
     async def fake_find(screen_id, ha_url, ha_token):
@@ -108,7 +108,7 @@ def test_show_falls_back_to_the_next_method_and_reports_every_attempt(monkeypatc
     monkeypatch.setattr(tv_stage, "find_screen", fake_find)
     monkeypatch.setitem(tv_stage._HANDLERS, "cast_web", cast_fails)
     monkeypatch.setitem(tv_stage._HANDLERS, "android_link", link_ok)
-    out = asyncio.run(tv_stage.show("ha:media_player.office_tv", "http://h:5001/tv/ZION", "u", "t"))
+    out = asyncio.run(tv_stage.show("ha:media_player.study_tv", "http://h:5001/tv/ZION", "u", "t"))
     assert out["success"] is True and out["method"] == "android_link" and out["display"] == "web"
     assert [a["method"] for a in out["attempts"]] == ["cast_web", "android_link"]
     assert out["attempts"][0]["ok"] is False
@@ -230,21 +230,21 @@ def test_ffmpeg_command_writes_a_rolling_hls_playlist(tmp_path):
 
 # --------------------------------------------------------------------------- real-house cases
 
-def test_master_bedroom_samsung_and_its_plugged_in_chromecast_are_both_listed():
+def test_guest_room_samsung_and_its_plugged_in_chromecast_are_both_listed():
     """A legacy Samsung with a Chromecast attached, plus that Chromecast's MA wrapper."""
     ha = [
-        {**_ha_tv("media_player.master_bedroom_samsung", "Master Bedroom Samsung", "samsung",
-                  cast_sibling="media_player.master_bedroom_tv", ma_sibling="media_player.master_bedroom_tv_2"),
+        {**_ha_tv("media_player.guest_room_samsung", "Guest Room Samsung", "samsung",
+                  cast_sibling="media_player.guest_room_tv", ma_sibling="media_player.guest_room_tv_2"),
          "os_version": "Samsung Orsay (Legacy)"},
-        _ha_tv("media_player.master_bedroom_tv", "Master Bedroom TV", "cast"),
-        _ha_tv("media_player.master_bedroom_tv_2", "Master Bedroom TV", "music_assistant",
-               cast_sibling="media_player.master_bedroom_tv"),
+        _ha_tv("media_player.guest_room_tv", "Guest Room TV", "cast"),
+        _ha_tv("media_player.guest_room_tv_2", "Guest Room TV", "music_assistant",
+               cast_sibling="media_player.guest_room_tv"),
     ]
-    cc = _cast("Master Bedroom TV", "16b00000-0000-4000-8000-000000000001", host="172.16.1.240")
-    uuids = {"media_player.master_bedroom_tv": "16b00000000040008000000000000001"}
+    cc = _cast("Guest Room TV", "16b00000-0000-4000-8000-000000000001", host="172.16.1.240")
+    uuids = {"media_player.guest_room_tv": "16b00000000040008000000000000001"}
     screens = tv_stage.build_screens(ha, [cc], None, uuids)
     by_id = {s["id"]: s for s in screens}
-    assert set(by_id) == {"ha:media_player.master_bedroom_samsung", "ha:media_player.master_bedroom_tv"}
+    assert set(by_id) == {"ha:media_player.guest_room_samsung", "ha:media_player.guest_room_tv"}
     for s in screens:  # either entry reaches the TV through the Chromecast, found on another subnet
         assert s["methods"] == ["cast_web"]
         assert s["cast"]["host"] == "172.16.1.240"
@@ -281,19 +281,19 @@ def test_known_hosts_are_read_from_the_options_form():
 
 
 def test_eureka_answer_becomes_a_cast_device():
-    info = {"name": "Master Bedroom TV", "device_info": {
+    info = {"name": "Guest Room TV", "device_info": {
         "ssdp_udn": "16b00000-0000-4000-8000-000000000001", "model_name": "Chromecast",
         "manufacturer": "Google", "capabilities": {"display_supported": True}}}
     dev = tv_stage.cast_from_eureka("172.16.1.240", info)
-    assert dev["name"] == "Master Bedroom TV" and dev["cast_type"] == "cast" and dev["host"] == "172.16.1.240"
+    assert dev["name"] == "Guest Room TV" and dev["cast_type"] == "cast" and dev["host"] == "172.16.1.240"
     speaker = tv_stage.cast_from_eureka("1.2.3.4", {"name": "Kitchen", "ssdp_udn": "u",
                                                      "device_info": {"capabilities": {"display_supported": False}}})
     assert speaker["cast_type"] == "audio"
 
 
 def test_mdns_and_unicast_results_merge_by_cast_id():
-    a = _cast("Office TV", "81df-ea8f", host="172.16.2.88")
-    b = {**_cast("Office TV", "81DFEA8F", host="172.16.2.88"), "found_by": "unicast"}
+    a = _cast("Study TV", "81df-ea8f", host="172.16.2.88")
+    b = {**_cast("Study TV", "81DFEA8F", host="172.16.2.88"), "found_by": "unicast"}
     c = {**_cast("Bedroom", "16b0", host="172.16.1.240"), "found_by": "unicast"}
     merged = tv_stage.merge_cast_devices([a], [b, c])
     assert [d["host"] for d in merged] == ["172.16.2.88", "172.16.1.240"]
@@ -309,7 +309,7 @@ def test_cross_subnet_discovery_works_without_home_assistant(monkeypatch, tmp_pa
         return ip == "172.16.1.240"
 
     async def info(ip):
-        return tv_stage.cast_from_eureka(ip, {"name": "Master Bedroom TV", "ssdp_udn": "16b0"})
+        return tv_stage.cast_from_eureka(ip, {"name": "Guest Room TV", "ssdp_udn": "16b0"})
 
     async def no_router():
         return {}
@@ -389,7 +389,7 @@ def test_show_stays_inside_its_time_budget(monkeypatch):
 
 def test_a_sleeping_chromecast_is_woken_and_found_again(monkeypatch):
     screen = tv_stage.build_screens(
-        [_ha_tv("media_player.bed", "Master Bedroom Samsung", "samsung", cast_sibling="media_player.bed_cast")], [])[0]
+        [_ha_tv("media_player.bed", "Guest Room Samsung", "samsung", cast_sibling="media_player.bed_cast")], [])[0]
     calls = []
 
     async def call_service(ha_url, ha_token, domain, service, entity_id="", data=None, **kw):
@@ -397,9 +397,9 @@ def test_a_sleeping_chromecast_is_woken_and_found_again(monkeypatch):
         return {"ok": True}
 
     async def get_state(ha_url, ha_token, eid):
-        return {"state": "on", "attributes": {"friendly_name": "Master Bedroom TV"}}
+        return {"state": "on", "attributes": {"friendly_name": "Guest Room TV"}}
 
-    rounds = iter([[], [_cast("Master Bedroom TV", "u-9", host="10.0.0.42")]])
+    rounds = iter([[], [_cast("Guest Room TV", "u-9", host="10.0.0.42")]])
 
     async def discover(timeout=3.0):
         return next(rounds, [])
@@ -411,7 +411,7 @@ def test_a_sleeping_chromecast_is_woken_and_found_again(monkeypatch):
 
     def fake_cast(cast_dev, host, url):
         shown.update(cast=cast_dev, url=url)
-        return True, "Showing on Master Bedroom TV"
+        return True, "Showing on Guest Room TV"
 
     monkeypatch.setattr(tv_stage.ha_client, "call_service", call_service)
     monkeypatch.setattr(tv_stage.ha_client, "get_state", get_state)
@@ -426,23 +426,23 @@ def test_a_sleeping_chromecast_is_woken_and_found_again(monkeypatch):
 def test_live_house_shape_lists_samsung_and_chromecast_and_drops_the_wrapper():
     """What HA really reports: no cast_sibling on the Samsung, Cast entities not classified."""
     ha = [
-        {**_ha_tv("media_player.master_bedroom_samsung", "Master Bedroom Samsung", "samsung",
-                  ma_sibling="media_player.master_bedroom_tv_2", remote_sibling="remote.master_bedroom_samsung"),
+        {**_ha_tv("media_player.guest_room_samsung", "Guest Room Samsung", "samsung",
+                  ma_sibling="media_player.guest_room_tv_2", remote_sibling="remote.guest_room_samsung"),
          "os_version": "Samsung Orsay (Legacy)"},
-        _ha_tv("media_player.master_bedroom_tv_2", "Master Bedroom TV", "music_assistant",
-               ma_sibling="media_player.master_bedroom_tv_2"),
+        _ha_tv("media_player.guest_room_tv_2", "Guest Room TV", "music_assistant",
+               ma_sibling="media_player.guest_room_tv_2"),
     ]
-    states = [{"entity_id": "media_player.master_bedroom_tv", "attributes": {"friendly_name": "Master Bedroom TV"}},
-              {"entity_id": "media_player.master_bedroom_tv_2", "attributes": {"friendly_name": "Master Bedroom TV"}}]
-    cc = {**_cast("Master Bedroom TV", "16b00000-0000-4000-8000-000000000001", host="172.16.1.240"),
+    states = [{"entity_id": "media_player.guest_room_tv", "attributes": {"friendly_name": "Guest Room TV"}},
+              {"entity_id": "media_player.guest_room_tv_2", "attributes": {"friendly_name": "Guest Room TV"}}]
+    cc = {**_cast("Guest Room TV", "16b00000-0000-4000-8000-000000000001", host="172.16.1.240"),
           "found_by": "unicast"}
-    uuids = {"media_player.master_bedroom_tv": "16b00000000040008000000000000001"}
+    uuids = {"media_player.guest_room_tv": "16b00000000040008000000000000001"}
     screens = tv_stage.build_screens(ha, [cc], states, uuids)
     by_id = {s["id"]: s for s in screens}
-    assert set(by_id) == {"ha:media_player.master_bedroom_samsung", "ha:media_player.master_bedroom_tv"}
-    sam = by_id["ha:media_player.master_bedroom_samsung"]
-    assert sam["methods"] == ["cast_web"] and sam["cast_entity"] == "media_player.master_bedroom_tv"
-    assert by_id["ha:media_player.master_bedroom_tv"]["platform"] == "cast"
+    assert set(by_id) == {"ha:media_player.guest_room_samsung", "ha:media_player.guest_room_tv"}
+    sam = by_id["ha:media_player.guest_room_samsung"]
+    assert sam["methods"] == ["cast_web"] and sam["cast_entity"] == "media_player.guest_room_tv"
+    assert by_id["ha:media_player.guest_room_tv"]["platform"] == "cast"
 
 
 
@@ -450,16 +450,16 @@ def test_the_owning_integration_decides_the_platform_not_the_name():
     # Reported: the LG would not cast. Its Music Assistant AirPlay player is named
     # "[LG] webOS TV ..." and was treated as the LG; the real webOS entity
     # ("Living Room TV") was treated as a generic TV.
-    ha = [_ha_tv("media_player.lg_webos_tv_un6955zuf_airplay", "[LG] webOS TV UN6955ZUF (AirPlay)", "webos"),
+    ha = [_ha_tv("media_player.lg_webos_tv_lgtv_airplay", "[LG] webOS TV lgtv (AirPlay)", "webos"),
           _ha_tv("media_player.living_room_tv", "Living Room TV", "generic_tv")]
-    platforms = {"media_player.lg_webos_tv_un6955zuf_airplay": "music_assistant",
+    platforms = {"media_player.lg_webos_tv_lgtv_airplay": "music_assistant",
                  "media_player.living_room_tv": "webos"}
     screens = {s["id"]: s for s in tv_stage.build_screens(ha, [], platforms=platforms)}
-    assert "ha:media_player.lg_webos_tv_un6955zuf_airplay" not in screens  # an AirPlay speaker shows no page
+    assert "ha:media_player.lg_webos_tv_lgtv_airplay" not in screens  # an AirPlay speaker shows no page
     assert screens["ha:media_player.living_room_tv"]["methods"] == ["webos_direct", "webos_browser"]
     # A Roku reached through its Music Assistant entity keeps its stream (it goes to the Roku itself).
-    roku = tv_stage.build_screens([_ha_tv("media_player.taylors_tv", "Taylors TV", "roku")], [],
-                                  platforms={"media_player.taylors_tv": "music_assistant"})
+    roku = tv_stage.build_screens([_ha_tv("media_player.playroom_tv", "Playroom TV", "roku")], [],
+                                  platforms={"media_player.playroom_tv": "music_assistant"})
     assert roku and roku[0]["methods"] == ["roku_stream"]
 
 
@@ -578,7 +578,7 @@ def test_a_samsung_is_found_by_its_own_name_after_its_address_changes(monkeypatc
     monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
 
     async def name_at(ip):
-        return {"172.16.4.114": "[TV] Loft Samsung Q900", "172.16.4.50": "[TV] Other"}.get(ip, "")
+        return {"172.16.4.114": "[TV] Attic Samsung qled", "172.16.4.50": "[TV] Other"}.get(ip, "")
 
     async def no_ip(*_a, **_k):
         return "172.16.2.77"  # Home Assistant's stale address: nothing answers there
@@ -589,7 +589,7 @@ def test_a_samsung_is_found_by_its_own_name_after_its_address_changes(monkeypatc
     monkeypatch.setattr(tv_stage, "_samsung_name_at", name_at)
     monkeypatch.setattr(tv_stage, "_entity_ip", no_ip)
     monkeypatch.setattr(tv_stage, "_router_status", router)
-    screen = {"name": "[TV] Loft Samsung Q900", "entity_id": "media_player.tv_loft_samsung_q900_2"}
+    screen = {"name": "[TV] Attic Samsung qled", "entity_id": "media_player.attic_tv_dlna_2"}
     assert asyncio.run(tv_stage._samsung_find_host(screen, "u", "t")) == "172.16.4.114"
     tv_stage._samsung_remember(screen["entity_id"], "172.16.4.114")
     screens = [{"platform": "samsung", "state": "unavailable", "entity_id": screen["entity_id"]}]
@@ -611,7 +611,7 @@ def test_casting_over_a_page_already_up_closes_it_and_sends_the_new_address(monk
             self.app_id = app_id
 
     class FakeCast:
-        name = "Office TV"
+        name = "Study TV"
 
         def __init__(self):
             self.status = Status(tv_stage.DASHCAST_APP_ID)

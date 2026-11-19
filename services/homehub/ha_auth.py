@@ -403,13 +403,25 @@ class HAAuth:
         return mine >= MAX_FAILURES_PER_USER or len(self._failures) >= MAX_FAILURES_TOTAL
 
     def validate_login(self, username: str, password: str) -> dict[str, Any] | None:
-        """The credential for a correct username and password, else None (bcrypt, timing-safe)."""
-        import bcrypt
-
+        """The credential for a correct username and password, else None (bcrypt, timing-safe, rate limited)."""
         name = normalize_username(username)
         if self._limited(name):
             log.warning("login refused for a while after repeated failures")
             return None
+        found = self.check_password(name, password)
+        if found is not None:
+            return found
+        self._failures.append((time.monotonic(), name))
+        return None
+
+    def check_password(self, username: str, password: str) -> dict[str, Any] | None:
+        """The hub credential for a correct username and password of an active user, else None.
+
+        No rate limit here: the caller applies it (``validate_login``, or the login providers' manager).
+        """
+        import bcrypt
+
+        name = normalize_username(username)
         found = None
         for cred in self._blob()["credentials"]:
             if normalize_username(cred.get("username", "")) == name and cred.get("password"):
@@ -424,8 +436,32 @@ class HAAuth:
             ok = False
         if ok and found is not None and self._user_allowed(found.get("user_id")) is not None:
             return found
-        self._failures.append((time.monotonic(), name))
         return None
+
+    def username_of(self, user_id: str) -> str | None:
+        """The username of a hub user's own login, if they have one."""
+        for cred in self._blob()["credentials"]:
+            if cred.get("user_id") == user_id and cred.get("username"):
+                return str(cred["username"])
+        return None
+
+    def set_password(self, user_id: str, username: str | None, password: str) -> None:
+        """Give a hub user a login (or a new password), stored as HA stores one: base64 of a bcrypt hash."""
+        import bcrypt
+
+        if len(password or "") < 8:
+            raise AuthError("invalid_request", "A password needs at least 8 characters")
+        hashed = base64.b64encode(bcrypt.hashpw(password.encode()[:72], bcrypt.gensalt())).decode()
+        with self._lock:
+            blob = self._blob()
+            cred = next((c for c in blob["credentials"] if c.get("user_id") == user_id), None)
+            if cred is None:
+                if not username:
+                    raise AuthError("invalid_request", "A new login needs a username")
+                cred = {"id": uuid.uuid4().hex, "user_id": user_id, "username": username}
+                blob["credentials"].append(cred)
+            cred["password"] = hashed
+            self._save(blob)
 
     def start_flow(self, client_id: str, redirect_uri: str, code_challenge: str | None) -> _Flow:
         self._prune()

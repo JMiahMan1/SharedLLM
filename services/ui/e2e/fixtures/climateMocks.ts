@@ -67,9 +67,9 @@ function baseEntities(): HaEntity[] {
     },
     {
       // Integration dropped it: must render as Unavailable, never as a dial.
-      entity_id: 'climate.office', friendly_name: 'Office', state: 'unavailable', domain: 'climate',
-      area_id: 'office', last_updated: now,
-      attributes: { friendly_name: 'Office' },
+      entity_id: 'climate.study', friendly_name: 'Study', state: 'unavailable', domain: 'climate',
+      area_id: 'study', last_updated: now,
+      attributes: { friendly_name: 'Study' },
     },
   ];
 }

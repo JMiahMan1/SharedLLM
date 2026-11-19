@@ -215,3 +215,19 @@ def test_turn_off_the_pantry_lights_by_voice_switches_all_seven_without_the_mode
     assert [u.rsplit("/", 2)[-2:] for u, _ in executed] == [["execute", "lights"]]
     assert executed[0][1]["entity_ids"] == PANTRY
     assert history[-1] == ("assistant", "The pantry lights are off.")
+
+
+def test_a_room_is_also_found_by_its_areas_alias_word_for_word():
+    """The hub's area registry gives a room other names; each is said word for word, like the name."""
+    eng = IntentEngine()
+    eng.update_entity_cache([
+        _entity("light.snug_lamp", "Corner Lamp", area="Den", area_aliases=["Snug", "Family Room"]),
+        _entity("light.snug_reading", "Reading Light", area="Den", area_aliases=["Snug", "Family Room"]),
+        _entity("light.family_bathroom", "Mirror Light", area="Family Bathroom"),
+    ])
+    for phrase in ("turn off the lights in the snug", "turn off the family room lights"):
+        found = eng.extract_device_set(phrase, "turn_off")
+        assert found is not None and found.entity_ids == ["light.snug_lamp", "light.snug_reading"], phrase
+    # "family" alone is no alias, and "Family Room" is never "Family Bathroom".
+    found = eng.extract_device_set("turn off the family bathroom lights", "turn_off")
+    assert found is None or found.entity_ids == ["light.family_bathroom"]

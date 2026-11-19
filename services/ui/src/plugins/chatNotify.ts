@@ -31,7 +31,7 @@ export interface ChatNotifyPluginInterface {
   /** A notification was tapped; `path` is the page to open. */
   addListener(event: 'open', cb: (data: { path: string }) => void): Promise<PluginListenerHandle>;
   /** A nudge arrived while Jarvis is on screen (APKs from 686). */
-  addListener(event: 'nudge', cb: (data: { title: string; body: string; path: string }) => void): Promise<PluginListenerHandle>;
+  addListener(event: 'nudge', cb: (data: { title: string; body: string; path: string; kind?: string }) => void): Promise<PluginListenerHandle>;
 }
 
 const ChatNotify = registerPlugin<ChatNotifyPluginInterface>('ChatNotify');

@@ -1,9 +1,9 @@
-"""Family safety state kept by geo: important places and long stops.
+"""Family safety state kept by geo: long stops.
 
-Important places are Home Assistant zones someone marked in Wander's place
-list; arriving at or leaving one sends a ``family_safety`` notice to the
-family members chosen for that place (everyone who may see the person when
-none are chosen). A long stop is a person staying put for LONG_STOP_S
+Important places (arriving at or leaving one sends a ``family_safety`` notice
+to the family members chosen for that place, or everyone who may see the person
+when none are chosen) are kept with the place on HomeHub; geo reads them with
+the places (``hub_places``). A long stop is a person staying put for LONG_STOP_S
 somewhere that is not a zone, which the family hears about once per stop,
 during the day unless LONG_STOP_ACTIVE_HOURS says otherwise.
 
@@ -15,8 +15,6 @@ from __future__ import annotations
 import json
 import os
 
-#: Hash zone entity id -> {"important": bool, "notify": [usernames]}.
-PLACE_SETTINGS_KEY = "geo:place_settings"
 #: Per person: where they have been since when, and whether it was announced.
 STOP_KEY = "geo:stop:{user}"
 
@@ -46,51 +44,6 @@ def in_active_hours(hour: int, spec: str | None = None) -> bool:
 
 def _decode(value):
     return value.decode() if isinstance(value, bytes) else value
-
-
-async def place_settings(r) -> dict[str, dict]:
-    """Every zone's settings; a zone never marked is absent."""
-    raw = await r.hgetall(PLACE_SETTINGS_KEY) if r else {}
-    out = {}
-    for key, value in (raw or {}).items():
-        try:
-            entry = json.loads(_decode(value))
-        except (TypeError, ValueError):
-            continue
-        if isinstance(entry, dict):
-            out[_decode(key)] = {
-                "important": bool(entry.get("important")),
-                "notify": [str(u).lower() for u in entry.get("notify") or [] if str(u).strip()],
-                "icon": str(entry.get("icon") or ""),
-            }
-    return out
-
-
-async def save_place_setting(r, zone_id: str, important: bool, notify: list[str] | None,
-                             icon: str | None = None) -> dict:
-    """``icon`` None keeps the zone's icon as it was; "" goes back to automatic."""
-    if icon is None:
-        icon = (await place_settings(r)).get(zone_id, {}).get("icon", "")
-    entry = {
-        "important": bool(important),
-        "notify": sorted({str(u).strip().lower() for u in notify or [] if str(u).strip()}),
-        "icon": icon,
-    }
-    await r.hset(PLACE_SETTINGS_KEY, zone_id, json.dumps(entry))
-    return entry
-
-
-def annotate_zone_features(features: list[dict], settings: dict[str, dict]) -> list[dict]:
-    """Add ``important`` and ``notify`` to each zone feature's properties."""
-    for feature in features:
-        props = feature.setdefault("properties", {})
-        entry = settings.get(props.get("entity_id") or "", {})
-        props["important"] = bool(entry.get("important"))
-        props["notify"] = list(entry.get("notify") or [])
-        # An icon chosen in Jarvis wins over the one drawn in Home Assistant.
-        if entry.get("icon"):
-            props["icon"] = entry["icon"]
-    return features
 
 
 async def note_fix(r, user: str, lat: float, lon: float, ts: float, distance) -> dict:

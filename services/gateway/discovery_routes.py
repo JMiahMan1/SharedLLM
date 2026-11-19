@@ -229,6 +229,28 @@ async def unhide_duplicates(request: Request):
     return _answer(*await _hub("POST", "/hub/devices/duplicates/unhide", json=payload))
 
 
+#: Combining duplicates into one device with a main and a fallback (homehub duplicates.py): action -> fields.
+_COMBINE_FIELDS = {
+    "combine": ("main", "fallback", "group", "main_domain", "fallback_domain"),
+    "uncombine": ("device",),
+    "swap": ("device",),
+    "rule": ("main_domain", "fallback_domain", "clear"),
+}
+
+
+@router.post("/devices/duplicates/{action}")
+async def combine_duplicates(action: str, request: Request):
+    """Combine two copies (``combine``), undo it (``uncombine``), swap main and fallback (``swap``) or set the
+    household's main/fallback rule for two integrations (``rule``). Only each action's own fields go through."""
+    fields = _COMBINE_FIELDS.get(action)
+    if fields is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in fields if k in body}
+    return _answer(*await _hub("POST", f"/hub/devices/duplicates/{action}", json=payload))
+
+
 @router.patch("/devices/{device_id}")
 async def update_device(device_id: str, request: Request):
     """Rename, move, label or hide a device: ``{"name_by_user"?, "area_id"?, "labels"?, "hidden"?}``.
@@ -239,6 +261,22 @@ async def update_device(device_id: str, request: Request):
     body = await _json(request)
     payload = {k: body[k] for k in ("name_by_user", "area_id", "labels", "hidden") if k in body}
     return _answer(*await _hub("PATCH", f"/hub/devices/{_rid(device_id, 'device')}", json=payload))
+
+
+@router.get("/devices/{device_id}/restarts")
+async def device_restarts(device_id: str, request: Request):
+    """An ESPHome node's restarts and drops with their likely cause (homehub esphome_restarts.py)."""
+    await _admin(request)
+    return _answer(*await _hub("GET", f"/hub/devices/{_rid(device_id, 'device')}/restarts"))
+
+
+@router.patch("/devices/{device_id}/restarts")
+async def set_device_restart_logs(device_id: str, request: Request):
+    """The level of the node's log lines the hub keeps for its restarts: ``{"log_level"}``."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("log_level",) if k in body}
+    return _answer(*await _hub("PATCH", f"/hub/devices/{_rid(device_id, 'device')}/restarts", json=payload))
 
 
 @router.delete("/devices/{device_id}")

@@ -170,6 +170,7 @@
 [data-site-theme-active] :is(.bg-indigo-500, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600) :is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200) { color: var(--site-on-accent) !important; }
 
 /* Dark themes: text too dim to read on a dark surface. */
+[data-theme-scheme="dark"] .text-amber-100\/70 { color: color-mix(in srgb, oklch(96.2% 0.059 95.617) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-amber-200\/70 { color: color-mix(in srgb, oklch(92.4% 0.12 95.746) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-amber-300\/70 { color: color-mix(in srgb, oklch(87.9% 0.169 91.605) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-amber-400\/70 { color: color-mix(in srgb, oklch(82.8% 0.189 84.429) 85%, transparent) !important; }
@@ -362,6 +363,7 @@
 [data-theme-scheme="light"] .hover\:text-white:hover { color: var(--site-text) !important; }
 [data-theme-scheme="light"] .text-\[\#fffdf8\] { color: var(--site-text) !important; }
 [data-theme-scheme="light"] .text-amber-100 { color: oklch(55.5% 0.163 48.998) !important; }
+[data-theme-scheme="light"] .text-amber-100\/70 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 70%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-100\/80 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-100\/90 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-200 { color: oklch(55.5% 0.163 48.998) !important; }
@@ -440,6 +442,7 @@
 [data-theme-scheme="light"] .text-rose-500 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-sky-100 { color: oklch(50% 0.134 242.749) !important; }
 [data-theme-scheme="light"] .text-sky-200 { color: oklch(50% 0.134 242.749) !important; }
+[data-theme-scheme="light"] .text-sky-200\/90 { color: color-mix(in srgb, oklch(50% 0.134 242.749) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-sky-300 { color: oklch(50% 0.134 242.749) !important; }
 [data-theme-scheme="light"] .text-sky-300\/60 { color: color-mix(in srgb, oklch(50% 0.134 242.749) 60%, transparent) !important; }
 [data-theme-scheme="light"] .text-sky-300\/80 { color: color-mix(in srgb, oklch(50% 0.134 242.749) 80%, transparent) !important; }

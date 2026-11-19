@@ -71,11 +71,11 @@ async def test_a_light_that_never_changes_is_reported_as_it_is(user_ctx, monkeyp
     monkeypatch.setattr(light, "CONFIRM_POLL_S", 0.01)
     with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
-        mock_get_state.return_value = {"state": "off", "attributes": {"friendly_name": "Hall Lamp"}}
+        mock_get_state.return_value = {"state": "off", "attributes": {"friendly_name": "Example Lamp"}}
         mock_call.return_value = {"ok": True}
-        res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.hall_lamp", action="turn_on"))
+        res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.example_lamp", action="turn_on"))
     assert res.status == "PARTIAL"
-    assert res.message == "I asked Hall Lamp to turn on, but it still shows off."
+    assert res.message == "I asked Example Lamp to turn on, but it still shows off."
     assert res.detail["confirmed"] is False
 
 
@@ -83,14 +83,14 @@ async def test_a_light_that_never_changes_is_reported_as_it_is(user_ctx, monkeyp
 async def test_a_light_that_drops_off_the_network_says_so(user_ctx, monkeypatch):
     monkeypatch.setattr(light, "CONFIRM_WITHIN_S", 0.05)
     monkeypatch.setattr(light, "CONFIRM_POLL_S", 0.01)
-    states = iter([{"state": "on", "attributes": {"friendly_name": "Hall Lamp"}}])
+    states = iter([{"state": "on", "attributes": {"friendly_name": "Example Lamp"}}])
     with patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
-        mock_get_state.side_effect = lambda *_a, **_k: next(states, {"state": "unavailable", "attributes": {"friendly_name": "Hall Lamp"}})
+        mock_get_state.side_effect = lambda *_a, **_k: next(states, {"state": "unavailable", "attributes": {"friendly_name": "Example Lamp"}})
         mock_call.return_value = {"ok": True}
-        res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.hall_lamp", action="turn_off"))
+        res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.example_lamp", action="turn_off"))
     assert res.status == "PARTIAL"
-    assert res.message == "I asked Hall Lamp to turn off, but it is not responding."
+    assert res.message == "I asked Example Lamp to turn off, but it is not responding."
 
 
 @pytest.mark.asyncio
@@ -99,9 +99,9 @@ async def test_a_light_whose_state_cannot_be_read_gets_plain_words(user_ctx):
          patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state:
         mock_get_state.return_value = None
         mock_call.return_value = {"ok": True}
-        res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.hall_lamp", action="turn_on"))
+        res = await light.handle_light(LightControlRequest(user_context=user_ctx, entity_id="light.example_lamp", action="turn_on"))
     assert res.status == "SUCCESS"
-    assert res.message == "Turned on hall lamp."
+    assert res.message == "Turned on Example Lamp."  # named from the id as people write it
     assert mock_get_state.await_count == 1  # nothing to watch
 
 

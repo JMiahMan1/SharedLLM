@@ -32,7 +32,7 @@ what keeps working while HA is unreachable, how, and what does not.
 | Weather | Open-Meteo is the primary source anyway | `weather.py` |
 
 A speaker or TV is matched by the HA entity's name: HA names entities after
-the device (`media_player.kitchen_speaker` is MA's "Kitchen Speaker"), so the
+the device (`media_player.example_speaker` is MA's "Example Speaker"), so the
 slug is the join key.
 
 ## What does not

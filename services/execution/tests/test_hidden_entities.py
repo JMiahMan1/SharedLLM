@@ -132,3 +132,20 @@ def test_the_capability_index_skips_hidden_copies_in_rooms_but_answers_by_id():
     assert idx.media_targets("pantry") == []
     assert idx.hidden("light.pantry_lamp") and not idx.hidden("light.pantry_lamp_wiz")
     assert idx.has("light.pantry_lamp", "dim") and idx.area_of("light.pantry_lamp") == "pantry"
+
+
+def test_discovery_carries_the_hub_areas_aliases(monkeypatch):
+    from services.execution import capability_index
+
+    _patch(monkeypatch, set())
+    idx = CapabilityIndex([{"entity_id": "light.pantry_lamp", "area_id": "area_9"}], {},
+                          [{"area_id": "area_9", "name": "Pantry", "aliases": ["Larder"]}])
+
+    async def routing_index(ha_url, ha_token, purpose):
+        return idx
+
+    monkeypatch.setattr(capability_index, "routing_index", routing_index)
+    by_id = {e["entity_id"]: e for e in client.get(
+        "/discovery/entities", headers=H, params={"ha_url": "http://hub.test", "ha_token": "t"}).json()["entities"]}
+    assert by_id["light.pantry_lamp"]["attributes"]["area_aliases"] == ["Larder"]
+    assert "area_aliases" not in by_id["light.pantry_lamp_wiz"]["attributes"]

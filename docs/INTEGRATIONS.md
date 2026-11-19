@@ -19,6 +19,24 @@ are borrowed is described in `docs/PER_USER_CREDENTIALS.md`.
 
 Test calls `GET /api/config` with the token.
 
+## HomeHub users and logins
+
+HomeHub can use Jarvis's accounts as its users. It is on by default when the stack gives homehub
+`IDENTITY_SVC_URL` and `INTERNAL_SECRET`; an admin sees and manages it in **Devices > Setup**:
+
+- **Integrations > Jarvis accounts**: the integration itself (remove it to run the hub on its own users; add it
+  back from Add devices > Servers and services).
+- **Users & logins**: each login provider (this hub, Jarvis), which is primary, the last sync and what it
+  changed, **Sync now**, the **Hub passwords** switch (it cannot be turned off unless a Jarvis admin can log
+  in), the hub-only users, and the hub's users (Jarvis's are marked "From Jarvis" and changed here, in Jarvis).
+- **People**: a person for each Jarvis account, kept in step (name, phones), marked "From Jarvis".
+
+With it on, nobody is set up by hand on the hub: a new Jarvis account appears there within a minute (or on its
+first login), the HA companion app logs in with the Jarvis username and password (Jarvis's sign-in lockout
+applies), admins are Jarvis's admins and parents, and each person's device access in Jarvis also limits what
+their hub logins can see and control. Removing an account in Jarvis disables its hub user and ends its hub
+sessions. Details: `services/homehub/README.md`, "Users and logins".
+
 ## Home alerts
 
 Phone notices (category `home`, docs/PUSH.md) from Home Assistant entities.

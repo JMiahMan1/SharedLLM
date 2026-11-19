@@ -360,6 +360,9 @@ function estimate(over: Partial<BibleProviderEstimate> = {}): BibleProviderEstim
 
 describe('what a provider import will cost', () => {
   beforeEach(() => {
+    // Like every other block here: without it the calls a test before this
+    // one made stay recorded, so "not called yet" depended on test order.
+    vi.clearAllMocks();
     apiMock.getBibleImports.mockResolvedValue(catalogue());
     apiMock.getBibleProviderTranslations.mockResolvedValue({
       provider: PROVIDER_OK,

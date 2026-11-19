@@ -1,6 +1,6 @@
 """Family chores on Skylight from the assistant (docs/ACHIEVEMENTS.md, "Managing chores").
 
-"Jarvis, give Noah 'feed the chickens' every day at 7am", "take 'trash' off
+"Jarvis, give Sam 'feed the chickens' every day at 7am", "take 'trash' off
 Taylor's chores", "what are my chores today", "I fed the dog".
 
 Who may do what:

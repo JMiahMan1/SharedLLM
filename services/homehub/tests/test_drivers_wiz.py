@@ -162,12 +162,16 @@ async def test_disabled_entities_are_not_made_again():
     assert [e.entity_id for e in hub.entities.values()] == ["light.kept"]
 
 
-async def test_poll_marks_a_vanished_bulb_unavailable_and_recovers(caplog):
+async def test_poll_marks_a_vanished_bulb_unavailable_and_recovers(monkeypatch, caplog):
+    monkeypatch.setattr(wiz, "RECHECK_AFTER_S", 0)
     bulb = FakeBulb()
     hub, drv = make_driver(bulb)
     await drv.async_setup()
     bulb.online = False
     await drv.async_poll()  # must not raise
+    assert hub.states.get(f"light.wiz_{MAC}").state == "on"  # one missed poll is not enough
+    assert drv.poll_interval == wiz.OFFLINE_POLL_S  # but it is asked again soon
+    await drv.async_poll()
     assert hub.states.get(f"light.wiz_{MAC}").state == "unavailable"
     assert hub.states.get(f"sensor.wiz_{MAC}_power").state == "unavailable"
     assert "unreachable" in caplog.text
@@ -323,9 +327,145 @@ async def test_one_missed_poll_does_not_make_a_working_bulb_unavailable(monkeypa
 async def test_an_unreachable_bulb_names_the_error_even_when_it_has_no_text(monkeypatch):
     loop = asyncio.get_running_loop()
 
-    async def times_out(*_a, **_k):
-        raise TimeoutError()
+    async def fails(*_a, **_k):
+        raise OSError()
 
-    monkeypatch.setattr(loop, "create_datagram_endpoint", times_out)
-    with pytest.raises(DeviceUnavailable, match=r"unreachable: TimeoutError$"):
+    monkeypatch.setattr(loop, "create_datagram_endpoint", fails)
+    with pytest.raises(wiz.WizTransportError, match=r"could not open a socket: OSError$"):
         await udp_request("192.0.2.5", "getPilot", timeout=0.1)
+
+
+# -- 2026-11-18: working bulbs called unreachable because the hub could not open a socket in time ----------
+
+async def test_the_transport_never_asks_the_loop_to_resolve_the_bulbs_address(monkeypatch):
+    """uvloop resolves ``remote_addr`` on libuv's 4-thread pool, which slow DNS lookups had filled."""
+    loop = asyncio.get_running_loop()
+    real = loop.create_datagram_endpoint
+    seen: list[dict] = []
+
+    async def spy(factory, *args, **kwargs):
+        seen.append(dict(kwargs))
+        return await real(factory, *args, **kwargs)
+
+    async def no_dns(*_a, **_k):
+        raise AssertionError("a numeric bulb address must not be resolved")
+
+    monkeypatch.setattr(loop, "create_datagram_endpoint", spy)
+    monkeypatch.setattr(loop, "getaddrinfo", no_dns)
+    monkeypatch.setattr(wiz, "RESEND_EVERY", 0.05)
+    proto = _StandIn()
+    transport, port = await _serve(proto)
+    try:
+        assert await udp_request("127.0.0.1", "getPilot", port=port, timeout=1.0) == {"state": True, "dimming": 55}
+    finally:
+        transport.close()
+    bulb_call = seen[-1]
+    assert "remote_addr" not in bulb_call and bulb_call.get("sock") is not None
+
+
+def test_the_transport_works_on_uvloop_the_loop_the_hub_runs_on():
+    uvloop = pytest.importorskip("uvloop")
+
+    async def main():
+        wiz.RESEND_EVERY, old = 0.05, wiz.RESEND_EVERY
+        proto = _StandIn(drop_first=1)
+        transport, port = await _serve(proto)
+        try:
+            return await udp_request("127.0.0.1", "getPilot", port=port, timeout=1.0)
+        finally:
+            transport.close()
+            wiz.RESEND_EVERY = old
+
+    loop = uvloop.new_event_loop()
+    try:
+        assert loop.run_until_complete(main()) == {"state": True, "dimming": 55}
+    finally:
+        loop.close()
+
+
+async def test_replies_from_another_address_are_ignored():
+    proto = wiz._UDPReply("getPilot", "192.0.2.9")
+    proto.datagram_received(json.dumps({"method": "getPilot", "result": {"state": True}}).encode(), ("192.0.2.8", 38899))
+    assert not proto.future.done()
+    proto.datagram_received(json.dumps({"method": "getPilot", "result": {"state": True}}).encode(), ("192.0.2.9", 38899))
+    assert proto.future.result()["result"] == {"state": True}
+
+
+async def test_a_poll_the_hub_could_not_send_leaves_the_bulb_as_it_was(caplog):
+    bulb = FakeBulb()
+    hub, drv = make_driver(bulb)
+    await drv.async_setup()
+
+    async def no_socket(method, params=None):
+        raise wiz.WizTransportError("no UDP socket")
+
+    drv._request = no_socket
+    for _ in range(wiz.MISSES_BEFORE_UNAVAILABLE + 1):
+        await drv.async_poll()
+    assert hub.states.get(f"light.wiz_{MAC}").state == "on"
+    assert "poll not sent" in caplog.text
+
+
+async def test_a_bulb_shown_unavailable_is_sent_the_command_straight_away(monkeypatch):
+    """No getPilot first: the command finds out whether it is back, and the reply is not delayed by a probe."""
+    monkeypatch.setattr(wiz, "RECHECK_AFTER_S", 0)
+    bulb = FakeBulb()
+    hub, drv = make_driver(bulb)
+    await drv.async_setup()
+    bulb.online = False
+    for _ in range(wiz.MISSES_BEFORE_UNAVAILABLE):
+        await drv.async_poll()
+    assert hub.states.get(drv.light.entity_id).state == "unavailable"
+    bulb.online = True
+    bulb.calls.clear()
+    await hub.call_service("light", "turn_off", {"entity_id": drv.light.entity_id})
+    assert bulb.calls[0] == ("setPilot", {"state": False})
+    assert hub.states.get(drv.light.entity_id).state == "off"
+    assert drv.poll_interval == wiz.ONLINE_POLL_S
+
+
+async def test_a_silent_bulb_cannot_hold_a_command_past_its_budget(monkeypatch):
+    monkeypatch.setattr(wiz, "COMMAND_BUDGET_S", 0.2)
+    bulb = FakeBulb()
+    hub, drv = make_driver(bulb)
+    await drv.async_setup()
+
+    async def hangs(method, params=None):
+        await asyncio.sleep(10)
+
+    drv._request = hangs
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    with pytest.raises(DeviceUnavailable, match="within"):
+        await drv.async_call(drv.light, "light", "turn_on", {})
+    assert loop.time() - started < 1.0
+    assert hub.states.get(drv.light.entity_id).state == "unavailable"
+
+
+async def test_one_silent_bulb_does_not_stop_the_others_in_the_same_call(monkeypatch):
+    """A room is one call with several entities: each bulb is sent its command at once."""
+    monkeypatch.setattr(wiz, "COMMAND_BUDGET_S", 0.3)
+    hub, entry = make_hub("wiz", {"host": "192.0.2.12"}, tw_entities())
+    good = WizDriver(hub, entry)
+    good._request = FakeBulb()  # type: ignore[method-assign]
+    hub.drivers[entry.entry_id] = good
+    from services.homehub.core import ConfigEntry, EntityEntry
+
+    other = ConfigEntry(entry_id="entry2", domain="wiz", title="silent", data={"host": "192.0.2.13"})
+    hub.config_entries[other.entry_id] = other
+    hub.entities["light.silent"] = EntityEntry(entity_id="light.silent", unique_id="02000000010b", platform="wiz",
+                                               config_entry_id="entry2", device_id="dev1")
+    silent = WizDriver(hub, other)
+
+    async def hangs(method, params=None):
+        await asyncio.sleep(10)
+
+    silent._request = hangs  # type: ignore[method-assign]
+    hub.drivers[other.entry_id] = silent
+    await good.async_setup()
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    await hub.call_service("light", "turn_off", {"entity_id": [good.light.entity_id, "light.silent"]})
+    assert loop.time() - started < 1.0
+    assert hub.states.get(good.light.entity_id).state == "off"
+    assert hub.states.get("light.silent").state == "unavailable"

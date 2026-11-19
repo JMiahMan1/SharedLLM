@@ -1,9 +1,9 @@
-"""Place names come from the cached family places (hub zones + saved places), not a hub read per point.
+"""Place names come from the cached family places (all HomeHub zones), not a hub read per point.
 
 Trip lists resolve many points. ``_closest_ha_zone`` used to read every hub state
 for each one (and, with Home Assistant down, tried it first every time). It now
-reads the same five-minute cache as ``/place-name`` and presence, and a hub that
-does not answer no longer takes the saved places down with it.
+reads the same five-minute cache as ``/place-name`` and presence; a HomeHub that
+does not answer keeps the last places, and nobody's private place names a spot.
 """
 import time
 
@@ -18,9 +18,9 @@ SAVED_PARK = {"entity_id": "place.p1", "name": "The Park", "latitude": 10.01, "l
 
 @pytest.fixture(autouse=True)
 def fresh_cache():
-    geo._zone_cache.update({"at": 0.0, "zones": [], "hub": []})
+    geo._zone_cache.update({"at": 0.0, "zones": []})
     yield
-    geo._zone_cache.update({"at": 0.0, "zones": [], "hub": []})
+    geo._zone_cache.update({"at": 0.0, "zones": []})
 
 
 @pytest.fixture
@@ -45,37 +45,31 @@ async def test_hub_zone_suggestions_come_from_the_cache_and_leave_saved_places_o
     assert await geo._ha_zones_containing(10.01, 20.0) == []
 
 
-async def test_a_hub_that_does_not_answer_keeps_the_saved_places_and_its_last_zones(monkeypatch):
-    async def hub_zones():
-        return [HUB_HOME]
+PRIVATE_DEN = {"entity_id": "place." + "d" * 32, "name": "Secret Den", "latitude": 11.0, "longitude": 21.0,
+               "radius": 150.0, "custom": True, "private": True, "owner": "sam"}
 
-    async def saved():
-        return [SAVED_PARK]
 
-    monkeypatch.setattr(geo, "_zones", hub_zones)
-    monkeypatch.setattr(geo, "_saved_places", saved)
+async def test_a_homehub_that_does_not_answer_keeps_the_last_places(monkeypatch):
+    async def hub_places():
+        return [HUB_HOME, SAVED_PARK]
+
+    monkeypatch.setattr(geo, "_zones", hub_places)
     assert [z["name"] for z in await geo._zones_cached()] == ["Home", "The Park"]
 
     async def hub_down():
-        raise ConnectionError("hub down")
+        raise geo.hub_places.PlacesUnavailable("HomeHub did not answer", 502)
 
     monkeypatch.setattr(geo, "_zones", hub_down)
+    monkeypatch.setattr(geo.hub_places, "stack_login", lambda: ("http://hub.test", "s"))
     geo._zone_cache["at"] = 0.0
     assert [z["name"] for z in await geo._zones_cached()] == ["Home", "The Park"]
+    # No HomeHub at all: no places, rather than a second store.
+    monkeypatch.setattr(geo.hub_places, "stack_login", lambda: None)
+    geo._zone_cache["at"] = 0.0
+    assert await geo._zones_cached() == []
 
-    geo._zone_cache.update({"at": 0.0, "hub": []})
-    assert [z["name"] for z in await geo._zones_cached()] == ["The Park"]
-    assert await geo._closest_ha_zone(10.01, 20.0) == "The Park"
 
-
-def test_geo_sends_the_stack_login_only_to_homehub(monkeypatch):
-    import services.config as config
-    import services.geo.main as geo
-
-    monkeypatch.setattr(geo, "HA_URL", "http://real-ha.test:8123")
-    monkeypatch.setattr(geo, "HA_TOKEN", None)
-    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test:8123")
-    monkeypatch.setattr(config, "INTERNAL_SECRET", "made-up-secret")
-    assert geo._hub_target() == ("http://hub.test:8123", "made-up-secret")
-    monkeypatch.setattr(geo, "HA_TOKEN", "household-token")
-    assert geo._hub_target() == ("http://real-ha.test:8123", "household-token")
+async def test_a_private_place_never_names_a_spot_for_anyone(no_state_reads):
+    geo._zone_cache.update({"at": time.time(), "zones": [HUB_HOME, PRIVATE_DEN]})
+    assert await geo._closest_ha_zone(11.0, 21.0) is None
+    assert await geo._ha_zones_containing(11.0, 21.0) == []

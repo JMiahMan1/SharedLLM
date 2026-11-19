@@ -335,7 +335,7 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
         role="dialog"
         aria-modal="true"
         aria-labelledby="dashboard-settings-title"
-        className="glass-panel w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col animate-fade-up outline-none"
+        className="glass-panel w-full max-w-2xl max-h-[85dvh] overflow-hidden flex flex-col animate-fade-up outline-none safe-area-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

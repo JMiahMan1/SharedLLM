@@ -16,6 +16,7 @@ class FakeRedis:
     def __init__(self):
         self.kv = {}
         self.lists = defaultdict(list)
+        self.zsets: defaultdict[str, dict[str, float]] = defaultdict(dict)
 
     async def set(self, key, value, ex=None):
         self.kv[key] = value
@@ -54,6 +55,22 @@ class FakeRedis:
     async def exists(self, key):
         return 1 if key in self.kv else 0
 
+    # Sorted sets: the inference queue is one since priority preemption
+    # (1c0670b4c). Members are ordered by score, ties by member, like Redis.
+    async def zadd(self, key, mapping):
+        added = sum(1 for member in mapping if member not in self.zsets[key])
+        self.zsets[key].update(mapping)
+        return added
+
+    async def zrange(self, key, start, end):
+        members = [m for m, _ in sorted(self.zsets[key].items(), key=lambda kv: (kv[1], kv[0]))]
+        if end == -1:
+            end = len(members) - 1
+        return members[start:end + 1]
+
+    async def zrem(self, key, member):
+        return 1 if self.zsets[key].pop(member, None) is not None else 0
+
     async def lrange(self, key, start, end):
         items = self.lists[key]
         if end == -1:
@@ -86,7 +103,7 @@ async def test_inference_queue_reclaims_expired_job():
     status = await queue.get_job_status(job_id)
     assert status is not None
     assert status["status"] == JobStatus.QUEUED
-    assert fake_redis.lists[queue.QUEUE_KEY] == [job_id]
+    assert await fake_redis.zrange(queue.QUEUE_KEY, 0, -1) == [job_id]
 
 
 @pytest.mark.asyncio

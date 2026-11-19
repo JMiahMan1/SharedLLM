@@ -165,13 +165,14 @@ public class PushPlugin extends Plugin {
     }
 
     /** A nudge arrived: the open page shows it (nothing is kept if no page listens). */
-    static void nudged(String title, String body, String path) {
+    static void nudged(String title, String body, String path, String kind) {
         PushPlugin plugin = current;
         if (plugin == null || !PushNotifier.appVisible) return;
         JSObject data = new JSObject();
         data.put("title", title);
         data.put("body", body);
         data.put("path", path);
+        data.put("kind", kind == null ? "" : kind);
         plugin.notifyListeners("nudge", data);
     }
 

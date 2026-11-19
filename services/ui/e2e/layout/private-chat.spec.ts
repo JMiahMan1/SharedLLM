@@ -56,6 +56,10 @@ interface Server {
   /** Link previews the server would make, by address, and the addresses this device asked about. */
   previews?: Record<string, Record<string, unknown>>;
   previewAsks?: string[];
+  /** My reply reminder switch as the server keeps it, the values this device set, and the bits it sent. */
+  reminders?: boolean;
+  reminderPuts?: boolean[];
+  flags?: Array<Record<string, unknown>>;
 }
 
 interface Mark {
@@ -172,6 +176,20 @@ async function serve(page: Page, server: Server): Promise<void> {
       // As slow as a real page, so the loading line is seen.
       await new Promise((r) => setTimeout(r, 400));
       return made ? route.fulfill({ json: made }) : route.fulfill({ status: 502, json: { detail: 'The page could not be read.' } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/reminders`) {
+      if (req.method() === 'PUT') {
+        const enabled = (req.postDataJSON() as { enabled: boolean }).enabled;
+        (server.reminderPuts ??= []).push(enabled);
+        server.reminders = enabled;
+      }
+      return route.fulfill({ json: { enabled: server.reminders ?? true, available: true, delay_s: 21600, question_delay_s: 7200,
+        quiet: '21:30-07:30', daily_max: 2 } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/expects-reply` && req.method() === 'POST') {
+      const body = req.postDataJSON() as Record<string, unknown>;
+      (server.flags ??= []).push(body);
+      return route.fulfill({ json: body });
     }
     if (/\/nudge$/.test(p)) {
       server.nudges += 1;
@@ -944,6 +962,46 @@ test.describe('private chat on every form factor', () => {
     await page.getByTestId('private-security').getByRole('button', { name: 'Close' }).last().click();
     await leaveAndComeBack();
     await expect(page.getByTestId('private-lock')).toBeVisible();
+    done(run);
+  });
+
+  test('reply reminders: one bit about a question leaves the device, and the switch in the settings is mine', async ({ page }, info) => {
+    const secrets = await v1Chat(PASSWORD);
+    const message = async (id: number, actor: string, name: string, text: string, ago: number) => ({
+      id, token: TOKEN, actor_type: 'users', actor_id: actor, actor_display_name: name, timestamp: SEC - ago, message_type: 'comment',
+      message: await sealMessage(secrets.key, { t: 'text', text }),
+    });
+    const server: Server = {
+      chats: [{ token: TOKEN, members: ['parent', 'robin'], partner: 'robin', partner_name: 'Robin', created_by: 'robin', created_at: SEC - 86400,
+        version: 1, storage: 'store', kdf: { name: 'PBKDF2-SHA256', salt: secrets.salt, iterations: secrets.iterations }, verifier: secrets.verifier }],
+      messages: [
+        await message(1, 'parent', 'Parent', 'Home by six', 7200),
+        await message(2, 'robin', 'Robin', 'Are you free for lunch tomorrow', 600),
+        await message(3, 'robin', 'Robin', 'Love you', 590),
+      ],
+      blobs: {}, posted: [], created: [], nudges: 0,
+    };
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed').getByText('Love you')).toBeVisible();
+
+    // Robin asked something (decided here, from the text): the server hears one bit for the newest message, once.
+    await expect.poll(() => server.flags?.length ?? 0).toBe(1);
+    expect(server.flags).toEqual([{ message_id: 3, expects_reply: true }]);
+    expect(JSON.stringify(server.flags)).not.toMatch(/lunch|free|Love/);
+
+    await page.getByTestId('private-security-open').click();
+    const menu = page.getByTestId('private-security');
+    const toggle = menu.getByTestId('private-reminders-toggle');
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await expect(menu.getByTestId('private-reminders-summary')).toContainText('never says what was written');
+    await check(page, info, run, 'private reminders on', page.getByRole('dialog').last());
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(server.reminderPuts).toEqual([false]);
+    await check(page, info, run, 'private reminders off', page.getByRole('dialog').last());
+    expect(server.flags).toHaveLength(1);
     done(run);
   });
 

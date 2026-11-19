@@ -13,6 +13,10 @@ import {
   type BackupHeader,
   type OpenedBackup,
 } from './privateChatBackupCore.js';
+import { memoizePbkdf2 } from '../test/pbkdf2Memo';
+
+// Each opening derives the chat password at 600,000+ iterations; reuse them.
+memoizePbkdf2();
 
 /**
  * The app's decryptor against backups the Python encrypter made

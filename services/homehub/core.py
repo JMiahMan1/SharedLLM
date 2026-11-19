@@ -25,6 +25,14 @@ UNKNOWN = "unknown"
 UPDATE_INSTALL = 1
 #: The update services the hub answers itself (a skipped version is the hub's record, not the device's).
 UPDATE_SKIP_SERVICES = ("skip", "clear_skipped")
+#: How long a combined device's main copy has to carry out a command before the fallback gets it.
+COMBINED_MAIN_TIMEOUT_S = 6.0
+#: Commands that start playback are not handed to the fallback just because the main is slow: a Cast TV that
+#: first switches app and then loads takes longer than 6 s, and the main's worker thread carries on after the
+#: wait is given up, so the fallback played the same clip a few seconds after the main did (announcements
+#: heard twice). They wait this long, past every media driver's own load timeout, and move on only on an error.
+COMBINED_PLAY_SERVICES = frozenset({("media_player", "play_media")})
+COMBINED_PLAY_TIMEOUT_S = 40.0
 
 # Entity services a domain answers. A driver may support fewer; the hub only
 # refuses a service no driver of that domain could ever handle.
@@ -96,6 +104,30 @@ class DeviceUnavailable(HubError):
     """The device did not answer. Callers treat this like HA's 'unavailable'."""
 
     status = 503
+
+
+class AuthRequired(DeviceUnavailable):
+    """The device answered but wants a password the entry does not have, or refused the one it has.
+
+    Raised from a driver's setup or poll, it parks the entry in ``setup_error`` with no retries (HA's
+    ``ConfigEntryAuthFailed``): trying a refused password again only locks the account (a Reolink camera locks
+    it after a few tries). The entry shows what it needs (``needs``, read by ``entries.needs_of``) until an
+    admin enters it, which reloads the entry. ``needs`` is ``"password"`` (the device's own password),
+    ``"login"`` (an account's username and password), ``"pairing"`` (pair again: a TV or accessory that
+    forgot the hub) or ``"bindkey"`` (a BLE sensor's encryption key).
+    """
+
+    def __init__(self, message: str = "", *, needs: str = "password") -> None:
+        super().__init__(message)
+        self.needs = needs
+
+
+class SetupError(HubError):
+    """A setup that cannot succeed however often it is tried (a required setting is missing or wrong).
+
+    The entry is parked in ``setup_error`` with this reason, with no retries, until an admin changes or
+    reloads it (HA's ``ConfigEntryError``). Anything else a setup raises is retried.
+    """
 
 
 @dataclass
@@ -239,6 +271,8 @@ class ConfigEntry:
     unique_id: str | None = None
     state: str = "not_loaded"  # loaded | setup_error | not_loaded | setup_retry
     reason: str | None = None
+    #: What a parked entry needs from an admin (``AuthRequired.needs``); None otherwise. Not stored.
+    needs: str | None = None
 
     def public(self) -> dict[str, Any]:
         """What HA's config_entries API shows: never the credentials in ``data``."""
@@ -391,6 +425,12 @@ class Driver:
     platform: str = ""
     #: Seconds between :meth:`async_poll` calls; ``None`` means push-only.
     poll_interval: float | None = 30.0
+    #: Seconds one :meth:`async_poll` may take before it counts as failed; ``None`` uses the runtime's default.
+    poll_timeout: float | None = None
+    #: Attributes of this driver's entities that history leaves out (HA's ``_unrecorded_attributes``), on top of
+    #: the recorder's per-domain ones (recorder.py): values that churn without meaning anything later, such as a
+    #: rotating token or a signal reading. The live state and the restored state keep them.
+    unrecorded_attributes: frozenset[str] = frozenset()
 
     def __init__(self, hub: Hub, entry: ConfigEntry) -> None:
         self.hub = hub
@@ -556,6 +596,8 @@ class Hub:
         self.platform_drivers: dict[str, Any] = {}
         self.services: dict[tuple[str, str], ServiceHandler] = {}
         self.service_schemas: dict[tuple[str, str], dict[str, Any]] = {}
+        #: Services only an admin may call over the API (HA's ``async_register_admin_service``): recorder purges.
+        self.admin_services: set[tuple[str, str]] = set()
         self.time_zone = time_zone
         self.location = location or {}
         self.started_at = utcnow()
@@ -569,6 +611,15 @@ class Hub:
         self.entity_registry_ids: dict[str, str] = {}
         #: Entities a driver has published a state for since the hub started.
         self.live: set[str] = set()
+        #: Combined duplicates (duplicates.py): each copy's entity id -> ``(main, fallback)`` entity ids. Both ids
+        #: show one shared state, the main's while it is available, else the fallback's; commands go to the main
+        #: and, when it fails, to the fallback (``_call_combined``).
+        self.combined: dict[str, tuple[str, str]] = {}
+        #: Each combined copy's own last state, as its driver published it.
+        self.copy_states: dict[str, State] = {}
+        #: Combined mains whose last command the fallback carried out: the fallback's state is the true one until
+        #: the main says something new.
+        self.fallback_active: set[str] = set()
 
     # -- registry -----------------------------------------------------------
     def entity_area_id(self, entity_id: str) -> str | None:
@@ -696,7 +747,107 @@ class Hub:
                 attrs["state_class"] = caps["state_class"]
             if entry.domain == "update" and str(state) != UNAVAILABLE:
                 state = update_state(state, attrs, skipped_version(entry))
+        if entity_id in self.combined:
+            self.copy_states[entity_id] = State(entity_id, "" if state is None else str(state), attrs)
+            if self.combined[entity_id][0] == entity_id:
+                self.fallback_active.discard(entity_id)
+            return self.publish_combined(entity_id)
         return self.states.set(entity_id, state, attrs)
+
+    # -- combined duplicates (duplicates.py) -----------------------------------
+    def combined_source(self, entity_id: str) -> tuple[str | None, State | None]:
+        """Which copy a combined entity shows: ``("main" | "fallback" | None, that copy's own state)``.
+
+        The main while it is available (unless the fallback carried out the last command and the main has said
+        nothing since); else the fallback while that is; else whichever copy has said anything (unavailable).
+        """
+        main, fallback = self.combined[entity_id]
+        ms, fs = self.copy_states.get(main), self.copy_states.get(fallback)
+        if main in self.fallback_active and fs is not None and fs.state != UNAVAILABLE:
+            return "fallback", fs
+        if ms is not None and ms.state != UNAVAILABLE:
+            return "main", ms
+        if fs is not None and fs.state != UNAVAILABLE:
+            return "fallback", fs
+        if ms is not None:
+            return "main", ms
+        return ("fallback", fs) if fs is not None else (None, None)
+
+    def publish_combined(self, entity_id: str) -> State:
+        """Write the shared state of a combined entity under both copies' ids (each keeps its own name)."""
+        main, fallback = self.combined[entity_id]
+        _which, src = self.combined_source(entity_id)
+        if src is None:
+            current = self.states.get(entity_id)
+            return current if current is not None else self.states.set(entity_id, UNKNOWN, {})
+        out: State | None = None
+        for eid in (main, fallback):
+            attrs = dict(src.attributes)
+            entry = self.entities.get(eid)
+            if entry is not None:
+                attrs["friendly_name"] = self.friendly_name(entry)
+                if entry.icon:
+                    attrs["icon"] = entry.icon
+            st = self.states.set(eid, src.state, attrs)
+            if eid == entity_id:
+                out = st
+        assert out is not None
+        return out
+
+    def _driver_for(self, entry: EntityEntry) -> Driver | None:
+        return self.drivers.get(entry.config_entry_id or "") if entry.config_entry_id \
+            else self.platform_drivers.get(entry.platform)
+
+    async def _call_combined(self, main_id: str, fallback_id: str, domain: str, service: str,
+                             data: dict[str, Any]) -> Any:
+        """Send a command to a combined entity's main copy, and to its fallback when the main fails.
+
+        A main whose own state is unavailable while the fallback's is not is skipped (it would only time out).
+        The main gets ``COMBINED_MAIN_TIMEOUT_S`` to answer; an error or a timeout sends the same command to the
+        fallback, logged at INFO. Only when both fail does the call fail, with both reasons.
+        """
+        order: list[tuple[EntityEntry, Driver]] = []
+        missing: list[str] = []
+        for eid in (main_id, fallback_id):
+            ent = self.entities.get(eid)
+            drv = self._driver_for(ent) if ent is not None and not ent.disabled_by else None
+            if ent is None or drv is None:
+                missing.append(f"{eid}: no driver is running for it")
+                continue
+            order.append((ent, drv))
+        if not order:
+            raise HubError("; ".join(missing))
+        ms, fs = self.copy_states.get(main_id), self.copy_states.get(fallback_id)
+        skipped_main = (len(order) == 2 and ms is not None and ms.state == UNAVAILABLE
+                        and fs is not None and fs.state != UNAVAILABLE)
+        if skipped_main:
+            order.reverse()
+        errors: list[tuple[str, BaseException]] = []
+        main_timeout = COMBINED_PLAY_TIMEOUT_S if (domain, service) in COMBINED_PLAY_SERVICES \
+            else COMBINED_MAIN_TIMEOUT_S
+        for i, (ent, drv) in enumerate(order):
+            try:
+                job = drv.async_call(ent, domain, service, dict(data))
+                if i == 0 and len(order) > 1:
+                    result = await asyncio.wait_for(job, main_timeout)
+                else:
+                    result = await job
+            except Exception as exc:  # any failure of one copy is a reason to try the other
+                if isinstance(exc, TimeoutError):
+                    exc = DeviceUnavailable(f"did not answer in {main_timeout:g} s")
+                errors.append((ent.entity_id, exc))
+                continue
+            if ent.entity_id != main_id:
+                why = "the main copy is unavailable" if skipped_main else \
+                    "; ".join(f"{eid}: {exc}" for eid, exc in errors) or "the main copy has no driver"
+                log.info("%s.%s on %s used fallback %s (%s)", domain, service, main_id, ent.entity_id, why)
+                self.fallback_active.add(main_id)
+                if main_id in self.combined:
+                    self.publish_combined(main_id)
+            return result
+        first = errors[0][1]
+        exc_type = type(first) if isinstance(first, HubError) else HubError
+        raise exc_type("; ".join([*missing, *(f"{eid}: {exc}" for eid, exc in errors)]))
 
     def _confirm_from_state(self, entry: EntityEntry, attrs: dict[str, Any]) -> None:
         info: dict[str, Any] = {}
@@ -802,8 +953,26 @@ class Hub:
     # -- services -----------------------------------------------------------
     def register_service(self, domain: str, service: str, handler: ServiceHandler,
                          schema: dict[str, Any] | None = None) -> None:
+        new = (domain, service) not in self.services
         self.services[(domain, service)] = handler
         self.service_schemas[(domain, service)] = schema or {}
+        if new:
+            # HA's event: automations waiting for a device's own action resume on it.
+            self.bus.fire("service_registered", {"domain": domain, "service": service})
+
+    def unregister_service(self, domain: str, service: str) -> None:
+        if self.services.pop((domain, service), None) is not None:
+            self.bus.fire("service_removed", {"domain": domain, "service": service})
+        self.service_schemas.pop((domain, service), None)
+
+    def is_device_action(self, domain: str, service: str) -> bool:
+        """Whether ``domain.service`` names an action a device brings with it (it exists only while the device
+        is connected or set up), as opposed to a service the hub or an integration always has. Which names are
+        device actions is declared by the drivers that register them (``drivers.DEVICE_ACTIONS``)."""
+        from services.homehub.drivers import DEVICE_ACTIONS
+
+        return any(service.startswith(prefix) and len(service) > len(prefix)
+                   for prefix in DEVICE_ACTIONS.get(domain, ()))
 
     def resolve_targets(self, data: dict[str, Any]) -> list[str]:
         """``entity_id`` / ``target`` / ``area_id`` / ``device_id`` -> entity ids (HA's rules)."""
@@ -946,7 +1115,20 @@ class Hub:
         errors: list[str] = []
         ran = 0
         jobs = []
+        combined_done: set[str] = set()
         for eid in call.entity_ids:
+            pair = self.combined.get(eid)
+            if pair is not None:
+                # Either copy's id is the combined device: one command, to the main (then the fallback).
+                main_entry = self.entities.get(pair[0])
+                if pair[0] in combined_done or main_entry is None:
+                    continue
+                domain = main_entry.domain if by_entity_domain else call.domain
+                if not by_entity_domain and main_entry.domain != call.domain and call.domain != "homeassistant":
+                    continue
+                combined_done.add(pair[0])
+                jobs.append((pair[0], self._call_combined(pair[0], pair[1], domain, call.service, dict(data))))
+                continue
             entry = self.entities.get(eid)
             if entry is None or entry.disabled_by:
                 errors.append(f"{eid}: unknown entity")
@@ -955,8 +1137,7 @@ class Hub:
             if not by_entity_domain and entry.domain != call.domain and call.domain != "homeassistant":
                 # HA silently skips entities of another domain; so do we.
                 continue
-            driver = self.drivers.get(entry.config_entry_id or "") if entry.config_entry_id \
-                else self.platform_drivers.get(entry.platform)
+            driver = self._driver_for(entry)
             if driver is None:
                 errors.append(f"{eid}: no driver is running for {entry.platform}")
                 continue

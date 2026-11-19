@@ -473,8 +473,8 @@ describe('AmbientTimerWidget', () => {
     (api.getTimerDevices as ReturnType<typeof vi.fn>).mockResolvedValue({
       devices: [
         {
-          id: 'media_player.office_tv',
-          name: 'Office TV',
+          id: 'media_player.study_tv',
+          name: 'Study TV',
           kind: 'tv',
           has_speaker: true,
           has_screen: true,
@@ -482,8 +482,8 @@ describe('AmbientTimerWidget', () => {
           state: 'idle',
         },
         {
-          id: 'media_player.office_tv_remote',
-          name: 'Office TV Remote',
+          id: 'media_player.study_tv_remote',
+          name: 'Study TV Remote',
           kind: 'tv',
           has_speaker: true,
           has_screen: true,
@@ -506,7 +506,7 @@ describe('AmbientTimerWidget', () => {
         state: 'unavailable',
         domain: 'media_player',
       },
-      { entity_id: 'media_player.office_tv_cast', friendly_name: 'Office TV Cast', state: 'idle', domain: 'media_player' },
+      { entity_id: 'media_player.study_tv_cast', friendly_name: 'Study TV Cast', state: 'idle', domain: 'media_player' },
     ]);
     (api.getTimers as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
@@ -529,7 +529,7 @@ describe('AmbientTimerWidget', () => {
     const select = screen.getByRole('combobox') as HTMLSelectElement;
     expect(Array.from(select.options, (option) => option.text)).toEqual([
       'No alert (silent)',
-      'Office TV',
+      'Study TV',
     ]);
   });
 

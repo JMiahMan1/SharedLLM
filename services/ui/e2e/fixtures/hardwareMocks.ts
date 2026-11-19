@@ -16,7 +16,7 @@ const device = (over: Record<string, unknown>) => ({
 });
 
 export const HARDWARE = {
-  areas: [{ area_id: 'kitchen', name: 'Kitchen' }, { area_id: 'living', name: 'Living room' }, { area_id: 'office', name: 'Office' },
+  areas: [{ area_id: 'kitchen', name: 'Kitchen' }, { area_id: 'living', name: 'Living room' }, { area_id: 'study', name: 'Study' },
     { area_id: 'den', name: 'Den' }, { area_id: 'porch', name: 'Front porch' }, { area_id: 'garage', name: 'Garage' }],
   devices: [
     device({ id: 'hw-lamp', name: 'Reading lamp with a rather long name for small phones', manufacturer: 'WiZ',
@@ -30,8 +30,8 @@ export const HARDWARE = {
     device({ id: 'hw-plug', name: 'Kettle plug', manufacturer: 'Espressif', model: 'Plug', area_id: 'kitchen',
       area: 'Kitchen', domain: 'esphome', label: 'ESPHome', entry_id: 'e-esp', entry_title: 'Kettle plug', kind: 'power',
       status: 'partial', unavailable: 1, abilities: ['power', 'sense'], connections: [{ type: 'mac', value: '02:00:00:00:00:31' }] }),
-    device({ id: 'hw-bulb', name: 'Desk bulb', manufacturer: 'Example Lighting', model: 'A15 colour bulb', area_id: 'office',
-      area: 'Office', domain: 'esphome', label: 'ESPHome', entry_id: 'e-esp2', entry_title: 'desk-bulb', kind: 'light',
+    device({ id: 'hw-bulb', name: 'Desk bulb', manufacturer: 'Example Lighting', model: 'A15 colour bulb', area_id: 'study',
+      area: 'Study', domain: 'esphome', label: 'ESPHome', entry_id: 'e-esp2', entry_title: 'desk-bulb', kind: 'light',
       sw_version: '2026.10.1', entities: 5, abilities: ['color', 'color_temp', 'dim', 'power', 'set_value', 'select_option'],
       connections: [{ type: 'ip', value: '192.0.2.41' }, { type: 'mac', value: '02:00:00:00:00:41' }] }),
     device({ id: 'hw-speaker', name: 'Kitchen speaker', manufacturer: 'Example Audio', model: 'Speaker One', area_id: 'kitchen',
@@ -58,8 +58,8 @@ export const HARDWARE = {
     device({ id: 'hw-lock', name: 'Front door lock', manufacturer: 'Example', model: 'Deadbolt', area_id: 'porch',
       area: 'Front porch', domain: 'zwave_js', label: 'Z-Wave', entry_id: 'e-zw', entry_title: 'Z-Wave', kind: 'access',
       abilities: ['lock'], connections: [] }),
-    device({ id: 'hw-fan', name: 'Office fan', manufacturer: 'Example', model: 'Tower fan', area_id: 'office', area: 'Office',
-      domain: 'esphome', label: 'ESPHome', entry_id: 'e-esp3', entry_title: 'office-fan', kind: 'climate',
+    device({ id: 'hw-fan', name: 'Study fan', manufacturer: 'Example', model: 'Tower fan', area_id: 'study', area: 'Study',
+      domain: 'esphome', label: 'ESPHome', entry_id: 'e-esp3', entry_title: 'study-fan', kind: 'climate',
       abilities: ['power', 'set_speed'], connections: [] }),
     device({ id: 'hw-service', name: 'Example weather service', manufacturer: 'Example', model: 'Forecast', area_id: null,
       area: null, domain: 'met', label: 'Weather', entry_id: 'e-met', entry_title: 'Home', kind: 'other', service: true,
@@ -82,7 +82,7 @@ export function initialStates() {
     'media_player.living_tv': st('media_player.living_tv', 'Living TV', 'unavailable', 'hw-tv', 'living', {
       last_changed: ago(185), device_class: 'tv', offline: { cause: 'device', integration: 'Roku' } }),
     'switch.kettle_plug': st('switch.kettle_plug', 'Kettle plug', 'off', 'hw-plug', 'kitchen'),
-    'light.desk_bulb': st('light.desk_bulb', 'Desk bulb', 'on', 'hw-bulb', 'office', {
+    'light.desk_bulb': st('light.desk_bulb', 'Desk bulb', 'on', 'hw-bulb', 'study', {
       attributes: { brightness: 128, supported_color_modes: ['color_temp', 'rgb'], color_mode: 'color_temp',
         color_temp_kelvin: 2700, min_color_temp_kelvin: 2000, max_color_temp_kelvin: 6535 } }),
     'media_player.kitchen_speaker': st('media_player.kitchen_speaker', 'Kitchen speaker', 'playing', 'hw-speaker', 'kitchen', {
@@ -105,7 +105,7 @@ export function initialStates() {
     'cover.garage_door': st('cover.garage_door', 'Garage door', 'closed', 'hw-garage', 'garage',
       { device_class: 'garage', attributes: { supported_features: 3 } }),
     'lock.front_door': st('lock.front_door', 'Front door lock', 'locked', 'hw-lock', 'porch'),
-    'fan.office_fan': st('fan.office_fan', 'Office fan', 'on', 'hw-fan', 'office', {
+    'fan.study_fan': st('fan.study_fan', 'Study fan', 'on', 'hw-fan', 'study', {
       attributes: { supported_features: 1 | 2 | 8 | 16 | 32, percentage: 40, percentage_step: 10, oscillating: false,
         preset_modes: ['normal', 'sleep', 'breeze'], preset_mode: 'normal' } }),
     'sensor.hall_temperature': st('sensor.hall_temperature', 'Hall climate sensor Temperature', '21.5', 'hw-sensor', null, {
@@ -163,7 +163,7 @@ export function detailFor(id: string, s: States, voices: Map<string, boolean> = 
     list.push(config('select.desk_bulb_power_on_state', 'Desk bulb Power-on state', 'restore',
       { options: ['restore', 'always_on', 'always_off'] }));
     list.push(entity('update.desk_bulb_firmware', 'Desk bulb Firmware',
-      st('update.desk_bulb_firmware', 'Firmware', 'on', 'hw-bulb', 'office', { attributes: { supported_features: 1 | 4 | 16,
+      st('update.desk_bulb_firmware', 'Firmware', 'on', 'hw-bulb', 'study', { attributes: { supported_features: 1 | 4 | 16,
         installed_version: '2026.10.1', latest_version: '2026.11.0', title: 'Bulb firmware', in_progress: false,
         release_url: 'https://example.com/releases/' } }), { entity_category: 'config', voice: QUIET }));
     list.push(reading('sensor.desk_bulb_wifi_signal', 'Desk bulb WiFi signal', '-61', 'hw-bulb', 'dBm', 'signal_strength',
@@ -196,7 +196,7 @@ export function detailFor(id: string, s: States, voices: Map<string, boolean> = 
     list.push(entity('lock.front_door', 'Front door lock', s['lock.front_door']));
     list.push(reading('sensor.front_door_lock_battery', 'Front door lock Battery', '64', 'hw-lock', '%', 'battery', 'diagnostic'));
   } else if (id === 'hw-fan') {
-    list.push(entity('fan.office_fan', 'Office fan', s['fan.office_fan']));
+    list.push(entity('fan.study_fan', 'Study fan', s['fan.study_fan']));
   } else if (id === 'hw-sensor') {
     list.push(entity('sensor.hall_temperature', 'Hall climate sensor Temperature', s['sensor.hall_temperature'], { voice: QUIET }));
     list.push(reading('sensor.hall_humidity', 'Hall climate sensor Humidity', '44', 'hw-sensor', '%', 'humidity'));

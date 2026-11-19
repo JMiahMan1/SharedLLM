@@ -14,8 +14,11 @@ the name may contain ``/`` and is empty for the node's main entity, as in
 is ``sensor``. HA's older ``{node}{platform}{object_id}`` ids are matched too.
 Ids like ``{MAC}-pipeline``, ``-wake_word``, ``-vad_sensitivity`` and
 ``-assist_satellite`` are not on the node at all: HA made them for its voice
-pipeline. They keep their last state and a ``select_option`` on them is
-remembered, nothing more.
+pipeline, and the hub's voice pipeline makes them (plus ``-speech_detection``)
+for a satellite adopted here (``SatelliteVoice.ensure_entities``). The wake
+word select drives the node's own setting, "Finished speaking detection" and
+"Speech detection" are the hub's per-satellite settings, and a ``select_option``
+on any other is remembered, nothing more.
 
 User-defined actions on the node (``api: actions:``) are registered as hub
 services ``esphome.{node_name}_{action}`` (dashes in the node name become
@@ -41,6 +44,7 @@ import colorsys
 import contextlib
 import inspect
 import json
+import logging
 import math
 import re
 from collections.abc import AsyncIterator
@@ -84,6 +88,7 @@ from aioesphomeapi import (
     VoiceAssistantTimerEventType,
 )
 
+from services.homehub import esphome_audio
 from services.homehub.core import (
     UNAVAILABLE,
     UNKNOWN,
@@ -118,6 +123,66 @@ TIMER_EVENTS = {
 }
 SATELLITE_ANNOUNCE_TIMEOUT_S = 120.0  # a long announcement plays to the end before the node answers
 RECONNECT_DELAYS = (2, 5, 10, 30, 60)
+#: How long an mDNS lookup of a node's ``.local`` name may take.
+MDNS_RESOLVE_TIMEOUT = 3.0
+
+# One zeroconf instance for every node's ``.local`` lookups in the process.
+_zeroconf: Any = None
+_zeroconf_failed = False
+_zeroconf_lock = asyncio.Lock()
+
+
+async def _shared_zeroconf() -> Any:
+    global _zeroconf, _zeroconf_failed
+    async with _zeroconf_lock:
+        if _zeroconf is None and not _zeroconf_failed:
+            try:
+                from zeroconf.asyncio import AsyncZeroconf
+
+                _zeroconf = AsyncZeroconf()
+            except Exception as exc:  # no multicast here: .local names cannot be looked up at all
+                _zeroconf_failed = True
+                logging.getLogger("homehub.esphome").warning("mDNS is unavailable, .local names will not "
+                                                             "resolve: %s", exc)
+        return _zeroconf
+
+
+async def resolve_mdns(host: str, timeout: float) -> str | None:
+    """``x.local`` -> its IPv4 address by mDNS only (never DNS), or None.
+
+    Asks for the host's A record and for the node's ``_esphomelib._tcp`` service (what aioesphomeapi
+    asks) at once; the first address either finds wins.
+    """
+    from zeroconf import AddressResolverIPv4, IPVersion
+    from zeroconf.asyncio import AsyncServiceInfo
+
+    aiozc = await _shared_zeroconf()
+    if aiozc is None:
+        return None
+    server = host.rstrip(".") + "."
+    short = server.split(".", 1)[0]
+    lookups = [AddressResolverIPv4(server),
+               AsyncServiceInfo("_esphomelib._tcp.local.", f"{short}._esphomelib._tcp.local.", server=server)]
+
+    async def ask(info: Any) -> str | None:
+        try:
+            if await info.async_request(aiozc.zeroconf, int(timeout * 1000)):
+                found = info.parsed_addresses(IPVersion.V4Only)
+                return found[0] if found else None
+        except Exception:
+            return None
+        return None
+
+    tasks = [asyncio.ensure_future(ask(i)) for i in lookups]
+    try:
+        for done in asyncio.as_completed(tasks):
+            address = await done
+            if address:
+                return address
+    finally:
+        for t in tasks:
+            t.cancel()
+    return None
 
 # EntityInfo class -> the platform word HA put in the unique_id.
 PLATFORMS: dict[str, str] = {
@@ -260,6 +325,7 @@ class ESPHomeDriver(Driver):
         self.noise_psk: str | None = d.get("noise_psk") or None
         self.allow_service_calls: bool = bool(entry.options.get("allow_service_calls"))
         self._client: Any = None
+        self._resolve_mdns = resolve_mdns
         self._device_info: Any = None
         self._api_version: Any = None
         self._closing = False
@@ -283,12 +349,15 @@ class ESPHomeDriver(Driver):
         from services.homehub.voice_pipeline import SatelliteVoice
 
         self.voice = SatelliteVoice(self)  # the voice pipeline, when the node is a satellite
+        from services.homehub.esphome_restarts import RestartMonitor
+
+        self.restarts = RestartMonitor(self)  # restarts and drops, with the node's log lines around each
         self.local_entities = [e for e in self.entities if "/" not in (e.unique_id or "")
                                and re.match(r"^[0-9A-Fa-f:]{17}-", e.unique_id or "")]
 
     # -- connection -----------------------------------------------------------
     def _make_client(self, host: str) -> Any:
-        # aioesphomeapi resolves a ``.local`` name itself through zeroconf (host_resolver).
+        # ``host`` is an address: a ``.local`` name was resolved by mDNS first (``_address_for``).
         return APIClient(host, self.port, self.password, client_info="homehub",
                          noise_psk=self.noise_psk, expected_name=self.device_name or None)
 
@@ -296,8 +365,24 @@ class ESPHomeDriver(Driver):
     def connected(self) -> bool:
         return self._client is not None
 
+    async def _address_for(self, host: str) -> str:
+        """Where to connect for ``host``: a ``.local`` name is looked up by mDNS alone.
+
+        Given ``x.local``, aioesphomeapi also asks DNS for ``x`` (no suffix) through ``loop.getaddrinfo``.
+        On the server a single-label name takes ~4 s to fail, and under uvloop each lookup holds one of
+        libuv's four pool threads, which every UDP socket the hub opens also needs: offline nodes retrying
+        filled the pool and WiZ bulbs were called unreachable (measured 2026-11-18). So the hub resolves
+        the name itself and hands aioesphomeapi an address, which it never looks up.
+        """
+        if not host.lower().rstrip(".").endswith(".local"):
+            return host
+        address = await self._resolve_mdns(host, MDNS_RESOLVE_TIMEOUT)
+        if not address:
+            raise DeviceUnavailable(f"{host}:{self.port}: not found by mDNS")
+        return address
+
     async def _try_connect(self, host: str) -> tuple[Any, Any, list[Any], list[Any]]:
-        client = self._make_client(host)
+        client = self._make_client(await self._address_for(host))
         try:
             await asyncio.wait_for(client.connect(on_stop=self._on_stop, login=True), CONNECT_TIMEOUT)
             device_info, infos, services = await asyncio.wait_for(
@@ -337,6 +422,10 @@ class ESPHomeDriver(Driver):
         self._device_info = device_info
         self._confirm(device_info)
         self._register_services(getattr(device_info, "name", "") or self.device_name, services)
+        try:  # before the states arrive: the monitor reads the node's uptime from them
+            self.restarts.attach(client, infos)
+        except Exception:
+            self.log.exception("ESPHome %s: watching it for restarts failed", self.device_name)
         client.subscribe_home_assistant_states_and_services(
             on_state=self._on_state, on_service_call=self._on_service_call,
             on_state_sub=self._on_state_sub, on_state_request=self._on_state_request)
@@ -366,9 +455,15 @@ class ESPHomeDriver(Driver):
             detach()
 
     async def _on_stop(self, expected_disconnect: bool) -> None:
+        # First, while the voice run and the media state still say what the node was doing.
+        if self._closing:
+            self.restarts.detach()
+        else:
+            self.restarts.on_disconnect(expected_disconnect)
         self._detach_bluetooth()
         self._client = None
         self.voice.detach()
+        self.stop_audio()  # a node that went away reads no more audio
         if self._closing:
             return
         self.log.warning("ESPHome %s (%s) disconnected%s; reconnecting", self.device_name, self.host,
@@ -423,7 +518,9 @@ class ESPHomeDriver(Driver):
                 await self._reconnect_task
         for t in list(self._tasks):
             t.cancel()
+        self.restarts.close()
         self.voice.detach()
+        self.stop_audio()
         self._unregister_services()
         if self._unsub_bus:
             self._unsub_bus()
@@ -502,6 +599,7 @@ class ESPHomeDriver(Driver):
             raise HubError("link the ESPHome Device Builder (Devices > Integrations) to install firmware")
         if self._device_info is None:
             raise DeviceUnavailable(f"ESPHome {self.device_name or self.host} is not connected")
+        self.restarts.note("firmware_install", True)
         builder.install(str(getattr(self._device_info, "name", "") or self.device_name))
 
     # -- entity mapping -------------------------------------------------------
@@ -621,6 +719,7 @@ class ESPHomeDriver(Driver):
     def _on_state(self, state: Any) -> None:
         k = (getattr(state, "device_id", 0) or 0, state.key)
         self._last[k] = state
+        self.restarts.on_state(k, state)
         for fut in self._waiters.pop(k, []):
             if not fut.done():
                 fut.set_result(state)
@@ -726,7 +825,28 @@ class ESPHomeDriver(Driver):
             a["supported_features"] = f
         elif isinstance(info, MediaPlayerInfo):
             a["supported_features"] = int(info.feature_flags_compat(self._api_version or APIVersion(1, 10)))
+            formats = esphome_audio.supported_formats(info)
+            if formats:  # what the node asked to be sent; the hub converts to it (esphome_audio.py)
+                a["supported_formats"] = [f.public() for f in formats]
         return a
+
+    # -- audio in the node's own format ---------------------------------------------
+    def _media_players(self) -> list[MediaPlayerInfo]:
+        return [i for i in self._infos.values() if isinstance(i, MediaPlayerInfo)]
+
+    def media_url_for(self, url: str, *, announcement: bool, info: MediaPlayerInfo | None = None) -> str:
+        """The URL to give the node for ``url``: the hub's ffmpeg proxy in the format the node asked for.
+
+        ``info`` is the media player that will play it; without one (a voice reply, a satellite
+        announcement) the formats of all the node's media players count, in order, as in HA.
+        """
+        players = [info] if info is not None else self._media_players()
+        formats = [f for p in players for f in esphome_audio.supported_formats(p)]
+        return esphome_audio.proxied_url(self.entry.entry_id, url, formats, announcement=announcement)
+
+    def stop_audio(self) -> None:
+        """Stop the ffmpeg conversions still feeding this node."""
+        esphome_audio.PROXY.stop_device(self.entry.entry_id)
 
     def _light_modes(self, info: LightInfo) -> list[Any]:
         try:
@@ -945,7 +1065,11 @@ class ESPHomeDriver(Driver):
             if not self.voice.can_converse:
                 raise ServiceNotFound(f"assist_satellite.start_conversation needs the node's voice pipeline, which "
                                       f"{self.device_name} does not offer now; use assist_satellite.announce")
-            return await self.voice.start_conversation(data)
+            self.restarts.note("announcement", True)
+            try:
+                return await self.voice.start_conversation(data)
+            finally:
+                self.restarts.note("announcement", False)
         if service == "timer_event":
             return self._timer_event(data)
         if service != "announce":
@@ -959,14 +1083,21 @@ class ESPHomeDriver(Driver):
             from services.homehub import tts
 
             media_id = await tts.make_clip(message)
+        # The node plays announcements in its announcement format; HA proxies both clips the same way.
+        media_id = self.media_url_for(media_id, announcement=True)
+        preannounce = str(data.get("preannounce_media_id") or "")
+        if preannounce:
+            preannounce = self.media_url_for(preannounce, announcement=True)
+        self.restarts.note("announcement", True)
         try:
             await client.send_voice_assistant_announcement_await_response(
-                media_id, SATELLITE_ANNOUNCE_TIMEOUT_S, text=message,
-                preannounce_media_id=str(data.get("preannounce_media_id") or ""))
+                media_id, SATELLITE_ANNOUNCE_TIMEOUT_S, text=message, preannounce_media_id=preannounce)
         except APIConnectionError as exc:
             raise DeviceUnavailable(f"ESPHome {self.device_name}: {exc}") from exc
         except TimeoutError as exc:
             raise DeviceUnavailable(f"ESPHome {self.device_name} did not finish the announcement") from exc
+        finally:
+            self.restarts.note("announcement", False)
         return None
 
     def _timer_event(self, data: dict[str, Any]) -> None:
@@ -1002,6 +1133,9 @@ class ESPHomeDriver(Driver):
     def _local_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
         if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word"):
             return self.voice.set_wake_word(str(data.get("option")))  # the node's own setting (awaited below)
+        key = (entity.unique_id or "").rsplit("-", 1)[-1]
+        if entity.domain == "select" and service == "select_option" and key in self.voice.SETTING_SELECTS:
+            return self.voice.select_option(entity, str(data.get("option")))  # the hub's own satellite setting
         if entity.domain == "select" and service == "select_option":
             # Not the node's entity (HA's voice pipeline made it): its attributes are whatever was restored,
             # so the choice is remembered without passing them off as the device's (no publish).
@@ -1209,6 +1343,8 @@ class ESPHomeDriver(Driver):
             service = "turn_on" if off else "turn_off"
         if service in simple:
             c.media_player_command(info.key, command=simple[service], device_id=dev)
+            if service in ("media_stop", "turn_off", "clear_playlist"):
+                self.stop_audio()
         elif service == "volume_set":
             c.media_player_command(info.key, volume=float(data["volume_level"]), device_id=dev)
         elif service == "volume_mute":
@@ -1222,6 +1358,9 @@ class ESPHomeDriver(Driver):
             if not url:
                 raise HubError("play_media needs media_content_id")
             announce = data.get("announce")
+            extra = data.get("extra") if isinstance(data.get("extra"), dict) else {}
+            if not extra.get("bypass_proxy"):  # HA's escape hatch: the URL exactly as given
+                url = self.media_url_for(url, announcement=bool(announce), info=info)
             if data.get("enqueue") in ("add", "next"):
                 c.media_player_command(info.key, command=MediaPlayerCommand.ENQUEUE, media_url=url, device_id=dev)
             else:
@@ -1246,9 +1385,8 @@ class ESPHomeDriver(Driver):
                           ", ".join(f"esphome.{n}" for _, n in self._services))
 
     def _unregister_services(self) -> None:
-        for key in self._services:
-            self.hub.services.pop(key, None)
-            self.hub.service_schemas.pop(key, None)
+        for domain, service in self._services:
+            self.hub.unregister_service(domain, service)
         self._services = []
 
     def _service_handler(self, svc: UserService):

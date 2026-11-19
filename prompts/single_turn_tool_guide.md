@@ -8,15 +8,15 @@ You have access to smart home, media, notes, storage, and workspace tools. When 
 Control lights and switches.
 - Fields: `tool`, `entity_id`, `action` (`turn_on`, `turn_off`, `toggle`).
 - Optional: `brightness_pct` (0-100), `color_temp`, `rgb_color` [r,g,b].
-- Example: `{"tool": "LightControlRequest", "entity_id": "light.hall_lamp", "action": "turn_on"}`
+- Example: `{"tool": "LightControlRequest", "entity_id": "light.example_lamp", "action": "turn_on"}`
 
 ### MediaPlayRequest
 Play music, podcasts, radio, or audio via Music Assistant, Home Assistant, or Nextcloud.
 - Fields: `tool`, `query` (title of song, album, artist, podcast name, or episode), `media_type` (`"podcast"`, `"music"`, `"radio"`, `"audiobook"`).
-- Optional: `device_name` or `entity_id` (e.g. "office speaker", "living room tv").
+- Optional: `device_name` or `entity_id` (e.g. "den speaker", "sunroom tv").
 - Examples:
   - `{"tool": "MediaPlayRequest", "query": "Bright Heart", "media_type": "podcast"}`
-  - `{"tool": "MediaPlayRequest", "query": "Miles Davis", "media_type": "music", "device_name": "Living Room"}`
+  - `{"tool": "MediaPlayRequest", "query": "Miles Davis", "media_type": "music", "device_name": "Den"}`
 
 ### MediaTransportRequest
 Transport controls for active media players.

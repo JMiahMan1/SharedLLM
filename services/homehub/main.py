@@ -12,6 +12,12 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
+# uvloop (uvicorn's loop) runs every DNS lookup, and the address of every UDP socket a driver opens with
+# ``remote_addr``, on libuv's thread pool: four threads by default, read once when the pool first starts.
+# A few slow lookups filled it on 2026-11-18 and WiZ bulbs were called unreachable. More threads are
+# cheap (they sleep in the kernel); set before anything can start the pool.
+os.environ.setdefault("UV_THREADPOOL_SIZE", "16")
+
 import uvicorn
 
 from services.homehub import (
@@ -30,6 +36,7 @@ from services.homehub import (
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
 from services.homehub.core import Hub
+from services.homehub.loop_monitor import LoopMonitor
 from services.homehub.runtime import Runtime
 from services.homehub.store import Store
 
@@ -46,8 +53,6 @@ IMPORT_DIR = os.getenv("HOMEHUB_IMPORT_DIR", "/import")
 PORT = int(os.getenv("HOMEHUB_PORT", "8123"))
 # How long automations wait for the integrations to load before starting anyway.
 STARTUP_WAIT_S = float(os.getenv("HOMEHUB_STARTUP_WAIT_S", "60"))
-# How often the family's saved places (geo) are mirrored as zones; 0 turns the mirror off.
-GEO_PLACES_EVERY_S = float(os.getenv("HOMEHUB_GEO_PLACES_EVERY_S", "300"))
 
 
 def _household_time_zone(home: dict | None = None) -> str:
@@ -61,6 +66,20 @@ def _household_time_zone(home: dict | None = None) -> str:
         return household_tz.refresh_sync("homehub", fetch, home=home)[0]
     except household_tz.HouseholdTimeZoneError as exc:
         raise SystemExit(f"homehub: {exc}") from None
+
+
+def _provider_configs() -> dict[str, dict[str, str]]:
+    """The login providers this stack configures, read once at startup (auth_providers/manager.py).
+
+    Jarvis's accounts need identity's address and the stack's internal secret; without either the hub runs on
+    its own users only, and says so once.
+    """
+    url = (os.getenv("IDENTITY_SVC_URL") or "").strip().rstrip("/")
+    secret = os.getenv("INTERNAL_SECRET") or ""
+    if url and secret:
+        return {"jarvis_identity": {"url": url, "secret": secret}}
+    log.info("IDENTITY_SVC_URL or INTERNAL_SECRET is not set: logins use the hub's own users only")
+    return {}
 
 
 class Service:
@@ -78,10 +97,15 @@ class Service:
         # Jarvis's own Nextcloud account, read once here: the motion-recording settings can use it.
         self.hub.household_nextcloud = camera_recording.household_account_from_env()
         self.runtime = Runtime(self.hub, self.store)
+        self.runtime.provider_configs = _provider_configs()  # login providers (auth_providers), resolved once
+        self.runtime.provider_sync_every_s = float(os.getenv("HOMEHUB_PROVIDER_SYNC_S", "60"))
+        # A stalled loop or a saturated thread pool makes devices look unreachable; this says which.
+        self.runtime.loop_monitor = LoopMonitor()
         self._lock = asyncio.Lock()
         self._bg: list[asyncio.Task] = []
 
     async def start(self) -> None:
+        self._bg.append(asyncio.create_task(self.runtime.loop_monitor.run(), name="loop-monitor"))
         self.runtime.load_registry()
         self.hub.entity_registry_ids = self.store.get_kv("entity_registry_ids", {}) or {}
         # HA user id -> name: mobile_app maps a phone to its Jarvis user through it.
@@ -94,6 +118,7 @@ class Service:
         # HA's time_date sensors on every hub, imported or not (services/homehub/time_date.py).
         self._bg.append(asyncio.create_task(time_date.run(self.hub)))
         await self._start_people()
+        self._start_login_providers()  # before the drivers: a provider's entry syncs when it loads
         await self._start_bluetooth()  # before the drivers: ESPHome proxies and BLE sensors attach to it
         await self.runtime.start_all()
         # Once: the Common Sense switch moves from identity's settings to an integration.
@@ -110,11 +135,24 @@ class Service:
         self._bg.append(asyncio.create_task(recorder_statistics.start(self.runtime)))  # recorder statistics
         await self._start_discovery()
 
+    def _start_login_providers(self) -> None:
+        """A provider the stack configures is set up once, on by default (an admin may remove it)."""
+        providers = getattr(self.runtime, "auth_providers", None)
+        if providers is None:
+            return
+        try:
+            providers.ensure_entries()
+        except Exception:
+            log.exception("login providers could not be set up; the hub's own logins still work")
+
     async def _start_helpers(self) -> None:
         """HA's helpers (input_*, counter, timer) with their restored values (services/homehub/helpers.py)."""
         from services.homehub.helpers import Helpers
 
         manager = Helpers(self.hub, self.store)
+        # A timer that ran out while the hub was down finishes now; its timer.finished waits for the
+        # automations (released in _start_automations), or no automation would ever hear it.
+        manager.hold_events()
         await manager.start()
         self.runtime.helpers = manager  # the /hub/helpers API reads it from here
         if manager.problems:
@@ -149,15 +187,13 @@ class Service:
         try:
             from services.homehub.drivers import mobile_app
 
-            registries.apply_zones(self.runtime)  # zone.home, the drawn zones and the saved-place zones
+            # Once: the old read-only mirror of the family's saved places becomes ordinary zones (the hub
+            # is the only store of places now; geo moves the rest of its places in at its own start).
+            registries.adopt_mirrored_places(self.runtime)
+            registries.apply_zones(self.runtime)  # zone.home and every family zone (never a private place)
             await mobile_app.setup_persons(self.hub, self.store.get_kv("persons", []) or [])
         except Exception:
             log.exception("people and zones could not start")
-        geo = registries.geo_url()
-        if not geo:
-            log.warning("GEO_SVC_URL is not set: the family's saved places will not become zones")
-        elif GEO_PLACES_EVERY_S > 0:
-            self._bg.append(asyncio.create_task(registries.follow_places(self.runtime, geo, GEO_PLACES_EVERY_S)))
 
     async def _start_automations_when_ready(self) -> None:
         pending = await self.runtime.wait_first_setups(STARTUP_WAIT_S)
@@ -179,6 +215,10 @@ class Service:
             await automation_api.start(self.runtime)
         except Exception:
             log.exception("automation engine could not start")
+        finally:
+            helpers = getattr(self.runtime, "helpers", None)
+            if helpers is not None:
+                helpers.release_events()  # the timer events held since startup, now that triggers listen
 
     async def stop(self) -> None:
         helpers = getattr(self.runtime, "helpers", None)

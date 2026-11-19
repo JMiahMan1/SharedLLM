@@ -573,13 +573,31 @@ def test_an_sos_still_goes_out_when_redis_is_down(safety_client, sent, monkeypat
     assert len(sent) == 4
 
 
-def test_marking_a_place_important_goes_to_geo(safety_client):
+def test_marking_a_place_important_goes_to_homehub(safety_client, monkeypatch):
+    from services.gateway import discovery_routes
+
     client, answers = safety_client
+    calls = []
+
+    async def hub(method, path, *, params=None, json=None, timeout=None):
+        calls.append((method, path, params, json))
+        if method == "GET":
+            return 200, {"zones": [{"id": "school1", "entity_id": "zone.school", "name": "School"}]}
+        return 200, {"id": "school1", "important": True, "notify": json["notify"], "pin": json.get("pin", "")}
+
+    async def refreshed():
+        answers["refreshed"] = True
+
+    monkeypatch.setattr(discovery_routes, "_hub", hub)
+    monkeypatch.setattr(family_safety, "places_changed", refreshed)
     resp = client.put("/api/geo/places/zone.school", json={"important": True, "notify": ["Sam", "leo", "leo"]})
     assert resp.status_code == 200
-    url, payload = answers["put"]
-    assert url.endswith("/place-settings/zone.school")
-    assert payload == {"important": True, "notify": ["sam", "leo"]}
+    assert calls[0] == ("GET", "/hub/zones", {"viewer": "alex"}, None)
+    assert calls[1] == ("PATCH", "/hub/zones/school1", {"viewer": "alex"}, {"important": True,
+                                                                            "notify": ["sam", "leo"]})
+    assert resp.json() == {"zone": "zone.school", "important": True, "notify": ["sam", "leo"], "icon": ""}
+    assert answers["refreshed"] is True
+    assert client.put("/api/geo/places/zone.gone", json={"important": True}).status_code == 404
 
 
 @pytest.mark.parametrize("body", [
@@ -592,9 +610,8 @@ def test_marking_a_place_important_goes_to_geo(safety_client):
     {"important": True, "notify": ["stranger"]},
 ])
 def test_place_settings_are_validated(safety_client, body):
-    client, answers = safety_client
+    client, _answers = safety_client
     assert client.put("/api/geo/places/zone.school", json=body).status_code == 422
-    assert "put" not in answers
 
 
 def test_only_an_admin_changes_a_place(safety_client):
@@ -602,7 +619,6 @@ def test_only_an_admin_changes_a_place(safety_client):
     answers["who"]["creds"] = {"user": "leo", "id": 5, "is_admin": False}
     resp = client.put("/api/geo/places/zone.school", json={"important": True})
     assert resp.status_code == 403
-    assert "put" not in answers
 
 
 def test_notice_builder_caps_actions_and_priority():

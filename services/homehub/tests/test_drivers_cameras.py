@@ -402,6 +402,29 @@ async def test_reolink_poll_does_not_wake_battery_cameras_every_time(fake_host):
     assert [c for c in host.calls if c[0] == "get_states"][-1][1] == {0: True, 1: True}
 
 
+@pytest.mark.parametrize("on_setup", [True, False])
+async def test_reolink_refused_credentials_need_the_login_and_are_not_retried(fake_host, on_setup, monkeypatch):
+    from reolink_aio.exceptions import CredentialsInvalidError
+
+    hub, entry = reolink_hub()
+    drv = reolink.ReolinkDriver(hub, entry)
+
+    async def refuse(*_a, **_kw):
+        raise CredentialsInvalidError("Login error, credentials invalid")
+
+    if on_setup:
+        monkeypatch.setattr(fake_host, "get_host_data", refuse)
+        with pytest.raises(reolink.AuthRequired) as raised:
+            await drv.async_setup()
+    else:
+        await drv.async_setup()
+        fake_host.instances[0].get_states = refuse
+        with pytest.raises(reolink.AuthRequired) as raised:
+            await drv.async_poll()
+        assert hub.states.get("binary_sensor.garage_camera_1_motion").state == "unavailable"
+    assert raised.value.needs == "login" and "first" not in str(raised.value)
+
+
 async def test_reolink_offline_camera_is_unavailable(fake_host):
     hub, entry = reolink_hub()
     drv = reolink.ReolinkDriver(hub, entry)

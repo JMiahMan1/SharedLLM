@@ -1,6 +1,6 @@
 /**
  * End-to-end playback tests for ABS and MA across:
- *  - Office TV (and other HA devices via cast)
+ *  - Study TV (and other HA devices via cast)
  *  - Browser WebPlayer (Local Audio Player)
  *  - Android App WebPlayer (Local Audio Player, mobile viewport)
  */
@@ -210,7 +210,7 @@ async function waitForLocalPlayerOverlay(page: Page, timeout: number = 15000): P
 
 // Test Suites
 
-test.describe('@live ABS Audiobook → Office TV', () => {
+test.describe('@live ABS Audiobook → Study TV', () => {
   test.beforeEach(async ({ page }) => {
     const logged = await loginAsAdmin(page);
     if (!logged) test.skip();
@@ -218,9 +218,9 @@ test.describe('@live ABS Audiobook → Office TV', () => {
     if (!ok) test.skip();
   });
 
-  test('@live ABS audiobook plays on Office TV: full playback chain', async ({ page }) => {
-    const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available, skipping');
+  test('@live ABS audiobook plays on Study TV: full playback chain', async ({ page }) => {
+    const officeTvCard = await findDeviceCard(page, 'Study TV');
+    test.skip(!officeTvCard, 'Study TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -228,7 +228,7 @@ test.describe('@live ABS Audiobook → Office TV', () => {
     await expect(officeTvCard!).toHaveClass(/cyan-500/);
 
     const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
-    await expect(playerCard.getByText('Office TV')).toBeVisible({ timeout: 5000 });
+    await expect(playerCard.getByText('Study TV')).toBeVisible({ timeout: 5000 });
 
     const absBookCards = page.locator('div.glass-panel button').filter({ has: page.getByText('Homilies') });
     const firstAbsBook = absBookCards.first();
@@ -250,8 +250,8 @@ test.describe('@live ABS Audiobook → Office TV', () => {
   });
 
   test('@live ABS audiobook: media status API reports correct state after play', async ({ page }) => {
-    const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available, skipping');
+    const officeTvCard = await findDeviceCard(page, 'Study TV');
+    test.skip(!officeTvCard, 'Study TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -279,7 +279,7 @@ test.describe('@live ABS Audiobook → Office TV', () => {
         });
         return resp.status === 200 ? await resp.json() : null;
       } catch { return null; }
-    }, bookId, 'media_player.office_tv');
+    }, bookId, 'media_player.study_tv');
 
     expect(playResponse).not.toBeNull();
     expect(playResponse!.status).toBe('SUCCESS');
@@ -289,7 +289,7 @@ test.describe('@live ABS Audiobook → Office TV', () => {
   });
 });
 
-test.describe('@live MA Music → Office TV', () => {
+test.describe('@live MA Music → Study TV', () => {
   test.beforeEach(async ({ page }) => {
     const logged = await loginAsAdmin(page);
     if (!logged) test.skip();
@@ -297,15 +297,15 @@ test.describe('@live MA Music → Office TV', () => {
     if (!ok) test.skip();
   });
 
-  test('@live MA music plays on Office TV: full playback chain', async ({ page }) => {
-    const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available, skipping');
+  test('@live MA music plays on Study TV: full playback chain', async ({ page }) => {
+    const officeTvCard = await findDeviceCard(page, 'Study TV');
+    test.skip(!officeTvCard, 'Study TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
 
     const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
-    await expect(playerCard.getByText('Office TV')).toBeVisible({ timeout: 5000 });
+    await expect(playerCard.getByText('Study TV')).toBeVisible({ timeout: 5000 });
 
     const maRecentItem = page.getByText('Does Anybody Hear Her').first();
     const hasMaTrack = await maRecentItem.isVisible({ timeout: 5000 }).catch(() => false);
@@ -326,8 +326,8 @@ test.describe('@live MA Music → Office TV', () => {
   });
 
   test('@live MA music: media status API reports correct state after play', async ({ page }) => {
-    const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available, skipping');
+    const officeTvCard = await findDeviceCard(page, 'Study TV');
+    test.skip(!officeTvCard, 'Study TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -356,7 +356,7 @@ test.describe('@live MA Music → Office TV', () => {
         });
         return resp.status === 200 ? await resp.json() : null;
       } catch { return null; }
-    }, trackUri, 'media_player.office_tv');
+    }, trackUri, 'media_player.study_tv');
 
     expect(playResponse).not.toBeNull();
     expect(playResponse!.status).toBe('SUCCESS');
@@ -365,9 +365,9 @@ test.describe('@live MA Music → Office TV', () => {
     expect(apiPlaying).toBe(true);
   });
 
-  test('@live MA playlist plays on Office TV', async ({ page }) => {
-    const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available, skipping');
+  test('@live MA playlist plays on Study TV', async ({ page }) => {
+    const officeTvCard = await findDeviceCard(page, 'Study TV');
+    test.skip(!officeTvCard, 'Study TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
@@ -397,7 +397,7 @@ test.describe('@live MA Music → Office TV', () => {
         });
         return resp.status === 200 ? await resp.json() : null;
       } catch { return null; }
-    }, playlist.uri, 'media_player.office_tv');
+    }, playlist.uri, 'media_player.study_tv');
 
     expect(playResponse).not.toBeNull();
     expect(playResponse!.status).toBe('SUCCESS');
@@ -804,14 +804,14 @@ test.describe('@live Playback Controls: Device', () => {
   });
 
   test('@live pause and resume works on device playback', async ({ page }) => {
-    const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available, skipping');
+    const officeTvCard = await findDeviceCard(page, 'Study TV');
+    test.skip(!officeTvCard, 'Study TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);
 
     const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
-    await expect(playerCard.getByText('Office TV')).toBeVisible({ timeout: 5000 });
+    await expect(playerCard.getByText('Study TV')).toBeVisible({ timeout: 5000 });
 
     const pauseBtn = playerCard.getByRole('button', { name: /pause/i }).first();
     if (await pauseBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
@@ -825,8 +825,8 @@ test.describe('@live Playback Controls: Device', () => {
   });
 
   test('@live volume slider changes display value on device', async ({ page }) => {
-    const officeTvCard = await findDeviceCard(page, 'Office TV');
-    test.skip(!officeTvCard, 'Office TV not available, skipping');
+    const officeTvCard = await findDeviceCard(page, 'Study TV');
+    test.skip(!officeTvCard, 'Study TV not available, skipping');
 
     await officeTvCard!.click();
     await page.waitForTimeout(1000);

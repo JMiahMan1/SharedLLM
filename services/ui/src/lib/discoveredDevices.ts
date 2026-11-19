@@ -44,6 +44,8 @@ export interface DiscoveredDevice {
   adoptable: boolean;
   unsupported: string | null;
   needs: DiscoveryInput[];
+  /** What the hub could tell about it that matters before adding it ("Needs its web password"). */
+  note?: string | null;
   /** Set when a device that is set up now answers at another address; offer `updateAddress`. */
   moved?: MovedDevice | null;
 }
@@ -226,6 +228,30 @@ export interface HubEntry {
   syncs?: boolean;
   /** When it last answered (ISO), while it is not loaded; null when it works or is disabled. */
   offline_since?: string | null;
+  /**
+   * What it needs from an admin to work again (the hub stops retrying until then): `password` when the device
+   * refused its password (or wants one), `login` for an account's sign-in, `pairing` when the device forgot
+   * the hub, `bindkey` for a Bluetooth sensor's key.
+   */
+  needs?: 'password' | 'login' | 'pairing' | 'bindkey' | null;
+}
+
+const NEEDS_TEXT: Record<string, string> = {
+  password: 'Needs its web password',
+  login: 'Needs its login again',
+  pairing: 'Needs pairing again',
+  bindkey: 'Needs its encryption key',
+};
+
+/** The plain words for what a failing entry needs, or null. */
+export function entryNeedsText(entry: { needs?: string | null }): string | null {
+  return (entry.needs && NEEDS_TEXT[entry.needs]) || null;
+}
+
+/** The fields of an entry that say how to reach its device (address and password), for a device's settings. */
+export function connectionFields(entry: HubEntry | null | undefined): ReconfigureField[] {
+  if (!entry || entry.shared || entry.devices.length > 1) return [];
+  return entry.reconfigure.filter((f) => f.key === 'host' || f.key === 'password');
 }
 
 export interface HubArea {

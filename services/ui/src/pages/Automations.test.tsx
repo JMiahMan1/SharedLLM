@@ -50,6 +50,27 @@ describe('Automations page', () => {
     expect(within(editor).getByText('Only an admin can change this.')).toBeInTheDocument();
   });
 
+  it('shows an automation waiting for its device calmly, not as an error, and offers no run', async () => {
+    const waiting = {
+      kind: 'automation', id: 'screen_sync', entity_id: 'automation.screen_sync', alias: 'Screen sync', enabled: true,
+      runnable: true, unsupported_reason: null, last_error: null, warnings: [], last_triggered: null, running: 0, entities: [],
+      waiting_reason: 'needs esphome.wall_screen_set_weather, which no connected device offers',
+    };
+    server.use(http.get('/api/homehub/automations', () => HttpResponse.json({ items: [ITEMS[0], waiting], can_edit: true })));
+    renderWithProviders(<Automations />, { route: '/automations' });
+    await screen.findAllByTestId('automation-row');
+    const row = screen.getByRole('button', { name: 'Open Screen sync' }).closest('li') as HTMLElement;
+    const badge = within(row).getByTestId('automation-waiting');
+    expect(badge).toHaveTextContent('Waiting for its device');
+    expect(badge).toHaveTextContent('needs esphome.wall_screen_set_weather, which no connected device offers');
+    expect(badge.className).not.toMatch(/red|amber/);
+    expect(within(row).getByRole('switch')).toBeChecked();
+    expect(within(row).queryByRole('button', { name: 'Run Screen sync now' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Run Porch at dusk now' })).toBeInTheDocument();
+    const porch = screen.getByRole('button', { name: 'Open Porch at dusk' }).closest('li') as HTMLElement;
+    expect(within(porch).queryByTestId('automation-waiting')).toBeNull();
+  });
+
   it('searches', async () => {
     renderWithProviders(<Automations />, { route: '/automations' });
     await screen.findAllByTestId('automation-row');

@@ -251,7 +251,7 @@ async def get_queue(
     """Get active queue for an MA player entity.
 
     Args:
-        entity_id: HA media_player entity_id (e.g., 'media_player.office_speaker')
+        entity_id: HA media_player entity_id (e.g., 'media_player.den_speaker')
 
     Returns:
         Queue dict with items, current_item, state, etc.

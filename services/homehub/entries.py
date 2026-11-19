@@ -38,12 +38,22 @@ RECONFIGURABLE: dict[str, dict[str, Any]] = {
     "password": {"label": "Password", "type": "password", "secret": True},
     "noise_psk": {"label": "Encryption key", "type": "password", "secret": True},
 }
+#: Fields offered for every entry of these integrations, even one that does not keep them yet: an entry
+#: imported from HA kept a Tasmota device's address only on its device (``configuration_url``) and had no
+#: password. Per field, what the UI shows instead of the generic label and help.
+DOMAIN_FIELDS: dict[str, dict[str, dict[str, Any]]] = {
+    "tasmota": {
+        "host": {"help": "The device's IP address. The hub follows it by its MAC when the router changes it."},
+        "password": {"label": "Web password",
+                     "help": "The password of the device's own web page. Leave empty to keep the stored one."},
+    },
+}
 #: Entries that are infrastructure for many devices: removing one of their
 #: devices must not remove the entry itself.
 SHARED_ENTRIES = {"matter", "cast", "music_assistant", "mobile_app"}
 _MATTER_NODE = re.compile(r"^deviceid_[0-9A-Fa-f]+-([0-9A-Fa-f]+)-MatterNodeDevice$")
 
-EXTRA_LABELS = {"esphome_builder": "ESPHome Device Builder", "matter": "Matter", "music_assistant": "Music Assistant",
+EXTRA_LABELS = {"jarvis_identity": "Jarvis accounts", "esphome_builder": "ESPHome Device Builder", "matter": "Matter", "music_assistant": "Music Assistant",
                 "group": "Light group"}
 
 
@@ -59,6 +69,39 @@ def label(domain: str) -> str:
 
 #: Keys an entry may keep in its options rather than its data; they are changed where they are.
 OPTION_KEYS = {"mjpeg_url", "still_image_url", "username", "password"}
+
+#: The options each integration's driver reads (``PATCH /hub/entries/{id}/options``). A key outside its
+#: integration's set is refused unless the entry already has it (an option HA's import carried): a typo
+#: would otherwise be stored and do nothing, and the entry restarted for it.
+ENTRY_OPTIONS: dict[str, frozenset[str]] = {
+    "androidtv_remote": frozenset({"host", "mac", "cert_file", "key_file"}),
+    "cast": frozenset({"known_hosts"}),
+    "dlna_dmr": frozenset({"url"}),
+    "esphome": frozenset({"host", "allow_service_calls"}),
+    "group": frozenset({"group_type", "entities", "all", "hide_members"}),
+    "matter": frozenset({"url"}),
+    "mjpeg": frozenset({"mjpeg_url", "still_image_url", "username", "password", "authentication", "verify_ssl"}),
+    "mobile_app": frozenset({"jarvis_user", "jarvis_fallback"}),
+    "music_assistant": frozenset({"url", "token"}),
+    "reolink": frozenset({"host", "protocol"}),
+    "roku": frozenset({"host"}),
+    "samsungtv": frozenset({"host", "mac"}),
+    "srp_energy": frozenset({"time_zone", "statistics", "statistics_backfill_days", "tou_backfill_days"}),
+    "switch_as_x": frozenset({"entity_id", "target_domain", "invert", "state_entity_id", "momentary",
+                              "device_class", "travel_s"}),
+    "tasmota": frozenset({"host"}),
+    "webostv": frozenset({"host", "mac"}),
+    "wiz": frozenset({"host"}),
+}
+
+
+def check_option_keys(entry: ConfigEntry, patch: dict[str, Any]) -> None:
+    """Refuse an options patch naming a key the entry's integration does not read (``EntryError`` 400)."""
+    allowed = ENTRY_OPTIONS.get(entry.domain, frozenset()) | set(entry.options or {})
+    unknown = sorted(k for k in patch if k not in allowed)
+    if unknown:
+        known = ", ".join(sorted(allowed)) or "none"
+        raise EntryError(f"{label(entry.domain)} has no option {', '.join(unknown)} (its options: {known})")
 
 
 def _home_of(entry: ConfigEntry, key: str) -> str | None:
@@ -102,14 +145,45 @@ def _spec_fields(entry: ConfigEntry, hub: Any = None) -> dict[str, dict[str, Any
 
 
 def _field_meta(entry: ConfigEntry, key: str, hub: Any = None) -> dict[str, Any] | None:
+    if key in DOMAIN_FIELDS.get(entry.domain, {}):
+        return {**RECONFIGURABLE[key], **DOMAIN_FIELDS[entry.domain][key]}
     return RECONFIGURABLE.get(key) or _spec_fields(entry, hub).get(key)
+
+
+def device_address(hub: Any, entry: ConfigEntry) -> str | None:
+    """The address on the entry's one device (``configuration_url``), for an entry that keeps none itself."""
+    if hub is None:
+        return None
+    from urllib.parse import urlparse
+
+    devices = [d for d in hub.devices.values() if entry.entry_id in (d.config_entries or [])]
+    urls = {str(d.configuration_url) for d in devices if d.configuration_url}
+    if len(urls) != 1:
+        return None
+    parts = urlparse(urls.pop())
+    if not parts.hostname:
+        return None
+    return parts.hostname + (f":{parts.port}" if parts.port else "")
+
+
+def needs_of(entry: ConfigEntry) -> str | None:
+    """What a failing entry needs from an admin: the ``needs`` of the AuthRequired that parked it
+    ("password", "login", "pairing", "bindkey"); "password" for an older AuthRequired reason."""
+    if entry.disabled_by or entry.state == "loaded":
+        return None
+    if entry.needs:
+        return entry.needs
+    return "password" if str(entry.reason or "").startswith("AuthRequired") else None
 
 
 def reconfigure_fields(entry: ConfigEntry, hub: Any = None) -> list[dict[str, Any]]:
     """What an admin may change: the generic keys the entry has, then its integration's setup fields."""
     out = []
     seen: set[str] = set()
-    candidates = [(k, m) for k, m in RECONFIGURABLE.items() if _home_of(entry, k) is not None]
+    own = DOMAIN_FIELDS.get(entry.domain, {})
+    candidates = [(k, {**RECONFIGURABLE[k], **extra}) for k, extra in own.items()]
+    candidates += [(k, m) for k, m in RECONFIGURABLE.items() if _home_of(entry, k) is not None
+                   and not (own and k == "username")]  # Tasmota's web user is always admin
     candidates += [(k, m) for k, m in _spec_fields(entry, hub).items() if k not in RECONFIGURABLE]
     for key, meta in candidates:
         if key in seen:
@@ -125,6 +199,8 @@ def reconfigure_fields(entry: ConfigEntry, hub: Any = None) -> list[dict[str, An
             field["set"] = bool(value)
         else:
             current = entry.options.get(key) if key == "host" and entry.options.get("host") else value
+            if key == "host" and not current and key in own:
+                current = device_address(hub, entry)
             field["value"] = "" if current is None else ("1" if current is True else "" if current is False
                                                           else str(current))
         out.append(field)
@@ -161,7 +237,7 @@ def summary(runtime: Any, entry: ConfigEntry) -> dict[str, Any]:
     return {
         "entry_id": entry.entry_id, "domain": entry.domain, "label": label(entry.domain), "title": entry.title,
         "state": entry.state, "reason": entry.reason, "source": entry.source, "disabled_by": entry.disabled_by,
-        "offline_since": offline_since(runtime, entry),
+        "offline_since": offline_since(runtime, entry), "needs": needs_of(entry),
         "devices": sorted((dev_view(d) for d in devices), key=lambda d: d["name"].lower()),
         "entities": len(ents), "reconfigure": reconfigure_fields(entry, hub),
         "unpairs": entry.domain in _unpair_hooks(), "shared": entry.domain in SHARED_ENTRIES,
@@ -257,6 +333,12 @@ async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -
     if "host" in changes and str(changes.get("host") or "").strip():
         # An address override from the import would win over the new address.
         options.pop("host", None)
+    if entry.domain in DOMAIN_FIELDS:
+        # Kept on the entry from now on, where address_follow updates it when DHCP moves the device.
+        if not data.get("host") and not options.get("host") and (where := device_address(runtime.hub, entry)):
+            data["host"] = where
+        if data.get("password") and not data.get("username"):
+            data["username"] = "admin"  # Tasmota's web user is always admin
     await _check_changes(entry.domain, changes, data)
     old = (dict(entry.data), dict(entry.options), entry.title)
     entry.data, entry.options = data, options
@@ -289,6 +371,8 @@ def update_device(runtime: Any, device_id: str, body: dict[str, Any]) -> dict[st
         raise EntryError("No such device", 404)
     if "hidden" in body and not isinstance(body["hidden"], bool):
         raise EntryError("hidden must be true or false")
+    if "hidden" in body and bool(dev.hidden_by) != body["hidden"] and duplicates.record_of(runtime, dev.id):
+        raise EntryError("This device is combined with its other copy. Uncombine it first.", 409)
     labels = registries.clean_label_ids(runtime, body["labels"]) if "labels" in body else None
     if "name_by_user" in body:
         name = body.get("name_by_user")
@@ -370,6 +454,8 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
             log.warning("removing %s %s without unpairing: %s", entry.domain, entry.title, exc)
     await runtime.stop_entry(entry_id)
     ent_ids = [e.entity_id for e in hub.entities.values() if e.config_entry_id == entry_id]
+    leaving = {d.id for d in hub.devices.values() if d.config_entries == [entry_id]}
+    _drop_combinations(runtime, leaving, set(ent_ids))
     _drop_entities(runtime, ent_ids)
     removed_devices = []
     for dev in [d for d in hub.devices.values() if entry_id in d.config_entries]:
@@ -381,6 +467,8 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
             removed_devices.append(dev.id)
     runtime.store.delete_config_entry(entry_id)
     hub.config_entries.pop(entry_id, None)
+    if entry.domain == "switch_as_x":
+        _show_wrapped_switch(runtime, entry)
     log.info("removed %s %s (%d entities, %d devices)", entry.domain, entry.title, len(ent_ids),
              len(removed_devices))
     out: dict[str, Any] = {"status": "removed", "entry_id": entry_id, "domain": entry.domain, "title": entry.title,
@@ -388,6 +476,28 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
     if warning:
         out["warning"] = warning
     return out
+
+
+def _drop_combinations(runtime: Any, device_ids: set[str], entity_ids: set[str]) -> None:
+    """A removed device or entity takes its duplicate combination with it; the other copy shows again."""
+    from services.homehub import duplicates  # duplicates imports this module
+
+    duplicates.drop_for_removal(runtime, device_ids, entity_ids)
+
+
+def _show_wrapped_switch(runtime: Any, entry: ConfigEntry) -> None:
+    """A removed switch_as_x shows its switch again, unless another wrapper or a person hid it."""
+    hub = runtime.hub
+    source = str({**entry.data, **entry.options}.get("entity_id") or "")
+    ent = hub.entities.get(source)
+    if ent is None or ent.hidden_by != "integration":
+        return
+    if any(e.domain == "switch_as_x" and {**e.data, **e.options}.get("entity_id") == source
+           for e in hub.config_entries.values()):
+        return
+    ent.hidden_by = None
+    runtime.store.save_entity(ent)
+    hub.bus.fire("entity_registry_updated", {"action": "update", "entity_id": source})
 
 
 async def remove_device(runtime: Any, device_id: str, *, force: bool = False) -> dict[str, Any]:
@@ -406,6 +516,7 @@ async def remove_device(runtime: Any, device_id: str, *, force: bool = False) ->
         await _remove_matter_node(runtime, entry, dev, force=force)
     children = [d for d in hub.devices.values() if d.via_device_id == dev.id]
     ent_ids = [eid for d in [dev, *children] for eid in hub.device_entities(d.id)]
+    _drop_combinations(runtime, {d.id for d in [dev, *children]}, set(ent_ids))
     _drop_entities(runtime, ent_ids)
     for d in [dev, *children]:
         _drop_device(runtime, d)

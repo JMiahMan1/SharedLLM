@@ -82,7 +82,10 @@ LIVE_GATEWAY_ENDPOINTS = [
     "http://127.0.0.1:11435",
 ]
 LIVE_GATEWAY_URL = ""
-for ep in LIVE_GATEWAY_ENDPOINTS:
+# Probe only when the run opted in to live tests (--run-live or
+# SHAREDLLM_RUN_LIVE=1 from the shell), so a plain run never reaches a gateway.
+_LIVE_OPT_IN = os.environ.get("SHAREDLLM_RUN_LIVE") == "1"
+for ep in LIVE_GATEWAY_ENDPOINTS if _LIVE_OPT_IN else []:
     try:
         resp = httpx.get(f"{ep}/api/tags", timeout=1.0)
         if resp.status_code == 200:
@@ -91,7 +94,7 @@ for ep in LIVE_GATEWAY_ENDPOINTS:
     except Exception:
         continue
 
-LIVE_GATEWAY_AVAILABLE = bool(LIVE_GATEWAY_URL and os.getenv("RUN_LIVE_GATEWAY_TESTS"))
+LIVE_GATEWAY_AVAILABLE = bool(_LIVE_OPT_IN and LIVE_GATEWAY_URL and os.getenv("RUN_LIVE_GATEWAY_TESTS"))
 
 import services.gateway.main as gateway_main  # noqa: E402 - after the test settings are resolved
 import services.gateway.orchestrator as gateway_orchestrator  # noqa: E402 - after the test settings are resolved

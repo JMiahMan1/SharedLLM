@@ -51,6 +51,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from services.homehub.store import HISTORY_ATTRS, HISTORY_FROM
+
 log = logging.getLogger("homehub.statistics")
 
 SHORT_TERM_S = 300
@@ -367,10 +369,12 @@ class Statistics:
     def _history_rows(self, entity_id: str, start: float, end: float) -> tuple[tuple | None, list[tuple]]:
         """(the last row before ``start``, the rows in ``[start, end)``) as (ts, state, attributes)."""
         db = self._history()
-        prior = db.execute("SELECT last_updated, state, attributes FROM history WHERE entity_id=? AND last_updated < ? "
-                           "ORDER BY last_updated DESC LIMIT 1", (entity_id, start)).fetchone()
-        rows = db.execute("SELECT last_updated, state, attributes FROM history WHERE entity_id=? AND last_updated >= ? "
-                          "AND last_updated < ? ORDER BY last_updated", (entity_id, start, end)).fetchall()
+        # Attributes live in state_attributes for rows written since it came, in the row itself before (store.py).
+        cols = f"SELECT h.last_updated, h.state, {HISTORY_ATTRS} FROM {HISTORY_FROM} WHERE h.entity_id=? "
+        prior = db.execute(cols + "AND h.last_updated < ? ORDER BY h.last_updated DESC LIMIT 1",
+                           (entity_id, start)).fetchone()
+        rows = db.execute(cols + "AND h.last_updated >= ? AND h.last_updated < ? ORDER BY h.last_updated",
+                          (entity_id, start, end)).fetchall()
         return prior, rows
 
     def _compile_short_term(self, start: float, end: float, targets: list[Target]) -> int:

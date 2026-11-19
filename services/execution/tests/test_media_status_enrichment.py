@@ -5,10 +5,10 @@ from services.execution.handlers import media_status
 from services.execution.schemas import MediaStatusRequest, UserContext
 
 TV_STATE = {
-    "entity_id": "media_player.office_tv",
+    "entity_id": "media_player.study_tv",
     "state": "playing",
     "attributes": {
-        "friendly_name": "Office TV",
+        "friendly_name": "Study TV",
         "app_id": "com.google.android.youtube.tv",
         "device_class": "tv",
         "media_title": "A Video",
@@ -51,9 +51,9 @@ async def test_status_enriches_tv_and_ma_players(monkeypatch):
 
     assert result.status == "SUCCESS"
     players = {p["entity_id"]: p for p in result.detail["all_players"]}
-    assert set(players) == {"media_player.office_tv", "media_player.mass_kitchen"}
+    assert set(players) == {"media_player.study_tv", "media_player.mass_kitchen"}
 
-    tv = players["media_player.office_tv"]
+    tv = players["media_player.study_tv"]
     assert tv["media_position_updated_at"] == "2026-10-05T12:00:00+00:00"
     assert tv["media_content_id"] == "abc123"
     assert tv["shuffle"] is True
@@ -71,13 +71,13 @@ async def test_status_enriches_tv_and_ma_players(monkeypatch):
 
 async def test_status_ma_player_id_prefers_explicit_mass_player_id(monkeypatch):
     state = {
-        "entity_id": "media_player.mass_office",
+        "entity_id": "media_player.mass_study",
         "state": "idle",
         "attributes": {
-            "friendly_name": "Office",
+            "friendly_name": "Study",
             "integration": "music_assistant",
-            "mass_player_id": "office_player",
-            "active_queue": "office_queue",
+            "mass_player_id": "study_player",
+            "active_queue": "study_queue",
         },
     }
 
@@ -89,14 +89,14 @@ async def test_status_ma_player_id_prefers_explicit_mass_player_id(monkeypatch):
     result = await media_status.handle_media_status(_request())
 
     player = result.detail["all_players"][0]
-    assert player["ma_player_id"] == "office_player"
+    assert player["ma_player_id"] == "study_player"
 
 
 async def test_status_non_ma_player_has_no_ma_player_id(monkeypatch):
     state = {
-        "entity_id": "media_player.office_speaker",
+        "entity_id": "media_player.study_speaker",
         "state": "idle",
-        "attributes": {"friendly_name": "Office Speaker"},
+        "attributes": {"friendly_name": "Study Speaker"},
     }
 
     async def fake_get_states(ha_url, ha_token):

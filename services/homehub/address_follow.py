@@ -16,6 +16,12 @@ Here, every housekeeping pass (discovery's, once a minute):
    gets that address in every place it keeps one (``ADDRESS_KEYS``, in its data
    or options) and is reloaded. Admins get one notice saying it happened.
 
+A Tasmota entry imported from HA kept its device's address only on the device
+(``configuration_url``, which the driver falls back to). For the integrations in
+``DEVICE_URL_FOLLOWED`` that address counts too, and following it writes the new
+one into the entry's ``host`` (where it is kept from then on) and the device's
+``configuration_url``.
+
 MACs that answer for several addresses (an extender or bridge, ``shared_macs``)
 never count. A host name follows the device by itself and is left alone.
 """
@@ -42,6 +48,8 @@ def _colons(mac: str) -> str:
 
 #: Where entries keep an address: a bare host, or the host of a URL.
 ADDRESS_KEYS = ("host", "url", "mjpeg_url", "still_image_url", "stream_url")
+#: Integrations whose driver reaches the device at its ``configuration_url`` when the entry keeps no address.
+DEVICE_URL_FOLLOWED = {"tasmota"}
 
 
 def _ip(text: str) -> str | None:
@@ -95,6 +103,24 @@ def _devices(hub: Any, entry: Any) -> list[Any]:
     return [d for d in hub.devices.values() if entry.entry_id in (d.config_entries or [])]
 
 
+def device_url_ip(hub: Any, entry: Any) -> str | None:
+    """The IP in the one device's ``configuration_url``, for an entry of DEVICE_URL_FOLLOWED keeping none itself."""
+    if entry.domain not in DEVICE_URL_FOLLOWED or addresses(entry):
+        return None
+    devices = _devices(hub, entry)
+    if len(devices) != 1 or not devices[0].configuration_url:
+        return None
+    return _ip(_host_of(str(devices[0].configuration_url)) or "")
+
+
+def entry_ips(hub: Any, entry: Any) -> set[str]:
+    """Every IP the entry reaches its device at."""
+    ips = {ip for _where, ip in addresses(entry).values()}
+    if not ips and (ip := device_url_ip(hub, entry)):
+        ips.add(ip)
+    return ips
+
+
 def _macs(device: Any) -> set[str]:
     return {m for t, v in (device.connections or []) if t == "mac" and (m := _norm(str(v)))}
 
@@ -130,7 +156,7 @@ def plan(hub: Any, neighbours: dict[str, str], proxied: set[str]) -> tuple[list[
     for entry in hub.config_entries.values():
         if entry.disabled_by or entry.source == "ignore":
             continue
-        ips = {ip for _where, ip in addresses(entry).values()}
+        ips = entry_ips(hub, entry)
         if len(ips) != 1:
             continue  # no IP, or several different ones: nothing to follow
         ip = ips.pop()
@@ -157,7 +183,7 @@ def lost(hub: Any, neighbours: dict[str, str]) -> bool:
     """Whether a device the hub follows by MAC stopped answering and is nowhere in the table."""
     seen = {m for v in neighbours.values() if (m := _norm(v))}
     for entry in hub.config_entries.values():
-        if entry.disabled_by or entry.source == "ignore" or not addresses(entry):
+        if entry.disabled_by or entry.source == "ignore" or not entry_ips(hub, entry):
             continue
         devices = _devices(hub, entry)
         if len(devices) == 1 and (macs := _macs(devices[0])) and not macs & seen and not working(hub, entry):
@@ -177,13 +203,22 @@ def apply_move(hub: Any, move: Move) -> Any:
     """Rewrite every address the entry keeps to the new IP and save it; returns the entry (reload it after)."""
     entry = hub.config_entries[move.entry_id]
     data, options = dict(entry.data or {}), dict(entry.options or {})
-    for key, (where, ip) in addresses(entry).items():
+    kept = addresses(entry)
+    for key, (where, ip) in kept.items():
         if ip != move.old_ip:
             continue
         target = options if where == "options" else data
         target[key] = with_new_ip(str(target[key]), move.new_ip)
+    if not kept and entry.domain in DEVICE_URL_FOLLOWED:
+        data["host"] = move.new_ip  # kept on the entry from now on
     entry.data, entry.options = data, options
     if hub.store is not None:
         hub.store.save_config_entry(entry)
+    for device in _devices(hub, entry):
+        url = str(device.configuration_url or "")
+        if url and _ip(_host_of(url) or "") == move.old_ip:
+            device.configuration_url = with_new_ip(url, move.new_ip)
+            if hub.store is not None:
+                hub.store.save_device(device)
     log.info("%s moved %s -> %s (MAC %s); its address is updated", entry.title, move.old_ip, move.new_ip, move.mac)
     return entry

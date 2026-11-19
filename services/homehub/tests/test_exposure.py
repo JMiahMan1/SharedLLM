@@ -115,7 +115,9 @@ def test_the_api_answers_one_entity_or_the_list(env):
     client = TestClient(build_app(rt, Auth(store, SECRET)))
     assert client.get("/api/homehub/exposed_entities").status_code == 401
     one = client.get("/api/homehub/exposed_entities", params={"entity_id": "light.den_lamp"}, headers=H).json()
-    assert one == {"entity_id": "light.den_lamp", "exposed": False}
+    # ``name``: what Jarvis says if it has to refuse (never the entity id).
+    assert {k: one[k] for k in ("entity_id", "exposed")} == {"entity_id": "light.den_lamp", "exposed": False}
+    assert "name" in one and one["name"] != "light.den_lamp"
     listing = client.get("/api/homehub/exposed_entities", headers=H).json()
     assert listing["assistant"] == "conversation"
     assert listing["entity_ids"] == ["binary_sensor.den_window", "sensor.api_humidity", "sensor.den_temperature"]

@@ -885,7 +885,7 @@ const Identity = () => {
                       ) : (
                         <Plus size={32} className="text-slate-600" />
                       )}
-                      <span className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 flex items-center justify-center transition-opacity rounded-full">
+                      <span className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 pointer-coarse:opacity-75 flex items-center justify-center transition-opacity rounded-full">
                          <Edit3 size={20} className="text-white" />
                       </span>
                    </button>
