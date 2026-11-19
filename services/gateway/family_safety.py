@@ -10,7 +10,10 @@
   minutes; sooner is answered 429 with when it can be sent again.
 * ``PUT /api/geo/places/{zone_id}`` marks a place important and chooses who
   hears about arrivals and departures there (geo sends those notices). Only
-  an admin may: places are Home Assistant zones, which have no owner.
+  an admin may.
+* ``/api/geo/saved-places`` lists, adds, changes and removes the places people
+  save from Wander. Every place is a HomeHub zone (HomeHub is the only store of
+  places); with no HomeHub these answer 503 and nothing is kept anywhere else.
 
 The other family_safety notices come from identity (low phone battery) and
 geo (important places, long stops). See docs/FAMILY_HUB.md.
@@ -19,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -458,10 +462,33 @@ def place_payload(body: Any, family: list[str]) -> dict[str, Any]:
     return out
 
 
+async def _hub_places(method: str, path: str, *, params: dict[str, str] | None = None, json: Any = None) -> Any:
+    """One call to HomeHub's places (``/hub/zones``) with the internal secret; its refusals keep their
+    words. A 400 (a bad field) is a 422 here, as the places routes always answered."""
+    from services.gateway import discovery_routes as hub
+
+    status, body = await hub._hub(method, path, params=params, json=json)
+    if status == 200:
+        return body
+    message = (body.get("message") or body.get("detail")) if isinstance(body, dict) else None
+    code = {400: 422}.get(status, status if status in (403, 404, 409, 503) else 502)
+    raise HTTPException(status_code=code, detail=str(message or "The home hub refused that"))
+
+
+async def places_changed() -> None:
+    """Tell geo a place changed, so arrivals and reminders use it at once (best effort)."""
+    try:
+        async with get_client().post(f"{GEO_SVC}/zones/refresh", headers=_HEADERS, timeout=_TIMEOUT) as resp:
+            if resp.status != 200:
+                log.info("[family-safety] geo did not refresh its places: HTTP %s", resp.status)
+    except Exception as e:
+        log.info(f"[family-safety] geo did not refresh its places: {type(e).__name__}: {e}")
+
+
 @router.put("/api/geo/places/{zone_id}")
 async def put_place(request: Request, zone_id: str):
     """Mark a place important and pick who hears about it (empty: everyone).
-    Admins only."""
+    Admins only. ``zone_id`` is the place's entity id (``zone.home``, ``zone.school``)."""
     from services.gateway.main import _resolve_identity_from_request
 
     creds = await _resolve_identity_from_request(request)
@@ -475,12 +502,18 @@ async def put_place(request: Request, zone_id: str):
     if not family:
         raise HTTPException(status_code=503, detail="Could not read the family list")
     payload = place_payload(body, family)
-    async with get_client().put(f"{GEO_SVC}/place-settings/{zone_id}", json=payload,
-                                headers=_HEADERS, timeout=_TIMEOUT) as resp:
-        answer = await resp.json(content_type=None)
-        if resp.status != 200:
-            raise HTTPException(status_code=resp.status, detail=str((answer or {}).get("detail") or "Could not save the place"))
-    return answer
+    viewer = {"viewer": str(creds.get("user") or "").strip().lower()}
+    zones = (await _hub_places("GET", "/hub/zones", params=viewer)).get("zones") or []
+    zone = next((z for z in zones if z.get("entity_id") == zone_id), None)
+    if zone is None:
+        raise HTTPException(status_code=404, detail="No such place")
+    change = {"important": payload["important"], "notify": payload["notify"]}
+    if "icon" in payload:
+        change["pin"] = payload["icon"]
+    saved = await _hub_places("PATCH", f"/hub/zones/{zone['id']}", params=viewer, json=change)
+    await places_changed()
+    return {"zone": zone_id, "important": saved.get("important"), "notify": saved.get("notify") or [],
+            "icon": saved.get("pin") or ""}
 
 
 # Place reminders ("remind me when I get home"): personal, so geo is always
@@ -537,22 +570,51 @@ async def remove_place_reminder(request: Request, reminder_id: str):
 
 # Saved places made from Wander: one shared family list plus each person's own.
 # Whoever adds a place owns it; only the owner or an admin may change or remove
-# one. Arriving at or leaving an important saved place sends the same
-# family_safety notice an important Home Assistant zone does.
+# one, and nobody (an admin included) sees someone else's private place. They
+# are HomeHub zones: the gateway names the person (their Jarvis username) and
+# HomeHub matches it to its own user. Arriving at or leaving an important place
+# sends a family_safety notice.
 
-def saved_place_payload(body: Any, family: list[str]) -> dict[str, Any]:
-    """The place fields a caller may set. Only the keys they sent are forwarded,
-    so a change can never blank a field it did not mention."""
+#: The radius a saved place gets, and the range it is kept in (metres).
+DEFAULT_RADIUS_M = 150.0
+MIN_RADIUS_M = 50.0
+MAX_RADIUS_M = 5000.0
+
+
+def saved_place_payload(body: Any, family: list[str], *, creating: bool = False) -> dict[str, Any]:
+    """The HomeHub fields for a place from Wander's ``{name, lat, lon, radius, scope, important, notify,
+    icon}``. Only the keys sent are forwarded, so a change never blanks a field it did not mention."""
     if not isinstance(body, dict):
         raise HTTPException(status_code=422, detail="The body must be an object")
     out: dict[str, Any] = {}
-    for key in ("name", "lat", "lon", "radius", "scope", "icon"):
-        if key in body:
-            out[key] = body[key]
+    if "name" in body or creating:
+        name = body.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise HTTPException(status_code=422, detail="name is required")
+        out["name"] = name.strip()[:80]
+    for key, field, low, high in (("lat", "latitude", -90.0, 90.0), ("lon", "longitude", -180.0, 180.0)):
+        if key in body or creating:
+            value = body.get(key)
+            if isinstance(value, bool) or not isinstance(value, int | float) or not low <= float(value) <= high:
+                raise HTTPException(status_code=422, detail=f"{key} must be a number between {low:g} and {high:g}")
+            out[field] = float(value)
+    if "radius" in body or creating:
+        value = body.get("radius")
+        radius = float(value) if isinstance(value, int | float) and not isinstance(value, bool) else DEFAULT_RADIUS_M
+        out["radius"] = min(max(radius, MIN_RADIUS_M), MAX_RADIUS_M)
+    if "scope" in body or creating:
+        scope = body.get("scope") or "user"
+        if scope not in ("family", "user"):
+            raise HTTPException(status_code=422, detail="scope must be 'family' or 'user'")
+        out["visibility"] = "family" if scope == "family" else "private"
+    if "icon" in body:
+        out["pin"] = body["icon"] if isinstance(body["icon"], str) else ""
     if "important" in body:
         if not isinstance(body["important"], bool):
             raise HTTPException(status_code=422, detail="important must be true or false")
         out["important"] = body["important"]
+    elif creating:
+        out["important"] = False
     if "notify" in body:
         notify_list = body["notify"]
         if not isinstance(notify_list, list) or not all(isinstance(u, str) for u in notify_list):
@@ -565,17 +627,31 @@ def saved_place_payload(body: Any, family: list[str]) -> dict[str, Any]:
     return out
 
 
-async def _may_change_place(request: Request, place_id: str) -> str:
-    """The caller's username once they may change this place (owner or admin)."""
+def saved_place(zone: dict[str, Any]) -> dict[str, Any]:
+    """A HomeHub zone in the shape Wander has always used for a saved place."""
+    return {"id": zone.get("id"), "entity_id": zone.get("entity_id"), "name": zone.get("name"),
+            "lat": zone.get("latitude"), "lon": zone.get("longitude"), "radius": zone.get("radius"),
+            "scope": "user" if zone.get("visibility") == "private" else "family",
+            "owner": zone.get("owner_name") or "", "important": bool(zone.get("important")),
+            "notify": list(zone.get("notify") or []), "icon": zone.get("pin") or "",
+            **({"created_at": zone["created_at"]} if zone.get("created_at") is not None else {})}
+
+
+async def _viewer(request: Request) -> tuple[str, bool]:
     from services.gateway.main import _resolve_identity_from_request
 
     creds = await _resolve_identity_from_request(request)
-    user = str(creds.get("user") or "").strip().lower()
-    answer = await _geo_call("GET", "/places", {"viewer": user})
-    place = next((p for p in (answer or {}).get("places") or [] if p.get("id") == place_id), None)
-    if not place:
+    return str(creds.get("user") or "").strip().lower(), bool(creds.get("is_admin"))
+
+
+async def _may_change_place(request: Request, place_id: str) -> str:
+    """The caller's username once they may change this place: its owner, or an admin for any place they
+    can see (someone else's private place is not there for them at all: 404)."""
+    user, is_admin = await _viewer(request)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", place_id or "") or place_id == "home":
         raise HTTPException(status_code=404, detail="No such place")
-    if not creds.get("is_admin") and str(place.get("owner") or "").lower() != user:
+    place = await _hub_places("GET", f"/hub/zones/{place_id}", params={"viewer": user})
+    if not is_admin and str(place.get("owner_name") or "").lower() != user:
         raise HTTPException(status_code=403, detail="Only the person who added a place can change it")
     return user
 
@@ -589,40 +665,48 @@ async def _family_or_503() -> list[str]:
 
 @router.get("/api/geo/saved-places")
 async def list_saved_places(request: Request):
-    """The saved places the caller may see: the family list plus their own."""
-    return await _geo_call("GET", "/places", {"viewer": await _caller(request)})
+    """The saved places the caller may see: the family's plus their own private ones."""
+    user = await _caller(request)
+    zones = (await _hub_places("GET", "/hub/zones", params={"viewer": user.strip().lower()})).get("zones") or []
+    return {"places": [saved_place(z) for z in zones if z.get("source") != "home" and z.get("owner_name")]}
 
 
 @router.post("/api/geo/saved-places")
 async def add_saved_place(request: Request):
     """Add a place the caller owns:
-    ``{name, lat, lon, radius?, scope?, important?, notify?}``."""
-    user = await _caller(request)
+    ``{name, lat, lon, radius?, scope?, important?, notify?, icon?}``."""
+    user = (await _caller(request)).strip().lower()
     try:
         body = await request.json()
     except Exception:
         body = None
-    payload = saved_place_payload(body, await _family_or_503())
-    return await _geo_call("POST", "/places", {"owner": user}, json=payload)
+    payload = saved_place_payload(body, await _family_or_503(), creating=True)
+    zone = await _hub_places("POST", "/hub/zones", params={"viewer": user}, json={**payload, "owner": user})
+    await places_changed()
+    return {"place": saved_place(zone)}
 
 
 @router.put("/api/geo/saved-places/{place_id}")
 async def update_saved_place(request: Request, place_id: str):
-    """Change a saved place the caller added (or any, as an admin)."""
-    await _may_change_place(request, place_id)
+    """Change a saved place the caller added (or any they can see, as an admin)."""
+    user = await _may_change_place(request, place_id)
     try:
         body = await request.json()
     except Exception:
         body = None
     payload = saved_place_payload(body, await _family_or_503())
-    return await _geo_call("PUT", f"/places/{place_id}", json=payload)
+    zone = await _hub_places("PATCH", f"/hub/zones/{place_id}", params={"viewer": user}, json=payload)
+    await places_changed()
+    return {"place": saved_place(zone)}
 
 
 @router.delete("/api/geo/saved-places/{place_id}")
 async def remove_saved_place(request: Request, place_id: str):
-    """Remove a saved place the caller added (or any, as an admin)."""
-    await _may_change_place(request, place_id)
-    return await _geo_call("DELETE", f"/places/{place_id}")
+    """Remove a saved place the caller added (or any they can see, as an admin)."""
+    user = await _may_change_place(request, place_id)
+    await _hub_places("DELETE", f"/hub/zones/{place_id}", params={"viewer": user})
+    await places_changed()
+    return {"removed": place_id}
 
 
 @router.get("/api/geo/visit-suggestions")

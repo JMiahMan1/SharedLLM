@@ -31,8 +31,13 @@ export interface Label {
   description: string | null;
 }
 
-export type ZoneSource = 'home' | 'hub' | 'geo';
+/** "home" is Home (the hub's own location); every other place is a "hub" zone. */
+export type ZoneSource = 'home' | 'hub';
 
+/**
+ * A place on HomeHub, the only store of the family's places: Home, a zone drawn for the household, or a place
+ * someone saved in Wander (it has an owner, and is shared with the family or private to them).
+ */
 export interface Zone {
   id: string;
   entity_id: string | null;
@@ -44,6 +49,13 @@ export interface Zone {
   icon: string | null;
   source: ZoneSource;
   editable: boolean;
+  /** False only for Home: it moves, but there is always one. */
+  removable?: boolean;
+  /** The Jarvis username of whoever saved it in Wander; null for Home and household zones. */
+  owner_name?: string | null;
+  visibility?: 'family' | 'private';
+  important?: boolean;
+  notify?: string[];
 }
 
 export interface Person {
@@ -68,6 +80,8 @@ export interface Tracker {
 }
 
 export type ZoneBody = { name: string; latitude: number; longitude: number; radius: number; passive: boolean };
+/** What moving Home takes: no passive (Home is always where people are). */
+export type HomeBody = Omit<ZoneBody, 'passive'>;
 export type PersonBody = { name: string; jarvis_user: string | null; device_trackers: string[] };
 
 /** The query key every view of the labels shares, so a change shows everywhere at once. */
@@ -126,8 +140,9 @@ export async function updateZone(id: string, body: Partial<ZoneBody>): Promise<Z
 export async function deleteZone(id: string): Promise<{ entity_id: string | null }> {
   return (await apiClient.delete(item('zones', id))).data;
 }
-export async function syncZones(): Promise<{ places: number; added: number; removed: number }> {
-  return (await apiClient.post('/api/homehub/zones/sync', {})).data;
+/** Move, resize or rename Home (admins). It is the hub's location: zone.home, the forecast and arrivals follow. */
+export async function updateHome(body: Partial<HomeBody>): Promise<Zone> {
+  return (await apiClient.patch(item('zones', 'home'), body)).data;
 }
 
 export async function getPersons(): Promise<{ persons: Person[]; trackers: Tracker[] }> {
@@ -214,8 +229,22 @@ export function zoneForm(zone?: Zone): ZoneForm {
 }
 
 export const ZONE_SOURCE_LABEL: Record<ZoneSource, string> = {
-  home: 'Home (the hub location)', hub: 'Drawn here', geo: 'Saved place in Jarvis',
+  home: 'Home (where the hub is)', hub: 'For the household',
 };
+
+/** Where a place came from, in a few words: Home, a household zone, or who saved it in Wander. */
+export function zoneOrigin(zone: Zone): string {
+  if (zone.source === 'home') return ZONE_SOURCE_LABEL.home;
+  if (zone.owner_name) {
+    return `Saved in Wander by ${zone.owner_name}${zone.visibility === 'private' ? ' (private)' : ''}`;
+  }
+  return ZONE_SOURCE_LABEL.hub;
+}
+
+/** Where an admin edits the household's places (Devices > Rooms & places). */
+export const PLACES_ADMIN_LINK = '/devices#devices-zones';
+/** Where everyone keeps their own places (Wander > Places). */
+export const WANDER_PLACES_LINK = '/wander#wander-places';
 
 /** Setup > Users & logins: where the hub's users and logins come from (services/homehub/users_api.py). */
 export interface ProviderSync {

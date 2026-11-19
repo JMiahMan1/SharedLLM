@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactElement } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import PlacesPanel, { type PlaceSetting } from './PlacesPanel';
 import { api } from '../../services/api';
@@ -16,6 +17,7 @@ vi.mock('../../services/api', async (importOriginal) => {
       updateSavedPlace: vi.fn(),
       getSavedPlaces: vi.fn(),
       getVisitSuggestions: vi.fn(),
+      getIntegrationsStatus: vi.fn(),
     },
   };
 });
@@ -24,18 +26,21 @@ const setPlaceSettings = vi.mocked(api.setPlaceSettings);
 const getSavedPlaces = vi.mocked(api.getSavedPlaces);
 const getVisitSuggestions = vi.mocked(api.getVisitSuggestions);
 const updateSavedPlace = vi.mocked(api.updateSavedPlace);
+const getIntegrationsStatus = vi.mocked(api.getIntegrationsStatus);
 const members = [
   { username: 'sam', name: 'Sam' },
   { username: 'leo', name: 'Leo' },
 ];
 const school: PlaceSetting = { id: 'zone.school', name: 'School', important: false, notify: [] };
 
-// The panel reads saved places and visit suggestions through react-query.
+// The panel reads saved places and visit suggestions through react-query, and links to other pages.
 const renderPanel = (ui: ReactElement) =>
   render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      {ui}
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        {ui}
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 
 describe('PlacesPanel', () => {
@@ -44,6 +49,31 @@ describe('PlacesPanel', () => {
     setPlaceSettings.mockResolvedValue({ zone: 'zone.school', important: true, notify: [] });
     getSavedPlaces.mockResolvedValue([]);
     getVisitSuggestions.mockResolvedValue([]);
+    getIntegrationsStatus.mockResolvedValue({ homehub: { enabled: true }, home_assistant: { enabled: false } });
+  });
+
+  it('says where household places are drawn, with a link for an admin and no Home Assistant', async () => {
+    renderPanel(<PlacesPanel places={[school]} members={members} canEdit onSaved={vi.fn()} currentUser="dad" isAdmin />);
+    const help = screen.getByTestId('places-help');
+    expect(help).not.toHaveTextContent(/Home Assistant/);
+    expect(within(help).getByRole('link', { name: /Devices > Rooms & places/ })).toHaveAttribute('href', '/devices#devices-zones');
+  });
+
+  it('a member sees no link to the admin page and no controls for the household places', () => {
+    renderPanel(<PlacesPanel places={[school]} members={members} canEdit={false} onSaved={vi.fn()} currentUser="leo" isAdmin={false} />);
+    expect(within(screen.getByTestId('places-help')).queryByRole('link')).toBeNull();
+    expect(within(screen.getByTestId('place-zone.school')).queryByRole('switch')).toBeNull();
+    expect(within(screen.getByTestId('place-zone.school')).queryByRole('combobox')).toBeNull();
+  });
+
+  it('with no home hub there are no places, and an admin is told where to connect it', async () => {
+    getIntegrationsStatus.mockResolvedValue({ homehub: { enabled: false }, home_assistant: { enabled: false } });
+    renderPanel(<PlacesPanel places={[]} members={members} canEdit onSaved={vi.fn()} currentUser="dad" isAdmin />);
+    const notice = await screen.findByTestId('places-need-hub');
+    expect(notice).toHaveTextContent('Places live on the home hub');
+    expect(within(notice).getByRole('link')).toHaveAttribute('href', '/identity');
+    expect(getSavedPlaces).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('add-place')).toBeNull();
   });
 
   it('marks a place important', async () => {
@@ -106,7 +136,7 @@ describe('PlacesPanel', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('an admin picks the icon a Home Assistant place shows on the map', async () => {
+  it('an admin picks the icon a household place shows on the map', async () => {
     renderPanel(<PlacesPanel places={[school]} members={members} canEdit onSaved={vi.fn()} currentUser="dad" isAdmin />);
     await userEvent.selectOptions(screen.getByRole('combobox', { name: /map icon for school/i }), 'gym');
     await waitFor(() =>
@@ -114,7 +144,7 @@ describe('PlacesPanel', () => {
     );
   });
 
-  it('only shows the icon to someone who cannot change a Home Assistant place', () => {
+  it('only shows the icon to someone who cannot change a household place', () => {
     renderPanel(<PlacesPanel places={[school]} members={members} canEdit={false} onSaved={vi.fn()} currentUser="leo" isAdmin={false} />);
     expect(screen.queryByRole('combobox', { name: /map icon for school/i })).not.toBeInTheDocument();
   });

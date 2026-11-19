@@ -516,3 +516,24 @@ async def test_the_entry_loads_by_syncing_and_retries_while_identity_is_down(tmp
     await driver.async_setup()
     assert any((u.get("provider") or {}).get("username") == "robin" for u in runtime.store.get_kv("users"))
     assert driver.poll_interval == 60.0
+
+
+def test_a_synced_user_owns_and_sees_their_private_place_by_jarvis_username(env):
+    """Places (registries.py) map the Jarvis username the gateway sends to the hub user that carries it."""
+    sync(env)
+    c, u = env["client"], users(env)
+    place = {"name": "Practice field", "latitude": 1.01, "longitude": 2.01, "radius": 80, "visibility": "private"}
+    made = c.post("/hub/zones", json={**place, "owner": "Robin"}, headers=ADMIN).json()
+    assert made["owner"] == u["robin"]["id"]
+
+    def seen(viewer: str) -> list[str]:
+        return [z["name"] for z in c.get("/hub/zones", params={"viewer": viewer}, headers=ADMIN).json()["zones"]]
+
+    assert "Practice field" in seen("robin")
+    assert "Practice field" not in seen("alex")
+    # Alex (an admin from Jarvis) logging in to the hub sees his own private place by his hub login.
+    mine = c.post("/hub/zones", json={**place, "name": "Alex only", "owner": "alex"}, headers=ADMIN).json()
+    assert mine["owner"] == "u-alex"  # the HA-imported user, linked by username
+    token = token_for(c, "alex", "alex-jarvis-pass")
+    names = [z["name"] for z in c.get("/hub/zones", headers={"Authorization": f"Bearer {token}"}).json()["zones"]]
+    assert "Alex only" in names and "Practice field" not in names

@@ -52,11 +52,11 @@ from services.geo import (
     driving,
     event_feed,
     health_notices,
+    hub_places,
     map_match,
     map_regions,
     metric_history,
     place_reminders,
-    places,
     safety,
     step_history,
     visits,
@@ -136,7 +136,9 @@ async def lifespan(app: FastAPI):
     notices = asyncio.create_task(_notice_sweeper())
     fuel_prices = asyncio.create_task(_fuel_price_sweeper())
     auto_workouts = asyncio.create_task(_auto_workout_sweeper())
+    places_move = asyncio.create_task(_move_places_to_homehub())
     yield
+    places_move.cancel()
     sweeper.cancel()
     notices.cancel()
     fuel_prices.cancel()
@@ -483,7 +485,8 @@ async def _people_from_history() -> list[dict]:
         raw_zone = await r.get(f"geo:zone_state:{user}")
         if raw_zone:
             with contextlib.suppress(TypeError, ValueError):
-                zone = str(json.loads(raw_zone).get("zone") or zone).split(".")[-1]
+                # A private place is its owner's: everyone else just sees "away".
+                zone = str(hub_places.public_zone_id(json.loads(raw_zone).get("zone")) or zone).split(".")[-1]
         when = datetime.fromtimestamp(ts, tz=UTC).isoformat()
         status = {k: point[k] for k in ("bst", "plg", "ich", "alm", "alp") if k in point}
         with contextlib.suppress(TypeError, ValueError):
@@ -592,69 +595,74 @@ async def get_android_auto(
 
 @app.get("/zones")
 async def get_zones(viewer: str | None = Query(None)):
-    """The family's places as a GeoJSON FeatureCollection: the Home Assistant
-    zones plus the places saved from Wander (a shared family list and each
-    person's own, filtered to ``viewer`` when given).
+    """The family's places as a GeoJSON FeatureCollection, from HomeHub (the only store of places):
+    Home, the drawn zones and the places saved from Wander. With ``viewer`` (the gateway always passes
+    the person) someone else's private place is left out; without it (a service) every place is.
 
-    With no home hub set up at all the saved places are still the family's:
-    they are answered, with ``hub_zones: "unavailable"`` and the reason, and
-    nothing is called. A hub that is set up but failing still errors.
+    With no HomeHub set up there are no places: ``hub_zones: "unavailable"`` and the reason, nothing
+    called. A HomeHub that is set up but failing still errors.
     """
-    hub_on = _hub_target() is not None
-    states = await _ha_get_states() if hub_on else []
+    try:
+        zones = await hub_places.fetch_all()
+    except hub_places.PlacesUnavailable as exc:
+        if hub_places.stack_login() is not None:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from None
+        return {"type": "FeatureCollection", "features": [], "hub_zones": "unavailable", "message": str(exc)}
+    _remember_zones(zones)
+    shown = hub_places.for_person(zones, viewer) if viewer else zones
     features = []
-    for s in _filter_entities(states, "zone"):
-        f = _entity_to_feature(s["entity_id"], s)
-        if f:
-            features.append(f)
-    # Which places are marked important, and who hears about them.
-    r = await get_redis()
-    settings = await safety.place_settings(r)
-    features = safety.annotate_zone_features(features, settings)
-    for place in await places.list_all(r) if r else []:
-        if viewer and not places.can_see(place, viewer):
-            continue
+    for z in shown:
         features.append({
             "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [place["lon"], place["lat"]]},
+            "geometry": {"type": "Point", "coordinates": [z["longitude"], z["latitude"]]},
             "properties": {
-                "entity_id": places.entity_id(place["id"]),
-                "state": "saved",
-                "friendly_name": place["name"],
-                "radius": place["radius"],
-                "custom": True,
-                "owner": place["owner"],
-                "scope": place["scope"],
-                "important": bool(place.get("important")),
-                "notify": list(place.get("notify") or []),
-                **({"icon": place["icon"]} if place.get("icon") else {}),
+                "entity_id": z["entity_id"],
+                "id": z["id"],
+                "friendly_name": z["name"],
+                "latitude": z["latitude"],
+                "longitude": z["longitude"],
+                "radius": z["radius"],
+                "passive": z["passive"],
+                "custom": z["custom"],
+                "owner": z["owner"] or "",
+                "scope": "user" if z["private"] else "family",
+                "important": z["important"],
+                "notify": z["notify"],
+                **({"icon": z["pin"]} if z["pin"] else {}),
             },
         })
-    if hub_on:
-        return {"type": "FeatureCollection", "features": features, "hub_zones": "available"}
-    from services.common.hub_login import NO_HUB_MESSAGE
-
-    return {"type": "FeatureCollection", "features": features, "hub_zones": "unavailable",
-            "message": NO_HUB_MESSAGE}
+    return {"type": "FeatureCollection", "features": features, "hub_zones": "available"}
 
 
-@app.put("/place-settings/{zone_id}")
-async def put_place_settings(zone_id: str, body: dict):
-    """Mark a zone important (arrivals and departures become family_safety
-    notices) and choose who hears about it; an empty list means everyone who
-    may see the person."""
-    if not re.fullmatch(r"zone\.[a-z0-9_]+", zone_id):
-        raise HTTPException(status_code=422, detail="zone_id must be a zone entity id")
-    r = await get_redis()
-    if not r:
-        raise HTTPException(status_code=503, detail="Redis unavailable")
-    notify_list = body.get("notify") if isinstance(body.get("notify"), list) else []
-    try:
-        icon = places.clean_icon(body["icon"]) if "icon" in body else None
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from None
-    entry = await safety.save_place_setting(r, zone_id, bool(body.get("important")), notify_list, icon)
-    return {"zone": zone_id, **entry}
+@app.post("/zones/refresh")
+async def refresh_zones():
+    """Read the places from HomeHub again now (the gateway calls this after a place changes)."""
+    _zone_cache["at"] = 0.0
+    return {"zones": len(await _zones_cached())}
+
+
+async def _move_places_to_homehub() -> None:
+    """Once, at start: the places geo used to keep move into HomeHub (``hub_places.migrate``).
+    Tried again every few minutes while HomeHub cannot take them; geo's own copy is never touched."""
+    from services.common.hub_login import stack_login
+
+    while True:
+        try:
+            r = await get_redis()
+            if r is not None:
+                if stack_login() is None:
+                    if await r.hlen(hub_places.LEGACY_PLACES_KEY) or await r.hlen(hub_places.LEGACY_SETTINGS_KEY):
+                        log.warning("[Geo] saved places wait for HomeHub: it is not set up, so they are not "
+                                    "moved and not in use (geo's copy is kept)")
+                    return
+                if await hub_places.migrate(r, time.time()) is not None:
+                    _zone_cache["at"] = 0.0
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("[Geo] moving saved places to HomeHub failed, will try again: %s", exc)
+        await asyncio.sleep(PLACES_MOVE_RETRY_S)
 
 
 # Place reminders ("remind me when I get home"): personal, fired by the
@@ -694,9 +702,12 @@ async def post_place_reminder(
         reminder = place_reminders.validate(body)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
-    # Only a place the family actually has: a reminder on a zone that does
-    # not exist would wait forever.
-    zones = {z["entity_id"]: z for z in await _zones()}
+    # Only a place the person has (the family's, or their own private one): a
+    # reminder on a zone that does not exist would wait forever.
+    try:
+        zones = {z["entity_id"]: z for z in hub_places.for_person(await _zones(), owner)}
+    except hub_places.PlacesUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
     zone = zones.get(reminder["zone"])
     if not zone:
         raise HTTPException(status_code=422, detail="That place is not one of the family's places")
@@ -724,84 +735,6 @@ async def delete_place_reminder(
     if not await place_reminders.remove(r, _place_reminder_user(user), reminder_id):
         raise HTTPException(status_code=404, detail="No such place reminder (it may have gone off already)")
     return {"removed": reminder_id}
-
-
-@app.get("/places")
-async def get_places(
-    viewer: str,
-    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-):
-    """Saved places the viewer may see: the family's shared ones plus their own."""
-    if not _verify_internal_secret(x_internal_secret):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    r = await get_redis()
-    if not r:
-        raise HTTPException(status_code=503, detail="Redis unavailable")
-    who = _place_reminder_user(viewer)
-    return {"places": [places.to_answer(p) for p in await places.list_for(r, who)]}
-
-
-@app.post("/places")
-async def post_place(
-    owner: str,
-    body: dict,
-    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-):
-    """Add a place from Wander: shared with the family, or private to the owner."""
-    if not _verify_internal_secret(x_internal_secret):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    r = await get_redis()
-    if not r:
-        raise HTTPException(status_code=503, detail="Redis unavailable")
-    try:
-        place = places.validate(body)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from None
-    try:
-        entry = await places.add(r, _place_reminder_user(owner), place)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from None
-    return {"place": places.to_answer(entry)}
-
-
-@app.put("/places/{place_id}")
-async def put_place(
-    place_id: str,
-    body: dict,
-    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-):
-    """Edit a saved place. The gateway decides who is allowed to."""
-    if not _verify_internal_secret(x_internal_secret):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    r = await get_redis()
-    if not r:
-        raise HTTPException(status_code=503, detail="Redis unavailable")
-    if not await places.get(r, place_id):
-        raise HTTPException(status_code=404, detail="No such place")
-    try:
-        changes = places.validate(body, partial=True)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from None
-    merged = await places.update(r, place_id, changes)
-    if not merged:
-        raise HTTPException(status_code=404, detail="No such place")
-    return {"place": places.to_answer(merged)}
-
-
-@app.delete("/places/{place_id}")
-async def delete_place(
-    place_id: str,
-    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-):
-    """Forget a saved place."""
-    if not _verify_internal_secret(x_internal_secret):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    r = await get_redis()
-    if not r:
-        raise HTTPException(status_code=503, detail="Redis unavailable")
-    if not await places.remove(r, place_id):
-        raise HTTPException(status_code=404, detail="No such place")
-    return {"removed": place_id}
 
 
 @app.get("/visit-suggestions")
@@ -940,7 +873,8 @@ async def get_person_day(
             points.append({"t": float(p["t"]), "lat": float(p["lat"]), "lon": float(p["lon"]), "spd": p.get("spd") or 0})
     points.sort(key=lambda p: p["t"])
 
-    zones = await _zones_cached()
+    # Someone else may be looking at this day: the family's places only, never a private one.
+    zones = hub_places.family(await _zones_cached())
     day_stops = day_history.stops(points)
     for index, stop in enumerate(day_stops):
         zone = _zone_at(zones, stop["lat"], stop["lon"], margin=100.0)
@@ -1145,38 +1079,30 @@ TIGHT_ZONE_RADIUS_M = 75.0
 #: The old per-person switch (hash viewer -> "off"), now the family_presence
 #: preference in identity; ``_migrate_presence_switches`` moves it over.
 LEGACY_PRESENCE_ALERTS_KEY = "geo:presence_alerts"
-_zone_cache: dict = {"at": 0.0, "zones": [], "hub": []}
+_zone_cache: dict = {"at": 0.0, "zones": []}
+#: How long the places read from HomeHub are used before being read again.
+ZONE_CACHE_S = 300.0
+#: How soon a move of saved places to HomeHub that failed is tried again.
+PLACES_MOVE_RETRY_S = 300.0
 
 
-async def _saved_places() -> list[dict]:
-    """Saved Wander places in the same shape as a Home Assistant zone, so the
-    presence code treats them identically (a saved place is a point + radius)."""
-    try:
-        r = await get_redis()
-        if not r:
-            return []
-        return [places.to_zone(p) for p in await places.list_all(r)]
-    except Exception as e:
-        warn_periodically(log, "geo.saved_places", "[Geo] Saved places unavailable: %s", e)
-        return []
+def _remember_zones(zones: list[dict]) -> None:
+    _zone_cache["zones"] = list(zones)
+    _zone_cache["at"] = time.time()
 
 
 async def _zones_cached() -> list[dict]:
-    """The hub's zones plus the saved places, refreshed every five minutes.
-
-    The two are read independently: a hub that does not answer keeps its last
-    zones and never takes the saved places down with it (they used to be
-    dropped together, so a hub outage emptied every place name).
-    """
-    if time.time() - _zone_cache["at"] > 300:
+    """Every place on HomeHub (private ones too), refreshed every ``ZONE_CACHE_S`` and at once when
+    the gateway says one changed (``POST /zones/refresh``). HomeHub not answering keeps the last
+    places, so an outage never empties every place name; with no HomeHub there are none."""
+    if time.time() - _zone_cache["at"] > ZONE_CACHE_S:
         try:
-            _zone_cache["hub"] = await _zones()
-        except Exception as e:
-            # Zones refresh on a timer; a hub outage should be visible without
-            # a warning per refresh.
-            warn_periodically(log, "geo.zones", "[Geo] Hub zones unavailable: %s", e)
-        _zone_cache["zones"] = list(_zone_cache["hub"]) + await _saved_places()
-        _zone_cache["at"] = time.time()
+            _remember_zones(await _zones())
+        except hub_places.PlacesUnavailable as e:
+            warn_periodically(log, "geo.zones", "[Geo] Places unavailable: %s", e)
+            if hub_places.stack_login() is None:
+                _zone_cache["zones"] = []
+            _zone_cache["at"] = time.time()
     return _zone_cache["zones"]
 
 
@@ -1213,7 +1139,8 @@ async def _presence_transition(
     and not travelling (or at once when the phone says they are on foot or
     still). A fix outside first cancels it quietly, so driving past a saved
     place says nothing."""
-    zones = await _zones_cached()
+    # The family's places and this person's own private ones (nobody else's).
+    zones = hub_places.for_person(await _zones_cached(), user)
     if not zones or not r:
         return []
     key = f"geo:zone_state:{user}"
@@ -1291,7 +1218,7 @@ async def _confirm_pending_arrival(r, user: str, zone_id: str, since: float, now
     latest = await _latest_fix(r, user)
     if latest and float(latest.get("t", 0)) >= since and float(latest.get("spd") or 0.0) >= ARRIVE_MAX_SPEED_MPS:
         return False
-    zone = next((z for z in await _zones_cached() if z["entity_id"] == zone_id), None)
+    zone = next((z for z in hub_places.for_person(await _zones_cached(), user) if z["entity_id"] == zone_id), None)
     if zone is None:
         return False
     await r.set(key, json.dumps({"zone": zone_id, "t": max(float(state.get("t", since)), since)}))
@@ -1362,16 +1289,12 @@ async def _guardian_children_cached() -> dict[str, dict]:
 
 
 async def _place_alert(r, entity_id: str) -> dict:
-    """Who to tell when someone arrives at or leaves this place.
-
-    Saved Wander places carry their own important/notify; Home Assistant zones
-    use the family-wide place settings the admin sets in Wander.
-    """
-    place_id = places.place_id_from_entity(entity_id)
-    if place_id:
-        saved = await places.get(r, place_id)
-        return places.alert_for(saved) if saved else {}
-    return (await safety.place_settings(r)).get(entity_id, {})
+    """Who to tell when someone arrives at or leaves this place: its ``important`` and ``notify``,
+    kept with the place on HomeHub."""
+    zone = next((z for z in await _zones_cached() if z["entity_id"] == entity_id), None)
+    if zone is None:
+        return {}
+    return {"important": bool(zone.get("important")), "notify": list(zone.get("notify") or [])}
 
 
 async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
@@ -2254,20 +2177,9 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
 
 
 async def _zones() -> list[dict]:
-    """HA zones as {"entity_id", "name", "latitude", "longitude", "radius"}."""
-    out = []
-    for z in _filter_entities(await _ha_get_states(), "zone"):
-        attrs = z.get("attributes", {})
-        if attrs.get("latitude") is None or attrs.get("longitude") is None:
-            continue
-        out.append({
-            "entity_id": z.get("entity_id", ""),
-            "name": attrs.get("friendly_name") or z.get("entity_id", "").replace("zone.", "").title(),
-            "latitude": float(attrs["latitude"]),
-            "longitude": float(attrs["longitude"]),
-            "radius": float(attrs.get("radius", 100)),
-        })
-    return out
+    """Every place on HomeHub, private ones included (``hub_places.to_zone`` shape). Raises
+    ``hub_places.PlacesUnavailable`` with no HomeHub or when it does not answer."""
+    return await hub_places.fetch_all()
 
 
 NOMINATIM_PUBLIC_URL = "https://nominatim.openstreetmap.org"
@@ -2345,7 +2257,11 @@ async def _destination(to: str, near: tuple[float, float] | None = None) -> dict
         lat, lon = (float(v) for v in key.split(","))
         return {"name": f"{lat:.4f}, {lon:.4f}", "latitude": lat, "longitude": lon, "radius": 50.0}
     want = key.lower().removeprefix("zone.")
-    for z in await _zones():
+    try:
+        known = hub_places.family(await _zones())
+    except hub_places.PlacesUnavailable:
+        known = []
+    for z in known:
         if want in (z["entity_id"].lower().removeprefix("zone."), z["name"].lower()):
             return z
     return await _geocode_place(key, near)
@@ -2894,7 +2810,7 @@ async def _closest_ha_zone(lat: float, lon: float) -> str | None:
     """
     best_name = None
     best_dist = None
-    for z in await _zones_cached():
+    for z in hub_places.family(await _zones_cached()):  # names other people see: never a private place
         dist = _haversine_distance(lat, lon, z["latitude"], z["longitude"])
         if dist <= z["radius"] and (best_dist is None or dist < best_dist):
             best_dist, best_name = dist, z["name"]
@@ -3176,9 +3092,9 @@ async def _overpass_nearby_pois(lat: float, lon: float) -> list[dict]:
 async def _ha_zones_containing(lat: float, lon: float) -> list[dict]:
     """The hub's zones whose radius contains the point, nearest first (from the zone cache)."""
     out: list[dict] = []
-    for z in await _zones_cached():
+    for z in hub_places.family(await _zones_cached()):
         if z.get("custom"):
-            continue  # the hub's zones only, as before (saved places are ``custom``)
+            continue  # Home and the drawn zones only, as before (saved places are ``custom``)
         dist = _haversine_distance(lat, lon, z["latitude"], z["longitude"])
         if dist <= z["radius"]:
             out.append({
@@ -3396,7 +3312,7 @@ async def _sweep_visit_stays(r, now: float | None = None) -> int:
         if not since or now - since < visits.MIN_STAY_S:
             continue
         lat, lon = float(stop["lat"]), float(stop["lon"])
-        if _zone_at(zones, lat, lon):
+        if _zone_at(hub_places.for_person(zones, person), lat, lon):
             continue
         if await visits.note_stay(r, person, lat, lon, now - since, since, now):
             recorded += 1
@@ -3419,7 +3335,7 @@ async def _sweep_long_stops(r, now: float | None = None) -> int:
         # Mark first: a place that cannot be named or a notice that fails is
         # not worth a second alarm about the same stop.
         await safety.mark_stop_notified(r, person, stop)
-        if _zone_at(zones, stop["lat"], stop["lon"]):
+        if _zone_at(hub_places.for_person(zones, person), stop["lat"], stop["lon"]):
             continue
         place = await _resolve_place_name_cached(stop["lat"], stop["lon"])
         hours = (now - float(stop["since"])) / 3600
@@ -4166,7 +4082,7 @@ async def _resolve_place_if_better(stored: str | None, lat: float, lon: float) -
 async def get_place_name(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180)):
     """What to call a spot in one line: the family place it is in (Home
     Assistant zone or saved place), else its street address. For a check-in."""
-    zone = _zone_at(await _zones_cached(), lat, lon, margin=50.0)
+    zone = _zone_at(hub_places.family(await _zones_cached()), lat, lon, margin=50.0)
     if zone:
         return {"name": zone["name"], "zone": zone["entity_id"]}
     try:

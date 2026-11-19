@@ -273,3 +273,33 @@ async def test_a_rule_can_run_actions_without_notifying_anyone(round_, monkeypat
     assert json.loads(redis.stream[0]["data"])["people"] == []
     assert "barn" in redis.h[w._RULE_STATE]
 
+
+
+async def test_the_hubs_home_is_the_one_home_location(monkeypatch):
+    """With a home hub, Home (zone.home, moved on Devices > Rooms & places) is where the forecast is for;
+    the weather_location setting is the home only when there is no hub at all."""
+    from services import config
+    from services.execution import ha_client, hardware_router
+    from services.execution import main as execution_main
+
+    setting = {w.SETTING_LOCATION: json.dumps({"name": "Old cabin", "latitude": 45.0, "longitude": -100.0})}
+    asked = []
+
+    async def first_user():
+        return {}
+
+    async def state(url, token, entity_id, account=None):
+        asked.append(entity_id)
+        return {"attributes": {"friendly_name": "Maple House", "latitude": 39.5, "longitude": -104.5}}
+
+    monkeypatch.setattr(execution_main, "resolve_first_user", first_user)
+    monkeypatch.setattr(hardware_router, "hub_pair", lambda _u: ("http://hub.test", "secret"))
+    monkeypatch.setattr(ha_client, "get_state", state)
+    monkeypatch.setattr(w, "_home_cache", (0.0, None))
+    monkeypatch.setattr(config, "any_home_hub", lambda: True)
+    home = await w.home_location(setting)
+    assert (home["name"], home["latitude"], home["longitude"]) == ("Maple House", 39.5, -104.5)
+    assert asked == ["zone.home"]
+    monkeypatch.setattr(config, "any_home_hub", lambda: False)
+    assert (await w.home_location(setting))["name"] == "Old cabin"
+    assert await w.home_location({}) is None

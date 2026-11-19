@@ -1,7 +1,7 @@
 """Place reminders: "remind me when I get home".
 
-A person sets a reminder on one of the family's places (a Home Assistant
-zone) for when they arrive or leave. Geo already turns every phone fix into
+A person sets a reminder on one of the family's places (a HomeHub zone, or one
+of their own private places) for when they arrive or leave. Geo already turns every phone fix into
 an arrival or departure (``_presence_transition`` in main), so a reminder
 needs no geofence of its own on the phone: the fix the app posts anyway is
 the trigger. When the person's own arrival or departure matches, they get one
@@ -27,7 +27,8 @@ KEY = "geo:place_reminders:{user}"
 MAX_PER_USER = 50
 TITLE_MAX = 200
 EVENTS = {"arrive": "arrived", "leave": "departed"}
-_ZONE_ID = re.compile(r"^zone\.[a-z0-9_]+$")
+#: A household zone, or one of the person's own private places (``place.<id>``).
+_ZONE_ID = re.compile(r"^(zone\.[a-z0-9_]+|place\.[0-9a-f]{32})$")
 _REMINDER_ID = re.compile(r"^[0-9a-f]{32}$")
 
 

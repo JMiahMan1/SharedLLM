@@ -449,10 +449,8 @@ flow that probed the device set, plus `state` once a driver published it.
   `/hub/labels`, `/hub/zones`, `/hub/persons`; `registries_api.py`). An area
   picks a floor; areas, devices and entities carry `labels`. A zone is
   published as `zone.*` for zone triggers; a rename keeps its entity id.
-  The family's shared saved places in Jarvis (geo `/zones`, `scope: family`)
-  are mirrored as read-only zones with `source: geo` every
-  `HOMEHUB_GEO_PLACES_EVERY_S` (300; 0 is off) and on `POST /hub/zones/sync`;
-  private places never become zones, and geo ignores the mirror. A person
+  Zones are every place the family has: HomeHub is the only store of places
+  (see "Places" below). A person
   links a Jarvis user (`jarvis_user`) and its `device_trackers`. The import
   also keeps HA's categories and tags (`GET /hub/categories`, `/hub/tags`).
 
@@ -469,6 +467,44 @@ M-SEARCH or a WiZ broadcast, so both scans also probe every address of the /24
 To also accept the broadcast replies, fix the source ports
 (`HOMEHUB_SSDP_PORT`, `HOMEHUB_WIZ_DISCOVERY_PORT`) and open them on the LAN zone.
 `HOMEHUB_DISCOVERY=0` turns discovery off.
+
+## Places (`registries.py`, `/hub/zones`)
+
+HomeHub is the only store of the family's places. Geo, the gateway, the UI and Jarvis read every place
+from here; nothing else keeps a copy.
+
+- **Home** is the hub's own location: the core config (`latitude`, `longitude`, `radius`,
+  `location_name`, as HA's `core.config`). An admin moves, resizes or renames it with
+  `PATCH /hub/zones/home` (Devices > Rooms & places > Zones > Move Home), or HA's websocket
+  `config/core/update`. It is saved at once and survives a restart; `zone.home`, `/api/config`, the sun,
+  the weather integration, the trackers' `home` and Jarvis's forecast all follow it. Home is never
+  removed (`DELETE /hub/zones/home` is a 409). Its place settings (`important`, `notify`, `pin`) are in
+  the kv key `home_place`. The time zone is not changed here: it is the household setting.
+- **Zones** drawn on Devices > Rooms & places or imported from Home Assistant, and **places saved in
+  Wander**, are one list (kv `zones`). Each may carry `important` (arriving or leaving sends a
+  `family_safety` notice), `notify` (Jarvis usernames; empty means everyone), `pin` (the map icon),
+  and an owner: `owner` is a hub user id, `owner_name` the Jarvis username Jarvis's gateway named.
+  `visibility` is `family` or `private`.
+- **Owners are the hub's own users.** A hub login (a standalone hub, no Jarvis) owns what it creates
+  and sees its own private places. Jarvis's gateway acts for a person with the internal secret and
+  `?viewer=<jarvis username>` (and `owner` in a new place); the hub matches that name to its own user
+  (a hub user carrying `jarvis_user`, as users synced from Jarvis do, else a person linking the name to
+  a hub user) and keeps the name too, so a place made before that hub user existed stays its owner's.
+  The hub never asks Jarvis anything for this.
+- **A private place is its owner's alone.** It is never a `zone.*` state and has no entity registry
+  row, so `/api/states`, the websocket (`get_states`, `subscribe_entities`), templates, automations
+  and the HA frontend never see it, and no tracker shows its name (it is not in the zone table). Only
+  the owner (their hub login, or the gateway acting for them) lists or changes it; an admin does not
+  see it either. Geo reads it (`?all=1`, internal secret only) for the owner's own arrivals and
+  reminders, as `place.<id>`. HA has no per-user state, so leaving it out of the state machine
+  entirely is the only way it stays private there.
+- **The old mirror is gone.** The read-only `source: geo` zones (`geo_zones`, followed every
+  `HOMEHUB_GEO_PLACES_EVERY_S`, `POST /hub/zones/sync`) became ordinary zones at the first start of this
+  version (`adopt_mirrored_places`: same id as the place, same `zone.*` entity id). Geo then moves the
+  rest of its places in with `POST /hub/zones/import` (internal secret only; idempotent; keeps ids,
+  fills only what a zone is missing, so a change made on the hub since is never overwritten).
+- With Home Assistant on, its zones can still be imported (`/hub/import`), but they become hub zones:
+  HomeHub remains the store.
 
 ## Bluetooth
 

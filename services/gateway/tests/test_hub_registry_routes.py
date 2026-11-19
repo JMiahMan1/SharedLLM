@@ -3,7 +3,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from services.gateway import discovery_routes
+from services.gateway import discovery_routes, family_safety
 from services.gateway import main as gateway_main
 from services.gateway.main import app
 
@@ -24,10 +24,17 @@ def hub(monkeypatch):
 
     async def call(method, path, *, params=None, json=None, timeout=None):
         seen.append((method, path, json))
+        params_seen.append(params)
         return answers.get((method, path), (200, {"ok": True}))
 
+    async def refreshed():
+        answers["geo_refreshed"] = answers.get("geo_refreshed", 0) + 1
+
+    params_seen: list = []
+    answers["params"] = params_seen
     monkeypatch.setattr(gateway_main, "_require_admin", admin)
     monkeypatch.setattr(discovery_routes, "_hub", call)
+    monkeypatch.setattr(family_safety, "places_changed", refreshed)
     return seen, answers
 
 
@@ -39,7 +46,8 @@ def client():
 KINDS = ("areas", "floors", "labels", "zones", "persons")
 ROUTES = ([("get", f"/api/homehub/{k}") for k in KINDS] + [("post", f"/api/homehub/{k}") for k in KINDS]
           + [("patch", f"/api/homehub/{k}/x1") for k in KINDS] + [("delete", f"/api/homehub/{k}/x1") for k in KINDS]
-          + [("get", "/api/homehub/categories"), ("get", "/api/homehub/tags"), ("post", "/api/homehub/zones/sync")]
+          + [("get", "/api/homehub/categories"), ("get", "/api/homehub/tags"),
+             ("patch", "/api/homehub/zones/home"), ("delete", "/api/homehub/zones/home")]
           + [("get", "/api/homehub/users"), ("post", "/api/homehub/users"), ("patch", "/api/homehub/users/u1"),
              ("get", "/api/homehub/auth/providers"), ("put", "/api/homehub/auth/providers"),
              ("post", "/api/homehub/auth/providers/jarvis_identity/sync")])
@@ -66,6 +74,10 @@ def test_only_known_fields_are_forwarded(client, hub):
     client.post("/api/homehub/zones", headers=ADMIN, json={
         "name": "Field", "latitude": 1.5, "longitude": 2.5, "radius": 100, "passive": False, "owner": "x"})
     assert seen[-1][2] == {"name": "Field", "latitude": 1.5, "longitude": 2.5, "radius": 100, "passive": False}
+    # The owner of a place is never the browser's to say.
+    client.patch("/api/homehub/zones/z1", headers=ADMIN, json={"important": True, "notify": ["sam"], "pin": "park",
+                                                               "owner": "x", "visibility": "private"})
+    assert seen[-1][2] == {"important": True, "notify": ["sam"], "pin": "park"}
     client.patch("/api/homehub/persons/p1", headers=ADMIN, json={
         "name": "Sam", "jarvis_user": "sam", "device_trackers": ["device_tracker.pixel"], "user_id": "u"})
     assert seen[-1][2] == {"name": "Sam", "jarvis_user": "sam", "device_trackers": ["device_tracker.pixel"]}
@@ -82,8 +94,9 @@ def test_hub_refusals_keep_their_status_and_words(client, hub):
     answers[("POST", "/hub/floors")] = (409, {"status": "error", "message": "There is already a floor named 'Up'"})
     resp = client.post("/api/homehub/floors", headers=ADMIN, json={"name": "Up"})
     assert resp.status_code == 409 and resp.json()["detail"] == "There is already a floor named 'Up'"
-    answers[("POST", "/hub/zones/sync")] = (503, {"status": "error", "message": "GEO_SVC_URL is not set"})
-    assert client.post("/api/homehub/zones/sync", headers=ADMIN).status_code == 503
+    answers[("DELETE", "/hub/zones/home")] = (409, {"status": "error", "message": "Home cannot be removed"})
+    resp = client.delete("/api/homehub/zones/home", headers=ADMIN)
+    assert resp.status_code == 409 and "cannot be removed" in resp.json()["detail"]
 
 
 def test_odd_ids_never_reach_the_hub(client, hub):
@@ -98,6 +111,23 @@ def test_these_routes_do_not_shadow_the_other_hub_routes(client, hub):
     client.get("/api/homehub/entries", headers=ADMIN)
     client.get("/api/homehub/discovered", headers=ADMIN)
     assert [s[1] for s in seen] == ["/hub/entries", "/hub/discovered"]
+
+
+def test_zones_are_asked_for_as_the_admin_so_nobody_elses_private_place_shows(client, hub):
+    seen, answers = hub
+    client.get("/api/homehub/zones", headers=ADMIN)
+    client.patch("/api/homehub/zones/home", headers=ADMIN, json={"latitude": 1.0, "longitude": 2.0, "radius": 90})
+    client.delete("/api/homehub/zones/z1", headers=ADMIN)
+    assert answers["params"][-3:] == [{"viewer": "parent"}] * 3
+    assert seen[-2] == ("PATCH", "/hub/zones/home", {"latitude": 1.0, "longitude": 2.0, "radius": 90})
+    client.get("/api/homehub/floors", headers=ADMIN)
+    assert answers["params"][-1] is None
+    # A change to a place tells geo to read the places again.
+    assert answers["geo_refreshed"] == 2
+
+
+def test_the_saved_places_mirror_is_gone(client, hub):
+    assert client.post("/api/homehub/zones/sync", headers=ADMIN).status_code in (404, 405)
 
 
 def test_users_and_providers_forward_only_their_fields(client, hub):
