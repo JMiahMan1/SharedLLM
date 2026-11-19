@@ -454,6 +454,8 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
             log.warning("removing %s %s without unpairing: %s", entry.domain, entry.title, exc)
     await runtime.stop_entry(entry_id)
     ent_ids = [e.entity_id for e in hub.entities.values() if e.config_entry_id == entry_id]
+    leaving = {d.id for d in hub.devices.values() if d.config_entries == [entry_id]}
+    _drop_combinations(runtime, leaving, set(ent_ids))
     _drop_entities(runtime, ent_ids)
     removed_devices = []
     for dev in [d for d in hub.devices.values() if entry_id in d.config_entries]:
@@ -474,6 +476,13 @@ async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> d
     if warning:
         out["warning"] = warning
     return out
+
+
+def _drop_combinations(runtime: Any, device_ids: set[str], entity_ids: set[str]) -> None:
+    """A removed device or entity takes its duplicate combination with it; the other copy shows again."""
+    from services.homehub import duplicates  # duplicates imports this module
+
+    duplicates.drop_for_removal(runtime, device_ids, entity_ids)
 
 
 def _show_wrapped_switch(runtime: Any, entry: ConfigEntry) -> None:
@@ -507,6 +516,7 @@ async def remove_device(runtime: Any, device_id: str, *, force: bool = False) ->
         await _remove_matter_node(runtime, entry, dev, force=force)
     children = [d for d in hub.devices.values() if d.via_device_id == dev.id]
     ent_ids = [eid for d in [dev, *children] for eid in hub.device_entities(d.id)]
+    _drop_combinations(runtime, {d.id for d in [dev, *children]}, set(ent_ids))
     _drop_entities(runtime, ent_ids)
     for d in [dev, *children]:
         _drop_device(runtime, d)

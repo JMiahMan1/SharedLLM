@@ -47,7 +47,9 @@ This is in the hub's service dispatch, so voice, the app, schedules, automations
 HA-compatible REST and websocket APIs all get it. A name or room only one copy has is carried over to the
 main (so nothing loses its name or room), and a bare "Light" name gives way to the device's name; everything
 changed is recorded, and uncombining restores both copies as they were (a field a person changed since is left
-alone).
+alone). Removing either copy (its device, or its whole integration entry) uncombines first
+(``drop_for_removal``), so the copy that stays is shown again as it was instead of staying hidden as a
+fallback for nothing.
 """
 from __future__ import annotations
 
@@ -730,6 +732,35 @@ def uncombine(runtime: Any, body: dict[str, Any]) -> dict[str, Any]:
     _republish(hub, [*hub.device_entities(r["main"]), *hub.device_entities(r["fallback"])])
     log.info("uncombined %s and %s", r["main"], r["fallback"])
     return {"uncombined": r["main"], **list_duplicates(runtime)}
+
+
+def drop_for_removal(runtime: Any, device_ids: set[str], entity_ids: set[str]) -> list[str]:
+    """Undo every combination a removal breaks, before the devices and entities go.
+
+    A combination whose main or fallback device is being removed, or one of whose paired entities is, is
+    uncombined: the copy that stays is shown again with its own name, room and state, and the record is
+    dropped (left behind, it would keep the surviving copy hidden as a fallback for nothing). Answers the
+    main device ids of the combinations dropped.
+    """
+    if runtime.store is None:
+        return []
+    hub = runtime.hub
+    records = _records(runtime)
+    broken = [r for r in records if {r["main"], r["fallback"]} & device_ids
+              or any(eid in entity_ids for pair in r.get("pairs") or [] for eid in pair)]
+    if not broken:
+        return []
+    keep = [r for r in records if r not in broken]
+    _save_records(runtime, keep)
+    apply_combinations(hub, keep)
+    for r in broken:
+        _restore(runtime, r)
+        _own_states_back(hub, r)
+        survivors = [d for d in (r["main"], r["fallback"]) if d not in device_ids]
+        _republish(hub, [e for d in survivors for e in hub.device_entities(d) if e not in entity_ids])
+        log.info("uncombined %s and %s: %s is being removed", r["main"], r["fallback"],
+                 ", ".join(sorted({r["main"], r["fallback"]} & device_ids)) or "a paired entity")
+    return [r["main"] for r in broken]
 
 
 def swap(runtime: Any, body: dict[str, Any]) -> dict[str, Any]:
