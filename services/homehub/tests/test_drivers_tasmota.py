@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from aiohttp import web
 
-from services.homehub.core import DeviceUnavailable, ServiceNotFound, SetupError
+from services.homehub.core import DeviceUnavailable, EntityEntry, ServiceNotFound, SetupError
 from services.homehub.drivers.tasmota import TasmotaDriver
 from services.homehub.tests.conftest import make_hub
 
@@ -90,6 +90,35 @@ async def test_setup_publishes_relays_energy_and_status():
     assert hub.states.get("sensor.loft_plug_wifi_connect_count").state == "3"
     assert hub.states.get("sensor.loft_plug_restart_reason").state == "Software/System restart"
     assert hub.states.get("sensor.loft_plug_last_restart_time").attributes["device_class"] == "timestamp"
+
+
+async def test_a_multi_channel_meter_sums_only_what_adds_up_and_shows_each_channel():
+    plug = FakePlug()
+    plug.status["StatusSNS"]["ENERGY"] = {"Power": [40, 25], "Voltage": [230.1, 229.8], "Current": [0.2, 0.15],
+                                          "Total": [1.5, 2.25], "Factor": [0.9, 0.9]}
+    extra = [("sensor.loft_plug_energy_voltage", "Voltage"), ("sensor.loft_plug_energy_voltage_1", "Voltage_1"),
+             ("sensor.loft_plug_energy_power_0", "Power_0"), ("sensor.loft_plug_energy_factor", "Factor"),
+             ("sensor.loft_plug_energy_current", "Current"), ("sensor.loft_plug_energy_power_7", "Power_7")]
+    hub, drv = make_driver(plug)
+    for eid, key in extra:
+        hub.entities[eid] = EntityEntry(entity_id=eid, platform="tasmota", config_entry_id=drv.entry.entry_id,
+                                        unique_id=f"{MAC}_sensor_sensor_ENERGY_{key}", device_id="dev1")
+    drv = TasmotaDriver(hub, drv.entry)
+    drv._command = plug  # type: ignore[method-assign]
+    await drv.async_setup()
+    st = hub.states.get
+    assert st("sensor.loft_plug_energy_power").state == "65.0"  # two loads on two channels: 65 W
+    assert st("sensor.loft_plug_energy_power").attributes["channels"] == [40, 25]
+    assert st("sensor.loft_plug_energy_total").state == "3.75"
+    assert st("sensor.loft_plug_energy_current").state == "0.35"
+    # Never 460 V: channels that differ have no one voltage; each is its own sensor.
+    assert st("sensor.loft_plug_energy_voltage").state == "unknown"
+    assert st("sensor.loft_plug_energy_voltage").attributes["channels"] == [230.1, 229.8]
+    assert st("sensor.loft_plug_energy_voltage_1").state == "229.8"
+    assert st("sensor.loft_plug_energy_voltage_1").attributes["unit_of_measurement"] == "V"
+    assert st("sensor.loft_plug_energy_power_0").state == "40"
+    assert st("sensor.loft_plug_energy_factor").state == "0.9"  # every channel agrees
+    assert st("sensor.loft_plug_energy_power_7").state == "unknown"  # no such channel
 
 
 async def test_relay_commands_use_one_based_power_numbers_and_publish_the_reply():

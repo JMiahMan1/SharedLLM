@@ -20,6 +20,13 @@ the class, unit and state class Tasmota's keys have (``ENERGY_META``).
 Entities, by unique_id (HA's tasmota integration, ``{MAC}`` upper-case, no colons):
 - ``{MAC}_switch_relay_{n}``                       relay n (Power{n+1})
 - ``{MAC}_sensor_sensor_ENERGY_{Key}``              StatusSNS.ENERGY.Key
+- ``{MAC}_sensor_sensor_ENERGY_{Key}_{i}``          channel i of a multi-channel meter's Key (a list)
+
+A multi-channel meter reports some keys as one value per channel. Each channel
+has its own sensor (``_{i}``); the key's own sensor is the sum where a sum
+means something (power, current, energy: ``ADDITIVE_ENERGY``) and never for
+voltage, power factor or frequency, whose own sensor shows the value only when
+every channel reads the same (and each channel in its ``channels`` attribute).
 - ``{MAC}_status_sensor_status_sensor_{name}``      status sensors (uptime, Wi-Fi, ...)
 - ``{MAC}_light_light_{n}``                         the light on Power{n+1} (a bulb's is ``_light_light_0``)
 
@@ -85,6 +92,30 @@ ENERGY_META: dict[str, dict[str, Any]] = {
     "Current": {"unit_of_measurement": "A", "device_class": "current", "state_class": "measurement"},
     "TotalStartTime": {"device_class": "timestamp"},
 }
+#: Keys whose per-channel values add up to the device's (power, current, energy). Voltage, power factor and
+#: frequency do not: two 230 V channels are not 460 V.
+ADDITIVE_ENERGY = frozenset({
+    "Power", "ActivePower", "ApparentPower", "ReactivePower", "Current", "Total", "Today", "Yesterday", "Period",
+    "ImportActive", "ExportActive", "ImportReactive", "ExportReactive", "TotalTariff", "ExportTariff",
+})
+_CHANNEL_KEY = re.compile(r"^(\w+?)_(\d+)$")
+
+
+def energy_value(energy: dict[str, Any], key: str) -> tuple[Any, dict[str, Any]]:
+    """(state value, extra attributes) of ``ENERGY.key``: a channel (``Power_1``), a sum, or a plain value."""
+    val = energy.get(key)
+    if val is None and (m := _CHANNEL_KEY.match(key)) and isinstance(energy.get(m.group(1)), list):
+        channels, idx = energy[m.group(1)], int(m.group(2))
+        return (channels[idx] if idx < len(channels) else None), {}
+    if not isinstance(val, list):
+        return val, {}
+    try:
+        numbers = [float(x) for x in val]
+    except (TypeError, ValueError):
+        return None, {"channels": val}
+    if key in ADDITIVE_ENERGY:
+        return round(sum(numbers), 3), {"channels": val}
+    return (val[0] if numbers and len(set(numbers)) == 1 else None), {"channels": val}
 
 
 def device_fields(status: dict[str, Any], host: str | None) -> dict[str, Any]:
@@ -429,12 +460,11 @@ class TasmotaDriver(Driver):
         self._publish_lights()
         energy = (self.status.get("StatusSNS") or {}).get("ENERGY") or {}
         for eid, key in self.energy.items():
-            val = energy.get(key)
+            val, extra = energy_value(energy, key)
             if key == "TotalStartTime":
                 val = self._tasmota_time(val)
-            elif isinstance(val, list):  # per-phase arrays on multi-channel meters: report the sum
-                val = round(sum(float(x) for x in val), 3)
-            self.publish(eid, "unknown" if val is None else val, dict(ENERGY_META.get(key, {})))
+            base = m.group(1) if (m := _CHANNEL_KEY.match(key)) and key not in ENERGY_META else key
+            self.publish(eid, "unknown" if val is None else val, {**ENERGY_META.get(base, {}), **extra})
         for eid, name in self.status_sensors.items():
             val, attrs = _status_value(name, self.status)
             self.publish(eid, val, attrs)

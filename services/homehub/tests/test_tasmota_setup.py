@@ -270,6 +270,23 @@ async def test_a_relay_plug_with_a_light_gets_both(env, monkeypatch):
     assert uids == ["020000000B02_light_light_1", "020000000B02_switch_relay_0"]
 
 
+async def test_a_two_channel_meter_gets_a_sensor_per_channel_and_no_summed_voltage(env, monkeypatch):
+    _hub, _store, rt, _mgr, _sent = env
+    dev = FakeTasmota("plug", mac=PLUG_MAC, name="Dual Meter")
+    status0 = dev.status0()
+    status0["StatusSNS"]["ENERGY"] = {"Total": 12.5, "Power": [40, 25], "Voltage": [230.1, 229.8]}
+
+    async def status(host, password):
+        return status0
+
+    monkeypatch.setattr(flows, "tasmota_status", status)
+    result = await flows.adopt(rt, {"id": "tasmota:x", "integration": "tasmota", "host": "192.0.2.61",
+                                    "ids": [], "props": {}}, {})
+    energy = sorted(rt.hub.entities[e].unique_id.split("ENERGY_")[1] for e in result["entities"]
+                    if "ENERGY_" in rt.hub.entities[e].unique_id)
+    assert energy == ["Power", "Power_0", "Power_1", "Total", "Voltage_0", "Voltage_1"]
+
+
 # -- repairing an entry imported from HA ---------------------------------------------------------------
 
 def imported_hub(*, url: str = "http://192.0.2.244/", reason: str | None = None):

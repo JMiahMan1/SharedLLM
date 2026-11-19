@@ -461,6 +461,9 @@ at rest with the rest of the entry's data (`store.py`, `FERNET_KEY`) and never r
 API (`reconfigure` says only whether one is `set`). The add flow reads `Status 0` and registers,
 with HA's unique ids: relays `{MAC}_switch_relay_{n}`, a light `{MAC}_light_light_{n}` (the last
 `POWER`, as Tasmota numbers a light after the relays), energy `{MAC}_sensor_sensor_ENERGY_{Key}`.
+A multi-channel meter (a key that is a list) also gets `..._ENERGY_{Key}_{i}` per channel; the key's
+own sensor is the sum only for power, current and energy (`ADDITIVE_ENERGY`), never voltage, power
+factor or frequency, which show a value only when every channel reads the same.
 A device already set up (by MAC on any Tasmota entry or device) is refused with 409 naming the
 entry to change instead. Add by address (`POST /hub/flows/tasmota`) takes the password too.
 

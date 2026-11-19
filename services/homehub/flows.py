@@ -594,7 +594,14 @@ async def adopt_tasmota(runtime: Any, finding: dict[str, Any], name: str | None,
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="tasmota", title=title, data=data,
                         source="user" if finding.get("source") == "user" else "zeroconf", unique_id=mac_up)
     plan = Plan(hub, entry)
-    from services.homehub.drivers.tasmota import ENERGY_META, color_modes, device_fields, has_light, light_index
+    from services.homehub.drivers.tasmota import (
+        ADDITIVE_ENERGY,
+        ENERGY_META,
+        color_modes,
+        device_fields,
+        has_light,
+        light_index,
+    )
 
     plan.set_device(title, name_by_user=name, area_id=area_id, **device_fields(status, host))
     sts = status.get("StatusSTS") or {}
@@ -609,12 +616,17 @@ async def adopt_tasmota(runtime: Any, finding: dict[str, Any], name: str | None,
         plan.add_entity("switch", f"{mac_up}_switch_relay_{n - 1}", label)
     energy = (status.get("StatusSNS") or {}).get("ENERGY") or {}
     for key in TASMOTA_ENERGY:
-        if key in energy:
-            meta = ENERGY_META.get(key, {})
-            plan.add_entity("sensor", f"{mac_up}_sensor_sensor_ENERGY_{key}", f"Energy {key}",
-                            original_device_class=meta.get("device_class"),
-                            unit_of_measurement=meta.get("unit_of_measurement"),
-                            capabilities={"state_class": meta["state_class"]} if meta.get("state_class") else None)
+        if key not in energy:
+            continue
+        meta = ENERGY_META.get(key, {})
+        kwargs = {"original_device_class": meta.get("device_class"),
+                  "unit_of_measurement": meta.get("unit_of_measurement"),
+                  "capabilities": {"state_class": meta["state_class"]} if meta.get("state_class") else None}
+        channels = energy[key] if isinstance(energy[key], list) else None
+        if channels is None or key in ADDITIVE_ENERGY:  # a multi-channel voltage has no one value
+            plan.add_entity("sensor", f"{mac_up}_sensor_sensor_ENERGY_{key}", f"Energy {key}", **kwargs)
+        for i in range(len(channels or [])):
+            plan.add_entity("sensor", f"{mac_up}_sensor_sensor_ENERGY_{key}_{i}", f"Energy {key} {i + 1}", **kwargs)
     return await commit(runtime, plan)
 
 
