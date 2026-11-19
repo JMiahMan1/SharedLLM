@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -434,6 +435,56 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         if audio is None:
             return _error(404, "Not found")
         return Response(audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+    @api.api_route("/api/esphome/ffmpeg_proxy/{device}/{name}", methods=["GET", "HEAD"])
+    async def esphome_ffmpeg_proxy(device: str, name: str, request: Request) -> Response:
+        """Audio converted to the format an ESPHome media player asked for (``esphome_audio.py``).
+
+        The unguessable token is the credential, as for ``/api/tts_proxy/`` and in HA.
+        """
+        from services.homehub import esphome_audio
+
+        conv = esphome_audio.PROXY.lookup(device, name)
+        if conv is None:
+            return _error(404, "Not found")
+        headers = {"Cache-Control": "no-store"}
+        media_type = conv.fmt.content_type
+        if request.method == "HEAD":
+            return Response(b"", media_type=media_type, headers=headers)
+        try:
+            if conv.source_url is None:
+                return Response(await esphome_audio.PROXY.clip_audio(conv), media_type=media_type, headers=headers)
+            body = await esphome_audio.PROXY.open_stream(conv)
+        except esphome_audio.ProxyError as exc:
+            return _error(exc.status, exc.message)
+        return StreamingResponse(body, media_type=media_type, headers=headers)
+
+    @api.post("/hub/esphome/audio_url")
+    async def esphome_audio_url(request: Request) -> Response:
+        """A proxy URL for a node the caller talks to itself (execution's alarm and timer alerts).
+
+        ``{"device", "url", "formats": [MediaPlayerSupportedFormat fields], "announcement"}`` ->
+        ``{"url", "proxied"}``; the URL comes back unchanged when no format applies. Admins only.
+        """
+        admin(request)
+        from services.homehub import esphome_audio
+
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "Data should be valid JSON.")
+        if not isinstance(body, dict) or not str(body.get("url") or ""):
+            return _error(400, "url is required")
+        device = str(body.get("device") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", device):
+            return _error(400, "device must be 1 to 64 letters, digits, '-' or '_'")
+        try:
+            formats = [esphome_audio.AudioFormat.from_dict(f) for f in body.get("formats") or []]
+        except (TypeError, ValueError, AttributeError):
+            return _error(400, "formats must be a list of {format, sample_rate, num_channels, sample_bytes, purpose}")
+        url = str(body["url"])
+        out = esphome_audio.proxied_url(device, url, formats, announcement=bool(body.get("announcement")))
+        return JSONResponse({"url": out, "proxied": out != url})
 
     @api.post("/api/tts_get_url")
     async def tts_get_url(request: Request) -> Response:

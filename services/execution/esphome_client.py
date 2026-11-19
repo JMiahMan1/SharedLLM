@@ -139,6 +139,48 @@ async def _identity_post(path: str, body: dict, *, bearer: str | None = None) ->
         return resp.status, data if isinstance(data, dict) else {}
 
 
+#: How long the hub may take to hand out a proxy URL before the original URL is sent instead.
+HUB_AUDIO_URL_TIMEOUT_S = 5.0
+
+
+async def node_media_url(device_name: str, entity, url: str | None, *, announcement: bool) -> str | None:
+    """``url`` as an ESPHome media player should fetch it: in the format it advertises.
+
+    A node lists the formats it wants (``supported_formats``: e.g. FLAC, 48 kHz, mono, per purpose).
+    Fed anything else (a 24 kHz Kokoro WAV) a small node resamples in software while it plays and can
+    stall until its watchdog resets it. HomeHub's ffmpeg proxy converts the audio (as HA's ESPHome
+    integration does), so a node with formats gets the hub's proxy URL. With no formats, no
+    ``HOMEHUB_URL``, or a hub that does not answer, the original URL is sent and a warning logged.
+    """
+    from services import config
+
+    formats = list(getattr(entity, "supported_formats", None) or [])
+    if not url or not formats or not config.HOMEHUB_URL:
+        return url
+    body = {
+        "device": "exec-" + re.sub(r"[^A-Za-z0-9_-]+", "-", device_name)[:58],
+        "url": url,
+        "announcement": announcement,
+        "formats": [{"format": str(getattr(f, "format", "") or ""), "sample_rate": int(getattr(f, "sample_rate", 0) or 0),
+                     "num_channels": int(getattr(f, "num_channels", 0) or 0),
+                     "sample_bytes": int(getattr(f, "sample_bytes", 0) or 0),
+                     "purpose": int(getattr(f, "purpose", 0) or 0)} for f in formats],
+    }
+    try:
+        async with aiohttp.ClientSession() as client:
+            resp = await client.post(f"{config.HOMEHUB_URL}/hub/esphome/audio_url", json=body,
+                                     headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                     timeout=aiohttp.ClientTimeout(total=HUB_AUDIO_URL_TIMEOUT_S))
+            data = await resp.json(content_type=None)
+            if resp.status != 200 or not isinstance(data, dict) or not data.get("url"):
+                raise ValueError(f"HTTP {resp.status}: {data}")
+            return str(data["url"])
+    except Exception as exc:
+        log.warning("[esphome] HomeHub could not convert audio for %s (%s); sending the original URL",
+                    device_name, exc)
+        return url
+
+
 async def _read_global_setting(key: str) -> str | None:
     """Fetch one Identity GlobalSetting's raw value (None when unset)."""
     async with aiohttp.ClientSession() as client:
@@ -744,6 +786,8 @@ async def call_entity(
                     ),
                 )
             elif domain == "media_player":
+                media_url = await node_media_url(device_name, entity, params.get("media_url"),
+                                                 announcement=bool(params.get("announcement")))
                 vol = params.get("volume")
                 if vol is None and params.get("volume_pct") is not None:
                     vol = float(params["volume_pct"]) / 100.0
@@ -751,7 +795,7 @@ async def call_entity(
                     key,
                     command=_media_command(params["command"]) if params.get("command") else None,
                     volume=(float(vol) if vol is not None else None),
-                    media_url=params.get("media_url"),
+                    media_url=media_url,
                     announcement=bool(params["announcement"]) if params.get("announcement") is not None else None,
                 )
             elif domain == "select":
@@ -902,7 +946,8 @@ async def trigger_device_alert(
             dom = _entity_domain(ent)
             if dom == "media_player" and media_url:
                 has_speaker = True
-                client.media_player_command(ent.key, media_url=media_url, announcement=True)
+                node_url = await node_media_url(device_name, ent, media_url, announcement=True)
+                client.media_player_command(ent.key, media_url=node_url, announcement=True)
                 triggered.append(f"media_player:{getattr(ent, 'object_id', 'speaker')}")
             elif dom == "siren":
                 has_speaker = True
