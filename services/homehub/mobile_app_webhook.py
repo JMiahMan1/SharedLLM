@@ -701,12 +701,40 @@ class MobileAppManager:
         wid = str(entry.data.get("webhook_id") or "")
         channel = self.channels.get(wid) if wid else None
         if channel is not None:
-            await channel.send(dict(data), lambda d: self.relay(entry, d))
+            await channel.send(dict(data), lambda d: self.unconfirmed(entry, d))
             return "local"
         if (entry.data.get("app_data") or {}).get("push_url"):
             await self.relay(entry, data)
             return "relay"
         raise HubError(f"{entry.title} is not connected for push notifications")
+
+    async def unconfirmed(self, entry: ConfigEntry, data: dict[str, Any]) -> str:
+        """A local push the app did not confirm in time: the push relay, else a Jarvis notice to the phone's user.
+
+        Never dropped without a word: answers how it went ("relay", "jarvis") or "dropped", which is logged
+        as a warning naming the phone.
+        """
+        payload = {k: v for k, v in data.items() if k != "hass_confirm_id"}
+        if (entry.data.get("app_data") or {}).get("push_url"):
+            try:
+                await self.relay(entry, payload)
+                return "relay"
+            except HubError as exc:
+                log.warning("push to %s was not confirmed and its relay failed: %s", entry.title, exc)
+        from services.homehub.drivers.mobile_app import MobileAppDriver, _send
+
+        drv = self.hub.drivers.get(entry.entry_id)
+        user = drv.jarvis_user() if isinstance(drv, MobileAppDriver) else entry.options.get("jarvis_user")
+        if user:
+            try:
+                if await _send([user], payload):
+                    log.info("push to %s was not confirmed; sent as a Jarvis notice to %s", entry.title, user)
+                    return "jarvis"
+            except Exception as exc:
+                log.warning("push to %s was not confirmed and the Jarvis notice failed: %s", entry.title, exc)
+        log.warning("push to %s was not confirmed and could not be sent another way (no relay%s): dropped",
+                    entry.title, "" if user else " and no Jarvis user")
+        return "dropped"
 
     async def relay(self, entry: ConfigEntry, data: dict[str, Any]) -> None:
         d = entry.data

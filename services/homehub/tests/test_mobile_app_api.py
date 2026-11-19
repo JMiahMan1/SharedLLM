@@ -411,6 +411,32 @@ def test_an_unconfirmed_local_push_falls_back_to_the_relay(env, monkeypatch):
     assert HOOK not in mgr.channels
 
 
+@pytest.mark.parametrize("jarvis_user", ["alex", None])
+def test_an_unconfirmed_local_push_with_no_relay_becomes_a_jarvis_notice(env, monkeypatch, caplog, jarvis_user):
+    monkeypatch.setattr(maw, "PUSH_CONFIRM_TIMEOUT_S", 0.05)
+    mgr, entry = env["mgr"], env["hub"].config_entries["e-enc"]  # no push_url: no relay
+    if jarvis_user:
+        entry.options["jarvis_user"] = jarvis_user
+
+    async def run():
+        async def send(data):
+            return None
+
+        mgr.channels[ENC_HOOK] = maw.PushChannel(ENC_HOOK, True, send, lambda: mgr.channels.pop(ENC_HOOK, None))
+        assert await mgr.push(entry, {"message": "Garage door left open", "title": "Garage"}) == "local"
+        await asyncio.sleep(0.2)
+
+    asyncio.run(run())
+    assert env["pushes"] == []
+    if jarvis_user:
+        assert len(env["sent"]) == 1
+        notice = env["sent"][0]
+        assert "Garage door left open" in json.dumps(notice) and "hass_confirm_id" not in json.dumps(notice)
+    else:
+        assert env["sent"] == []
+        assert "could not be sent another way" in caplog.text  # said, never silent
+
+
 # -- settings and the admin API ----------------------------------------------------------
 
 def test_settings_are_stored_validated_and_admin_only(env):
