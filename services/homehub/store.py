@@ -195,6 +195,15 @@ class Store:
 
     def history(self, entity_ids: list[str] | None, start: datetime, end: datetime | None = None,
                 *, changes_only: bool = False, limit: int = 50000) -> list[dict[str, Any]]:
+        return self.history_page(entity_ids, start, end, changes_only=changes_only, limit=limit)[0]
+
+    def history_page(self, entity_ids: list[str] | None, start: datetime, end: datetime | None = None,
+                     *, changes_only: bool = False, limit: int = 50000) -> tuple[list[dict[str, Any]], bool]:
+        """Rows in ``[start, end]``, oldest first, and whether older rows were left out to stay under ``limit``.
+
+        The newest rows are the ones kept: a window longer than ``limit`` rows loses its oldest part, never
+        the hours a person is most likely looking at.
+        """
         sql = "SELECT entity_id, state, attributes, last_changed, last_updated FROM history WHERE last_updated >= ?"
         args: list[Any] = [start.timestamp()]
         if end is not None:
@@ -205,16 +214,30 @@ class Store:
             args.extend(entity_ids)
         if changes_only:
             sql += " AND state_changed = 1"
-        sql += " ORDER BY last_updated LIMIT ?"
-        args.append(limit)
-        out = []
-        for eid, st, attrs, lc, lu in self._exec(sql, tuple(args)).fetchall():
-            out.append({
-                "entity_id": eid, "state": st, "attributes": json.loads(attrs),
-                "last_changed": datetime.fromtimestamp(lc, UTC).isoformat(),
-                "last_updated": datetime.fromtimestamp(lu, UTC).isoformat(),
-            })
+        sql += " ORDER BY last_updated DESC LIMIT ?"
+        args.append(limit + 1)
+        rows = self._exec(sql, tuple(args)).fetchall()
+        truncated = len(rows) > limit
+        return [self._history_row(*r) for r in reversed(rows[:limit])], truncated
+
+    def states_at(self, entity_ids: list[str], when: datetime) -> dict[str, dict[str, Any]]:
+        """Each entity's last recorded state before ``when`` (HA's start-time state); entities with none are left out."""
+        out: dict[str, dict[str, Any]] = {}
+        sql = ("SELECT entity_id, state, attributes, last_changed, last_updated FROM history "
+               "WHERE entity_id = ? AND last_updated < ? ORDER BY last_updated DESC, id DESC LIMIT 1")
+        for eid in dict.fromkeys(entity_ids):
+            row = self._exec(sql, (eid, when.timestamp())).fetchone()
+            if row is not None:
+                out[eid] = self._history_row(*row)
         return out
+
+    @staticmethod
+    def _history_row(eid: str, st: str, attrs: str, lc: float, lu: float) -> dict[str, Any]:
+        return {
+            "entity_id": eid, "state": st, "attributes": json.loads(attrs),
+            "last_changed": datetime.fromtimestamp(lc, UTC).isoformat(),
+            "last_updated": datetime.fromtimestamp(lu, UTC).isoformat(),
+        }
 
     def prune_history(self, keep_days: int) -> int:
         cutoff = (datetime.now(UTC) - timedelta(days=keep_days)).timestamp()
