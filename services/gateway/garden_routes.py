@@ -10,7 +10,7 @@ service can enforce Phase 1 permissions ("open care, guarded structure").
 """
 from __future__ import annotations
 
-import json
+import json as _json
 from typing import Any
 
 import aiohttp
@@ -29,7 +29,7 @@ async def _call(
     path: str,
     *,
     params: dict | None = None,
-    json: dict | None = None,
+    json: Any = None,
     headers: dict | None = None,
 ) -> Any:
     from services.gateway.main import shared_http_client
@@ -52,7 +52,7 @@ async def _call(
                 return Response(status_code=204)
             body = await resp.json(content_type=None)
             return Response(
-                content=json.dumps(body),
+                content=_json.dumps(body),
                 status_code=resp.status,
                 media_type="application/json",
             )
@@ -62,7 +62,7 @@ async def _call(
         with suppress(Exception):
             detail = (await resp.json(content_type=None)).get("detail") or detail
         return Response(
-            content=json.dumps({"detail": detail}),
+            content=_json.dumps({"detail": detail}),
             status_code=resp.status,
             media_type="application/json",
         )
@@ -428,10 +428,10 @@ async def garden_recipes_draft(request: Request):
 # --------------------------------------------------------------------------- garden planner proxy (Phase 5)
 
 
-@router.get("/profile/detect-zone")
+@router.post("/profile/detect-zone")
 async def garden_detect_zone(request: Request):
     headers = await _verified_headers(request)
-    return await _call("GET", "/profile/detect-zone", headers=headers)
+    return await _call("POST", "/profile/detect-zone", headers=headers)
 
 
 @router.get("/pantry-goals")

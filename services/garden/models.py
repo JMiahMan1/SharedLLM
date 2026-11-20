@@ -508,8 +508,8 @@ class PlanCell(SQLModel, table=True):
 
 
 class PlanCellIn(SQLModel):
-    plan_id: str
-    location_id: str
+    plan_id: str | None = None
+    location_id: str | None = None
     col: int = Field(default=0, ge=0)
     row: int = Field(default=0, ge=0)
     species_ref: str | None = None

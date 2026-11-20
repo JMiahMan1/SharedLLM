@@ -175,14 +175,14 @@ def calls(monkeypatch):
         if path == "/recipes/draft" and method == "POST":
             return {"status": "SUCCESS", "draft": True, "servings": 7, "ingredients": ["basil"], "focus_crop": "", "markdown": "# Pesto\nCategory: Recipes\n\n- [ ] 2 cups fresh basil leaves\n1. Blend ingredients.\nServes: 7"}
         # Phase 5 routes.
-        if path == "/profile/detect-zone" and method == "GET":
+        if path == "/profile/detect-zone" and method == "POST":
             return {"zone": "7b", "zone_source": "auto", "last_spring_frost_mmdd": "04-15", "first_fall_frost_mmdd": "10-15", "season_length_days": 170}
         if path == "/pantry-goals" and method == "GET":
             return {"count": 1, "goals": [{"id": "goal-1", "item": "Marinara sauce", "crop_refs_json": '[\"roma_tomato\", \"basil\"]', "target_qty": 40, "unit": "quarts", "method": "water_bath_canning", "season_year": 2027, "notes": "", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}]}
         if path == "/pantry-goals" and method == "POST":
             return Response(content='{"id": "goal-new", "item": "Salsa", "target_qty": 20, "unit": "quarts", "method": "water_bath_canning", "season_year": 2027}', status_code=201, media_type="application/json")
         if path.startswith("/pantry-goals/") and method == "PATCH":
-            return {"id": goal_id if "goal_id" in dir() else "goal-1", "item": "Updated Sauce"}
+            return {"id": path.rsplit("/", 1)[-1], "item": "Updated Sauce"}
         if path.startswith("/pantry-goals/") and method == "DELETE":
             return Response(status_code=204)
         if path == "/pantry-goals/calculate" and method == "GET":
@@ -419,12 +419,12 @@ def test_garden_rejects_spoofed_admin_header(client, calls):
 
 
 def test_garden_detect_zone_proxy(client, calls):
-    resp = client.get("/api/garden/profile/detect-zone", headers=ADMIN_HEADERS)
+    resp = client.post("/api/garden/profile/detect-zone", headers=ADMIN_HEADERS)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["zone"] == "7b"
     assert data["zone_source"] == "auto"
-    assert any(m == "GET" and p == "/profile/detect-zone" for m, p, _, _, _ in calls)
+    assert any(m == "POST" and p == "/profile/detect-zone" for m, p, _, _, _ in calls)
 
 
 def test_garden_pantry_goals_proxy(client, calls):
@@ -679,5 +679,129 @@ def test_garden_callback_rejects_spoofed_admin(client, calls):
         for _, _, _, _, h in calls
         if h
     )
+
+
+# --------------------------------------------------------------------------- _call regression tests
+# These test garden_routes._call directly (mocking shared_http_client) so the
+# json-module shadowing bug that took 100% of /api/garden/* down can never
+# return silently.
+
+
+class _FakeResponse:
+    def __init__(self, status: int, payload=None, raise_json: bool = False):
+        self.status = status
+        self.payload = payload
+        self.raise_json = raise_json
+
+    async def json(self, content_type=None):
+        if self.raise_json:
+            raise ValueError("not json")
+        return self.payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeClient:
+    def __init__(self, response: _FakeResponse, seen: list):
+        self.response = response
+        self.seen = seen
+
+    def request(self, method, url, **kwargs):
+        self.seen.append((method, url, kwargs))
+        return self.response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _install_fake_client(monkeypatch, response: _FakeResponse) -> list:
+    seen: list = []
+
+    def fake_shared_http_client():
+        return _FakeClient(response, seen)
+
+    monkeypatch.setattr(gateway_main, "shared_http_client", fake_shared_http_client)
+    return seen
+
+
+def test_garden_call_get_serializes_json(monkeypatch):
+    import asyncio
+
+    seen = _install_fake_client(monkeypatch, _FakeResponse(200, {"ok": True, "zone": "7b"}))
+    result = asyncio.run(garden_routes._call("GET", "/profile"))
+
+    assert result.status_code == 200
+    assert isinstance(result.body, bytes)
+    assert b'"zone"' in result.body and b'"7b"' in result.body
+    method, url, kwargs = seen[0]
+    assert method == "GET"
+    assert url.endswith("/profile")
+    assert kwargs["json"] is None
+
+
+def test_garden_call_post_serializes_json_body(monkeypatch):
+    import asyncio
+
+    seen = _install_fake_client(monkeypatch, _FakeResponse(201, {"id": "goal-1"}))
+    result = asyncio.run(
+        garden_routes._call("POST", "/pantry-goals", json={"item": "Salsa"})
+    )
+
+    assert result.status_code == 201
+    assert b'"goal-1"' in result.body
+    assert seen[0][2]["json"] == {"item": "Salsa"}
+
+
+def test_garden_call_put_accepts_list_body(monkeypatch):
+    import asyncio
+
+    cells = [{"col": 0, "row": 0, "species_ref": "basil_sweet"}]
+    seen = _install_fake_client(monkeypatch, _FakeResponse(200, {"cells_upserted": 1}))
+    result = asyncio.run(
+        garden_routes._call(
+            "PUT", "/plans/plan-1/beds/bed-1/cells", json=cells
+        )
+    )
+
+    assert result.status_code == 200
+    assert b'"cells_upserted"' in result.body
+    # The body must stay a list; typing it dict would reject this at runtime.
+    assert seen[0][2]["json"] == cells
+
+
+def test_garden_call_passes_through_204(monkeypatch):
+    import asyncio
+
+    _install_fake_client(monkeypatch, _FakeResponse(204))
+    result = asyncio.run(garden_routes._call("DELETE", "/pantry-goals/goal-1"))
+
+    assert result.status_code == 204
+
+
+def test_garden_call_passes_through_4xx_detail(monkeypatch):
+    import asyncio
+
+    _install_fake_client(monkeypatch, _FakeResponse(403, {"detail": "forbidden"}))
+    result = asyncio.run(garden_routes._call("POST", "/plans"))
+
+    assert result.status_code == 403
+    assert b"forbidden" in result.body
+
+
+def test_garden_call_passes_through_5xx_even_without_json(monkeypatch):
+    import asyncio
+
+    _install_fake_client(monkeypatch, _FakeResponse(502, raise_json=True))
+    result = asyncio.run(garden_routes._call("GET", "/health"))
+
+    assert result.status_code == 502
+    assert b"did not answer" in result.body
 
 

@@ -91,21 +91,17 @@ from services.garden.weather_care import (
 )
 from services.common import weather_client as weather
 from services.garden.planner import (
-    add_weeks,
     auto_arrange_bed,
-    check_companions,
+    check_plan,
     crop_family,
     default_frost_dates,
-    frost_offset_weeks,
+    detect_zone_for_location,
+    mmdd_sort_key,
     planting_milestones,
     pantry_goal_backcalc,
-    plant_count_for_raw_lbs,
-    preservation_raw_lbs,
+    season_length_days,
     simple_sizing,
     sqft_for_plants,
-    zone_in_range,
-    zone_number,
-    zone_sort_key,
 )
 from services.shared.info_endpoint import info_router
 
@@ -1125,6 +1121,7 @@ async def test_notice(
     _require_parent_or_admin(request)
     user = _user(request)
     # Build a minimal digest: just the caller's due tasks.
+    from services.common import notify
     from services.garden.notices import collect_due_tasks, build_digest
     tasks = collect_due_tasks(session, user)
     digest = build_digest(user, tasks)
@@ -1774,69 +1771,80 @@ async def profile_detect_zone(request: Request, session: Session = Depends(get_s
     """Auto-detect USDA zone + frost dates from household lat/lon (weather config).
 
     Degrades gracefully with a clear message when geo/weather is unconfigured.
+    Never hardcodes coordinates.
     """
     _user(request)
     profile = session.exec(select(GardenProfile)).first()
     if not profile:
-        raise HTTPException(status_code=404, detail="Garden profile not found")
+        # Auto-initialize default profile row if none exists yet.
+        profile = GardenProfile(
+            user_id="household",
+            family_size=7,
+            zone_source="manual",
+        )
+        session.add(profile)
+        session.commit()
+        session.refresh(profile)
 
-    # Try to resolve zone from weather config (household lat/lon).
     zone = None
     source = "manual"
+    lat = None
+    lon = None
+    min_temp_f = None
     try:
-        from services.common.weather_client import current as weather_current
-
-        w = await weather_current()
-        if w and w.get("latitude") and w.get("longitude"):
-            lat = float(w["latitude"])
-            lon = float(w["longitude"])
-            # Approximate USDA zone from latitude (very rough, degrades gracefully).
-            # Northern latitudes = lower zones; southern = higher zones.
-            abs_lat = abs(lat)
-            if abs_lat >= 60:
-                zone = "3b"
-            elif abs_lat >= 50:
-                zone = "5b"
-            elif abs_lat >= 40:
-                zone = "7b"
-            elif abs_lat >= 30:
-                zone = "9a"
-            elif abs_lat >= 20:
-                zone = "10b"
-            else:
-                zone = "11b"
-            source = "auto"
+        forecast = await weather.forecast()
+        location = (forecast or {}).get("location") or {}
+        lat = location.get("latitude")
+        lon = location.get("longitude")
+        if lat is not None and lon is not None:
+            zone, min_temp_f = await detect_zone_for_location(float(lat), float(lon))
+            if zone:
+                source = "auto"
     except Exception as e:
         log.info("[Garden] zone auto-detect unavailable: %s", e)
 
     if not zone:
+        if lat is None or lon is None:
+            message = "Geo/weather not configured; set zone manually in Garden Profile."
+        else:
+            message = (
+                "Could not read historical winter temperatures; "
+                "set zone manually in Garden Profile."
+            )
         return {
             "zone": profile.hardiness_zone,
             "zone_source": profile.zone_source or "manual",
             "last_spring_frost_mmdd": profile.last_spring_frost_mmdd,
             "first_fall_frost_mmdd": profile.first_fall_frost_mmdd,
-            "message": "Geo/weather not configured; set zone manually in Garden Profile.",
+            "latitude": lat,
+            "longitude": lon,
+            "min_temp_f": min_temp_f,
+            "message": message,
         }
 
     spring_mmdd, fall_mmdd = default_frost_dates(zone)
 
-    # Update profile if auto source and no manual override.
-    if source == "auto" and (not profile.zone_source or profile.zone_source == "auto"):
-        profile.hardiness_zone = zone
-        profile.zone_source = "auto"
-        profile.last_spring_frost_mmdd = spring_mmdd or profile.last_spring_frost_mmdd
-        profile.first_fall_frost_mmdd = fall_mmdd or profile.first_fall_frost_mmdd
-        profile.updated_at = utcnow()
-        session.add(profile)
-        session.commit()
-        session.refresh(profile)
+    # Auto-detect was explicitly requested by the user (tap on Auto-detect),
+    # so persist the detected zone and the frost dates it implies.
+    profile.hardiness_zone = zone
+    profile.zone_source = "auto"
+    profile.last_spring_frost_mmdd = spring_mmdd or profile.last_spring_frost_mmdd
+    profile.first_fall_frost_mmdd = fall_mmdd or profile.first_fall_frost_mmdd
+    profile.updated_at = utcnow()
+    session.add(profile)
+    session.commit()
+    session.refresh(profile)
 
     return {
         "zone": zone,
         "zone_source": source,
+        "latitude": lat,
+        "longitude": lon,
+        "min_temp_f": min_temp_f,
         "last_spring_frost_mmdd": spring_mmdd,
         "first_fall_frost_mmdd": fall_mmdd,
         "season_length_days": season_length_days(zone) if zone else None,
+        "message": "Zone detected from the household's historical winter minimum.",
     }
 
 
@@ -2075,7 +2083,9 @@ def delete_plan(
     plan = session.get(GardenPlan, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
-    session.exec(select(PlanCell).where(PlanCell.plan_id == plan_id)).all()
+    cells = session.exec(select(PlanCell).where(PlanCell.plan_id == plan_id)).all()
+    for cell in cells:
+        session.delete(cell)
     session.delete(plan)
     session.commit()
     return JSONResponse(status_code=204, content=None)
@@ -2148,34 +2158,82 @@ def upsert_plan_cells(
     return {"plan_id": plan_id, "bed_id": bed_id, "cells_upserted": len(body)}
 
 
+class AutoArrangeRequest(BaseModel):
+    """Optional body for the auto-arrange endpoint."""
+
+    species_refs: list[str] | None = None
+    apply: bool = True
+
+
 @app.post("/plans/{plan_id}/beds/{bed_id}/auto-arrange")
 def auto_arrange_bed_endpoint(
     plan_id: str,
     bed_id: str,
     request: Request,
+    body: AutoArrangeRequest | None = None,
     session: Session = Depends(get_session),
 ):
-    """Auto-arrange crops in a bed: tall crops north, companions paired, antagonists separated."""
+    """Auto-arrange crops in a bed: tall crops north, companions paired, antagonists separated.
+
+    Accepts optional ``{"species_refs": [...], "apply": true}``.  When
+    ``apply`` is true (the default) the arranged cells are persisted and the
+    updated checks are returned alongside the placements.
+    """
     _require_admin_or_adult(request)
     plan = session.get(GardenPlan, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    # Get existing cells for this bed to know what's already placed
     existing = session.exec(
         select(PlanCell).where(PlanCell.plan_id == plan_id, PlanCell.location_id == bed_id)
     ).all()
-    species_refs = [c.species_ref for c in existing if c.species_ref]
 
-    if not species_refs:
-        return {"plan_id": plan_id, "bed_id": bed_id, "placements": [], "message": "No crops in bed"}
+    refs = list(body.species_refs) if body and body.species_refs else [
+        c.species_ref for c in existing if c.species_ref
+    ]
+    if not refs:
+        return {
+            "plan_id": plan_id,
+            "bed_id": bed_id,
+            "placements": [],
+            "checks": [],
+            "warning_count": 0,
+            "applied": False,
+            "message": "No crops in bed",
+        }
 
-    placements = auto_arrange_bed(session, existing, bed_id, species_refs)
+    placements = auto_arrange_bed(
+        session, existing, bed_id, refs, plan=plan
+    )
+    applied = bool(body.apply) if body else True
+
+    if applied:
+        for cell in existing:
+            session.delete(cell)
+        for placement in placements:
+            if placement.get("col", -1) < 0:
+                continue
+            session.add(PlanCell(
+                plan_id=plan_id,
+                location_id=bed_id,
+                col=int(placement["col"]),
+                row=int(placement["row"]),
+                species_ref=placement.get("species_ref"),
+                crop_family=placement.get("crop_family"),
+                quantity=float(placement.get("quantity") or 1.0),
+            ))
+        session.commit()
+
+    cells = session.exec(select(PlanCell).where(PlanCell.plan_id == plan_id)).all()
+    checks = check_plan(session, plan, cells)
 
     return {
         "plan_id": plan_id,
         "bed_id": bed_id,
         "placements": placements,
+        "checks": checks,
+        "warning_count": len([c for c in checks if c.get("kind") != "companion"]),
+        "applied": applied,
     }
 
 
@@ -2192,25 +2250,12 @@ def plan_checks(
         raise HTTPException(status_code=404, detail="Plan not found")
 
     cells = session.exec(select(PlanCell).where(PlanCell.plan_id == plan_id)).all()
-    warnings: list[dict] = []
-
-    for cell in cells:
-        species = resolve_species(session, cell.species_ref) if cell.species_ref else None
-        cell_warnings = check_companions(session, cells, cell, species)
-        for w in cell_warnings:
-            warnings.append({
-                "cell_id": cell.id,
-                "col": cell.col,
-                "row": cell.row,
-                "species_ref": cell.species_ref,
-                "bed_id": cell.location_id,
-                "message": w,
-            })
+    warnings = check_plan(session, plan, cells)
 
     return {
         "plan_id": plan_id,
         "checks": warnings,
-        "warning_count": len(warnings),
+        "warning_count": len([w for w in warnings if w.get("kind") != "companion"]),
     }
 
 
@@ -2248,7 +2293,11 @@ def plan_timeline(
         })
 
     # Sort by first milestone date
-    timeline.sort(key=lambda t: t["milestones"][0]["mmdd"] if t["milestones"] else "99-99")
+    timeline.sort(
+        key=lambda t: mmdd_sort_key(
+            t["milestones"][0]["mmdd"] if t["milestones"] else None
+        )
+    )
     return {
         "plan_id": plan_id,
         "plan_name": plan.name,
