@@ -4888,6 +4888,8 @@ export interface GardenLocation {
   id: string;
   name: string;
   kind: string;
+  /** `homehub` for an indoor room (Home Hub's areas are the only room list), `garden` for a bed. */
+  source?: 'garden' | 'homehub';
   area_id: string | null;
   width_ft: number | null;
   length_ft: number | null;

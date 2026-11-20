@@ -54,6 +54,11 @@ vi.mock('../services/api', () => ({
   },
 }));
 
+// Rooms are Home Hub's areas: the Add Plant modal adds a room there, never in
+// Garden, so this is the same call the Rooms page makes.
+const { createArea } = vi.hoisted(() => ({ createArea: vi.fn() }));
+vi.mock('../lib/homeSetup', () => ({ createArea }));
+
 const createWrapper = () => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -1029,5 +1034,85 @@ describe('Garden Planner tab (Phase 5)', () => {
     expect(vi.mocked(api.gardenCalculatePantryGoal)).toHaveBeenCalledWith(expect.objectContaining({
       item: 'Marinara sauce', crop_refs: 'tomato_roma', target_qty: 40,
     }));
+  });
+});
+
+describe('Garden rooms come from Home Hub', () => {
+  let wrapper: ReturnType<typeof createWrapper>;
+
+  beforeEach(() => {
+    wrapper = createWrapper();
+    vi.mocked(api.gardenToday).mockResolvedValue({
+      date: '2026-11-19', due_count: 0, overdue_count: 0, by_room: {}, all: [],
+    });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([
+      {
+        id: 'living_room', name: 'Living Room', kind: 'indoor_room', source: 'homehub',
+        area_id: 'living_room', width_ft: null, length_ft: null, area_sqft: null,
+        sun_exposure: null, covered: false, map_x: null, map_y: null, rotation_deg: null,
+        light_notes: null, draft_notes: null, assigned_to: null, skylight_sync_enabled: false,
+        created_at: '', updated_at: '',
+      },
+    ]);
+    // A species is picked first; the room picker only shows once one is.
+    vi.mocked(api.gardenListSpecies).mockResolvedValue({
+      category: null, usda_zone: null, count: 1, seed_present: true,
+      results: [{
+        key: 'monstera_deliciosa', category: 'houseplant', common_name: 'Monstera',
+        scientific_name: 'Monstera deliciosa', description: 'Split-leaf philodendron',
+      } as GardenSpecies],
+    });
+    createArea.mockReset();
+  });
+
+  async function openRoomPicker() {
+    render(<Garden />, { wrapper });
+    fireEvent.click(screen.getByText('Plants'));
+    fireEvent.click(await screen.findByText('Add Plant'));
+    fireEvent.click(await screen.findByText('Monstera'));
+    return screen.getByLabelText('Room');
+  }
+
+  it('says the rooms are Home Hub\u2019s and links to them', async () => {
+    const room = await openRoomPicker();
+
+    expect(screen.getByText(/Rooms come from Home Hub/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Manage rooms in Home Hub/ })).toHaveAttribute(
+      'href',
+      '/devices#devices-areas',
+    );
+    // The room list is what the hub (via Garden's /locations) returned.
+    expect(screen.getByRole('option', { name: 'Living Room' })).toBeInTheDocument();
+    expect(room).toBeInTheDocument();
+  });
+
+  it('adds a new room in Home Hub, not in Garden', async () => {
+    createArea.mockResolvedValue({ area_id: 'sunroom', name: 'Sunroom' });
+    // The hub room shows up in the room list on the next read, as it does in
+    // the app (creating it refreshes Garden's /locations).
+    const living: GardenLocation = {
+      id: 'living_room', name: 'Living Room', kind: 'indoor_room', source: 'homehub',
+      area_id: 'living_room', width_ft: null, length_ft: null, area_sqft: null,
+      sun_exposure: null, covered: false, map_x: null, map_y: null, rotation_deg: null,
+      light_notes: null, draft_notes: null, assigned_to: null, skylight_sync_enabled: false,
+      created_at: '', updated_at: '',
+    };
+    vi.mocked(api.gardenListLocations).mockImplementation(async () => (
+      createArea.mock.calls.length
+        ? [living, { ...living, id: 'sunroom', area_id: 'sunroom', name: 'Sunroom' }]
+        : [living]
+    ));
+    const room = await openRoomPicker();
+
+    fireEvent.click(screen.getByTitle('Add a new room'));
+    fireEvent.change(screen.getByLabelText('New room name'), { target: { value: 'Sunroom' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => expect(createArea).toHaveBeenCalledWith({ name: 'Sunroom' }));
+    // The new area is selected for the plant being added.
+    await waitFor(() => expect(room).toHaveValue('sunroom'));
+    // And nothing was created through Garden's own location endpoint.
+    expect(vi.mocked(api.gardenCreateLocation)).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Plus, Sun, Droplets, Leaf, X, ChevronRight,
   ShieldAlert, RotateCw, Flower, User, Zap, Settings, Search,
@@ -9,6 +9,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveShoppingList, readShoppingList } from '../lib/shoppingListStore';
+import { createArea } from '../lib/homeSetup';
+import { AREAS_KEY, FLOORS_KEY, ROOMS_KEY } from '../hooks/useRoomActions';
+import { failureText } from '../lib/discoveredDevices';
 import { useAuth } from '../context/AuthContext';
 import {
   BedGridEditor, DualSizingPanel, PlansPanel, TimelinePanel, YardMapPanel, ZoneFrostPanel,
@@ -1849,6 +1852,12 @@ function AddPlantModal({
                     +
                   </button>
                 </div>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Rooms come from Home Hub, so a room added here appears on the Rooms page too.{' '}
+                  <Link to="/devices#devices-areas" className="text-purple-400 hover:text-purple-300 underline">
+                    Manage rooms in Home Hub
+                  </Link>
+                </p>
                 {showNewRoom && (
                   <div className="mt-2 flex gap-2">
                     <input
@@ -1862,20 +1871,23 @@ function AddPlantModal({
                     <button
                       type="button"
                       onClick={async () => {
-                        if (!newRoomName.trim()) return;
+                        const name = newRoomName.trim();
+                        if (!name) return;
                         setCreating(true);
                         try {
-                          const resp = await api.gardenCreateLocation({
-                            name: newRoomName.trim(),
-                            kind: 'indoor_room',
-                          });
+                          // Rooms are Home Hub's areas (GET/POST /api/homehub/areas),
+                          // the same list the Rooms page shows: one room, one place
+                          // to change it -- never a second Garden-only list.
+                          const area = await createArea({ name });
                           setNewRoomName('');
                           setShowNewRoom(false);
-                          setLocationId(resp.id);
-                          queryClient.invalidateQueries({ queryKey: ['garden-locations'] });
-                          toast.success('Room added');
-                        } catch {
-                          toast.error('Failed to add room');
+                          setLocationId(area.area_id);
+                          for (const queryKey of [['garden-locations'], AREAS_KEY, FLOORS_KEY, ROOMS_KEY]) {
+                            void queryClient.invalidateQueries({ queryKey });
+                          }
+                          toast.success(`${area.name} was added in Home Hub.`);
+                        } catch (err) {
+                          toast.error(failureText(err));
                         } finally {
                           setCreating(false);
                         }
