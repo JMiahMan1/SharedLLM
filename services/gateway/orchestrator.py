@@ -1885,6 +1885,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                     use_chat=True,
                 )
                 ans = data.get("message", {}).get("content", "")
+                if gate is not None:
+                    await gate.end_call()
                 break
             except Exception as e:
                 log.warning(f"[_single_turn_inference] Inference attempt {retry_count + 1} failed: {e}")
@@ -2103,6 +2105,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             closing = await _closing_turn(messages, model, options,
                                           _step_stream("final") if event_callback
                                           else (gate.feed if gate is not None else chunk_callback), tool_result)
+            if gate is not None:
+                await gate.end_call()
             return honest_reply(query, closing, device_runs)
 
     # Final answer processing: strip JSON/thinking artifacts for clean natural language

@@ -76,6 +76,46 @@ async def test_a_device_command_is_not_streamed_so_device_claims_can_still_corre
     assert sink.chunks == []
 
 
+async def test_the_end_of_a_prose_turn_is_said_when_the_model_call_ends():
+    sink = Sink()
+    gate = SpeechGate(sink, "what's the verse of the day")
+    await gate.begin_turn()
+    await _feed(gate, 'Today\'s verse is Psalm 23:1, "The Lord is my shepherd."')
+    assert sink.said() == []  # nothing shows the sentence has ended while the model writes
+    await gate.end_call()
+    assert sink.said() == ['Today\'s verse is Psalm 23:1, "The Lord is my shepherd."']
+
+
+async def test_a_turn_that_wrote_a_tool_call_says_nothing_at_its_end():
+    sink = Sink()
+    gate = SpeechGate(sink, "what's the verse of the day")
+    await gate.begin_turn()
+    await _feed(gate, 'Checking {"tool": "BibleRequest"')
+    await gate.end_call()
+    assert sink.said() == []
+
+
+async def test_a_tool_named_in_prose_is_never_said():
+    sink = Sink()
+    gate = SpeechGate(sink, "make a notes workspace")
+    await gate.begin_turn()
+    await _feed(gate, "Sure, I will set that up for you now. 1. WorkspaceCreateRequest name 'notes'. 2. Done.")
+    await gate.end_call()
+    assert sink.said() == ["Sure, I will set that up for you now."]
+
+
+async def test_a_long_first_sentence_is_said_up_to_a_clause_break():
+    sink = Sink()
+    gate = SpeechGate(sink, "tell me about the weather this week")
+    await gate.begin_turn()
+    first = ("This week starts warm and sunny across the whole valley with light winds in the morning and a "
+             "few clouds by the afternoon, ")
+    await _feed(gate, first + "then rain moves in on Thursday")
+    assert sink.said() == [first.strip()]
+    await _feed(gate, ", and the weekend clears again. ")
+    assert sink.said()[-1] == "then rain moves in on Thursday, and the weekend clears again."
+
+
 @pytest.mark.parametrize("reply, spoken, rest", [
     ("Sunny and warm today. High of 75.", ["Sunny and warm today."], "High of 75."),
     ("Sunny and warm today.", ["Sunny and warm today."], ""),
@@ -105,7 +145,8 @@ async def test_the_orchestrator_streams_safe_sentences_and_returns_the_whole_ans
         query="what's the weather tomorrow", model="m", system_prompt="S", rag_context="", history=[],
         creds=orchestrator.ResolvedCredentials(user="u"), chunk_callback=sink, speech_stream=True)
     assert answer == "It will be sunny tomorrow with a light breeze. Highs near seventy."
-    assert sink.said() == ["It will be sunny tomorrow with a light breeze."]
+    # The last sentence is said once the model call ends, not held for the whole job.
+    assert sink.said() == ["It will be sunny tomorrow with a light breeze.", "Highs near seventy."]
     # Without speech_stream the old behaviour stands: the whole answer as one content chunk at the end.
     plain = Sink()
     await orchestrator._single_turn_inference(
