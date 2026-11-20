@@ -29,6 +29,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     dashboard_api,
     discovery_api,
     entries_api,  # integrations: reconfigure, remove/unpair, add by address
+    esphome_logs_api,  # /hub/devices/{id}/logs: an ESPHome node's live logs
     esphome_restarts,  # ESPHome restarts and drops, for /health
     ha_auth_api,
     ha_ws_compat,
@@ -848,6 +849,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(service_logins_api.build_router(runtime, auth))  # service logins, Music Assistant link
     app.include_router(voice_api.build_router(runtime, auth))  # voice satellites (voice_pipeline.py)
     app.include_router(restarts_api.build_router(runtime, auth))  # ESPHome restarts (esphome_restarts.py)
+    app.include_router(esphome_logs_api.build_router(runtime, auth))  # ESPHome live logs (esphome_logs.py)
     app.include_router(conversation.build_router(runtime, auth))  # sentence triggers, asked by Jarvis first
     app.include_router(matter_ble.build_router(runtime, auth))  # the household Wi-Fi for new Matter devices
     app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map

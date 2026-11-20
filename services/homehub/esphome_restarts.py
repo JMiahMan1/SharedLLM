@@ -105,6 +105,10 @@ _SECRET = re.compile(
     r"(\s*[:=]\s*)(['\"]?)[^\s'\",;]+")
 _BEARER = re.compile(r"(?i)\b(bearer|basic)(\s+)()[^\s'\",;]+")
 _LONG_TOKEN = re.compile(r"[A-Za-z0-9+/_-]{40,}={0,2}")
+#: ``key=...``/``pass=...`` (a query string, a form) that the named patterns above do not cover.
+_KEY_EQ = re.compile(r"(?i)\b((?:[a-z]+_)?(?:key|pass|pwd|auth|sig|signature|authsig))(=)()[^\s&'\",;]+")
+#: Home Assistant style proxy URLs whose path itself is the credential (an announcement's audio).
+_PROXY_PATH = re.compile(r"(?i)(/api/(?:esphome/ffmpeg_proxy|tts_proxy)/)[^\s'\"<>]+")
 #: Lines a node logs as it boots (any ESPHome node; not one firmware's wording alone).
 _BOOT = re.compile(r"(?i)running through setup|setup\(\) finished|boot seems successful|reset reason|rst:0x"
                    r"|esphome version .* compiled|starting esphome")
@@ -123,15 +127,20 @@ async def _send_notice(payload: dict[str, Any]) -> bool:
     return await notify.send(payload)
 
 
-def clean_line(raw: Any) -> str:
+def redact(text: str) -> str:
+    """Anything in a log line that looks like a credential, replaced by ``[redacted]``."""
+    text = _PROXY_PATH.sub(lambda m: f"{m.group(1)}[redacted]", text)
+    for pattern in (_SECRET, _BEARER, _KEY_EQ):
+        text = pattern.sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}[redacted]", text)
+    return _LONG_TOKEN.sub("[redacted]", text)
+
+
+def clean_line(raw: Any, max_chars: int = LINE_MAX_CHARS) -> str:
     """One log line as the monitor keeps it: no colour codes, nothing secret, not too long."""
     text = raw.decode("utf-8", "replace") if isinstance(raw, bytes | bytearray) else str(raw or "")
-    text = _ANSI.sub("", text).replace("\r", "").strip()
-    for pattern in (_SECRET, _BEARER):
-        text = pattern.sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}[redacted]", text)
-    text = _LONG_TOKEN.sub("[redacted]", text)
-    if len(text) > LINE_MAX_CHARS:
-        text = text[: LINE_MAX_CHARS - 1] + "…"
+    text = redact(_ANSI.sub("", text).replace("\r", "").strip())
+    if len(text) > max_chars:
+        text = text[: max_chars - 1] + "…"
     return text
 
 
@@ -208,6 +217,13 @@ class RestartMonitor:
         self._activity: dict[str, dict[str, float | None]] = {}  # "announcement" -> {"started", "ended"}
         self.events: list[dict[str, Any]] = []
         self.notified_at: str | None = None
+        from services.homehub.esphome_logs import DeviceLogs
+
+        #: Every line the node sends, for Devices > a device > Logs (``esphome_logs.py``); its viewers raise the
+        #: subscription level while they watch.
+        self.logs = DeviceLogs(self._viewers_changed, clock=clock)
+        self.subscribed_level = 0  # the aioesphomeapi level the node was last asked for
+        self._dump_timer: asyncio.TimerHandle | None = None
         self._restore()
 
     # -- settings and store ------------------------------------------------------------
@@ -270,6 +286,7 @@ class RestartMonitor:
         self._close_error = self._close_reason = None
         self._watch_close(client)
         self._subscribe_logs()
+        self.logs.add_marker("online", "Reconnected" if self._pending is not None else "Connected")
         if self._pending is not None:
             self._pending["reconnected"] = now
             self._pending["reconnected_at"] = _iso(utcnow())
@@ -291,9 +308,14 @@ class RestartMonitor:
         reason = getattr(event, "reason", None)
         self._close_reason = getattr(reason, "name", None) if reason is not None else None
 
-    def _subscribe_logs(self) -> None:
+    @property
+    def effective_level(self) -> int:
+        """The level the node is asked for: the configured one, raised while someone watches its logs."""
+        return max(LOG_LEVELS[self.log_level], self.logs.wanted_level())
+
+    def _subscribe_logs(self, *, dump_config: bool = False) -> None:
         self._unsubscribe_logs()
-        client, level = self._client, self.log_level
+        client, level = self._client, self.effective_level
         self.subscribe_error = None
         if client is None:
             return
@@ -304,18 +326,46 @@ class RestartMonitor:
         try:
             from aioesphomeapi import LogLevel
 
-            self._unsub_logs = subscribe(self._on_log, log_level=LogLevel(LOG_LEVELS[level]))
+            kwargs: dict[str, Any] = {"log_level": LogLevel(level)}
+            if dump_config:
+                kwargs["dump_config"] = True
+            self._unsub_logs = subscribe(self._on_log, **kwargs)
         except Exception as exc:  # the node still works; only its log lines are not kept
             self.subscribe_error = f"{type(exc).__name__}: {exc}"
             log.warning("ESPHome %s: subscribing to its logs failed: %s", self.name, exc)
             return
-        self.subscribed = level != "off"
-        if level == "off":  # the node keeps sending until told NONE; the callback is not needed
+        self.subscribed_level = level
+        self.subscribed = level > 0
+        if level == 0:  # the node keeps sending until told NONE; the callback is not needed
             self._unsubscribe_logs()
+
+    def _viewers_changed(self) -> None:
+        """A viewer came or went (or a config dump's hold ended): ask the node for the level now needed."""
+        if self._client is not None and self.effective_level != self.subscribed_level:
+            log.info("ESPHome %s: log level %s while %d viewer(s) watch", self.name, self.effective_level,
+                     len(self.logs.viewers))
+            self._subscribe_logs()
+
+    def request_dump_config(self) -> None:
+        """Ask the node to log its configuration again (what it logs at boot). Raises when it is not connected."""
+        if self._client is None:
+            raise RuntimeError("The device is not connected")
+        from services.homehub.esphome_logs import DUMP_HOLD_S
+
+        self.logs.dump_until = self.clock() + DUMP_HOLD_S
+        self.logs.add_marker("dump_config", "Config dump requested")
+        self._subscribe_logs(dump_config=True)
+        if self.subscribe_error:
+            raise RuntimeError(self.subscribe_error)
+        if self._dump_timer is not None:
+            self._dump_timer.cancel()
+        with contextlib.suppress(RuntimeError):  # no running loop: the next viewer change drops the level
+            self._dump_timer = asyncio.get_running_loop().call_later(DUMP_HOLD_S + 0.1, self._viewers_changed)
 
     def _unsubscribe_logs(self) -> None:
         unsub, self._unsub_logs = self._unsub_logs, None
         self.subscribed = False
+        self.subscribed_level = 0
         if unsub is not None:
             with contextlib.suppress(Exception):
                 unsub()
@@ -338,6 +388,9 @@ class RestartMonitor:
 
     def close(self) -> None:
         self.detach()
+        if self._dump_timer is not None:
+            self._dump_timer.cancel()
+        self.logs.close()
         for t in list(self._tasks):
             t.cancel()
 
@@ -351,6 +404,12 @@ class RestartMonitor:
     def _on_log(self, msg: Any) -> None:
         now = self.clock()
         self.last_heard = now
+        number = int(getattr(msg, "level", 0) or 0)
+        self.logs.add_line(number, getattr(msg, "message", ""))
+        if number > LOG_LEVELS[self.log_level] and not _BOOT.search(clean_line(getattr(msg, "message", ""))):
+            # Sent because someone is watching the logs: not what the restart history keeps. A boot message
+            # still is, since it can decide what the last drop was.
+            return
         self._tokens = min(float(RATE_BURST), self._tokens + (now - self._tokens_at) * RATE_LINES_PER_S)
         self._tokens_at = now
         if self._tokens < 1.0:
@@ -360,7 +419,7 @@ class RestartMonitor:
         text = clean_line(getattr(msg, "message", ""))
         if not text:
             return
-        level = _LEVEL_LETTER.get(int(getattr(msg, "level", 0) or 0), "?")
+        level = _LEVEL_LETTER.get(number, "?")
         line = (_iso(utcnow()), level, text)
         self.ring.append(line)
         pending = self._pending
@@ -449,6 +508,7 @@ class RestartMonitor:
             "context": self._context(now),
         }
         self._recent = None
+        self.logs.add_marker("offline", f"Device offline{f' ({self._close_error})' if self._close_error else ''}")
         self.detach()
 
     def _context(self, now: float) -> dict[str, Any]:
@@ -543,6 +603,7 @@ class RestartMonitor:
         del self.events[EVENTS_KEEP:]
         self._recent = stored
         stored["_reconnected"] = reconnected if reconnected is not None else self.clock()
+        self.logs.add_marker(kind, ev["summary"], restart_id=ev["id"])
         self._save()
         (log.warning if kind != "drop" else log.info)(
             "ESPHome %s: %s (%s)%s", self.name, ev["summary"], evidence,
