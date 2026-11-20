@@ -92,6 +92,8 @@ class Plant(SQLModel, table=True):
     assigned_to: str | None = Field(default=None)
     skylight_sync_enabled: bool = Field(default=False)
     skylight_chore_id: str | None = Field(default=None, max_length=128)
+    #: The household member the Skylight chore is assigned to (Identity username).
+    skylight_assignee: str | None = Field(default=None, max_length=128)
     notes: str | None = Field(default=None, max_length=2000)
     calibration_factor: float = Field(default=1.0)  # self-calibrating snooze adjustment
     last_harvested_at: str | None = Field(default=None)  # when last harvested (herbs/veg/fruit)
@@ -304,6 +306,10 @@ class PlantOut(SQLModel):
     assigned_to: str | None
     skylight_sync_enabled: bool
     skylight_chore_id: str | None
+    skylight_assignee: str | None
+    #: The earliest due date among this plant's active care rules, so a card can
+    #: say when care is next rather than a fixed placeholder.
+    next_due_at: str | None = None
     notes: str | None
     calibration_factor: float
     last_harvested_at: str | None

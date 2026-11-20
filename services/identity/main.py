@@ -2353,10 +2353,13 @@ def service_defaults(session: Session = Depends(get_session), _caller: User = De
 @app.get("/api/users/family-directory")
 def family_directory(session: Session = Depends(get_session), _caller: User = Depends(require_api_key)):
     """Everyone in the household, as chat draws them: name, profile picture,
-    and the Nextcloud account their Talk messages arrive from.
+    the Nextcloud account their Talk messages arrive from, and their family
+    role.
 
-    Profile pictures and names are meant to be seen by the family; nothing
-    else about an account (URLs, credentials, keys) is included.
+    Profile pictures, names and the family role (mother/father/adult_child/
+    child/teen/other) are meant to be seen by the family -- Garden uses it to
+    decide who may be given a plant's care chore. Nothing else about an account
+    (URLs, credentials, keys) is included.
     """
     return [
         {
@@ -2364,6 +2367,7 @@ def family_directory(session: Session = Depends(get_session), _caller: User = De
             "display_name": u.display_name or u.username,
             "nextcloud_user": u.nextcloud_user or None,
             "avatar": u.avatar or None,
+            "family_role": u.family_role or None,
         }
         for u in session.exec(select(User)).all()
     ]

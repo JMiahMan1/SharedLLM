@@ -280,8 +280,21 @@ async def _family_list() -> list[str]:
 # --------------------------------------------------------------------------- helpers
 
 
-def _plant_out(row: Plant, species: dict | None = None) -> dict:
+def _next_due_at(session: Session, plant_id: str) -> str | None:
+    """The soonest active care rule's due time for a plant (None when it has none)."""
+    rules = session.exec(
+        select(CareRule).where(CareRule.plant_id == plant_id, CareRule.paused == False)  # noqa: E712
+    ).all()
+    dues = [r.next_due_at for r in rules if r.next_due_at]
+    return min(dues) if dues else None
+
+
+def _plant_out(row: Plant, species: dict | None = None, session: Session | None = None) -> dict:
     data = row.model_dump()
+    if session is not None:
+        # The plant's next care, so a card can say "Due today"/"Next care: …"
+        # instead of a placeholder. Earliest rule wins: that is what is next.
+        data["next_due_at"] = _next_due_at(session, row.id)
     if species:
         data["species"] = {
             "common_name": species.get("common_name"),
@@ -289,6 +302,8 @@ def _plant_out(row: Plant, species: dict | None = None) -> dict:
             "family": species.get("family"),
             "light_level": species.get("light_level"),
             "watering_method": species.get("watering_method"),
+            "watering_interval_days": species.get("watering_interval_days"),
+            "winter_multiplier": species.get("winter_multiplier"),
             "dryness_cue": species.get("dryness_cue"),
             "water_quality": species.get("water_quality"),
             "humidity_band": species.get("humidity_band"),
@@ -507,6 +522,105 @@ async def hooks_weather(request: Request):
     if not _verify_internal_secret(secret):
         return JSONResponse(status_code=403, content={"detail": "Forbidden"})
     return await handle_weather_webhook(_db, _family_list, _resolve_seed_get)
+
+
+# --------------------------------------------------------------------------- Skylight chore completion
+
+
+def _advance_care_rule(session: Session, plant: Plant, action: str) -> CareRule | None:
+    """Push a plant's next due date forward as if that care had just been logged.
+
+    The same arithmetic every care path uses (``compute_interval`` with the
+    plant's pot/window/soil, the rule's winter multiplier and the calibration
+    factor), so a chore ticked off in Skylight schedules exactly what ticking it
+    off in Garden would.
+    """
+    rule = session.exec(
+        select(CareRule).where(CareRule.plant_id == plant.id, CareRule.action == action)
+    ).first()
+    if rule is None:
+        return None
+    result = compute_interval(
+        base_interval_days=rule.interval_days or 7.0,
+        winter_multiplier=rule.winter_multiplier or 1.0,
+        pot_material=plant.pot_material,
+        pot_size_in=plant.pot_size_in,
+        soil_mix=plant.soil_mix,
+        window_direction=plant.window_direction,
+        distance_from_window=plant.distance_from_window,
+        season_winter=_is_winter(),
+        calibration_factor=rule.calibration_factor or 1.0,
+    )
+    rule.next_due_at = (datetime.now(UTC) + timedelta(days=result.next_due_offset_days)).isoformat()
+    rule.updated_at = utcnow()
+    rule.snoozed_until = None  # care happened; any snooze is spent
+    session.add(rule)
+    return rule
+
+
+@app.post("/hooks/skylight-chore-completed")
+async def hooks_skylight_chore_completed(request: Request, session: Session = Depends(get_session)):
+    """Internal: a linked Skylight chore was ticked off -- log the watering here.
+
+    The gateway calls this the moment Execution reports the chore complete
+    (``POST /api/integrations/skylight/chores/{chore_id}/complete``), so the
+    garden's schedule follows the chore chart. It never mirrors back to
+    Skylight: the chore is already done, and a loop is how two systems keep
+    re-completing each other.
+
+    ``chore_id`` may be a dated instance (``52409380-2026-11-20``) or the series
+    id; the plant stores the series id, so both are matched. Idempotent per
+    plant per UTC day -- phones retry, and the same completion can be reported
+    twice.
+    """
+    secret = request.headers.get("X-Internal-Secret")
+    if not _verify_internal_secret(secret):
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    chore_id = str((body or {}).get("chore_id") or "").strip()
+    if not chore_id:
+        raise HTTPException(status_code=422, detail="chore_id is required")
+    performed_by = (body or {}).get("performed_by") or None
+    base_id = chore_id.split("-")[0]
+
+    linked = session.exec(
+        select(Plant).where(Plant.skylight_sync_enabled == True)  # noqa: E712
+    ).all()
+    matches = [plant for plant in linked if plant.skylight_chore_id in (chore_id, base_id)]
+    if not matches:
+        return {"ok": True, "matched": 0, "logged": 0, "skipped_duplicate": 0}
+
+    today = datetime.now(UTC).date().isoformat()
+    logged = skipped = 0
+    for plant in matches:
+        already = session.exec(
+            select(CareLog).where(
+                CareLog.plant_id == plant.id,
+                CareLog.source == "skylight_chore",
+                CareLog.created_at.like(f"{today}%"),
+            )
+        ).first()
+        if already is not None:
+            skipped += 1
+            continue
+        session.add(
+            CareLog(
+                plant_id=plant.id,
+                action="water",
+                performed_by=performed_by,
+                source="skylight_chore",
+                notes="Completed via Skylight chore",
+            )
+        )
+        _advance_care_rule(session, plant, "water")
+        plant.updated_at = utcnow()
+        session.add(plant)
+        logged += 1
+    session.commit()
+    return {"ok": True, "matched": len(matches), "logged": logged, "skipped_duplicate": skipped}
 
 
 # --------------------------------------------------------------------------- profile
@@ -766,6 +880,12 @@ async def assign_location(
 class PlantAssignmentIn(SQLModel):
     assigned_to: str | None = None
     skylight_sync_enabled: bool | None = None
+    skylight_chore_id: str | None = None
+    skylight_assignee: str | None = None
+
+
+#: Which fields the plant's own caregiver (a non-parent `adult_child`) may set.
+SKYLIGHT_ASSIGNMENT_FIELDS = frozenset({"skylight_sync_enabled", "skylight_chore_id", "skylight_assignee"})
 
 
 @app.patch("/plants/{plant_id}/assign")
@@ -775,27 +895,64 @@ def assign_plant(
     request: Request,
     session: Session = Depends(get_session),
 ):
-    """Assign a plant to a family member (parent+ only).
+    """Assign a plant to a family member, or link/unlink its Skylight chore.
 
     Uses ``model_fields_set`` so ``{"assigned_to": null}`` actually unassigns.
+
+    Who may do what: changing ``assigned_to`` is parents/admins only. Linking or
+    clearing the Skylight chore is also allowed for an ``adult_child`` who is
+    *currently assigned this plant* -- they look after it, so they may put its
+    watering on the family's chore chart. They still cannot hand the plant (or
+    the chore) to someone else; the gateway decides who a chore may go to.
     """
-    _require_parent_or_admin(request)
     row = session.get(Plant, plant_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Plant not found")
     fields_set = body.model_fields_set
+    if not fields_set:
+        return _plant_out(row, resolve_species(session, row.species_ref), session)
+
+    if "assigned_to" in fields_set:
+        _require_parent_or_admin(request)
+    if fields_set - {"assigned_to"} - SKYLIGHT_ASSIGNMENT_FIELDS:
+        _require_admin_or_adult(request)
+    if fields_set & SKYLIGHT_ASSIGNMENT_FIELDS and "assigned_to" not in fields_set:
+        # Skylight linkage: a parent/admin, or the adult_child this plant is
+        # assigned to (narrower than "any adult" on purpose).
+        role = _role(request)
+        is_assignee = role == "adult_child" and row.assigned_to == _user(request)
+        if not (_is_admin(request) or role in PARENT_ROLES or is_assignee):
+            raise HTTPException(
+                status_code=403,
+                detail="Parents, admins, or the adult this plant is assigned to may link its Skylight chore.",
+            )
+
     if "assigned_to" in fields_set:
         row.assigned_to = body.assigned_to  # None = unassign
     if "skylight_sync_enabled" in fields_set:
-        row.skylight_sync_enabled = body.skylight_sync_enabled
+        row.skylight_sync_enabled = bool(body.skylight_sync_enabled)
+    if "skylight_chore_id" in fields_set:
+        row.skylight_chore_id = body.skylight_chore_id  # None = clear
+    if "skylight_assignee" in fields_set:
+        row.skylight_assignee = body.skylight_assignee  # None = clear
     row.updated_at = utcnow()
     session.commit()
     session.refresh(row)
     species = resolve_species(session, row.species_ref)
-    return _plant_out(row, species)
+    return _plant_out(row, species, session)
 
 
 # --------------------------------------------------------------------------- plants
+
+
+@app.get("/plants/{plant_id}")
+def get_plant(plant_id: str, request: Request, session: Session = Depends(get_session)):
+    """One plant, with its species cues and next care date."""
+    _user(request)
+    row = session.get(Plant, plant_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    return _plant_out(row, resolve_species(session, row.species_ref), session)
 
 
 @app.get("/plants")
@@ -805,7 +962,7 @@ def list_plants(request: Request, session: Session = Depends(get_session)):
     out = []
     for row in rows:
         species = resolve_species(session, row.species_ref)
-        out.append(_plant_out(row, species))
+        out.append(_plant_out(row, species, session))
     return out
 
 
@@ -854,7 +1011,7 @@ async def create_plant(
     session.commit()
 
     species_full = resolve_species(session, row.species_ref)
-    return _plant_out(row, species_full)
+    return _plant_out(row, species_full, session)
 
 
 def _is_winter() -> bool:
@@ -914,7 +1071,7 @@ def patch_plant(
     session.commit()
     session.refresh(row)
     species = resolve_species(session, row.species_ref)
-    return _plant_out(row, species)
+    return _plant_out(row, species, session)
 
 
 @app.delete("/plants/{plant_id}", status_code=204)
@@ -1306,31 +1463,14 @@ def log_care(
         sensor_snapshot_json=json.dumps(body.sensor_snapshot) if body.sensor_snapshot else None,
     )
     session.add(log_row)
-    # Mirror to Skylight if the plant has opt-in sync enabled.
-    mirror_care_log(session, plant_id=plant_id, action=body.action, performed_by=log_row.performed_by)
+    # Mirror to Skylight if the plant has opt-in sync enabled -- but never for a
+    # completion that came *from* Skylight: that chore is already done, and
+    # mirroring it back is how two systems loop.
+    if body.source != "skylight_chore":
+        mirror_care_log(session, plant_id=plant_id, action=body.action, performed_by=log_row.performed_by)
 
     # Advance the matching care rule's next_due_at using compute_interval.
-    rule = session.exec(
-        select(CareRule).where(CareRule.plant_id == plant_id, CareRule.action == body.action)
-    ).first()
-    if rule:
-        result = compute_interval(
-            base_interval_days=rule.interval_days or 7.0,
-            winter_multiplier=rule.winter_multiplier or 1.0,
-            pot_material=plant.pot_material,
-            pot_size_in=plant.pot_size_in,
-            soil_mix=plant.soil_mix,
-            window_direction=plant.window_direction,
-            distance_from_window=plant.distance_from_window,
-            season_winter=_is_winter(),
-            calibration_factor=rule.calibration_factor or 1.0,
-        )
-        next_due = datetime.now(UTC) + timedelta(days=result.next_due_offset_days)
-        rule.next_due_at = next_due.isoformat()
-        rule.updated_at = utcnow()
-        # Clear snooze when care is actually logged.
-        rule.snoozed_until = None
-        session.add(rule)
+    rule = _advance_care_rule(session, plant, body.action)
 
     plant.updated_at = utcnow()
     session.commit()

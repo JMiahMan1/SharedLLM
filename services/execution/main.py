@@ -5176,7 +5176,11 @@ async def get_skylight_members(user: str | None = None):
 
 @app.post("/api/integrations/skylight/chores", dependencies=[Depends(require_internal)])
 async def create_skylight_chore(body: dict, user: str | None = None):
-    """Add a chore: ``{title, assignees, date, time, repeat, until, stars, emoji, note}``."""
+    """Add a chore: ``{title, assignees, date, time, repeat, until, stars, emoji, note}``.
+
+    Returns the ids Skylight gave the new chores, so a caller can keep the
+    linkage (Garden stores one on the plant to mirror care both ways).
+    """
     from services.execution import skylight_chores
 
     session = await _get_skylight_session(user)
@@ -5186,7 +5190,37 @@ async def create_skylight_chore(body: dict, user: str | None = None):
         made = await skylight_chores.create(session, _skylight_request, body or {})
     except skylight_chores.ChoreError as e:
         return {"status": "FAILURE", "message": str(e)}
-    return {"status": "SUCCESS", "message": "Chore added", "created": len(made)}
+    chore_ids: list[str] = []
+    for item in made:
+        chore_id = _created_chore_id(item)
+        if chore_id and chore_id not in chore_ids:
+            chore_ids.append(chore_id)
+    return {
+        "status": "SUCCESS",
+        "message": "Chore added",
+        "created": len(made),
+        "chore_ids": chore_ids,
+    }
+
+
+def _created_chore_id(item: Any) -> str | None:
+    """The id of one entry from ``skylight_chores.create``.
+
+    ``create`` flattens what Skylight answered, but a response can arrive either
+    as the object itself or wrapped in ``{"data": ...}`` (a list for a repeating
+    chore); all shapes are accepted, and the id is normalised to a string so a
+    caller can store and compare it.
+    """
+    node: Any = item
+    if isinstance(node, dict) and "id" not in node:
+        node = node.get("data")
+    if isinstance(node, list):
+        node = node[0] if node else None
+    if isinstance(node, dict):
+        chore_id = node.get("id")
+        if chore_id not in (None, ""):
+            return str(chore_id)
+    return None
 
 
 @app.patch("/api/integrations/skylight/chores/{chore_id}", dependencies=[Depends(require_internal)])

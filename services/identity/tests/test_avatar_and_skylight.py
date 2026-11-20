@@ -20,7 +20,7 @@ def session_fixture():
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(User(id=1, username="default", display_name="Admin", is_admin=True, is_system_default=True))
-        session.add(User(id=2, username="sam", display_name="Sam"))
+        session.add(User(id=2, username="sam", display_name="Sam", family_role="adult_child"))
         session.commit()
         yield session
 
@@ -129,9 +129,12 @@ def test_a_default_chat_is_remembered_and_cleared(client):
     assert cleared["chat_default_token"] is None
 
 
-def test_the_family_directory_shows_names_and_pictures_only(client, session):
+def test_the_family_directory_shows_names_pictures_and_the_family_role(client, session):
     client.put("/api/users/me/avatar", json={"preset": "jonahs-whale"})
     people = {p["username"]: p for p in client.get("/api/users/family-directory").json()}
     assert people["sam"]["avatar"] == "preset:jonahs-whale"
-    assert set(people["sam"]) == {"username", "display_name", "nextcloud_user", "avatar"}
+    # The role is family metadata (Garden decides who may take a chore from it);
+    # nothing else about the account rides along.
+    assert set(people["sam"]) == {"username", "display_name", "nextcloud_user", "avatar", "family_role"}
+    assert people["sam"]["family_role"] == "adult_child"
     assert "default" in people

@@ -252,3 +252,34 @@ async def test_skylight_request_reads_an_empty_200_as_success(monkeypatch, statu
     monkeypatch.setattr(main, "get_client", lambda: Client())
     session = {"url": "https://sky", "frame_id": "f", "access_token": "t", "email": "e"}
     assert await main._skylight_request(session, "DELETE", "/chores/1") == expected
+
+
+# --- the ids a caller links a plant to -------------------------------------
+
+def test_created_chore_ids_are_read_from_each_shape():
+    import services.execution.main as exec_main
+
+    assert exec_main._created_chore_id({"id": 52409380}) == "52409380"
+    assert exec_main._created_chore_id({"data": {"id": 7}}) == "7"
+    assert exec_main._created_chore_id({"data": [{"id": "9"}]}) == "9"
+    assert exec_main._created_chore_id({"attributes": {}}) is None
+
+
+@pytest.mark.asyncio
+async def test_the_create_route_returns_the_new_chore_ids(monkeypatch):
+    import services.execution.main as exec_main
+
+    async def session(_user=None):
+        return {"frame": "1"}
+
+    async def create(_session, _call, _body, **_kw):
+        return [{"data": {"id": 52409380}}, {"id": "111"}, {"data": [{"id": 222}]}]
+
+    monkeypatch.setattr(exec_main, "_get_skylight_session", session)
+    monkeypatch.setattr(sc, "create", create)
+
+    result = await exec_main.create_skylight_chore({"title": "Water Monty", "assignees": ["Noah"]})
+
+    assert result["status"] == "SUCCESS"
+    assert result["created"] == 3
+    assert result["chore_ids"] == ["52409380", "111", "222"]
