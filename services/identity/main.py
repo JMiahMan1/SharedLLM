@@ -6826,6 +6826,18 @@ def internal_family_role(username: str, session: Session = Depends(get_session),
     return {"username": username.strip().lower(), "family_role": role if role in roles.FAMILY_ROLES else "other"}
 
 
+@app.get("/api/internal/household")
+def internal_household(session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: the household roster -- who is in it, and how many.
+
+    A service that sizes something by family (Garden plants a garden for the
+    household) reads the number here instead of keeping its own copy, which
+    went stale the moment a member was added or removed.
+    """
+    usernames = [user.username for user in session.exec(select(User)).all()]
+    return {"status": "SUCCESS", "members": len(usernames), "usernames": usernames}
+
+
 @app.get("/api/internal/may-view-raw")
 def internal_may_view_raw(
     viewer: str,

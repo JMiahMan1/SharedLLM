@@ -75,6 +75,7 @@ from services.garden.models import (
 )
 from services.garden.achievements import evaluate as evaluate_achievements
 from services.garden import hub_rooms as rooms_hub
+from services.garden import household
 from services.garden.notices import collect_due_tasks, build_digest, digest_loop, send_digest_to_member
 from services.garden.skylight_sync import mirror_care_log
 from services.garden.species_lookup import (
@@ -512,11 +513,14 @@ async def hooks_weather(request: Request):
 
 
 @app.get("/profile")
-def get_profile(request: Request, session: Session = Depends(get_session)):
+async def get_profile(request: Request, session: Session = Depends(get_session)):
     _user(request)
     profile = session.get(GardenProfile, "household")
     if profile is None:
-        profile = GardenProfile(user_id="household")
+        # The family size is Identity's roster, not a number of our own.
+        profile = GardenProfile(
+            user_id="household", family_size=await household.size_or_last_resort()
+        )
         session.add(profile)
         session.commit()
         session.refresh(profile)
@@ -524,13 +528,15 @@ def get_profile(request: Request, session: Session = Depends(get_session)):
 
 
 @app.put("/profile")
-def put_profile(
+async def put_profile(
     body: GardenProfileIn, request: Request, session: Session = Depends(get_session)
 ):
     _require_admin_or_adult(request)
     profile = session.get(GardenProfile, "household")
     if profile is None:
-        profile = GardenProfile(user_id="household")
+        profile = GardenProfile(
+            user_id="household", family_size=await household.size_or_last_resort()
+        )
         session.add(profile)
     changes = body.model_dump(exclude_unset=True)
     for key, value in changes.items():
@@ -1893,7 +1899,8 @@ async def profile_detect_zone(request: Request, session: Session = Depends(get_s
         # Auto-initialize default profile row if none exists yet.
         profile = GardenProfile(
             user_id="household",
-            family_size=7,
+            # The household roster (Identity), not a number of our own.
+            family_size=await household.size_or_last_resort(),
             zone_source="manual",
         )
         session.add(profile)
@@ -2113,7 +2120,7 @@ def list_plans(
 
 
 @app.post("/plans", status_code=201)
-def create_plan(
+async def create_plan(
     body: GardenPlanIn,
     request: Request,
     session: Session = Depends(get_session),
@@ -2124,7 +2131,8 @@ def create_plan(
         name=body.name,
         season=body.season,
         year=body.year or datetime.now(UTC).year,
-        family_size=body.family_size or 7,
+        # An explicit size wins; otherwise the household roster (Identity).
+        family_size=body.family_size or await household.size_or_last_resort(),
         mode=body.mode or "fresh_only",
         status=body.status or "draft",
     )
@@ -2424,7 +2432,7 @@ def plan_timeline(
 
 
 @app.get("/planner/sizing")
-def planner_sizing(
+async def planner_sizing(
     request: Request,
     mode: str = Query("fresh_only", description="fresh_only | fresh_plus_preserving | pantry_goals"),
     family_size: int | None = Query(None, ge=1, description="Override family size"),
@@ -2434,7 +2442,9 @@ def planner_sizing(
     """Simple mode sizing calculator: plant counts & sq ft per crop."""
     _user(request)
     profile = session.exec(select(GardenProfile)).first()
-    fs = family_size or (profile.family_size if profile else 7)
+    fs = family_size or (
+        profile.family_size if profile else await household.size_or_last_resort()
+    )
     refs = [c.strip() for c in species_refs.split(",") if c.strip()] if species_refs else []
     results = simple_sizing(session, fs, mode, refs)
     return {

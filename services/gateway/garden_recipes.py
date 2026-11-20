@@ -25,6 +25,11 @@ log = logging.getLogger("garden_recipes")
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
 
+#: Servings for a drafted recipe when the garden profile cannot be read at all.
+#: The family size itself is Identity's roster, which the garden carries on its
+#: profile (``GET /api/garden/profile``); this only covers garden being away.
+_FALLBACK_SERVINGS = 7
+
 
 def _garden_headers(caller: Any) -> dict[str, str]:
     """Internal-secret + acting-user headers required by services/garden."""
@@ -213,7 +218,7 @@ async def recipe_draft(
     to ready garden produce.  Returns markdown in Nextcloud Notes format
     for user review -- NOT saved to the cookbook.
     """
-    # Resolve servings from garden_profile.family_size (default 7).
+    # Resolve servings from garden_profile.family_size (the household roster).
     garden_hdrs = _garden_headers(caller)
     servings = body.get("servings")
     if servings is None:
@@ -226,11 +231,11 @@ async def recipe_draft(
                 )
                 if resp.status == 200:
                     profile = await resp.json(content_type=None)
-                    servings = int(profile.get("family_size") or 7)
+                    servings = int(profile.get("family_size") or _FALLBACK_SERVINGS)
         except Exception:
             pass
     if not servings or servings < 1:
-        servings = 7
+        servings = _FALLBACK_SERVINGS
 
     # Resolve ingredients: from body or ready garden produce.
     ingredients = body.get("ingredients") or []

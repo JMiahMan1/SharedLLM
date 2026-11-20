@@ -12,6 +12,8 @@ from uuid import uuid4
 
 from sqlmodel import Field, SQLModel
 
+from services.garden.household import LAST_RESORT as LAST_RESORT_FAMILY_SIZE
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -23,7 +25,9 @@ class GardenProfile(SQLModel, table=True):
     __tablename__ = "garden_profile"
 
     user_id: str = Field(primary_key=True, default="household")
-    family_size: int = Field(default=7)
+    #: The household roster (Identity) is the source; this only covers a row
+    #: created before Identity can be asked.
+    family_size: int = Field(default=LAST_RESORT_FAMILY_SIZE)
     hardiness_zone: str | None = Field(default=None)
     zone_source: str = Field(default="manual")
     last_spring_frost_mmdd: str | None = Field(default=None)
@@ -463,7 +467,7 @@ class GardenPlan(SQLModel, table=True):
     name: str = Field(max_length=120)  # e.g., "Spring/Summer 2027"
     season: str = Field(max_length=32)  # spring_summer | fall | winter
     year: int = Field(default=0)
-    family_size: int = Field(default=7, ge=1)
+    family_size: int = Field(default=LAST_RESORT_FAMILY_SIZE, ge=1)
     mode: str = Field(max_length=32)  # fresh_only | fresh_plus_preserving | pantry_goals
     status: str = Field(max_length=32, default="draft")  # draft | active | archived
     created_at: str = Field(default_factory=utcnow)
