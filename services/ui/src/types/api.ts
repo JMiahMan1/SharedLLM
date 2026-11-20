@@ -5454,5 +5454,76 @@ export interface PantryBatchIn {
   notes?: string | null;
 }
 
+/* ---------- Photo journal, Plant ID & Plant Doctor (Phase 7) ---------- */
+
+export interface GardenPlantPhoto {
+  id: string;
+  plant_id: string;
+  nextcloud_path: string | null;
+  thumb_path: string | null;
+  taken_at: string;
+  taken_by: string | null;
+  kind: 'progress' | 'id' | 'diagnosis' | string;
+  ai_summary_json: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface GardenPhotoList {
+  plant_id: string;
+  count: number;
+  photos: GardenPlantPhoto[];
+}
+
+/** What the vision model saw, plus the catalog rows it matched. */
+export interface GardenIdentification {
+  common_name: string;
+  scientific_name: string;
+  category: string | null;
+  confidence: 'high' | 'medium' | 'low' | string;
+  is_seed_packet: boolean;
+  notes: string | null;
+  description: string | null;
+}
+
+export interface GardenIdentifyResult {
+  status: string;
+  identified: GardenIdentification;
+  matches: GardenSpecies[];
+  in_catalog: boolean;
+  can_draft_profile: boolean;
+  uncertain: string[];
+}
+
+export interface GardenDiagnosisCause {
+  cause: string;
+  confidence: string;
+  why: string | null;
+}
+
+export interface GardenDiagnosis {
+  likely_causes: GardenDiagnosisCause[];
+  confidence: string;
+  urgency: 'low' | 'medium' | 'high' | string;
+  recovery_steps: string[];
+  care_adjustments: string[];
+  summary: string;
+  uncertain?: string[];
+  context?: string;
+}
+
+export interface GardenDiagnoseResult {
+  diagnosis: GardenDiagnosis;
+  photo: GardenPlantPhoto;
+  nextcloud_warning: string | null;
+}
+
+export interface GardenPhotoUploadResult {
+  photo: GardenPlantPhoto;
+  nextcloud_warning: string | null;
+}
+
+/* ---------- end Photo journal, Plant ID & Plant Doctor (Phase 7) ---------- */
+
 /* ---------- end Harvest forecast, preservation & Put-Up Pantry (Phase 6) ---------- */
 

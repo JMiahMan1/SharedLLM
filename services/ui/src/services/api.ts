@@ -388,6 +388,10 @@ import type {
   PantryBatch,
   PantryBatchIn,
   PantryViewResponse,
+  GardenIdentifyResult,
+  GardenDiagnoseResult,
+  GardenPhotoList,
+  GardenPhotoUploadResult,
 } from '../types/api';
 
 declare module 'axios' {
@@ -3088,6 +3092,66 @@ export const api = {
 
   async gardenDeletePantryBatch(batchId: string): Promise<void> {
     await apiClient.delete(`/api/garden/pantry-batches/${encodeURIComponent(batchId)}`);
+  },
+
+  // --- Photos, Plant ID & Plant Doctor (Phase 7) ----------------
+
+  /** Snap-to-add: identify a plant or seed packet; nothing is created. */
+  async gardenIdentifyPhoto(photo: Blob): Promise<GardenIdentifyResult> {
+    const form = new FormData();
+    form.append('image', photo, 'plant.jpg');
+    const resp = await apiClient.post('/api/garden/vision/identify', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300_000,
+    });
+    return resp.data;
+  },
+
+  /** Plant Doctor: a diagnosis from a leaf photo plus this plant's history. */
+  async gardenDiagnosePlant(plantId: string, photo: Blob, symptoms?: string): Promise<GardenDiagnoseResult> {
+    const form = new FormData();
+    form.append('image', photo, 'leaf.jpg');
+    if (symptoms) form.append('symptoms', symptoms);
+    const resp = await apiClient.post(
+      `/api/garden/plants/${encodeURIComponent(plantId)}/diagnose`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300_000 },
+    );
+    return resp.data;
+  },
+
+  /** A growth-journal photo. Every family role may add one. */
+  async gardenUploadPlantPhoto(
+    plantId: string,
+    photo: Blob,
+    options?: { notes?: string; kind?: 'progress' | 'diagnosis' },
+  ): Promise<GardenPhotoUploadResult> {
+    const form = new FormData();
+    form.append('image', photo, 'growth.jpg');
+    if (options?.notes) form.append('notes', options.notes);
+    if (options?.kind) form.append('kind', options.kind);
+    const resp = await apiClient.post(
+      `/api/garden/plants/${encodeURIComponent(plantId)}/photos`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300_000 },
+    );
+    return resp.data;
+  },
+
+  async gardenListPlantPhotos(plantId: string): Promise<GardenPhotoList> {
+    const resp = await apiClient.get(`/api/garden/plants/${encodeURIComponent(plantId)}/photos`);
+    return resp.data;
+  },
+
+  async gardenDeletePlantPhoto(plantId: string, photoId: string): Promise<void> {
+    await apiClient.delete(
+      `/api/garden/plants/${encodeURIComponent(plantId)}/photos/${encodeURIComponent(photoId)}`,
+    );
+  },
+
+  /** Where a photo's cached thumbnail is served from (no Nextcloud round-trip). */
+  gardenPlantPhotoThumbUrl(plantId: string, photoId: string): string {
+    return `/api/garden/plants/${encodeURIComponent(plantId)}/photos/${encodeURIComponent(photoId)}/thumb`;
   },
 
   /** The family's Calibre library: search, by tag, or untagged. */

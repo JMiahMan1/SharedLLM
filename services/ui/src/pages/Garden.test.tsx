@@ -70,6 +70,13 @@ vi.mock('../services/api', () => ({
     gardenPatchPantryBatch: vi.fn(),
     gardenUsePantryBatch: vi.fn(),
     gardenDeletePantryBatch: vi.fn(),
+    gardenIdentifyPhoto: vi.fn(),
+    gardenDiagnosePlant: vi.fn(),
+    gardenUploadPlantPhoto: vi.fn(),
+    gardenListPlantPhotos: vi.fn(),
+    gardenDeletePlantPhoto: vi.fn(),
+    gardenPlantPhotoThumbUrl: (plantId: string, photoId: string) =>
+      `/api/garden/plants/${plantId}/photos/${photoId}/thumb`,
   },
 }));
 
@@ -121,6 +128,8 @@ beforeEach(() => {
     timeline: [],
   });
   vi.mocked(api.gardenListPlanCells).mockResolvedValue({ plan_id: '', bed_id: '', cells: [] });
+  // Photo journal (Phase 7) defaults: an empty journal, vision never called.
+  vi.mocked(api.gardenListPlantPhotos).mockResolvedValue({ plant_id: '', count: 0, photos: [] });
   // Pantry (Phase 6) defaults: empty everywhere unless a test says otherwise.
   vi.mocked(api.gardenHarvestForecast).mockResolvedValue({
     generated_on: '2026-11-20', window_days: 28, weather_used: false,
@@ -1453,5 +1462,178 @@ describe('Garden Pantry tab (Phase 6)', () => {
     fireEvent.click(await screen.findByRole('button', { name: '−1 Used' }));
 
     await waitFor(() => expect(vi.mocked(api.gardenUsePantryBatch)).toHaveBeenCalledWith('batch-1', 1));
+  });
+});
+
+describe('Garden photos, snap-to-add and the Plant Doctor (Phase 7)', () => {
+  const plant = {
+    id: 'plant-1', category: 'houseplant', species_ref: 'monstera_deliciosa',
+    location_id: null, nickname: 'Monty', quantity: 1, area_sqft_used: null,
+    pot_size_in: 6, pot_material: 'terracotta', has_drainage: true, soil_mix: null,
+    window_direction: 'e', distance_from_window: 2, planted_date: null, last_repotted_date: null,
+    planting_method: null, expected_harvest_start: null, expected_harvest_end: null,
+    status: 'active', assigned_to: 'kaleb', skylight_sync_enabled: false,
+    skylight_chore_id: null, skylight_assignee: null, next_due_at: null,
+    notes: null, calibration_factor: 1, last_harvested_at: null, regrowth_cooldown_days: null,
+    created_at: '', updated_at: '', species: null,
+  } as unknown as GardenPlant;
+
+  const identification = {
+    status: 'ok',
+    identified: {
+      common_name: 'Monstera', scientific_name: 'Monstera deliciosa', category: 'houseplant',
+      confidence: 'high', is_seed_packet: false, notes: 'Split leaves', description: 'A climber.',
+    },
+    matches: [{
+      key: 'monstera_deliciosa', category: 'houseplant', common_name: 'Monstera (Swiss Cheese Plant)',
+      scientific_name: 'Monstera deliciosa', description: 'Fenestrated climber.',
+    }],
+    in_catalog: true,
+    can_draft_profile: false,
+    uncertain: [],
+  };
+
+  const diagnosis = {
+    likely_causes: [{ cause: 'overwatering', confidence: 'high', why: 'yellow lower leaves' }],
+    confidence: 'high',
+    urgency: 'medium',
+    recovery_steps: ['Let the top 2 inches dry out', 'Check the drainage holes'],
+    care_adjustments: ['Water every 10 days instead of 7'],
+    summary: 'Too much water. Let it dry out.',
+  };
+
+  const journalPhoto = {
+    id: 'photo-1', plant_id: 'plant-1', nextcloud_path: 'Garden/Photos/plant-1/a.jpg',
+    thumb_path: 'photo-1.jpg', taken_at: '2026-11-18T09:00:00+00:00', taken_by: 'kaleb',
+    kind: 'progress', ai_summary_json: null, notes: 'New leaf', created_at: '2026-11-18T09:00:00+00:00',
+  };
+
+  const leaf = () => new File([new Uint8Array([0xff, 0xd8, 0xff])], 'leaf.jpg', { type: 'image/jpeg' });
+
+  it('identifies a plant from a photo and fills the form from the catalog', async () => {
+    vi.mocked(api.gardenToday).mockResolvedValue({ date: '2026-11-19', due_count: 0, overdue_count: 0, by_room: {}, all: [] });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.gardenListSpecies).mockResolvedValue({ category: null, usda_zone: null, count: 0, results: [], seed_present: true });
+    vi.mocked(api.gardenIdentifyPhoto).mockResolvedValue(identification as never);
+
+    render(<Garden />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText('Plants'));
+    fireEvent.click(await screen.findByText('Add Plant'));
+
+    fireEvent.change(document.getElementById('garden-identify-photo') as HTMLInputElement, {
+      target: { files: [leaf()] },
+    });
+
+    expect(await screen.findByText('Monstera')).toBeInTheDocument();
+    expect(screen.getByText('high confidence')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Use Monstera \(Swiss Cheese Plant\)/ }));
+
+    // Choosing the match selects the species, so the rest of the form is next.
+    await waitFor(() => expect(vi.mocked(api.gardenIdentifyPhoto)).toHaveBeenCalled());
+    expect(await screen.findByText('Monstera deliciosa')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Change' })).toBeInTheDocument();
+  });
+
+  it('offers a draft profile when the photo is not in the catalog', async () => {
+    vi.mocked(api.gardenToday).mockResolvedValue({ date: '2026-11-19', due_count: 0, overdue_count: 0, by_room: {}, all: [] });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.gardenListSpecies).mockResolvedValue({ category: null, usda_zone: null, count: 0, results: [], seed_present: true });
+    vi.mocked(api.gardenIdentifyPhoto).mockResolvedValue({
+      ...identification,
+      matches: [],
+      in_catalog: false,
+      can_draft_profile: true,
+      identified: { ...identification.identified, common_name: 'Philodendron spiritus-sancti' },
+    } as never);
+
+    render(<Garden />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText('Plants'));
+    fireEvent.click(await screen.findByText('Add Plant'));
+    fireEvent.change(document.getElementById('garden-identify-photo') as HTMLInputElement, {
+      target: { files: [leaf()] },
+    });
+
+    expect(await screen.findByText(/Not in the catalog yet/i)).toBeInTheDocument();
+  });
+
+  it('diagnoses a plant from a leaf photo and keeps the diagnosis', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(api.gardenGetPlant).mockResolvedValue(plant);
+    vi.mocked(api.gardenGetPlantLogs).mockResolvedValue({ plant_id: plant.id, count: 0, logs: [] });
+    vi.mocked(api.gardenListHarvests).mockResolvedValue({ harvests: [], count: 0 } as never);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.getFamilyDirectory).mockResolvedValue([]);
+    vi.mocked(api.gardenDiagnosePlant).mockResolvedValue({
+      diagnosis,
+      photo: { ...journalPhoto, kind: 'diagnosis' },
+      nextcloud_warning: null,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/garden/plants/plant-1']}>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <Routes>
+              <Route path="/garden/plants/:id" element={<PlantDetail />} />
+            </Routes>
+          </AuthProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Plant Doctor/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Plant Doctor' });
+    fireEvent.change(within(dialog).getByLabelText(/What have you noticed/), {
+      target: { value: 'yellow lower leaves' },
+    });
+    fireEvent.change(document.getElementById('doctor-photo') as HTMLInputElement, {
+      target: { files: [leaf()] },
+    });
+
+    expect(await within(dialog).findByText('Too much water. Let it dry out.')).toBeInTheDocument();
+    expect(within(dialog).getByText(/MEDIUM urgency/)).toBeInTheDocument();
+    expect(within(dialog).getByText('Let the top 2 inches dry out')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(vi.mocked(api.gardenDiagnosePlant)).toHaveBeenCalledWith(
+        'plant-1',
+        expect.any(File),
+        'yellow lower leaves',
+      ),
+    );
+  });
+
+  it('shows the growth journal with thumbnails and can delete a photo', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(api.gardenGetPlant).mockResolvedValue(plant);
+    vi.mocked(api.gardenGetPlantLogs).mockResolvedValue({ plant_id: plant.id, count: 0, logs: [] });
+    vi.mocked(api.gardenListHarvests).mockResolvedValue({ harvests: [], count: 0 } as never);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.getFamilyDirectory).mockResolvedValue([]);
+    vi.mocked(api.gardenListPlantPhotos).mockResolvedValue({
+      plant_id: plant.id, count: 1, photos: [journalPhoto],
+    });
+    vi.mocked(api.gardenDeletePlantPhoto).mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter initialEntries={['/garden/plants/plant-1']}>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <Routes>
+              <Route path="/garden/plants/:id" element={<PlantDetail />} />
+            </Routes>
+          </AuthProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Growth Journal')).toBeInTheDocument();
+    const thumb = await screen.findByAltText(/progress photo from 2026-11-18/);
+    expect(thumb).toHaveAttribute('src', '/api/garden/plants/plant-1/photos/photo-1/thumb');
+    expect(screen.getByText('New leaf')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete photo from 2026-11-18/ }));
+    await waitFor(() => expect(vi.mocked(api.gardenDeletePlantPhoto)).toHaveBeenCalledWith('plant-1', 'photo-1'));
   });
 });

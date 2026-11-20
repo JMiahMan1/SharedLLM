@@ -716,6 +716,39 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
       return json({ id: p.split('/')[4], label: 'Jam', method: 'water_bath_canning', qty_initial: 1, qty_remaining: 0, unit: 'pints', used_by: 'parent', qty_used: 1 });
     }
     if (p === '/api/garden/plans') return json({ count: 0, plans: [] });
+    // Phase 7: the photo journal and Alpaca Vision (nothing is created here).
+    if (p === '/api/garden/vision/identify') {
+      return json({
+        status: 'ok',
+        identified: {
+          common_name: 'Monstera', scientific_name: 'Monstera deliciosa', category: 'houseplant',
+          confidence: 'high', is_seed_packet: false, notes: 'Split leaves', description: 'A climber.',
+        },
+        matches: [],
+        in_catalog: false,
+        can_draft_profile: true,
+        uncertain: [],
+      });
+    }
+    if (/^\/api\/garden\/plants\/[^/]+\/photos$/.test(p)) {
+      if (method === 'POST') {
+        return json({
+          photo: {
+            id: 'photo-new', plant_id: 'plant', kind: 'progress', thumb_path: null,
+            nextcloud_path: null, taken_at: '2026-01-01T09:00:00Z', taken_by: 'parent',
+            ai_summary_json: null, notes: null, created_at: '2026-01-01T09:00:00Z',
+          },
+          nextcloud_warning: null,
+        }, 201);
+      }
+      return json({ plant_id: 'plant', count: 0, photos: [] });
+    }
+    if (/^\/api\/garden\/plants\/[^/]+\/photos\/[^/]+\/thumb$/.test(p)) {
+      return route.fulfill({ status: 404, body: '' });
+    }
+    if (/^\/api\/garden\/plants\/[^/]+\/photos\/[^/]+$/.test(p) && method === 'DELETE') {
+      return route.fulfill({ status: 204, body: '' });
+    }
     if (p === '/api/garden/species/custom') return json({ count: 0, results: [] });
     if (p === '/api/garden/species/search') {
       return json({ query: url.searchParams.get('q') || '', category: null, count: 0, results: [], seed_present: true });

@@ -12,6 +12,14 @@ import { openAllDetails, quietHotReload, screenFindings, settle, shot } from '..
 
 const expect = baseExpect.configure({ timeout: 15_000 });
 
+/** The smallest real JPEG, so the journal's thumbnails lay out as images. */
+const TINY_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a' +
+    'HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAA' +
+    'AAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==',
+  'base64',
+);
+
 interface Run {
   home: HomeMocks;
   errors: string[];
@@ -499,6 +507,47 @@ async function openGarden(page: Page, path = '/garden'): Promise<Run> {
       });
     }
     if (p === '/api/garden/plants/plant-monty/logs') return json({ logs: [] });
+    // Phase 7: the growth journal, with one real thumbnail to lay out.
+    if (p === '/api/garden/plants/plant-monty/photos') {
+      if (method === 'POST') {
+        return json({ photo: { id: 'photo-new', plant_id: 'plant-monty', kind: 'progress', taken_at: '2026-11-20T09:00:00Z', taken_by: 'parent', thumb_path: null, nextcloud_path: null, ai_summary_json: null, notes: null, created_at: '2026-11-20T09:00:00Z' }, nextcloud_warning: null }, 201);
+      }
+      return json({
+        plant_id: 'plant-monty',
+        count: 2,
+        photos: [
+          {
+            id: 'photo-1', plant_id: 'plant-monty', kind: 'progress',
+            thumb_path: 'photo-1.jpg', nextcloud_path: 'Garden/Photos/plant-monty/a.jpg',
+            taken_at: '2026-11-18T09:00:00Z', taken_by: 'parent', ai_summary_json: null,
+            notes: 'New leaf unfurling', created_at: '2026-11-18T09:00:00Z',
+          },
+          {
+            id: 'photo-2', plant_id: 'plant-monty', kind: 'diagnosis',
+            thumb_path: 'photo-2.jpg', nextcloud_path: 'Garden/Photos/plant-monty/b.jpg',
+            taken_at: '2026-11-12T09:00:00Z', taken_by: 'parent',
+            ai_summary_json: '{"urgency": "medium", "summary": "Overwatered."}',
+            notes: null, created_at: '2026-11-12T09:00:00Z',
+          },
+        ],
+      });
+    }
+    if (/^\/api\/garden\/plants\/[^/]+\/photos\/[^/]+\/thumb$/.test(p)) {
+      return route.fulfill({ status: 200, contentType: 'image/jpeg', body: TINY_JPEG });
+    }
+    if (/^\/api\/garden\/plants\/[^/]+\/photos\/[^/]+$/.test(p) && method === 'DELETE') {
+      return route.fulfill({ status: 204, body: '' });
+    }
+    if (p === '/api/garden/vision/identify') {
+      return json({
+        status: 'ok',
+        identified: { common_name: 'Monstera', scientific_name: 'Monstera deliciosa', category: 'houseplant', confidence: 'high', is_seed_packet: false, notes: 'Split leaves', description: 'A climber.' },
+        matches: [{ key: 'monstera_deliciosa', category: 'houseplant', common_name: 'Monstera (Swiss Cheese Plant)', scientific_name: 'Monstera deliciosa', description: 'Fenestrated climber.' }],
+        in_catalog: true,
+        can_draft_profile: false,
+        uncertain: [],
+      });
+    }
     if (p === '/api/garden/harvests') return json({ harvests: [], count: 0 });
     if (method === 'POST' && p === '/api/garden/profile/detect-zone') {
       return json({ zone: '5b', zone_source: 'auto', last_spring_frost_mmdd: '05-15', first_fall_frost_mmdd: '10-15' });

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Plus, Sun, Droplets, Leaf, X, ChevronRight,
   ShieldAlert, RotateCw, Flower, User, Zap, Settings, Search,
-  Scissors, ShoppingCart,
+  Scissors, ShoppingCart, HeartPulse,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
@@ -18,7 +18,8 @@ import {
   BedGridEditor, DualSizingPanel, PlansPanel, TimelinePanel, YardMapPanel, ZoneFrostPanel,
 } from '../components/garden/PlannerPanels';
 import { PantryTab } from '../components/garden/PantryPanels';
-import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn, GardenSkylightOptions, HarvestLogIn, HarvestReadyItem } from '../types/api';
+import { PhotoInput, PhotoJournalPanel, PlantDoctorModal } from '../components/garden/PhotoJournalPanel';
+import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn, GardenSkylightOptions, HarvestLogIn, HarvestReadyItem, GardenIdentifyResult } from '../types/api';
 
 /* ========================= Garden Page ========================= */
 
@@ -1207,6 +1208,7 @@ export function PlantDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [suppliesOpen, setSuppliesOpen] = useState(false);
+  const [doctorOpen, setDoctorOpen] = useState(false);
 
   const plantQuery = useQuery({
     queryKey: ['garden-plant', id],
@@ -1467,6 +1469,14 @@ export function PlantDetail() {
               {action.charAt(0).toUpperCase() + action.slice(1)}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setDoctorOpen(true)}
+            className="col-span-2 sm:col-span-2 inline-flex items-center justify-center gap-2 px-4 py-2 min-h-11 rounded-lg bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 border border-sky-500/20 text-sm transition-colors"
+          >
+            <HeartPulse size={14} className="shrink-0" />
+            <span>Plant Doctor</span>
+          </button>
           {['herb', 'vegetable', 'fruit'].includes(plant.category) && (
             <button
               type="button"
@@ -1492,6 +1502,8 @@ export function PlantDetail() {
           </button>
         </div>
       </div>
+
+      <PhotoJournalPanel plant={plant} canDeleteAny={canEdit} currentUser={user?.username ?? ''} />
 
       <div className="bg-white/5 border border-white/10 rounded-xl p-4">
         <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Recent Harvests</h3>
@@ -1532,6 +1544,7 @@ export function PlantDetail() {
       </div>
       {editOpen && <EditPlantModal plant={plant} onClose={() => setEditOpen(false)} />}
       {suppliesOpen && <SuppliesPickerModal plant={plant} onClose={() => setSuppliesOpen(false)} />}
+      {doctorOpen && <PlantDoctorModal plant={plant} onClose={() => setDoctorOpen(false)} />}
       {harvestOpen && (
         <HarvestModal
           open={harvestOpen}
@@ -1943,7 +1956,19 @@ function AddPlantModal({
   // enforces it too); everyone else adds their own.
   const canAssign = Boolean(user?.is_admin || ['mother', 'father'].includes(user?.family_role ?? ''));
   const family = useFamilyMembers();
+  const identifyMutation = useMutation({
+    mutationFn: (file: File) => api.gardenIdentifyPhoto(file),
+    onSuccess: (result) => setIdentify(result),
+    onError: (error: unknown) => {
+      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || 'That photo could not be read');
+    },
+    onSettled: () => setIdentifying(false),
+  });
   const [caregiver, setCaregiver] = useState('');
+  // Snap-to-add: the photo's identification, and the catalog rows it matched.
+  const [identify, setIdentify] = useState<GardenIdentifyResult | null>(null);
+  const [identifying, setIdentifying] = useState(false);
   const [query, setQuery] = useState('');
   const [speciesResults, setSpeciesResults] = useState<GardenSpecies[]>([]);
   const [selectedSpecies, setSelectedSpecies] = useState<GardenSpecies | null>(null);
@@ -2188,6 +2213,57 @@ function AddPlantModal({
         </div>
 
         <div className="space-y-4">
+          {/* Snap-to-add: a photo of the plant (or its seed packet) identifies it
+              and pre-fills the form. Nothing is created until the person says so. */}
+          <div className="rounded-lg border border-white/10 bg-white/5 p-3 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs text-slate-300">Know what it is? Let the camera tell us.</span>
+              <PhotoInput
+                id="garden-identify-photo"
+                label={identifying ? 'Looking…' : 'Snap / Upload Photo to Identify'}
+                onPick={(file) => {
+                  setIdentifying(true);
+                  identifyMutation.mutate(file);
+                }}
+                disabled={identifying}
+              />
+            </div>
+            {identify && (
+              <div className="space-y-2" aria-live="polite">
+                <p className="text-sm text-white">
+                  {identify.identified.common_name || 'Not sure what this is'}
+                  {identify.identified.scientific_name ? (
+                    <span className="text-xs text-slate-400 italic"> · {identify.identified.scientific_name}</span>
+                  ) : null}
+                  <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300">
+                    {identify.identified.confidence} confidence
+                  </span>
+                  {identify.identified.is_seed_packet && (
+                    <span className="ml-1 text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-slate-300">seed packet</span>
+                  )}
+                </p>
+                {identify.matches.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {identify.matches.map((match) => (
+                      <button
+                        key={match.key}
+                        type="button"
+                        onClick={() => setSelectedSpecies(match)}
+                        className="px-3 py-2 min-h-11 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-200 text-xs hover:bg-emerald-600/30"
+                      >
+                        Use {match.common_name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-amber-200">
+                    Not in the catalog yet. Type the name below and Jarvis can draft a care profile for it.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           <div>
             <label htmlFor="garden-add-species" className="block text-xs text-slate-400 mb-1">Search species</label>
             <input
