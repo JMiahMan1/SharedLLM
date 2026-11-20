@@ -123,7 +123,12 @@ def _same_word(a: str, b: str) -> bool:
 
 
 def _matches(wanted: str, tokens: Iterable[str]) -> bool:
-    return any(_same_word(wanted, token) for token in tokens)
+    """Does a catalog crop word (``"green bean"``) match the tokens a crop has?"""
+    tokens = list(tokens)
+    words = [word for word in _TOKEN_SPLIT.split((wanted or "").lower()) if word]
+    if not words:
+        return False
+    return all(any(_same_word(word, token) for token in tokens) for word in words)
 
 
 def _as_list(value: Any) -> list[str]:
@@ -391,7 +396,7 @@ def match_combos(crops: list[dict]) -> list[dict]:
     def names(words: list[str]) -> list[str]:
         found: list[str] = []
         for crop in crops:
-            if any(_same_word(word, token) for word in words for token in crop["tokens"]):
+            if any(_matches(word, crop["tokens"]) for word in words):
                 if crop["common_name"] not in found:
                     found.append(crop["common_name"])
         return found
@@ -470,7 +475,8 @@ def build_prep_checklist(items: list[dict], *, horizon_days: int = PREP_HORIZON_
     upcoming_crops = [
         {
             "common_name": item.get("common_name"),
-            "tokens": _tokens(item.get("common_name")) | set(item.get("culinary_aliases") or []),
+            "tokens": _tokens(item.get("common_name"))
+            | _tokens(" ".join(item.get("culinary_aliases") or [])),
         }
         for item in upcoming
     ]
@@ -631,11 +637,14 @@ def build_pantry_view(
     rows: list[dict] = []
     for batch in batches:
         flags = batch_flags(batch, today=today)
+        oldest = oldest_by_label.get(batch.label.strip().lower()) == batch.id
         rows.append(
             {
                 **PantryBatchOut.model_validate(batch).model_dump(),
                 **flags,
-                "oldest_in_label": oldest_by_label.get(batch.label.strip().lower()) == batch.id,
+                # The oldest jar of a label is used first even with a later date.
+                "use_first": bool(flags["use_first"] or oldest),
+                "oldest_in_label": oldest,
                 "method_label": method_label(batch.method),
             }
         )

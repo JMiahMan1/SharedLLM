@@ -534,3 +534,28 @@ def test_the_advice_route_returns_the_safety_sources(client, monkeypatch):
 def test_the_forecast_window_is_bounded(client):
     assert client.get("/harvest/forecast", headers=CHILD, params={"days": 0}).status_code == 422
     assert client.get("/harvest/forecast", headers=CHILD, params={"days": 999}).status_code == 422
+
+
+def test_the_oldest_batch_of_a_label_is_flagged_even_with_a_late_date(client):
+    far = (date.today() + timedelta(days=400)).isoformat()
+    _batch(client, qty=6.0, use_by=far, batch_date="2025-09-15")
+    _batch(client, qty=6.0, use_by=far, batch_date="2026-09-15")
+
+    rows = client.get("/pantry-batches", headers=PARENT).json()["batches"]
+
+    oldest = next(row for row in rows if row["batch_date"] == "2025-09-15")
+    assert oldest["oldest_in_label"] is True
+    assert oldest["use_first"] is True
+    assert next(row for row in rows if row["batch_date"] == "2026-09-15")["use_first"] is False
+
+
+def test_a_two_word_crop_matches_a_combo_ingredient(session):
+    _grow(session, "zucchini")
+    _grow(session, "green_bean_bush")
+
+    combos = {c["key"]: c for c in _advice(session)["combos"]}
+
+    # "green bean" is a two-word optional ingredient of the freezer packs combo:
+    # the whole phrase must match, not just its first word.
+    assert "Bush Green Bean" in combos["squash_freezer_packs"]["optional_matched"]
+    assert combos["squash_freezer_packs"]["ready"] is True
