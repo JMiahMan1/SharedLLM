@@ -5,7 +5,7 @@ import { mockBible } from '../fixtures/bibleMocks';
 import { mockFamilyPages, CONVERSATIONS } from '../fixtures/familyPagesMocks';
 import { screenFindings, settle, shot, quietHotReload, type Allowed } from '../fixtures/pageAudit';
 import JSZip from 'jszip';
-import { deriveKey, encryptBytes, makeVerifier, openMessage, openRecord, randomBytes, sealMessage, sealRecord, toBase64, PBKDF2_ITERATIONS, type PrivatePayload } from '../../src/lib/privateChatCrypto';
+import { deriveKey, encryptBytes, encryptVideo, makeVerifier, openMessage, openRecord, randomBytes, sealMessage, sealRecord, toBase64, PBKDF2_ITERATIONS, type PrivatePayload } from '../../src/lib/privateChatCrypto';
 import { fakeJpeg } from '../../src/test/fakes/fakeJpeg';
 import { TINY_WEBM_BASE64 } from '../fixtures/tinyVideo';
 
@@ -1216,6 +1216,153 @@ test.describe('private chat on every form factor', () => {
     await page.getByRole('button', { name: 'Close gallery' }).click();
 
     // Locking wipes it: no decrypted picture is left on the page.
+    await page.getByTestId('private-lock-now').click();
+    expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
+    done(run);
+  });
+
+  test('the gallery grid, filters, selecting, the viewer swiped and zoomed, and the slideshow with its settings', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    const run = await open(page, server);
+    // Made-up pictures of different shapes, drawn by the page's own canvas (no real photo anywhere).
+    const shapes: Array<[number, number]> = [[640, 400], [300, 480], [800, 300], [500, 500]];
+    const drawn = await page.evaluate((sizes) => sizes.map(([w, h], i) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const g = canvas.getContext('2d')!;
+      const grad = g.createLinearGradient(0, 0, w, h);
+      grad.addColorStop(0, `hsl(${i * 80} 70% 55%)`);
+      grad.addColorStop(1, `hsl(${i * 80 + 40} 60% 30%)`);
+      g.fillStyle = grad;
+      g.fillRect(0, 0, w, h);
+      return canvas.toDataURL('image/jpeg', 0.8);
+    }), shapes);
+    const jpeg = (dataUrl: string) => new Uint8Array(Buffer.from(dataUrl.split(',')[1], 'base64'));
+    for (const [i, url] of drawn.entries()) {
+      const blob = String(i + 1).padStart(32, 'a');
+      server.blobs[blob] = Buffer.from(await encryptBytes(key, jpeg(url)));
+      server.messages.push({ id: 2 + i, token: TOKEN, actor_type: 'users', actor_id: i % 2 ? 'robin' : 'parent',
+        actor_display_name: i % 2 ? 'Robin' : 'Parent', timestamp: SEC - 900 + i * 60, message_type: 'comment',
+        message: await sealMessage(key, { t: 'image', blob, mime: 'image/jpeg', sent_at: SEC - 900 + i * 60 }) });
+    }
+    // And one clip, sealed in pieces like the app sends it.
+    const poster = 'b'.repeat(32);
+    server.blobs[poster] = Buffer.from(await encryptBytes(key, jpeg(drawn[2])));
+    let piece = 0;
+    const sealed = await encryptVideo(key, new Blob([Buffer.from(TINY_WEBM_BASE64, 'base64')]), async (bytes) => {
+      const id = String(piece++).padStart(32, 'c');
+      server.blobs[id] = Buffer.from(bytes);
+      return id;
+    });
+    server.messages.push({ id: 10, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 60,
+      message_type: 'comment', message: await sealMessage(key, { t: 'video', mime: 'video/webm', size: sealed.size, duration: 2,
+        poster, chunks: sealed.chunks, clip: sealed.clip, chunk_bytes: sealed.chunk_bytes, sent_at: SEC - 60 }) });
+
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await page.getByTestId('private-gallery-open').click();
+    const gallery = page.getByTestId('private-gallery');
+    const tiles = gallery.getByTestId('private-gallery-tile');
+    await expect(tiles).toHaveCount(5);
+    await expect(gallery.getByTestId('private-gallery-count')).toHaveText('4 photos, 1 video');
+    await expect(gallery.locator('img[src^="blob:"]')).toHaveCount(5);
+
+    // Justified rows: once decrypted, each picture keeps its shape, the tiles of a row share one height.
+    await expect.poll(async () => {
+      const boxes = await tiles.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => [Math.round(r.width), Math.round(r.height)]));
+      return new Set(boxes.map(([w]) => w)).size > 1;
+    }).toBe(true);
+    await check(page, info, run, 'private gallery grid', gallery);
+
+    // Filters.
+    await gallery.getByTestId('private-gallery-filter-videos').click();
+    await expect(tiles).toHaveCount(1);
+    await gallery.getByTestId('private-gallery-filter-photos').click();
+    await expect(tiles).toHaveCount(4);
+    await gallery.getByTestId('private-gallery-filter-all').click();
+    await expect(tiles).toHaveCount(5);
+
+    // Selecting two, then a slideshow of just those.
+    await gallery.getByTestId('private-gallery-select').click();
+    await tiles.nth(1).click();
+    await tiles.nth(2).click();
+    await expect(gallery.getByTestId('private-gallery-selected-count')).toHaveText('2 selected');
+    await expect(tiles.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    await check(page, info, run, 'private gallery selecting', gallery);
+    await gallery.getByTestId('private-gallery-selection-slideshow').click();
+    const show = page.getByTestId('private-slideshow');
+    await expect(show.getByTestId('private-slideshow-position')).toHaveText('1 of 2');
+    await page.keyboard.press('Escape');
+    if (await show.count()) await page.keyboard.press('Escape');
+    await expect(show).toHaveCount(0);
+    await gallery.getByRole('button', { name: 'Stop selecting' }).click();
+    await expect(gallery.getByTestId('private-gallery-selected-count')).toHaveCount(0);
+
+    // The viewer: arrow keys and a swipe move through the gallery, a double tap zooms.
+    await tiles.nth(1).click();
+    const viewer = page.getByTestId('private-gallery-viewer');
+    await expect(viewer.getByTestId('private-gallery-position')).toHaveText('2 of 5');
+    await page.keyboard.press('ArrowRight');
+    await expect(viewer.getByTestId('private-gallery-position')).toHaveText('3 of 5');
+    await page.keyboard.press('ArrowLeft');
+    await expect(viewer.getByTestId('private-gallery-position')).toHaveText('2 of 5');
+    const stage = viewer.getByTestId('private-gallery-stage');
+    await expect(viewer.getByTestId('private-gallery-photo')).toBeVisible();
+    const box = (await stage.boundingBox())!;
+    const cy = box.y + box.height / 2;
+    await page.mouse.move(box.x + box.width * 0.8, cy);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.5, cy, { steps: 6 });
+    await page.mouse.move(box.x + box.width * 0.2, cy, { steps: 6 });
+    await page.mouse.up();
+    await expect(viewer.getByTestId('private-gallery-position')).toHaveText('3 of 5');
+    await expect(viewer.getByTestId('private-gallery-photo')).toBeVisible();
+    await page.mouse.click(box.x + box.width / 2, cy);
+    await page.mouse.click(box.x + box.width / 2, cy);
+    const fit = viewer.getByTestId('private-gallery-zoom-reset');
+    await expect(fit).toContainText('250%');
+    await check(page, info, run, 'private gallery viewer zoomed', viewer);
+    await fit.click();
+    await expect(fit).toHaveCount(0);
+
+    // A slideshow from this picture: it plays, its settings change, it pauses and skips, and Esc leaves it.
+    await viewer.getByTestId('private-gallery-viewer-slideshow').click();
+    await expect(viewer).toHaveCount(0);
+    await expect(show).toHaveAttribute('data-playing', 'true');
+    await expect(show.getByTestId('private-slideshow-position')).toHaveText('1 of 5');
+    await expect(show.getByTestId('private-slideshow-current')).toHaveAttribute('data-blob', String(3).padStart(32, 'a'));
+    await page.keyboard.press(' ');
+    await expect(show).toHaveAttribute('data-playing', 'false');
+    await show.getByTestId('private-slideshow-settings-open').click();
+    const settings = show.getByTestId('private-slideshow-settings');
+    await settings.getByRole('button', { name: '3s' }).click();
+    await settings.getByRole('button', { name: 'Crossfade' }).click();
+    await settings.getByRole('button', { name: 'Loop' }).click();
+    await expect(settings.getByRole('button', { name: '3s' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(settings.getByRole('button', { name: 'Loop' })).toHaveAttribute('aria-pressed', 'false');
+    await check(page, info, run, 'private slideshow settings', show);
+    await settings.getByRole('button', { name: 'Shuffle' }).click();
+    // Shuffling keeps the picture on screen first.
+    await expect(show.getByTestId('private-slideshow-position')).toHaveText('1 of 5 · shuffled');
+    await expect(show.getByTestId('private-slideshow-current')).toHaveAttribute('data-blob', String(3).padStart(32, 'a'));
+    await settings.getByRole('button', { name: 'Shuffle' }).click();
+    await show.getByTestId('private-slideshow-settings-open').click();
+    await expect(settings).toHaveCount(0);
+    await page.keyboard.press('ArrowRight');
+    await expect(show.getByTestId('private-slideshow-position')).toHaveText('2 of 5');
+    await check(page, info, run, 'private slideshow paused', show);
+    // Playing again moves on by itself after 3 seconds.
+    await page.keyboard.press(' ');
+    await expect(show).toHaveAttribute('data-playing', 'true');
+    await expect(show.getByTestId('private-slideshow-position')).toHaveText('3 of 5', { timeout: 10_000 });
+    await page.keyboard.press('Escape');
+    if (await show.count()) await page.keyboard.press('Escape');
+    await expect(show).toHaveCount(0);
+    await expect(gallery).toBeVisible();
+    await gallery.getByRole('button', { name: 'Close gallery' }).click();
+
+    // Locking wipes it all.
     await page.getByTestId('private-lock-now').click();
     expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
     done(run);

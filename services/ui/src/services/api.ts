@@ -3859,6 +3859,17 @@ export const api = {
     return resp.data;
   },
 
+  /** Take my reaction off a message; everyone else's stays. */
+  async unreactToTalkMessage(payload: {
+    token: string;
+    message_id: number;
+    reaction: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/unreact', payload);
+    return resp.data;
+  },
+
   async sendTalkVoice(payload: {
     token: string;
     audio_base64: string;

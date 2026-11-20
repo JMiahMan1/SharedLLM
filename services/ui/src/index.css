@@ -669,3 +669,35 @@ input[type="range"] {
   30% { transform: scale(1.04); }
   60% { transform: scale(0.99); }
 }
+
+/* The private gallery: the viewer sliding to the next or previous picture, a fade on open. */
+@keyframes pg-in-right {
+  from { transform: translateX(14%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes pg-in-left {
+  from { transform: translateX(-14%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes pg-fade {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* The slideshow: a crossfade in, a Ken Burns pan and zoom (its moves come from CSS variables), and the progress bar. */
+@keyframes pg-slide-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pg-kenburns {
+  from { transform: translate3d(var(--kb-fx, 0%), var(--kb-fy, 0%), 0) scale(var(--kb-fs, 1.04)); }
+  to { transform: translate3d(var(--kb-tx, 0%), var(--kb-ty, 0%), 0) scale(var(--kb-ts, 1.16)); }
+}
+@keyframes pg-progress {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes pg-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}

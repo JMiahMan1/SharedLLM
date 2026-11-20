@@ -13,6 +13,10 @@ import {
   previewLine,
   reactionCounts,
   sortMessages,
+  isHiddenUpdate,
+  newestMessageId,
+  reactorNames,
+  toggleReaction,
   type TalkMessage,
 } from './chatModel';
 
@@ -72,6 +76,39 @@ describe('chat model', () => {
     expect(reactionCounts({ '❤️': [{ actorId: 'a' }, { actorId: 'b' }] })).toEqual({ '❤️': 2 });
     expect(reactionCounts([{ reaction: '🎉' }, { reaction: '🎉' }])).toEqual({ '🎉': 2 });
     expect(reactionCounts(undefined)).toEqual({});
+  });
+
+  it('toggles only my reaction: a second person adds to the count, taking mine back leaves theirs', () => {
+    const theirs = { reactions: { '👍': 1 }, reactions_self: [] as string[] };
+    const added = toggleReaction(theirs, '👍');
+    expect(added).toEqual({ reactions: { '👍': 2 }, reactions_self: ['👍'], adding: true });
+    const removed = toggleReaction(added, '👍');
+    expect(removed).toEqual({ reactions: { '👍': 1 }, reactions_self: [], adding: false });
+    // My last one goes away entirely, and a different emoji is its own chip.
+    expect(toggleReaction({ reactions: { '🎉': 1 }, reactions_self: ['🎉'] }, '🎉').reactions).toEqual({});
+    expect(toggleReaction({ reactions: { '🎉': 1 } }, '❤️').reactions).toEqual({ '🎉': 1, '❤️': 1 });
+  });
+
+  it('keeps reaction updates out of the feed but still counts their ids', () => {
+    const update: TalkMessage = { id: 12, message_type: 'system', system_message: 'reaction', message: '👍' };
+    expect(isHiddenUpdate(update)).toBe(true);
+    expect(isHiddenUpdate({ id: 13, message_type: 'system', system_message: 'call_joined' })).toBe(false);
+    expect(isHiddenUpdate({ id: 14, message_type: 'comment', message: 'reaction' })).toBe(false);
+    expect(newestMessageId({ detail: { messages: [], last_id: 12 } })).toBe(12);
+    expect(newestMessageId({ detail: { messages: [{ id: 3 }, { id: 9 }] } })).toBe(9);
+    expect(newestMessageId(undefined)).toBe(0);
+  });
+
+  it('names who reacted, me first as You', () => {
+    expect(
+      reactorNames(
+        [
+          { actor_type: 'users', actor_id: 'sam', display_name: 'Sam' },
+          { actor_type: 'users', actor_id: 'Alex', display_name: 'Alex' },
+        ],
+        me,
+      ),
+    ).toEqual(['You', 'Sam']);
   });
 
   it('fills placeholders: a file becomes an attachment, a mention a chip, a URL a link', () => {

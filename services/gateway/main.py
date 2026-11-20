@@ -9393,6 +9393,20 @@ async def proxy_react_talk_message(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/communication/talk/unreact")
+async def proxy_unreact_talk_message(request: Request):
+    """Take my reaction off a message (tapping my own chip again)."""
+    body = await request.json()
+    private_chat.guard_talk(body.get("token"), "react")
+    payload = {
+        "action": "unreact",
+        "token": body.get("token"),
+        "message_id": body.get("message_id"),
+        "reaction": body.get("reaction"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
 #: How long one call is "announced": the first joiner claims this key, so a
 #: group where everybody taps Join produces one notice, not one per person.
 CALL_NOTICE_SECONDS = 900

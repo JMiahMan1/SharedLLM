@@ -15,8 +15,10 @@ import {
   sameDay,
   timeLabel,
   type MessageRun,
+  type Reactor,
   type TalkMessage,
 } from './chatModel';
+import ReactionChips from './ReactionChips';
 
 /** How close to the bottom still counts as "reading the latest". */
 const AT_BOTTOM_PX = 80;
@@ -34,6 +36,8 @@ interface MessageThreadProps {
   jarvisThinking: boolean;
   reactionCounts: (message: TalkMessage) => Record<string, number>;
   onReact: (message: TalkMessage, emoji: string) => void;
+  /** Who reacted with what, asked when a chip is held. */
+  loadReactors?: (message: TalkMessage) => Promise<Record<string, Reactor[]>>;
   onReply: (message: TalkMessage) => void;
   onEdit: (message: TalkMessage) => void;
   onDelete: (message: TalkMessage) => void;
@@ -55,6 +59,7 @@ export default function MessageThread({
   jarvisThinking,
   reactionCounts,
   onReact,
+  loadReactors,
   onReply,
   onEdit,
   onDelete,
@@ -231,6 +236,7 @@ export default function MessageThread({
                   receiptMessage={myLatest}
                   lastCommonRead={lastCommonRead}
                   reactionCounts={reactionCounts}
+                  loadReactors={loadReactors}
                   onToggle={(key) => setActiveKey((current) => (current === key ? null : key))}
                   onReact={(message, emoji) => {
                     setActiveKey(null);
@@ -299,6 +305,7 @@ interface RunProps {
   receiptMessage?: TalkMessage;
   lastCommonRead?: number;
   reactionCounts: (message: TalkMessage) => Record<string, number>;
+  loadReactors?: (message: TalkMessage) => Promise<Record<string, Reactor[]>>;
   onToggle: (key: string) => void;
   onReact: (message: TalkMessage, emoji: string) => void;
   onReply: (message: TalkMessage) => void;
@@ -322,6 +329,7 @@ function Run({
   receiptMessage,
   lastCommonRead,
   reactionCounts,
+  loadReactors,
   onToggle,
   onReact,
   onReply,
@@ -434,23 +442,15 @@ function Run({
               </div>
 
               {hasReactions && (
-                <div className={`-mt-1.5 flex flex-wrap gap-1 px-2 ${mine ? 'justify-end' : ''}`} data-testid="reaction-chips">
-                  {Object.entries(counts).map(([emoji, count]) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => canAct && onReact(message, emoji)}
-                      aria-label={`${emoji} ${count}`}
-                      // A small chip under the bubble; on a phone its tap area reaches 44px above and below it.
-                      className={`relative max-sm:before:absolute max-sm:before:inset-x-0 max-sm:before:-inset-y-2.5 max-sm:before:content-[''] rounded-full border px-1.5 py-0.5 text-[12px] shadow ${
-                        message.reactions_self?.includes(emoji) ? 'border-purple-400/60 bg-purple-500/30' : 'border-white/10 bg-slate-800'
-                      }`}
-                    >
-                      {emoji}
-                      {count > 1 ? ` ${count}` : ''}
-                    </button>
-                  ))}
-                </div>
+                <ReactionChips
+                  message={message}
+                  counts={counts}
+                  mine={mine}
+                  canAct={canAct}
+                  myActorIds={myActorIds}
+                  onReact={onReact}
+                  loadReactors={loadReactors}
+                />
               )}
 
               {open && (
@@ -463,7 +463,10 @@ function Run({
                       key={emoji}
                       type="button"
                       aria-label={`React ${emoji}`}
-                      className="min-h-11 min-w-11 rounded-full text-xl transition hover:scale-125 hover:bg-white/10 sm:min-h-10 sm:min-w-10"
+                      aria-pressed={Boolean(message.reactions_self?.includes(emoji))}
+                      className={`min-h-11 min-w-11 rounded-full text-xl transition hover:scale-125 hover:bg-white/10 sm:min-h-10 sm:min-w-10 ${
+                        message.reactions_self?.includes(emoji) ? 'bg-purple-500/30 ring-1 ring-purple-400/60' : ''
+                      }`}
                       onClick={() => onReact(message, emoji)}
                     >
                       {emoji}

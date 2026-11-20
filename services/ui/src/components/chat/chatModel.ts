@@ -279,6 +279,70 @@ export function reactionCounts(raw: unknown): Record<string, number> {
   return counts;
 }
 
+/**
+ * Talk posts each reaction (and each removal) as a system message whose parent
+ * is the message reacted to. They are updates, not lines to draw: shown, each
+ * reaction became a lone emoji in the middle of the feed instead of a chip on
+ * the message. Execution leaves them out; this keeps a stale server honest.
+ */
+const HIDDEN_UPDATES = new Set(['reaction', 'reaction_deleted', 'reaction_revoked']);
+
+export function isHiddenUpdate(message: TalkMessage): boolean {
+  return message.message_type === 'system' && HIDDEN_UPDATES.has(message.system_message || '');
+}
+
+/** The newest message id a page or long poll has seen, hidden updates included. */
+export function newestMessageId(response: { detail?: unknown } | undefined): number {
+  const detail = response?.detail as { last_id?: unknown } | undefined;
+  const ids = detailList<{ id?: unknown }>(response, 'messages').map((m) => Number(m.id) || 0);
+  return Math.max(0, Number(detail?.last_id) || 0, ...ids);
+}
+
+/** What a message's reactions are now, as the feed draws them. */
+export interface ReactionState {
+  reactions: Record<string, number>;
+  reactions_self: string[];
+}
+
+/**
+ * My reaction toggled on a message, before the server answers: tapping an
+ * emoji I have not used adds me (one more, beside everyone else's), tapping one
+ * I have takes me off. Nobody else's reaction is touched.
+ */
+export function toggleReaction(message: Pick<TalkMessage, 'reactions' | 'reactions_self'>, emoji: string): ReactionState & { adding: boolean } {
+  const counts = reactionCounts(message.reactions);
+  const mine = new Set(message.reactions_self ?? []);
+  const adding = !mine.has(emoji);
+  if (adding) {
+    mine.add(emoji);
+    counts[emoji] = (counts[emoji] || 0) + 1;
+  } else {
+    mine.delete(emoji);
+    const left = (counts[emoji] || 1) - 1;
+    if (left > 0) counts[emoji] = left;
+    else delete counts[emoji];
+  }
+  return { reactions: counts, reactions_self: [...mine], adding };
+}
+
+/** One person's reaction, as the reactions endpoint lists them. */
+export interface Reactor {
+  actor_id?: string;
+  actor_type?: string;
+  display_name?: string;
+}
+
+/** "You, Sam and Alex" for a chip's label: me first, then everyone else by name. */
+export function reactorNames(people: Reactor[] | undefined, myActorIds: ReadonlySet<string>): string[] {
+  const names: string[] = [];
+  let me = false;
+  for (const person of people ?? []) {
+    if (person.actor_type === 'users' && myActorIds.has(String(person.actor_id || '').toLowerCase())) me = true;
+    else names.push(person.display_name || person.actor_id || 'Someone');
+  }
+  return me ? ['You', ...names] : names;
+}
+
 export const JARVIS_ID = 'jarvis';
 
 /** A Jarvis answer, marked by its envelope (it is posted with the asker's login). */

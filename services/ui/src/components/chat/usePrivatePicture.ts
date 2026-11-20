@@ -9,10 +9,80 @@ export const noSave = {
   onDragStart: (event: { preventDefault: () => void }) => event.preventDefault(),
 };
 
+interface Shared {
+  epoch: number;
+  refs: number;
+  promise: Promise<string>;
+  url?: string;
+  /** Released for good: its URL is (or will be, once made) revoked. */
+  gone: boolean;
+}
+
+/**
+ * Decrypted pictures in use right now, per vault, by chat and blob: the tile,
+ * the viewer and the slideshow showing the same picture share one decrypt and
+ * one object URL. In memory only, counted, and let go (revoked) the moment the
+ * last screen using it closes; the vault revokes everything on lock anyway.
+ */
+const shared = new WeakMap<PrivateVault, Map<string, Shared>>();
+
+function acquirePicture(vault: PrivateVault, token: string, blob: string, mime: string): Shared {
+  let byKey = shared.get(vault);
+  if (!byKey) {
+    byKey = new Map();
+    shared.set(vault, byKey);
+  }
+  const key = `${token}\n${blob}`;
+  const held = byKey.get(key);
+  // A release (lock, chat off the screen) revoked every URL: anything from before it is dead.
+  if (held && held.epoch === vault.epoch && !held.gone) {
+    held.refs += 1;
+    return held;
+  }
+  const entry: Shared = { epoch: vault.epoch, refs: 1, promise: Promise.resolve(''), gone: false };
+  entry.promise = api
+    .getPrivateBlob(token, blob)
+    .then((bytes) => vault.pictureUrl(bytes, mime))
+    .then((url) => {
+      entry.url = url;
+      // Everyone stopped wanting it while it was decrypting.
+      if (entry.gone) vault.revoke(url);
+      return url;
+    });
+  entry.promise.catch(() => {
+    if (byKey.get(key) === entry) byKey.delete(key);
+  });
+  byKey.set(key, entry);
+  return entry;
+}
+
+/**
+ * How long an unused picture is kept before its URL is revoked: long enough
+ * for a screen that remounts (or a tile handing over to the viewer) to pick it
+ * up again without a second download and decrypt, short enough that a closed
+ * gallery or slideshow is not holding pictures in memory.
+ */
+const GRACE_MS = 1500;
+
+/** Let go of one use of a picture: the very entry acquired, never a newer one under the same key. */
+function releasePicture(vault: PrivateVault, token: string, blob: string, held: Shared): void {
+  held.refs -= 1;
+  if (held.refs > 0) return;
+  window.setTimeout(() => {
+    if (held.refs > 0 || held.gone) return;
+    held.gone = true;
+    const byKey = shared.get(vault);
+    const key = `${token}\n${blob}`;
+    if (byKey?.get(key) === held) byKey.delete(key);
+    if (held.url) vault.revoke(held.url);
+  }, GRACE_MS);
+}
+
 /**
  * One encrypted picture of the chat: fetched (ciphertext), decrypted in memory
- * and shown from an object URL the vault revokes when the chat locks or leaves
- * the screen. Nothing decrypted is cached anywhere else.
+ * and shown from an object URL. The URL is revoked when nothing on screen uses
+ * it any more, and by the vault when the chat locks or leaves the screen.
+ * Nothing decrypted is cached anywhere else (no storage, no service worker).
  */
 export function usePrivatePicture(token: string, blob: string, mime: string, vault: PrivateVault, enabled = true): { url: string; failed: boolean } {
   const [url, setUrl] = useState('');
@@ -22,9 +92,8 @@ export function usePrivatePicture(token: string, blob: string, mime: string, vau
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    void api
-      .getPrivateBlob(token, blob)
-      .then((bytes) => vault.pictureUrl(bytes, mime))
+    const held = acquirePicture(vault, token, blob, mime);
+    void held.promise
       .then((made) => {
         if (live) setUrl(made);
       })
@@ -33,6 +102,7 @@ export function usePrivatePicture(token: string, blob: string, mime: string, vau
       });
     return () => {
       live = false;
+      releasePicture(vault, token, blob, held);
     };
   }, [token, blob, mime, vault, epoch, enabled]);
   return { url, failed };

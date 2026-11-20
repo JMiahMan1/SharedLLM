@@ -30,6 +30,26 @@ let apiKeys: Array<Record<string, unknown>> = [];
 let logs: Array<Record<string, unknown>> = [];
 let talkConversations: Array<Record<string, unknown>> = [];
 let talkMessages: Record<string, Array<Record<string, unknown>>> = {};
+
+/** Add or take back this user's reaction on a stored message, answering as execution does. */
+function mockReaction(body: { token?: string; message_id?: number; reaction?: string }, adding: boolean) {
+  const emoji = body.reaction || '👍';
+  const list = talkMessages[String(body.token)] || [];
+  const message = list.find((m) => m.id === body.message_id) ?? {};
+  const counts = { ...((message.reactions as Record<string, number> | undefined) ?? {}) };
+  const mine = new Set((message.reactions_self as string[] | undefined) ?? []);
+  if (adding && !mine.has(emoji)) {
+    mine.add(emoji);
+    counts[emoji] = (counts[emoji] || 0) + 1;
+  } else if (!adding && mine.has(emoji)) {
+    mine.delete(emoji);
+    counts[emoji] = (counts[emoji] || 1) - 1;
+    if (counts[emoji] <= 0) delete counts[emoji];
+  }
+  message.reactions = counts;
+  message.reactions_self = [...mine];
+  return { reactions: counts, reactions_self: [...mine], reactors: {} };
+}
 let talkPolls: Array<Record<string, unknown>> = [];
 let widgetSettings: Array<Record<string, unknown>> = [];
 let credentialShares: Record<string, Record<string, unknown>> = {};
@@ -907,19 +927,21 @@ export const server = setupServer(
       status: 'SUCCESS',
       service: 'talk_reactions',
       detail: {
-        reactions: [
-          { reaction: '\u2764\ufe0f', actor_display_name: 'Sam' },
-        ],
+        reactions: { '\u2764\ufe0f': 1 },
+        reactions_self: [],
+        reactors: { '\u2764\ufe0f': [{ actor_type: 'users', actor_id: 'sam', display_name: 'Sam' }] },
       },
     })
   ),
+  // As execution answers: counts per emoji, my own, and who (Talk's {emoji: [actors]} reshaped).
+  // Stored on the message, like Talk, so the refetch after a reaction still carries it.
   http.post('/api/communication/talk/react', async ({ request }) => {
-    const body = await request.json() as { reaction?: string };
-    return HttpResponse.json({
-      status: 'SUCCESS',
-      service: 'talk_react',
-      detail: { reactions: [{ reaction: body.reaction || '\ud83d\udc4d', actor_display_name: 'You' }] },
-    });
+    const body = await request.json() as { token?: string; message_id?: number; reaction?: string };
+    return HttpResponse.json({ status: 'SUCCESS', service: 'talk_react', detail: mockReaction(body, true) });
+  }),
+  http.post('/api/communication/talk/unreact', async ({ request }) => {
+    const body = await request.json() as { token?: string; message_id?: number; reaction?: string };
+    return HttpResponse.json({ status: 'SUCCESS', service: 'talk_unreact', detail: mockReaction(body, false) });
   }),
   http.post('/api/communication/talk/voice', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
