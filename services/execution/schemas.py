@@ -1304,9 +1304,37 @@ class OcrRequest(BaseRequest):
     # An image sent inline instead of a workspace file (a photo of a food label
     # from the Health hub): base64 bytes, never written outside a temp file.
     image_base64: str | None = Field(None, description="Base64 image bytes, used instead of image_path")
-    task: str = Field("general", description="OCR task type: 'general', 'document', or 'price_scrape'")
+    task: str = Field(
+        "general",
+        description=(
+            "Vision task type: 'general', 'document', 'price_scrape', 'recipe', "
+            "'plant_identify' or 'plant_diagnose'."
+        ),
+    )
+    context: str | None = Field(
+        None,
+        description="Extra context for the task's prompt (e.g. a plant's care history and symptoms).",
+    )
     model: str | None = Field(None, description="Override vision model name (default: vision_ocr_model setting)")
     proxy_url: str | None = Field(None, description="Override LLM proxy URL (default: llm_local_url setting)")
+
+
+class PhotoUploadRequest(BaseRequest):
+    """Stores a photo in the household's Nextcloud under ``folder``.
+
+    The Garden hub keeps a growth journal in ``Garden/Photos/<plant>/``; it never
+    holds Nextcloud credentials itself, so the bytes come through here. With
+    ``thumbnail_max_px`` the same request also returns a base64 thumbnail, made
+    by the one image stack that already depends on Pillow.
+    """
+    user_context: UserContext
+    folder: str = Field(..., description="Path inside Nextcloud, e.g. 'Garden/Photos/<plant_id>'")
+    filename: str = Field(..., description="File name to store (made safe)")
+    data: str = Field(..., description="The file, base64")
+    content_type: str | None = Field(None, description="MIME type; guessed from the name when absent")
+    thumbnail_max_px: int = Field(
+        0, ge=0, le=2048, description="Longest side of the returned JPEG thumbnail (0 = no thumbnail)"
+    )
 
 
 class ImageEditRequest(BaseRequest):

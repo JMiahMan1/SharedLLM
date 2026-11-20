@@ -102,6 +102,7 @@ async def _ocr_file(path: str, req, where: dict) -> ExecutionResult:
             proxy_url=req.proxy_url,
             model=req.model,
             task=req.task or "general",
+            context=getattr(req, "context", None),
         )
     except Exception as exc:  # an unreadable image (PIL) is the caller's problem, said plainly
         return ExecutionResult(status="FAILURE", message=f"OCR failed: {exc}", service="ocr", detail=where)

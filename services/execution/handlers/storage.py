@@ -6,9 +6,13 @@ from services.execution.schemas import ExecutionResult, StorageFileReadRequest, 
 from ..artifacts import artifact_name, create_artifact
 from ..http_client import request as http_request
 from ..nextcloud_client import resolve_credentials, webdav_url
+from ..personal_data import resolve_personal_data_provider
 from ..tts import text_to_speech
 
 log = logging.getLogger("execution.storage")
+
+#: A growth-journal photo larger than this is refused rather than pushed at Nextcloud.
+MAX_PHOTO_BYTES = 25 * 1024 * 1024
 
 def _ok(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service="storage", detail=detail)
@@ -58,6 +62,73 @@ async def handle_storage_write(req: StorageFileWriteRequest) -> ExecutionResult:
     except Exception as e:
         log.error(f"Storage write failed: {e}")
         return _fail(str(e))
+
+async def handle_photo_upload(req) -> ExecutionResult:
+    """Store a photo in Nextcloud, optionally returning a JPEG thumbnail.
+
+    The Garden hub keeps its growth journal in ``Garden/Photos/<plant>/`` and has
+    no Nextcloud credentials of its own: the bytes come through here, and the one
+    image stack that already depends on Pillow makes the small copy it serves.
+    """
+    import base64
+    import binascii
+    import mimetypes
+
+    try:
+        data = base64.b64decode(req.data or "", validate=True)
+    except (binascii.Error, ValueError, TypeError):
+        return _fail("The photo was not readable as base64.")
+    if not data:
+        return _fail("The photo is empty.")
+    if len(data) > MAX_PHOTO_BYTES:
+        limit = MAX_PHOTO_BYTES // (1024 * 1024)
+        return _fail(f"Photos can be up to {limit} MB.")
+
+    folder = (req.folder or "").strip().strip("/")
+    if not folder:
+        return _fail("A folder inside Nextcloud is required (e.g. Garden/Photos/<plant_id>).")
+
+    provider = resolve_personal_data_provider(req.user_context)
+    if provider is None:
+        return _fail("No Nextcloud account is connected, so the photo was not stored.")
+    name = provider.sanitize_filename(req.filename or "photo.jpg", "photo.jpg")
+    path = f"{folder}/{name}"
+    try:
+        await provider.ensure_directory(folder)
+        if not await provider.upload_file(path, data, req.content_type or mimetypes.guess_type(name)[0] or "image/jpeg"):
+            return _fail("Could not store the photo in Nextcloud.")
+    except Exception as exc:
+        log.error("Photo upload failed: %s", exc)
+        return _fail(str(exc))
+
+    detail: dict = {"path": path, "name": name, "size": len(data)}
+    if req.thumbnail_max_px:
+        thumb = _jpeg_thumbnail(data, req.thumbnail_max_px)
+        if thumb is None:
+            detail["thumbnail_warning"] = "The photo could not be resized; no thumbnail was made."
+        else:
+            detail["thumbnail_base64"] = base64.b64encode(thumb).decode("ascii")
+            detail["thumbnail_bytes"] = len(thumb)
+    return _ok(f"Stored {path}.", detail=detail)
+
+
+def _jpeg_thumbnail(data: bytes, max_px: int) -> bytes | None:
+    """A JPEG no larger than ``max_px`` on its long side, or None if it will not decode."""
+    try:
+        from io import BytesIO
+
+        from PIL import Image, ImageOps
+
+        image = Image.open(BytesIO(data))
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        image.thumbnail((max_px, max_px))
+        out = BytesIO()
+        image.save(out, format="JPEG", quality=82)
+        return out.getvalue()
+    except Exception as exc:
+        log.info("Thumbnail not made: %s", exc)
+        return None
+
 
 async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
     try:

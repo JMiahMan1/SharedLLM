@@ -74,6 +74,7 @@ async def vision_ocr_screenshot(
     model: str | None = None,
     max_size: int = 1024,
     task: str = "general",
+    context: str | None = None,
 ) -> dict:
     """
     Extract text from a screenshot using the vision LLM.
@@ -84,7 +85,9 @@ async def vision_ocr_screenshot(
         proxy_url: Override LLM proxy URL (default: from Identity settings)
         model: Override model name (default: user's configured vision_ocr_model setting)
         max_size: Max thumbnail size for image (reduces token usage)
-        task: Task type for prompt selection ('general', 'price_scrape', 'document')
+        task: Task type for prompt selection ('general', 'price_scrape', 'document',
+            'recipe', 'plant_identify', 'plant_diagnose')
+        context: Extra facts for the task's prompt (a plant's care history, symptoms)
 
     Returns:
         dict with keys: full_text, headline, subtext, badge
@@ -190,11 +193,62 @@ async def vision_ocr_screenshot(
         "IMPORTANT: Include EVERY line of text you see. Do not summarize. "
         "Preserve prices, numbers, and formatting exactly as shown."
     )
+    plant_identify_prompt = (
+        "You are an expert horticulturist identifying a plant from a photo for a "
+        "family garden app.\n"
+        "The photo may show a houseplant, a garden plant, a herb, or a seed packet.\n\n"
+        "Respond ONLY with a valid JSON object:\n"
+        "{\n"
+        '  "full_text": "One sentence describing what you see in the photo.",\n'
+        '  "plant": {\n'
+        '    "common_name": "the most common household name, or \\"\\" if unsure",\n'
+        '    "scientific_name": "genus and species, or \\"\\" if unsure",\n'
+        '    "category": "one of houseplant, herb, vegetable, fruit, flower, or \\"\\" if unsure",\n'
+        '    "confidence": "high, medium or low",\n'
+        '    "is_seed_packet": false,\n'
+        '    "notes": "distinguishing features you actually see (leaf shape, variegation, flowers)"\n'
+        "  },\n"
+        '  "uncertain": ["anything you could not tell from the photo"]\n'
+        "}\n\n"
+        "RULES:\n"
+        "- Name what the photo shows, never what you would like it to be.\n"
+        "- A plant you cannot identify gets empty names and confidence 'low'.\n"
+        "- is_seed_packet is true only when the photo is printed packaging.\n"
+        "- Never invent a cultivar you cannot see."
+    )
+    plant_diagnose_prompt = (
+        "You are an expert plant doctor diagnosing a sick plant from a photo for a "
+        "family garden app.\n"
+        "You may be given the plant's species, its recent care history, the weather and "
+        "any symptoms the family typed.\n\n"
+        "Respond ONLY with a valid JSON object:\n"
+        "{\n"
+        '  "full_text": "One sentence describing the visible problem.",\n'
+        '  "diagnosis": {\n'
+        '    "likely_causes": [{"cause": "overwatering", "confidence": "high", "why": "what in the photo supports it"}],\n'
+        '    "confidence": "high, medium or low",\n'
+        '    "urgency": "low, medium or high",\n'
+        '    "recovery_steps": ["one concrete step at a time, in order"],\n'
+        '    "care_adjustments": ["a change to watering, light, feeding or placement"],\n'
+        '    "summary": "two sentences a person can act on"\n'
+        "  },\n"
+        '  "uncertain": ["anything the photo cannot show (roots, soil moisture, pests underneath)"]\n'
+        "}\n\n"
+        "RULES:\n"
+        "- Diagnose from the photo and the facts given; say when the photo is not enough.\n"
+        "- Never invent pesticide doses, chemical names or measurements.\n"
+        "- Urgency 'high' only for a plant that may die within days without action.\n"
+        "- Recovery steps are things a family can do at home, in order."
+    )
     prompt = {
         "price_scrape": price_prompt,
         "document": doc_prompt,
         "recipe": recipe_prompt,
+        "plant_identify": plant_identify_prompt,
+        "plant_diagnose": plant_diagnose_prompt,
     }.get(task, general_prompt)
+    if context and task in ("plant_identify", "plant_diagnose"):
+        prompt = f"{prompt}\n\nWHAT WE ALREADY KNOW (use it, never contradict the photo):\n{context}"
 
     messages = [
         {
@@ -256,8 +310,11 @@ async def vision_ocr_screenshot(
             # The recipe task returns a structured reading, the words it was
             # unsure of and any readings it offers; pass them through for
             # services/common/recipe_ocr.py.
-            if isinstance(result.get("recipe"), dict):
-                out["recipe"] = result["recipe"]
+            # Structured readings pass through whole: a recipe, a plant ID or a
+            # diagnosis is the point of its task, not the raw text.
+            for _key in ("recipe", "plant", "diagnosis"):
+                if isinstance(result.get(_key), dict):
+                    out[_key] = result[_key]
             if result.get("uncertain"):
                 out["uncertain"] = result["uncertain"]
             if isinstance(result.get("suggestions"), dict):

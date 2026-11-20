@@ -122,6 +122,7 @@ from services.execution.schemas import (
     SpeakerIdentifyRequest,
     StorageFileReadRequest,
     StorageFileWriteRequest,
+    PhotoUploadRequest,
     StorageTextToAudioRequest,
     SystemLearningRequest,
     TalkFileRequest,
@@ -2066,6 +2067,16 @@ async def execute_storage_file_write(req: StorageFileWriteRequest):
     Write a file to Nextcloud storage.
     """
     return await storage.handle_storage_write(req)
+
+
+@app.post("/execute/photo_upload", response_model=ExecutionResult)
+async def execute_photo_upload(req: PhotoUploadRequest):
+    """Store a photo in Nextcloud under a folder, with an optional thumbnail.
+
+    The Garden hub's growth journal posts here: it keeps the metadata and the
+    small copy it serves, while the Nextcloud account stays Execution's.
+    """
+    return await storage.handle_photo_upload(req)
 
 
 @app.post("/execute/tts", response_model=ExecutionResult)
