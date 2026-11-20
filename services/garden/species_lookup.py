@@ -25,10 +25,12 @@ import asyncio
 import ipaddress
 import json
 import logging
+import os
 import re
 import socket
+import sys
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 import aiohttp
 from fastapi import HTTPException
@@ -96,7 +98,11 @@ async def _public(host: str) -> bool:
 
 
 async def _fetch_json(url: str) -> dict | None:
-    """Fetch JSON from a public HTTPS URL only; None on any failure."""
+    """Fetch JSON from a public HTTPS URL only; None on any failure.
+
+    Follows redirects like ``recipe_images.py``: every hop is resolved and
+    refused if it lands on a private, loopback or link-local address.
+    """
     parsed = urlparse((url or "").strip())
     if parsed.scheme != "https" or not parsed.hostname:
         log.info("[Garden lookup] refused non-https URL: %s", url)
@@ -110,14 +116,37 @@ async def _fetch_json(url: str) -> dict | None:
     try:
         async with aiohttp.ClientSession(timeout=_LOOKUP_TIMEOUT,
                                          headers={"User-Agent": _UA}) as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    log.info("[Garden lookup] %s -> HTTP %s", url, resp.status)
-                    return None
-                return await resp.json(content_type=None)
+            target = url
+            for _ in range(4):  # up to 3 redirects + initial
+                async with session.get(target, allow_redirects=False) as resp:
+                    if resp.status in (301, 302, 303, 307, 308):
+                        target = await _public_redirect(target, resp.headers.get("Location", ""))
+                        if target is None:
+                            return None
+                        continue
+                    if resp.status != 200:
+                        log.info("[Garden lookup] %s -> HTTP %s", url, resp.status)
+                        return None
+                    return await resp.json(content_type=None)
     except Exception as e:
         log.info("[Garden lookup] %s failed: %s", url, e)
         return None
+
+
+async def _public_redirect(current_url: str, location: str) -> str | None:
+    """Resolve a redirect target; validate it is public HTTPS; None if refused."""
+    target = urljoin(current_url, location)
+    parsed = urlparse(target)
+    if parsed.scheme != "https" or not parsed.hostname:
+        log.info("[Garden lookup] redirect to non-https: %s", target)
+        return None
+    if parsed.username or parsed.password:
+        log.info("[Garden lookup] redirect with credentials: %s", target)
+        return None
+    if not await _public(parsed.hostname):
+        log.info("[Garden lookup] redirect to non-public host: %s", target)
+        return None
+    return target
 
 
 # --------------------------------------------------------------------------- LLM draft (via gateway)
@@ -177,8 +206,8 @@ async def _draft_via_llm(name: str, category: str | None, wiki_summary: str | No
         from services.common.http import get_client
 
         client = get_client()
-        gateway = config.GATEWAY_URL or "http://gateway:11435"
-        async with client.post(f"{gateway.rstrip('/')}/api/llm/generate",
+        gateway = getattr(config, "GATEWAY_INTERNAL_URL", None) or os.getenv("GATEWAY_URL") or "http://gateway:11435"
+        async with client.post(f"{gateway.rstrip('/')}/v1/chat/completions",
                                json=body,
                                headers={"X-Internal-Secret": config.INTERNAL_SECRET},
                                timeout=_LOOKUP_TIMEOUT) as resp:
@@ -190,7 +219,7 @@ async def _draft_via_llm(name: str, category: str | None, wiki_summary: str | No
         log.info("[Garden lookup] LLM draft unavailable: %s", e)
         return None
 
-    text = data.get("text") or data.get("content") or ""
+    text = data.get("choices", [{}])[0].get("message", {}).get("content") or data.get("text") or ""
     if not text:
         return None
     try:
@@ -268,14 +297,15 @@ async def _draft_via_llm(name: str, category: str | None, wiki_summary: str | No
 
 
 def _seed_get(key: str) -> dict | None:
-    """Look up one species in the read-only botanical seed."""
-    from services.garden import plant_seed
+    """Look up one species in the read-only botanical seed.
+
+    Reuses the already-open seed connection from ``services.garden.main``
+    instead of opening a new PlantSeed on every lookup.
+    """
+    from services.garden import main as _garden_main
 
     try:
-        ps = plant_seed.PlantSeed(
-            __import__("os").getenv("PLANT_SEED_PATH") or "/data/plants-seed.db"
-        )
-        return ps.get(key)
+        return _garden_main._seed().get(key)
     except Exception as e:
         log.info("[Garden lookup] seed unavailable: %s", e)
         return None
@@ -376,6 +406,19 @@ def _validate_custom(body: CustomSpeciesIn, warnings: list[str]) -> dict[str, An
     else:
         data["winter_multiplier"] = 1.0
 
+    # watering_interval_days must be > 0 when provided.
+    bid = body.watering_interval_days
+    if bid is not None:
+        try:
+            bid = float(bid)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="watering_interval_days must be a number")
+        if bid <= 0:
+            raise HTTPException(status_code=400, detail="watering_interval_days must be > 0")
+        data["watering_interval_days"] = round(bid, 1)
+    else:
+        data["watering_interval_days"] = None
+
     # Low-acid canning safety: reject low_acid + bare water_bath_canning.
     acidity = body.usda_acidity_class
     methods = (body.preservation_methods or "")
@@ -466,7 +509,7 @@ async def handle_species_lookup(
     warnings: list[str] = []
 
     # Tier 2a: Wikipedia REST summary (public HTTPS, strict timeout).
-    wiki_title = name.replace(" ", "_")
+    wiki_title = quote(name.replace(" ", "_"), safe="")
     wiki = await _fetch_json(WIKIPEDIA_SUMMARY_URL.format(title=wiki_title))
     wiki_summary = (wiki or {}).get("extract") if wiki else None
     if wiki is None:

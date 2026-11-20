@@ -518,3 +518,202 @@ def test_hooks_weather_works_with_secret(garden_client, monkeypatch):
                         lambda *a, **k: {"evaluated": True, "weather": None})
     resp = client.post("/hooks/weather", headers={"X-Internal-Secret": INTERNAL_SECRET})
     assert resp.status_code == 200, resp.text
+
+
+# --------------------------------------------------------------------------- regression tests (integration bugs)
+
+
+def test_custom_species_preserves_watering_interval_days(garden_client):
+    client, engine = garden_client
+    resp = client.post("/species/custom", headers=PARENT_HEADERS, json={
+        "common_name": "Thai Holy Basil",
+        "category": "herb",
+        "watering_interval_days": 10.5,
+        "winter_multiplier": 1.5,
+    })
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["ok"] is True
+
+    # Verify it was saved with the watering interval preserved.
+    with Session(engine) as session:
+        row = session.exec(select(CustomSpecies).where(CustomSpecies.key == "thai_holy_basil")).first()
+        assert row is not None
+        assert row.watering_interval_days == 10.5
+        assert row.winter_multiplier == 1.5
+
+
+def test_weather_metric_25c_does_not_trigger_frost(garden_client, monkeypatch):
+    """Metric forecast: 25°C (77°F) should NOT trigger a tender frost alert."""
+    client, engine = garden_client
+    import services.garden.weather_care as wc
+
+    # Metric forecast: 25°C low = 77°F, well above tender threshold (36°F).
+    forecast = {
+        "units": "metric",
+        "daily": [
+            {"high": 28, "low": 20},   # today: 28°C / 20°C
+            {"high": 25, "low": 25},   # tomorrow: 25°C / 25°C (77°F — not freezing)
+        ],
+        "hourly": [{"gust": 10} for _ in range(12)],  # 10 km/h gusts (~6 mph)
+    }
+    loc = _make_location(garden_client, PARENT_HEADERS, name="Bed 1", kind="raised_bed", covered=False)
+    tender = _make_plant(garden_client, PARENT_HEADERS, species_ref="basil_sweet",
+                         location_id=loc["id"], category="herb", nickname="Patio Basil")
+    with Session(engine) as session:
+        rule = session.exec(select(CareRule).where(CareRule.plant_id == tender["id"],
+                                                   CareRule.action == "water")).first()
+        if rule:
+            rule.rain_skip_enabled = True
+            session.add(rule)
+        session.commit()
+
+    from services.garden import plant_seed
+    ps = plant_seed.PlantSeed(__import__("os").getenv("PLANT_SEED_PATH") or "/data/plants-seed.db")
+    alerts = asyncio.run(wc.check_frost_alerts(session, forecast, ps.get, units="metric"))
+    assert alerts == []
+
+
+def test_weather_metric_1c_triggers_tender_frost(garden_client, monkeypatch):
+    """Metric forecast: 1°C (33.8°F) SHOULD trigger a tender frost alert."""
+    client, engine = garden_client
+    import services.garden.weather_care as wc
+
+    forecast = {
+        "units": "metric",
+        "daily": [
+            {"high": 5, "low": 2},    # today
+            {"high": 3, "low": 1},    # tomorrow: 1°C = 33.8°F <= 36°F tender threshold
+        ],
+        "hourly": [{"gust": 5} for _ in range(12)],
+    }
+    loc = _make_location(garden_client, PARENT_HEADERS, name="Bed 1", kind="raised_bed", covered=False)
+    tender = _make_plant(garden_client, PARENT_HEADERS, species_ref="basil_sweet",
+                         location_id=loc["id"], category="herb", nickname="Patio Basil")
+    hardy = _make_plant(garden_client, PARENT_HEADERS, species_ref="kale",
+                        location_id=loc["id"], category="vegetable", nickname="Garden Kale")
+    with Session(engine) as session:
+        for p in [tender, hardy]:
+            rule = session.exec(select(CareRule).where(CareRule.plant_id == p["id"],
+                                                       CareRule.action == "water")).first()
+            if rule:
+                rule.rain_skip_enabled = True
+                session.add(rule)
+        session.commit()
+
+    from services.garden import plant_seed
+    ps = plant_seed.PlantSeed(__import__("os").getenv("PLANT_SEED_PATH") or "/data/plants-seed.db")
+    alerts = asyncio.run(wc.check_frost_alerts(session, forecast, ps.get, units="metric"))
+    assert len(alerts) == 1
+    assert "Patio Basil" in alerts[0]["names"]
+    assert "Garden Kale" not in alerts[0]["names"]  # hardy, safe at 33.8°F
+
+
+def test_weather_singular_gust_key(garden_client, monkeypatch):
+    """weather.py emits 'gust' (singular) — wind advisory must pick it up."""
+    client, engine = garden_client
+    import services.garden.weather_care as wc
+
+    forecast = {
+        "units": "imperial",
+        "daily": [{"high": 60, "low": 40}, {"high": 55, "low": 35}],
+        "hourly": [{"gust": 40} for _ in range(12)],  # 40 mph >= 35 mph threshold
+    }
+    loc = _make_location(garden_client, PARENT_HEADERS, name="Bed 1", kind="raised_bed", covered=False)
+    plant = _make_plant(garden_client, PARENT_HEADERS, species_ref="tomato_cherry",
+                        location_id=loc["id"], category="vegetable", nickname="Trellis Tomato")
+    with Session(engine) as session:
+        rule = session.exec(select(CareRule).where(CareRule.plant_id == plant["id"],
+                                                   CareRule.action == "water")).first()
+        if rule:
+            rule.rain_skip_enabled = True
+            session.add(rule)
+        session.commit()
+
+    from services.garden import plant_seed
+    ps = plant_seed.PlantSeed(__import__("os").getenv("PLANT_SEED_PATH") or "/data/plants-seed.db")
+    wind = asyncio.run(wc.check_wind_advisory(session, forecast, ps.get, units="imperial"))
+    assert wind is not None
+    assert "Trellis Tomato" in wind["names"]
+    assert wind["gusts_mph"] == 40.0
+
+
+def test_weather_zero_f_not_dropped(garden_client, monkeypatch):
+    """0.0°F forecast low must NOT be dropped by falsy `or` checks."""
+    client, engine = garden_client
+    import services.garden.weather_care as wc
+
+    forecast = {
+        "units": "imperial",
+        "daily": [
+            {"high": 20, "low": 10},   # today
+            {"high": 15, "low": 0.0},  # tomorrow: exactly 0.0°F hard freeze
+        ],
+        "hourly": [{"gust": 5} for _ in range(12)],
+    }
+    loc = _make_location(garden_client, PARENT_HEADERS, name="Bed 1", kind="raised_bed", covered=False)
+    hardy = _make_plant(garden_client, PARENT_HEADERS, species_ref="kale",
+                        location_id=loc["id"], category="vegetable", nickname="Garden Kale")
+    with Session(engine) as session:
+        rule = session.exec(select(CareRule).where(CareRule.plant_id == hardy["id"],
+                                                   CareRule.action == "water")).first()
+        if rule:
+            rule.rain_skip_enabled = True
+            session.add(rule)
+        session.commit()
+
+    from services.garden import plant_seed
+    ps = plant_seed.PlantSeed(__import__("os").getenv("PLANT_SEED_PATH") or "/data/plants-seed.db")
+    alerts = asyncio.run(wc.check_frost_alerts(session, forecast, ps.get, units="imperial"))
+    assert len(alerts) == 1
+    assert alerts[0]["min_temp_f"] == 0.0  # 0.0°F <= 15°F hardy extreme freeze threshold
+
+
+def test_draft_via_llm_parses_chat_completions(garden_client, monkeypatch):
+    """_draft_via_llm() must parse OpenAI /v1/chat/completions response format."""
+    import services.garden.species_lookup as sl
+    from unittest.mock import patch
+
+    captured = {}
+
+    class FakeResp:
+        def __init__(self, data):
+            self._data = data
+            self.status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def json(self, content_type=None):
+            return self._data
+
+    class FakeClient:
+        def post(self, url, *, json=None, headers=None, timeout=None):
+            import json as json_module
+            captured["url"] = str(url)
+            captured["json"] = json
+            return FakeResp({
+                "choices": [{
+                    "message": {
+                        "content": json_module.dumps({
+                            "key": "test_plant",
+                            "category": "houseplant",
+                            "common_name": "Test Plant",
+                            "watering_interval_days": 7.0,
+                            "winter_multiplier": 1.0,
+                            "watering_method": "top_drain",
+                            "frost_tolerance": "hardy",
+                            "toxicity_level": "non_toxic",
+                            "source": "wiki_ai_draft",
+                        })
+                    }
+                }]
+            })
+
+    with patch("services.common.http.get_client", return_value=FakeClient()):
+        monkeypatch.setattr(sl, "_fetch_json", lambda url: None)  # no Wikipedia
+
+        result = asyncio.run(sl._draft_via_llm("Test Plant", "houseplant", None, []))
+    assert result is not None, f"Expected non-None result"
+    assert result["common_name"] == "Test Plant"
+    # Must have called /v1/chat/completions, not /api/llm/generate.
+    assert "/v1/chat/completions" in captured["url"]

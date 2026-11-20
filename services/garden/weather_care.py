@@ -83,6 +83,37 @@ FROST_LOOKAHEAD_H = 24
 _rain_skip_done: dict[str, str] = {}
 
 
+# --------------------------------------------------------------------------- unit conversion
+
+
+def _forecast_units(forecast: dict | None) -> str:
+    """Return ``"imperial"`` or ``"metric"`` based on the forecast payload."""
+    if forecast is None:
+        return "imperial"
+    return (forecast.get("units") or "imperial").lower()
+
+
+def _c_to_f(c: float | None) -> float | None:
+    """Celsius -> Fahrenheit; None stays None."""
+    if c is None:
+        return None
+    return c * 9.0 / 5.0 + 32.0
+
+
+def _mm_to_in(mm: float | None) -> float | None:
+    """Millimeters -> inches; None stays None."""
+    if mm is None:
+        return None
+    return mm / 25.4
+
+
+def _kmh_to_mph(kmh: float | None) -> float | None:
+    """km/h -> mph; None stays None."""
+    if kmh is None:
+        return None
+    return kmh * 0.621371
+
+
 # --------------------------------------------------------------------------- helpers
 
 
@@ -152,64 +183,102 @@ async def _fetch_day(date_iso: str) -> dict | None:
         return None
 
 
-def _daily_rain_in(day: dict | None) -> float:
-    """Total rain (inches) reported for a day by the day store."""
-    if not day:
-        return 0.0
-    rain = day.get("rain") or day.get("rain_in") or day.get("precip") or 0.0
-    try:
-        return float(rain)
-    except (TypeError, ValueError):
-        return 0.0
+def _hourly_rain_in(hourly: list[dict] | None, hours: int, units: str = "imperial") -> float:
+    """Sum rain (inches) from the next ``hours`` hourly forecast entries.
 
-
-def _hourly_rain_in(hourly: list[dict] | None, hours: int) -> float:
-    """Sum rain (inches) from the next ``hours`` hourly forecast entries."""
+    Converts mm -> inches when ``units == "metric"``.
+    """
     if not hourly:
         return 0.0
     total = 0.0
     for entry in hourly[: max(1, hours)]:
         rain = entry.get("rain") or entry.get("rain_in") or entry.get("precip") or 0.0
         try:
-            total += float(rain)
+            rain = float(rain)
         except (TypeError, ValueError):
             continue
+        if units == "metric":
+            rain = _mm_to_in(rain) or 0.0
+        total += rain
     return total
 
 
-def _daily_high_f(daily: list[dict] | None) -> float | None:
-    """Today's forecast daily high in °F (None when unavailable)."""
+def _daily_rain_in(day: dict | None, units: str = "imperial") -> float:
+    """Total rain (inches) reported for a day by the day store.
+
+    Converts mm -> inches when ``units == "metric"``.
+    """
+    if not day:
+        return 0.0
+    rain = day.get("rain") or day.get("rain_in") or day.get("precip") or 0.0
+    try:
+        rain = float(rain)
+    except (TypeError, ValueError):
+        return 0.0
+    if units == "metric":
+        rain = _mm_to_in(rain) or 0.0
+    return rain
+
+
+def _daily_high_f(daily: list[dict] | None, units: str = "imperial") -> float | None:
+    """Today's forecast daily high in °F (None when unavailable).
+
+    Uses explicit ``is not None`` checks so a 0.0°F reading is never
+    dropped as falsy.  Converts °C -> °F when ``units == "metric"``.
+    """
     if not daily:
         return None
-    high = (daily[0] or {}).get("high") or (daily[0] or {}).get("temp_max")
+    entry = daily[0] or {}
+    high = entry.get("high")
+    if high is None:
+        high = entry.get("temp_max")
     try:
-        return float(high)
+        high = float(high)
     except (TypeError, ValueError):
         return None
+    if units == "metric":
+        high = _c_to_f(high)
+    return high
 
 
-def _daily_low_f(daily: list[dict] | None, index: int = 1) -> float | None:
-    """Forecast daily low in °F at ``index`` (0=today, 1=tomorrow)."""
+def _daily_low_f(daily: list[dict] | None, index: int = 1, units: str = "imperial") -> float | None:
+    """Forecast daily low in °F at ``index`` (0=today, 1=tomorrow).
+
+    Uses explicit ``is not None`` checks so a 0.0°F reading is never
+    dropped as falsy.  Converts °C -> °F when ``units == "metric"``.
+    """
     if not daily or index >= len(daily):
         return None
-    low = (daily[index] or {}).get("low") or (daily[index] or {}).get("temp_min")
+    entry = daily[index] or {}
+    low = entry.get("low")
+    if low is None:
+        low = entry.get("temp_min")
     try:
-        return float(low)
+        low = float(low)
     except (TypeError, ValueError):
         return None
+    if units == "metric":
+        low = _c_to_f(low)
+    return low
 
 
-def _max_gust_mph(hourly: list[dict] | None, hours: int) -> float | None:
-    """Max gust (mph) over the next ``hours`` hourly entries."""
+def _max_gust_mph(hourly: list[dict] | None, hours: int, units: str = "imperial") -> float | None:
+    """Max gust (mph) over the next ``hours`` hourly entries.
+
+    weather.py emits ``"gust"`` (singular); accept ``"gusts"``/``"wind_gust"``
+    as fallbacks.  Converts km/h -> mph when ``units == "metric"``.
+    """
     if not hourly:
         return None
     best: float | None = None
     for entry in hourly[: max(1, hours)]:
-        g = entry.get("gusts") or entry.get("wind_gust") or 0.0
+        g = entry.get("gust") or entry.get("gusts") or entry.get("wind_gust") or 0.0
         try:
             g = float(g)
         except (TypeError, ValueError):
             continue
+        if units == "metric":
+            g = _kmh_to_mph(g) or 0.0
         if best is None or g > best:
             best = g
     return best
@@ -218,18 +287,20 @@ def _max_gust_mph(hourly: list[dict] | None, hours: int) -> float | None:
 # --------------------------------------------------------------------------- rain skip
 
 
-async def _observed_and_forecast_rain_in() -> float:
+async def _observed_and_forecast_rain_in(units: str = "imperial") -> float:
     """Observed rain (today) + upcoming 12h forecast rain, in inches."""
     today = datetime.now(UTC).date().isoformat()
     day = await _fetch_day(today)
-    observed = _daily_rain_in(day)
+    observed = _daily_rain_in(day, units)
     fc = await _fetch_forecast()
+    forecast_units = _forecast_units(fc)
     hourly = (fc or {}).get("hourly") or []
-    upcoming = _hourly_rain_in(hourly, RAIN_LOOKAHEAD_H)
+    upcoming = _hourly_rain_in(hourly, RAIN_LOOKAHEAD_H, forecast_units)
     return observed + upcoming
 
 
-async def apply_rain_skip(session: Session, profile: GardenProfile | None) -> list[dict]:
+async def apply_rain_skip(session: Session, profile: GardenProfile | None,
+                          units: str = "imperial") -> list[dict]:
     """Postpone watering for uncovered outdoor plants when rain meets the threshold.
 
     Returns a list of ``{"plant_id", "nickname", "rain_in", "next_due_at"}`` dicts
@@ -238,7 +309,7 @@ async def apply_rain_skip(session: Session, profile: GardenProfile | None) -> li
     """
     skipped: list[dict] = []
     try:
-        rain_in = await _observed_and_forecast_rain_in()
+        rain_in = await _observed_and_forecast_rain_in(units)
     except Exception as e:
         log.info("[Garden weather] rain lookup failed: %s", e)
         return skipped
@@ -326,6 +397,7 @@ async def check_frost_alerts(
     session: Session,
     forecast: dict | None,
     seed_get,
+    units: str = "imperial",
 ) -> list[dict]:
     """Cross-reference active outdoor plants vs forecast lows by frost tolerance.
 
@@ -333,7 +405,9 @@ async def check_frost_alerts(
     "min_temp_f", "advice"}`` — empty when no outdoor plants are at risk.
     """
     daily = (forecast or {}).get("daily") or []
-    low = _daily_low_f(daily, 1) or _daily_low_f(daily, 0)
+    low = _daily_low_f(daily, 1, units)
+    if low is None:
+        low = _daily_low_f(daily, 0, units)
     if low is None:
         return []
 
@@ -380,21 +454,22 @@ async def check_frost_alerts(
     ]
 
 
-async def check_heat_advisory(session: Session, forecast: dict | None) -> dict | None:
+async def check_heat_advisory(session: Session, forecast: dict | None,
+                              units: str = "imperial") -> dict | None:
     """Heat advisory when forecast daily high >= 90°F / 32.2°C and dry.
 
     Returns an advisory dict or None.  Degrades to None when weather is
     unavailable.
     """
     daily = (forecast or {}).get("daily") or []
-    high = _daily_high_f(daily)
+    high = _daily_high_f(daily, units)
     if high is None:
         return None
     if high < HEAT_HIGH_F:
         return None
     hourly = (forecast or {}).get("hourly") or []
     # "dry": no meaningful rain in the next 12h.
-    rain_in = _hourly_rain_in(hourly, RAIN_LOOKAHEAD_H)
+    rain_in = _hourly_rain_in(hourly, RAIN_LOOKAHEAD_H, units)
     dry = rain_in < 0.05
     if not dry:
         return None
@@ -405,14 +480,15 @@ async def check_heat_advisory(session: Session, forecast: dict | None) -> dict |
     }
 
 
-async def check_wind_advisory(session: Session, forecast: dict | None, seed_get) -> dict | None:
+async def check_wind_advisory(session: Session, forecast: dict | None, seed_get,
+                              units: str = "imperial") -> dict | None:
     """High-wind warning for tall/trellis or potted outdoor plants.
 
     Gusts >= 35 mph / 56 km/h warns for plants with ``tall_trellis == 1`` or
     potted outdoor plants (pot_size_in set).  Returns an advisory dict or None.
     """
     hourly = (forecast or {}).get("hourly") or []
-    gusts = _max_gust_mph(hourly, RAIN_LOOKAHEAD_H)
+    gusts = _max_gust_mph(hourly, RAIN_LOOKAHEAD_H, units)
     if gusts is None or gusts < WIND_HIGH_MPH:
         return None
 
@@ -464,18 +540,27 @@ async def build_weather_summary(session: Session, seed_get) -> dict | None:
     if forecast is None:
         return None
 
+    # Detect units from the forecast payload so metric (°C, mm, km/h) values
+    # are converted to imperial (°F, inches, mph) before threshold checks.
+    units = _forecast_units(forecast)
+
     # Current-condition one-liner.
     current = (forecast or {}).get("current") or {}
     label = current.get("label") or current.get("condition") or ""
     temp = current.get("temp") or current.get("temperature")
+    if units == "metric" and temp is not None:
+        try:
+            temp = round(_c_to_f(float(temp)), 1)
+        except (TypeError, ValueError):
+            pass
     summary = f"{label}, {temp}°" if (label or temp) else None
 
     profile = session.exec(select(GardenProfile).where(GardenProfile.user_id == "household")).first()
 
-    rain_skipped = await apply_rain_skip(session, profile)
-    frost_alerts = await check_frost_alerts(session, forecast, seed_get)
-    heat = await check_heat_advisory(session, forecast)
-    wind = await check_wind_advisory(session, forecast, seed_get)
+    rain_skipped = await apply_rain_skip(session, profile, units)
+    frost_alerts = await check_frost_alerts(session, forecast, seed_get, units)
+    heat = await check_heat_advisory(session, forecast, units)
+    wind = await check_wind_advisory(session, forecast, seed_get, units)
 
     relevant = (
         len(rain_skipped) > 0
@@ -532,9 +617,9 @@ async def dispatch_weather_notices(
     today = datetime.now(UTC).date().isoformat()
 
     for alert in weather_summary.get("frost_alerts") or []:
-        key = f"{ONCE_PREFIX}:frost:{today}"
         names = ", ".join(alert.get("names") or [])
         for member in family:
+            key = f"{ONCE_PREFIX}:frost:{member}:{today}"
             await _send_urgent_notice(
                 member,
                 "Frost alert — cover or bring inside",
@@ -544,19 +629,20 @@ async def dispatch_weather_notices(
 
     if weather_summary.get("wind_advisory"):
         wa = weather_summary["wind_advisory"]
-        key = f"{ONCE_PREFIX}:wind:{today}"
+        names = ", ".join(wa.get("names") or [])
         for member in family:
+            key = f"{ONCE_PREFIX}:wind:{member}:{today}"
             await _send_urgent_notice(
                 member,
                 "High wind alert",
-                f"{wa.get('advice')} ({', '.join(wa.get('names') or [])})",
+                f"{wa.get('advice')} ({names})",
                 key,
             )
 
     if weather_summary.get("heat_advisory"):
         ha = weather_summary["heat_advisory"]
-        key = f"{ONCE_PREFIX}:heat:{today}"
         for member in family:
+            key = f"{ONCE_PREFIX}:heat:{member}:{today}"
             await _send_urgent_notice(
                 member,
                 "Heat advisory",
