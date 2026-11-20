@@ -116,6 +116,22 @@ describe('Family hub', () => {
     expect(await screen.findByTestId('reaction-chips')).toHaveTextContent('❤️');
   });
 
+  it('lights my reaction and takes it back when I tap its chip again', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Family />);
+
+    await waitFor(() => expect(screen.getByTestId('chat-feed')).toHaveTextContent('Dinner at 6.'));
+    await user.click(await screen.findByTitle('Tap to react'));
+    await user.click(screen.getByRole('button', { name: /react \u{1f44d}/iu }));
+
+    const chip = await screen.findByTestId('reaction-chip');
+    await waitFor(() => expect(chip).toHaveAttribute('aria-pressed', 'true'));
+    expect(chip).toHaveAccessibleName(/1, including you/);
+
+    await user.click(chip);
+    await waitFor(() => expect(screen.queryByTestId('reaction-chips')).not.toBeInTheDocument());
+  });
+
   it('shows family polls and records a vote', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Family />);

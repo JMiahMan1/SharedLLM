@@ -37,9 +37,14 @@ import {
   asksJarvis,
   detailList,
   isAssistant,
+  isHiddenUpdate,
   MAX_ATTACHMENT_BYTES,
+  newestMessageId,
   reactionCounts,
   sortMessages,
+  toggleReaction,
+  type ReactionState,
+  type Reactor,
   gameRunning,
   type TalkConversation,
   type TalkMessage,
@@ -88,7 +93,6 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const [replyTo, setReplyTo] = useState<TalkMessage | null>(null);
   const [editing, setEditing] = useState<TalkMessage | null>(null);
   const [pending, setPending] = useState<Record<string, TalkMessage[]>>({});
-  const [reactionOverrides, setReactionOverrides] = useState<Record<string, Record<string, number>>>({});
   const [staged, setStaged] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
   const [jarvisAsked, setJarvisAsked] = useState<Record<string, number>>({});
@@ -290,7 +294,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
   const limit = historyLimit[activeToken] ?? PAGE;
   const newestQuery = queryClient.getQueryData<ExecutionResponse>(['talk-messages', activeToken, limit]);
-  const newestId = detailList<TalkMessage>(newestQuery, 'messages').reduce((max, m) => Math.max(max, Number(m.id) || 0), 0);
+  // Hidden updates (reactions) count: the long poll starts past them, not on them.
+  const newestId = newestMessageId(newestQuery);
   const liveFeed = useTalkLongPoll(
     activeToken,
     newestId,
@@ -329,7 +334,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
       const brisk = waitingForJarvis || sentRecently || gameRunning(detailList<TalkMessage>(query.state.data, 'messages'));
       return brisk ? 2000 : 10000;
     },
-    select: (response) => sortMessages(detailList<TalkMessage>(response, 'messages')),
+    select: (response) => sortMessages(detailList<TalkMessage>(response, 'messages').filter((m) => !isHiddenUpdate(m))),
   });
 
   // A sent bubble is hidden as soon as a fetch contains the message, so it
@@ -659,20 +664,62 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     void startCall(activeToken, activeConversation?.display_name || 'Family call', { video, private: isPrivate });
   };
 
+  /**
+   * Write one message's reactions into the cached thread (every page size of
+   * it). The cache is the only copy: the next fetch, which the long poll asks
+   * for as soon as anyone reacts, replaces it with the server's counts. An
+   * override kept beside the cache used to win over every later fetch, so
+   * after reacting once you never saw anyone else's reaction on that message.
+   */
+  const patchReactions = useCallback(
+    (token: string, messageId: number, state: ReactionState) => {
+      queryClient.setQueriesData<ExecutionResponse>({ queryKey: ['talk-messages', token] }, (data) => {
+        const detail = data?.detail as { messages?: TalkMessage[] } | undefined;
+        if (!data || !Array.isArray(detail?.messages)) return data;
+        return {
+          ...data,
+          detail: { ...detail, messages: detail.messages.map((m) => (m.id === messageId ? { ...m, ...state } : m)) },
+        };
+      });
+    },
+    [queryClient],
+  );
+
   const react = async (message: TalkMessage, emoji: string) => {
     if (typeof message.id !== 'number') return;
-    const key = String(message.id);
-    const before = reactionOverrides[key] ?? reactionCounts(message.reactions);
-    setReactionOverrides((current) => ({ ...current, [key]: { ...before, [emoji]: (before[emoji] || 0) + 1 } }));
+    const token = activeToken;
+    const messageId = message.id;
+    const before: ReactionState = { reactions: reactionCounts(message.reactions), reactions_self: message.reactions_self ?? [] };
+    // Tapping an emoji I already used takes it back; anyone else's stays.
+    const { adding, ...next } = toggleReaction(message, emoji);
+    await queryClient.cancelQueries({ queryKey: ['talk-messages', token] });
+    patchReactions(token, messageId, next);
     try {
-      const res = await api.reactToTalkMessage({ token: activeToken, message_id: message.id, reaction: emoji, as_user: asUser });
-      const counts = reactionCounts((res.detail as { reactions?: unknown } | undefined)?.reactions);
-      if (Object.keys(counts).length > 0) setReactionOverrides((current) => ({ ...current, [key]: counts }));
+      const payload = { token, message_id: messageId, reaction: emoji, as_user: asUser };
+      const res = adding ? await api.reactToTalkMessage(payload) : await api.unreactToTalkMessage(payload);
+      if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'reaction failed');
+      const detail = res.detail as Partial<ReactionState> | undefined;
+      if (detail?.reactions && !Array.isArray(detail.reactions)) {
+        patchReactions(token, messageId, { reactions: reactionCounts(detail.reactions), reactions_self: detail.reactions_self ?? next.reactions_self });
+      }
     } catch {
-      setReactionOverrides((current) => ({ ...current, [key]: before }));
-      toast.error('Could not react. Try again.');
+      patchReactions(token, messageId, before);
+      toast.error(adding ? 'Could not react. Try again.' : 'Could not remove the reaction. Try again.');
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: ['talk-messages', token] });
     }
   };
+
+  /** Who reacted to a message, per emoji (asked when a chip is held). */
+  const loadReactors = useCallback(
+    async (message: TalkMessage): Promise<Record<string, Reactor[]>> => {
+      if (typeof message.id !== 'number') return {};
+      const res = await api.getTalkReactions(activeToken, message.id);
+      const reactors = (res.detail as { reactors?: Record<string, Reactor[]> } | undefined)?.reactors;
+      return reactors && typeof reactors === 'object' ? reactors : {};
+    },
+    [activeToken],
+  );
 
   const submitPoll = async () => {
     const question = pollQuestion.trim();
@@ -926,10 +973,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           lastCommonRead={activeConversation?.last_common_read}
           unreadAfter={unreadMarkers[activeToken]}
           jarvisThinking={jarvisThinking}
-          reactionCounts={(message) =>
-            (typeof message.id === 'number' && reactionOverrides[String(message.id)]) || reactionCounts(message.reactions)
-          }
+          reactionCounts={(message) => reactionCounts(message.reactions)}
           onReact={(message, emoji) => void react(message, emoji)}
+          loadReactors={isPrivate ? undefined : loadReactors}
           onReply={(message) => {
             setEditing(null);
             setReplyTo(message);

@@ -221,6 +221,68 @@ def _message_summary(message: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+#: Talk posts a reaction (and its removal) as a system message whose parent is
+#: the message reacted to. Talk's own client hides them and updates the parent;
+#: drawn as they were, each reaction became a stray centred emoji in the feed and
+#: used up the history page. They stay out of the feed, but still count for
+#: ``last_id``, so a long poll moves past them and tells the app to refetch.
+_HIDDEN_SYSTEM_MESSAGES = frozenset({"reaction", "reaction_deleted", "reaction_revoked"})
+
+
+def _is_hidden_update(message: dict[str, Any]) -> bool:
+    return message.get("messageType") == "system" and message.get("systemMessage") in _HIDDEN_SYSTEM_MESSAGES
+
+
+def _feed(data: Any) -> dict[str, Any]:
+    """A page of Talk messages as the app reads it: the visible ones, the
+    newest id seen (hidden updates included), and the messages that changed."""
+    raw = [item for item in (data or []) if isinstance(item, dict)]
+    ids = [int(item["id"]) for item in raw if isinstance(item.get("id"), int)]
+    updated = sorted({
+        int(item["parent"]["id"])
+        for item in raw
+        if _is_hidden_update(item) and isinstance(item.get("parent"), dict) and isinstance(item["parent"].get("id"), int)
+    })
+    return {
+        "messages": [_message_summary(item) for item in raw if not _is_hidden_update(item)],
+        "last_id": max(ids) if ids else None,
+        "updated": updated,
+    }
+
+
+def _reaction_detail(data: Any, me: str | None) -> dict[str, Any]:
+    """Talk's ``{emoji: [actors]}`` as counts, my own emoji, and who reacted.
+
+    Talk answers an empty list (PHP's empty array) when nobody has reacted.
+    Only an actor with my user id is me: two people never share a reaction.
+    """
+    counts: dict[str, int] = {}
+    mine: list[str] = []
+    reactors: dict[str, list[dict[str, Any]]] = {}
+    me_id = (me or "").lower()
+    if isinstance(data, dict):
+        for emoji, actors in data.items():
+            if not isinstance(actors, list) or not actors:
+                continue
+            people = [
+                {
+                    "actor_type": a.get("actorType"),
+                    "actor_id": a.get("actorId"),
+                    "display_name": a.get("actorDisplayName") or a.get("actorId") or "Someone",
+                    "timestamp": a.get("timestamp"),
+                }
+                for a in actors
+                if isinstance(a, dict)
+            ]
+            if not people:
+                continue
+            counts[str(emoji)] = len(people)
+            reactors[str(emoji)] = people
+            if me_id and any(p["actor_type"] == "users" and str(p["actor_id"] or "").lower() == me_id for p in people):
+                mine.append(str(emoji))
+    return {"reactions": counts, "reactions_self": mine, "reactors": reactors}
+
+
 _PARAMETER_FIELDS = ("type", "id", "name", "mimetype", "size", "path", "link", "preview-available", "mention-id")
 
 
@@ -1005,8 +1067,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             )
             if not ok:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to load messages.", service="talk_messages")
-            messages = [_message_summary(item) for item in (data or [])]
-            detail: dict[str, Any] = {"messages": messages}
+            detail: dict[str, Any] = _feed(data)
+            messages = detail["messages"]
             if req.export:
                 detail.update({"export": True, "raw": [item for item in (data or []) if isinstance(item, dict)]})
             return ExecutionResult(
@@ -1037,12 +1099,12 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             )
             if not ok:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to wait for messages.", service="talk_wait")
-            messages = [_message_summary(item) for item in (data or [])]
+            feed = _feed(data)
             return ExecutionResult(
                 status="SUCCESS",
-                message=f"{len(messages)} new message(s).",
+                message=f"{len(feed['messages'])} new message(s).",
                 service="talk_wait",
-                detail={"messages": messages},
+                detail=feed,
             )
 
         if action == "reactions":
@@ -1059,7 +1121,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 status="SUCCESS",
                 message="Reactions loaded.",
                 service="talk_reactions",
-                detail={"reactions": data or []},
+                detail=_reaction_detail(data, getattr(provider, "username", None)),
             )
 
         if action == "react":
@@ -1077,7 +1139,25 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 status="SUCCESS",
                 message="Reaction sent.",
                 service="talk_react",
-                detail={"reactions": data or []},
+                detail=_reaction_detail(data, getattr(provider, "username", None)),
+            )
+
+        if action == "unreact":
+            if not req.token or req.message_id is None or not req.reaction:
+                return ExecutionResult(status="FAILURE", message="Conversation token, message_id and reaction are required.", service="talk_unreact")
+            ok, data, message = await _talk_request_with_retry(
+                provider,
+                "DELETE",
+                f"/ocs/v2.php/apps/spreed/api/v1/reactions/{urllib.parse.quote(req.token)}/{int(req.message_id)}",
+                params={"reaction": req.reaction},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Failed to remove the reaction.", service="talk_unreact")
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Reaction removed.",
+                service="talk_unreact",
+                detail=_reaction_detail(data, getattr(provider, "username", None)),
             )
 
         if action == "polls":

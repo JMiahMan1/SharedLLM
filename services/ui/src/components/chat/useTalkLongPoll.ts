@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
-import { detailList } from './chatModel';
+import { newestMessageId } from './chatModel';
 
 const HOLD_S = 25;
 const QUICK_EMPTY_MS = 1000;
@@ -78,8 +78,11 @@ export function useTalkLongPoll(
           if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'wait failed');
           backoff = BACKOFF_START_MS;
           setHealthy(true);
-          const ids = detailList<{ id?: number }>(res, 'messages').map((m) => Number(m.id) || 0);
-          const newest = Math.max(after, ...ids);
+          // A reaction arrives as a hidden update: no message to draw, only a
+          // newer id (`last_id`). Moving past it and refetching is what shows
+          // everyone else the new chip at once; without it the poll would ask
+          // for the same update again and again.
+          const newest = Math.max(after, newestMessageId(res));
           if (newest > after) {
             newestRef.current = newest;
             onNewsRef.current();

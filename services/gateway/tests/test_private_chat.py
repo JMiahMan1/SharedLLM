@@ -330,6 +330,7 @@ def talk_routes(env, monkeypatch):
     ("/api/communication/talk/file", {"file_base64": "AAAA", "mime_type": "image/png", "file_name": "a.png"}),
     ("/api/communication/talk/voice", {"audio_base64": "AAAA"}),
     ("/api/communication/talk/react", {"message_id": 3, "reaction": "x"}),
+    ("/api/communication/talk/unreact", {"message_id": 3, "reaction": "x"}),
     ("/api/communication/talk/game", {"game_command": "start"}),
     ("/api/communication/talk/card", {"card_kind": "activity", "card_title": "x"}),
     ("/api/communication/talk/polls/create", {"question": "q", "options": ["a", "b"]}),
@@ -354,6 +355,14 @@ def test_an_encrypted_message_goes_through_and_other_rooms_are_untouched(talk_ro
     assert c.post("/api/communication/talk/messages", json={"token": "family1", "message": "meet at 6"}).status_code == 200
     assert c.post("/api/communication/talk/file", json={"token": "family1", "file_base64": "AAAA"}).status_code == 200
     assert [p["token"] for p in talk_routes["sent"]] == ["room123abc", "family1", "family1"]
+
+
+def test_a_family_reaction_can_be_added_and_taken_back(talk_routes):
+    c = talk_routes["client"]
+    body = {"token": "family1", "message_id": 7, "reaction": "👍"}
+    assert c.post("/api/communication/talk/react", json=body).status_code == 200
+    assert c.post("/api/communication/talk/unreact", json=body).status_code == 200
+    assert [(p["action"], p["message_id"], p["reaction"]) for p in talk_routes["sent"]] == [("react", 7, "👍"), ("unreact", 7, "👍")]
 
 
 def test_a_notification_reply_cannot_post_into_a_private_chat(talk_routes):
