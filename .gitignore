@@ -24,6 +24,8 @@ services/storage/index_checkpoint.json
 services/workspace_runtime/config/
 /data/*
 !/data/phrasebook.json
+!/data/plants_seed/
+/data/plants_seed/__pycache__/
 !services/gateway/data/
 node_modules/
 
