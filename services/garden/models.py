@@ -464,6 +464,84 @@ class PantryGoalOut(SQLModel):
     updated_at: str
 
 
+class PantryBatch(SQLModel, table=True):
+    """One preserved batch put up in the pantry (Phase 6).
+
+    A batch is what is actually on the shelf: *"12 quarts marinara, water-bath
+    canned, basement shelf, use by Oct 2027"*. ``goal_id`` links it to the
+    ``pantry_goals`` target it counts towards (optional: not everything put up
+    belongs to a goal).
+    """
+
+    __tablename__ = "pantry_batches"
+
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
+    goal_id: str | None = Field(default=None, max_length=128)  # pantry_goals.id
+    label: str = Field(max_length=120)  # e.g., "Marinara sauce", "Dill pickles"
+    method: str = Field(max_length=32)  # see preservation_combos.json "methods"
+    batch_date: str = Field(default="", max_length=10)  # ISO YYYY-MM-DD, defaults to today
+    qty_initial: float = Field(default=0.0, ge=0)
+    qty_remaining: float = Field(default=0.0, ge=0)
+    unit: str = Field(max_length=32)  # quarts | pints | half_pints | lbs | bags | jars | bunches
+    storage_location: str | None = Field(default=None, max_length=120)
+    use_by_date: str | None = Field(default=None, max_length=10)  # ISO YYYY-MM-DD
+    logged_by: str | None = Field(default=None, max_length=128)
+    notes: str | None = Field(default=None, max_length=1000)
+    created_at: str = Field(default_factory=utcnow)
+    updated_at: str = Field(default_factory=utcnow)
+
+
+class PantryBatchIn(SQLModel):
+    label: str = Field(max_length=120)
+    goal_id: str | None = Field(default=None, max_length=128)
+    method: str = Field(max_length=32)
+    batch_date: str | None = Field(default=None, max_length=10)
+    qty_initial: float = Field(default=0.0, ge=0)
+    qty_remaining: float | None = Field(default=None, ge=0)
+    unit: str = Field(max_length=32)
+    storage_location: str | None = Field(default=None, max_length=120)
+    use_by_date: str | None = Field(default=None, max_length=10)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PantryBatchOut(SQLModel):
+    id: str
+    goal_id: str | None
+    label: str
+    method: str
+    batch_date: str
+    qty_initial: float
+    qty_remaining: float
+    unit: str
+    storage_location: str | None
+    use_by_date: str | None
+    logged_by: str | None
+    notes: str | None
+    created_at: str
+    updated_at: str
+
+
+class PantryBatchUseIn(SQLModel):
+    """Use some of a batch. Everyone may do this, children included."""
+
+    qty_used: float = Field(default=1.0, ge=0)
+
+
+class PantryBatchPatch(SQLModel):
+    """Partial edit of a batch: only the fields the caller sends change."""
+
+    goal_id: str | None = Field(default=None, max_length=128)
+    label: str | None = Field(default=None, max_length=120)
+    method: str | None = Field(default=None, max_length=32)
+    batch_date: str | None = Field(default=None, max_length=10)
+    qty_initial: float | None = Field(default=None, ge=0)
+    qty_remaining: float | None = Field(default=None, ge=0)
+    unit: str | None = Field(default=None, max_length=32)
+    storage_location: str | None = Field(default=None, max_length=120)
+    use_by_date: str | None = Field(default=None, max_length=10)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class GardenPlan(SQLModel, table=True):
     """Seasonal bed plan (e.g., "Spring/Summer 2027")."""
 

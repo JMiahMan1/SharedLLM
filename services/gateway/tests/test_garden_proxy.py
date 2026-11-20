@@ -187,6 +187,21 @@ def calls(monkeypatch):
             return Response(status_code=204)
         if path == "/pantry-goals/calculate" and method == "GET":
             return {"item": "Marinara", "method": "water_bath_canning", "unit": "quarts", "target_qty": 40, "total_raw_lbs_needed": 120.0, "total_plant_count": 12, "total_sqft": 12.0, "crops": [{"species_ref": "roma_tomato", "common_name": "Roma Tomato", "raw_lbs_needed": 84.0, "plant_count": 8, "sqft": 8.0}]}
+        # Phase 6 routes.
+        if path == "/harvest/forecast" and method == "GET":
+            return {"generated_on": "2026-11-20", "window_days": 28, "weather_used": True, "gdd_adjusted_count": 1, "count": 1, "items": [{"plant_id": "plant-1", "nickname": "Roma", "common_name": "Roma (Plum) Tomato", "category": "vegetable", "species_ref": "tomato_roma", "planted_date": "2026-06-01", "estimated_ready_date": "2026-11-25", "harvest_window_end": "2026-12-25", "days_until_ready": 5, "ready_now": False, "gdd_adjusted": True, "gdd_base_f": 50, "gdd_daily_rate": 10.0, "gdd_shift_days": -3, "days_to_maturity": 75, "harvest_window_days": 30, "culinary_aliases": ["tomato"], "preservation_methods": ["water_bath_canning", "dehydrating", "freezing"], "usda_acidity_class": "high_acid", "blanching_minutes": None, "location_id": "bed-1", "assigned_to": "mother"}]}
+        if path == "/preservation/advice" and method == "GET":
+            return {"generated_on": "2026-11-20", "crop_count": 1, "plant_count": 2, "crops": [{"species_ref": "green_bean_bush", "common_name": "Bush Green Bean", "category": "vegetable", "usda_acidity_class": "low_acid", "safety": {"level": "pressure_canner_required", "title": "Low-acid — Pressure Canner Required", "message": "Pressure canning is required.", "source": "USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book"}, "methods": [{"method": "freezing", "recorded_as": "freezing", "label": "Freezing", "blanching_minutes": 3, "supplies": ["Freezer bags or containers"]}], "plant_count": 2}], "combos": [], "prep_checklist": {"horizon_days": 21, "crops": ["Bush Green Bean"], "methods": [{"method": "freezing", "label": "Freezing"}], "combos": [], "count": 1, "items": ["Freezer bags or containers"], "categories": [{"key": "freezer", "label": "Freezer", "items": ["Freezer bags or containers"]}]}, "safety_sources": ["USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book"]}
+        if path == "/pantry-batches" and method == "GET":
+            return {"generated_on": "2026-11-20", "include_empty": False, "goal_id": None, "count": 1, "use_first_count": 1, "batches": [{"id": "batch-1", "goal_id": "goal-1", "label": "Marinara sauce", "method": "water_bath_canning", "method_label": "Water-bath canning", "batch_date": "2026-09-15", "qty_initial": 12, "qty_remaining": 8, "unit": "quarts", "storage_location": "Basement shelf", "use_by_date": "2027-12-15", "logged_by": "mother", "notes": None, "created_at": "2026-09-15T00:00:00Z", "updated_at": "2026-09-15T00:00:00Z", "days_until_use_by": 39, "past_use_by": False, "use_first": True, "oldest_in_label": True}], "goal_progress": [{"goal_id": "goal-1", "item": "Marinara sauce", "unit": "quarts", "target_qty": 40, "qty_put_up": 28, "qty_remaining": 8, "percent_complete": 70, "batch_count": 1, "unit_mismatch": False, "mismatched_units": [], "season_year": 2026}]}
+        if path == "/pantry-batches" and method == "POST":
+            return Response(content='{"id": "batch-new", "label": "Dill pickles", "method": "water_bath_canning", "qty_initial": 6, "qty_remaining": 6, "unit": "quarts"}', status_code=201, media_type="application/json")
+        if path == "/pantry-batches/batch-1/use" and method == "POST":
+            return {"id": "batch-1", "qty_initial": 12, "qty_remaining": 7, "unit": "quarts", "used_by": "child", "qty_used": 1.0}
+        if path.startswith("/pantry-batches/") and method == "PATCH":
+            return {"id": path.rsplit("/", 1)[-1], "label": "Marinara sauce", "storage_location": "Cold room"}
+        if path.startswith("/pantry-batches/") and method == "DELETE":
+            return Response(status_code=204)
         if path == "/plans" and method == "GET":
             return {"count": 1, "plans": [{"id": "plan-1", "name": "Spring/Summer 2027", "season": "spring_summer", "year": 2027, "family_size": 7, "mode": "fresh_plus_preserving", "status": "draft", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}]}
         if path == "/plans" and method == "POST":
@@ -805,3 +820,91 @@ def test_garden_call_passes_through_5xx_even_without_json(monkeypatch):
     assert b"did not answer" in result.body
 
 
+
+
+# --------------------------------------------------------------------------- Phase 6 routes
+
+
+def test_garden_harvest_forecast_proxy(client, calls):
+    resp = client.get("/api/garden/harvest/forecast", headers=KID_HEADERS, params={"days": 21})
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["items"][0]["days_until_ready"] == 5
+    assert data["items"][0]["gdd_adjusted"] is True
+    assert any(m == "GET" and p == "/harvest/forecast" and params == {"days": "21"} for m, p, params, _, _ in calls)
+
+
+def test_garden_harvest_forecast_drops_unknown_query_params(client, calls):
+    resp = client.get("/api/garden/harvest/forecast", headers=KID_HEADERS, params={"days": 28, "evil": "1"})
+
+    assert resp.status_code == 200, resp.text
+    seen = [params for m, p, params, _, _ in calls if p == "/harvest/forecast"]
+    assert seen == [{"days": "28"}]
+
+
+def test_garden_preservation_advice_proxy(client, calls):
+    resp = client.get("/api/garden/preservation/advice", headers=ADMIN_HEADERS)
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["crops"][0]["safety"]["level"] == "pressure_canner_required"
+    assert any("USDA" in source for source in data["safety_sources"])
+    assert any(m == "GET" and p == "/preservation/advice" for m, p, _, _, _ in calls)
+
+
+def test_garden_pantry_batches_proxy(client, calls):
+    resp = client.get("/api/garden/pantry-batches", headers=KID_HEADERS, params={"include_empty": "true"})
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["batches"][0]["use_first"] is True
+    assert data["goal_progress"][0]["percent_complete"] == 70
+    assert any(m == "GET" and p == "/pantry-batches" and params == {"include_empty": "true"} for m, p, params, _, _ in calls)
+
+
+def test_garden_create_pantry_batch_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/pantry-batches",
+        headers=ADMIN_HEADERS,
+        json={"label": "Dill pickles", "method": "water_bath_canning", "qty_initial": 6, "unit": "quarts"},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["label"] == "Dill pickles"
+    assert any(m == "POST" and p == "/pantry-batches" for m, p, _, _, _ in calls)
+
+
+def test_garden_use_pantry_batch_proxy_for_a_child(client, calls):
+    # Taking a jar out of the pantry is open to every role, children included.
+    resp = client.post("/api/garden/pantry-batches/batch-1/use", headers=KID_HEADERS, json={"qty_used": 1})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["qty_remaining"] == 7
+    assert any(m == "POST" and p == "/pantry-batches/batch-1/use" for m, p, _, _, _ in calls)
+    forwarded = next(headers for m, p, _, _, headers in calls if p == "/pantry-batches/batch-1/use")
+    assert forwarded["X-User-Id"] == "child"
+
+
+def test_garden_patch_pantry_batch_proxy(client, calls):
+    resp = client.patch(
+        "/api/garden/pantry-batches/batch-1",
+        headers=ADMIN_HEADERS,
+        json={"storage_location": "Cold room"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert any(m == "PATCH" and p == "/pantry-batches/batch-1" for m, p, _, _, _ in calls)
+
+
+def test_garden_delete_pantry_batch_proxy(client, calls):
+    resp = client.delete("/api/garden/pantry-batches/batch-1", headers=ADMIN_HEADERS)
+
+    assert resp.status_code == 204, resp.text
+    assert any(m == "DELETE" and p == "/pantry-batches/batch-1" for m, p, _, _, _ in calls)
+
+
+def test_garden_pantry_needs_authentication(client):
+    assert client.get("/api/garden/pantry-batches").status_code == 401
+    assert client.get("/api/garden/harvest/forecast").status_code == 401

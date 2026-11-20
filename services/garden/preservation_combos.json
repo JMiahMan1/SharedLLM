@@ -1,0 +1,219 @@
+{
+  "version": 1,
+  "source": "docs/PLANT_CARE.md 4.D — family preservation catalog (methods, safety, combos, supplies)",
+  "notes": "Data only: no preservation logic lives in Python. Safety copy points at USDA/NCHFP/Ball tested recipes and never states processing times.",
+  "methods": {
+    "water_bath_canning": {
+      "label": "Water-bath canning",
+      "acidity": "high_acid",
+      "use_by_months": 15,
+      "storage": "Cool, dark shelf",
+      "supplies": [
+        "Quart canning jars",
+        "Pint canning jars",
+        "New two-piece lids and bands",
+        "Bottled lemon juice or citric acid",
+        "Canning funnel",
+        "Jar lifter"
+      ]
+    },
+    "pressure_canning": {
+      "label": "Pressure canning",
+      "acidity": "low_acid",
+      "use_by_months": 15,
+      "storage": "Cool, dark shelf",
+      "supplies": [
+        "Quart canning jars",
+        "Pint canning jars",
+        "New two-piece lids and bands",
+        "Pressure canner with a tested gauge",
+        "Canning funnel",
+        "Jar lifter"
+      ]
+    },
+    "freezing": {
+      "label": "Freezing",
+      "acidity": null,
+      "use_by_months": 10,
+      "storage": "Chest freezer",
+      "supplies": [
+        "Freezer bags or containers",
+        "Freezer tape and marker"
+      ]
+    },
+    "dehydrating": {
+      "label": "Dehydrating",
+      "acidity": null,
+      "use_by_months": 12,
+      "storage": "Airtight jar on the shelf",
+      "supplies": [
+        "Dehydrator sheets or parchment",
+        "Airtight storage jars"
+      ]
+    },
+    "fermenting": {
+      "label": "Fermenting",
+      "acidity": "high_acid",
+      "use_by_months": 6,
+      "storage": "Cool spot, refrigerate when done",
+      "supplies": [
+        "Fermentation crock or jar",
+        "Pickling salt",
+        "Weights and airlock"
+      ]
+    },
+    "cold_storage": {
+      "label": "Root cellar / curing",
+      "acidity": null,
+      "use_by_months": 5,
+      "storage": "Root cellar or cool basement",
+      "supplies": [
+        "Curing rack or crates"
+      ]
+    },
+    "oil_herb_cubes": {
+      "label": "Herb drying / olive-oil cubes",
+      "acidity": null,
+      "use_by_months": 6,
+      "storage": "Freezer",
+      "supplies": [
+        "Ice-cube trays",
+        "Olive oil",
+        "Freezer bags or containers"
+      ]
+    }
+  },
+  "safety": {
+    "low_acid": {
+      "level": "pressure_canner_required",
+      "title": "Low-acid — Pressure Canner Required",
+      "message": "Pressure canning is required for plain low-acid vegetables, meats and mixed soups. Never water-bath can unacidified low-acid food: botulism risk. Follow a tested USDA / NCHFP / Ball recipe for load, venting and processing time.",
+      "source": "USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book"
+    },
+    "high_acid": {
+      "level": "water_bath_safe",
+      "title": "High-acid — Water-Bath Safe",
+      "message": "Water-bath canning is safe for high-acid foods. Tomatoes and figs need added acid: bottled lemon juice or citric acid per USDA, or the tested recipe's ratio.",
+      "source": "USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book"
+    },
+    "unknown": {
+      "level": "verify",
+      "title": "Acidity not recorded — verify before canning",
+      "message": "This species has no recorded USDA acidity class. Follow a tested USDA / NCHFP / Ball recipe rather than an untested one.",
+      "source": "USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book"
+    }
+  },
+  "method_aliases": {
+    "pickle": "water_bath_canning",
+    "pickled": "water_bath_canning",
+    "canning": "water_bath_canning",
+    "dry": "dehydrating",
+    "dried": "dehydrating",
+    "freeze": "freezing",
+    "frozen": "freezing",
+    "cure": "cold_storage",
+    "root_cellar": "cold_storage",
+    "oil_cubes": "oil_herb_cubes",
+    "herb_cubes": "oil_herb_cubes"
+  },
+  "supply_categories": [
+    { "key": "jars_and_lids", "label": "Jars & lids", "match": ["jar", "lid", "band"] },
+    { "key": "acid_and_safety", "label": "Acid & safety", "match": ["lemon", "citric", "vinegar", "pectin", "pickling salt", "pressure canner"] },
+    { "key": "freezer", "label": "Freezer", "match": ["freezer", "ice-cube"] },
+    { "key": "dehydrator", "label": "Dehydrating", "match": ["dehydrator", "parchment", "airtight"] },
+    { "key": "fermenting", "label": "Fermenting", "match": ["crock", "airlock", "weights"] },
+    { "key": "tools", "label": "Tools", "match": ["funnel", "lifter", "tray", "rack", "crate", "marker", "tape", "olive oil"] }
+  ],
+  "combos": [
+    {
+      "key": "marinara",
+      "label": "Marinara sauce",
+      "method": "water_bath_canning",
+      "required": ["tomato"],
+      "optional": ["basil", "garlic", "onion", "oregano"],
+      "note": "Paste tomatoes make the thickest sauce; acidify with bottled lemon juice or citric acid per the tested recipe.",
+      "supplies": ["Quart canning jars", "New two-piece lids and bands", "Bottled lemon juice or citric acid"]
+    },
+    {
+      "key": "salsa",
+      "label": "Salsa",
+      "method": "water_bath_canning",
+      "required": ["tomato", "pepper"],
+      "optional": ["onion", "cilantro", "garlic", "jalapeno"],
+      "note": "Use a tested salsa ratio: adding more low-acid vegetables (onion, pepper) without more acid makes it unsafe to water-bath.",
+      "supplies": ["Pint canning jars", "New two-piece lids and bands", "Bottled lemon juice or citric acid"]
+    },
+    {
+      "key": "dill_pickles",
+      "label": "Dill pickles",
+      "method": "water_bath_canning",
+      "required": ["cucumber", "dill"],
+      "optional": ["garlic", "pepper"],
+      "note": "Cucumbers are low-acid: they are only water-bath safe once pickled at a tested vinegar strength.",
+      "supplies": ["Quart canning jars", "New two-piece lids and bands", "Pickling salt", "Vinegar"]
+    },
+    {
+      "key": "pesto_cubes",
+      "label": "Pesto cubes",
+      "method": "oil_herb_cubes",
+      "required": ["basil"],
+      "optional": ["garlic", "parsley"],
+      "note": "Freeze in oil: garlic-in-oil kept at room temperature is a botulism risk.",
+      "supplies": ["Ice-cube trays", "Olive oil", "Freezer bags or containers"]
+    },
+    {
+      "key": "berry_jam",
+      "label": "Berry jam",
+      "method": "water_bath_canning",
+      "required": ["berry"],
+      "optional": ["strawberry", "raspberry", "blackberry", "blueberry"],
+      "note": "Follow the pectin insert's tested sugar/acid ratio for set and safety.",
+      "supplies": ["Half-pint canning jars", "New two-piece lids and bands", "Pectin"]
+    },
+    {
+      "key": "pickled_jalapenos",
+      "label": "Pickled jalapeños",
+      "method": "water_bath_canning",
+      "required": ["jalapeno"],
+      "optional": ["onion", "garlic", "carrot"],
+      "note": "Peppers are low-acid; the tested vinegar ratio is what makes them water-bath safe.",
+      "supplies": ["Pint canning jars", "New two-piece lids and bands", "Pickling salt", "Vinegar"]
+    },
+    {
+      "key": "applesauce",
+      "label": "Applesauce",
+      "method": "water_bath_canning",
+      "required": ["apple"],
+      "optional": [],
+      "note": "Apples are high-acid: water-bath safe, with or without sugar.",
+      "supplies": ["Quart canning jars", "New two-piece lids and bands"]
+    },
+    {
+      "key": "soup_base",
+      "label": "Ratatouille / veggie soup base",
+      "method": "pressure_canning",
+      "required": ["tomato", "zucchini"],
+      "optional": ["eggplant", "pepper", "onion", "basil"],
+      "note": "Mixed vegetable bases are low-acid — pressure can only, never water-bath.",
+      "supplies": ["Quart canning jars", "New two-piece lids and bands", "Pressure canner with a tested gauge"]
+    },
+    {
+      "key": "italian_herb_blend",
+      "label": "Dried Italian herb blend",
+      "method": "dehydrating",
+      "required": ["basil"],
+      "optional": ["oregano", "thyme", "rosemary", "parsley", "marjoram"],
+      "note": "Dry herbs at low heat and keep them airtight; they lose aroma in light.",
+      "supplies": ["Dehydrator sheets or parchment", "Airtight storage jars"]
+    },
+    {
+      "key": "squash_freezer_packs",
+      "label": "Squash & carrot freezer packs",
+      "method": "freezing",
+      "required": ["zucchini"],
+      "optional": ["carrot", "green bean", "pea", "corn"],
+      "note": "Blanch first (see each crop's blanching time) so the texture survives the freezer.",
+      "supplies": ["Freezer bags or containers", "Freezer tape and marker"]
+    }
+  ]
+}

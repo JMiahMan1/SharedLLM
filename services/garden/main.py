@@ -62,6 +62,11 @@ from services.garden.models import (
     Location,
     LocationIn,
     LocationOut,
+    PantryBatch,
+    PantryBatchIn,
+    PantryBatchOut,
+    PantryBatchPatch,
+    PantryBatchUseIn,
     PantryGoal,
     PantryGoalIn,
     PantryGoalOut,
@@ -75,6 +80,7 @@ from services.garden.models import (
 )
 from services.garden.achievements import evaluate as evaluate_achievements
 from services.garden import hub_rooms as rooms_hub
+from services.garden import preservation as pantry
 from services.garden import household
 from services.garden.notices import collect_due_tasks, build_digest, digest_loop, send_digest_to_member
 from services.garden.skylight_sync import mirror_care_log
@@ -328,6 +334,17 @@ def _plant_out(row: Plant, species: dict | None = None, session: Session | None 
 
 def _today_iso() -> str:
     return datetime.now(UTC).date().isoformat()
+
+
+def _validate_iso_date(name: str, value: str) -> None:
+    """A date the pantry stores must be a real ISO ``YYYY-MM-DD`` day."""
+    try:
+        datetime.strptime(str(value)[:10], "%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{name} must be an ISO date (YYYY-MM-DD), got {value!r}.",
+        ) from None
 
 
 # --------------------------------------------------------------------------- health
@@ -2611,3 +2628,159 @@ async def planner_sizing(
         "total_sqft": round(sum(c["sqft"] for c in results), 1),
         "total_plants": sum(c["plant_count"] for c in results),
     }
+
+
+# --------------------------------------------------------------------------- Phase 6: harvest forecast, preservation & pantry
+
+
+@app.get("/harvest/forecast")
+async def harvest_forecast(
+    request: Request,
+    days: int = Query(28, ge=1, le=120, description="Rolling window of days to look ahead"),
+    session: Session = Depends(get_session),
+):
+    """Coming Ready Soon: maturity forecast, refined with growing degree days.
+
+    Weather is an optional extra: when the forecast is unavailable the estimate
+    is plain ``planted_date + days_to_maturity`` and every item says
+    ``gdd_adjusted: false``.
+    """
+    _user(request)
+    forecast = await weather.forecast()
+    return pantry.compute_harvest_forecast(session, days=days, daily=(forecast or {}).get("daily"))
+
+
+@app.get("/preservation/advice")
+async def preservation_advice(
+    request: Request,
+    days: int = Query(28, ge=1, le=120, description="Forecast window used for prep timing"),
+    session: Session = Depends(get_session),
+):
+    """Methods per growing crop, USDA safety callouts, combos and the prep checklist."""
+    _user(request)
+    weather_data = await weather.forecast()
+    forecast = pantry.compute_harvest_forecast(session, days=days, daily=(weather_data or {}).get("daily"))
+    return pantry.build_preservation_advice(session, forecast=forecast)
+
+
+@app.get("/pantry-batches")
+def list_pantry_batches(
+    request: Request,
+    goal_id: str | None = Query(None, description="Only batches counting towards this goal"),
+    include_empty: bool = Query(False, description="Include batches with nothing left"),
+    session: Session = Depends(get_session),
+):
+    """The pantry shelf, with use-first flags and per-goal progress."""
+    _user(request)
+    return pantry.build_pantry_view(session, goal_id=goal_id, include_empty=include_empty)
+
+
+@app.post("/pantry-batches", status_code=201)
+def create_pantry_batch(
+    body: PantryBatchIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Log a preserved batch (adults and admins)."""
+    user = _user(request)
+    _require_admin_or_adult(request)
+    batch_date = body.batch_date or _today_iso()
+    _validate_iso_date("batch_date", batch_date)
+    use_by = body.use_by_date or pantry.suggest_use_by(batch_date, body.method)
+    if use_by:
+        _validate_iso_date("use_by_date", use_by)
+    qty_remaining = body.qty_initial if body.qty_remaining is None else body.qty_remaining
+    row = PantryBatch(
+        goal_id=body.goal_id,
+        label=body.label,
+        method=body.method,
+        batch_date=batch_date,
+        qty_initial=body.qty_initial,
+        qty_remaining=qty_remaining,
+        unit=body.unit,
+        storage_location=body.storage_location,
+        use_by_date=use_by,
+        logged_by=user,
+        notes=body.notes,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    data = PantryBatchOut.model_validate(row).model_dump()
+    data["method_label"] = pantry.method_label(row.method)
+    return data
+
+
+@app.patch("/pantry-batches/{batch_id}")
+def patch_pantry_batch(
+    batch_id: str,
+    body: PantryBatchPatch,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Edit a batch (adults and admins)."""
+    _user(request)
+    _require_admin_or_adult(request)
+    row = session.get(PantryBatch, batch_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Pantry batch not found")
+    fields = body.model_dump(exclude_unset=True)
+    if fields.get("batch_date"):
+        _validate_iso_date("batch_date", fields["batch_date"])
+    if fields.get("use_by_date"):
+        _validate_iso_date("use_by_date", fields["use_by_date"])
+    for key, value in fields.items():
+        if key == "qty_remaining" and value is None:
+            continue
+        setattr(row, key, value)
+    if row.qty_remaining > row.qty_initial:
+        row.qty_initial = row.qty_remaining
+    row.updated_at = utcnow()
+    session.commit()
+    session.refresh(row)
+    data = PantryBatchOut.model_validate(row).model_dump()
+    data["method_label"] = pantry.method_label(row.method)
+    return data
+
+
+@app.post("/pantry-batches/{batch_id}/use")
+def use_pantry_batch(
+    batch_id: str,
+    request: Request,
+    body: PantryBatchUseIn | None = None,
+    session: Session = Depends(get_session),
+):
+    """Take something out of the pantry (every family role, children included)."""
+    user = _user(request)
+    row = session.get(PantryBatch, batch_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Pantry batch not found")
+    used = body.qty_used if body is not None else 1.0
+    row.qty_remaining = max(0.0, round(row.qty_remaining - used, 3))
+    row.updated_at = utcnow()
+    session.commit()
+    session.refresh(row)
+    data = PantryBatchOut.model_validate(row).model_dump()
+    data.update(pantry.batch_flags(row, today=datetime.now(UTC).date()))
+    data["method_label"] = pantry.method_label(row.method)
+    data["used_by"] = user
+    data["qty_used"] = used
+    return data
+
+
+@app.delete("/pantry-batches/{batch_id}", status_code=204)
+def delete_pantry_batch(
+    batch_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Delete a batch (adults and admins)."""
+    _user(request)
+    _require_admin_or_adult(request)
+    row = session.get(PantryBatch, batch_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Pantry batch not found")
+    session.delete(row)
+    session.commit()
+    return JSONResponse(status_code=204, content=None)
+

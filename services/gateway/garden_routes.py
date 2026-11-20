@@ -909,3 +909,67 @@ async def garden_delete_skylight_chore(plant_id: str, request: Request):
         raise HTTPException(status_code=502, detail="Could not unlink the Skylight chore from the plant.")
     return {"plant": updated, "removed_chore_id": chore_id}
 
+
+
+# --------------------------------------------------------------------------- harvest, preservation & pantry proxy (Phase 6)
+
+
+@router.get("/harvest/forecast")
+async def garden_harvest_forecast(request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "GET",
+        "/harvest/forecast",
+        params={k: v for k, v in request.query_params.items() if k in ("days",)},
+        headers=headers,
+    )
+
+
+@router.get("/preservation/advice")
+async def garden_preservation_advice(request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "GET",
+        "/preservation/advice",
+        params={k: v for k, v in request.query_params.items() if k in ("days",)},
+        headers=headers,
+    )
+
+
+@router.get("/pantry-batches")
+async def garden_list_pantry_batches(request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "GET",
+        "/pantry-batches",
+        params={k: v for k, v in request.query_params.items() if k in ("goal_id", "include_empty")},
+        headers=headers,
+    )
+
+
+@router.post("/pantry-batches")
+async def garden_create_pantry_batch(request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call("POST", "/pantry-batches", json=body, headers=headers)
+
+
+@router.patch("/pantry-batches/{batch_id}")
+async def garden_patch_pantry_batch(batch_id: str, request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    return await _call("PATCH", f"/pantry-batches/{batch_id}", json=body, headers=headers)
+
+
+@router.post("/pantry-batches/{batch_id}/use")
+async def garden_use_pantry_batch(batch_id: str, request: Request):
+    # Every family role may take something out of the pantry, children included.
+    headers = await _verified_headers(request)
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    return await _call("POST", f"/pantry-batches/{batch_id}/use", json=body, headers=headers)
+
+
+@router.delete("/pantry-batches/{batch_id}")
+async def garden_delete_pantry_batch(batch_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call("DELETE", f"/pantry-batches/{batch_id}", headers=headers)
