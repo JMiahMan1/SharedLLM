@@ -5,7 +5,7 @@ import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApp
 import type {
   GardenPlant, GardenSpecies, GardenLocation, GardenProfile,
   GardenTodaySummary, GardenCareLog, GardenCareRule,
-  GardenAssignBody, GardenStreaks, GardenNoticeTest,
+  GardenAssignBody, GardenStreaks, GardenNoticeTest, GardenSkylightOptions,
   GardenCustomSpeciesIn,
 } from '../types/api';
 import type {
@@ -2744,6 +2744,11 @@ export const api = {
     return resp.data;
   },
 
+  async gardenGetPlant(id: string): Promise<GardenPlant> {
+    const resp = await apiClient.get(`/api/garden/plants/${encodeURIComponent(id)}`);
+    return resp.data;
+  },
+
   async gardenPatchPlant(id: string, body: Partial<GardenPlant>): Promise<GardenPlant> {
     const resp = await apiClient.patch(`/api/garden/plants/${encodeURIComponent(id)}`, body);
     return resp.data;
@@ -2753,8 +2758,8 @@ export const api = {
     await apiClient.delete(`/api/garden/plants/${encodeURIComponent(id)}`);
   },
 
-  async gardenToday(): Promise<GardenTodaySummary> {
-    const resp = await apiClient.get('/api/garden/today');
+  async gardenToday(params?: { mine?: boolean; assigned_to?: string }): Promise<GardenTodaySummary> {
+    const resp = await apiClient.get('/api/garden/today', { params });
     return resp.data;
   },
 
@@ -2790,6 +2795,24 @@ export const api = {
 
   async gardenAssignPlant(id: string, body: GardenAssignBody): Promise<GardenPlant> {
     const resp = await apiClient.patch(`/api/garden/plants/${encodeURIComponent(id)}/assign`, body);
+    return resp.data;
+  },
+
+  async gardenSkylightOptions(plantId: string): Promise<GardenSkylightOptions> {
+    const resp = await apiClient.get(`/api/garden/plants/${encodeURIComponent(plantId)}/skylight-options`);
+    return resp.data;
+  },
+
+  async gardenCreateSkylightChore(
+    plantId: string,
+    body: { assignee_username: string; title?: string; repeat?: string; time?: string; stars?: number; note?: string },
+  ): Promise<{ plant: GardenPlant; chore: { id: string; assignee: string; skylight_name: string; repeat: string; title: string } }> {
+    const resp = await apiClient.post(`/api/garden/plants/${encodeURIComponent(plantId)}/skylight-chore`, body);
+    return resp.data;
+  },
+
+  async gardenDeleteSkylightChore(plantId: string): Promise<{ plant: GardenPlant; removed_chore_id: string | null }> {
+    const resp = await apiClient.delete(`/api/garden/plants/${encodeURIComponent(plantId)}/skylight-chore`);
     return resp.data;
   },
 

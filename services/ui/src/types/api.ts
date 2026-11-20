@@ -4835,6 +4835,11 @@ export interface GardenPlant {
   status: string;
   assigned_to: string | null;
   skylight_sync_enabled: boolean;
+  skylight_chore_id?: string | null;
+  /** The household member (Identity username) the Skylight chore is for. */
+  skylight_assignee?: string | null;
+  /** The soonest active care rule's due date, so a card can say when care is next. */
+  next_due_at?: string | null;
   notes: string | null;
   calibration_factor: number;
   last_harvested_at: string | null;
@@ -4915,8 +4920,28 @@ export interface GardenStreaks {
 }
 
 export interface GardenAssignBody {
-  assigned_to: string | null;
-  skylight_sync_enabled: boolean | null;
+  assigned_to?: string | null;
+  skylight_sync_enabled?: boolean | null;
+  skylight_chore_id?: string | null;
+  skylight_assignee?: string | null;
+}
+
+/** One person a plant's Skylight chore may go to, and their chore-chart name. */
+export interface GardenSkylightAssignee {
+  username: string;
+  display_name: string;
+  family_role: string | null;
+  skylight_name: string | null;
+  is_self: boolean;
+}
+
+export interface GardenSkylightOptions {
+  can_assign_skylight: boolean;
+  skylight_configured: boolean;
+  eligible_assignees: GardenSkylightAssignee[];
+  current_chore_id: string | null;
+  current_assignee: string | null;
+  skylight_sync_enabled: boolean;
 }
 
 export interface GardenNoticeTest {

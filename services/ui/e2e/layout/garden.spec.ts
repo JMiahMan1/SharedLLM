@@ -232,6 +232,29 @@ async function openGarden(page: Page, path = '/garden'): Promise<Run> {
         ],
       });
     }
+    if (p === '/api/users/family-directory') {
+      return json([
+        { username: 'mother', display_name: 'Michele', nextcloud_user: null, avatar: null, family_role: 'mother' },
+        { username: 'father', display_name: 'Jeremiah', nextcloud_user: null, avatar: null, family_role: 'father' },
+        { username: 'kaleb', display_name: 'Kaleb', nextcloud_user: null, avatar: null, family_role: 'adult_child' },
+        { username: 'gracie', display_name: 'Gracie', nextcloud_user: null, avatar: null, family_role: 'teen' },
+        { username: 'noah', display_name: 'Noah', nextcloud_user: null, avatar: null, family_role: 'child' },
+      ]);
+    }
+    if (/^\/api\/garden\/plants\/[^/]+\/skylight-options$/.test(p)) {
+      return json({
+        can_assign_skylight: true,
+        skylight_configured: true,
+        eligible_assignees: [
+          { username: 'mother', display_name: 'Michele', family_role: 'mother', skylight_name: 'Michele', is_self: true },
+          { username: 'noah', display_name: 'Noah', family_role: 'child', skylight_name: 'Noah', is_self: false },
+        ],
+        current_chore_id: null,
+        current_assignee: null,
+        skylight_sync_enabled: false,
+      });
+    }
+    if (p === '/api/garden/plants/plant-monty') return json(SAMPLE_PLANTS[0]);
     if (p === '/api/garden/plants') return json(SAMPLE_PLANTS);
     if (p === '/api/garden/locations') return json(SAMPLE_LOCATIONS);
     if (p === '/api/garden/profile') {

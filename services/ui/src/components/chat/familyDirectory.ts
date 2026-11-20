@@ -7,6 +7,8 @@ export interface FamilyMember {
   display_name: string;
   nextcloud_user: string | null;
   avatar: string | null;
+  /** mother | father | adult_child | child | teen | other (null for an account without one). */
+  family_role?: string | null;
 }
 
 export type FamilyLookup = (actorId?: string | null) => FamilyMember | undefined;
@@ -37,6 +39,17 @@ export function useFamilyDirectory(): FamilyLookup {
     retry: false,
   });
   return useMemo(() => buildFamilyLookup(data), [data]);
+}
+
+/** The household as a list, for pickers and name lookups (roles included). */
+export function useFamilyMembers(): FamilyMember[] {
+  const { data } = useQuery({
+    queryKey: ['family-directory'],
+    queryFn: () => api.getFamilyDirectory(),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  return useMemo(() => (Array.isArray(data) ? data : []), [data]);
 }
 
 /** Words in a Home Assistant entity id that identify the entity, not a person. */

@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, MemoryRouter, Route, Routes } from 'react-router-dom';
 import React from 'react';
-import Garden from '../pages/Garden';
+import Garden, { PlantDetail } from '../pages/Garden';
 import { api } from '../services/api';
-import type { GardenLocation, GardenPlanOut, GardenSpecies } from '../types/api';
+import { saveShoppingList } from '../lib/shoppingListStore';
+import type { GardenLocation, GardenPlant, GardenPlanOut, GardenSpecies } from '../types/api';
 import { AuthProvider } from '../context/AuthContext';
 
 vi.mock('../context/AuthContext', async (importActual) => {
@@ -31,6 +32,14 @@ vi.mock('../services/api', () => ({
     gardenSpeciesLookup: vi.fn(),
     gardenSaveCustomSpecies: vi.fn(),
     gardenCreatePlant: vi.fn(),
+    gardenGetPlant: vi.fn(),
+    gardenSkylightOptions: vi.fn(),
+    gardenCreateSkylightChore: vi.fn(),
+    gardenDeleteSkylightChore: vi.fn(),
+    getFamilyDirectory: vi.fn(),
+    gardenPatchPlant: vi.fn(),
+    gardenDeletePlant: vi.fn(),
+    gardenAssignPlant: vi.fn(),
     gardenGetProfile: vi.fn(),
     gardenStreaks: vi.fn(),
     gardenUpdateProfile: vi.fn(),
@@ -51,6 +60,9 @@ vi.mock('../services/api', () => ({
     gardenPlannerSizing: vi.fn(),
     gardenCreateLocation: vi.fn(),
     gardenPatchLocation: vi.fn(),
+    gardenListHarvests: vi.fn(),
+    gardenLogHarvest: vi.fn(),
+    gardenHarvestReady: vi.fn(),
   },
 }));
 
@@ -58,6 +70,10 @@ vi.mock('../services/api', () => ({
 // Garden, so this is the same call the Rooms page makes.
 const { createArea } = vi.hoisted(() => ({ createArea: vi.fn() }));
 vi.mock('../lib/homeSetup', () => ({ createArea }));
+vi.mock('../lib/shoppingListStore', () => ({
+  saveShoppingList: vi.fn(async () => undefined),
+  readShoppingList: vi.fn(async () => ({ exists: false, text: '' })),
+}));
 
 const createWrapper = () => {
   const queryClient = new QueryClient({
@@ -76,6 +92,8 @@ const createWrapper = () => {
 
 // Planner defaults, set for every test; individual planner tests override them.
 beforeEach(() => {
+  vi.mocked(api.getFamilyDirectory).mockResolvedValue([]);
+  vi.mocked(api.gardenSkylightOptions).mockRejectedValue(new Error('no plant'));
   vi.mocked(api.gardenListPlans).mockResolvedValue({ count: 0, plans: [] });
   vi.mocked(api.gardenListPantryGoals).mockResolvedValue({ count: 0, goals: [] });
   vi.mocked(api.gardenListSpecies).mockResolvedValue({
@@ -993,7 +1011,10 @@ describe('Garden Planner tab (Phase 5)', () => {
     fireEvent.click(await screen.findByLabelText(/open north bed bed grid/i));
     await screen.findByText(/square-foot grid/i);
     fireEvent.click(screen.getByRole('button', { name: /auto-arrange/i }));
-    await waitFor(() => expect(vi.mocked(api.gardenAutoArrange)).toHaveBeenCalledWith(plan.id, bed.id, { apply: true }));
+    // Arrange what is on the grid right now (empty here), not only what was saved.
+    await waitFor(() => expect(vi.mocked(api.gardenAutoArrange)).toHaveBeenCalledWith(
+      plan.id, bed.id, { species_refs: [], apply: true },
+    ));
     await screen.findByText(/Antagonist adjacent/);
   });
 
@@ -1114,5 +1135,116 @@ describe('Garden rooms come from Home Hub', () => {
     await waitFor(() => expect(room).toHaveValue('sunroom'));
     // And nothing was created through Garden's own location endpoint.
     expect(vi.mocked(api.gardenCreateLocation)).not.toHaveBeenCalled();
+  });
+});
+
+describe('Garden plant detail (Skylight, edit, supplies)', () => {
+  const bed: GardenLocation = {
+    id: 'bed-1', name: 'North Bed', kind: 'raised_bed', source: 'garden', area_id: null,
+    width_ft: 2, length_ft: 2, area_sqft: 4, sun_exposure: 'full_sun', covered: false,
+    map_x: 1, map_y: 1, rotation_deg: 0, light_notes: null, draft_notes: null,
+    assigned_to: null, skylight_sync_enabled: false, created_at: '', updated_at: '',
+  };
+  const plant = {
+    id: 'plant-1', category: 'houseplant', species_ref: 'monstera_deliciosa',
+    location_id: null, nickname: 'Monty', quantity: 1, area_sqft_used: null,
+    pot_size_in: 6, pot_material: 'terracotta', has_drainage: true, soil_mix: null,
+    window_direction: 'e', distance_from_window: 2, planted_date: null, last_repotted_date: null,
+    planting_method: null, expected_harvest_start: null, expected_harvest_end: null,
+    status: 'active', assigned_to: 'kaleb', skylight_sync_enabled: false,
+    skylight_chore_id: null, skylight_assignee: null, next_due_at: null,
+    notes: null, calibration_factor: 1, last_harvested_at: null, regrowth_cooldown_days: null,
+    created_at: '', updated_at: '', species: null,
+  } as unknown as GardenPlant;
+  const household = [
+    { username: 'michele', display_name: 'Michele', nextcloud_user: null, avatar: null, family_role: 'mother' },
+    { username: 'kaleb', display_name: 'Kaleb', nextcloud_user: null, avatar: null, family_role: 'adult_child' },
+    { username: 'noah', display_name: 'Noah', nextcloud_user: null, avatar: null, family_role: 'child' },
+  ];
+  let wrapper: React.ComponentType<{ children?: React.ReactNode }>;
+
+  beforeEach(() => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // The route element draws PlantDetail itself, so the wrapper ignores children.
+    wrapper = () => (
+      <MemoryRouter initialEntries={['/garden/plants/plant-1']}>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <Routes>
+              <Route path="/garden/plants/:id" element={<PlantDetail />} />
+            </Routes>
+          </AuthProvider>
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    vi.mocked(api.gardenGetPlant).mockResolvedValue(plant);
+    vi.mocked(api.getFamilyDirectory).mockResolvedValue(household as never);
+    vi.mocked(api.gardenGetPlantLogs).mockResolvedValue({ plant_id: plant.id, count: 0, logs: [] });
+    vi.mocked(api.gardenListHarvests).mockResolvedValue({ harvests: [], count: 0 } as never);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([bed]);
+    vi.mocked(api.gardenSkylightOptions).mockResolvedValue({
+      can_assign_skylight: true,
+      skylight_configured: true,
+      eligible_assignees: [
+        { username: 'kaleb', display_name: 'Kaleb', family_role: 'adult_child', skylight_name: 'Kaleb', is_self: true },
+        { username: 'noah', display_name: 'Noah', family_role: 'child', skylight_name: 'Noah', is_self: false },
+      ],
+      current_chore_id: null,
+      current_assignee: null,
+      skylight_sync_enabled: false,
+    });
+    vi.mocked(api.gardenCreateSkylightChore).mockResolvedValue({
+      plant: { ...plant, skylight_sync_enabled: true, skylight_assignee: 'noah' },
+      chore: { id: '52409380', assignee: 'noah', skylight_name: 'Noah', repeat: 'weekly', title: 'Water Monty' },
+    });
+    vi.mocked(api.gardenPatchPlant).mockResolvedValue(plant);
+  });
+
+  it('offers the real household in the care assignment picker', async () => {
+    render(<PlantDetail />, { wrapper });
+
+    const picker = await screen.findByLabelText('Assigned to');
+    const names = Array.from((picker as HTMLSelectElement).options).map((o) => o.textContent);
+    expect(names).toContain('Kaleb (adult_child)');
+    expect(names).toContain('Michele (mother)');
+  });
+
+  it('creates the Skylight chore for the chosen person', async () => {
+    render(<PlantDetail />, { wrapper });
+
+    fireEvent.change(await screen.findByLabelText('Assign Skylight chore to'), { target: { value: 'noah' } });
+    fireEvent.click(screen.getByRole('button', { name: /assign as skylight chore/i }));
+
+    await waitFor(() => expect(vi.mocked(api.gardenCreateSkylightChore)).toHaveBeenCalledWith(
+      'plant-1', expect.objectContaining({ assignee_username: 'noah' }),
+    ));
+  });
+
+  it('saves the edit form', async () => {
+    render(<PlantDetail />, { wrapper });
+
+    fireEvent.click(await screen.findByRole('button', { name: /edit plant/i }));
+    fireEvent.change(screen.getByLabelText('Personal name'), { target: { value: 'Sir Monty' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(vi.mocked(api.gardenPatchPlant)).toHaveBeenCalledWith(
+      'plant-1', expect.objectContaining({ nickname: 'Sir Monty' }),
+    ));
+  });
+
+  it('pre-ticks only the likely supplies and adds the ticked ones', async () => {
+    render(<PlantDetail />, { wrapper });
+
+    fireEvent.click(await screen.findByRole('button', { name: /add supplies to shopping list/i }));
+    const dialog = await screen.findByRole('dialog', { name: /add supplies/i });
+    expect(within(dialog).getByLabelText('Potting mix')).toBeChecked();
+    expect(within(dialog).getByLabelText('Compost')).not.toBeChecked();
+    fireEvent.click(within(dialog).getByLabelText('Compost'));
+    fireEvent.click(within(dialog).getByRole('button', { name: /add \d+ items?/i }));
+
+    await waitFor(() => expect(saveShoppingList).toHaveBeenCalled());
+    const written = String(vi.mocked(saveShoppingList).mock.calls[0][0]);
+    expect(written).toContain('Potting mix');
+    expect(written).toContain('Compost');
   });
 });

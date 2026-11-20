@@ -669,6 +669,18 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     }
     if (p === '/api/garden/harvest/ready') return json({ count: 0, ready: [] });
     if (p === '/api/garden/recipes/matches') return json({ ready_ingredients: [], matches: [] });
+    if (p === '/api/users/family-directory') {
+      return json([
+        { username: 'parent', display_name: 'Parent', nextcloud_user: null, avatar: null, family_role: 'mother' },
+        { username: 'child', display_name: 'Child', nextcloud_user: null, avatar: null, family_role: 'child' },
+      ]);
+    }
+    if (/^\/api\/garden\/plants\/[^/]+\/skylight-options$/.test(p)) {
+      return json({
+        can_assign_skylight: false, skylight_configured: false, eligible_assignees: [],
+        current_chore_id: null, current_assignee: null, skylight_sync_enabled: false,
+      });
+    }
     if (p === '/api/garden/plants') return json([]);
     if (p === '/api/garden/locations') return json([]);
     if (p === '/api/garden/profile') {

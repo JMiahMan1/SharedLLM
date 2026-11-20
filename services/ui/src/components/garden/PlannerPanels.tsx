@@ -580,6 +580,16 @@ export function PlansPanel({
 
 /* ------------------------------- Yard map --------------------------------- */
 
+/** The outdoor places a bed can be (services/garden/models.py Location.kind). */
+const BED_KINDS = [
+  { value: 'raised_bed', label: 'Raised bed' },
+  { value: 'in_ground', label: 'In ground' },
+  { value: 'container', label: 'Container' },
+  { value: 'trellis', label: 'Trellis' },
+  { value: 'greenhouse', label: 'Greenhouse' },
+  { value: 'orchard', label: 'Orchard' },
+];
+
 export function YardMapPanel({
   beds, onOpenBed,
 }: {
@@ -594,6 +604,7 @@ export function YardMapPanel({
   const [length, setLength] = useState('8');
   const [mapX, setMapX] = useState('1');
   const [mapY, setMapY] = useState('1');
+  const [kind, setKind] = useState('raised_bed');
 
   const selected = beds.find((bed) => bed.id === selectedId) ?? null;
 
@@ -603,7 +614,7 @@ export function YardMapPanel({
   const addBed = useMutation({
     mutationFn: () => api.gardenCreateLocation({
       name: name.trim(),
-      kind: 'raised_bed',
+      kind,
       width_ft: Number(width) || 4,
       length_ft: Number(length) || 8,
       map_x: Number(mapX) || 0,
@@ -640,7 +651,7 @@ export function YardMapPanel({
 
       {adding && (
         <form
-          className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end mb-4"
+          className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end mb-4"
           onSubmit={(event) => {
             event.preventDefault();
             if (!name.trim()) return;
@@ -650,6 +661,14 @@ export function YardMapPanel({
           <label className={labelClass}>
             Bed name
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="North bed" className={inputClass} />
+          </label>
+          <label className={labelClass}>
+            Kind
+            <select value={kind} onChange={(e) => setKind(e.target.value)} className={inputClass}>
+              {BED_KINDS.map((bedKind) => (
+                <option key={bedKind.value} value={bedKind.value}>{bedKind.label}</option>
+              ))}
+            </select>
           </label>
           <label className={labelClass}>
             Width (ft)
@@ -667,7 +686,7 @@ export function YardMapPanel({
             Y (ft)
             <input type="number" value={mapY} onChange={(e) => setMapY(e.target.value)} className={inputClass} />
           </label>
-          <div className="col-span-2 sm:col-span-5 flex justify-end">
+          <div className="col-span-2 sm:col-span-6 flex justify-end">
             <button type="submit" disabled={addBed.isPending || !name.trim()} className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 text-sm pointer-coarse:min-h-11">
               {addBed.isPending ? 'Adding…' : 'Add bed'}
             </button>
@@ -846,7 +865,12 @@ export function BedGridEditor({
   });
 
   const autoArrange = useMutation({
-    mutationFn: () => api.gardenAutoArrange(planId, bed.id, { apply: true }),
+    // Arrange what is on the grid now, not only what was last saved: a person
+    // taps Auto-arrange on a bed they have just filled in.
+    mutationFn: () => api.gardenAutoArrange(planId, bed.id, {
+      species_refs: Object.values(assigned).filter(Boolean),
+      apply: true,
+    }),
     onSuccess: (data) => {
       const next: Record<string, string> = {};
       for (const placement of data.placements ?? []) {
@@ -1015,9 +1039,13 @@ export function TimelinePanel({ planId, planYear }: { planId: string; planYear: 
     try {
       const results = await Promise.allSettled(entries.map((entry) => api.addCalendarEvent({
         summary: `Garden: ${entry.name} — ${entry.stage}`,
-        start_time: `${planYear}-${entry.date}T09:00:00`,
+        // `start_time` is an ISO instant: a date alone made Calendar guess.
+        start_time: `${planYear}-${entry.date} 09:00`,
       })));
-      const failed = results.filter((result) => result.status === 'rejected').length;
+      // A resolved promise still carries the service's own verdict (SUCCESS/FAILURE).
+      const failed = results.filter(
+        (result) => result.status === 'rejected' || result.value?.status !== 'SUCCESS',
+      ).length;
       if (failed) toast.error('Some milestones could not reach Calendar; they stay on this plan.');
       else toast.success('Garden milestones added to Calendar');
     } catch {

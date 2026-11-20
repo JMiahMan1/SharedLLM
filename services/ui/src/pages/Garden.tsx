@@ -13,10 +13,11 @@ import { createArea } from '../lib/homeSetup';
 import { AREAS_KEY, FLOORS_KEY, ROOMS_KEY } from '../hooks/useRoomActions';
 import { failureText } from '../lib/discoveredDevices';
 import { useAuth } from '../context/AuthContext';
+import { useFamilyMembers, type FamilyMember } from '../components/chat/familyDirectory';
 import {
   BedGridEditor, DualSizingPanel, PlansPanel, TimelinePanel, YardMapPanel, ZoneFrostPanel,
 } from '../components/garden/PlannerPanels';
-import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn, HarvestLogIn, HarvestReadyItem } from '../types/api';
+import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn, GardenSkylightOptions, HarvestLogIn, HarvestReadyItem } from '../types/api';
 
 /* ========================= Garden Page ========================= */
 
@@ -30,7 +31,9 @@ export default function Garden() {
 
   const todayQuery = useQuery({
     queryKey: ['garden-today', mineOnly ? 'mine' : 'all'],
-    queryFn: () => api.gardenToday(),
+    // The server filters by assignee (mine = mine or unassigned); the page must
+    // ask for that, not fetch everything and pretend.
+    queryFn: () => api.gardenToday({ mine: mineOnly }),
     staleTime: 60_000,
   });
 
@@ -125,30 +128,48 @@ export default function Garden() {
             >
               <Scissors size={16} /> Planner
             </button>
-            <div className="inline-flex items-center shrink-0 border border-white/10 rounded-lg overflow-hidden">
+            {tab !== 'planner' && (
+              <div className="inline-flex items-center shrink-0 border border-white/10 rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setMineOnly(false)}
+                  className={`px-3 py-2 min-h-11 text-xs font-medium transition-all ${
+                    !mineOnly
+                      ? 'bg-purple-600/30 text-white'
+                      : 'text-slate-300 hover:bg-white/10'
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMineOnly(true)}
+                  className={`px-3 py-2 min-h-11 text-xs font-medium transition-all ${
+                    mineOnly
+                      ? 'bg-purple-600/30 text-white'
+                      : 'text-slate-300 hover:bg-white/10'
+                  }`}
+                >
+                  Mine
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 min-h-11 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-purple-500/25 shrink-0"
+            >
+              <Plus size={16} /> Add Plant
+            </button>
+            {isParent && (
               <button
                 type="button"
-                onClick={() => setMineOnly(false)}
-                className={`px-3 py-2 min-h-11 text-xs font-medium transition-all ${
-                  !mineOnly
-                    ? 'bg-purple-600/30 text-white'
-                    : 'text-slate-300 hover:bg-white/10'
-                }`}
+                onClick={() => setDigestOpen(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 min-h-11 bg-white/10 hover:bg-white/20 text-slate-300 rounded-xl text-sm font-medium transition-colors border border-white/10 shrink-0"
               >
-                All
+                <Settings size={16} /> Digest Settings
               </button>
-              <button
-                type="button"
-                onClick={() => setMineOnly(true)}
-                className={`px-3 py-2 min-h-11 text-xs font-medium transition-all ${
-                  mineOnly
-                    ? 'bg-purple-600/30 text-white'
-                    : 'text-slate-300 hover:bg-white/10'
-                }`}
-              >
-                Mine
-              </button>
-            </div>
+            )}
           </div>
         </div>
 
@@ -163,29 +184,10 @@ export default function Garden() {
             onLogHarvest={setHarvestOpen}
           />
         ) : tab === 'plants' ? (
-          <PlantsTab plants={plants} locations={locations} mineOnly={mineOnly} setMineOnly={setMineOnly} currentUser={user?.username ?? ''} />
+          <PlantsTab plants={plants} locations={locations} mineOnly={mineOnly} currentUser={user?.username ?? ''} />
         ) : (
           <PlannerTab locations={locations} />
         )}
-
-        <div className="mt-6 flex flex-wrap justify-end gap-3">
-          <button
-            type="button"
-            onClick={() => setAddOpen(true)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 min-h-11 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-purple-500/25"
-          >
-            <Plus size={16} /> Add Plant
-          </button>
-          {isParent && (
-            <button
-              type="button"
-              onClick={() => setDigestOpen(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 min-h-11 bg-white/10 hover:bg-white/20 text-slate-300 rounded-xl text-sm font-medium transition-colors border border-white/10"
-            >
-              <Settings size={16} /> Digest Settings
-            </button>
-          )}
-        </div>
 
         <AddPlantModal
           open={addOpen}
@@ -504,14 +506,14 @@ function TodayTab({
 
 /* ========================= Plants Tab ========================= */
 
-function PlantsTab({ plants, locations, mineOnly, setMineOnly, currentUser }: { plants: GardenPlant[]; locations: GardenLocation[]; mineOnly: boolean; setMineOnly: (v: boolean) => void; currentUser: string }) {
+function PlantsTab({ plants, locations, mineOnly, currentUser }: { plants: GardenPlant[]; locations: GardenLocation[]; mineOnly: boolean; currentUser: string }) {
   const [filter, setFilter] = useState<'all' | 'houseplant' | 'herb' | 'outdoor'>('all');
 
   const locationMap = new Map(locations.map((l) => [l.id, l.name]));
 
   const FILTERS: Array<'all' | 'houseplant' | 'herb' | 'outdoor'> = ['all', 'houseplant', 'herb', 'outdoor'];
 
-  let filtered = plants.filter((p) => {
+  const filtered = plants.filter((p) => {
     if (mineOnly && p.assigned_to !== currentUser && p.assigned_to != null && p.assigned_to !== '') return false;
     if (filter === 'outdoor') return ['vegetable', 'fruit', 'flower'].includes(p.category);
     if (filter !== 'all' && p.category !== filter) return false;
@@ -535,18 +537,6 @@ function PlantsTab({ plants, locations, mineOnly, setMineOnly, currentUser }: { 
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
-        <button
-          type="button"
-          onClick={() => setMineOnly(!mineOnly)}
-          className={`inline-flex items-center gap-1.5 px-3.5 py-2 min-h-11 rounded-full text-sm font-medium transition-all ${
-            mineOnly
-              ? 'bg-purple-600 text-white'
-              : 'bg-white/5 text-slate-300 hover:bg-white/10'
-          }`}
-        >
-          <User size={14} />
-          {mineOnly ? 'Mine' : 'All'}
-        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -566,20 +556,30 @@ function PlantsTab({ plants, locations, mineOnly, setMineOnly, currentUser }: { 
   );
 }
 
+/** "Due today" / "Overdue · 2 days" / "Next care: Mar 4" for a plant's next rule. */
+function formatNextCare(nextDueAt: string | null | undefined): string | null {
+  if (!nextDueAt) return null;
+  const due = new Date(nextDueAt);
+  if (Number.isNaN(due.getTime())) return null;
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(due) - startOfDay(now)) / 86_400_000);
+  if (days === 0) return 'Due today';
+  if (days < 0) return `Overdue · ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'}`;
+  return `Next care: ${due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+}
+
 function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: string | undefined }) {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const assignMutation = useMutation({
-    mutationFn: (body: { assigned_to: string | null; skylight_sync_enabled: boolean }) =>
-      api.gardenAssignPlant(plant.id, body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
-      queryClient.invalidateQueries({ queryKey: ['garden-today'] });
-      toast.success('Assignment updated');
-    },
-    onError: () => toast.error('Failed to update assignment'),
-  });
+  const family = useFamilyMembers();
+  const caregiverName = plant.assigned_to
+    ? family.find((m) => m.username.toLowerCase() === plant.assigned_to!.toLowerCase())?.display_name ?? plant.assigned_to
+    : null;
+  const skylightName = plant.skylight_assignee
+    ? family.find((m) => m.username.toLowerCase() === plant.skylight_assignee!.toLowerCase())?.display_name ?? plant.skylight_assignee
+    : null;
+  const nextCare = formatNextCare(plant.next_due_at);
+  const overdue = (nextCare ?? '').startsWith('Overdue');
 
   const getStatusColor = () => {
     switch (plant.status) {
@@ -592,12 +592,7 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
 
   return (
     <div
-      onClick={(e) => {
-        // Don't navigate if the click came from the Skylight checkbox.
-        if (!(e.target as HTMLElement).closest('input[type="checkbox"]')) {
-          navigate(`/garden/plants/${plant.id}`);
-        }
-      }}
+      onClick={() => navigate(`/garden/plants/${plant.id}`)}
       className="group bg-white/5 border border-white/10 rounded-xl p-4 hover:border-purple-500/50 hover:bg-white/10 transition-colors cursor-pointer pointer-coarse:min-h-[140px]"
     >
       <div className="flex items-start justify-between mb-3">
@@ -614,32 +609,23 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
         <span>{locationName || 'Unplaced'}</span>
         <span>{plant.category}</span>
       </div>
-      {plant.assigned_to && (
+      {caregiverName && (
         <div className="flex items-center gap-2 text-xs text-slate-400 mb-3">
           <User size={12} />
-          <span>Assigned: {plant.assigned_to}</span>
+          <span>Assigned: {caregiverName}</span>
         </div>
       )}
-      <div className="flex items-center gap-2 text-xs mt-3 pt-3 border-t border-white/5">
-        <label className="text-slate-500 flex items-center gap-1 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={plant.skylight_sync_enabled}
-            onChange={(e) => {
-              e.stopPropagation();
-              assignMutation.mutate({
-                assigned_to: plant.assigned_to ?? null,
-                skylight_sync_enabled: e.target.checked,
-              });
-            }}
-            className="rounded bg-slate-800 border-slate-600 text-purple-600 focus:ring-purple-500"
-          />
-          <span>Skylight sync</span>
-        </label>
-      </div>
+      {plant.skylight_sync_enabled && (
+        <div className="flex items-center gap-2 text-xs text-sky-300/80 mb-3" title="This plant's watering is a Skylight chore">
+          <RotateCw size={12} />
+          <span>Skylight{skylightName ? ` · ${skylightName}` : ''}</span>
+        </div>
+      )}
       <div className="flex items-center gap-2 pt-3 border-t border-white/5">
-        <Droplets size={14} className="text-slate-400" />
-        <span className="text-sm text-slate-300">Next care due</span>
+        <Droplets size={14} className={overdue ? 'text-amber-400' : 'text-slate-400'} />
+        <span className={`text-sm ${overdue ? 'text-amber-300' : 'text-slate-300'}`}>
+          {nextCare ?? 'No care scheduled'}
+        </span>
       </div>
     </div>
   );
@@ -679,6 +665,21 @@ function PlannerTab({
 
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
   const [openBed, setOpenBed] = useState<GardenLocation | null>(null);
+  // A bed tapped before any plan exists: offer to make one rather than ignore it.
+  const [planPromptBed, setPlanPromptBed] = useState<GardenLocation | null>(null);
+
+  const createPlanMutation = useMutation({
+    mutationFn: () => {
+      const year = new Date().getFullYear();
+      return api.gardenCreatePlan({ name: `${year} Garden`, season: 'spring_summer', year });
+    },
+    onSuccess: (plan) => {
+      setActivePlanId(plan.id);
+      void queryClient.invalidateQueries({ queryKey: ['garden-plans'] });
+      toast.success(`${plan.name} created`);
+    },
+    onError: (err) => toast.error(failureText(err)),
+  });
 
   useEffect(() => {
     if (!plans.some((plan) => plan.id === activePlanId)) {
@@ -687,7 +688,9 @@ function PlannerTab({
   }, [plans, activePlanId]);
 
   const bedLocations = locations.filter((location) =>
-    ['raised_bed', 'in_ground', 'container', 'greenhouse'].includes(location.kind),
+    // Every outdoor place a plan can plant in -- a trellis and an orchard are
+    // as plantable as a raised bed, and used to be invisible here.
+    ['raised_bed', 'in_ground', 'container', 'trellis', 'greenhouse', 'orchard'].includes(location.kind),
   );
   const activePlan = plans.find((plan) => plan.id === activePlanId) ?? null;
 
@@ -707,7 +710,45 @@ function PlannerTab({
         onChanged={() => void queryClient.invalidateQueries({ queryKey: ['garden-plans'] })}
       />
 
-      <YardMapPanel beds={bedLocations} onOpenBed={setOpenBed} />
+      <YardMapPanel
+        beds={bedLocations}
+        onOpenBed={(bed) => {
+          // Planting needs a plan; say so instead of doing nothing at all.
+          if (!activePlanId) {
+            setPlanPromptBed(bed);
+            return;
+          }
+          setOpenBed(bed);
+        }}
+      />
+
+      {planPromptBed && !activePlanId && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 pointer-coarse:p-5">
+          <p className="text-sm text-amber-200">
+            Create a seasonal plan to start planting <span className="font-semibold">{planPromptBed.name}</span>.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setPlanPromptBed(null);
+                void createPlanMutation.mutate();
+              }}
+              disabled={createPlanMutation.isPending}
+              className="inline-flex items-center gap-2 px-4 py-2 min-h-11 rounded-lg bg-amber-500 text-slate-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50"
+            >
+              <Plus size={16} /> Create a plan
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlanPromptBed(null)}
+              className="inline-flex items-center px-4 py-2 min-h-11 rounded-lg bg-white/5 text-slate-300 text-sm hover:bg-white/10"
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
 
       {activePlanId && openBed && (
         <BedGridEditor
@@ -739,7 +780,8 @@ const GARDEN_SUPPLIES = [
   'Pruning shears',
 ];
 
-async function addSuppliesToShoppingList(plant: GardenPlant) {
+/** The supplies this plant suggests, most relevant first. */
+function suppliesFor(plant: GardenPlant): string[] {
   const species = plant.species;
   const supplies = [...GARDEN_SUPPLIES];
   if (plant.category === 'herb' && species?.herb_preservation_tips) {
@@ -748,6 +790,18 @@ async function addSuppliesToShoppingList(plant: GardenPlant) {
   if (['vegetable', 'fruit'].includes(plant.category)) {
     supplies.push('Canning jars', 'Freezer bags');
   }
+  return supplies;
+}
+
+/** The first few are pre-ticked: the ones this plant most likely needs. */
+function suggestedSupplies(plant: GardenPlant): string[] {
+  const supplies = suppliesFor(plant);
+  const likely = [supplies[0], supplies[3], plant.category === 'houseplant' ? 'Plant labels' : 'Seeds'];
+  return [...new Set(likely.filter(Boolean))];
+}
+
+async function addSuppliesToShoppingList(plant: GardenPlant, chosen?: string[]) {
+  const supplies = chosen ?? suppliesFor(plant);
 
   try {
     const existing = await readShoppingList();
@@ -770,25 +824,378 @@ async function addSuppliesToShoppingList(plant: GardenPlant) {
   }
 }
 
-/* ========================= Plant Detail ========================= */
+/* ========================= Edit Plant ========================= */
+
+function EditPlantModal({ plant, onClose }: { plant: GardenPlant; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const locationsQuery = useQuery({
+    queryKey: ['garden-locations'],
+    queryFn: () => api.gardenListLocations(),
+    staleTime: 300_000,
+  });
+  const [nickname, setNickname] = useState(plant.nickname ?? '');
+  const [locationId, setLocationId] = useState(plant.location_id ?? '');
+  const [potSize, setPotSize] = useState(plant.pot_size_in != null ? String(plant.pot_size_in) : '');
+  const [potMaterial, setPotMaterial] = useState(plant.pot_material ?? '');
+  const [hasDrainage, setHasDrainage] = useState(plant.has_drainage);
+  const [windowDirection, setWindowDirection] = useState(plant.window_direction ?? '');
+  const [distance, setDistance] = useState(plant.distance_from_window != null ? String(plant.distance_from_window) : '');
+  const [notes, setNotes] = useState(plant.notes ?? '');
+
+  const save = useMutation({
+    mutationFn: () => api.gardenPatchPlant(plant.id, {
+      nickname: nickname.trim() || null,
+      location_id: locationId || null,
+      pot_size_in: potSize ? Number(potSize) : null,
+      pot_material: potMaterial || null,
+      has_drainage: hasDrainage,
+      window_direction: windowDirection || null,
+      distance_from_window: distance ? Number(distance) : null,
+      notes: notes.trim() || null,
+    }),
+    onSuccess: () => {
+      for (const key of [['garden-plant', plant.id], ['garden-plants'], ['garden-today']]) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+      toast.success('Plant updated');
+      onClose();
+    },
+    onError: (err) => toast.error(failureText(err)),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Edit Plant"
+        className="bg-slate-900 border border-white/20 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold text-white">Edit Plant</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white">
+            <X size={18} />
+          </button>
+        </div>
+        <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
+          <div>
+            <label htmlFor="garden-edit-nickname" className="block text-xs text-slate-400 mb-1">Personal name</label>
+            <input id="garden-edit-nickname" value={nickname} onChange={(e) => setNickname(e.target.value)}
+              className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white" />
+          </div>
+          <div>
+            <label htmlFor="garden-edit-room" className="block text-xs text-slate-400 mb-1">Room</label>
+            <select id="garden-edit-room" value={locationId} onChange={(e) => setLocationId(e.target.value)}
+              className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white">
+              <option value="">Unplaced</option>
+              {(locationsQuery.data ?? []).map((place) => (
+                <option key={place.id} value={place.id}>{place.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="garden-edit-pot-size" className="block text-xs text-slate-400 mb-1">Pot size (in)</label>
+              <input id="garden-edit-pot-size" type="number" min="0" value={potSize} onChange={(e) => setPotSize(e.target.value)}
+                className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white" />
+            </div>
+            <div>
+              <label htmlFor="garden-edit-pot-material" className="block text-xs text-slate-400 mb-1">Pot material</label>
+              <select id="garden-edit-pot-material" value={potMaterial} onChange={(e) => setPotMaterial(e.target.value)}
+                className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white">
+                <option value="">—</option>
+                <option value="terracotta">Terracotta</option>
+                <option value="plastic">Plastic</option>
+                <option value="ceramic">Ceramic</option>
+                <option value="fabric">Fabric</option>
+              </select>
+            </div>
+          </div>
+          <label className="flex items-center gap-2 min-h-11 text-sm text-slate-300">
+            <input type="checkbox" checked={hasDrainage} onChange={(e) => setHasDrainage(e.target.checked)}
+              className="rounded bg-slate-800 border-slate-600 text-purple-600 focus:ring-purple-500" />
+            Has drainage
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="garden-edit-window" className="block text-xs text-slate-400 mb-1">Window</label>
+              <select id="garden-edit-window" value={windowDirection} onChange={(e) => setWindowDirection(e.target.value)}
+                className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white">
+                <option value="">—</option>
+                {['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((dir) => (
+                  <option key={dir} value={dir}>{dir.toUpperCase()}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="garden-edit-distance" className="block text-xs text-slate-400 mb-1">Distance (ft)</label>
+              <input id="garden-edit-distance" type="number" min="0" value={distance} onChange={(e) => setDistance(e.target.value)}
+                className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white" />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="garden-edit-notes" className="block text-xs text-slate-400 mb-1">Notes</label>
+            <textarea id="garden-edit-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white" />
+          </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose}
+              className="flex-1 px-4 py-2.5 min-h-11 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10">
+              Cancel
+            </button>
+            <button type="submit" disabled={save.isPending}
+              className="flex-1 px-4 py-2.5 min-h-11 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50">
+              {save.isPending ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ========================= Supplies picker ========================= */
+
+function SuppliesPickerModal({ plant, onClose }: { plant: GardenPlant; onClose: () => void }) {
+  const supplies = suppliesFor(plant);
+  const [chosen, setChosen] = useState<string[]>(suggestedSupplies(plant));
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Add supplies to the shopping list"
+        className="bg-slate-900 border border-white/20 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-xl font-bold text-white">Add Supplies</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-xs text-slate-400 mb-4">Tick what you need; it goes on the family shopping list.</p>
+        <div className="space-y-1">
+          {supplies.map((item) => {
+            const id = `supply-${item.replace(/\s+/g, '-').toLowerCase()}`;
+            const checked = chosen.includes(item);
+            return (
+              <label key={item} htmlFor={id} className="flex items-center gap-3 min-h-11 px-2 rounded-lg hover:bg-white/5 text-sm text-slate-200">
+                <input id={id} type="checkbox" checked={checked}
+                  onChange={(e) => setChosen((prev) => e.target.checked ? [...prev, item] : prev.filter((s) => s !== item))}
+                  className="rounded bg-slate-800 border-slate-600 text-purple-600 focus:ring-purple-500" />
+                {item}
+              </label>
+            );
+          })}
+        </div>
+        <div className="mt-5 flex gap-3">
+          <button type="button" onClick={onClose}
+            className="flex-1 px-4 py-2.5 min-h-11 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10">
+            Cancel
+          </button>
+          <button type="button" disabled={busy || chosen.length === 0}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await addSuppliesToShoppingList(plant, chosen);
+                onClose();
+              } finally {
+                setBusy(false);
+              }
+            }}
+            className="flex-1 px-4 py-2.5 min-h-11 rounded-lg bg-amber-500 text-slate-950 font-medium hover:bg-amber-400 disabled:opacity-50">
+            {busy ? 'Adding…' : `Add ${chosen.length} item${chosen.length === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ========================= Skylight Plant Chore (two-way care sync) ========================= */
+
+function SkylightChorePanel({
+  plant,
+  options,
+  family,
+}: {
+  plant: GardenPlant;
+  options: GardenSkylightOptions;
+  family: FamilyMember[];
+}) {
+  const queryClient = useQueryClient();
+  const displayName = (username: string | null | undefined) =>
+    (username && family.find((m) => m.username.toLowerCase() === username.toLowerCase())?.display_name) || username || '';
+  const [assignee, setAssignee] = useState(() => options.eligible_assignees.find((a) => a.is_self)?.username ?? options.eligible_assignees[0]?.username ?? '');
+  const [title, setTitle] = useState(`Water ${plant.nickname || plant.species?.common_name || 'plant'}`);
+  const [repeat, setRepeat] = useState('weekly');
+
+  const refresh = () => {
+    for (const key of [['garden-skylight-options', plant.id], ['garden-plant', plant.id], ['garden-plants']]) {
+      void queryClient.invalidateQueries({ queryKey: key });
+    }
+  };
+
+  const create = useMutation({
+    mutationFn: () => api.gardenCreateSkylightChore(plant.id, {
+      assignee_username: assignee,
+      title: title.trim(),
+      repeat,
+    }),
+    onSuccess: (data) => {
+      toast.success(`Skylight chore assigned to ${data.chore.skylight_name}`);
+      refresh();
+    },
+    onError: (err) => toast.error(failureText(err)),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => api.gardenDeleteSkylightChore(plant.id),
+    onSuccess: () => {
+      toast.success('Skylight chore removed');
+      refresh();
+    },
+    onError: (err) => toast.error(failureText(err)),
+  });
+
+  if (plant.skylight_sync_enabled) {
+    return (
+      <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Skylight Chore</h3>
+        <p className="text-sm text-slate-300">
+          Assigned to <span className="text-white font-medium">{displayName(plant.skylight_assignee)}</span> on the Skylight chore chart.
+        </p>
+        <p className="mt-1 text-xs text-slate-400">Checking it off in Skylight automatically logs watering here.</p>
+        <button
+          type="button"
+          onClick={() => remove.mutate()}
+          disabled={remove.isPending}
+          className="mt-3 inline-flex items-center px-4 py-2 min-h-11 rounded-lg bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/20 text-sm disabled:opacity-50"
+        >
+          {remove.isPending ? 'Removing…' : 'Remove from Skylight'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+      <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Skylight Chore</h3>
+      {!options.skylight_configured ? (
+        <p className="text-sm text-slate-400">
+          Skylight is not connected yet. Add it on Devices &gt; Integrations, then this plant's watering can appear on the family chore chart.
+        </p>
+      ) : (
+        <form
+          className="space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (assignee) create.mutate();
+          }}
+        >
+          <div>
+            <label htmlFor="garden-skylight-assignee" className="block text-xs text-slate-400 mb-1">Assign Skylight chore to</label>
+            <select
+              id="garden-skylight-assignee"
+              value={assignee}
+              onChange={(e) => setAssignee(e.target.value)}
+              className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {options.eligible_assignees.map((who) => (
+                <option key={who.username} value={who.username} disabled={!who.skylight_name}>
+                  {who.display_name}{who.is_self ? ' (You)' : ''}{who.family_role ? ` (${who.family_role})` : ''}
+                  {who.skylight_name ? '' : ' — not on the Skylight chart'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="garden-skylight-title" className="block text-xs text-slate-400 mb-1">Chore title</label>
+            <input
+              id="garden-skylight-title"
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <div>
+            <label htmlFor="garden-skylight-repeat" className="block text-xs text-slate-400 mb-1">Repeat</label>
+            <select
+              id="garden-skylight-repeat"
+              value={repeat}
+              onChange={(e) => setRepeat(e.target.value)}
+              className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              <option value="weekly">weekly</option>
+              <option value="FREQ=DAILY;INTERVAL=3">every 3 days</option>
+              <option value="daily">daily</option>
+              <option value="once">once</option>
+            </select>
+          </div>
+          <button
+            type="submit"
+            disabled={create.isPending || !assignee}
+            className="inline-flex items-center gap-2 px-4 py-2 min-h-11 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 text-sm font-medium"
+          >
+            {create.isPending ? 'Adding…' : 'Assign as Skylight Chore'}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+
 
 export function PlantDetail() {
   const { id } = useParams();
   const { user } = useAuth();
-  const isParent = Boolean(user?.is_admin || user?.family_role === 'mother' || user?.family_role === 'father');
+  const canEdit = Boolean(user?.is_admin || ['mother', 'father', 'adult_child'].includes(user?.family_role ?? ''));
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const family = useFamilyMembers();
   const [harvestOpen, setHarvestOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [suppliesOpen, setSuppliesOpen] = useState(false);
 
   const plantQuery = useQuery({
     queryKey: ['garden-plant', id],
-    queryFn: () => {
-      return api.gardenListPlants().then((plants) => plants.find((p) => p.id === id));
-    },
+    queryFn: () => api.gardenGetPlant(id!),
     enabled: !!id,
   });
 
   const plant = plantQuery.data;
+
+  const skylightQuery = useQuery({
+    queryKey: ['garden-skylight-options', id],
+    queryFn: () => api.gardenSkylightOptions(id!),
+    enabled: !!id && !!plant,
+    retry: false,
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: (body: Parameters<typeof api.gardenAssignPlant>[1]) => api.gardenAssignPlant(id!, body),
+    onSuccess: () => {
+      for (const key of [
+        ['garden-plant', id],
+        ['garden-plants'],
+        ['garden-today'],
+        ['garden-skylight-options', id],
+      ]) void queryClient.invalidateQueries({ queryKey: key });
+      toast.success('Assignment updated');
+    },
+    onError: (err) => toast.error(failureText(err)),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.gardenDeletePlant(id!),
+    onSuccess: () => {
+      for (const key of [['garden-plants'], ['garden-today'], ['garden-streaks']]) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+      toast.success('Plant deleted');
+      navigate('/garden');
+    },
+    onError: (err) => toast.error(failureText(err)),
+  });
 
   const logsQuery = useQuery({
     queryKey: ['garden-plant-logs', id],
@@ -806,6 +1213,7 @@ export function PlantDetail() {
   });
   const harvests = harvestsQuery.data?.harvests ?? [];
 
+  if (plantQuery.isLoading) return <div className="p-4 text-slate-400">Loading plant…</div>;
   if (!plant) return <div className="p-4 text-slate-400">Plant not found</div>;
 
   return (
@@ -815,14 +1223,59 @@ export function PlantDetail() {
           <h1 className="text-2xl font-bold text-white">{plant.nickname || plant.species_ref}</h1>
           <p className="text-slate-400 text-sm">{plant.species?.common_name || plant.species_ref}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => navigate('/garden')}
-          className="inline-flex items-center gap-1.5 px-4 py-2 min-h-11 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 shrink-0"
-        >
-          <X size={16} /> Back
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {canEdit && (
+            <>
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 min-h-11 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 shrink-0"
+              >
+                <Settings size={16} /> Edit Plant
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 min-h-11 rounded-lg bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/20 shrink-0"
+              >
+                <X size={16} /> Delete
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate('/garden')}
+            className="inline-flex items-center gap-1.5 px-4 py-2 min-h-11 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 shrink-0"
+          >
+            <X size={16} /> Back
+          </button>
+        </div>
       </div>
+
+      {confirmDelete && (
+        <div role="alertdialog" aria-label="Delete plant" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+          <p className="text-sm text-red-200">
+            Delete {plant.nickname || plant.species?.common_name || plant.species_ref}? Its care history is removed with it.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+              className="inline-flex items-center px-4 py-2 min-h-11 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 disabled:opacity-50"
+            >
+              {deleteMutation.isPending ? 'Deleting…' : 'Yes, delete it'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(false)}
+              className="inline-flex items-center px-4 py-2 min-h-11 rounded-lg bg-white/5 text-slate-300 text-sm hover:bg-white/10"
+            >
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div className="bg-white/5 border border-white/10 rounded-xl p-4">
@@ -902,57 +1355,30 @@ export function PlantDetail() {
         </div>
       </div>
 
-      {isParent && (
+      {canEdit && (
         <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Assignment</h3>
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <label htmlFor="garden-assigned-to" className="text-xs text-slate-400 w-24">Assigned to</label>
-              <select
-                id="garden-assigned-to"
-                value={plant.assigned_to || ''}
-                onChange={(e) => {
-                  api.gardenAssignPlant(plant.id, {
-                    assigned_to: e.target.value || null,
-                    skylight_sync_enabled: plant.skylight_sync_enabled,
-                  }).then(() => {
-                    queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
-                    queryClient.invalidateQueries({ queryKey: ['garden-today'] });
-                    toast.success('Assignment updated');
-                  }).catch(() => toast.error('Failed to update assignment'));
-                }}
-                className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-              >
-                <option value="">Unassigned</option>
-                <option value="mother">Mother</option>
-                <option value="father">Father</option>
-                <option value="adult_child">Adult Child</option>
-                <option value="teen">Teen</option>
-                <option value="child">Child</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={plant.skylight_sync_enabled}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    api.gardenAssignPlant(plant.id, {
-                      assigned_to: plant.assigned_to ?? null,
-                      skylight_sync_enabled: e.target.checked,
-                    }).then(() => {
-                      queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
-                      toast.success('Skylight sync updated');
-                    }).catch(() => toast.error('Failed to update Skylight sync'));
-                  }}
-                  className="rounded bg-slate-800 border-slate-600 text-purple-600 focus:ring-purple-500"
-                />
-                <span>Opt-in Skylight chore mirror</span>
-              </label>
-            </div>
+          <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Care Assignment</h3>
+          <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="garden-assigned-to" className="text-xs text-slate-400 w-24">Assigned to</label>
+            <select
+              id="garden-assigned-to"
+              value={plant.assigned_to || ''}
+              onChange={(e) => assignMutation.mutate({ assigned_to: e.target.value || null })}
+              className="flex-1 min-w-[12rem] px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              <option value="">Unassigned</option>
+              {family.map((member) => (
+                <option key={member.username} value={member.username}>
+                  {member.display_name}{member.family_role ? ` (${member.family_role})` : ''}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
+      )}
+
+      {skylightQuery.data?.can_assign_skylight && (
+        <SkylightChorePanel plant={plant} options={skylightQuery.data} family={family} />
       )}
 
       <div className="bg-white/5 border border-white/10 rounded-xl p-4">
@@ -993,7 +1419,7 @@ export function PlantDetail() {
           )}
           <button
             type="button"
-            onClick={() => addSuppliesToShoppingList(plant)}
+            onClick={() => setSuppliesOpen(true)}
             className="col-span-2 sm:col-span-2 inline-flex items-center justify-center gap-2 px-4 py-2 min-h-11 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 text-sm transition-colors"
           >
             <ShoppingCart size={14} className="shrink-0" />
@@ -1039,6 +1465,8 @@ export function PlantDetail() {
           )}
         </div>
       </div>
+      {editOpen && <EditPlantModal plant={plant} onClose={() => setEditOpen(false)} />}
+      {suppliesOpen && <SuppliesPickerModal plant={plant} onClose={() => setSuppliesOpen(false)} />}
       {harvestOpen && (
         <HarvestModal
           open={harvestOpen}
@@ -1189,7 +1617,7 @@ function DigestSettingsModal({
   onClose: () => void;
   initialDigestTime: string;
 }) {
-  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
   const [digestTime, setDigestTime] = useState(initialDigestTime);
 
   useEffect(() => {
@@ -1201,27 +1629,19 @@ function DigestSettingsModal({
       await api.gardenUpdateProfile({ daily_digest_time: time });
     },
     onSuccess: () => {
-      setSaving(false);
+      void queryClient.invalidateQueries({ queryKey: ['garden-profile'] });
       toast.success('Digest time saved');
+      onClose();
     },
-    onError: () => {
-      setSaving(false);
-      toast.error('Failed to save digest time');
-    },
+    onError: () => toast.error('Failed to save digest time'),
   });
 
   const testMutation = useMutation({
     mutationFn: async () => {
       await api.gardenNoticesTest({});
     },
-    onSuccess: () => {
-      setSaving(false);
-      toast.success('Test digest sent');
-    },
-    onError: () => {
-      setSaving(false);
-      toast.error('Failed to send test digest');
-    },
+    onSuccess: () => toast.success('Test digest sent'),
+    onError: () => toast.error('Failed to send test digest'),
   });
 
   if (!open) return null;
@@ -1251,14 +1671,11 @@ function DigestSettingsModal({
           <div className="pt-3 border-t border-white/10">
             <button
               type="button"
-              onClick={() => {
-                setSaving(true);
-                testMutation.mutate();
-              }}
-              disabled={saving}
+              onClick={() => testMutation.mutate()}
+              disabled={testMutation.isPending}
               className="w-full px-4 py-2.5 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50"
             >
-              {saving ? 'Sending…' : 'Send test digest'}
+              {testMutation.isPending ? 'Sending…' : 'Send test digest'}
             </button>
           </div>
 
@@ -1267,20 +1684,17 @@ function DigestSettingsModal({
               type="button"
               onClick={onClose}
               className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 disabled:opacity-50"
-              disabled={saving}
+              disabled={saveMutation.isPending || testMutation.isPending}
             >
               Cancel
             </button>
             <button
               type="button"
-              onClick={() => {
-                setSaving(true);
-                saveMutation.mutate(digestTime);
-              }}
-              disabled={saving || !digestTime}
+              onClick={() => saveMutation.mutate(digestTime)}
+              disabled={saveMutation.isPending || !digestTime}
               className="flex-1 px-4 py-2.5 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50"
             >
-              {saving ? 'Saving…' : 'Save'}
+              {saveMutation.isPending ? 'Saving…' : 'Save'}
             </button>
           </div>
         </div>
@@ -1313,11 +1727,17 @@ function LogHarvestModal({
     mutationFn: async ({ plantId, body }: { plantId: string; body: HarvestLogIn }) => {
       return api.gardenLogHarvest(plantId, body);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['garden-today'] });
-      queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
-      queryClient.invalidateQueries({ queryKey: ['garden-harvest-ready'] });
-      queryClient.invalidateQueries({ queryKey: ['garden-streaks'] });
+    onSuccess: (_data, { plantId }) => {
+      // A harvest changes the plant, today's list, what is ready, the streak and
+      // this plant's harvest history -- all of them, not just some.
+      for (const queryKey of [
+        ['garden-harvests', plantId],
+        ['garden-today'],
+        ['garden-harvest-ready'],
+        ['garden-plants'],
+        ['garden-plant', plantId],
+        ['garden-streaks'],
+      ]) queryClient.invalidateQueries({ queryKey });
       onClose();
       setQuantity('1');
       setNotes('');
@@ -1669,8 +2089,11 @@ function AddPlantModal({
     }
   };
 
-  const visibleSpecies =
+  const visibleSpecies: GardenSpecies[] =
     query.trim().length >= 2 ? speciesResults : (starterSpeciesQuery.data ?? []);
+  // A plain boolean, so narrowing does not turn `selectedSpecies` into `null`
+  // inside the list below (which made every row's props `never`).
+  const showSpeciesList = selectedSpecies === null && visibleSpecies.length > 0;
 
   const suggestName = () => {
     if (selectedSpecies?.common_name) {
@@ -1708,7 +2131,9 @@ function AddPlantModal({
             <p className="text-xs text-slate-400">Searching catalog…</p>
           )}
 
-          {visibleSpecies.length > 0 && (
+          {/* Once a species is picked the list collapses: the form below is the
+              next step, and a wall of 15 buttons on a phone hid it. */}
+          {showSpeciesList && (
             <div className="max-h-48 overflow-y-auto space-y-1">
               {query.trim().length < 2 && (
                 <p className="text-[11px] uppercase tracking-wider text-slate-400 mb-1">
@@ -1720,11 +2145,7 @@ function AddPlantModal({
                   key={s.key}
                   type="button"
                   onClick={() => setSelectedSpecies(s)}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                    selectedSpecies?.key === s.key
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-white/5 text-slate-300 hover:bg-white/10'
-                  }`}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors bg-white/5 text-slate-300 hover:bg-white/10"
                 >
                   <div className="font-medium text-white">{s.common_name}</div>
                   <div className="text-xs text-slate-400">{s.scientific_name || ''}</div>
@@ -1801,9 +2222,22 @@ function AddPlantModal({
           {selectedSpecies && (
             <div className="space-y-4">
               <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                <div className="flex items-center gap-3">
-                  <div className="text-slate-400">{selectedSpecies.common_name}</div>
-                  <span className="text-xs text-slate-500">{selectedSpecies.scientific_name}</span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-white font-medium truncate">{selectedSpecies.common_name}</div>
+                    <span className="text-xs text-slate-500 truncate">{selectedSpecies.scientific_name}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSpecies(null);
+                      setQuery('');
+                      setSpeciesResults([]);
+                    }}
+                    className="text-xs text-purple-400 hover:text-purple-300 underline min-h-11 px-2"
+                  >
+                    Change
+                  </button>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">{selectedSpecies.description || ''}</p>
               </div>
