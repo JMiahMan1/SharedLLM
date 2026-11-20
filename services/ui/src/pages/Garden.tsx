@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Plus, Sun, Droplets, Leaf, X, ChevronRight,
-  ShieldAlert, RotateCw, Flower, User, Zap, Settings,
+  ShieldAlert, RotateCw, Flower, User, Zap, Settings, Search,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation } from '../types/api';
+import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn } from '../types/api';
 
 /* ========================= Garden Page ========================= */
 
@@ -123,7 +123,7 @@ export default function Garden() {
         </div>
 
         {tab === 'today' ? (
-          <TodayTab today={today} locations={locations} mineOnly={mineOnly} currentUser={user?.username ?? ''} />
+          <TodayTab today={today} locations={locations} mineOnly={mineOnly} currentUser={user?.username ?? ''} weather={today?.weather ?? null} />
         ) : (
           <PlantsTab plants={plants} locations={locations} mineOnly={mineOnly} setMineOnly={setMineOnly} currentUser={user?.username ?? ''} />
         )}
@@ -164,6 +164,60 @@ export default function Garden() {
   );
 }
 
+/* ========================= Weather Banner (Phase 3) ========================= */
+
+function WeatherBanner({ weather }: { weather: GardenWeatherSummary | null }) {
+  if (!weather) return null;
+  const { rain_skipped, frost_alerts, heat_advisory, wind_advisory, summary } = weather;
+  const relevant =
+    rain_skipped.length > 0 ||
+    frost_alerts.length > 0 ||
+    heat_advisory !== null ||
+    wind_advisory !== null;
+  if (!relevant) return null;
+
+  return (
+    <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+      {summary && (
+        <p className="text-xs text-amber-300 mb-2">{summary}</p>
+      )}
+      {rain_skipped.length > 0 && (
+        <div className="mb-3">
+          <h3 className="text-xs font-semibold text-amber-400 mb-1">Rain skip — watering postponed</h3>
+          <p className="text-sm text-amber-200 mb-1">
+            {rain_skipped.map((r) => r.nickname).join(", ")} — skipped ({rain_skipped[0]?.rain_in ?? 0} in rain).
+            Next care due tomorrow.
+          </p>
+        </div>
+      )}
+      {frost_alerts.length > 0 && (
+        <div className="mb-3">
+          <h3 className="text-xs font-semibold text-amber-400 mb-1">Frost alert — cover or bring inside</h3>
+          <p className="text-sm text-amber-200 mb-1">
+            {frost_alerts.map((a) => a.advice).join(" ")}
+          </p>
+        </div>
+      )}
+      {heat_advisory && (
+        <div className="mb-3">
+          <h3 className="text-xs font-semibold text-amber-400 mb-1">Heat advisory</h3>
+          <p className="text-sm text-amber-200 mb-1">
+            High {heat_advisory.high_f}°F forecast — {heat_advisory.advice}
+          </p>
+        </div>
+      )}
+      {wind_advisory && (
+        <div className="mb-3">
+          <h3 className="text-xs font-semibold text-amber-400 mb-1">High wind alert</h3>
+          <p className="text-sm text-amber-200 mb-1">
+            {wind_advisory.advice} ({wind_advisory.names.join(', ')})
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ========================= Today Tab ========================= */
 
 function TodayTab({
@@ -171,11 +225,13 @@ function TodayTab({
   locations,
   mineOnly,
   currentUser,
+  weather,
 }: {
   today: GardenTodaySummary | undefined;
   locations: GardenLocation[];
   mineOnly: boolean;
   currentUser: string;
+  weather: GardenWeatherSummary | null;
 }) {
   const queryClient = useQueryClient();
 
@@ -278,6 +334,7 @@ function TodayTab({
 
   return (
     <div className="space-y-6">
+      <WeatherBanner weather={weather} />
       {today.due_count === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-slate-400">
           <Flower size={48} className="mb-4 opacity-50" />
@@ -806,6 +863,10 @@ function AddPlantModal({
   const [windowDirection, setWindowDirection] = useState<string>('');
   const [distanceFromWindow, setDistanceFromWindow] = useState<string>('');
   const [creating, setCreating] = useState(false);
+  // Phase 3: unknown species lookup flow
+  const [lookupMode, setLookupMode] = useState(false);
+  const [lookupDraft, setLookupDraft] = useState<GardenSpecies | null>(null);
+  const [lookupWarnings, setLookupWarnings] = useState<string[]>([]);
 
   const searchMutation = useMutation({
     mutationFn: async (q: string) => {
@@ -813,6 +874,64 @@ function AddPlantModal({
       return resp.results;
     },
     onSuccess: (results) => setSpeciesResults(results),
+  });
+
+  const lookupMutation = useMutation({
+    mutationFn: async (q: string) => {
+      setLookupMode(true);
+      setLookupDraft(null);
+      setLookupWarnings([]);
+      const resp = await api.gardenSpeciesLookup({ name: q });
+      setLookupWarnings(resp.warnings);
+      setLookupDraft(resp.species);
+      return resp;
+    },
+  });
+
+  const saveCustomMutation = useMutation({
+    mutationFn: async () => {
+      if (!lookupDraft) throw new Error('No draft to save');
+      const body: GardenCustomSpeciesIn = {
+        key: lookupDraft.key,
+        category: lookupDraft.category,
+        common_name: lookupDraft.common_name,
+        scientific_name: lookupDraft.scientific_name ?? undefined,
+        family: lookupDraft.family ?? undefined,
+        description: lookupDraft.description ?? undefined,
+        watering_interval_days: lookupDraft.watering_interval_days ?? undefined,
+        winter_multiplier: lookupDraft.winter_multiplier ?? undefined,
+        watering_method: lookupDraft.watering_method ?? undefined,
+        dryness_cue: lookupDraft.dryness_cue ?? undefined,
+        water_quality: lookupDraft.water_quality ?? undefined,
+        light_level: lookupDraft.light_level ?? undefined,
+        temp_min_f: lookupDraft.temp_min_f ?? undefined,
+        temp_max_f: lookupDraft.temp_max_f ?? undefined,
+        cold_draft_sensitive: Boolean(lookupDraft.cold_draft_sensitive) ?? undefined,
+        humidity_band: lookupDraft.humidity_band ?? undefined,
+        misting_rule: lookupDraft.misting_rule ?? undefined,
+        soil_mix: lookupDraft.soil_mix ?? undefined,
+        fertilizing: lookupDraft.fertilizing ?? undefined,
+        repot_interval_months: lookupDraft.repot_interval_months ?? undefined,
+        grooming_propagation: lookupDraft.grooming_propagation ?? undefined,
+        common_pests: lookupDraft.common_pests ?? undefined,
+        symptoms: lookupDraft.symptoms ?? undefined,
+        frost_tolerance: lookupDraft.frost_tolerance ?? undefined,
+        usda_zone_min: lookupDraft.usda_zone_min ?? undefined,
+        usda_zone_max: lookupDraft.usda_zone_max ?? undefined,
+        days_to_maturity: lookupDraft.days_to_maturity ?? undefined,
+        tall_trellis: lookupDraft.tall_trellis ?? undefined,
+        toxicity_level: lookupDraft.toxicity_level ?? undefined,
+        toxicity_notes: lookupDraft.toxicity_notes ?? undefined,
+        preservation_methods: lookupDraft.preservation_methods ?? undefined,
+        usda_acidity_class: lookupDraft.usda_acidity_class ?? undefined,
+        source: 'wiki_ai_draft',
+      };
+      const resp = await api.gardenSaveCustomSpecies(body);
+      setSelectedSpecies({ ...lookupDraft, key: resp.key } as GardenSpecies);
+      setLookupMode(false);
+      toast.success('Species saved');
+      return resp;
+    },
   });
 
   const createMutation = useMutation({
@@ -915,6 +1034,53 @@ function AddPlantModal({
                   <div className="text-xs text-slate-500">{s.scientific_name || ''}</div>
                 </button>
               ))}
+            </div>
+          )}
+
+          {query.length >= 2 && speciesResults.length === 0 && !lookupMode && !lookupDraft && (
+            <button
+              type="button"
+              onClick={() => lookupMutation.mutate(query)}
+              disabled={creating}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm text-purple-400 border border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-300 transition-colors"
+            >
+              <Search size={14} className="mr-2" />
+              Ask Jarvis to look up “{query}”
+            </button>
+          )}
+
+          {lookupMode && lookupDraft && (
+            <div className="space-y-3 p-3 bg-white/5 rounded-xl border border-white/10">
+              <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
+                Review drafted species
+              </h3>
+              <p className="text-xs text-slate-400 mb-2">
+                {lookupDraft.common_name} — {lookupDraft.scientific_name || ''}
+              </p>
+              {lookupWarnings.length > 0 && (
+                <p className="text-xs text-amber-300 mb-2">
+                  {lookupWarnings.join('; ')}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => saveCustomMutation.mutate()}
+                disabled={creating}
+                className="w-full px-3 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 text-sm transition-colors"
+              >
+                {creating ? 'Saving…' : 'Save & Select Species'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLookupMode(false);
+                  setLookupDraft(null);
+                  setLookupWarnings([]);
+                }}
+                className="w-full text-xs text-slate-500 hover:text-slate-300 underline"
+              >
+                Cancel
+              </button>
             </div>
           )}
 

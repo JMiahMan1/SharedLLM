@@ -6,6 +6,7 @@ import type {
   GardenPlant, GardenSpecies, GardenLocation, GardenProfile,
   GardenTodaySummary, GardenCareLog, GardenCareRule,
   GardenAssignBody, GardenStreaks, GardenNoticeTest,
+  GardenCustomSpeciesIn,
 } from '../types/api';
 import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
@@ -2776,6 +2777,27 @@ export const api = {
 
   async gardenNoticesTest(body: {} = {}): Promise<GardenNoticeTest> {
     const resp = await apiClient.post('/api/garden/notices/test', body);
+    return resp.data;
+  },
+
+  // --- Weather-smart care & unknown species lookup (Phase 3) ----------------
+
+  async gardenSpeciesLookup(body: { name: string; category?: string | null }): Promise<{
+    draft: boolean; source: string; species: GardenSpecies; warnings: string[];
+  }> {
+    const resp = await apiClient.post('/api/garden/species/lookup', body);
+    return resp.data;
+  },
+
+  async gardenSaveCustomSpecies(body: GardenCustomSpeciesIn): Promise<{
+    ok: boolean; key: string; source: string; warnings: string[];
+  }> {
+    const resp = await apiClient.post('/api/garden/species/custom', body);
+    return resp.data;
+  },
+
+  async gardenDeleteCustomSpecies(key: string): Promise<{ ok: boolean; key: string }> {
+    const resp = await apiClient.delete(`/api/garden/species/custom/${encodeURIComponent(key)}`);
     return resp.data;
   },
 

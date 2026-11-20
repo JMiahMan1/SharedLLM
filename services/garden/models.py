@@ -129,6 +129,60 @@ class CareLog(SQLModel, table=True):
     created_at: str = Field(default_factory=utcnow)
 
 
+class CustomSpecies(SQLModel, table=True):
+    """A species created manually or via live botanical lookup + Jarvis AI draft.
+
+    Shares the same schema as the read-only botanical seed (plants-seed.db), so
+    it can be resolved right alongside it. Tagged with ``source``
+    (``manual | wiki_ai_draft``) and review metadata.
+    """
+
+    __tablename__ = "custom_species"
+
+    key: str = Field(primary_key=True, max_length=120)  # e.g. "thai_holy_basil"
+    category: str = Field(max_length=32)  # houseplant | herb | vegetable | fruit | flower
+    common_name: str = Field(max_length=120)
+    scientific_name: str | None = Field(default=None, max_length=120)
+    family: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=1000)
+    # --- watering ---
+    watering_interval_days: float | None = Field(default=None)
+    winter_multiplier: float = Field(default=1.0)
+    watering_method: str | None = Field(default=None)  # top_drain | bottom_water | soak_and_dry | evenly_moist | bark_soak | air_bath
+    dryness_cue: str | None = Field(default=None)  # surface_damp | top_1in_dry | top_2in_dry | mostly_dry | bone_dry
+    water_quality: str | None = Field(default=None)  # tap_ok | filtered_or_rain_preferred
+    # --- environment ---
+    light_level: str | None = Field(default=None)  # low | medium | bright_indirect | bright_direct | full_sun
+    temp_min_f: float | None = Field(default=None)
+    temp_max_f: float | None = Field(default=None)
+    cold_draft_sensitive: bool = Field(default=False)
+    humidity_band: str | None = Field(default=None)  # low_tolerant | average | high_humidity
+    misting_rule: str | None = Field(default=None)  # beneficial | optional | avoid_misting
+    soil_mix: str | None = Field(default=None)  # standard_potting | chunky_aroid | cactus_succulent | orchid_bark | african_violet | moisture_retentive
+    # --- lifecycle ---
+    fertilizing: str | None = Field(default=None, max_length=200)
+    repot_interval_months: float | None = Field(default=None)
+    grooming_propagation: str | None = Field(default=None, max_length=500)
+    common_pests: str | None = Field(default=None, max_length=500)
+    symptoms: str | None = Field(default=None, max_length=500)
+    # --- outdoor / agronomy ---
+    frost_tolerance: str | None = Field(default=None)  # tender | half_hardy | hardy
+    usda_zone_min: int | None = Field(default=None)
+    usda_zone_max: int | None = Field(default=None)
+    days_to_maturity: int | None = Field(default=None)
+    tall_trellis: int = Field(default=0)
+    # --- safety & preservation ---
+    toxicity_level: str | None = Field(default=None)  # non_toxic | mild_irritant | toxic_pets | toxic_all
+    toxicity_notes: str | None = Field(default=None, max_length=500)
+    preservation_methods: str | None = Field(default=None, max_length=200)
+    usda_acidity_class: str | None = Field(default=None)  # high_acid | low_acid
+    # --- provenance ---
+    source: str = Field(default="manual")  # manual | wiki_ai_draft
+    reviewed_by: str | None = Field(default=None, max_length=128)
+    reviewed_at: str | None = Field(default=None, max_length=32)
+    created_at: str = Field(default_factory=utcnow)
+
+
 class CareRuleIn(SQLModel):
     """Create/update request for a care rule. All fields optional for PATCH."""
 
@@ -269,3 +323,43 @@ class GardenProfileOut(SQLModel):
     yard_canvas_json: str | None
     created_at: str
     updated_at: str
+
+
+class CustomSpeciesIn(SQLModel):
+    """Create/update request for a custom species. Validates enums + safety."""
+
+    key: str | None = None
+    category: str | None = None
+    common_name: str | None = None
+    scientific_name: str | None = None
+    family: str | None = None
+    description: str | None = None
+    watering_interval_days: float | None = None
+    winter_multiplier: float | None = None
+    watering_method: str | None = None
+    dryness_cue: str | None = None
+    water_quality: str | None = None
+    light_level: str | None = None
+    temp_min_f: float | None = None
+    temp_max_f: float | None = None
+    cold_draft_sensitive: bool | None = None
+    humidity_band: str | None = None
+    misting_rule: str | None = None
+    soil_mix: str | None = None
+    fertilizing: str | None = None
+    repot_interval_months: float | None = None
+    grooming_propagation: str | None = None
+    common_pests: str | None = None
+    symptoms: str | None = None
+    frost_tolerance: str | None = None
+    usda_zone_min: int | None = None
+    usda_zone_max: int | None = None
+    days_to_maturity: int | None = None
+    tall_trellis: int | None = None
+    toxicity_level: str | None = None
+    toxicity_notes: str | None = None
+    preservation_methods: str | None = None
+    usda_acidity_class: str | None = None
+    source: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None

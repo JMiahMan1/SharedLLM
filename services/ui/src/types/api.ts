@@ -4868,6 +4868,13 @@ export interface GardenSpecies {
   description: string | null;
   preservation_methods: string | null;
   usda_acidity_class: string | null;
+  watering_interval_days: number | null;
+  winter_multiplier: number | null;
+  frost_tolerance: string | null;
+  usda_zone_min: number | null;
+  usda_zone_max: number | null;
+  days_to_maturity: number | null;
+  tall_trellis: number | null;
   [key: string]: unknown;
 }
 
@@ -4958,6 +4965,7 @@ export interface GardenTodaySummary {
   overdue_count: number;
   by_room: Record<string, GardenTodayTask[]>;
   all: GardenTodayTask[];
+  weather?: GardenWeatherSummary | null;
 }
 
 export interface GardenCareLog {
@@ -4979,4 +4987,82 @@ export interface GardenCareRule {
   next_due_at: string | null;
   snoozed_until: string | null;
   paused: boolean;
+}
+
+/* ---------- Weather-Smart Care (Phase 3) ---------- */
+
+export interface GardenFrostAlert {
+  plant_ids: string[];
+  names: string[];
+  min_temp_f: number;
+  safe_names: string[];
+  advice: string;
+}
+
+export interface GardenHeatAdvisory {
+  high_f: number;
+  heat_factor: number;
+  advice: string;
+}
+
+export interface GardenWindAdvisory {
+  gusts_mph: number;
+  names: string[];
+  advice: string;
+}
+
+export interface GardenWeatherSummary {
+  summary: string | null;
+  rain_skipped: Array<{ plant_id: string; nickname: string; rain_in: number; next_due_at: string }>;
+  frost_alerts: GardenFrostAlert[];
+  heat_advisory: GardenHeatAdvisory | null;
+  wind_advisory: GardenWindAdvisory | null;
+}
+
+export interface GardenSpeciesLookupRequest {
+  name: string;
+  category?: string | null;
+}
+
+export interface GardenSpeciesLookupResponse {
+  draft: boolean;
+  source: string;
+  species: GardenSpecies & { custom?: boolean; source?: string };
+  warnings: string[];
+}
+
+export interface GardenCustomSpeciesIn {
+  key?: string | null;
+  category?: string | null;
+  common_name: string;
+  scientific_name?: string | null;
+  family?: string | null;
+  description?: string | null;
+  watering_interval_days?: number | null;
+  winter_multiplier?: number | null;
+  watering_method?: string | null;
+  dryness_cue?: string | null;
+  water_quality?: string | null;
+  light_level?: string | null;
+  temp_min_f?: number | null;
+  temp_max_f?: number | null;
+  cold_draft_sensitive?: boolean | null;
+  humidity_band?: string | null;
+  misting_rule?: string | null;
+  soil_mix?: string | null;
+  fertilizing?: string | null;
+  repot_interval_months?: number | null;
+  grooming_propagation?: string | null;
+  common_pests?: string | null;
+  symptoms?: string | null;
+  frost_tolerance?: string | null;
+  usda_zone_min?: number | null;
+  usda_zone_max?: number | null;
+  days_to_maturity?: number | null;
+  tall_trellis?: number | null;
+  toxicity_level?: string | null;
+  toxicity_notes?: string | null;
+  preservation_methods?: string | null;
+  usda_acidity_class?: string | null;
+  source?: string | null;
 }

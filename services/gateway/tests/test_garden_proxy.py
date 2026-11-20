@@ -134,6 +134,29 @@ def calls(monkeypatch):
             return {"ok": True, "action": "water", "plant_id": "plant-1", "logged_by": "mother"}
         if path == "/plants/plant-1/snooze" and method == "POST":
             return {"ok": True, "plant_id": "plant-1", "still_damp": True, "postpone_days": 2, "calibration_factor": 1.1, "next_due_at": "2026-11-21T10:00:00Z"}
+        # Phase 3 routes.
+        if path == "/species/lookup" and method == "POST":
+            return {
+                "draft": True,
+                "source": "wiki_ai_draft",
+                "species": {
+                    "key": "rare_plant_x",
+                    "category": "houseplant",
+                    "common_name": "Rare Plant X",
+                    "scientific_name": "Rarus plantus",
+                    "watering_interval_days": 10.0,
+                    "winter_multiplier": 1.2,
+                    "frost_tolerance": "tender",
+                    "toxicity_level": "non_toxic",
+                },
+                "warnings": ["LLM draft unavailable — basic manual draft shown."],
+            }
+        if path == "/species/custom" and method == "POST":
+            return {"ok": True, "key": "thai_holy_basil", "source": "manual", "warnings": []}
+        if path == "/species/custom/thai_holy_basil" and method == "DELETE":
+            return {"ok": True, "key": "thai_holy_basil"}
+        if path == "/hooks/weather" and method == "POST":
+            return {"evaluated": True, "weather": None}
         raise AssertionError(f"Unexpected path: {path} {method}")
 
     monkeypatch.setattr(gateway_main, "_acting_identity", acting_identity)
@@ -462,3 +485,55 @@ def test_garden_callback_rejects_spoofed_admin(client, calls):
         for _, _, _, _, h in calls
         if h
     )
+
+
+# --------------------------------------------------------------------------- Phase 3 routes
+
+
+def test_garden_species_lookup_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/species/lookup",
+        headers=ADMIN_HEADERS,
+        json={"name": "Rare Plant X"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["draft"] is True
+    assert data["source"] == "wiki_ai_draft"
+    assert data["species"]["common_name"] == "Rare Plant X"
+    assert any(m == "POST" and p == "/species/lookup" for m, p, _, _, _ in calls)
+
+
+def test_garden_species_custom_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/species/custom",
+        headers=ADMIN_HEADERS,
+        json={"common_name": "Thai Holy Basil", "category": "herb"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["key"] == "thai_holy_basil"
+    assert any(m == "POST" and p == "/species/custom" for m, p, _, _, _ in calls)
+
+
+def test_garden_species_custom_delete_proxy(client, calls):
+    resp = client.delete(
+        "/api/garden/species/custom/thai_holy_basil", headers=ADMIN_HEADERS
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True
+    assert any(
+        m == "DELETE" and p == "/species/custom/thai_holy_basil"
+        for m, p, _, _, _ in calls
+    )
+
+
+def test_garden_hooks_weather_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/hooks/weather",
+        headers=ADMIN_HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["evaluated"] is True
+    assert any(m == "POST" and p == "/hooks/weather" for m, p, _, _, _ in calls)

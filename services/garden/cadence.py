@@ -300,3 +300,27 @@ def placement_fit(
             )
 
     return PlacementFit(warning=None, severity="info", detail=detail)
+
+
+# --- heatwave ----------------------------------------------------------------
+
+HEATWAVE_HIGH_F = 90.0  # forecast daily high at or above triggers heat boost
+HEATWAVE_HIGH_C = 32.2
+HEAT_FACTOR = 0.75  # multiply outdoor/container watering interval by this in a heatwave
+
+
+def heat_factor(temperature_f: float | None, dry: bool = True) -> float:
+    """Heatwave boost: shorten outdoor/container watering intervals in a heatwave.
+
+    Pure function, unit tested. Returns ``HEAT_FACTOR`` (0.75) when the forecast
+    daily high is >= 90°F (32.2°C) and conditions are dry; otherwise 1.0.
+
+    Callers multiply the effective interval by this factor so plants need water
+    more often when it's hot and dry.  Degrades to 1.0 when temperature is
+    unknown (weather unavailable) — never raises.
+    """
+    if temperature_f is None:
+        return 1.0
+    if dry and temperature_f >= HEATWAVE_HIGH_F:
+        return HEAT_FACTOR
+    return 1.0

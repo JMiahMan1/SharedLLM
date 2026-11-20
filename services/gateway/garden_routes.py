@@ -141,6 +141,34 @@ async def garden_species_list(request: Request):
     )
 
 
+@router.post("/species/lookup")
+async def garden_species_lookup(request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call("POST", "/species/lookup", json=body, headers=headers)
+
+
+@router.post("/species/custom")
+async def garden_species_custom(request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call("POST", "/species/custom", json=body, headers=headers)
+
+
+@router.delete("/species/custom/{key}")
+async def garden_species_custom_delete(key: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "DELETE", f"/species/custom/{key}", headers=headers
+    )
+
+
+@router.post("/hooks/weather")
+async def garden_hooks_weather(request: Request):
+    headers = dict(_HEADERS)
+    return await _call("POST", "/hooks/weather", headers=headers)
+
+
 @router.get("/profile")
 async def garden_profile(request: Request):
     headers = await _verified_headers(request)

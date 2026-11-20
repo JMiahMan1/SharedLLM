@@ -39,6 +39,7 @@ from services.garden import plant_seed
 from services.garden.cadence import (
     auto_seed_care_rules,
     compute_interval,
+    heat_factor,
     nudge_calibration,
     placement_fit,
 )
@@ -47,6 +48,8 @@ from services.garden.models import (
     CareLogIn,
     CareRule,
     CareRuleIn,
+    CustomSpecies,
+    CustomSpeciesIn,
     GardenProfile,
     GardenProfileIn,
     GardenProfileOut,
@@ -61,6 +64,19 @@ from services.garden.models import (
 from services.garden.achievements import evaluate as evaluate_achievements
 from services.garden.notices import collect_due_tasks, build_digest, digest_loop, send_digest_to_member
 from services.garden.skylight_sync import mirror_care_log
+from services.garden.species_lookup import (
+    handle_species_custom,
+    handle_species_custom_delete,
+    handle_species_lookup,
+    resolve_species,
+)
+from services.garden.weather_care import (
+    build_weather_summary,
+    dispatch_weather_notices,
+    handle_weather_webhook,
+    weather_poller,
+    _is_outdoor_uncovered as _is_outdoor_uncovered_location,
+)
 from services.shared.info_endpoint import info_router
 
 logging.basicConfig(
@@ -113,10 +129,18 @@ async def lifespan(app: FastAPI):
     log.info("[Garden] ready db=%s seed=%s", _database_url(), _seed().path)
     # Start the quiet morning digest loop (disabled under pytest).
     digest_task = asyncio.create_task(digest_loop(_db, _family_list))
+    # Start the weather-smart care poller (disabled under pytest).
+    weather_task = asyncio.create_task(weather_poller(_db, _family_list, _resolve_seed_get))
     try:
         yield
     finally:
         digest_task.cancel()
+        weather_task.cancel()
+
+
+def _resolve_seed_get(key: str) -> dict | None:
+    """Resolve a species key via the read-only botanical seed (for weather_care)."""
+    return _seed().get(key)
 
 
 app = FastAPI(title="Jarvis Garden Service", lifespan=lifespan)
@@ -270,13 +294,46 @@ def species_search(
     usda_zone: int | None = Query(None, description="USDA hardiness zone filter"),
     limit: int = Query(20, ge=1, le=100),
 ):
-    """Search the botanical seed.  Falls back gracefully when the seed is absent."""
+    """Search the botanical seed and custom_species. Falls back gracefully when the seed is absent."""
     _user(request)
     seed = _seed()
-    results = seed.search(q or "", limit, category=category, usda_zone=usda_zone) if q else []
+    results: list[dict] = []
+    if q:
+        results = seed.search(q or "", limit, category=category, usda_zone=usda_zone) if seed.present else []
     # When there's no query but a category/zone filter, list by category instead.
     if not q and (category or usda_zone is not None):
-        results = seed.list_by_category(category or "houseplant", limit=limit, usda_zone=usda_zone)
+        results = seed.list_by_category(category or "houseplant", limit=limit, usda_zone=usda_zone) if seed.present else []
+    # Merge in custom_species matches (Phase 3: unified resolution).
+    custom_results: list[dict] = []
+    try:
+        with Session(_db()) as session:
+            custom_rows = session.exec(select(CustomSpecies).limit(limit)).all()
+            for row in custom_rows:
+                sp = {
+                    "key": row.key,
+                    "category": row.category,
+                    "common_name": row.common_name,
+                    "scientific_name": row.scientific_name,
+                    "family": row.family,
+                    "description": row.description,
+                    "watering_method": row.watering_method,
+                    "dryness_cue": row.dryness_cue,
+                    "water_quality": row.water_quality,
+                    "light_level": row.light_level,
+                    "toxicity_level": row.toxicity_level,
+                    "frost_tolerance": row.frost_tolerance,
+                    "source": row.source,
+                    "custom": True,
+                }
+                # Apply the same filters as seed results.
+                if category and sp["category"] != category:
+                    continue
+                if q and q.lower() not in (sp["common_name"] or "").lower() and q.lower() not in (sp["scientific_name"] or "").lower():
+                    continue
+                custom_results.append(sp)
+    except Exception as e:
+        log.info("[Garden] custom_species not ready: %s", e)
+    results.extend(custom_results)
     return {
         "query": q,
         "category": category,
@@ -288,12 +345,13 @@ def species_search(
 
 
 @app.get("/species/{key}")
-def species_get(key: str = PathParam(..., description="Botanical seed key")):
+def species_get(key: str = PathParam(..., description="Botanical seed key or custom species key")):
+    """Get one species, resolving across custom_species and the botanical seed."""
     _require_auth = None  # species read is open to anyone who passed the internal secret
-    seed = _seed()
-    species = seed.get(key)
+    with Session(_db()) as session:
+        species = resolve_species(session, key)
     if species is None:
-        raise HTTPException(status_code=404, detail=f"Species {key!r} not found in seed")
+        raise HTTPException(status_code=404, detail=f"Species {key!r} not found")
     return {"key": key, "present": True, "species": species}
 
 
@@ -304,15 +362,41 @@ def species_list(
     usda_zone: int | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
 ):
-    """List species in a category (or all when no category given)."""
+    """List species in a category (or all when no category given), including custom_species."""
     _user(request)
     seed = _seed()
+    results: list[dict] = []
     if category:
-        results = seed.list_by_category(category, limit=limit, usda_zone=usda_zone)
+        results = seed.list_by_category(category, limit=limit, usda_zone=usda_zone) if seed.present else []
     else:
-        results = []
         for cat in ("houseplant", "herb", "vegetable", "fruit", "flower"):
-            results.extend(seed.list_by_category(cat, limit=limit, usda_zone=usda_zone))
+            results.extend(seed.list_by_category(cat, limit=limit, usda_zone=usda_zone) if seed.present else [])
+    # Merge in custom_species (Phase 3: unified resolution).
+    try:
+        with Session(_db()) as session:
+            custom_rows = session.exec(select(CustomSpecies).limit(limit)).all()
+            for row in custom_rows:
+                sp = {
+                    "key": row.key,
+                    "category": row.category,
+                    "common_name": row.common_name,
+                    "scientific_name": row.scientific_name,
+                    "family": row.family,
+                    "description": row.description,
+                    "watering_method": row.watering_method,
+                    "dryness_cue": row.dryness_cue,
+                    "water_quality": row.water_quality,
+                    "light_level": row.light_level,
+                    "toxicity_level": row.toxicity_level,
+                    "frost_tolerance": row.frost_tolerance,
+                    "source": row.source,
+                    "custom": True,
+                }
+                if category and sp["category"] != category:
+                    continue
+                results.append(sp)
+    except Exception as e:
+        log.info("[Garden] custom_species not ready: %s", e)
     return {
         "category": category,
         "usda_zone": usda_zone,
@@ -320,6 +404,69 @@ def species_list(
         "results": results,
         "seed_present": seed.present,
     }
+
+
+# --------------------------------------------------------------------------- species lookup (3-tier unknown/rare species, Phase 3)
+
+
+@app.post("/species/lookup", status_code=201)
+async def species_lookup(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Look up an unknown/rare species (3-tier: seed -> Wikipedia + LLM draft -> custom_species).
+
+    Accepts ``{"name": "...", "category": "..."}``.  Returns a draft for user
+    review — never auto-saves unreviewed AI drafts.  Adults and admins only.
+    """
+    _require_admin_or_adult(request)
+    body = await request.json()
+    from services.garden.species_lookup import handle_species_lookup
+
+    return await handle_species_lookup(session, body, _user(request), _is_admin(request))
+
+
+@app.post("/species/custom", status_code=201)
+async def species_custom(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Save a user-reviewed custom species permanently (adults and admins only)."""
+    _require_admin_or_adult(request)
+    body = await request.json()
+    from services.garden.species_lookup import handle_species_custom, CustomSpeciesIn
+
+    validated = CustomSpeciesIn(**body)
+    return await handle_species_custom(session, validated, _user(request), _is_admin(request))
+
+
+@app.delete("/species/custom/{key}")
+async def species_custom_delete(
+    key: str = PathParam(..., description="Custom species key"),
+    request: Request = None,
+    session: Session = Depends(get_session),
+):
+    """Delete a custom species (adults and admins only)."""
+    _require_admin_or_adult(request)
+    from services.garden.species_lookup import handle_species_custom_delete
+
+    return await handle_species_custom_delete(session, key, _user(request), _is_admin(request))
+
+
+# --------------------------------------------------------------------------- internal weather webhook (Phase 3)
+
+
+@app.post("/hooks/weather")
+async def hooks_weather(request: Request):
+    """Internal webhook for weather:events (X-Internal-Secret authenticated).
+
+    Evaluates rain-skip + frost/heat/wind alerts and sends urgent garden
+    notices via Telemetry when household plants are at risk.
+    """
+    secret = request.headers.get("X-Internal-Secret")
+    if not _verify_internal_secret(secret):
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+    return await handle_weather_webhook(_db, _family_list, _resolve_seed_get)
 
 
 # --------------------------------------------------------------------------- profile
@@ -486,8 +633,7 @@ def assign_plant(
     row.updated_at = utcnow()
     session.commit()
     session.refresh(row)
-    seed = _seed()
-    species = seed.get(row.species_ref) if seed.present else None
+    species = resolve_species(session, row.species_ref)
     return _plant_out(row, species)
 
 
@@ -498,10 +644,9 @@ def assign_plant(
 def list_plants(request: Request, session: Session = Depends(get_session)):
     _user(request)
     rows = session.exec(select(Plant).where(Plant.status == "active").order_by(Plant.updated_at.desc())).all()
-    seed = _seed()
     out = []
     for row in rows:
-        species = seed.get(row.species_ref) if seed.present else None
+        species = resolve_species(session, row.species_ref)
         out.append(_plant_out(row, species))
     return out
 
@@ -518,6 +663,16 @@ def create_plant(
         # a plant with just a species_ref (care cues will be unavailable).
         species = {}
 
+    # Auto-enable rain_skip_enabled for outdoor uncovered plants so rain-skip
+    # applies to them (Phase 3).  Indoor rooms, greenhouses, and covered pots
+    # never rain-skip.
+    rain_skip_enabled = False
+    location = None
+    if body.location_id:
+        location = session.get(Location, body.location_id)
+    if location and _is_outdoor_uncovered_location(location):
+        rain_skip_enabled = True
+
     row = Plant(**body.model_dump(exclude_unset=True))
     session.add(row)
     session.commit()
@@ -525,6 +680,9 @@ def create_plant(
 
     # Auto-seed species-appropriate care rules (no rules if seed absent).
     for rule in auto_seed_care_rules(species):
+        # Outdoor uncovered watering rules get rain_skip_enabled = True.
+        if location and _is_outdoor_uncovered_location(location) and rule["action"] == "water":
+            rule["rain_skip_enabled"] = True
         session.add(
             CareRule(
                 plant_id=row.id,
@@ -537,7 +695,7 @@ def create_plant(
         )
     session.commit()
 
-    species_full = seed.get(row.species_ref) if seed.present else None
+    species_full = resolve_species(session, row.species_ref)
     return _plant_out(row, species_full)
 
 
@@ -597,8 +755,7 @@ def patch_plant(
     row.updated_at = utcnow()
     session.commit()
     session.refresh(row)
-    seed = _seed()
-    species = seed.get(row.species_ref) if seed.present else None
+    species = resolve_species(session, row.species_ref)
     return _plant_out(row, species)
 
 
@@ -619,13 +776,14 @@ def delete_plant(
 
 
 @app.get("/today")
-def today(
+async def today(
     request: Request,
     assigned_to: str | None = Query(None, description="Filter to plants assigned to this member"),
     mine: bool = Query(False, description="Filter to plants assigned to the calling user (or unassigned)"),
     session: Session = Depends(get_session),
 ):
-    """Due and overdue care tasks grouped by room/category, with species cues."""
+    """Due and overdue care tasks grouped by room/category, with species cues,
+    plus a weather summary (rain-skip, frost/heat/wind alerts) when relevant."""
     user = _user(request)
     seed = _seed()
     now = datetime.now(UTC)
@@ -679,7 +837,7 @@ def today(
                 continue  # still snoozed, skip
         if due_dt > now:
             continue
-        species = seed.get(plant.species_ref) if seed.present else None
+        species = resolve_species(session, plant.species_ref) if seed.present else None
         # Location already fetched above for assignment inheritance.
 
         # Build the species-specific care cue.
@@ -739,12 +897,20 @@ def today(
         room = task["location_name"] or "Unplaced"
         by_room.setdefault(room, []).append(task)
 
+    # Weather summary (Phase 3): None when weather is unavailable or calm.
+    weather_summary = None
+    try:
+        weather_summary = await build_weather_summary(session, _resolve_seed_get)
+    except Exception as e:
+        log.info("[Garden] weather summary unavailable: %s", e)
+
     return {
         "date": _today_iso(),
         "due_count": len(due_tasks),
         "overdue_count": sum(1 for t in due_tasks if t["overdue"]),
         "by_room": by_room,
         "all": due_tasks,
+        "weather": weather_summary,
     }
 
 
@@ -902,8 +1068,7 @@ def log_care(
     if plant.status != "active":
         raise HTTPException(status_code=409, detail="Plant is not active")
 
-    seed = _seed()
-    species = seed.get(plant.species_ref) if seed.present else None
+    species = resolve_species(session, plant.species_ref)
 
     # Write the care log.
     log_row = CareLog(
@@ -971,8 +1136,7 @@ def snooze_plant(
     if plant is None:
         raise HTTPException(status_code=404, detail="Plant not found")
 
-    seed = _seed()
-    species = seed.get(plant.species_ref) if seed.present else None
+    species = resolve_species(session, plant.species_ref)
 
     # Snooze the water care rule: postpone next_due_at to now + postpone_days,
     # nudge calibration_factor upward if still_damp.
@@ -1035,9 +1199,9 @@ def water_all(
         select(Plant).where(Plant.location_id == loc_id, Plant.status == "active")
     ).all()
 
-    seed = _seed()
     watered = []
     for plant in plants:
+        species = resolve_species(session, plant.species_ref)
         rule = session.exec(
             select(CareRule).where(CareRule.plant_id == plant.id, CareRule.action == "water")
         ).first()
@@ -1078,12 +1242,12 @@ def water_all(
             )
         )
         plant.updated_at = utcnow()
-        species = seed.get(plant.species_ref) if seed.present else None
+        common_name = species.get("common_name") if species else plant.species_ref
         watered.append(
             {
                 "plant_id": plant.id,
                 "nickname": plant.nickname,
-                "common_name": species.get("common_name") if species else plant.species_ref,
+                "common_name": common_name,
                 "next_due_at": rule.next_due_at if rule else None,
             }
         )

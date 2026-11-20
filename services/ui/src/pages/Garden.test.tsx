@@ -6,6 +6,7 @@ import { BrowserRouter } from 'react-router-dom';
 import React from 'react';
 import Garden from '../pages/Garden';
 import { api } from '../services/api';
+import type { GardenSpecies } from '../types/api';
 import { AuthProvider } from '../context/AuthContext';
 
 vi.mock('../context/AuthContext', async (importActual) => {
@@ -26,6 +27,8 @@ vi.mock('../services/api', () => ({
     gardenWaterAll: vi.fn(),
     gardenGetPlantLogs: vi.fn(),
     gardenSearch: vi.fn(),
+    gardenSpeciesLookup: vi.fn(),
+    gardenSaveCustomSpecies: vi.fn(),
     gardenCreatePlant: vi.fn(),
     gardenGetProfile: vi.fn(),
     gardenStreaks: vi.fn(),
@@ -291,6 +294,13 @@ describe('Garden Plants tab', () => {
           description: 'A popular houseplant',
           preservation_methods: '',
           usda_acidity_class: null,
+          watering_interval_days: 7,
+          winter_multiplier: 1.0,
+          frost_tolerance: 'hardy',
+          usda_zone_min: 10,
+          usda_zone_max: 12,
+          days_to_maturity: null,
+          tall_trellis: 0,
         },
       },
     ]);
@@ -421,6 +431,13 @@ describe('Garden Mine filter and streak pill', () => {
           description: 'A popular houseplant',
           preservation_methods: '',
           usda_acidity_class: null,
+          watering_interval_days: 7,
+          winter_multiplier: 1.0,
+          frost_tolerance: 'hardy',
+          usda_zone_min: 10,
+          usda_zone_max: 12,
+          days_to_maturity: null,
+          tall_trellis: 0,
         },
       },
     ]);
@@ -543,5 +560,189 @@ describe('Garden Digest Settings button (parent+ only)', () => {
     await screen.findByText('Add Plant');
     // Digest Settings button should be present for parent users
     expect(screen.queryByText('Digest Settings')).toBeInTheDocument();
+  });
+});
+
+
+/* ========================= Weather Banner (Phase 3) ========================= */
+
+describe('Garden Weather Banner', () => {
+  let wrapper: ReturnType<typeof createWrapper>;
+
+  const baseToday = {
+    date: '2026-11-19',
+    due_count: 0,
+    overdue_count: 0,
+    by_room: {},
+    all: [],
+  };
+
+  beforeEach(() => {
+    wrapper = createWrapper();
+    vi.mocked(api.gardenToday).mockResolvedValue({ ...baseToday, weather: null });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.gardenGetProfile).mockResolvedValue({
+      user_id: 'household', family_size: 7, hardiness_zone: '5b', zone_source: 'manual',
+      last_spring_frost_mmdd: '05-15', first_fall_frost_mmdd: '10-15', units: 'imperial',
+      preservation_prefs: null, daily_digest_time: '08:00', yard_canvas_json: null,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    });
+    vi.mocked(api.gardenStreaks).mockResolvedValue({
+      user_id: 'mother', current_streak: 0, longest_streak: 0, total_logs: 0,
+    });
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  it('is hidden when weather is null (unavailable)', async () => {
+    render(<Garden />, { wrapper });
+    await screen.findByText('All caught up');
+    expect(screen.queryByText('Rain skip')).not.toBeInTheDocument();
+    expect(screen.queryByText('Frost alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Heat advisory')).not.toBeInTheDocument();
+    expect(screen.queryByText('High wind alert')).not.toBeInTheDocument();
+  });
+
+  it('shows rain-skip banner when rain_skipped is non-empty', async () => {
+    vi.mocked(api.gardenToday).mockResolvedValue({
+      ...baseToday,
+      weather: {
+        summary: 'Rainy, 55°',
+        rain_skipped: [{ plant_id: 'p1', nickname: 'Patio Basil', rain_in: 0.5, next_due_at: '2026-11-20T10:00:00Z' }],
+        frost_alerts: [],
+        heat_advisory: null,
+        wind_advisory: null,
+      },
+    });
+    render(<Garden />, { wrapper });
+    await screen.findByText('Rain skip — watering postponed');
+    expect(screen.getByText(/Patio Basil/)).toBeInTheDocument();
+  });
+
+  it('shows frost alert banner when frost_alerts is non-empty', async () => {
+    vi.mocked(api.gardenToday).mockResolvedValue({
+      ...baseToday,
+      weather: {
+        summary: 'Cold, 30°',
+        rain_skipped: [],
+        frost_alerts: [{
+          plant_ids: ['p1'],
+          names: ['Patio Basil'],
+          min_temp_f: 30,
+          safe_names: ['Garden Kale'],
+          advice: 'Cover or bring inside: Patio Basil; Safe as-is: Garden Kale',
+        }],
+        heat_advisory: null,
+        wind_advisory: null,
+      },
+    });
+    render(<Garden />, { wrapper });
+    await screen.findByText('Frost alert — cover or bring inside');
+    expect(screen.getByText(/Patio Basil/)).toBeInTheDocument();
+    expect(screen.getByText(/Garden Kale/)).toBeInTheDocument();
+  });
+
+  it('shows heat advisory banner when heat_advisory is set', async () => {
+    vi.mocked(api.gardenToday).mockResolvedValue({
+      ...baseToday,
+      weather: {
+        summary: 'Hot, 95°',
+        rain_skipped: [],
+        frost_alerts: [],
+        heat_advisory: { high_f: 95, heat_factor: 0.75, advice: 'Early-morning watering helps.' },
+        wind_advisory: null,
+      },
+    });
+    render(<Garden />, { wrapper });
+    await screen.findByText('Heat advisory');
+    expect(screen.getByText(/High 95°F forecast/)).toBeInTheDocument();
+  });
+
+  it('shows wind advisory banner when wind_advisory is set', async () => {
+    vi.mocked(api.gardenToday).mockResolvedValue({
+      ...baseToday,
+      weather: {
+        summary: 'Windy, 55°',
+        rain_skipped: [],
+        frost_alerts: [],
+        heat_advisory: null,
+        wind_advisory: { gusts_mph: 40, names: ['Trellis Tomato'], advice: 'High winds (40 mph) — secure plants.' },
+      },
+    });
+    render(<Garden />, { wrapper });
+    await screen.findByText('High wind alert');
+    expect(screen.getByText(/Trellis Tomato/)).toBeInTheDocument();
+  });
+});
+
+
+/* ========================= AddPlantModal Unknown Species Lookup (Phase 3) ========================= */
+
+describe('Garden AddPlantModal lookup', () => {
+  let wrapper: ReturnType<typeof createWrapper>;
+
+  beforeEach(() => {
+    wrapper = createWrapper();
+    vi.mocked(api.gardenToday).mockResolvedValue({
+      date: '2026-11-19', due_count: 0, overdue_count: 0, by_room: {}, all: [],
+    });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.gardenSearch).mockResolvedValue({
+      query: '', category: null, usda_zone: null, count: 0, results: [], seed_present: true,
+    });
+    vi.mocked(api.gardenSpeciesLookup).mockResolvedValue({
+      draft: true,
+      source: 'wiki_ai_draft',
+      species: {
+        key: 'rare_plant_x', category: 'houseplant', common_name: 'Rare Plant X',
+        scientific_name: 'Rarus plantus', watering_interval_days: 10, winter_multiplier: 1.2,
+        watering_method: 'top_drain', toxicity_level: 'non_toxic',
+        family: null, light_level: null, dryness_cue: null, water_quality: null,
+        humidity_band: null, misting_rule: null, soil_mix: null, temp_min_f: null,
+        temp_max_f: null, cold_draft_sensitive: null, toxicity_notes: null, common_pests: null,
+        symptoms: null, grooming_propagation: null, fertilizing: null,
+        repot_interval_months: null, description: null, preservation_methods: null,
+        usda_acidity_class: null, frost_tolerance: 'tender', usda_zone_min: null,
+        usda_zone_max: null, days_to_maturity: null, tall_trellis: null,
+      } as GardenSpecies,
+      warnings: ['Review all fields before saving.'],
+    });
+    vi.mocked(api.gardenSaveCustomSpecies).mockResolvedValue({
+      ok: true, key: 'rare_plant_x', source: 'wiki_ai_draft', warnings: [],
+    });
+    vi.mocked(api.gardenGetProfile).mockResolvedValue({
+      user_id: 'household', family_size: 7, hardiness_zone: '5b', zone_source: 'manual',
+      last_spring_frost_mmdd: '05-15', first_fall_frost_mmdd: '10-15', units: 'imperial',
+      preservation_prefs: null, daily_digest_time: '08:00', yard_canvas_json: null,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    });
+    vi.mocked(api.gardenStreaks).mockResolvedValue({
+      user_id: 'mother', current_streak: 0, longest_streak: 0, total_logs: 0,
+    });
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  it('shows "Ask Jarvis to look up" when search returns no results', async () => {
+    render(<Garden />, { wrapper });
+    fireEvent.click(screen.getByText('Add Plant'));
+    const searchInput = screen.getByPlaceholderText('e.g. Monstera, Basil, Snake Plant');
+    fireEvent.change(searchInput, { target: { value: 'Rare Plant X' } });
+    await screen.findByText('Ask Jarvis to look up “Rare Plant X”');
+  });
+
+  it('shows review draft and Save & Select Species button after lookup', async () => {
+    render(<Garden />, { wrapper });
+    fireEvent.click(screen.getByText('Add Plant'));
+    const searchInput = screen.getByPlaceholderText('e.g. Monstera, Basil, Snake Plant');
+    fireEvent.change(searchInput, { target: { value: 'Rare Plant X' } });
+    await screen.findByText('Ask Jarvis to look up “Rare Plant X”');
+    fireEvent.click(screen.getByText('Ask Jarvis to look up “Rare Plant X”'));
+    await screen.findByText('Review drafted species');
+    await screen.findByText(/Rare Plant X/);
+    expect(screen.getByText(/Rare Plant X/)).toBeInTheDocument();
+    expect(screen.getByText('Save & Select Species')).toBeInTheDocument();
   });
 });
