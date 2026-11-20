@@ -4351,6 +4351,7 @@ WIDGET_DEFAULT_SIZES: dict[str, str] = {
     'workspaces': 'medium',
     'health_activity': 'medium',
     'health_today': 'medium',
+    'garden_today': 'medium',
     'climate': 'medium',
     'presence': 'medium',
     'bible_daily': 'medium',
