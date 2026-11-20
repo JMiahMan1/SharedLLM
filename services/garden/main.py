@@ -17,18 +17,22 @@ Phase 1 permissions ("open care, guarded structure"):
 """
 from __future__ import annotations
 
+import asyncio
+import base64
+import binascii
 import json
 import logging
 import os
+import re
 import sqlite3
-import asyncio
 from collections.abc import Iterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from pathlib import Path as FilePath
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Path as PathParam, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -76,6 +80,9 @@ from services.garden.models import (
     Plant,
     PlantIn,
     PlantOut,
+    PlantPhoto,
+    PlantPhotoIn,
+    PlantPhotoOut,
     utcnow,
 )
 from services.garden.achievements import evaluate as evaluate_achievements
@@ -960,6 +967,80 @@ def assign_plant(
 
 
 # --------------------------------------------------------------------------- plants
+
+
+@app.get("/plants/resolve")
+def resolve_plant_target(
+    request: Request,
+    q: str = Query(..., description="A personal name, species or room, as spoken or typed"),
+    session: Session = Depends(get_session),
+):
+    """Match a spoken name to a plant, its species, or a room (Tier 1 & 2 helpers).
+
+    Personal name beats species, species beats room, and a tie is reported as
+    ``ambiguous`` with every candidate: the caller must ask, never guess.
+    """
+    _user(request)
+    needle = _normalize_target(q)
+    if not needle:
+        raise HTTPException(status_code=400, detail="Name a plant, a species or a room.")
+
+    rows = session.exec(select(Plant).where(Plant.status == "active")).all()
+    loc_rows = session.exec(select(Location)).all()
+    loc_names = {loc.id: loc.name for loc in loc_rows}
+
+    def species_of(row: Plant) -> dict | None:
+        return resolve_species(session, row.species_ref)
+
+    best: dict[str, tuple[int, dict]] = {}
+    for row in rows:
+        species = species_of(row)
+        ranks = [
+            _match_rank(needle, row.nickname),
+            _match_rank(needle, (species or {}).get("common_name")),
+            _match_rank(needle, (species or {}).get("scientific_name")),
+            _match_rank(needle, row.species_ref.replace("_", " ")),
+        ]
+        found = [r for r in ranks if r is not None]
+        if found:
+            best[row.id] = (min(found), _plant_summary(row, species, loc_names.get(row.location_id or "")))
+
+    if best:
+        top = min(rank for rank, _ in best.values())
+        plants = [summary for rank, summary in best.values() if rank == top]
+        plants.sort(key=lambda p: (p["nickname"] or p["common_name"] or "").lower())
+        return {
+            "query": q,
+            "match_type": "plant" if len(plants) == 1 else "ambiguous",
+            "plants": plants,
+            "location": None,
+        }
+
+    room_hits = sorted(
+        (rank, loc_names[loc.id], loc)
+        for loc in loc_rows
+        if (rank := _match_rank(needle, loc.name)) is not None
+    )
+    if room_hits:
+        top_rank = room_hits[0][0]
+        tied = [hit for hit in room_hits if hit[0] == top_rank]
+        if len(tied) > 1:
+            return {
+                "query": q,
+                "match_type": "ambiguous",
+                "plants": [],
+                "locations": [{"location_id": hit[2].id, "name": hit[1]} for hit in tied],
+                "location": None,
+            }
+        _, name, loc = tied[0]
+        return {
+            "query": q,
+            "match_type": "location",
+            "plants": [],
+            "location": {"location_id": loc.id, "name": name, "kind": loc.kind},
+        }
+
+    return {"query": q, "match_type": "none", "plants": [], "location": None}
 
 
 @app.get("/plants/{plant_id}")
@@ -2784,3 +2865,194 @@ def delete_pantry_batch(
     session.commit()
     return JSONResponse(status_code=204, content=None)
 
+
+
+# --------------------------------------------------------------------------- Phase 7: photos, journal & name resolution
+
+PHOTO_KINDS = frozenset({"progress", "id", "diagnosis"})
+#: A thumbnail is a small JPEG the caller already made; this is the ceiling.
+MAX_THUMB_BYTES = 256 * 1024
+
+
+def _thumbs_dir() -> FilePath:
+    """Where local thumbnails live: beside the database, or ``GARDEN_THUMB_DIR``."""
+    override = os.getenv("GARDEN_THUMB_DIR")
+    if override:
+        return FilePath(override)
+    url = _database_url()
+    if url.startswith("sqlite:///"):
+        return FilePath(url[len("sqlite:///"):]).parent / "thumbs"
+    return FilePath("/data/thumbs")
+
+
+def _normalize_target(text: str) -> str:
+    """A spoken or typed name, reduced to what a person meant ("the Monty!" -> monty)."""
+    words = [w for w in re.split(r"[^a-z0-9']+", (text or "").lower()) if w]
+    words = [w for w in words if w not in ("the", "a", "an", "my", "our")]
+    return " ".join(words)
+
+
+def _singular(word: str) -> str:
+    """A spoken plural, back to the word species names use (tomatoes -> tomato)."""
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    if word.endswith("es") and len(word) > 4:
+        return word[:-2]
+    if word.endswith("s") and len(word) > 3:
+        return word[:-1]
+    return word
+
+
+def _match_rank(needle: str, candidate: str | None) -> int | None:
+    """0 exact, 1 prefix, 2 substring, None when it does not match at all.
+
+    Spoken plurals match (\"tomatoes\" finds Roma Tomato), and a phrase that
+    *contains* the candidate matches too (\"kitchen herbs\" finds the Kitchen).
+    """
+    if not needle or not candidate:
+        return None
+    value = _normalize_target(candidate)
+    if not value:
+        return None
+    words = needle.split()
+    forms = {needle, " ".join([*words[:-1], _singular(words[-1])])} if words else {needle}
+    for form in forms:
+        if value == form:
+            return 0
+        if value.startswith(form):
+            return 1
+        if form in value:
+            return 2
+    if value in needle:
+        return 2
+    return None
+
+
+def _plant_summary(row: Plant, species: dict | None, location_name: str | None) -> dict:
+    return {
+        "plant_id": row.id,
+        "nickname": row.nickname,
+        "common_name": (species or {}).get("common_name"),
+        "scientific_name": (species or {}).get("scientific_name"),
+        "species_ref": row.species_ref,
+        "category": row.category,
+        "location_id": row.location_id,
+        "location_name": location_name,
+        "assigned_to": row.assigned_to,
+    }
+
+
+@app.get("/plants/{plant_id}/photos")
+def list_plant_photos(
+    plant_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """A plant's growth journal, newest first (every family role may read it)."""
+    _user(request)
+    if session.get(Plant, plant_id) is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    rows = session.exec(
+        select(PlantPhoto)
+        .where(PlantPhoto.plant_id == plant_id)
+        .order_by(PlantPhoto.taken_at.desc(), PlantPhoto.created_at.desc())
+    ).all()
+    return {
+        "plant_id": plant_id,
+        "count": len(rows),
+        "photos": [PlantPhotoOut.model_validate(row).model_dump() for row in rows],
+    }
+
+
+@app.post("/plants/{plant_id}/photos", status_code=201)
+def create_plant_photo(
+    plant_id: str,
+    body: PlantPhotoIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Add a photo to a plant's timeline (everyone: it is the family's journal)."""
+    user = _user(request)
+    if session.get(Plant, plant_id) is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    kind = (body.kind or "progress").strip().lower()
+    if kind not in PHOTO_KINDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"kind must be one of {', '.join(sorted(PHOTO_KINDS))}.",
+        )
+    if body.taken_at:
+        _validate_iso_date("taken_at", body.taken_at)
+
+    row = PlantPhoto(
+        plant_id=plant_id,
+        nextcloud_path=body.nextcloud_path,
+        taken_at=body.taken_at or utcnow(),
+        taken_by=user,
+        kind=kind,
+        ai_summary_json=body.ai_summary_json,
+        notes=body.notes,
+    )
+    if body.thumb_base64:
+        try:
+            raw = base64.b64decode(body.thumb_base64, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=400, detail="thumb_base64 is not valid base64.") from None
+        if len(raw) > MAX_THUMB_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"The thumbnail is larger than {MAX_THUMB_BYTES // 1024} KB.",
+            )
+        if not (raw.startswith(b"\xff\xd8") or raw.startswith(b"\x89PNG")):
+            raise HTTPException(status_code=400, detail="The thumbnail must be a JPEG or PNG image.")
+        folder = _thumbs_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        name = f"{row.id}.jpg"
+        (folder / name).write_bytes(raw)
+        row.thumb_path = name
+
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return PlantPhotoOut.model_validate(row).model_dump()
+
+
+@app.get("/plants/{plant_id}/photos/{photo_id}/thumb")
+def plant_photo_thumb(
+    plant_id: str,
+    photo_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """The cached local thumbnail, so the journal loads without Nextcloud."""
+    _user(request)
+    row = session.get(PlantPhoto, photo_id)
+    if row is None or row.plant_id != plant_id or not row.thumb_path:
+        raise HTTPException(status_code=404, detail="No thumbnail for this photo")
+    path = _thumbs_dir() / row.thumb_path
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No thumbnail for this photo")
+    media = "image/png" if row.thumb_path.endswith(".png") else "image/jpeg"
+    return Response(content=path.read_bytes(), media_type=media, headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.delete("/plants/{plant_id}/photos/{photo_id}", status_code=204)
+def delete_plant_photo(
+    plant_id: str,
+    photo_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Remove a photo: whoever took it, or any adult/admin (everyone's journal, guarded)."""
+    user = _user(request)
+    row = session.get(PlantPhoto, photo_id)
+    if row is None or row.plant_id != plant_id:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    if (row.taken_by or "").lower() != user and not (_role(request) in ADULT_ROLES or _is_admin(request)):
+        raise HTTPException(status_code=403, detail="Only the person who took the photo, or adults/admins, may delete it.")
+    if row.thumb_path:
+        with suppress(OSError):
+            (_thumbs_dir() / row.thumb_path).unlink()
+    session.delete(row)
+    session.commit()
+    return JSONResponse(status_code=204, content=None)

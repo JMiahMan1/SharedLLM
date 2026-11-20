@@ -542,6 +542,54 @@ class PantryBatchPatch(SQLModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class PlantPhoto(SQLModel, table=True):
+    """One photo on a plant's timeline (Phase 7).
+
+    Full-resolution images live in Nextcloud under ``Garden/Photos/<plant_id>/``
+    (Execution owns that account); this row keeps the metadata, the link, and a
+    small local thumbnail the UI can load instantly. ``kind`` says what the photo
+    is: a ``progress`` shot for the growth journal, an ``id`` from snap-to-add, or
+    a ``diagnosis`` from the Plant Doctor, whose structured result is kept in
+    ``ai_summary_json``.
+    """
+
+    __tablename__ = "plant_photos"
+
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
+    plant_id: str = Field(max_length=128, index=True)
+    nextcloud_path: str | None = Field(default=None, max_length=400)
+    thumb_path: str | None = Field(default=None, max_length=200)  # file name under /data/thumbs/
+    taken_at: str = Field(default_factory=utcnow)
+    taken_by: str | None = Field(default=None, max_length=128)
+    kind: str = Field(default="progress", max_length=32)  # progress | id | diagnosis
+    ai_summary_json: str | None = Field(default=None, max_length=8000)
+    notes: str | None = Field(default=None, max_length=1000)
+    created_at: str = Field(default_factory=utcnow)
+
+
+class PlantPhotoIn(SQLModel):
+    kind: str = Field(default="progress", max_length=32)
+    notes: str | None = Field(default=None, max_length=1000)
+    taken_at: str | None = Field(default=None, max_length=40)
+    nextcloud_path: str | None = Field(default=None, max_length=400)
+    #: A small JPEG/PNG made by the caller (Gateway, through Execution's Pillow).
+    thumb_base64: str | None = None
+    ai_summary_json: str | None = Field(default=None, max_length=8000)
+
+
+class PlantPhotoOut(SQLModel):
+    id: str
+    plant_id: str
+    nextcloud_path: str | None
+    thumb_path: str | None
+    taken_at: str
+    taken_by: str | None
+    kind: str
+    ai_summary_json: str | None
+    notes: str | None
+    created_at: str
+
+
 class GardenPlan(SQLModel, table=True):
     """Seasonal bed plan (e.g., "Spring/Summer 2027")."""
 
