@@ -821,6 +821,13 @@ def import_places(runtime: Any, body: dict[str, Any]) -> dict[str, Any]:
     return {**counts, "unmatched": unmatched, "entity_ids": mapping}
 
 
+# -- persons --------------------------------------------------------------------------------------------
+
+def _stored_persons(runtime: Any) -> list[dict[str, Any]]:
+    persons = runtime.store.get_kv("persons", []) or []
+    return [p for p in persons if isinstance(p, dict)] if isinstance(persons, list) else []
+
+
 # -- network devices ------------------------------------------------------------------------------------
 
 # Device type enum for known categories
