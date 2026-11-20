@@ -6833,8 +6833,15 @@ def internal_household(session: Session = Depends(get_session), _: None = Depend
     A service that sizes something by family (Garden plants a garden for the
     household) reads the number here instead of keeping its own copy, which
     went stale the moment a member was added or removed.
+
+    The stack's own default admin account is not a person to feed, so it is
+    left out; everyone else in the roster counts.
     """
-    usernames = [user.username for user in session.exec(select(User)).all()]
+    usernames = [
+        user.username
+        for user in session.exec(select(User)).all()
+        if not getattr(user, "is_system_default", False)
+    ]
     return {"status": "SUCCESS", "members": len(usernames), "usernames": usernames}
 
 

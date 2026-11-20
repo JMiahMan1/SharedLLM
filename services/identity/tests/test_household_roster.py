@@ -25,6 +25,8 @@ def client(monkeypatch):
     with Session(engine) as session:
         for username in ("dad", "mom", "kid", "sib"):
             session.add(User(username=username))
+        # The stack's own default admin is not a person to feed.
+        session.add(User(username="default", is_system_default=True, is_admin=True))
         session.commit()
 
     app.dependency_overrides[require_internal] = lambda: True
@@ -39,6 +41,7 @@ def test_the_roster_is_the_household_size(client):
     body = resp.json()
     assert body["members"] == 4
     assert sorted(body["usernames"]) == ["dad", "kid", "mom", "sib"]
+    assert "default" not in body["usernames"]
 
 
 def test_it_is_not_open_without_the_internal_secret(client):
