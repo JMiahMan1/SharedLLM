@@ -776,12 +776,11 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - GARDEN_DATABASE_URL=${GARDEN_DATABASE_URL:-sqlite:////data/garden.db}
-      - PLANT_SEED_PATH=/data/plants-seed.db
+      - PLANT_SEED_PATH=${PLANT_SEED_PATH:-/app/plants-seed.db}
       - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./data/garden:/data
-      - ./data/plants/plants-seed.db:/data/plants-seed.db:ro
     dns:
       - 1.1.1.1
       - 8.8.8.8

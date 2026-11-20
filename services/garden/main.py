@@ -89,7 +89,7 @@ logging.basicConfig(
 log = logging.getLogger("garden")
 
 DEFAULT_DATABASE_URL = "sqlite:////data/garden.db"
-DEFAULT_SEED_PATH = "/data/plants-seed.db"
+DEFAULT_SEED_PATH = "/app/plants-seed.db"
 
 ADULT_ROLES = frozenset({"adult_child", "mother", "father", "admin"})
 ALL_ROLES = frozenset({"child", "teen", "adult_child", "mother", "father", "admin"})

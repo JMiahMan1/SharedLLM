@@ -10,19 +10,29 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any
 
 import aiohttp
 from fastapi import HTTPException, Request
 
-from services.gateway.config import EXECUTION_SVC, INTERNAL_SECRET
+from services.gateway.config import GARDEN_SVC, INTERNAL_SECRET
 from services.gateway import cookbook
 from services.gateway.main import shared_http_client
 
 log = logging.getLogger("garden_recipes")
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
+
+
+def _garden_headers(caller: Any) -> dict[str, str]:
+    """Internal-secret + acting-user headers required by services/garden."""
+    user = (getattr(caller, "user", None) or "household").strip().lower()
+    return {
+        "X-Internal-Secret": INTERNAL_SECRET,
+        "X-User-Id": user,
+    }
 
 #: Word-boundary regex for ingredient matching.  ``\b`` boundaries prevent
 #: false matches like ``"pea"`` matching ``"peanut"`` or ``"peach"``.
@@ -79,8 +89,8 @@ async def recipe_matches(run: Any, caller: Any) -> dict:
     try:
         async with shared_http_client() as client:
             resp = await client.get(
-                f"{EXECUTION_SVC.rsplit('/', 1)[0] if False else 'http://sharedllm_garden:8012'}/harvest/ready",
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                f"{GARDEN_SVC.rstrip('/')}/harvest/ready",
+                headers=_garden_headers(caller),
                 timeout=_TIMEOUT,
             )
             if resp.status == 200:
@@ -203,16 +213,15 @@ async def recipe_draft(
     to ready garden produce.  Returns markdown in Nextcloud Notes format
     for user review -- NOT saved to the cookbook.
     """
-    from services.gateway.config import GARDEN_SVC
-
     # Resolve servings from garden_profile.family_size (default 7).
+    garden_hdrs = _garden_headers(caller)
     servings = body.get("servings")
     if servings is None:
         try:
             async with shared_http_client() as client:
                 resp = await client.get(
                     f"{GARDEN_SVC.rstrip('/')}/profile",
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    headers=garden_hdrs,
                     timeout=_TIMEOUT,
                 )
                 if resp.status == 200:
@@ -231,7 +240,7 @@ async def recipe_draft(
             async with shared_http_client() as client:
                 resp = await client.get(
                     f"{GARDEN_SVC.rstrip('/')}/harvest/ready",
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    headers=garden_hdrs,
                     timeout=_TIMEOUT,
                 )
                 if resp.status == 200:
@@ -264,10 +273,16 @@ async def recipe_draft(
     )
 
     # Call the gateway's own LLM endpoint.
+    gateway_base = (os.getenv("GATEWAY_INTERNAL_URL") or "http://127.0.0.1:11435").rstrip("/")
+    llm_headers: dict[str, str] = {"X-Internal-Secret": INTERNAL_SECRET}
+    if request is not None:
+        auth = request.headers.get("Authorization")
+        if auth:
+            llm_headers["Authorization"] = auth
     try:
         async with shared_http_client() as client:
             resp = await client.post(
-                "http://sharedllm_gateway:11435/v1/chat/completions",
+                f"{gateway_base}/v1/chat/completions",
                 json={
                     "model": "auto",
                     "messages": [
@@ -276,7 +291,7 @@ async def recipe_draft(
                     ],
                     "temperature": 0.7,
                 },
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                headers=llm_headers,
                 timeout=_TIMEOUT,
             )
             if resp.status != 200:

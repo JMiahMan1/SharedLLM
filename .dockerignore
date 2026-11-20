@@ -36,3 +36,5 @@ tmp/
 # by the postgres uid, unreadable to the deploying user).
 data/*
 !data/phrasebook.json
+!data/plants_seed/
+!data/plants_seed/**

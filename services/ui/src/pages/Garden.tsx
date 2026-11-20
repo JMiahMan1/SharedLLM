@@ -1003,8 +1003,9 @@ function HarvestModal({
 
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Quantity</label>
+            <label htmlFor="detail-harvest-qty" className="block text-xs text-slate-400 mb-1">Quantity</label>
             <input
+              id="detail-harvest-qty"
               type="number"
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
@@ -1013,8 +1014,9 @@ function HarvestModal({
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Unit</label>
+            <label htmlFor="detail-harvest-unit" className="block text-xs text-slate-400 mb-1">Unit</label>
             <select
+              id="detail-harvest-unit"
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
               className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -1025,8 +1027,9 @@ function HarvestModal({
             </select>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Disposition</label>
+            <label htmlFor="detail-harvest-disposition" className="block text-xs text-slate-400 mb-1">Disposition</label>
             <select
+              id="detail-harvest-disposition"
               value={disposition}
               onChange={(e) => setDisposition(e.target.value)}
               className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -1037,8 +1040,9 @@ function HarvestModal({
             </select>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes (optional)</label>
+            <label htmlFor="detail-harvest-notes" className="block text-xs text-slate-400 mb-1">Notes (optional)</label>
             <input
+              id="detail-harvest-notes"
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -1235,15 +1239,16 @@ function LogHarvestModal({
 
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Plant</label>
+            <span className="block text-xs text-slate-400 mb-1">Plant</span>
             <p className="text-sm text-white font-medium">{plant.nickname || plant.common_name}</p>
             <p className="text-xs text-slate-500">{plant.category} · {plant.species_ref}</p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Quantity</label>
+              <label htmlFor="ready-harvest-qty" className="block text-xs text-slate-400 mb-1">Quantity</label>
               <input
+                id="ready-harvest-qty"
                 type="number"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
@@ -1251,8 +1256,9 @@ function LogHarvestModal({
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Unit</label>
+              <label htmlFor="ready-harvest-unit" className="block text-xs text-slate-400 mb-1">Unit</label>
               <select
+                id="ready-harvest-unit"
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
                 className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -1267,8 +1273,9 @@ function LogHarvestModal({
           </div>
 
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Disposition</label>
+            <label htmlFor="ready-harvest-disposition" className="block text-xs text-slate-400 mb-1">Disposition</label>
             <select
+              id="ready-harvest-disposition"
               value={disposition}
               onChange={(e) => setDisposition(e.target.value)}
               className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -1282,8 +1289,9 @@ function LogHarvestModal({
           </div>
 
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Notes (optional)</label>
+            <label htmlFor="ready-harvest-notes" className="block text-xs text-slate-400 mb-1">Notes (optional)</label>
             <textarea
+              id="ready-harvest-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
@@ -1349,6 +1357,7 @@ function AddPlantModal({
   const [selectedSpecies, setSelectedSpecies] = useState<GardenSpecies | null>(null);
   const [nickname, setNickname] = useState('');
   const [locationId, setLocationId] = useState<string>('');
+  const [showNewRoom, setShowNewRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [showTuning, setShowTuning] = useState(false);
   const [potSize, setPotSize] = useState<string>('');
@@ -1360,6 +1369,18 @@ function AddPlantModal({
   const [lookupMode, setLookupMode] = useState(false);
   const [lookupDraft, setLookupDraft] = useState<GardenSpecies | null>(null);
   const [lookupWarnings, setLookupWarnings] = useState<string[]>([]);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+
+  const starterSpeciesQuery = useQuery({
+    queryKey: ['garden-starter-species'],
+    queryFn: async () => {
+      if (typeof api.gardenListSpecies !== 'function') return [];
+      const resp = await api.gardenListSpecies({ category: 'houseplant', limit: 15 });
+      return resp?.results ?? [];
+    },
+    enabled: open,
+    staleTime: 5 * 60_000,
+  });
 
   const searchMutation = useMutation({
     mutationFn: async (q: string) => {
@@ -1367,6 +1388,7 @@ function AddPlantModal({
       return resp.results;
     },
     onSuccess: (results) => setSpeciesResults(results),
+    onError: () => setSpeciesResults([]),
   });
 
   const lookupMutation = useMutation({
@@ -1374,12 +1396,70 @@ function AddPlantModal({
       setLookupMode(true);
       setLookupDraft(null);
       setLookupWarnings([]);
+      setLookupError(null);
       const resp = await api.gardenSpeciesLookup({ name: q });
       setLookupWarnings(resp.warnings);
       setLookupDraft(resp.species);
       return resp;
     },
+    onError: () => {
+      setLookupMode(false);
+      setLookupDraft(null);
+      setLookupError('Jarvis could not look up that plant right now. You can still add it as a custom plant below.');
+      toast.error('Species lookup failed');
+    },
   });
+
+  const startManualCustomDraft = (rawName: string) => {
+    const clean = rawName.trim();
+    if (!clean) return;
+    const slug = clean
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 60) || 'custom_plant';
+    setLookupError(null);
+    setLookupMode(true);
+    setLookupWarnings(['Custom entry with default 7-day watering cadence — you can tune it after adding.']);
+    setLookupDraft({
+      key: `custom_${slug}`,
+      category: 'houseplant',
+      common_name: clean,
+      scientific_name: null,
+      family: null,
+      light_level: 'bright_indirect',
+      watering_interval_days: 7,
+      winter_multiplier: 1.3,
+      watering_method: 'top_drain',
+      dryness_cue: 'Top inch of soil feels dry',
+      water_quality: null,
+      humidity_band: 'medium',
+      misting_rule: null,
+      soil_mix: 'Standard indoor potting mix',
+      temp_min_f: 60,
+      temp_max_f: 80,
+      cold_draft_sensitive: 0,
+      toxicity_level: 'unknown',
+      toxicity_notes: null,
+      common_pests: null,
+      symptoms: null,
+      grooming_propagation: null,
+      fertilizing: null,
+      repot_interval_months: null,
+      description: 'Custom plant added manually.',
+      preservation_methods: null,
+      usda_acidity_class: null,
+      frost_tolerance: 'tender',
+      usda_zone_min: null,
+      usda_zone_max: null,
+      days_to_maturity: null,
+      tall_trellis: null,
+      culinary_aliases: null,
+      pinching_bolting_notes: null,
+      regrowth_cadence: null,
+      herb_preservation_tips: null,
+    });
+  };
 
   const saveCustomMutation = useMutation({
     mutationFn: async () => {
@@ -1422,8 +1502,12 @@ function AddPlantModal({
       const resp = await api.gardenSaveCustomSpecies(body);
       setSelectedSpecies({ ...lookupDraft, key: resp.key } as GardenSpecies);
       setLookupMode(false);
+      setLookupDraft(null);
       toast.success('Species saved');
       return resp;
+    },
+    onError: () => {
+      toast.error('Failed to save custom species');
     },
   });
 
@@ -1455,12 +1539,17 @@ function AddPlantModal({
       setSelectedSpecies(null);
       setNickname('');
       setLocationId('');
+      setShowNewRoom(false);
       setShowTuning(false);
       setPotSize('');
       setPotMaterial('');
       setWindowDirection('');
       setDistanceFromWindow('');
       setNewRoomName('');
+      setLookupMode(false);
+      setLookupDraft(null);
+      setLookupWarnings([]);
+      setLookupError(null);
     },
     onError: () => {
       setCreating(false);
@@ -1471,12 +1560,16 @@ function AddPlantModal({
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const q = e.target.value;
     setQuery(q);
-    if (q.length >= 2) {
-      searchMutation.mutate(q);
+    setLookupError(null);
+    if (q.trim().length >= 2) {
+      searchMutation.mutate(q.trim());
     } else {
       setSpeciesResults([]);
     }
   };
+
+  const visibleSpecies =
+    query.trim().length >= 2 ? speciesResults : (starterSpeciesQuery.data ?? []);
 
   const suggestName = () => {
     if (selectedSpecies?.common_name) {
@@ -1510,9 +1603,18 @@ function AddPlantModal({
             />
           </div>
 
-          {speciesResults.length > 0 && (
+          {searchMutation.isPending && query.trim().length >= 2 && (
+            <p className="text-xs text-slate-400">Searching catalog…</p>
+          )}
+
+          {visibleSpecies.length > 0 && (
             <div className="max-h-48 overflow-y-auto space-y-1">
-              {speciesResults.map((s) => (
+              {query.trim().length < 2 && (
+                <p className="text-[11px] uppercase tracking-wider text-slate-400 mb-1">
+                  Popular species
+                </p>
+              )}
+              {visibleSpecies.map((s) => (
                 <button
                   key={s.key}
                   type="button"
@@ -1524,22 +1626,40 @@ function AddPlantModal({
                   }`}
                 >
                   <div className="font-medium text-white">{s.common_name}</div>
-                  <div className="text-xs text-slate-500">{s.scientific_name || ''}</div>
+                  <div className="text-xs text-slate-400">{s.scientific_name || ''}</div>
                 </button>
               ))}
             </div>
           )}
 
-          {query.length >= 2 && speciesResults.length === 0 && !lookupMode && !lookupDraft && (
-            <button
-              type="button"
-              onClick={() => lookupMutation.mutate(query)}
-              disabled={creating}
-              className="w-full text-left px-3 py-2 rounded-lg text-sm text-purple-400 border border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-300 transition-colors"
-            >
-              <Search size={14} className="mr-2" />
-              Ask Jarvis to look up “{query}”
-            </button>
+          {lookupMutation.isPending && (
+            <p className="text-xs text-purple-300">Looking up “{query.trim()}”…</p>
+          )}
+
+          {lookupError && (
+            <p className="text-xs text-amber-300">{lookupError}</p>
+          )}
+
+          {query.trim().length >= 2 && !searchMutation.isPending && speciesResults.length === 0 && !lookupMode && !lookupDraft && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => lookupMutation.mutate(query.trim())}
+                disabled={creating || lookupMutation.isPending}
+                className="w-full flex items-center text-left px-3 py-2 rounded-lg text-sm text-purple-400 border border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-300 transition-colors"
+              >
+                <Search size={14} className="mr-2 shrink-0" />
+                Ask Jarvis to look up “{query.trim()}”
+              </button>
+              <button
+                type="button"
+                onClick={() => startManualCustomDraft(query)}
+                disabled={creating}
+                className="w-full text-left px-3 py-2 rounded-lg text-xs text-slate-300 border border-white/10 hover:bg-white/10 transition-colors"
+              >
+                Or add “{query.trim()}” as a custom plant
+              </button>
+            </div>
           )}
 
           {lookupMode && lookupDraft && (
@@ -1558,10 +1678,10 @@ function AddPlantModal({
               <button
                 type="button"
                 onClick={() => saveCustomMutation.mutate()}
-                disabled={creating}
+                disabled={creating || saveCustomMutation.isPending}
                 className="w-full px-3 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 text-sm transition-colors"
               >
-                {creating ? 'Saving…' : 'Save & Select Species'}
+                {saveCustomMutation.isPending ? 'Saving…' : 'Save & Select Species'}
               </button>
               <button
                 type="button"
@@ -1624,19 +1744,19 @@ function AddPlantModal({
                   </select>
                   <button
                     type="button"
-                    onClick={() => setNewRoomName('+ New room')}
+                    onClick={() => setShowNewRoom((prev) => !prev)}
                     className="px-2 py-2 bg-white/5 border border-white/10 rounded-lg text-purple-400 hover:bg-white/10 hover:text-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     title="Add a new room"
                   >
                     +
                   </button>
                 </div>
-                {newRoomName === '+ New room' && (
+                {showNewRoom && (
                   <div className="mt-2 flex gap-2">
                     <input
                       type="text"
-                      value={locationId}
-                      onChange={(e) => setLocationId(e.target.value)}
+                      value={newRoomName}
+                      onChange={(e) => setNewRoomName(e.target.value)}
                       placeholder="Room name"
                       aria-label="New room name"
                       className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -1644,14 +1764,15 @@ function AddPlantModal({
                     <button
                       type="button"
                       onClick={async () => {
-                        if (!locationId.trim()) return;
+                        if (!newRoomName.trim()) return;
                         setCreating(true);
                         try {
                           const resp = await api.gardenCreateLocation({
-                            name: locationId.trim(),
+                            name: newRoomName.trim(),
                             kind: 'indoor_room',
                           });
                           setNewRoomName('');
+                          setShowNewRoom(false);
                           setLocationId(resp.id);
                           queryClient.invalidateQueries({ queryKey: ['garden-locations'] });
                           toast.success('Room added');
@@ -1661,21 +1782,12 @@ function AddPlantModal({
                           setCreating(false);
                         }
                       }}
-                      disabled={creating || !locationId.trim()}
+                      disabled={creating || !newRoomName.trim()}
                       className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-500 disabled:opacity-50"
                     >
                       Add
                     </button>
                   </div>
-                )}
-                {newRoomName !== '+ New room' && newRoomName !== '' && (
-                  <button
-                    type="button"
-                    onClick={() => setNewRoomName('')}
-                    className="text-xs text-slate-500 hover:text-slate-300 underline"
-                  >
-                    Cancel
-                  </button>
                 )}
               </div>
 
@@ -1743,6 +1855,12 @@ function AddPlantModal({
                 </div>
               )}
             </div>
+          )}
+
+          {!selectedSpecies && (
+            <p className="text-xs text-slate-400">
+              Select a species above to enable Add Plant.
+            </p>
           )}
 
           <div className="mt-6 flex gap-3">

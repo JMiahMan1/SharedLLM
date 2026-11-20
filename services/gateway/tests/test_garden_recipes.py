@@ -122,6 +122,12 @@ def test_recipe_matches_basil_matches_pesto():
         result = asyncio.run(recipe_matches(cookbook, caller))
 
     assert result["ready_ingredients"][0]["common_name"] == "Sweet Basil"
+    # Verify X-User-Id and configured GARDEN_SVC URL are used (not hardcoded hostname).
+    called_url = client_mock.get.call_args.args[0]
+    called_headers = client_mock.get.call_args.kwargs["headers"]
+    assert "sharedllm_garden" not in called_url
+    assert called_url.endswith("/harvest/ready")
+    assert called_headers["X-User-Id"] == "mother"
     matches = result["matches"]
     assert len(matches) == 1
     assert matches[0]["title"] == "Pesto"

@@ -27,6 +27,7 @@ vi.mock('../services/api', () => ({
     gardenWaterAll: vi.fn(),
     gardenGetPlantLogs: vi.fn(),
     gardenSearch: vi.fn(),
+    gardenListSpecies: vi.fn(),
     gardenSpeciesLookup: vi.fn(),
     gardenSaveCustomSpecies: vi.fn(),
     gardenCreatePlant: vi.fn(),

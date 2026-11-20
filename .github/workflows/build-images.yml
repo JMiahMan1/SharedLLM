@@ -147,6 +147,8 @@ jobs:
               - 'services/garden/**'
               - 'services/common/**'
               - 'services/config.py'
+              - 'data/plants_seed/**'
+              - 'scripts/build_plants_seed.py'
               - '.github/workflows/build-images.yml'
 
       - name: Set Outputs

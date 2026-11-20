@@ -34,7 +34,16 @@ jobs:
     # `ubuntu-latest` moved to 26.04, which Playwright 1.59.1 refuses to install
     # Chromium on ("not officially supported"); 24.04 is a supported image.
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - hermetic-desktop
+          - hermetic-mobile
+          - hermetic-small-phone
+          - hermetic-tablet-portrait
+          - hermetic-tablet-landscape
 
     steps:
       - uses: actions/checkout@v4
@@ -54,11 +63,11 @@ jobs:
         working-directory: services/ui
         run: npx playwright install --with-deps chromium
 
-      - name: Run the hermetic suite
+      - name: Run the hermetic suite (${{ matrix.project }})
         working-directory: services/ui
         env:
           SKIP_VISUAL: '1'
-        run: npx playwright test --project=hermetic-desktop --project=hermetic-mobile --project=hermetic-small-phone --project=hermetic-tablet-portrait --project=hermetic-tablet-landscape --reporter=line,html --workers=2
+        run: npx playwright test --project=${{ matrix.project }} --reporter=line,html --workers=2
 
       # Every run, not only a failed one: the per-page, per-format screenshots
       # are attached to the report.
@@ -66,7 +75,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.project }}
           path: |
             services/ui/playwright-report
             services/ui/test-results

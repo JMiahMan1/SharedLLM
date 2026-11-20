@@ -11,6 +11,7 @@ ENV PYTHONPATH=/app
 COPY services/garden/requirements.txt /tmp/garden-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/garden-requirements.txt
 COPY . .
+RUN python3 scripts/build_plants_seed.py --work-dir /tmp/plants-build --out /app/plants-seed.db && rm -rf /tmp/plants-build
 EXPOSE 8012
 ENV PYTHONUNBUFFERED=1
 
