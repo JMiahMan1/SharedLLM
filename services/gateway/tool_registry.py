@@ -35,6 +35,13 @@ TOOL_WORKSPACE_EXPOSE_PORT = "workspaceportexposerequest"
 TOOL_PODCAST_RENDER = "sharedllm_podcast_render"
 TOOL_SPEAKER_IDENTIFY = "sharedllm_speaker_identify"
 TOOL_LIST_VOICES = "sharedllm_list_voices"
+# Garden (docs/PLANT_CARE.md, Phase 7): grounded in live garden state.
+TOOL_GARDEN_SUMMARY = "garden_summary"
+TOOL_GARDEN_LOG_CARE = "garden_log_care"
+TOOL_GARDEN_LOG_HARVEST = "garden_log_harvest"
+TOOL_GARDEN_RECIPE_MATCHES = "garden_recipe_matches"
+TOOL_GARDEN_PRESERVATION_GUIDE = "garden_preservation_guide"
+TOOL_GARDEN_PLAN_SUGGEST = "garden_plan_suggest"
 
 # Service identifiers used by the resolver / proxy layer.
 SVC_EXECUTION = "execution"
@@ -416,6 +423,84 @@ _LIST_VOICES_TOOL = {
 }
 
 
+def _garden_tool(name: str, description: str, properties: dict, required: list[str] | None = None) -> dict:
+    """One garden tool schema; every property sent to the assistant route."""
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": list(required or []),
+            },
+        },
+    }
+
+
+_GARDEN_SUMMARY_TOOL = _garden_tool(
+    TOOL_GARDEN_SUMMARY,
+    "Today's garden: which plants need care (by their family names), any frost/heat/rain "
+    "alerts, what is ready to harvest, and how the year's pantry goals are progressing. "
+    "Use this before answering any question about what needs doing in the garden.",
+    {},
+)
+
+_GARDEN_LOG_CARE_TOOL = _garden_tool(
+    TOOL_GARDEN_LOG_CARE,
+    'Log garden care: watering, fertilizing, misting, pruning, or "still damp" (snooze). '
+    "Name the plant by its family name, its species, or a whole room to water everything "
+    "in it. The garden resolves the name; an ambiguous name comes back with the choices.",
+    {
+        "target": {"type": "string", "description": "Personal name, species, or room, as the person said it."},
+        "action": {
+            "type": "string",
+            "description": "water (default), fertilize, mist, prune_pinch, clean_leaves, rotate, check_pests.",
+        },
+        "still_damp": {"type": "boolean", "description": 'True for "still damp": postpone instead of logging done.'},
+        "postpone_days": {"type": "number", "description": "Days to postpone when still_damp (default 2)."},
+    },
+    ["target"],
+)
+
+_GARDEN_LOG_HARVEST_TOOL = _garden_tool(
+    TOOL_GARDEN_LOG_HARVEST,
+    "Record a harvest against a plant (by family name or species): quantity, unit, what was "
+    "done with it (fresh, canned, frozen, dried, fermented, shared).",
+    {
+        "target": {"type": "string", "description": "Personal name or species of the plant picked."},
+        "quantity": {"type": "number", "description": "How much was picked."},
+        "unit": {"type": "string", "description": "lb, oz, bunch, pint, quart, piece..."},
+        "disposition": {"type": "string", "description": "fresh, canned, frozen, dried, fermented or shared."},
+        "notes": {"type": "string", "description": "Anything worth remembering about this harvest."},
+    },
+    ["target", "quantity"],
+)
+
+_GARDEN_RECIPE_MATCHES_TOOL = _garden_tool(
+    TOOL_GARDEN_RECIPE_MATCHES,
+    "Match what is ready to harvest in the garden against the family's own cookbook, so a "
+    "surplus crop becomes tonight's dinner instead of waste.",
+    {},
+)
+
+_GARDEN_PRESERVATION_GUIDE_TOOL = _garden_tool(
+    TOOL_GARDEN_PRESERVATION_GUIDE,
+    "How to preserve what is growing: methods per crop, blanching times, and the USDA safety "
+    "callout (low-acid crops need a pressure canner; high-acid are water-bath safe). Also "
+    "returns preservation combos the garden can make right now.",
+    {},
+)
+
+_GARDEN_PLAN_SUGGEST_TOOL = _garden_tool(
+    TOOL_GARDEN_PLAN_SUGGEST,
+    "The real yard for planning: USDA zone, frost dates, household size, existing beds and "
+    "their sizes, and this year's pantry goals. Use it before suggesting what to plant where.",
+    {},
+)
+
+
 def get_tool_schemas() -> list[dict]:
     """Return the OpenAI ``tools`` schemas for all SharedLLM tools."""
     return [
@@ -432,6 +517,12 @@ def get_tool_schemas() -> list[dict]:
         _PODCAST_RENDER_TOOL,
         _SPEAKER_IDENTIFY_TOOL,
         _LIST_VOICES_TOOL,
+        _GARDEN_SUMMARY_TOOL,
+        _GARDEN_LOG_CARE_TOOL,
+        _GARDEN_LOG_HARVEST_TOOL,
+        _GARDEN_RECIPE_MATCHES_TOOL,
+        _GARDEN_PRESERVATION_GUIDE_TOOL,
+        _GARDEN_PLAN_SUGGEST_TOOL,
         *get_raven_tool_schemas(),
     ]
 
@@ -963,6 +1054,50 @@ def resolve_tool_call(
                 "image": arguments.get("image"),
                 "model": arguments.get("model"),
             },
+        )
+
+    # --- Garden (docs/PLANT_CARE.md, Phase 7) -------------------------------
+    # Every garden tool goes through the gateway's own routes, so the caller's
+    # verified identity and the Garden's role checks apply exactly as in the UI.
+    if name == TOOL_GARDEN_SUMMARY:
+        return ResolvedToolCall(method="GET", service=SVC_GATEWAY, path="/api/garden/assistant/summary", json={})
+
+    if name == TOOL_GARDEN_LOG_CARE:
+        payload = {
+            "target": arguments.get("target"),
+            "action": arguments.get("action") or "water",
+            "still_damp": bool(arguments.get("still_damp")),
+            "source": "voice",
+        }
+        if arguments.get("postpone_days") is not None:
+            payload["postpone_days"] = arguments.get("postpone_days")
+        return ResolvedToolCall(
+            method="POST", service=SVC_GATEWAY, path="/api/garden/assistant/log-care", json=payload
+        )
+
+    if name == TOOL_GARDEN_LOG_HARVEST:
+        return ResolvedToolCall(
+            method="POST",
+            service=SVC_GATEWAY,
+            path="/api/garden/assistant/log-harvest",
+            json={
+                "target": arguments.get("target"),
+                "quantity": arguments.get("quantity"),
+                "unit": arguments.get("unit") or "lb",
+                "disposition": arguments.get("disposition") or "fresh",
+                "notes": arguments.get("notes"),
+            },
+        )
+
+    if name == TOOL_GARDEN_RECIPE_MATCHES:
+        return ResolvedToolCall(method="GET", service=SVC_GATEWAY, path="/api/garden/recipes/matches", json={})
+
+    if name == TOOL_GARDEN_PRESERVATION_GUIDE:
+        return ResolvedToolCall(method="GET", service=SVC_GATEWAY, path="/api/garden/preservation/advice", json={})
+
+    if name == TOOL_GARDEN_PLAN_SUGGEST:
+        return ResolvedToolCall(
+            method="GET", service=SVC_GATEWAY, path="/api/garden/assistant/plan-context", json={}
         )
 
     if name == TOOL_LIST_IMAGE_MODELS:

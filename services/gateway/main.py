@@ -90,6 +90,7 @@ from services.gateway import (
     drawing,
     email_routes,
     family_safety,
+    fast_garden,
     fast_lights,
     garden_routes,
     helper_routes,
@@ -3965,6 +3966,18 @@ async def chat_handler(request: Request, background_tasks=None):
         engine.FAST_PATH_CONFIDENCE = float(threshold_str)
     except (ValueError, TypeError):
         engine.FAST_PATH_CONFIDENCE = _DEFAULT_FAST_PATH_THRESHOLD
+
+    # Garden commands are answered from the garden itself, deterministically: a
+    # spoken name is resolved by the Garden (never guessed), so "I watered Monty"
+    # is a 30 ms answer instead of a model round-trip that might claim it did.
+    if not grounded:
+        garden_answer = await fast_garden.try_handle(query, creds.model_dump())
+        if garden_answer:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", garden_answer)
+            if is_openai:
+                return _make_openai_response(garden_answer, selected_model, "garden")
+            return _make_ollama_response(garden_answer, selected_model, "garden")
 
     # "Is the hall lamp on?" is answered from the device's state whenever the device is
     # clearly named, whatever the classifier scored: a misheard word ("on" heard as "ons")
