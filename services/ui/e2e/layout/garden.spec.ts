@@ -301,6 +301,150 @@ async function openGarden(page: Page, path = '/garden'): Promise<Run> {
         ],
       });
     }
+    if (p === '/api/garden/harvest/forecast') {
+      return json({
+        generated_on: '2026-11-20',
+        window_days: 28,
+        weather_used: true,
+        gdd_adjusted_count: 1,
+        count: 2,
+        items: [
+          {
+            plant_id: 'plant-tomato', nickname: 'Roma Row', common_name: 'Roma (Plum) Tomato',
+            category: 'vegetable', species_ref: 'tomato_roma', planted_date: '2026-06-01',
+            estimated_ready_date: '2026-11-24', harvest_window_end: '2026-12-24',
+            days_until_ready: 4, ready_now: false, gdd_adjusted: true, gdd_base_f: 50,
+            gdd_daily_rate: 12.5, gdd_shift_days: -3, days_to_maturity: 75,
+            harvest_window_days: 30, culinary_aliases: ['tomato'],
+            preservation_methods: ['water_bath_canning', 'dehydrating', 'freezing'],
+            usda_acidity_class: 'high_acid', blanching_minutes: null,
+            location_id: 'loc-bed-north', assigned_to: 'parent',
+          },
+          {
+            plant_id: 'plant-beans', nickname: null, common_name: 'Bush Green Bean',
+            category: 'vegetable', species_ref: 'green_bean_bush', planted_date: '2026-08-01',
+            estimated_ready_date: '2026-12-05', harvest_window_end: '2027-01-04',
+            days_until_ready: 15, ready_now: false, gdd_adjusted: false, gdd_base_f: 50,
+            gdd_daily_rate: 0, gdd_shift_days: 0, days_to_maturity: 55,
+            harvest_window_days: 30, culinary_aliases: ['green bean', 'string bean'],
+            preservation_methods: ['freezing', 'pressure_canning', 'dehydrating'],
+            usda_acidity_class: 'low_acid', blanching_minutes: 3,
+            location_id: 'loc-bed-north', assigned_to: null,
+          },
+        ],
+      });
+    }
+    if (p === '/api/garden/preservation/advice') {
+      return json({
+        generated_on: '2026-11-20',
+        crop_count: 2,
+        plant_count: 3,
+        crops: [
+          {
+            species_ref: 'green_bean_bush', common_name: 'Bush Green Bean', category: 'vegetable',
+            culinary_aliases: ['green bean'], usda_acidity_class: 'low_acid',
+            safety: {
+              level: 'pressure_canner_required',
+              title: 'Low-acid — Pressure Canner Required',
+              message: 'Pressure canning is required for plain low-acid vegetables. Never water-bath can unacidified low-acid food: botulism risk. Follow a tested USDA recipe.',
+              source: 'USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book',
+            },
+            blanching_minutes: 3, herb_preservation_tips: null, preservation_conversion: null,
+            plant_ids: ['plant-beans'], plant_count: 2,
+            methods: [
+              { method: 'freezing', recorded_as: 'freezing', label: 'Freezing', storage: 'Chest freezer', use_by_months: 10, blanching_minutes: 3, requires_acidification: false, supplies: ['Freezer bags or containers'] },
+              { method: 'pressure_canning', recorded_as: 'pressure_canning', label: 'Pressure canning', storage: 'Cool, dark shelf', use_by_months: 15, blanching_minutes: null, requires_acidification: false, supplies: ['Quart canning jars'] },
+            ],
+          },
+          {
+            species_ref: 'tomato_roma', common_name: 'Roma (Plum) Tomato', category: 'vegetable',
+            culinary_aliases: ['tomato'], usda_acidity_class: 'high_acid',
+            safety: {
+              level: 'water_bath_safe',
+              title: 'High-acid — Water-Bath Safe',
+              message: 'Water-bath canning is safe for high-acid foods. Tomatoes need added acid: bottled lemon juice or citric acid per USDA.',
+              source: 'USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book',
+            },
+            blanching_minutes: null, herb_preservation_tips: null, preservation_conversion: null,
+            plant_ids: ['plant-tomato'], plant_count: 1,
+            methods: [
+              { method: 'water_bath_canning', recorded_as: 'water_bath_canning', label: 'Water-bath canning', storage: 'Cool, dark shelf', use_by_months: 15, blanching_minutes: null, requires_acidification: false, supplies: ['Quart canning jars'] },
+            ],
+          },
+        ],
+        combos: [
+          {
+            key: 'marinara', label: 'Marinara sauce', method: 'water_bath_canning',
+            method_label: 'Water-bath canning', note: 'Acidify with bottled lemon juice or citric acid.',
+            required: ['tomato'], optional: ['basil', 'garlic'], matched_crops: ['Roma (Plum) Tomato'],
+            missing_crops: [], optional_matched: [], optional_missing: ['basil', 'garlic'],
+            ready: true, matched_count: 1, required_count: 1,
+            safety: {
+              level: 'water_bath_safe', title: 'High-acid — Water-Bath Safe',
+              message: 'Water-bath canning is safe for high-acid foods.',
+              source: 'USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book',
+            },
+            supplies: ['Quart canning jars'],
+          },
+        ],
+        prep_checklist: {
+          horizon_days: 21,
+          crops: ['Roma (Plum) Tomato', 'Bush Green Bean'],
+          methods: [{ method: 'freezing', label: 'Freezing' }, { method: 'water_bath_canning', label: 'Water-bath canning' }],
+          combos: ['Marinara sauce'],
+          count: 3,
+          items: ['Quart canning jars', 'Freezer bags or containers', 'Bottled lemon juice or citric acid'],
+          categories: [
+            { key: 'jars_and_lids', label: 'Jars & lids', items: ['Quart canning jars'] },
+            { key: 'acid_and_safety', label: 'Acid & safety', items: ['Bottled lemon juice or citric acid'] },
+            { key: 'freezer', label: 'Freezer', items: ['Freezer bags or containers'] },
+          ],
+        },
+        safety_sources: ['USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book'],
+      });
+    }
+    if (p === '/api/garden/pantry-batches') {
+      if (method === 'POST') {
+        return json({ id: 'batch-new', label: 'Dill pickles', method: 'water_bath_canning', qty_initial: 6, qty_remaining: 6, unit: 'quarts' }, 201);
+      }
+      return json({
+        generated_on: '2026-11-20',
+        include_empty: false,
+        goal_id: null,
+        count: 2,
+        use_first_count: 1,
+        batches: [
+          {
+            id: 'batch-1', goal_id: 'goal-2026', label: 'Marinara sauce', method: 'water_bath_canning',
+            method_label: 'Water-bath canning', batch_date: '2026-09-15', qty_initial: 12, qty_remaining: 8,
+            unit: 'quarts', storage_location: 'Basement shelf', use_by_date: '2027-12-15',
+            logged_by: 'parent', notes: null, created_at: '2026-09-15T00:00:00Z', updated_at: '2026-09-15T00:00:00Z',
+            days_until_use_by: 30, past_use_by: false, use_first: true, oldest_in_label: true,
+          },
+          {
+            id: 'batch-2', goal_id: null, label: 'Frozen green beans', method: 'freezing',
+            method_label: 'Freezing', batch_date: '2026-10-01', qty_initial: 20, qty_remaining: 16,
+            unit: 'bags', storage_location: 'Chest freezer', use_by_date: '2027-08-01',
+            logged_by: 'parent', notes: null, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z',
+            days_until_use_by: 254, past_use_by: false, use_first: false, oldest_in_label: true,
+          },
+        ],
+        goal_progress: [
+          {
+            goal_id: 'goal-2026', item: 'Marinara sauce', unit: 'quarts', target_qty: 40,
+            qty_put_up: 28, qty_remaining: 8, percent_complete: 70, batch_count: 1,
+            unit_mismatch: false, mismatched_units: [], season_year: 2026,
+          },
+        ],
+      });
+    }
+    if (/^\/api\/garden\/pantry-batches\/[^/]+\/use$/.test(p)) {
+      return json({ id: p.split('/')[4], label: 'Marinara sauce', method: 'water_bath_canning', qty_initial: 12, qty_remaining: 7, unit: 'quarts', used_by: 'parent', qty_used: 1 });
+    }
+    if (/^\/api\/garden\/pantry-batches\/[^/]+$/.test(p)) {
+      if (method === 'DELETE') return route.fulfill({ status: 204, body: '' });
+      return json({ id: p.split('/').pop(), label: 'Marinara sauce', method: 'water_bath_canning', qty_initial: 12, qty_remaining: 7, unit: 'quarts' });
+    }
     if (p === '/api/garden/pantry-goals/calculate') {
       return json({
         item: 'Marinara sauce',
@@ -415,7 +559,14 @@ test.describe('Garden UI on every form factor', () => {
     await expect(main.getByText(/Square-foot grid/i)).toBeVisible();
     await auditScreen(page, info, run, main, 'garden-planner-bed-grid');
 
-    // 5. Plant detail page
+    // 5. Pantry tab (Coming Ready Soon, USDA callouts, combos, goal progress, batches)
+    await main.getByRole('button', { name: 'Pantry', exact: true }).click();
+    await expect(main.getByRole('heading', { name: 'Coming Ready Soon' })).toBeVisible();
+    await expect(main.getByText('Low-acid — Pressure Canner Required')).toBeVisible();
+    await expect(main.getByText(/28 \/ 40 quarts put up \(70%\)/)).toBeVisible();
+    await auditScreen(page, info, run, main, 'garden-pantry');
+
+    // 6. Plant detail page
     await page.goto('/garden/plants/plant-monty');
     await expect(main.getByText('Care Sheet')).toBeVisible();
     await auditScreen(page, info, run, main, 'garden-plant-detail');

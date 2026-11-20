@@ -5286,3 +5286,173 @@ export interface PlanTimelineResponse {
   timeline: any[];
 }
 /* ---------- end Garden Planner (Phase 5) ---------- */
+
+/* ---------- Harvest forecast, preservation & Put-Up Pantry (Phase 6) ---------- */
+
+export interface HarvestForecastItem {
+  plant_id: string;
+  nickname: string | null;
+  common_name: string;
+  category: string;
+  species_ref: string;
+  planted_date: string | null;
+  estimated_ready_date: string;
+  harvest_window_end: string;
+  days_until_ready: number;
+  ready_now: boolean;
+  gdd_adjusted: boolean;
+  gdd_base_f: number;
+  gdd_daily_rate: number;
+  gdd_shift_days: number;
+  days_to_maturity: number | null;
+  harvest_window_days: number | null;
+  culinary_aliases: string[];
+  preservation_methods: string[];
+  usda_acidity_class: 'high_acid' | 'low_acid' | null;
+  blanching_minutes: number | null;
+  location_id: string | null;
+  assigned_to: string | null;
+}
+
+export interface HarvestForecastResponse {
+  generated_on: string;
+  window_days: number;
+  weather_used: boolean;
+  gdd_adjusted_count: number;
+  count: number;
+  items: HarvestForecastItem[];
+}
+
+export interface PreservationSafety {
+  level: 'pressure_canner_required' | 'water_bath_safe' | 'verify' | string;
+  title: string;
+  message: string;
+  source: string;
+}
+
+export interface PreservationMethodAdvice {
+  method: string;
+  recorded_as: string;
+  label: string;
+  storage: string | null;
+  use_by_months: number | null;
+  blanching_minutes: number | null;
+  requires_acidification: boolean;
+  supplies: string[];
+}
+
+export interface PreservationCrop {
+  species_ref: string;
+  common_name: string;
+  category: string;
+  culinary_aliases: string[];
+  usda_acidity_class: 'high_acid' | 'low_acid' | null;
+  safety: PreservationSafety;
+  blanching_minutes: number | null;
+  herb_preservation_tips: string | null;
+  preservation_conversion: string | null;
+  plant_ids: string[];
+  plant_count: number;
+  methods: PreservationMethodAdvice[];
+}
+
+export interface PreservationCombo {
+  key: string;
+  label: string;
+  method: string;
+  method_label: string;
+  note: string | null;
+  required: string[];
+  optional: string[];
+  matched_crops: string[];
+  missing_crops: string[];
+  optional_matched: string[];
+  optional_missing: string[];
+  ready: boolean;
+  matched_count: number;
+  required_count: number;
+  safety: PreservationSafety;
+  supplies: string[];
+}
+
+export interface PrepChecklist {
+  horizon_days: number;
+  crops: string[];
+  methods: { method: string; label: string }[];
+  combos: string[];
+  count: number;
+  items: string[];
+  categories: { key: string; label: string; items: string[] }[];
+}
+
+export interface PreservationAdviceResponse {
+  generated_on: string;
+  crop_count: number;
+  plant_count: number;
+  crops: PreservationCrop[];
+  combos: PreservationCombo[];
+  prep_checklist: PrepChecklist;
+  safety_sources: string[];
+}
+
+export interface PantryBatch {
+  id: string;
+  goal_id: string | null;
+  label: string;
+  method: string;
+  method_label?: string;
+  batch_date: string;
+  qty_initial: number;
+  qty_remaining: number;
+  unit: string;
+  storage_location: string | null;
+  use_by_date: string | null;
+  logged_by: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  days_until_use_by?: number | null;
+  past_use_by?: boolean;
+  use_first?: boolean;
+  oldest_in_label?: boolean;
+}
+
+export interface PantryGoalProgress {
+  goal_id: string;
+  item: string;
+  unit: string;
+  target_qty: number;
+  qty_put_up: number;
+  qty_remaining: number;
+  percent_complete: number;
+  batch_count: number;
+  unit_mismatch: boolean;
+  mismatched_units: string[];
+  season_year: number;
+}
+
+export interface PantryViewResponse {
+  generated_on: string;
+  include_empty: boolean;
+  goal_id: string | null;
+  count: number;
+  use_first_count: number;
+  batches: PantryBatch[];
+  goal_progress: PantryGoalProgress[];
+}
+
+export interface PantryBatchIn {
+  label: string;
+  goal_id?: string | null;
+  method: string;
+  batch_date?: string | null;
+  qty_initial: number;
+  qty_remaining?: number | null;
+  unit: string;
+  storage_location?: string | null;
+  use_by_date?: string | null;
+  notes?: string | null;
+}
+
+/* ---------- end Harvest forecast, preservation & Put-Up Pantry (Phase 6) ---------- */
+

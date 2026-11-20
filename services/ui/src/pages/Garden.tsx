@@ -17,17 +17,23 @@ import { useFamilyMembers, type FamilyMember } from '../components/chat/familyDi
 import {
   BedGridEditor, DualSizingPanel, PlansPanel, TimelinePanel, YardMapPanel, ZoneFrostPanel,
 } from '../components/garden/PlannerPanels';
+import { PantryTab } from '../components/garden/PantryPanels';
 import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn, GardenSkylightOptions, HarvestLogIn, HarvestReadyItem } from '../types/api';
 
 /* ========================= Garden Page ========================= */
 
 export default function Garden() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const isParent = Boolean(user?.is_admin || user?.family_role === 'mother' || user?.family_role === 'father');
-  const [tab, setTab] = useState<'today' | 'plants' | 'planner'>('today');
+  // Adults and admins log and edit pantry batches; everyone may take one out.
+  const isAdult = Boolean(user?.is_admin || ['mother', 'father', 'adult_child'].includes(user?.family_role ?? ''));
+  const [tab, setTab] = useState<'today' | 'plants' | 'planner' | 'pantry'>('today');
   const [mineOnly, setMineOnly] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [digestOpen, setDigestOpen] = useState(false);
+  // Supplies the Pantry tab wants on the shopping list (opens the picker).
+  const [pantrySupplies, setPantrySupplies] = useState<string[] | null>(null);
 
   const todayQuery = useQuery({
     queryKey: ['garden-today', mineOnly ? 'mine' : 'all'],
@@ -128,7 +134,18 @@ export default function Garden() {
             >
               <Scissors size={16} /> Planner
             </button>
-            {tab !== 'planner' && (
+            <button
+              type="button"
+              onClick={() => setTab('pantry')}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 min-h-11 rounded-lg text-sm font-medium transition-all shrink-0 ${
+                tab === 'pantry'
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
+                  : 'bg-white/5 text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              <ShoppingCart size={16} /> Pantry
+            </button>
+            {tab !== 'planner' && tab !== 'pantry' && (
               <div className="inline-flex items-center shrink-0 border border-white/10 rounded-lg overflow-hidden">
                 <button
                   type="button"
@@ -185,8 +202,14 @@ export default function Garden() {
           />
         ) : tab === 'plants' ? (
           <PlantsTab plants={plants} locations={locations} mineOnly={mineOnly} currentUser={user?.username ?? ''} />
-        ) : (
+        ) : tab === 'planner' ? (
           <PlannerTab locations={locations} />
+        ) : (
+          <PantryTab
+            canEdit={isAdult}
+            onAddSupplies={setPantrySupplies}
+            onOpenRecipes={() => navigate('/recipes')}
+          />
         )}
 
         <AddPlantModal
@@ -199,6 +222,14 @@ export default function Garden() {
             open={digestOpen}
             onClose={() => setDigestOpen(false)}
             initialDigestTime={profileQuery.data?.daily_digest_time ?? ''}
+          />
+        )}
+        {pantrySupplies && (
+          <AddSuppliesModal
+            title="Preservation supplies"
+            supplies={pantrySupplies}
+            suggested={pantrySupplies}
+            onClose={() => setPantrySupplies(null)}
           />
         )}
         {harvestOpen && (
@@ -800,8 +831,8 @@ function suggestedSupplies(plant: GardenPlant): string[] {
   return [...new Set(likely.filter(Boolean))];
 }
 
-async function addSuppliesToShoppingList(plant: GardenPlant, chosen?: string[]) {
-  const supplies = chosen ?? suppliesFor(plant);
+async function addSuppliesToShoppingList(chosen: string[]) {
+  const supplies = chosen;
 
   try {
     const existing = await readShoppingList();
@@ -954,8 +985,26 @@ function EditPlantModal({ plant, onClose }: { plant: GardenPlant; onClose: () =>
 /* ========================= Supplies picker ========================= */
 
 function SuppliesPickerModal({ plant, onClose }: { plant: GardenPlant; onClose: () => void }) {
-  const supplies = suppliesFor(plant);
-  const [chosen, setChosen] = useState<string[]>(suggestedSupplies(plant));
+  return (
+    <AddSuppliesModal
+      title="Add Supplies"
+      supplies={suppliesFor(plant)}
+      suggested={suggestedSupplies(plant)}
+      onClose={onClose}
+    />
+  );
+}
+
+/** Pick from any supply list and put the ticked ones on the family shopping list. */
+function AddSuppliesModal({
+  title, supplies, suggested, onClose,
+}: {
+  title: string;
+  supplies: string[];
+  suggested: string[];
+  onClose: () => void;
+}) {
+  const [chosen, setChosen] = useState<string[]>(suggested);
   const [busy, setBusy] = useState(false);
 
   return (
@@ -964,7 +1013,7 @@ function SuppliesPickerModal({ plant, onClose }: { plant: GardenPlant; onClose: 
         className="bg-slate-900 border border-white/20 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-2">
-          <h2 className="text-xl font-bold text-white">Add Supplies</h2>
+          <h2 className="text-xl font-bold text-white">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white">
             <X size={18} />
           </button>
@@ -993,7 +1042,7 @@ function SuppliesPickerModal({ plant, onClose }: { plant: GardenPlant; onClose: 
             onClick={async () => {
               setBusy(true);
               try {
-                await addSuppliesToShoppingList(plant, chosen);
+                await addSuppliesToShoppingList(chosen);
                 onClose();
               } finally {
                 setBusy(false);

@@ -63,6 +63,13 @@ vi.mock('../services/api', () => ({
     gardenListHarvests: vi.fn(),
     gardenLogHarvest: vi.fn(),
     gardenHarvestReady: vi.fn(),
+    gardenHarvestForecast: vi.fn(),
+    gardenPreservationAdvice: vi.fn(),
+    gardenListPantryBatches: vi.fn(),
+    gardenCreatePantryBatch: vi.fn(),
+    gardenPatchPantryBatch: vi.fn(),
+    gardenUsePantryBatch: vi.fn(),
+    gardenDeletePantryBatch: vi.fn(),
   },
 }));
 
@@ -114,6 +121,20 @@ beforeEach(() => {
     timeline: [],
   });
   vi.mocked(api.gardenListPlanCells).mockResolvedValue({ plan_id: '', bed_id: '', cells: [] });
+  // Pantry (Phase 6) defaults: empty everywhere unless a test says otherwise.
+  vi.mocked(api.gardenHarvestForecast).mockResolvedValue({
+    generated_on: '2026-11-20', window_days: 28, weather_used: false,
+    gdd_adjusted_count: 0, count: 0, items: [],
+  });
+  vi.mocked(api.gardenPreservationAdvice).mockResolvedValue({
+    generated_on: '2026-11-20', crop_count: 0, plant_count: 0, crops: [], combos: [],
+    prep_checklist: { horizon_days: 21, crops: [], methods: [], combos: [], count: 0, items: [], categories: [] },
+    safety_sources: [],
+  });
+  vi.mocked(api.gardenListPantryBatches).mockResolvedValue({
+    generated_on: '2026-11-20', include_empty: false, goal_id: null, count: 0,
+    use_first_count: 0, batches: [], goal_progress: [],
+  });
   vi.mocked(api.gardenDetectZone).mockResolvedValue({
     zone: '6b',
     zone_source: 'auto',
@@ -1284,5 +1305,153 @@ describe('Garden plant detail (Skylight, edit, supplies)', () => {
     const written = String(vi.mocked(saveShoppingList).mock.calls[0][0]);
     expect(written).toContain('Potting mix');
     expect(written).toContain('Compost');
+  });
+});
+
+describe('Garden Pantry tab (Phase 6)', () => {
+  const forecast = {
+    generated_on: '2026-11-20', window_days: 28, weather_used: true, gdd_adjusted_count: 1, count: 1,
+    items: [{
+      plant_id: 'plant-tomato', nickname: 'Roma Row', common_name: 'Roma (Plum) Tomato',
+      category: 'vegetable', species_ref: 'tomato_roma', planted_date: '2026-06-01',
+      estimated_ready_date: '2026-11-24', harvest_window_end: '2026-12-24', days_until_ready: 4,
+      ready_now: false, gdd_adjusted: true, gdd_base_f: 50, gdd_daily_rate: 12.5, gdd_shift_days: -3,
+      days_to_maturity: 75, harvest_window_days: 30, culinary_aliases: ['tomato'],
+      preservation_methods: ['water_bath_canning'], usda_acidity_class: 'high_acid' as const,
+      blanching_minutes: null, location_id: null, assigned_to: null,
+    }],
+  };
+  const beanSafety = {
+    level: 'pressure_canner_required' as const,
+    title: 'Low-acid — Pressure Canner Required',
+    message: 'Pressure canning is required for plain low-acid vegetables. Never water-bath can unacidified low-acid food.',
+    source: 'USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book',
+  };
+  const advice = {
+    generated_on: '2026-11-20', crop_count: 1, plant_count: 2,
+    crops: [{
+      species_ref: 'green_bean_bush', common_name: 'Bush Green Bean', category: 'vegetable',
+      culinary_aliases: ['green bean'], usda_acidity_class: 'low_acid' as const, safety: beanSafety,
+      blanching_minutes: 3, herb_preservation_tips: null, preservation_conversion: null,
+      plant_ids: ['p1', 'p2'], plant_count: 2,
+      methods: [{
+        method: 'freezing', recorded_as: 'freezing', label: 'Freezing', storage: 'Chest freezer',
+        use_by_months: 10, blanching_minutes: 3, requires_acidification: false,
+        supplies: ['Freezer bags or containers'],
+      }],
+    }],
+    combos: [{
+      key: 'marinara', label: 'Marinara sauce', method: 'water_bath_canning',
+      method_label: 'Water-bath canning', note: 'Acidify with lemon juice.', required: ['tomato'],
+      optional: ['basil'], matched_crops: ['Roma (Plum) Tomato'], missing_crops: [],
+      optional_matched: [], optional_missing: ['basil'], ready: true, matched_count: 1, required_count: 1,
+      safety: { level: 'water_bath_safe' as const, title: 'High-acid — Water-Bath Safe', message: 'Safe.', source: 'USDA' },
+      supplies: ['Quart canning jars'],
+    }],
+    prep_checklist: {
+      horizon_days: 21, crops: ['Bush Green Bean'],
+      methods: [{ method: 'freezing', label: 'Freezing' }], combos: ['Marinara sauce'],
+      count: 2, items: ['Freezer bags or containers', 'Quart canning jars'],
+      categories: [{ key: 'freezer', label: 'Freezer', items: ['Freezer bags or containers'] }],
+    },
+    safety_sources: ['USDA Complete Guide to Home Canning / NCHFP / Ball Blue Book'],
+  };
+  const pantry = {
+    generated_on: '2026-11-20', include_empty: false, goal_id: null, count: 1, use_first_count: 1,
+    batches: [{
+      id: 'batch-1', goal_id: 'goal-1', label: 'Marinara sauce', method: 'water_bath_canning',
+      method_label: 'Water-bath canning', batch_date: '2026-09-15', qty_initial: 12, qty_remaining: 8,
+      unit: 'quarts', storage_location: 'Basement shelf', use_by_date: '2027-12-15',
+      logged_by: 'mother', notes: null, created_at: '2026-09-15T00:00:00Z',
+      updated_at: '2026-09-15T00:00:00Z', days_until_use_by: 30, past_use_by: false,
+      use_first: true, oldest_in_label: true,
+    }],
+    goal_progress: [{
+      goal_id: 'goal-1', item: 'Marinara sauce', unit: 'quarts', target_qty: 40, qty_put_up: 28,
+      qty_remaining: 8, percent_complete: 70, batch_count: 1, unit_mismatch: false,
+      mismatched_units: [], season_year: 2026,
+    }],
+  };
+
+  const openPantry = async () => {
+    const wrapper = createWrapper();
+    render(<Garden />, { wrapper });
+    fireEvent.click(screen.getByRole('button', { name: 'Pantry' }));
+    await screen.findByRole('heading', { name: 'Coming Ready Soon' });
+  };
+
+  beforeEach(() => {
+    vi.mocked(api.gardenToday).mockResolvedValue({ date: '2026-11-19', due_count: 0, overdue_count: 0, by_room: {}, all: [] });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.gardenHarvestForecast).mockResolvedValue(forecast);
+    vi.mocked(api.gardenPreservationAdvice).mockResolvedValue(advice);
+    vi.mocked(api.gardenListPantryBatches).mockResolvedValue(pantry);
+    vi.mocked(api.gardenUsePantryBatch).mockResolvedValue({ ...pantry.batches[0], qty_remaining: 7 });
+    vi.mocked(api.gardenCreatePantryBatch).mockResolvedValue({} as never);
+  });
+
+  it('shows what is coming ready soon with its GDD badge', async () => {
+    await openPantry();
+
+    expect(await screen.findByText('Roma Row')).toBeInTheDocument();
+    expect(screen.getByText('Ready in 4 days')).toBeInTheDocument();
+    expect(screen.getByText('GDD')).toBeInTheDocument();
+  });
+
+  it('warns that low-acid crops need a pressure canner', async () => {
+    await openPantry();
+
+    expect(await screen.findByText('Low-acid — Pressure Canner Required')).toBeInTheDocument();
+    expect(screen.getByText(/Never water-bath can unacidified low-acid food/)).toBeInTheDocument();
+  });
+
+  it('suggests a combo the garden can actually make', async () => {
+    await openPantry();
+
+    expect(await screen.findByText('You have everything')).toBeInTheDocument();
+    expect(screen.getAllByText(/Roma \(Plum\) Tomato/).length).toBeGreaterThan(0);
+  });
+
+  it('tracks the goal progress bar at 28 of 40 quarts', async () => {
+    await openPantry();
+
+    const bar = await screen.findByRole('progressbar', { name: 'Marinara sauce progress' });
+    expect(bar).toHaveAttribute('aria-valuenow', '70');
+    expect(screen.getByText('28 / 40 quarts put up (70%)')).toBeInTheDocument();
+  });
+
+  it('opens the prep-supplies picker with the forecast supplies', async () => {
+    await openPantry();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Prep supplies/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: /shopping list/i });
+    expect(within(dialog).getByText('Quart canning jars')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: /Add 2 items/ }));
+    await waitFor(() => expect(vi.mocked(saveShoppingList)).toHaveBeenCalled());
+  });
+
+  it('lets an adult log a preserved batch', async () => {
+    await openPantry();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Log Batch' }));
+    const dialog = await screen.findByRole('dialog', { name: /Log preserved batch/i });
+    fireEvent.change(within(dialog).getByLabelText(/What did you put up/), { target: { value: 'Dill pickles' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add batch' }));
+
+    await waitFor(() => expect(vi.mocked(api.gardenCreatePantryBatch)).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'Dill pickles', method: 'water_bath_canning', qty_initial: 12, unit: 'quarts' }),
+    ));
+  });
+
+  it('takes one jar out with -1 Used', async () => {
+    await openPantry();
+
+    const useFirst = await screen.findByText('Use first: Marinara sauce');
+    expect(useFirst).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '−1 Used' }));
+
+    await waitFor(() => expect(vi.mocked(api.gardenUsePantryBatch)).toHaveBeenCalledWith('batch-1', 1));
   });
 });

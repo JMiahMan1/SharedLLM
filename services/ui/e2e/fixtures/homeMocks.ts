@@ -693,6 +693,28 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
       return json({ user_id: 'parent', current_streak: 0, longest_streak: 0, total_logs: 0 });
     }
     if (p === '/api/garden/pantry-goals') return json({ count: 0, goals: [] });
+    // Phase 6: harvest forecast, preservation advice and the Put-Up Pantry.
+    if (p === '/api/garden/harvest/forecast') {
+      return json({ generated_on: '2026-01-01', window_days: 28, weather_used: false, gdd_adjusted_count: 0, count: 0, items: [] });
+    }
+    if (p === '/api/garden/preservation/advice') {
+      return json({
+        generated_on: '2026-01-01', crop_count: 0, plant_count: 0, crops: [], combos: [],
+        prep_checklist: { horizon_days: 21, crops: [], methods: [], combos: [], count: 0, items: [], categories: [] },
+        safety_sources: [],
+      });
+    }
+    if (p === '/api/garden/pantry-batches') {
+      if (method === 'POST') return json({ id: 'batch-new', label: 'Jam', method: 'water_bath_canning', qty_initial: 1, qty_remaining: 1, unit: 'pints' }, 201);
+      return json({ generated_on: '2026-01-01', include_empty: false, goal_id: null, count: 0, use_first_count: 0, batches: [], goal_progress: [] });
+    }
+    if (/^\/api\/garden\/pantry-batches\/[^/]+$/.test(p)) {
+      if (method === 'DELETE') return route.fulfill({ status: 204, body: '' });
+      return json({ id: p.split('/').pop(), label: 'Jam', method: 'water_bath_canning', qty_initial: 1, qty_remaining: 1, unit: 'pints' });
+    }
+    if (/^\/api\/garden\/pantry-batches\/[^/]+\/use$/.test(p)) {
+      return json({ id: p.split('/')[4], label: 'Jam', method: 'water_bath_canning', qty_initial: 1, qty_remaining: 0, unit: 'pints', used_by: 'parent', qty_used: 1 });
+    }
     if (p === '/api/garden/plans') return json({ count: 0, plans: [] });
     if (p === '/api/garden/species/custom') return json({ count: 0, results: [] });
     if (p === '/api/garden/species/search') {

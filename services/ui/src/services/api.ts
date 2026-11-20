@@ -383,6 +383,11 @@ import type {
   PantryGoalCalcResponse,
   PlannerSizingResponse,
   PlanTimelineResponse,
+  HarvestForecastResponse,
+  PreservationAdviceResponse,
+  PantryBatch,
+  PantryBatchIn,
+  PantryViewResponse,
 } from '../types/api';
 
 declare module 'axios' {
@@ -3046,6 +3051,43 @@ export const api = {
   }): Promise<PlannerSizingResponse> {
     const resp = await apiClient.get('/api/garden/planner/sizing', { params });
     return resp.data;
+  },
+
+  // --- Harvest forecast, preservation & Put-Up Pantry (Phase 6) ----
+
+  async gardenHarvestForecast(params?: { days?: number }): Promise<HarvestForecastResponse> {
+    const resp = await apiClient.get('/api/garden/harvest/forecast', { params });
+    return resp.data;
+  },
+
+  async gardenPreservationAdvice(params?: { days?: number }): Promise<PreservationAdviceResponse> {
+    const resp = await apiClient.get('/api/garden/preservation/advice', { params });
+    return resp.data;
+  },
+
+  async gardenListPantryBatches(params?: { goal_id?: string | null; include_empty?: boolean }): Promise<PantryViewResponse> {
+    const resp = await apiClient.get('/api/garden/pantry-batches', { params });
+    return resp.data;
+  },
+
+  async gardenCreatePantryBatch(body: PantryBatchIn): Promise<PantryBatch> {
+    const resp = await apiClient.post('/api/garden/pantry-batches', body);
+    return resp.data;
+  },
+
+  async gardenPatchPantryBatch(batchId: string, body: Partial<PantryBatchIn>): Promise<PantryBatch> {
+    const resp = await apiClient.patch(`/api/garden/pantry-batches/${encodeURIComponent(batchId)}`, body);
+    return resp.data;
+  },
+
+  /** Take something out of the pantry. Every family role may do this. */
+  async gardenUsePantryBatch(batchId: string, qtyUsed = 1): Promise<PantryBatch> {
+    const resp = await apiClient.post(`/api/garden/pantry-batches/${encodeURIComponent(batchId)}/use`, { qty_used: qtyUsed });
+    return resp.data;
+  },
+
+  async gardenDeletePantryBatch(batchId: string): Promise<void> {
+    await apiClient.delete(`/api/garden/pantry-batches/${encodeURIComponent(batchId)}`);
   },
 
   /** The family's Calibre library: search, by tag, or untagged. */
