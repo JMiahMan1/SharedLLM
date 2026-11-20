@@ -250,3 +250,40 @@ def test_device_restarts_reach_the_hub_for_admins_only(client, hub):
     client.patch("/api/homehub/devices/dev1/restarts", headers=ADMIN, json={"log_level": "debug", "extra": 1})
     assert seen[-1] == ("PATCH", "/hub/devices/dev1/restarts", None, {"log_level": "debug"})
     assert client.get("/api/homehub/devices/bad%20id/restarts", headers=ADMIN).status_code == 404
+
+
+def test_device_logs_reach_the_hub_for_admins_only(client, hub):
+    seen, answers = hub
+    for verb, path in (("get", "/api/homehub/devices/dev1/logs"), ("get", "/api/homehub/devices/dev1/logs/stream"),
+                       ("post", "/api/homehub/devices/dev1/logs/dump_config")):
+        assert getattr(client, verb)(path, headers=KID).status_code == 403
+        assert getattr(client, verb)(path).status_code == 401
+    assert seen == []
+    answers["/hub/devices/dev1/logs"] = (200, {"supported": True, "lines": []})
+    resp = client.get("/api/homehub/devices/dev1/logs?since=4&level=debug&limit=99999", headers=ADMIN)
+    assert resp.json()["supported"] is True
+    assert seen[-1] == ("GET", "/hub/devices/dev1/logs", {"since": "4", "level": "debug", "limit": "2000"}, None)
+    assert client.get("/api/homehub/devices/dev1/logs?level=DROP%20TABLE", headers=ADMIN).status_code == 400
+    answers["/hub/devices/dev1/logs/dump_config"] = (409, {"detail": "The device is not connected"})
+    resp = client.post("/api/homehub/devices/dev1/logs/dump_config", headers=ADMIN)
+    assert resp.status_code == 409 and resp.json()["detail"] == "The device is not connected"
+
+
+def test_the_device_log_stream_is_relayed_line_by_line(client, hub, monkeypatch):
+    calls = []
+
+    async def lines(path, params):
+        calls.append((path, params))
+        if "refused" in path:
+            raise HTTPException(status_code=409, detail="This device is not an ESPHome node")
+        yield b'{"type": "hello", "seq": 2}\n'
+        yield b'{"type": "line", "seq": 3, "message": "hi"}\n'
+
+    monkeypatch.setattr(discovery_routes, "_hub_lines", lines)
+    resp = client.get("/api/homehub/devices/dev1/logs/stream?level=verbose&since=2", headers=ADMIN)
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("application/x-ndjson")
+    assert resp.headers["x-accel-buffering"] == "no"
+    assert resp.text.splitlines() == ['{"type": "hello", "seq": 2}', '{"type": "line", "seq": 3, "message": "hi"}']
+    assert calls[-1] == ("/hub/devices/dev1/logs/stream", {"since": "2", "level": "verbose"})
+    refused = client.get("/api/homehub/devices/refused/logs/stream", headers=ADMIN)
+    assert refused.status_code == 409 and refused.json()["detail"] == "This device is not an ESPHome node"

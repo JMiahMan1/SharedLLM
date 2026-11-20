@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import AsyncIterator
 from typing import Any
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from services.gateway.config import INTERNAL_SECRET
 
@@ -277,6 +278,88 @@ async def set_device_restart_logs(device_id: str, request: Request):
     body = await _json(request)
     payload = {k: body[k] for k in ("log_level",) if k in body}
     return _answer(*await _hub("PATCH", f"/hub/devices/{_rid(device_id, 'device')}/restarts", json=payload))
+
+
+_LOG_LEVEL = re.compile(r"^[a-z_]{3,16}$")
+#: A log stream stays open; the hub sends a line at least every 15 s, so a minute of silence is a dead hub.
+_LOG_STREAM_TIMEOUT = aiohttp.ClientTimeout(total=None, connect=5, sock_read=60)
+
+
+def _log_params(since: int | None, level: str | None) -> dict[str, str]:
+    params: dict[str, str] = {}
+    if since is not None:
+        params["since"] = str(max(0, since))
+    if level:
+        if not _LOG_LEVEL.match(level):
+            raise HTTPException(status_code=400, detail="Unknown log level")
+        params["level"] = level
+    return params
+
+
+async def _hub_lines(path: str, params: dict[str, str]) -> AsyncIterator[bytes]:
+    """The hub's NDJSON stream, line by line. Raises an HTTPException (before the first line) when it refuses."""
+    from services.gateway.main import shared_http_client
+
+    headers = {"Authorization": f"Bearer {INTERNAL_SECRET}"}
+    try:
+        async with shared_http_client() as client, client.get(
+            f"{_homehub_base()}{path}", params=params, headers=headers, timeout=_LOG_STREAM_TIMEOUT
+        ) as resp:
+            if resp.status != 200:
+                try:
+                    body = await resp.json(content_type=None)
+                except Exception:
+                    body = None
+                detail = str(body.get("detail") or "") if isinstance(body, dict) else ""
+                status = resp.status if resp.status in _PASS_THROUGH else 502
+                raise HTTPException(status_code=status, detail=detail or "The device hub did not answer")
+            async for line in resp.content:
+                if line.strip():
+                    yield line
+    except (TimeoutError, aiohttp.ClientError) as exc:
+        log.warning("[discovery] hub log stream %s: %s", path, type(exc).__name__)
+        raise HTTPException(status_code=502, detail="The device hub did not answer") from exc
+
+
+@router.get("/devices/{device_id}/logs")
+async def device_logs(device_id: str, request: Request, since: int | None = None, level: str | None = None,
+                      limit: int = 500):
+    """An ESPHome node's kept log lines and markers (homehub esphome_logs.py), oldest first."""
+    await _admin(request)
+    params = {**_log_params(since, level), "limit": str(max(0, min(limit, 2000)))}
+    return _answer(*await _hub("GET", f"/hub/devices/{_rid(device_id, 'device')}/logs", params=params))
+
+
+@router.get("/devices/{device_id}/logs/stream")
+async def device_log_stream(device_id: str, request: Request, since: int | None = None, level: str | None = None):
+    """NDJSON: the node's kept lines after ``since``, then each new one while the reader stays. While it is open
+    the hub asks the node for at least ``level``; it drops back when the last reader leaves."""
+    await _admin(request)
+    lines = _hub_lines(f"/hub/devices/{_rid(device_id, 'device')}/logs/stream", _log_params(since, level))
+    try:
+        first = await lines.__anext__()  # the hub's hello, or its refusal as an HTTP status
+    except StopAsyncIteration:
+        raise HTTPException(status_code=502, detail="The device hub did not answer") from None
+
+    async def relay() -> AsyncIterator[bytes]:
+        try:
+            yield first
+            async for line in lines:
+                yield line
+        except HTTPException:  # the hub went away mid-stream: end it; the reader reopens from its last line
+            return
+        finally:
+            await lines.aclose()
+
+    return StreamingResponse(relay(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/devices/{device_id}/logs/dump_config")
+async def device_dump_config(device_id: str, request: Request):
+    """Ask the node to log its configuration again (409 while it is offline)."""
+    await _admin(request)
+    return _answer(*await _hub("POST", f"/hub/devices/{_rid(device_id, 'device')}/logs/dump_config"))
 
 
 @router.delete("/devices/{device_id}")

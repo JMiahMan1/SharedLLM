@@ -410,6 +410,35 @@ Through the gateway these are `/api/homehub/devices/{id}/restarts` (admins). `/h
 `esphome_restarts`: nodes watched, logs subscribed, nodes without the debug component, the last day's counts
 and the latest event. The hub's log has one line per event (`homehub.esphome.restarts`).
 
+## ESPHome live logs (`esphome_logs.py`, `esphome_logs_api.py`)
+
+Devices > an ESPHome device > Logs is the hub's own version of the ESPHome dashboard's "Logs" button. It reads
+the same log subscription the restart monitor holds on the hub's one API connection to the node; viewers fan
+out from it and never open a connection of their own.
+
+* **Buffer:** the node's last 2000 lines (sequence number, time received, level, ESPHome tag, message), colour
+  codes stripped and anything that looks like a credential redacted (`password=`, `key=`, tokens, bearer
+  headers, long base64 strings, and the path of `/api/esphome/ffmpeg_proxy/...` and `/api/tts_proxy/...` URLs)
+  before a line is kept. A node may send 200 lines a second (burst 400) into it; the rest are counted.
+* **Markers** in the same stream: `offline`, `online` (connected or reconnected) and the restart monitor's
+  verdict (`restart`, `drop` or `unknown`, with its summary such as "Restarted (Power on), 2 s offline").
+* **Level:** the node is asked for the highest of its configured `restart_log_level` and every open viewer's
+  level (`error`, `warning`, `info` (includes the config dump), `debug`, `verbose`); when the last viewer leaves
+  it drops back. Lines sent only because someone watches stay out of the restart history (a boot message still
+  counts towards deciding a restart).
+* **Config dump:** resubscribes with `dump_config=True` and holds at least the `config` level for 15 s.
+
+| Route | What |
+|---|---|
+| `GET /hub/devices/{id}/logs?since=&level=&limit=&format=` | The kept lines and markers after `since` at or above `level`, newest `limit` (500, at most 2000), oldest first; `format=text` for a plain-text file |
+| `GET /hub/devices/{id}/logs/stream?since=&level=` | NDJSON: `hello`, the kept lines after `since`, then each new item, `ping` every 15 s, `end` after 30 min (reopen from the last `seq`) |
+| `POST /hub/devices/{id}/logs/dump_config` | Ask the node for its config dump; 409 while it is offline |
+| WS `homehub/esphome/logs/subscribe` | `{device_id, level?, since?}`: the same items as events until `unsubscribe_events` |
+| WS `homehub/esphome/logs/dump_config` | `{device_id}` |
+
+Admins only: 401 without a valid token, 403 for anyone else. Through the gateway the HTTP routes are
+`/api/homehub/devices/{id}/logs`, `.../logs/stream` and `.../logs/dump_config`.
+
 ## New devices (discovery)
 
 `discovery.py` replaces HA's "Discovered" panel: mDNS continuously (ESPHome,
