@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import type { TalkMessage } from './chatModel';
-import { buildGallery, countLabel, groupByDay, itemBlobs, type Opened, type OpenedEntry } from './privateGalleryModel';
+import {
+  buildGallery,
+  clampAspect,
+  countLabel,
+  filterGallery,
+  groupByDay,
+  itemBlobs,
+  justifyRows,
+  kenBurns,
+  knownAspect,
+  seededRandom,
+  slideshowOrder,
+  stepSlideshow,
+  type GalleryItem,
+  type Opened,
+  type OpenedEntry,
+} from './privateGalleryModel';
 import type { VideoPayload } from '../../lib/privateChatCrypto';
 
 const me = new Set(['alex']);
@@ -127,5 +143,75 @@ describe('video clips in the gallery', () => {
     expect(countLabel(items.filter((i) => i.video))).toBe('1 video');
     expect(countLabel([])).toBe('0 photos');
     expect(countLabel(items.slice(-1))).toBe('1 photo');
+  });
+});
+
+const item = (blob: string, extra: Partial<GalleryItem> = {}): GalleryItem => ({
+  messageId: 1, blob, mime: 'image/jpeg', at: 1, when: 1, own: true, actorName: 'Alex', comments: [], ...extra,
+});
+
+describe('the gallery grid', () => {
+  it('filters photos and videos', () => {
+    const video = { chunks: ['c'], poster: 'p', duration: 2 } as unknown as GalleryItem['video'];
+    const list = [item('a'), item('p', { video }), item('b')];
+    expect(filterGallery(list, 'all')).toHaveLength(3);
+    expect(filterGallery(list, 'photos').map((i) => i.blob)).toEqual(['a', 'b']);
+    expect(filterGallery(list, 'videos').map((i) => i.blob)).toEqual(['p']);
+  });
+
+  it('knows a shape before decrypting only when the details carry one, and keeps extremes sane', () => {
+    expect(knownAspect(item('a'))).toBeUndefined();
+    expect(knownAspect(item('a', { details: { width: 4000, height: 3000 } }))).toBeCloseTo(4 / 3);
+    expect(clampAspect(10)).toBe(2.4);
+    expect(clampAspect(0.1)).toBe(0.6);
+    expect(clampAspect(Number.NaN)).toBe(1);
+  });
+
+  it('lays rows out to fill the width exactly, leaving the last row at the target height', () => {
+    const aspects = [1.5, 1, 0.75, 1.5, 1, 1];
+    const rows = justifyRows(aspects, 600, 150, 4);
+    expect(rows.flatMap((r) => r.indexes)).toEqual([0, 1, 2, 3, 4, 5]);
+    for (const row of rows.slice(0, -1)) {
+      const used = row.indexes.reduce((sum, i) => sum + aspects[i] * row.height, 0) + 4 * (row.indexes.length - 1);
+      expect(used).toBeGreaterThan(598);
+      expect(used).toBeLessThanOrEqual(600.5);
+      expect(row.height).toBeLessThanOrEqual(150);
+    }
+    // One wide picture alone is not blown up past the target.
+    expect(justifyRows([1], 1000, 150, 4)).toEqual([{ indexes: [0], height: 150 }]);
+    expect(justifyRows([1, 1], 0, 150, 4)).toEqual([]);
+  });
+});
+
+describe('the slideshow', () => {
+  it('plays in gallery order from the chosen picture, wrapping round', () => {
+    expect(slideshowOrder(5, 2, false)).toEqual([2, 3, 4, 0, 1]);
+    expect(slideshowOrder(0, 0, false)).toEqual([]);
+    expect(slideshowOrder(3, 9, false)).toEqual([2, 0, 1]);
+  });
+
+  it('shuffles the rest but keeps the chosen picture first, the same way for the same seed', () => {
+    const a = slideshowOrder(20, 7, true, seededRandom(42));
+    const b = slideshowOrder(20, 7, true, seededRandom(42));
+    expect(a).toEqual(b);
+    expect(a[0]).toBe(7);
+    expect([...a].sort((x, y) => x - y)).toEqual([...Array(20).keys()]);
+    expect(a).not.toEqual(slideshowOrder(20, 7, false));
+  });
+
+  it('steps forward and back, looping or stopping at the ends', () => {
+    expect(stepSlideshow(1, 3, 1, false)).toBe(2);
+    expect(stepSlideshow(2, 3, 1, false)).toBeNull();
+    expect(stepSlideshow(2, 3, 1, true)).toBe(0);
+    expect(stepSlideshow(0, 3, -1, true)).toBe(2);
+    expect(stepSlideshow(0, 3, -1, false)).toBeNull();
+    expect(stepSlideshow(0, 0, 1, true)).toBeNull();
+  });
+
+  it('gives each picture its own steady Ken Burns move', () => {
+    expect(kenBurns('abc')).toEqual(kenBurns('abc'));
+    const move = kenBurns('abc');
+    expect(Math.abs(move.fromX)).toBeLessThanOrEqual(4);
+    expect(move.fromScale).not.toBe(move.toScale);
   });
 });

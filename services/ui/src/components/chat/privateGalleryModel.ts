@@ -183,3 +183,123 @@ export function groupByDay(items: GalleryItem[], now: Date = new Date()): Galler
 export function stampLabel(at: number): string {
   return new Date(at * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
+
+/** What the gallery is showing: everything, only photos, or only videos. */
+export type GalleryFilter = 'all' | 'photos' | 'videos';
+
+export function filterGallery(items: GalleryItem[], filter: GalleryFilter): GalleryItem[] {
+  if (filter === 'photos') return items.filter((item) => !item.video);
+  if (filter === 'videos') return items.filter((item) => item.video);
+  return items;
+}
+
+/** Panoramas and tall screenshots are cropped rather than allowed to make a row a sliver. */
+export function clampAspect(aspect: number): number {
+  if (!Number.isFinite(aspect) || aspect <= 0) return 1;
+  return Math.min(2.4, Math.max(0.6, aspect));
+}
+
+/** Width over height of a picture when it is known before decrypting (an added picture's details). */
+export function knownAspect(item: GalleryItem): number | undefined {
+  const w = Number(item.details?.width);
+  const h = Number(item.details?.height);
+  return w > 0 && h > 0 ? clampAspect(w / h) : undefined;
+}
+
+export interface JustifiedRow {
+  /** Indexes into the list that was laid out. */
+  indexes: number[];
+  /** Height in px; every tile in the row is this tall and `aspect * height` wide. */
+  height: number;
+}
+
+/**
+ * Lay pictures out in rows of equal height that fill the width exactly (the
+ * Google Photos layout): add pictures to a row until, scaled to fill the
+ * width, it would be no taller than the target. The last row keeps the target
+ * height rather than blowing a lone picture up to the full width.
+ */
+export function justifyRows(aspects: number[], width: number, targetHeight: number, gap: number): JustifiedRow[] {
+  const rows: JustifiedRow[] = [];
+  if (width <= 0 || targetHeight <= 0) return rows;
+  let start = 0;
+  while (start < aspects.length) {
+    let sum = 0;
+    let end = start;
+    let height = targetHeight;
+    while (end < aspects.length) {
+      sum += clampAspect(aspects[end]);
+      end += 1;
+      const fill = (width - gap * (end - start - 1)) / sum;
+      if (fill <= targetHeight) {
+        height = fill;
+        break;
+      }
+      if (end === aspects.length) height = Math.min(targetHeight, fill);
+    }
+    const indexes: number[] = [];
+    for (let i = start; i < end; i += 1) indexes.push(i);
+    rows.push({ indexes, height: Math.max(1, Math.floor(height * 100) / 100) });
+    start = end;
+  }
+  return rows;
+}
+
+/** A small seeded random generator (mulberry32), so a shuffle can be tested and repeated. */
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * The order a slideshow plays `count` items in, starting with `start`: in
+ * gallery order from there (wrapping round), or shuffled with the starting
+ * picture still first.
+ */
+export function slideshowOrder(count: number, start: number, shuffle: boolean, random: () => number = Math.random): number[] {
+  if (count <= 0) return [];
+  const first = Math.min(Math.max(0, start), count - 1);
+  const rest: number[] = [];
+  for (let i = 1; i < count; i += 1) rest.push((first + i) % count);
+  if (shuffle) {
+    for (let i = rest.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(random() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+  }
+  return [first, ...rest];
+}
+
+/** The next position in a slideshow, or null past either end when it does not loop. */
+export function stepSlideshow(position: number, length: number, delta: number, loop: boolean): number | null {
+  if (length <= 0) return null;
+  const next = position + delta;
+  if (next >= 0 && next < length) return next;
+  if (!loop) return null;
+  return ((next % length) + length) % length;
+}
+
+/** Seconds each photo stays up in a slideshow. */
+export const SLIDE_INTERVALS = [3, 5, 8, 12] as const;
+
+/** How the slideshow moves from one picture to the next. */
+export type SlideTransition = 'fade' | 'kenburns';
+
+/**
+ * A Ken Burns move for one slide: a slow zoom from one corner towards another,
+ * different for each picture but the same every time it is shown.
+ */
+export function kenBurns(key: string): { fromX: number; fromY: number; toX: number; toY: number; fromScale: number; toScale: number } {
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  const random = seededRandom(hash);
+  const pick = () => Math.round((random() * 2 - 1) * 4 * 10) / 10;
+  const zoomIn = random() < 0.5;
+  return { fromX: pick(), fromY: pick(), toX: pick(), toY: pick(), fromScale: zoomIn ? 1.04 : 1.16, toScale: zoomIn ? 1.16 : 1.04 };
+}
