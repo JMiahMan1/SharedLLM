@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChefHat, Clock, Flame, Loader2, RotateCcw, Search, Utensils } from 'lucide-react';
+import { ChefHat, Clock, Flame, Loader2, RotateCcw, Search, Scissors, Utensils } from 'lucide-react';
 import type { CookbookRecipe } from '../../types/api';
 import { MEAL_LABELS, PROTEIN_LABELS, formatCookTime } from '../../lib/recipeDoc';
 import { sortRecipes, type RecipeSort } from '../../lib/recipeSort';
@@ -42,8 +42,27 @@ function Chip({ active, onClick, children, testId }: { active: boolean; onClick:
   );
 }
 
-function RecipeTile({ recipe, onOpen }: { recipe: CookbookRecipe; onOpen: () => void }) {
+function RecipeTile({
+  recipe,
+  onOpen,
+  freshInGarden = false,
+  gardenAliasWords,
+}: {
+  recipe: CookbookRecipe;
+  onOpen: () => void;
+  freshInGarden?: boolean;
+  gardenAliasWords?: Set<string>;
+}) {
   const time = formatCookTime(recipe.total_minutes);
+  const aliasWords = gardenAliasWords;
+  const matchesGarden = freshInGarden && aliasWords && aliasWords.size > 0 && [
+    recipe.title,
+    ...recipe.tags,
+    ...recipe.staples,
+    recipe.meal,
+    ...recipe.proteins,
+    recipe.owner_label,
+  ].join(' ').toLowerCase().split(/\s+/).some((w) => aliasWords!.has(w));
   return (
     <button
       type="button"
@@ -67,6 +86,12 @@ function RecipeTile({ recipe, onOpen }: { recipe: CookbookRecipe; onOpen: () => 
         {recipe.ratings > 0 && (
           <span className="absolute right-2 top-2 flex items-center gap-0.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-amber-200 backdrop-blur">
             ★ {recipe.rating?.toFixed(1)}
+          </span>
+        )}
+        {matchesGarden && (
+          <span className="absolute right-2 top-10 flex items-center gap-0.5 rounded-full bg-emerald-500/90 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur">
+            <Scissors size={10} className="mr-0.5" />
+            Fresh from garden
           </span>
         )}
         <div className="absolute inset-x-0 bottom-0 p-3">
@@ -107,6 +132,8 @@ export default function RecipeBrowser({
   error,
   onRetry,
   onOpen,
+  freshInGarden = false,
+  readyIngredients: readyIngredientsProp = [],
 }: {
   recipes: CookbookRecipe[];
   me: string;
@@ -114,6 +141,8 @@ export default function RecipeBrowser({
   error: string | null;
   onRetry: () => void;
   onOpen: (recipe: CookbookRecipe) => void;
+  freshInGarden?: boolean;
+  readyIngredients?: Array<{ culinary_aliases?: string[] | null; nickname?: string | null; common_name?: string | null }>;
 }) {
   const [query, setQuery] = useState('');
   const [meal, setMeal] = useState<string | null>(null);
@@ -127,6 +156,18 @@ export default function RecipeBrowser({
     [recipes],
   );
 
+  // Phase 4: build a set of normalized garden alias words for matching.
+  const gardenAliasWords = useMemo(() => {
+    const words = new Set<string>();
+    for (const ri of readyIngredientsProp ?? []) {
+      for (const alias of ri.culinary_aliases ?? []) {
+        const normalized = alias.trim().toLowerCase();
+        if (normalized) words.add(normalized);
+      }
+    }
+    return words;
+  }, [readyIngredientsProp]);
+
   const visible = useMemo(() => {
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const filtered = recipes.filter((recipe) => {
@@ -137,6 +178,12 @@ export default function RecipeBrowser({
       if (quick.has('favorites') && !((recipe.rating ?? 0) >= 4)) return false;
       if (quick.has('untried') && recipe.made > 0) return false;
       if (quick.has('mine') && recipe.owner !== me) return false;
+      if (freshInGarden && gardenAliasWords.size > 0) {
+        const hay = [recipe.title, ...recipe.tags, ...recipe.staples, recipe.meal, ...recipe.proteins, recipe.owner_label]
+          .join(' ')
+          .toLowerCase();
+        if (![...gardenAliasWords].some((alias) => hay.includes(alias))) return false;
+      }
       if (words.length) {
         const hay = [recipe.title, ...recipe.tags, ...recipe.staples, recipe.meal, ...recipe.proteins, recipe.owner_label]
           .join(' ')
@@ -266,7 +313,13 @@ export default function RecipeBrowser({
       )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
         {visible.map((recipe) => (
-          <RecipeTile key={recipe.path} recipe={recipe} onOpen={() => onOpen(recipe)} />
+          <RecipeTile
+            key={recipe.path}
+            recipe={recipe}
+            onOpen={() => onOpen(recipe)}
+            freshInGarden={freshInGarden}
+            gardenAliasWords={gardenAliasWords}
+          />
         ))}
       </div>
     </div>

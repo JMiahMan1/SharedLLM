@@ -157,10 +157,36 @@ def calls(monkeypatch):
             return {"ok": True, "key": "thai_holy_basil"}
         if path == "/hooks/weather" and method == "POST":
             return {"evaluated": True, "weather": None}
+        # Phase 4 routes.
+        if path == "/plants/plant-1/harvest" and method == "POST":
+            return Response(
+                content='{"ok": true, "harvest_id": "harvest-1", "plant_id": "plant-1", "quantity": 2.0, "unit": "bunch", "disposition": "fresh"}',
+                status_code=201,
+                media_type="application/json",
+            )
+        if path == "/harvests" and method == "GET":
+            return {"count": 2, "harvests": [{"id": "h1", "quantity": 1.0, "unit": "bunch", "disposition": "fresh"}, {"id": "h2", "quantity": 2.0, "unit": "lb", "disposition": "canned"}], "totals": [{"plant_id": "plant-1", "total_quantity": 3.0, "count": 2}]}
+        if path.startswith("/harvests/") and method == "DELETE":
+            return Response(status_code=204)
+        if path == "/harvest/ready" and method == "GET":
+            return {"count": 1, "ready": [{"plant_id": "plant-1", "nickname": "Sir Basil", "common_name": "Sweet Basil", "category": "herb", "species_ref": "basil_sweet", "culinary_aliases": ["basil"], "in_cooldown": False}]}
+        if path == "/recipes/matches" and method == "GET":
+            return {"ready_ingredients": [{"plant_id": "plant-1", "common_name": "Sweet Basil", "culinary_aliases": ["basil"]}], "matches": [{"path": "Recipes/pesto.md", "title": "Pesto", "matched_ingredients": ["basil"], "match_count": 1, "tags": [], "servings": 7}]}
+        if path == "/recipes/draft" and method == "POST":
+            return {"status": "SUCCESS", "draft": True, "servings": 7, "ingredients": ["basil"], "focus_crop": "", "markdown": "# Pesto\nCategory: Recipes\n\n- [ ] 2 cups fresh basil leaves\n1. Blend ingredients.\nServes: 7"}
         raise AssertionError(f"Unexpected path: {path} {method}")
 
     monkeypatch.setattr(gateway_main, "_acting_identity", acting_identity)
     monkeypatch.setattr(garden_routes, "_call", call)
+    # Mock identity resolution for cookbook routes (recipe_matches/draft).
+    async def resolve_identity(request, body=None):
+        auth = request.headers.get("Authorization")
+        if auth == "Bearer admin-key":
+            return {"user": "mother", "is_admin": True, "family_role": "mother", "user_id": "mother"}
+        if auth == "Bearer kid-key":
+            return {"user": "child", "is_admin": False, "family_role": "child", "user_id": "child"}
+        return None
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", resolve_identity)
     return seen
 
 
@@ -537,3 +563,66 @@ def test_garden_hooks_weather_proxy(client, calls):
     assert resp.status_code == 200, resp.text
     assert resp.json()["evaluated"] is True
     assert any(m == "POST" and p == "/hooks/weather" for m, p, _, _, _ in calls)
+
+
+# --------------------------------------------------------------------------- Phase 4 routes
+
+
+def test_garden_harvest_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/plants/plant-1/harvest",
+        headers=ADMIN_HEADERS,
+        json={"quantity": 2.0, "unit": "bunch", "disposition": "fresh"},
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["harvest_id"] == "harvest-1"
+    assert any(m == "POST" and p == "/plants/plant-1/harvest" for m, p, _, _, _ in calls)
+
+
+def test_garden_harvests_proxy(client, calls):
+    resp = client.get("/api/garden/harvests", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["count"] == 2
+    assert len(data["harvests"]) == 2
+    assert data["totals"][0]["total_quantity"] == 3.0
+    assert any(m == "GET" and p == "/harvests" for m, p, _, _, _ in calls)
+
+
+def test_garden_delete_harvest_proxy(client, calls):
+    resp = client.delete("/api/garden/harvests/harvest-1", headers=ADMIN_HEADERS)
+    assert resp.status_code == 204, resp.text
+    assert any(m == "DELETE" and p == "/harvests/harvest-1" for m, p, _, _, _ in calls)
+
+
+def test_garden_harvest_ready_proxy(client, calls):
+    resp = client.get("/api/garden/harvest/ready", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["ready"][0]["common_name"] == "Sweet Basil"
+    assert "basil" in data["ready"][0]["culinary_aliases"]
+    assert any(m == "GET" and p == "/harvest/ready" for m, p, _, _, _ in calls)
+
+
+def test_garden_proxy_rejects_spoofed_admin_on_harvest(client, calls):
+    """A kid with spoofed admin headers can log harvest (all roles allowed),
+    and forwarded headers reflect kid identity from Bearer token."""
+    resp = client.post(
+        "/api/garden/plants/plant-1/harvest",
+        headers={
+            "Authorization": "Bearer kid-key",
+            "X-Is-Admin": "true",  # spoofed
+            "X-User-Id": "mother",  # spoofed
+        },
+        json={"quantity": 1.0, "unit": "bunch", "disposition": "fresh"},
+    )
+    assert resp.status_code == 201  # kid can log harvest (all roles allowed)
+    # Forwarded headers must reflect kid identity.
+    assert any(
+        h.get("X-User-Id") == "child" and h.get("X-User-Role") == "child"
+        for _, _, _, _, h in calls
+        if h
+    )

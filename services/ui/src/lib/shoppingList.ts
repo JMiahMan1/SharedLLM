@@ -121,3 +121,51 @@ export function shoppingShareText(body: string, note?: string): string {
   }
   return withShareNote(list, note);
 }
+
+/**
+ * Cross-reference shopping list items against harvest-ready garden produce.
+ *
+ * Uses word-boundary matching so `"pea"` does NOT match `"peanut"` or
+ * `"peach"`, while `"basil"` matches `"1 cup fresh basil leaves"`. Returns
+ * the set of normalized shopping-list item texts that have a match among the
+ * garden's culinary aliases. Never throws when garden items are empty.
+ */
+export function matchGardenItems(
+  items: ShoppingItem[],
+  gardenItems: Array<{ culinary_aliases?: string[] | null }>,
+): Set<string> {
+  const matched = new Set<string>();
+  if (!items.length || !gardenItems.length) return matched;
+
+  // Build a flat list of normalized alias words per garden item.
+  const aliases: string[] = [];
+  for (const gi of gardenItems) {
+    for (const alias of gi.culinary_aliases ?? []) {
+      aliases.push(alias.trim().toLowerCase());
+    }
+  }
+
+  for (const item of items) {
+    const text = normalizeItem(item.text);
+    if (!text) continue;
+    for (const alias of aliases) {
+      if (!alias) continue;
+      // Multi-word alias: every whole word must appear in the item text.
+      if (alias.split(' ').every((part) => wordInText(part, text))) {
+        matched.add(text);
+        break;
+      }
+    }
+  }
+  return matched;
+}
+
+/** Whole-word check: does `word` appear as a standalone word in `text`? */
+function wordInText(word: string, text: string): boolean {
+  return new RegExp(`\\b${escapeRegExp(word)}\\b`, 'i').test(text);
+}
+
+/** Escape a string for use in a regex. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

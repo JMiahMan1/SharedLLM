@@ -274,6 +274,44 @@ async def garden_snooze(plant_id: str, request: Request):
     )
 
 
+@router.post("/plants/{plant_id}/harvest")
+async def garden_harvest(plant_id: str, request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call(
+        "POST", f"/plants/{plant_id}/harvest", json=body, headers=headers
+    )
+
+
+@router.get("/harvests")
+async def garden_harvests(request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "GET",
+        "/harvests",
+        params={
+            k: v
+            for k, v in request.query_params.items()
+            if k in ("plant_id", "days", "disposition")
+        },
+        headers=headers,
+    )
+
+
+@router.delete("/harvests/{harvest_id}")
+async def garden_delete_harvest(harvest_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "DELETE", f"/harvests/{harvest_id}", headers=headers
+    )
+
+
+@router.get("/harvest/ready")
+async def garden_harvest_ready(request: Request):
+    headers = await _verified_headers(request)
+    return await _call("GET", "/harvest/ready", headers=headers)
+
+
 @router.post("/locations/{loc_id}/water-all")
 async def garden_water_all(loc_id: str, request: Request):
     headers = await _verified_headers(request)
@@ -361,3 +399,27 @@ async def garden_delete_care_rule(plant_id: str, rule_id: str, request: Request)
         f"/plants/{plant_id}/care-rules/{rule_id}",
         headers=headers,
     )
+
+
+# --------------------------------------------------------------------------- recipes bridge (Phase 4)
+
+
+@router.get("/recipes/matches")
+async def garden_recipes_matches(request: Request):
+    """Match harvest-ready garden produce against the family cookbook."""
+    from services.gateway.garden_recipes import recipe_matches
+    from services.gateway.main import _cookbook_caller, _cookbook_run
+
+    caller = await _cookbook_caller(request)
+    return await recipe_matches(_cookbook_run, caller)
+
+
+@router.post("/recipes/draft")
+async def garden_recipes_draft(request: Request):
+    """Draft a new family-sized recipe from surplus garden produce."""
+    from services.gateway.garden_recipes import recipe_draft
+    from services.gateway.main import _cookbook_caller, _cookbook_run
+
+    caller = await _cookbook_caller(request)
+    body = await request.json()
+    return await recipe_draft(_cookbook_run, caller, body, request)

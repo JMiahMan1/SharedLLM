@@ -2801,6 +2801,57 @@ export const api = {
     return resp.data;
   },
 
+  // --- Harvest log (Phase 4) ----------------
+
+  async gardenLogHarvest(plantId: string, body: {
+    plant_id: string;
+    harvested_at?: string | null;
+    harvested_by?: string | null;
+    quantity?: number;
+    unit?: string;
+    disposition?: string;
+    notes?: string | null;
+  }): Promise<{
+    ok: boolean;
+    harvest_id: string;
+    plant_id: string;
+    harvested_at: string;
+    harvested_by: string | null;
+    quantity: number;
+    unit: string;
+    disposition: string;
+    plant: any;
+  }> {
+    const resp = await apiClient.post(`/api/garden/plants/${encodeURIComponent(plantId)}/harvest`, body);
+    return resp.data;
+  },
+
+  async gardenListHarvests(params?: {
+    plant_id?: string | null;
+    days?: number | null;
+    disposition?: string | null;
+  }): Promise<{
+    count: number;
+    filters: { plant_id?: string | null; days?: number | null; disposition?: string | null };
+    harvests: any[];
+    totals: any[];
+  }> {
+    const resp = await apiClient.get('/api/garden/harvests', { params });
+    return resp.data;
+  },
+
+  async gardenDeleteHarvest(harvestId: string): Promise<void> {
+    await apiClient.delete(`/api/garden/harvests/${encodeURIComponent(harvestId)}`);
+  },
+
+  async gardenHarvestReady(): Promise<{
+    count: number;
+    ready: any[];
+  }> {
+    const resp = await apiClient.get('/api/garden/harvest/ready');
+    return resp.data;
+  },
+
   /** The family's Calibre library: search, by tag, or untagged. */
   async libraryBooks(params: { q?: string; tag?: string; untagged?: boolean; limit?: number; offset?: number }): Promise<{ total: number; books: LibraryBook[] }> {
     const resp = await apiClient.get('/api/library/books', { params });

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { BookOpen, CalendarDays, ChefHat, ImagePlus, Inbox, Loader2, MoreHorizontal, Plus, ShoppingCart, Users } from 'lucide-react';
+import { BookOpen, CalendarDays, ChefHat, ImagePlus, Inbox, Loader2, MoreHorizontal, Plus, ShoppingCart, Scissors, Users } from 'lucide-react';
 import { api } from '../services/api';
 import { errorText } from '../lib/errorText';
 import { isKidMode } from '../lib/healthSwitches';
@@ -85,6 +85,16 @@ export default function Recipes() {
     skylightQuery.data?.configured === false ||
     (skylightQuery.error as { response?: { status?: number } } | null)?.response?.status === 400;
   const { plan, save: savePlan, setDay } = usePlan(asUser);
+
+  // Phase 4: harvest-ready garden produce for "Fresh in Garden" banner.
+  const gardenReadyQuery = useQuery({
+    queryKey: ['garden-harvest-ready'],
+    queryFn: () => api.gardenHarvestReady(),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const readyIngredients = gardenReadyQuery.data?.ready ?? [];
+  const [freshInGarden, setFreshInGarden] = useState(false);
 
   const go = (next: Record<string, string | null>) => {
     const merged = new URLSearchParams(params);
@@ -221,6 +231,8 @@ export default function Recipes() {
         error={catalog.isError ? errorText(catalog.error, 'Could not open the cookbook') : null}
         onRetry={() => void catalog.refetch()}
         onOpen={(recipe) => go({ recipe: recipe.path })}
+        freshInGarden={freshInGarden}
+        readyIngredients={readyIngredients}
       />
     );
   }
@@ -305,6 +317,26 @@ export default function Recipes() {
               <button type="button" onClick={() => void adopt()} disabled={busy === 'adopt'} className="glass-button min-h-11 px-3 text-xs disabled:opacity-60">
                 {busy === 'adopt' ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
                 Add them to the family cookbook
+              </button>
+            </div>
+          )}
+          {readyIngredients.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2" data-testid="recipe-fresh-in-garden">
+              <Scissors size={14} className="text-emerald-400" />
+              <span className="mr-auto text-xs text-emerald-100">
+                Fresh in garden:{' '}
+                {readyIngredients.map((r) => r.nickname || r.common_name).join(', ')}
+              </span>
+              <button
+                type="button"
+                onClick={() => setFreshInGarden(!freshInGarden)}
+                disabled={busy === 'draft'}
+                className={`glass-button min-h-11 px-3 text-xs disabled:opacity-60 ${
+                  freshInGarden ? 'text-emerald-400 ring-1 ring-emerald-400/60' : 'text-emerald-300 hover:text-emerald-400'
+                }`}
+              >
+                {busy === 'draft' ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                Draft new family recipe
               </button>
             </div>
           )}

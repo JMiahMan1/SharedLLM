@@ -3,12 +3,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   Plus, Sun, Droplets, Leaf, X, ChevronRight,
   ShieldAlert, RotateCw, Flower, User, Zap, Settings, Search,
+  Scissors, ShoppingCart,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { api } from '../services/api';
+import { saveShoppingList, readShoppingList } from '../lib/shoppingListStore';
 import { useAuth } from '../context/AuthContext';
-import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn } from '../types/api';
+import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn, HarvestLogIn, HarvestReadyItem } from '../types/api';
 
 /* ========================= Garden Page ========================= */
 
@@ -49,6 +51,15 @@ export default function Garden() {
     queryFn: () => api.gardenStreaks(),
     staleTime: 300_000,
   });
+
+  // Phase 4: harvest
+  const harvestReadyQuery = useQuery({
+    queryKey: ['garden-harvest-ready'],
+    queryFn: () => api.gardenHarvestReady(),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const [harvestOpen, setHarvestOpen] = useState<HarvestReadyItem | null>(null);
 
   const today = todayQuery.data;
   const plants = plantsQuery.data ?? [];
@@ -123,7 +134,15 @@ export default function Garden() {
         </div>
 
         {tab === 'today' ? (
-          <TodayTab today={today} locations={locations} mineOnly={mineOnly} currentUser={user?.username ?? ''} weather={today?.weather ?? null} />
+          <TodayTab
+            today={today}
+            locations={locations}
+            mineOnly={mineOnly}
+            currentUser={user?.username ?? ''}
+            weather={today?.weather ?? null}
+            harvestReady={harvestReadyQuery.data?.ready}
+            onLogHarvest={setHarvestOpen}
+          />
         ) : (
           <PlantsTab plants={plants} locations={locations} mineOnly={mineOnly} setMineOnly={setMineOnly} currentUser={user?.username ?? ''} />
         )}
@@ -157,6 +176,13 @@ export default function Garden() {
             open={digestOpen}
             onClose={() => setDigestOpen(false)}
             initialDigestTime={profileQuery.data?.daily_digest_time ?? ''}
+          />
+        )}
+        {harvestOpen && (
+          <LogHarvestModal
+            open={true}
+            onClose={() => setHarvestOpen(null)}
+            plant={harvestOpen}
           />
         )}
       </div>
@@ -226,12 +252,16 @@ function TodayTab({
   mineOnly,
   currentUser,
   weather,
+  harvestReady,
+  onLogHarvest,
 }: {
   today: GardenTodaySummary | undefined;
   locations: GardenLocation[];
   mineOnly: boolean;
   currentUser: string;
   weather: GardenWeatherSummary | null;
+  harvestReady: HarvestReadyItem[] | undefined;
+  onLogHarvest: (item: HarvestReadyItem) => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -324,6 +354,10 @@ function TodayTab({
   const byRoom = today.by_room ?? {};
   const roomEntries = Object.entries(byRoom);
 
+  // Phase 4: Ready to Harvest strip
+  const readyItems = harvestReady ?? [];
+  const readyNotInCooldown = readyItems.filter((r) => !r.in_cooldown);
+
   // Apply mineOnly filter to room entries: show plants assigned to current user or unassigned.
   const filteredEntries = mineOnly
     ? roomEntries.map(([roomName, tasks]) => [
@@ -335,7 +369,76 @@ function TodayTab({
   return (
     <div className="space-y-6">
       <WeatherBanner weather={weather} />
-      {today.due_count === 0 ? (
+
+      {/* Phase 4: Ready to Harvest strip */}
+      {readyItems.length > 0 && (
+        <section className="mb-6">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <Scissors size={18} className="text-emerald-400" />
+              <h2 className="text-sm font-semibold text-white uppercase tracking-wider">
+                Ready to Harvest
+              </h2>
+              <span className={`ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400`}>
+                {readyItems.length}
+              </span>
+            </div>
+            {readyNotInCooldown.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onLogHarvest(readyNotInCooldown[0])}
+                className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors pointer-coarse:min-h-11"
+              >
+                <Leaf size={12} /> Log Harvest
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {readyItems.map((item) => (
+              <div
+                key={item.plant_id}
+                className={`p-3 rounded-xl border ${item.in_cooldown ? 'border-amber-500/30 bg-amber-500/5' : 'border-emerald-500/30 bg-emerald-500/5'}`}
+              >
+                <div className="flex items-start justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-white">{item.nickname || item.common_name}</span>
+                    {item.in_cooldown && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                        Cooldown
+                      </span>
+                    )}
+                  </div>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${item.in_cooldown ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                    {item.category}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mb-2">{item.common_name}</p>
+                {item.culinary_aliases.length > 0 && (
+                  <p className="text-xs text-slate-500 mb-2">
+                    {item.culinary_aliases.slice(0, 3).join(', ')}{item.culinary_aliases.length > 3 ? '…' : ''}
+                  </p>
+                )}
+                {item.in_cooldown && item.cooldown_until && (
+                  <p className="text-xs text-amber-300 mb-2">
+                    Ready again {new Date(item.cooldown_until).toLocaleDateString()}
+                  </p>
+                )}
+                {!item.in_cooldown && (
+                  <button
+                    type="button"
+                    onClick={() => onLogHarvest(item)}
+                    className="w-full px-3 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors"
+                  >
+                    Log Harvest
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {today.due_count === 0 && readyItems.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-slate-400">
           <Flower size={48} className="mb-4 opacity-50" />
           <h3 className="text-lg font-medium text-slate-300">All caught up</h3>
@@ -521,6 +624,51 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
   );
 }
 
+/* ========================= Add Supplies to Shopping List (Phase 4) ========================= */
+
+/** Garden/preservation supplies to offer adding to the shopping list. */
+const GARDEN_SUPPLIES = [
+  'Potting mix',
+  'Seeds',
+  'Compost',
+  'Fertilizer',
+  'Mulch',
+  'Plant labels',
+  'Watering can',
+  'Pruning shears',
+];
+
+async function addSuppliesToShoppingList(plant: GardenPlant) {
+  const species = plant.species;
+  const supplies = [...GARDEN_SUPPLIES];
+  if (plant.category === 'herb' && species?.herb_preservation_tips) {
+    supplies.push('Herb drying supplies');
+  }
+  if (['vegetable', 'fruit'].includes(plant.category)) {
+    supplies.push('Canning jars', 'Freezer bags');
+  }
+
+  try {
+    const existing = await readShoppingList();
+    let content = '';
+    if (existing.exists && existing.text) {
+      content = existing.text;
+    }
+    const lines = content.split('\n');
+    const already = new Set(lines.map(l => l.replace(/^-\s*\[[ xX]\]\s*/, '').trim()).filter(Boolean));
+    const toAdd = supplies.filter(s => !already.has(s));
+    if (toAdd.length === 0) {
+      toast.success('All supplies already on the list');
+      return;
+    }
+    const newLines = [...lines.filter(l => l.trim()), ...toAdd.map(s => `- [ ] ${s}`), ''];
+    await saveShoppingList(newLines.join('\n'), existing.exists);
+    toast.success(`Added ${toAdd.length} supply(ies) to shopping list`);
+  } catch {
+    toast.error('Could not add supplies to shopping list');
+  }
+}
+
 /* ========================= Plant Detail ========================= */
 
 export function PlantDetail() {
@@ -529,6 +677,7 @@ export function PlantDetail() {
   const isParent = Boolean(user?.is_admin || user?.family_role === 'mother' || user?.family_role === 'father');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [harvestOpen, setHarvestOpen] = useState(false);
 
   const plantQuery = useQuery({
     queryKey: ['garden-plant', id],
@@ -547,6 +696,14 @@ export function PlantDetail() {
   });
 
   const logs = logsQuery.data?.logs ?? [];
+
+  // Phase 4: harvest log for this plant.
+  const harvestsQuery = useQuery({
+    queryKey: ['garden-harvests', id],
+    queryFn: () => api.gardenListHarvests({ plant_id: id }),
+    enabled: !!id,
+  });
+  const harvests = harvestsQuery.data?.harvests ?? [];
 
   if (!plant) return <div className="p-4 text-slate-400">Plant not found</div>;
 
@@ -590,6 +747,18 @@ export function PlantDetail() {
               <span>Misting:</span>
               <span className="text-white">{plant.species?.misting_rule || '—'}</span>
             </div>
+            {plant.category === 'herb' && plant.species?.pinching_bolting_notes && (
+              <div className="flex justify-between">
+                <span>Pinching / Bolting:</span>
+                <span className="text-emerald-400">{plant.species.pinching_bolting_notes}</span>
+              </div>
+            )}
+            {plant.category === 'herb' && plant.species?.herb_preservation_tips && (
+              <div className="flex justify-between">
+                <span>Preservation:</span>
+                <span className="text-amber-400">{plant.species.herb_preservation_tips}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -706,6 +875,49 @@ export function PlantDetail() {
               {action.charAt(0).toUpperCase() + action.slice(1)}
             </button>
           ))}
+          {['herb', 'vegetable', 'fruit'].includes(plant.category) && (
+            <button
+              type="button"
+              onClick={() => setHarvestOpen(true)}
+              className="flex items-center justify-between px-4 py-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 text-sm transition-colors pointer-coarse:min-h-11"
+            >
+              <Scissors size={14} className="mr-2" />
+              Log Harvest
+              {plant.regrowth_cooldown_days && plant.last_harvested_at && (
+                <span className="text-[10px] text-emerald-200 ml-2">
+                  {plant.regrowth_cooldown_days}d cooldown
+                </span>
+              )}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => addSuppliesToShoppingList(plant)}
+            className="flex items-center justify-between px-4 py-2 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 text-sm transition-colors pointer-coarse:min-h-11"
+          >
+            <ShoppingCart size={14} className="mr-2" />
+            Add Supplies to Shopping List
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Recent Harvests</h3>
+        <div className="h-48 overflow-y-auto space-y-2">
+          {harvests.length === 0 ? (
+            <p className="text-xs text-slate-500 italic">No harvests yet</p>
+          ) : (
+            harvests.map((h) => (
+              <div key={h.id} className="flex items-center gap-2 text-xs text-slate-300 pb-1 border-b border-white/5">
+                <span className="text-slate-500">{new Date(h.harvested_at).toLocaleDateString()}</span>
+                <span className="text-white">{h.quantity} {h.unit}</span>
+                <span className="ml-2 px-1 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  {h.disposition}
+                </span>
+                {h.notes && <span className="ml-2 text-slate-400">— {h.notes}</span>}
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -724,6 +936,137 @@ export function PlantDetail() {
               </div>
             ))
           )}
+        </div>
+      </div>
+      {harvestOpen && (
+        <HarvestModal
+          open={harvestOpen}
+          onClose={() => setHarvestOpen(false)}
+          plant={plant}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ========================= Log Harvest Modal (Phase 4) ========================= */
+
+function HarvestModal({
+  open,
+  onClose,
+  plant,
+}: {
+  open: boolean;
+  onClose: () => void;
+  plant: GardenPlant;
+}) {
+  const [quantity, setQuantity] = useState('');
+  const [unit, setUnit] = useState('count');
+  const [disposition, setDisposition] = useState('fresh');
+  const [notes, setNotes] = useState('');
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      await api.gardenLogHarvest(plant.id!, {
+        plant_id: plant.id!,
+        quantity: parseFloat(quantity) || 1,
+        unit,
+        disposition,
+        notes: notes || undefined,
+      });
+    },
+    onSuccess: () => {
+      onClose();
+      setQuantity('');
+      setUnit('count');
+      setDisposition('fresh');
+      setNotes('');
+      toast.success('Harvest logged');
+    },
+    onError: () => toast.error('Failed to log harvest'),
+  });
+
+  const units = ['count', 'bunch', 'leaf', 'oz', 'lb', 'pint', 'quart', 'piece'];
+  const dispositions = ['fresh', 'canned', 'frozen', 'dried', 'fermented', 'shared'];
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white/10 border border-white/20 rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold text-white">Log Harvest</h2>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Quantity</label>
+            <input
+              type="number"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              placeholder="e.g. 2"
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Unit</label>
+            <select
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {units.map((u) => (
+                <option key={u} value={u}>{u}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Disposition</label>
+            <select
+              value={disposition}
+              onChange={(e) => setDisposition(e.target.value)}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {dispositions.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Notes (optional)</label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. first basil of the season"
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <p className="text-xs text-slate-500">
+            Species: <span className="text-white">{plant.species?.common_name || plant.species_ref}</span>
+          </p>
+
+          <div className="mt-4 flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => saveMutation.mutate()}
+              disabled={!quantity || parseFloat(quantity) <= 0}
+              className="flex-1 px-4 py-2.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {saveMutation.isPending ? 'Logging…' : 'Log Harvest'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -833,6 +1176,154 @@ function DigestSettingsModal({
               className="flex-1 px-4 py-2.5 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50"
             >
               {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ========================= Log Harvest Modal (Phase 4) ========================= */
+
+function LogHarvestModal({
+  open,
+  onClose,
+  plant,
+}: {
+  open: boolean;
+  onClose: () => void;
+  plant: HarvestReadyItem | null;
+}) {
+  const queryClient = useQueryClient();
+  const [quantity, setQuantity] = useState('1');
+  const [unit, setUnit] = useState('bunch');
+  const [disposition, setDisposition] = useState('fresh');
+  const [notes, setNotes] = useState('');
+
+  const units = ['bunch', 'lb', 'oz', 'pint', 'quart', 'piece', 'count'];
+  const dispositions = ['fresh', 'canned', 'frozen', 'dried', 'fermented', 'shared'];
+
+  const logHarvestMutation = useMutation({
+    mutationFn: async ({ plantId, body }: { plantId: string; body: HarvestLogIn }) => {
+      return api.gardenLogHarvest(plantId, body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['garden-today'] });
+      queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
+      queryClient.invalidateQueries({ queryKey: ['garden-harvest-ready'] });
+      queryClient.invalidateQueries({ queryKey: ['garden-streaks'] });
+      onClose();
+      setQuantity('1');
+      setNotes('');
+      toast.success('Harvest logged');
+    },
+    onError: () => toast.error('Failed to log harvest'),
+  });
+
+  if (!open || !plant) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white/10 border border-white/20 rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold text-white">Log Harvest</h2>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Plant</label>
+            <p className="text-sm text-white font-medium">{plant.nickname || plant.common_name}</p>
+            <p className="text-xs text-slate-500">{plant.category} · {plant.species_ref}</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Quantity</label>
+              <input
+                type="number"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Unit</label>
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                {units.map((u) => (
+                  <option key={u} value={u}>
+                    {u.charAt(0).toUpperCase() + u.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Disposition</label>
+            <select
+              value={disposition}
+              onChange={(e) => setDisposition(e.target.value)}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {dispositions.map((d) => (
+                <option key={d} value={d}>
+                  {d.charAt(0).toUpperCase() + d.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Notes (optional)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              placeholder="e.g. Used for pesto, shared with neighbor…"
+            />
+          </div>
+
+          {plant.herb_preservation_tips && (
+            <div className="pt-3 border-t border-white/10">
+              <p className="text-xs text-amber-300 mb-1">Herb preservation tip:</p>
+              <p className="text-xs text-slate-300">{plant.herb_preservation_tips}</p>
+            </div>
+          )}
+
+          <div className="mt-4 flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                logHarvestMutation.mutate({
+                  plantId: plant.plant_id,
+                  body: {
+                    plant_id: plant.plant_id,
+                    quantity: parseFloat(quantity) || 1,
+                    unit,
+                    disposition,
+                    notes: notes || undefined,
+                  },
+                });
+              }}
+              className="flex-1 px-4 py-2.5 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50"
+            >
+              Log Harvest
             </button>
           </div>
         </div>

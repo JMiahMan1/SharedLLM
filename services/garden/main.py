@@ -53,6 +53,9 @@ from services.garden.models import (
     GardenProfile,
     GardenProfileIn,
     GardenProfileOut,
+    HarvestLog,
+    HarvestLogIn,
+    HarvestLogOut,
     Location,
     LocationIn,
     LocationOut,
@@ -77,6 +80,7 @@ from services.garden.weather_care import (
     weather_poller,
     _is_outdoor_uncovered as _is_outdoor_uncovered_location,
 )
+from services.common import weather_client as weather
 from services.shared.info_endpoint import info_router
 
 logging.basicConfig(
@@ -103,6 +107,18 @@ def _engine():
     kwargs: dict[str, Any] = {}
     if url.startswith("sqlite"):
         kwargs = {"connect_args": {"check_same_thread": False, "timeout": 30}}
+        # Ensure the database directory exists so the service starts cleanly
+        # on a fresh host without any manual directory creation.
+        try:
+            from urllib.parse import urlparse
+            path = urlparse(url).path
+            # sqlite:////data/garden.db -> /data/garden.db
+            if path.startswith("/"):
+                parent = os.path.dirname(path)
+                if parent and not os.path.isdir(parent):
+                    os.makedirs(parent, exist_ok=True)
+        except Exception:
+            pass
     engine = create_engine(url, pool_pre_ping=True, **kwargs)
     apply_sqlite_pragmas(engine)
     return engine
@@ -904,6 +920,67 @@ async def today(
     except Exception as e:
         log.info("[Garden] weather summary unavailable: %s", e)
 
+    # Phase 4: ready-to-harvest herbs/produce summary.
+    _now = datetime.now(UTC)
+    _ready = []
+    for _p in session.exec(
+        select(Plant).where(
+            Plant.category.in_(("herb", "vegetable", "fruit")), Plant.status == "active"
+        )
+    ).all():
+        _species = resolve_species(session, _p.species_ref) or {}
+        _aliases_raw = _species.get("culinary_aliases") or ""
+        _aliases = [a.strip() for a in _aliases_raw.split(",") if a.strip()]
+        _in_cooldown = False
+        _cooldown_until = None
+        if _p.category == "herb" and _p.last_harvested_at and _p.regrowth_cooldown_days:
+            try:
+                _h = datetime.fromisoformat(_p.last_harvested_at)
+                _cooldown_until = _h + timedelta(days=_p.regrowth_cooldown_days)
+                if _now < _cooldown_until:
+                    _in_cooldown = True
+            except (ValueError, TypeError):
+                pass
+        _is_ready = False
+        if _p.category == "herb":
+            _is_ready = not _in_cooldown
+        elif _p.category in ("vegetable", "fruit"):
+            if _p.status == "harvesting":
+                _is_ready = True
+            else:
+                try:
+                    if _p.expected_harvest_start:
+                        _s = datetime.fromisoformat(_p.expected_harvest_start)
+                        if _p.expected_harvest_end:
+                            _e = datetime.fromisoformat(_p.expected_harvest_end)
+                            if _s <= _now <= _e:
+                                _is_ready = True
+                        elif _now >= _s:
+                            _is_ready = True
+                except (ValueError, TypeError):
+                    pass
+                if not _is_ready and _p.last_harvested_at:
+                    try:
+                        if _now - datetime.fromisoformat(_p.last_harvested_at) <= timedelta(days=14):
+                            _is_ready = True
+                    except (ValueError, TypeError):
+                        pass
+        if _is_ready:
+            _ready.append(
+                {
+                    "plant_id": _p.id,
+                    "nickname": _p.nickname,
+                    "common_name": _species.get("common_name") or _p.species_ref,
+                    "category": _p.category,
+                    "species_ref": _p.species_ref,
+                    "culinary_aliases": _aliases,
+                    "in_cooldown": _in_cooldown,
+                    "cooldown_until": _cooldown_until.isoformat() if _cooldown_until else None,
+                    "pinching_bolting_notes": _species.get("pinching_bolting_notes"),
+                    "herb_preservation_tips": _species.get("herb_preservation_tips"),
+                }
+            )
+
     return {
         "date": _today_iso(),
         "due_count": len(due_tasks),
@@ -911,6 +988,7 @@ async def today(
         "by_room": by_room,
         "all": due_tasks,
         "weather": weather_summary,
+        "ready_to_harvest": _ready,
     }
 
 
@@ -982,12 +1060,17 @@ def get_streaks(
         session.exec(select(Plant).where(Plant.status == "active")).all()
     )
 
+    # Count harvests for this user (Phase 4: first_harvest achievement).
+    harvests_total = len(
+        session.exec(select(HarvestLog).where(HarvestLog.harvested_by == user)).all()
+    )
+
     # Evaluate garden achievements.
     ach = evaluate_achievements(
         session,
         user,
         plants_total=plants_total,
-        harvests_total=0,  # Phase 4: harvest logs
+        harvests_total=harvests_total,
         snoozes_total=len(
             session.exec(select(CareLog).where(CareLog.performed_by == user, CareLog.action == "snooze")).all()
         ),
@@ -1300,6 +1383,264 @@ def get_plant_logs(
             for r in rows
         ],
     }
+
+
+# --------------------------------------------------------------------------- harvest log (Phase 4)
+
+
+@app.post("/plants/{plant_id}/harvest", status_code=201)
+async def log_harvest(
+    plant_id: str,
+    body: HarvestLogIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Log a harvest (open to all family roles).
+
+    Writes a HarvestLog, updates plant.last_harvested_at and
+    regrowth_cooldown_days, and pushes a yield metric to weather_client
+    best-effort (never fails the request if weather is unavailable).
+    """
+    user = _user(request)
+    plant = session.get(Plant, plant_id)
+    if plant is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    if plant.status != "active":
+        raise HTTPException(status_code=409, detail="Plant is not active")
+
+    # Validate disposition.
+    valid_dispositions = {"fresh", "canned", "frozen", "dried", "fermented", "shared"}
+    if body.disposition not in valid_dispositions:
+        raise HTTPException(
+            status_code=422,
+            detail=f"disposition must be one of: {', '.join(sorted(valid_dispositions))}",
+        )
+
+    # Resolve species for harvest yield metric name.
+    species = resolve_species(session, plant.species_ref) or {}
+    species_key = plant.species_ref
+
+    row = HarvestLog(
+        plant_id=plant_id,
+        harvested_at=body.harvested_at or utcnow(),
+        harvested_by=body.harvested_by or user,
+        quantity=body.quantity,
+        unit=body.unit,
+        disposition=body.disposition,
+        notes=body.notes,
+    )
+    session.add(row)
+
+    # Update plant harvest tracking.
+    plant.last_harvested_at = row.harvested_at
+    # Derive regrowth cooldown from species (herbs) if not already set.
+    if plant.regrowth_cooldown_days is None and species.get("regrowth_cadence"):
+        plant.regrowth_cooldown_days = (
+            5 if species["regrowth_cadence"] == "cut_and_come_again" else 7
+        )
+    plant.updated_at = utcnow()
+
+    # Best-effort push harvest yield metric (never fails the request).
+    try:
+        await weather.push_metric(
+            f"garden_harvest_{species_key}",
+            body.quantity,
+            unit=body.unit,
+            label=body.disposition,
+        )
+    except Exception as e:
+        log.info("[Garden] harvest metric push best-effort failed: %s", e)
+
+    session.commit()
+    session.refresh(row)
+    session.refresh(plant)
+
+    return {
+        "ok": True,
+        "harvest_id": row.id,
+        "plant_id": plant_id,
+        "harvested_at": row.harvested_at,
+        "harvested_by": row.harvested_by,
+        "quantity": row.quantity,
+        "unit": row.unit,
+        "disposition": row.disposition,
+        "plant": HarvestLogOut.model_validate(row).model_dump(),
+    }
+
+
+@app.get("/harvests")
+def list_harvests(
+    request: Request,
+    plant_id: str | None = Query(None, description="Filter to a specific plant"),
+    days: int | None = Query(None, ge=1, le=365, description="Lookback window in days"),
+    disposition: str | None = Query(None, description="Filter by disposition"),
+    session: Session = Depends(get_session),
+):
+    """Harvest log history with optional filters + per-crop seasonal yield totals."""
+    user = _user(request)
+    query = select(HarvestLog)
+    if plant_id:
+        query = query.where(HarvestLog.plant_id == plant_id)
+    if days is not None:
+        from datetime import UTC, datetime, timedelta
+
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        query = query.where(HarvestLog.harvested_at >= cutoff.isoformat())
+    if disposition:
+        query = query.where(HarvestLog.disposition == disposition)
+    query = query.order_by(HarvestLog.harvested_at.desc())
+    rows = session.exec(query).all()
+
+    # Per-crop seasonal yield totals.
+    totals: dict[str, dict] = {}
+    for row in rows:
+        key = row.plant_id
+        if key not in totals:
+            p = session.get(Plant, key)
+            species = resolve_species(session, p.species_ref) if p else None
+            totals[key] = {
+                "plant_id": key,
+                "nickname": p.nickname if p else None,
+                "common_name": (species or {}).get("common_name") if species else None,
+                "category": p.category if p else None,
+                "species_ref": p.species_ref if p else None,
+                "total_quantity": 0.0,
+                "unit": row.unit,
+                "count": 0,
+            }
+        totals[key]["total_quantity"] += row.quantity
+        totals[key]["count"] += 1
+
+    return {
+        "count": len(rows),
+        "filters": {
+            "plant_id": plant_id,
+            "days": days,
+            "disposition": disposition,
+        },
+        "harvests": [
+            {
+                "id": r.id,
+                "plant_id": r.plant_id,
+                "harvested_at": r.harvested_at,
+                "harvested_by": r.harvested_by,
+                "quantity": r.quantity,
+                "unit": r.unit,
+                "disposition": r.disposition,
+                "notes": r.notes,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ],
+        "totals": list(totals.values()),
+    }
+
+
+@app.delete("/harvests/{harvest_id}", status_code=204)
+def delete_harvest(
+    harvest_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Delete a harvest log (adult/admin only, or the user who logged it)."""
+    user = _user(request)
+    role = _role(request)
+    is_admin = _is_admin(request)
+    row = session.get(HarvestLog, harvest_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Harvest not found")
+    if row.harvested_by != user and role not in ADULT_ROLES and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the person who logged the harvest, or adults/admins, may delete it.",
+        )
+    session.delete(row)
+    session.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
+@app.get("/harvest/ready")
+def harvest_ready(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Currently harvest-ready herbs, vegetables, and fruits.
+
+    - Active herb plants not in regrowth cooldown
+      (now >= last_harvested_at + regrowth_cooldown_days)
+    - Active vegetable/fruit plants in status "harvesting" or inside
+      [expected_harvest_start, expected_harvest_end] or harvested
+      within the last 14 days.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    user = _user(request)
+    now = datetime.now(UTC)
+    plants = session.exec(
+        select(Plant).where(Plant.category.in_(("herb", "vegetable", "fruit")), Plant.status == "active")
+    ).all()
+
+    ready = []
+    for plant in plants:
+        species = resolve_species(session, plant.species_ref) or {}
+        culinary_aliases_raw = species.get("culinary_aliases") or ""
+        culinary_aliases = [a.strip() for a in culinary_aliases_raw.split(",") if a.strip()]
+
+        in_cooldown = False
+        cooldown_until = None
+        if plant.category == "herb" and plant.last_harvested_at and plant.regrowth_cooldown_days:
+            try:
+                harvested_dt = datetime.fromisoformat(plant.last_harvested_at)
+                cooldown_until = harvested_dt + timedelta(days=plant.regrowth_cooldown_days)
+                if now < cooldown_until:
+                    in_cooldown = True
+            except (ValueError, TypeError):
+                pass
+
+        is_ready = False
+        if plant.category == "herb":
+            is_ready = not in_cooldown
+        elif plant.category in ("vegetable", "fruit"):
+            # Ready if in harvesting status, inside harvest window, or harvested recently.
+            if plant.status == "harvesting":
+                is_ready = True
+            else:
+                try:
+                    if plant.expected_harvest_start:
+                        start = datetime.fromisoformat(plant.expected_harvest_start)
+                        if plant.expected_harvest_end:
+                            end = datetime.fromisoformat(plant.expected_harvest_end)
+                            if start <= now <= end:
+                                is_ready = True
+                        elif now >= start:
+                            is_ready = True
+                except (ValueError, TypeError):
+                    pass
+                if not is_ready and plant.last_harvested_at:
+                    try:
+                        harvested_dt = datetime.fromisoformat(plant.last_harvested_at)
+                        if now - harvested_dt <= timedelta(days=14):
+                            is_ready = True
+                    except (ValueError, TypeError):
+                        pass
+
+        if is_ready:
+            ready.append(
+                {
+                    "plant_id": plant.id,
+                    "nickname": plant.nickname,
+                    "common_name": species.get("common_name") or plant.species_ref,
+                    "category": plant.category,
+                    "species_ref": plant.species_ref,
+                    "culinary_aliases": culinary_aliases,
+                    "in_cooldown": in_cooldown,
+                    "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
+                    "pinching_bolting_notes": species.get("pinching_bolting_notes"),
+                    "herb_preservation_tips": species.get("herb_preservation_tips"),
+                }
+            )
+
+    return {"count": len(ready), "ready": ready}
 
 
 # --------------------------------------------------------------------------- care rules (admin+)

@@ -4837,6 +4837,8 @@ export interface GardenPlant {
   skylight_sync_enabled: boolean;
   notes: string | null;
   calibration_factor: number;
+  last_harvested_at: string | null;
+  regrowth_cooldown_days: number | null;
   created_at: string;
   updated_at: string;
   species: GardenSpecies | null;
@@ -4875,6 +4877,10 @@ export interface GardenSpecies {
   usda_zone_max: number | null;
   days_to_maturity: number | null;
   tall_trellis: number | null;
+  culinary_aliases: string | null;
+  pinching_bolting_notes: string | null;
+  regrowth_cadence: string | null;
+  herb_preservation_tips: string | null;
   [key: string]: unknown;
 }
 
@@ -4966,6 +4972,7 @@ export interface GardenTodaySummary {
   by_room: Record<string, GardenTodayTask[]>;
   all: GardenTodayTask[];
   weather?: GardenWeatherSummary | null;
+  ready_to_harvest?: HarvestReadyItem[];
 }
 
 export interface GardenCareLog {
@@ -5065,4 +5072,46 @@ export interface GardenCustomSpeciesIn {
   preservation_methods?: string | null;
   usda_acidity_class?: string | null;
   source?: string | null;
+}
+
+/* ---------- Harvest Log (Phase 4) ---------- */
+
+export interface HarvestLogIn {
+  plant_id: string;
+  harvested_at?: string | null;
+  harvested_by?: string | null;
+  quantity?: number;
+  unit?: string;
+  disposition?: string;
+  notes?: string | null;
+}
+
+export interface HarvestLogOut {
+  id: string;
+  plant_id: string;
+  harvested_at: string;
+  harvested_by: string | null;
+  quantity: number;
+  unit: string;
+  disposition: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface HarvestReadyItem {
+  plant_id: string;
+  nickname: string | null;
+  common_name: string;
+  category: string;
+  species_ref: string;
+  culinary_aliases: string[];
+  in_cooldown: boolean;
+  cooldown_until: string | null;
+  pinching_bolting_notes: string | null;
+  herb_preservation_tips: string | null;
+}
+
+export interface HarvestReadyResponse {
+  count: number;
+  ready: HarvestReadyItem[];
 }

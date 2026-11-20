@@ -90,8 +90,26 @@ class Plant(SQLModel, table=True):
     skylight_chore_id: str | None = Field(default=None, max_length=128)
     notes: str | None = Field(default=None, max_length=2000)
     calibration_factor: float = Field(default=1.0)  # self-calibrating snooze adjustment
+    last_harvested_at: str | None = Field(default=None)  # when last harvested (herbs/veg/fruit)
+    regrowth_cooldown_days: int | None = Field(default=None)  # days to wait before next harvest (herbs)
     created_at: str = Field(default_factory=utcnow)
     updated_at: str = Field(default_factory=utcnow)
+
+
+class HarvestLog(SQLModel, table=True):
+    """A harvest record: how much was picked, by whom, and what was done with it."""
+
+    __tablename__ = "harvest_logs"
+
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
+    plant_id: str = Field(max_length=128)
+    harvested_at: str = Field(default_factory=utcnow)
+    harvested_by: str | None = Field(default=None, max_length=128)
+    quantity: float = Field(default=0.0)
+    unit: str = Field(max_length=32)  # oz | lb | bunch | leaf | pint | quart | piece
+    disposition: str = Field(max_length=32)  # fresh | canned | frozen | dried | fermented | shared
+    notes: str | None = Field(default=None, max_length=1000)
+    created_at: str = Field(default_factory=utcnow)
 
 
 class CareRule(SQLModel, table=True):
@@ -284,6 +302,8 @@ class PlantOut(SQLModel):
     skylight_chore_id: str | None
     notes: str | None
     calibration_factor: float
+    last_harvested_at: str | None
+    regrowth_cooldown_days: int | None
     created_at: str
     updated_at: str
     species: dict | None = None
@@ -363,3 +383,27 @@ class CustomSpeciesIn(SQLModel):
     source: str | None = None
     reviewed_by: str | None = None
     reviewed_at: str | None = None
+
+
+class HarvestLogIn(SQLModel):
+    """Create/update request for a harvest log entry."""
+
+    plant_id: str | None = None  # Comes from URL path in POST /plants/{plant_id}/harvest
+    harvested_at: str | None = None
+    harvested_by: str | None = None
+    quantity: float = Field(default=1.0, ge=0)
+    unit: str = Field(default="count", max_length=32)  # oz | lb | bunch | pint | quart | piece | count
+    disposition: str = Field(default="fresh", max_length=32)  # fresh | canned | frozen | dried | fermented | shared
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class HarvestLogOut(SQLModel):
+    id: str
+    plant_id: str
+    harvested_at: str
+    harvested_by: str | None
+    quantity: float
+    unit: str
+    disposition: str
+    notes: str | None
+    created_at: str

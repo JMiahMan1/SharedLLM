@@ -256,6 +256,22 @@ def auto_seed_care_rules(species: dict) -> list[dict]:
     rules.append({"action": "repot", "interval_days": repot_days, "winter_multiplier": 1.0, "rain_skip_enabled": False})
     rules.append({"action": "check_pests", "interval_days": 30.0, "winter_multiplier": 1.0, "rain_skip_enabled": False})
 
+    # Phase 4: herbs get a prune_pinch rule to prevent bolting and encourage regrowth.
+    # Surface pinching_bolting_notes / herb_preservation_tips in care cues.
+    species_category = species.get("category") or ""
+    if species_category == "herb" or species.get("pinching_bolting_notes"):
+        regrowth_cadence = species.get("regrowth_cadence") or "cut_and_come_again"
+        cooldown_days = 5 if regrowth_cadence == "cut_and_come_again" else 7
+        rules.append(
+            {
+                "action": "prune_pinch",
+                "interval_days": 14.0,
+                "winter_multiplier": 1.0,
+                "rain_skip_enabled": False,
+                "regrowth_cooldown_days": cooldown_days,
+            }
+        )
+
     return rules
 
 
