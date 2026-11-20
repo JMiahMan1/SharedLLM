@@ -10,8 +10,10 @@ answer: a turn can be a tool call (JSON), and the answer to a device command is 
 ``device_claims.honest_reply``, which may replace it. So the hub is not given raw words. This gate sits
 between the model and the stream and lets through only what can be said safely:
 
-* whole sentences of prose (``MIN_CHARS`` or more, so "1." or "Okay." is not its own clip);
-* nothing in a turn once it starts writing a tool call (``_TOOL_MARKERS``) or a reasoning block;
+* whole sentences of prose (``MIN_CHARS`` or more, so "1." or "Okay." is not its own clip), a long
+  first sentence up to a clause break, and the last sentence once the model call ends (``end_call``);
+* nothing in a turn once it starts writing a tool call (``_TOOL_MARKERS``, a tool named in prose) or
+  a reasoning block;
 * nothing at all for a turn on/off command, because ``honest_reply`` may still change that answer.
 
 Each new model call (after a tool ran, a retry, the closing turn) starts with a ``speech_turn`` marker.
@@ -30,10 +32,15 @@ from services.gateway.device_claims import device_command
 
 #: Text that starts a tool call or markup the hub must not read out: nothing after it in that turn is spoken.
 _TOOL_MARKERS = ("{", "```", "<tool", "[TOOL", "tool_code", "<|")
+#: A tool named in prose ("1. WorkspaceCreateRequest name 'x'"), which ``prose_tools`` turns into a call.
+_TOOL_NAME = re.compile(r"\b[A-Z][a-z]+(?:[A-Z][a-z]*)*Request\b")
 #: The shortest piece of text sent as its own sentence; shorter ones wait for the next.
 MIN_CHARS = 20
 #: The end of a sentence: . ! ? (with closing quotes or brackets) before a space, or a line break.
 _BOUNDARY = re.compile("[.!?\\u2026][\"'\\u201d\\u2019)\\]]*(?=\\s)|\\n")
+#: A first sentence this long is said up to a clause break (, ; :) instead of waiting for its end.
+LONG_CHARS = 120
+_CLAUSE = re.compile(r"[,;:](?=\s)")
 #: Words a full stop does not end a sentence after.
 _ABBREVIATIONS = frozenset({"mr", "mrs", "ms", "dr", "st", "vs", "etc", "eg", "ie", "jr", "sr", "no", "approx"})
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -63,13 +70,32 @@ class SpeechGate:
         self.turns = 0
         self._buf = ""
         self._blocked = False
+        self._said = False
 
     async def begin_turn(self) -> None:
         """A new model call: what it says replaces nothing already said, and starts unblocked."""
         if self.turns and self.enabled:
             await self.emit({"type": "speech_turn"})
         self.turns += 1
-        self._buf, self._blocked = "", False
+        self._buf, self._blocked, self._said = "", False, False
+
+    async def end_call(self) -> None:
+        """The model call is over: the end of what it wrote, if it was prose all through, is said now.
+
+        Its last sentence has nothing after it to show it ended, so it would otherwise wait for the whole
+        job; a one-sentence answer would never be streamed at all (2026-11-19, "What's the verse of the
+        day?" was spoken only after the job). A turn that wrote a tool call says nothing more.
+        """
+        if not self.enabled or self._blocked:
+            self._buf = ""
+            return
+        sentences = self._take()
+        tail = "" if "<think>" in self._buf.lower() else self._buf.strip()
+        self._buf = ""
+        if tail and not self._blocked:
+            sentences.append(tail)
+        for sentence in sentences:
+            await self.emit({"type": "speech", "text": sentence})
 
     async def feed(self, chunk: Any) -> None:
         """One streamed piece of the model's answer (the provider's ``chunk_callback``)."""
@@ -88,6 +114,9 @@ class SpeechGate:
                 return []  # a reasoning block still being written
             buf = _THINK.sub("", buf)
         cut = min((i for i in (buf.find(m) for m in _TOOL_MARKERS) if i >= 0), default=-1)
+        named = _TOOL_NAME.search(buf)
+        if named is not None and (cut < 0 or named.start() < cut):
+            cut = named.start()
         speakable = buf if cut < 0 else buf[:cut]
         out: list[str] = []
         start = 0
@@ -98,6 +127,15 @@ class SpeechGate:
                 continue
             out.append(piece)
             start = end
+        if not out and start == 0 and not self._said:
+            # A long first sentence: say it up to a clause break rather than wait for its end.
+            for m in _CLAUSE.finditer(speakable):
+                if m.end() >= LONG_CHARS:
+                    out.append(speakable[:m.end()].strip())
+                    start = m.end()
+                    break
+        if out:
+            self._said = True
         if cut >= 0:
             self._blocked = True  # the rest of this turn is a tool call; what led into it is dropped
             self._buf = ""

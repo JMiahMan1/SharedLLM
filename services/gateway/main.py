@@ -3664,6 +3664,7 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
 
     assert job_queue is not None, "Job queue not initialized"
     spoken: list[str] = []
+    said = 0  # sentences relayed in all turns (``spoken`` keeps only the current turn's)
     while True:
         job = await job_queue.get_job_status(job_id)
         if not job:
@@ -3681,6 +3682,7 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
             elif parsed.get("type") == "speech" and str(parsed.get("text") or "").strip():
                 text = str(parsed["text"]).strip()
                 spoken.append(text)
+                said += 1
                 yield json.dumps(_make_ollama_chunk(text, model, speech=True, voice=reply_voice)) + "\n"
         if job["status"] == JobStatus.COMPLETED:
             ans = job.get("result")
@@ -3688,7 +3690,11 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
             if isinstance(ans, str):
                 _thinking, reply = extract_thinking_and_content(ans)
             reply = reply.strip()
-            yield json.dumps(_make_ollama_chunk("", model, True, reply=reply, speech_rest=speech_rest(reply, spoken),
+            rest = speech_rest(reply, spoken)
+            # What reached the satellite early, so a reply spoken whole can be told from one streamed.
+            log.info(f"[speech_stream] job {job_id}: {said} sentences streamed before the end, "
+                     f"{len(rest)} of {len(reply)} characters left to say")
+            yield json.dumps(_make_ollama_chunk("", model, True, reply=reply, speech_rest=rest,
                                                 voice=reply_voice)) + "\n"
             return
         if job["status"] == JobStatus.FAILED:
