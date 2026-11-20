@@ -294,6 +294,37 @@ async def garden_patch_care_rule(plant_id: str, rule_id: str, request: Request):
     )
 
 
+@router.patch("/locations/{loc_id}/assign")
+async def garden_assign_location(loc_id: str, request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call(
+        "PATCH", f"/locations/{loc_id}/assign", json=body, headers=headers
+    )
+
+
+@router.patch("/plants/{plant_id}/assign")
+async def garden_assign_plant(plant_id: str, request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call(
+        "PATCH", f"/plants/{plant_id}/assign", json=body, headers=headers
+    )
+
+
+@router.get("/streaks")
+async def garden_streaks(request: Request):
+    headers = await _verified_headers(request)
+    return await _call("GET", "/streaks", headers=headers)
+
+
+@router.post("/notices/test")
+async def garden_notices_test(request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    return await _call("POST", "/notices/test", json=body, headers=headers)
+
+
 @router.delete("/plants/{plant_id}/care-rules/{rule_id}")
 async def garden_delete_care_rule(plant_id: str, rule_id: str, request: Request):
     headers = await _verified_headers(request)

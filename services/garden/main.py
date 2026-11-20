@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import sqlite3
+import asyncio
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -57,6 +58,9 @@ from services.garden.models import (
     PlantOut,
     utcnow,
 )
+from services.garden.achievements import evaluate as evaluate_achievements
+from services.garden.notices import collect_due_tasks, build_digest, digest_loop, send_digest_to_member
+from services.garden.skylight_sync import mirror_care_log
 from services.shared.info_endpoint import info_router
 
 logging.basicConfig(
@@ -107,7 +111,12 @@ async def lifespan(app: FastAPI):
     if added:
         log.info("[Garden] added missing column(s): %s", ", ".join(added))
     log.info("[Garden] ready db=%s seed=%s", _database_url(), _seed().path)
-    yield
+    # Start the quiet morning digest loop (disabled under pytest).
+    digest_task = asyncio.create_task(digest_loop(_db, _family_list))
+    try:
+        yield
+    finally:
+        digest_task.cancel()
 
 
 app = FastAPI(title="Jarvis Garden Service", lifespan=lifespan)
@@ -167,7 +176,7 @@ def _family_manage(request: Request) -> bool:
 
 
 def _require_admin_or_adult(request: Request) -> None:
-    """403 unless the caller is an adult or admin."""
+    """403 unless the caller is an adult or admin (adult_child/mother/father/admin)."""
     role = _role(request)
     if role not in ADULT_ROLES and not _is_admin(request):
         raise HTTPException(
@@ -176,8 +185,32 @@ def _require_admin_or_adult(request: Request) -> None:
         )
 
 
+PARENT_ROLES = frozenset({"mother", "father", "admin"})
+
+
+def _require_parent_or_admin(request: Request) -> None:
+    """403 unless the caller is a parent or admin (mother/father/admin only — never adult_child/teen/child)."""
+    role = _role(request)
+    if role not in PARENT_ROLES and not _is_admin(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Parents and admins only: assign plants/locations, toggle Skylight sync, manage garden assignments.",
+        )
+
+
 def _is_minor_role(role: str) -> bool:
     return role in ("child", "teen")
+
+
+async def _family_list() -> list[str]:
+    """Every family member's username, fetched from identity via telemetry's
+    common notify helper. Degrades gracefully to an empty list."""
+    from services.common.notify import family
+    try:
+        return await family()
+    except Exception as e:
+        log.warning("[Garden] could not list family members: %s", e)
+        return []
 
 
 # --------------------------------------------------------------------------- helpers
@@ -351,10 +384,14 @@ def patch_location(
     request: Request,
     session: Session = Depends(get_session),
 ):
-    _require_admin_or_adult(request)
     row = session.get(Location, loc_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Location not found")
+    # Assignment / Skylight sync changes are parent+ only.
+    if "assigned_to" in body.model_fields_set or "skylight_sync_enabled" in body.model_fields_set:
+        _require_parent_or_admin(request)
+    else:
+        _require_admin_or_adult(request)
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(row, key, value)
     row.updated_at = utcnow()
@@ -381,6 +418,77 @@ def delete_location(
     session.delete(row)
     session.commit()
     return JSONResponse(status_code=204, content=None)
+
+
+# --------------------------------------------------------------------------- location assignment (parent+ only)
+
+
+class LocationAssignmentIn(SQLModel):
+    assigned_to: str | None = None
+    skylight_sync_enabled: bool | None = None
+
+
+@app.patch("/locations/{loc_id}/assign")
+def assign_location(
+    loc_id: str,
+    body: LocationAssignmentIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Assign a location to a family member (parent+ only).
+
+    Uses ``model_fields_set`` so ``{"assigned_to": null}`` actually unassigns
+    (distinguishes an explicit null from an omitted field).
+    """
+    _require_parent_or_admin(request)
+    row = session.get(Location, loc_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+    fields_set = body.model_fields_set
+    if "assigned_to" in fields_set:
+        row.assigned_to = body.assigned_to  # None = unassign
+    if "skylight_sync_enabled" in fields_set:
+        row.skylight_sync_enabled = body.skylight_sync_enabled
+    row.updated_at = utcnow()
+    session.commit()
+    session.refresh(row)
+    return LocationOut.model_validate(row).model_dump()
+
+
+# --------------------------------------------------------------------------- plant assignment (parent+ only)
+
+
+class PlantAssignmentIn(SQLModel):
+    assigned_to: str | None = None
+    skylight_sync_enabled: bool | None = None
+
+
+@app.patch("/plants/{plant_id}/assign")
+def assign_plant(
+    plant_id: str,
+    body: PlantAssignmentIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Assign a plant to a family member (parent+ only).
+
+    Uses ``model_fields_set`` so ``{"assigned_to": null}`` actually unassigns.
+    """
+    _require_parent_or_admin(request)
+    row = session.get(Plant, plant_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    fields_set = body.model_fields_set
+    if "assigned_to" in fields_set:
+        row.assigned_to = body.assigned_to  # None = unassign
+    if "skylight_sync_enabled" in fields_set:
+        row.skylight_sync_enabled = body.skylight_sync_enabled
+    row.updated_at = utcnow()
+    session.commit()
+    session.refresh(row)
+    seed = _seed()
+    species = seed.get(row.species_ref) if seed.present else None
+    return _plant_out(row, species)
 
 
 # --------------------------------------------------------------------------- plants
@@ -476,10 +584,14 @@ def patch_plant(
     request: Request,
     session: Session = Depends(get_session),
 ):
-    _require_admin_or_adult(request)
     row = session.get(Plant, plant_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Plant not found")
+    # Assignment / Skylight sync changes are parent+ only.
+    if "assigned_to" in body.model_fields_set or "skylight_sync_enabled" in body.model_fields_set:
+        _require_parent_or_admin(request)
+    else:
+        _require_admin_or_adult(request)
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(row, key, value)
     row.updated_at = utcnow()
@@ -507,11 +619,23 @@ def delete_plant(
 
 
 @app.get("/today")
-def today(request: Request, session: Session = Depends(get_session)):
+def today(
+    request: Request,
+    assigned_to: str | None = Query(None, description="Filter to plants assigned to this member"),
+    mine: bool = Query(False, description="Filter to plants assigned to the calling user (or unassigned)"),
+    session: Session = Depends(get_session),
+):
     """Due and overdue care tasks grouped by room/category, with species cues."""
-    _user(request)
+    user = _user(request)
     seed = _seed()
     now = datetime.now(UTC)
+
+    # Build filter: assigned_to explicit member takes priority over mine.
+    effective_assigned_to: str | None = None
+    if assigned_to is not None:
+        effective_assigned_to = assigned_to
+    elif mine:
+        effective_assigned_to = "__MINE__"  # sentinel: assigned to user OR unassigned
 
     rules = session.exec(
         select(CareRule).where(CareRule.paused == False)  # noqa: E712
@@ -522,6 +646,18 @@ def today(request: Request, session: Session = Depends(get_session)):
         plant = session.get(Plant, rule.plant_id)
         if plant is None or plant.status != "active":
             continue
+
+        # Effective assignment: plant.assigned_to, else location.assigned_to.
+        location = session.get(Location, plant.location_id) if plant.location_id else None
+        plant_assigned = plant.assigned_to or (location.assigned_to if location else None)
+
+        # Apply assignment filter.
+        if effective_assigned_to == "__MINE__":
+            if plant_assigned is not None and plant_assigned != user:
+                continue
+        elif effective_assigned_to is not None and plant_assigned != effective_assigned_to:
+            continue
+
         next_due = rule.next_due_at
         if next_due:
             try:
@@ -544,7 +680,7 @@ def today(request: Request, session: Session = Depends(get_session)):
         if due_dt > now:
             continue
         species = seed.get(plant.species_ref) if seed.present else None
-        location = session.get(Location, plant.location_id) if plant.location_id else None
+        # Location already fetched above for assignment inheritance.
 
         # Build the species-specific care cue.
         cue_parts = []
@@ -593,6 +729,7 @@ def today(request: Request, session: Session = Depends(get_session)):
                 "has_drainage": plant.has_drainage,
                 "placement_warning": placement,
                 "calibration_factor": rule.calibration_factor,
+                "assigned_to": plant_assigned,
             }
         )
 
@@ -608,6 +745,142 @@ def today(request: Request, session: Session = Depends(get_session)):
         "overdue_count": sum(1 for t in due_tasks if t["overdue"]),
         "by_room": by_room,
         "all": due_tasks,
+    }
+
+
+# --------------------------------------------------------------------------- streaks
+
+
+@app.get("/streaks")
+def get_streaks(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Care streaks derived from care_logs: current streak (consecutive days
+    with at least one care log) and longest streak per user, plus earned
+    garden achievements and points."""
+    user = _user(request)
+    now = datetime.now(UTC).date()
+
+    # All care logs for this user, ordered by date.
+    logs = session.exec(
+        select(CareLog)
+        .where(CareLog.performed_by == user)
+        .order_by(CareLog.created_at.desc())
+    ).all()
+
+    # Extract distinct dates with at least one log.
+    logged_dates: set = set()
+    for log in logs:
+        try:
+            d = datetime.fromisoformat(log.created_at).date()
+            logged_dates.add(d)
+        except (ValueError, TypeError):
+            continue
+
+    if not logged_dates:
+        streaks = {
+            "user_id": user,
+            "current_streak": 0,
+            "longest_streak": 0,
+            "total_logs": 0,
+        }
+    else:
+        # Current streak: count backwards from today.
+        current_streak = 0
+        d = now
+        while d in logged_dates:
+            current_streak += 1
+            d -= timedelta(days=1)
+
+        # Longest streak: find max consecutive run.
+        sorted_dates = sorted(logged_dates, reverse=True)
+        longest_streak = 1
+        run = 1
+        for i in range(1, len(sorted_dates)):
+            if sorted_dates[i - 1] - sorted_dates[i] == timedelta(days=1):
+                run += 1
+                longest_streak = max(longest_streak, run)
+            else:
+                run = 1
+
+        streaks = {
+            "user_id": user,
+            "current_streak": current_streak,
+            "longest_streak": longest_streak,
+            "total_logs": len(logs),
+        }
+
+    # Count active plants for this user.
+    plants_total = len(
+        session.exec(select(Plant).where(Plant.status == "active")).all()
+    )
+
+    # Evaluate garden achievements.
+    ach = evaluate_achievements(
+        session,
+        user,
+        plants_total=plants_total,
+        harvests_total=0,  # Phase 4: harvest logs
+        snoozes_total=len(
+            session.exec(select(CareLog).where(CareLog.performed_by == user, CareLog.action == "snooze")).all()
+        ),
+        room_water_total=len(
+            session.exec(select(CareLog).where(CareLog.performed_by == user, CareLog.notes.like("%batch water room%"))).all()
+        ),
+        pantry_batches_total=0,  # Phase 6: pantry
+    )
+
+    return {**streaks, **ach}
+
+
+# --------------------------------------------------------------------------- notices (quiet morning digest test)
+
+
+@app.post("/notices/test")
+async def test_notice(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Send a test morning digest to the calling user (parent/admin only).
+
+    Dispatches a real notice via Telemetry. Test digests omit the ``once``
+    key so they never suppress that day's real morning digest.
+    """
+    _require_parent_or_admin(request)
+    user = _user(request)
+    # Build a minimal digest: just the caller's due tasks.
+    from services.garden.notices import collect_due_tasks, build_digest
+    tasks = collect_due_tasks(session, user)
+    digest = build_digest(user, tasks)
+    if digest is None:
+        payload = notify.notice(
+            user=user,
+            category="garden",
+            title="Garden Morning Digest (test)",
+            body=f"{user}, everything is caught up — no plants need care today.",
+            kind="garden_digest_test",
+        )
+    else:
+        payload = notify.notice(
+            user=user,
+            category="garden",
+            title=digest["title"],
+            body=digest["body"],
+            actions=digest["actions"],
+            kind="garden_digest_test",
+        )
+    # Dispatch via Telemetry (actually await it — no fire-and-forget).
+    try:
+        from services.common import notify as _notify
+        await _notify.send(payload)
+    except Exception as e:
+        return {"ok": False, "user_id": user, "error": str(e)}
+    return {
+        "ok": True,
+        "user_id": user,
+        "dispatched": True,
+        "payload": payload,
     }
 
 
@@ -642,6 +915,8 @@ def log_care(
         sensor_snapshot_json=json.dumps(body.sensor_snapshot) if body.sensor_snapshot else None,
     )
     session.add(log_row)
+    # Mirror to Skylight if the plant has opt-in sync enabled.
+    mirror_care_log(session, plant_id=plant_id, action=body.action, performed_by=log_row.performed_by)
 
     # Advance the matching care rule's next_due_at using compute_interval.
     rule = session.exec(

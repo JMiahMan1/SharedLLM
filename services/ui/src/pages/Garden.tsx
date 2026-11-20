@@ -1,23 +1,35 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Plus, Sun, Droplets, Leaf, X, ChevronRight,
-  ShieldAlert, RotateCw, Flower,
+  ShieldAlert, RotateCw, Flower, User, Zap, Settings,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation } from '../types/api';
+
 /* ========================= Garden Page ========================= */
 
 export default function Garden() {
+  const { user } = useAuth();
+  const isParent = Boolean(user?.is_admin || user?.family_role === 'mother' || user?.family_role === 'father');
   const [tab, setTab] = useState<'today' | 'plants'>('today');
+  const [mineOnly, setMineOnly] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [digestOpen, setDigestOpen] = useState(false);
 
   const todayQuery = useQuery({
-    queryKey: ['garden-today'],
+    queryKey: ['garden-today', mineOnly ? 'mine' : 'all'],
     queryFn: () => api.gardenToday(),
     staleTime: 60_000,
+  });
+
+  const profileQuery = useQuery({
+    queryKey: ['garden-profile'],
+    queryFn: () => api.gardenGetProfile(),
+    staleTime: 300_000,
   });
 
   const plantsQuery = useQuery({
@@ -32,21 +44,35 @@ export default function Garden() {
     staleTime: 300_000,
   });
 
+  const streaksQuery = useQuery({
+    queryKey: ['garden-streaks'],
+    queryFn: () => api.gardenStreaks(),
+    staleTime: 300_000,
+  });
+
   const today = todayQuery.data;
   const plants = plantsQuery.data ?? [];
   const locations = locationsQuery.data ?? [];
+  const streaks = streaksQuery.data;
+  const streak = streaks?.current_streak ?? 0;
 
   return (
     <div className="flex flex-col h-full w-full bg-slate-950 text-slate-200">
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
+          <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-white">Garden</h1>
-            <p className="text-slate-400 text-sm">
-              {plants.length} plant{plants.length !== 1 ? 's' : ''} · {today?.due_count ?? 0} due today
-            </p>
+            {streak > 0 && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
+                <Zap size={12} className="text-amber-400" />
+                <span className="text-xs font-semibold text-amber-300">{streak}-day streak</span>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <p className="text-slate-400 text-sm">
+            {plants.length} plant{plants.length !== 1 ? 's' : ''} · {today?.due_count ?? 0} due today
+          </p>
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => setTab('today')}
@@ -58,6 +84,30 @@ export default function Garden() {
             >
               <Sun size={16} className="mr-2" /> Today
             </button>
+            <div className="flex items-center gap-1 border border-white/10 rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setMineOnly(false)}
+                className={`px-3 py-1.5 text-xs font-medium transition-all ${
+                  !mineOnly
+                    ? 'bg-purple-600/30 text-white'
+                    : 'text-slate-300 hover:bg-white/10'
+                }`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setMineOnly(true)}
+                className={`px-3 py-1.5 text-xs font-medium transition-all ${
+                  mineOnly
+                    ? 'bg-purple-600/30 text-white'
+                    : 'text-slate-300 hover:bg-white/10'
+                }`}
+              >
+                Mine
+              </button>
+            </div>
             <button
               type="button"
               onClick={() => setTab('plants')}
@@ -73,9 +123,9 @@ export default function Garden() {
         </div>
 
         {tab === 'today' ? (
-          <TodayTab today={today} locations={locations} />
+          <TodayTab today={today} locations={locations} mineOnly={mineOnly} currentUser={user?.username ?? ''} />
         ) : (
-          <PlantsTab plants={plants} locations={locations} />
+          <PlantsTab plants={plants} locations={locations} mineOnly={mineOnly} setMineOnly={setMineOnly} currentUser={user?.username ?? ''} />
         )}
 
         <div className="mt-6 flex justify-end">
@@ -86,6 +136,15 @@ export default function Garden() {
           >
             <Plus size={16} /> Add Plant
           </button>
+          {isParent && (
+            <button
+              type="button"
+              onClick={() => setDigestOpen(true)}
+              className="ml-3 flex items-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 text-slate-300 rounded-xl text-sm font-medium transition-colors border border-white/10"
+            >
+              <Settings size={16} className="mr-2" /> Digest Settings
+            </button>
+          )}
         </div>
 
         <AddPlantModal
@@ -93,6 +152,13 @@ export default function Garden() {
           onClose={() => setAddOpen(false)}
           locations={locations}
         />
+        {isParent && (
+          <DigestSettingsModal
+            open={digestOpen}
+            onClose={() => setDigestOpen(false)}
+            initialDigestTime={profileQuery.data?.daily_digest_time ?? ''}
+          />
+        )}
       </div>
     </div>
   );
@@ -103,9 +169,13 @@ export default function Garden() {
 function TodayTab({
   today,
   locations,
+  mineOnly,
+  currentUser,
 }: {
   today: GardenTodaySummary | undefined;
   locations: GardenLocation[];
+  mineOnly: boolean;
+  currentUser: string;
 }) {
   const queryClient = useQueryClient();
 
@@ -164,6 +234,11 @@ function TodayTab({
               {task.toxicity_level}
             </span>
           )}
+          {task.assigned_to && (
+            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20">
+              {task.assigned_to}
+            </span>
+          )}
         </div>
         {task.overdue ? (
           <div className="text-xs text-red-400 font-medium mb-1">Overdue · {task.next_due_at}</div>
@@ -193,6 +268,14 @@ function TodayTab({
   const byRoom = today.by_room ?? {};
   const roomEntries = Object.entries(byRoom);
 
+  // Apply mineOnly filter to room entries: show plants assigned to current user or unassigned.
+  const filteredEntries = mineOnly
+    ? roomEntries.map(([roomName, tasks]) => [
+        roomName,
+        (tasks as GardenTodayTask[]).filter((t) => t.assigned_to === currentUser || !t.assigned_to),
+      ] as [string, GardenTodayTask[]])
+    : roomEntries.map(([name, tasks]) => [name, tasks as GardenTodayTask[]] as [string, GardenTodayTask[]]);
+
   return (
     <div className="space-y-6">
       {today.due_count === 0 ? (
@@ -203,8 +286,8 @@ function TodayTab({
         </div>
       ) : (
         <>
-          {roomEntries.map(([roomName, tasks]) => {
-            const roomTasks = tasks as GardenTodayTask[];
+          {filteredEntries.map(([roomName, tasks]) => {
+            if (tasks.length === 0) return null;
             const room = locations.find((l) => l.name === roomName);
             return (
               <section key={roomName} className="mb-6">
@@ -215,7 +298,7 @@ function TodayTab({
                       {roomName}
                     </h2>
                     <span className={`ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400`}>
-                      {roomTasks.length}
+                      {tasks.length}
                     </span>
                   </div>
                   {room?.id && (
@@ -228,7 +311,7 @@ function TodayTab({
                     </button>
                   )}
                 </div>
-                <div className="space-y-0">{roomTasks.map(renderTask)}</div>
+                <div className="space-y-0">{tasks.map(renderTask)}</div>
               </section>
             );
           })}
@@ -240,14 +323,15 @@ function TodayTab({
 
 /* ========================= Plants Tab ========================= */
 
-function PlantsTab({ plants, locations }: { plants: GardenPlant[]; locations: GardenLocation[] }) {
+function PlantsTab({ plants, locations, mineOnly, setMineOnly, currentUser }: { plants: GardenPlant[]; locations: GardenLocation[]; mineOnly: boolean; setMineOnly: (v: boolean) => void; currentUser: string }) {
   const [filter, setFilter] = useState<'all' | 'houseplant' | 'herb' | 'outdoor'>('all');
 
   const locationMap = new Map(locations.map((l) => [l.id, l.name]));
 
   const FILTERS: Array<'all' | 'houseplant' | 'herb' | 'outdoor'> = ['all', 'houseplant', 'herb', 'outdoor'];
 
-  const filtered = plants.filter((p) => {
+  let filtered = plants.filter((p) => {
+    if (mineOnly && p.assigned_to !== currentUser && p.assigned_to != null && p.assigned_to !== '') return false;
     if (filter === 'outdoor') return ['vegetable', 'fruit', 'flower'].includes(p.category);
     if (filter !== 'all' && p.category !== filter) return false;
     return true;
@@ -270,6 +354,18 @@ function PlantsTab({ plants, locations }: { plants: GardenPlant[]; locations: Ga
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setMineOnly(!mineOnly)}
+          className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+            mineOnly
+              ? 'bg-purple-600 text-white'
+              : 'bg-white/5 text-slate-300 hover:bg-white/10'
+          }`}
+        >
+          <User size={14} className="mr-1.5" />
+          {mineOnly ? 'Mine' : 'All'}
+        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -291,6 +387,18 @@ function PlantsTab({ plants, locations }: { plants: GardenPlant[]; locations: Ga
 
 function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: string | undefined }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const assignMutation = useMutation({
+    mutationFn: (body: { assigned_to: string | null; skylight_sync_enabled: boolean }) =>
+      api.gardenAssignPlant(plant.id, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
+      queryClient.invalidateQueries({ queryKey: ['garden-today'] });
+      toast.success('Assignment updated');
+    },
+    onError: () => toast.error('Failed to update assignment'),
+  });
 
   const getStatusColor = () => {
     switch (plant.status) {
@@ -303,7 +411,12 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
 
   return (
     <div
-      onClick={() => navigate(`/garden/plants/${plant.id}`)}
+      onClick={(e) => {
+        // Don't navigate if the click came from the Skylight checkbox.
+        if (!(e.target as HTMLElement).closest('input[type="checkbox"]')) {
+          navigate(`/garden/plants/${plant.id}`);
+        }
+      }}
       className="group bg-white/5 border border-white/10 rounded-xl p-4 hover:border-purple-500/50 hover:bg-white/10 transition-colors cursor-pointer pointer-coarse:min-h-[140px]"
     >
       <div className="flex items-start justify-between mb-3">
@@ -320,6 +433,29 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
         <span>{locationName || 'Unplaced'}</span>
         <span>{plant.category}</span>
       </div>
+      {plant.assigned_to && (
+        <div className="flex items-center gap-2 text-xs text-slate-400 mb-3">
+          <User size={12} />
+          <span>Assigned: {plant.assigned_to}</span>
+        </div>
+      )}
+      <div className="flex items-center gap-2 text-xs mt-3 pt-3 border-t border-white/5">
+        <label className="text-slate-500 flex items-center gap-1 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={plant.skylight_sync_enabled}
+            onChange={(e) => {
+              e.stopPropagation();
+              assignMutation.mutate({
+                assigned_to: plant.assigned_to ?? null,
+                skylight_sync_enabled: e.target.checked,
+              });
+            }}
+            className="rounded bg-slate-800 border-slate-600 text-purple-600 focus:ring-purple-500"
+          />
+          <span>Skylight sync</span>
+        </label>
+      </div>
       <div className="flex items-center gap-2 pt-3 border-t border-white/5">
         <Droplets size={14} className="text-slate-400" />
         <span className="text-sm text-slate-300">Next care due</span>
@@ -332,13 +468,14 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
 
 export function PlantDetail() {
   const { id } = useParams();
+  const { user } = useAuth();
+  const isParent = Boolean(user?.is_admin || user?.family_role === 'mother' || user?.family_role === 'father');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const plantQuery = useQuery({
     queryKey: ['garden-plant', id],
     queryFn: () => {
-      // Not implemented as a separate endpoint; derive from list
       return api.gardenListPlants().then((plants) => plants.find((p) => p.id === id));
     },
     enabled: !!id,
@@ -438,6 +575,58 @@ export function PlantDetail() {
         </div>
       </div>
 
+      {isParent && (
+        <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Assignment</h3>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <label className="text-xs text-slate-400 w-24">Assigned to</label>
+              <select
+                value={plant.assigned_to || ''}
+                onChange={(e) => {
+                  api.gardenAssignPlant(plant.id, {
+                    assigned_to: e.target.value || null,
+                    skylight_sync_enabled: plant.skylight_sync_enabled,
+                  }).then(() => {
+                    queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
+                    queryClient.invalidateQueries({ queryKey: ['garden-today'] });
+                    toast.success('Assignment updated');
+                  }).catch(() => toast.error('Failed to update assignment'));
+                }}
+                className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="">Unassigned</option>
+                <option value="mother">Mother</option>
+                <option value="father">Father</option>
+                <option value="adult_child">Adult Child</option>
+                <option value="teen">Teen</option>
+                <option value="child">Child</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={plant.skylight_sync_enabled}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    api.gardenAssignPlant(plant.id, {
+                      assigned_to: plant.assigned_to ?? null,
+                      skylight_sync_enabled: e.target.checked,
+                    }).then(() => {
+                      queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
+                      toast.success('Skylight sync updated');
+                    }).catch(() => toast.error('Failed to update Skylight sync'));
+                  }}
+                  className="rounded bg-slate-800 border-slate-600 text-purple-600 focus:ring-purple-500"
+                />
+                <span>Opt-in Skylight chore mirror</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white/5 border border-white/10 rounded-xl p-4">
         <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Quick Care</h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -477,6 +666,116 @@ export function PlantDetail() {
               </div>
             ))
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ========================= Digest Settings Modal (parent+ only) ========================= */
+
+function DigestSettingsModal({
+  open,
+  onClose,
+  initialDigestTime,
+}: {
+  open: boolean;
+  onClose: () => void;
+  initialDigestTime: string;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [digestTime, setDigestTime] = useState(initialDigestTime);
+
+  useEffect(() => {
+    setDigestTime(initialDigestTime);
+  }, [initialDigestTime]);
+
+  const saveMutation = useMutation({
+    mutationFn: async (time: string) => {
+      await api.gardenUpdateProfile({ daily_digest_time: time });
+    },
+    onSuccess: () => {
+      setSaving(false);
+      toast.success('Digest time saved');
+    },
+    onError: () => {
+      setSaving(false);
+      toast.error('Failed to save digest time');
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: async () => {
+      await api.gardenNoticesTest({});
+    },
+    onSuccess: () => {
+      setSaving(false);
+      toast.success('Test digest sent');
+    },
+    onError: () => {
+      setSaving(false);
+      toast.error('Failed to send test digest');
+    },
+  });
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white/10 border border-white/20 rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold text-white">Digest Settings</h2>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Morning digest time</label>
+            <input
+              type="time"
+              value={digestTime}
+              onChange={(e) => setDigestTime(e.target.value)}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-white/10">
+            <button
+              type="button"
+              onClick={() => {
+                setSaving(true);
+                testMutation.mutate();
+              }}
+              disabled={saving}
+              className="w-full px-4 py-2.5 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50"
+            >
+              {saving ? 'Sending…' : 'Send test digest'}
+            </button>
+          </div>
+
+          <div className="mt-4 flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 disabled:opacity-50"
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSaving(true);
+                saveMutation.mutate(digestTime);
+              }}
+              disabled={saving || !digestTime}
+              className="flex-1 px-4 py-2.5 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

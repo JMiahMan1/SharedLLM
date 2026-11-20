@@ -121,6 +121,19 @@ def calls(monkeypatch):
                     status_code=200,
                     media_type="application/json",
                 )
+        # Phase 2 routes.
+        if path == "/locations/loc-1/assign" and method == "PATCH":
+            return {"id": "loc-1", "name": "Living Room", "kind": "indoor_room", "assigned_to": "child", "skylight_sync_enabled": True}
+        if path == "/plants/plant-1/assign" and method == "PATCH":
+            return {"id": "plant-1", "nickname": "Monty", "assigned_to": "child", "skylight_sync_enabled": True}
+        if path == "/streaks" and method == "GET":
+            return {"user_id": "child", "current_streak": 3, "longest_streak": 7, "total_logs": 12}
+        if path == "/notices/test" and method == "POST":
+            return {"ok": True, "digest": {"member": "mother", "due_count": 2, "overdue_count": 1, "rooms": {}}}
+        if path == "/plants/plant-1/care" and method == "POST":
+            return {"ok": True, "action": "water", "plant_id": "plant-1", "logged_by": "mother"}
+        if path == "/plants/plant-1/snooze" and method == "POST":
+            return {"ok": True, "plant_id": "plant-1", "still_damp": True, "postpone_days": 2, "calibration_factor": 1.1, "next_due_at": "2026-11-21T10:00:00Z"}
         raise AssertionError(f"Unexpected path: {path} {method}")
 
     monkeypatch.setattr(gateway_main, "_acting_identity", acting_identity)
@@ -330,3 +343,122 @@ def test_garden_rejects_spoofed_admin_header(client, calls):
 def test_garden_requires_authentication(client, calls):
     resp = client.get("/api/garden/plants")
     assert resp.status_code == 401
+
+
+# --------------------------------------------------------------------------- Phase 2 routes
+
+
+def test_garden_assign_location(client, calls):
+    resp = client.patch(
+        "/api/garden/locations/loc-1/assign",
+        headers=ADMIN_HEADERS,
+        json={"assigned_to": "child", "skylight_sync_enabled": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["assigned_to"] == "child"
+    assert resp.json()["skylight_sync_enabled"] is True
+    assert any(
+        m == "PATCH" and p == "/locations/loc-1/assign"
+        for m, p, _, _, _ in calls
+    )
+
+
+def test_garden_assign_plant(client, calls):
+    resp = client.patch(
+        "/api/garden/plants/plant-1/assign",
+        headers=ADMIN_HEADERS,
+        json={"assigned_to": "child", "skylight_sync_enabled": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["assigned_to"] == "child"
+    assert any(
+        m == "PATCH" and p == "/plants/plant-1/assign"
+        for m, p, _, _, _ in calls
+    )
+
+
+def test_garden_streaks(client, calls):
+    resp = client.get("/api/garden/streaks", headers=KID_HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["user_id"] == "child"
+    assert data["current_streak"] == 3
+    assert data["longest_streak"] == 7
+    assert data["total_logs"] == 12
+
+
+def test_garden_notices_test(client, calls):
+    resp = client.post(
+        "/api/garden/notices/test",
+        headers=ADMIN_HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["digest"]["member"] == "mother"
+    assert any(
+        m == "POST" and p == "/notices/test"
+        for m, p, _, _, _ in calls
+    )
+
+
+# --------------------------------------------------------------------------- garden_done / garden_snooze push callback proxy
+
+
+def test_garden_done_proxy(client, calls):
+    """garden_done proxies plant care logging with plant_id in params."""
+    resp = client.post(
+        "/api/garden/plants/plant-1/care",
+        headers=ADMIN_HEADERS,
+        json={"action": "water"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert any(
+        m == "POST" and p == "/plants/plant-1/care"
+        for m, p, _, _, _ in calls
+    )
+
+
+def test_garden_snooze_proxy(client, calls):
+    """garden_snooze proxies plant snooze with query params."""
+    resp = client.post(
+        "/api/garden/plants/plant-1/snooze",
+        headers=ADMIN_HEADERS,
+        params={"still_damp": "true", "postpone_days": 2},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["still_damp"] is True
+    assert any(
+        m == "POST" and p == "/plants/plant-1/snooze"
+        for m, p, _, _, _ in calls
+    )
+
+
+# --------------------------------------------------------------------------- spoofed header rejection for garden callbacks
+
+
+def test_garden_callback_rejects_spoofed_admin(client, calls):
+    """A kid with a spoofed X-Is-Admin header is not treated as admin for
+    garden callbacks — identity comes from Bearer token only."""
+    resp = client.post(
+        "/api/garden/plants/plant-1/care",
+        headers={
+            "Authorization": "Bearer kid-key",
+            "X-Is-Admin": "true",  # spoofed
+            "X-User-Id": "mother",  # spoofed
+        },
+        json={"action": "water"},
+    )
+    assert resp.status_code == 200
+    # Forwarded headers must reflect kid identity, not spoofed admin.
+    assert any(
+        h.get("X-User-Id") == "child" and h.get("X-User-Role") == "child"
+        for _, _, _, _, h in calls
+        if h
+    )
+    assert not any(
+        h.get("X-Is-Admin") == "true"
+        for _, _, _, _, h in calls
+        if h
+    )

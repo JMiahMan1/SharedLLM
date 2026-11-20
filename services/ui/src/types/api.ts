@@ -4886,8 +4886,32 @@ export interface GardenLocation {
   rotation_deg: number | null;
   light_notes: string | null;
   draft_notes: string | null;
+  assigned_to: string | null;
+  skylight_sync_enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface GardenStreaks {
+  user_id: string;
+  current_streak: number;
+  longest_streak: number;
+  total_logs: number;
+}
+
+export interface GardenAssignBody {
+  assigned_to: string | null;
+  skylight_sync_enabled: boolean | null;
+}
+
+export interface GardenNoticeTest {
+  ok: boolean;
+  digest: {
+    member: string;
+    due_count: number;
+    overdue_count: number;
+    rooms: Record<string, { count: number; tasks: GardenTodayTask[] }>;
+  } | null;
 }
 
 export interface GardenProfile {
@@ -4913,6 +4937,7 @@ export interface GardenTodayTask {
   category: string;
   location_name: string | null;
   location_id: string | null;
+  assigned_to: string | null;
   action: string;
   next_due_at: string | null;
   overdue: boolean;

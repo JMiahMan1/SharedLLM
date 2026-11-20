@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "kind": "jarvis.achievements",
+  "domain": "garden",
+  "achievements": [
+    { "id": "first_plant", "name": "First Plant", "description": "Add your first houseplant", "points": 5, "rule": { "type": "plants_total", "value": 1 } },
+    { "id": "plants_5", "name": "Urban Jungle", "description": "Care for 5 plants", "points": 10, "rule": { "type": "plants_total", "value": 5 } },
+    { "id": "plants_10", "name": "Plant Parent", "description": "Care for 10 plants", "points": 20, "rule": { "type": "plants_total", "value": 10 } },
+    { "id": "water_streak_3", "name": "Three in a Row", "description": "Water plants 3 days running", "points": 8, "rule": { "type": "water_streak", "value": 3 } },
+    { "id": "water_streak_7", "name": "Week of Watering", "description": "Water plants 7 days running", "points": 15, "rule": { "type": "water_streak", "value": 7 } },
+    { "id": "water_streak_30", "name": "Green Thumb", "description": "Water plants 30 days running", "points": 50, "rule": { "type": "water_streak", "value": 30 } },
+    { "id": "first_harvest", "name": "First Harvest", "description": "Log your first harvest", "points": 10, "rule": { "type": "harvests_total", "value": 1 } },
+    { "id": "still_damp_5", "name": "Observant", "description": "Tap 'Still damp' 5 times", "points": 5, "rule": { "type": "snoozes_total", "value": 5 } },
+    { "id": "room_watered", "name": "Room Care", "description": "Water an entire room at once", "points": 8, "rule": { "type": "room_water_total", "value": 1 } },
+    { "id": "master_preserver", "name": "Master Preserver", "description": "Put up 10 preservation batches", "points": 25, "rule": { "type": "pantry_batches_total", "value": 10 } }
+  ]
+}

@@ -5,6 +5,7 @@ import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApp
 import type {
   GardenPlant, GardenSpecies, GardenLocation, GardenProfile,
   GardenTodaySummary, GardenCareLog, GardenCareRule,
+  GardenAssignBody, GardenStreaks, GardenNoticeTest,
 } from '../types/api';
 import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
@@ -2755,6 +2756,26 @@ export const api = {
 
   async gardenListCareRules(plantId: string): Promise<{ plant_id: string; rules: GardenCareRule[] }> {
     const resp = await apiClient.get(`/api/garden/plants/${encodeURIComponent(plantId)}/care-rules`);
+    return resp.data;
+  },
+
+  async gardenAssignLocation(id: string, body: GardenAssignBody): Promise<GardenLocation> {
+    const resp = await apiClient.patch(`/api/garden/locations/${encodeURIComponent(id)}/assign`, body);
+    return resp.data;
+  },
+
+  async gardenAssignPlant(id: string, body: GardenAssignBody): Promise<GardenPlant> {
+    const resp = await apiClient.patch(`/api/garden/plants/${encodeURIComponent(id)}/assign`, body);
+    return resp.data;
+  },
+
+  async gardenStreaks(): Promise<GardenStreaks> {
+    const resp = await apiClient.get('/api/garden/streaks');
+    return resp.data;
+  },
+
+  async gardenNoticesTest(body: {} = {}): Promise<GardenNoticeTest> {
+    const resp = await apiClient.post('/api/garden/notices/test', body);
     return resp.data;
   },
 

@@ -24,6 +24,12 @@ ADMINS = "@admins"
 #: System notices: delivered to admins only (main.deliver_notice).
 ADMIN_CATEGORY = "admin"
 DEFAULT_CATEGORY = "general"
+#: Known categories: used for preference defaults and UI switches.
+KNOWN_CATEGORIES = frozenset({
+    "admin", "app_updates", "bible", "calendar", "chat", "call",
+    "family_presence", "family_safety", "garden", "health", "home",
+    "jobs", "leave_by", "raven", "reports", "timers", "weather",
+})
 ACTION_TYPES = ("view", "callback", "reply")
 MAX_ACTIONS = 3
 #: Who a notice may reach: everyone, or parents only (never a minor).

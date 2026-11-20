@@ -34,6 +34,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
     label: 'Weather',
     description: 'Rain, snow, freezes, heat and wind your household asked to hear about.',
   },
+  { id: 'garden', label: 'Garden', description: 'Morning digest of plants needing watering and care.' },
   { id: 'reports', label: 'Reports', description: 'When a scheduled report is ready.' },
   { id: 'jobs', label: 'Finished jobs', description: 'Songs, pictures and audiobooks that are ready.' },
   { id: 'raven', label: 'Raven missions', description: 'Missions that finished or need your approval.' },

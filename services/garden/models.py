@@ -87,6 +87,7 @@ class Plant(SQLModel, table=True):
     status: str = Field(default="active")  # active | archived | dormant
     assigned_to: str | None = Field(default=None)
     skylight_sync_enabled: bool = Field(default=False)
+    skylight_chore_id: str | None = Field(default=None, max_length=128)
     notes: str | None = Field(default=None, max_length=2000)
     calibration_factor: float = Field(default=1.0)  # self-calibrating snooze adjustment
     created_at: str = Field(default_factory=utcnow)
@@ -129,13 +130,14 @@ class CareLog(SQLModel, table=True):
 
 
 class CareRuleIn(SQLModel):
-    """Create/update request for a care rule."""
+    """Create/update request for a care rule. All fields optional for PATCH."""
 
-    plant_id: str
-    action: str
+    plant_id: str | None = None
+    action: str | None = None
     interval_days: float | None = None
     winter_multiplier: float | None = None
-    rain_skip_enabled: bool = False
+    rain_skip_enabled: bool | None = None
+    paused: bool | None = None
 
 
 class CareLogIn(SQLModel):
@@ -164,6 +166,8 @@ class PlantIn(SQLModel):
     window_direction: str | None = None
     distance_from_window: float | None = None
     planted_date: str | None = None
+    assigned_to: str | None = None
+    skylight_sync_enabled: bool | None = None
 
 
 class LocationIn(SQLModel):
@@ -184,6 +188,7 @@ class LocationIn(SQLModel):
     draft_notes: str | None = None
     assigned_to: str | None = None
     skylight_sync_enabled: bool | None = None
+    skylight_chore_id: str | None = None
 
 
 class GardenProfileIn(SQLModel):
@@ -222,6 +227,7 @@ class PlantOut(SQLModel):
     status: str
     assigned_to: str | None
     skylight_sync_enabled: bool
+    skylight_chore_id: str | None
     notes: str | None
     calibration_factor: float
     created_at: str
