@@ -236,3 +236,34 @@ def test_logging_care_here_still_mirrors_to_skylight(client, monkeypatch):
 
     assert resp.status_code == 200, resp.text
     assert len(mirrored) == 1
+
+
+# --------------------------------------------------------------------------- creating a plant for someone
+
+def test_a_parent_may_add_a_plant_for_another_adult(client):
+    resp = client.post("/plants", headers=PARENT, json={
+        "category": "houseplant", "species_ref": "monstera_deliciosa", "assigned_to": "gracie",
+    })
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["assigned_to"] == "gracie"
+
+
+def test_an_adult_may_add_a_plant_only_for_themselves(client):
+    mine = client.post("/plants", headers=ADULT, json={
+        "category": "houseplant", "species_ref": "monstera_deliciosa", "assigned_to": "kaleb",
+    })
+    assert mine.status_code == 201, mine.text
+
+    theirs = client.post("/plants", headers=ADULT, json={
+        "category": "houseplant", "species_ref": "monstera_deliciosa", "assigned_to": "noah",
+    })
+    assert theirs.status_code == 403
+    assert "parents and admins" in theirs.json()["detail"]
+
+
+def test_a_child_cannot_add_a_plant(client):
+    resp = client.post("/plants", headers=CHILD, json={
+        "category": "houseplant", "species_ref": "monstera_deliciosa",
+    })
+    assert resp.status_code == 403

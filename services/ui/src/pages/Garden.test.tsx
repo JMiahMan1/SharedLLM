@@ -1138,6 +1138,44 @@ describe('Garden rooms come from Home Hub', () => {
   });
 });
 
+describe('Adding a plant for another adult', () => {
+  let wrapper: ReturnType<typeof createWrapper>;
+
+  beforeEach(() => {
+    wrapper = createWrapper();
+    vi.mocked(api.gardenToday).mockResolvedValue({ date: '2026-11-19', due_count: 0, overdue_count: 0, by_room: {}, all: [] });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.gardenListSpecies).mockResolvedValue({
+      category: null, usda_zone: null, count: 1, seed_present: true,
+      results: [{
+        key: 'monstera_deliciosa', category: 'houseplant', common_name: 'Monstera',
+        scientific_name: 'Monstera deliciosa', description: 'Split-leaf philodendron',
+      } as GardenSpecies],
+    });
+    vi.mocked(api.getFamilyDirectory).mockResolvedValue([
+      { username: 'kaleb', display_name: 'Kaleb', nextcloud_user: null, avatar: null, family_role: 'adult_child' },
+    ] as never);
+    vi.mocked(api.gardenCreatePlant).mockResolvedValue({} as never);
+  });
+
+  it('lets a parent give the new plant to an adult, who then cares for it', async () => {
+    render(<Garden />, { wrapper });
+    fireEvent.click(screen.getByText('Plants'));
+    fireEvent.click(await screen.findByText('Add Plant'));
+    fireEvent.click(await screen.findByText('Monstera'));
+
+    const caregiver = await screen.findByLabelText('Caregiver');
+    fireEvent.change(caregiver, { target: { value: 'kaleb' } });
+    const dialog = screen.getByRole('dialog', { name: /add plant/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^add plant$/i }));
+
+    await waitFor(() => expect(vi.mocked(api.gardenCreatePlant)).toHaveBeenCalledWith(
+      expect.objectContaining({ assigned_to: 'kaleb', species_ref: 'monstera_deliciosa' }),
+    ));
+  });
+});
+
 describe('Garden plant detail (Skylight, edit, supplies)', () => {
   const bed: GardenLocation = {
     id: 'bed-1', name: 'North Bed', kind: 'raised_bed', source: 'garden', area_id: null,

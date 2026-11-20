@@ -970,7 +970,24 @@ def list_plants(request: Request, session: Session = Depends(get_session)):
 async def create_plant(
     body: PlantIn, request: Request, session: Session = Depends(get_session)
 ):
+    """Add a plant, optionally assigning it to a household member.
+
+    A parent/admin may hand the new plant to anyone (adding a plant *for* another
+    adult is the point of the picker). Any other adult may only take it
+    themselves -- the same rule as re-assigning an existing plant, so creating
+    one cannot be used to get around it.
+    """
     _require_admin_or_adult(request)
+    if body.assigned_to:
+        role = _role(request)
+        if not (_is_admin(request) or role in PARENT_ROLES):
+            me = _user(request)
+            if body.assigned_to.strip().lower() != me:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only parents and admins may assign a new plant to someone else.",
+                )
+            body.assigned_to = me
     seed = _seed()
     species = seed.get(body.species_ref) if seed.present else None
     if species is None:

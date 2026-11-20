@@ -1148,6 +1148,9 @@ export function PlantDetail() {
   const { id } = useParams();
   const { user } = useAuth();
   const canEdit = Boolean(user?.is_admin || ['mother', 'father', 'adult_child'].includes(user?.family_role ?? ''));
+  // Re-assigning care is a parent/admin decision (services/garden agrees); the
+  // adult looking after the plant can still log care and link its chore.
+  const canAssign = Boolean(user?.is_admin || ['mother', 'father'].includes(user?.family_role ?? ''));
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const family = useFamilyMembers();
@@ -1355,25 +1358,38 @@ export function PlantDetail() {
         </div>
       </div>
 
-      {canEdit && (
+      {(canEdit || plant.assigned_to) && (
         <div className="bg-white/5 border border-white/10 rounded-xl p-4">
           <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Care Assignment</h3>
-          <div className="flex flex-wrap items-center gap-3">
-            <label htmlFor="garden-assigned-to" className="text-xs text-slate-400 w-24">Assigned to</label>
-            <select
-              id="garden-assigned-to"
-              value={plant.assigned_to || ''}
-              onChange={(e) => assignMutation.mutate({ assigned_to: e.target.value || null })}
-              className="flex-1 min-w-[12rem] px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-            >
-              <option value="">Unassigned</option>
-              {family.map((member) => (
-                <option key={member.username} value={member.username}>
-                  {member.display_name}{member.family_role ? ` (${member.family_role})` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
+          {canAssign ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <label htmlFor="garden-assigned-to" className="text-xs text-slate-400 w-24">Assigned to</label>
+              <select
+                id="garden-assigned-to"
+                value={plant.assigned_to || ''}
+                onChange={(e) => assignMutation.mutate({ assigned_to: e.target.value || null })}
+                className="flex-1 min-w-[12rem] px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="">Unassigned</option>
+                {family.map((member) => (
+                  <option key={member.username} value={member.username}>
+                    {member.display_name}{member.family_role ? ` (${member.family_role})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-300">
+              Cared for by{' '}
+              <span className="text-white font-medium">
+                {family.find((m) => m.username.toLowerCase() === (plant.assigned_to ?? '').toLowerCase())?.display_name
+                  ?? plant.assigned_to}
+              </span>
+              <span className="block text-xs text-slate-400 mt-1">
+                A parent or admin can change who looks after this plant.
+              </span>
+            </p>
+          )}
         </div>
       )}
 
@@ -1873,6 +1889,12 @@ function AddPlantModal({
   locations: GardenLocation[];
 }) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  // Only a parent/admin may hand a new plant to someone else (services/garden
+  // enforces it too); everyone else adds their own.
+  const canAssign = Boolean(user?.is_admin || ['mother', 'father'].includes(user?.family_role ?? ''));
+  const family = useFamilyMembers();
+  const [caregiver, setCaregiver] = useState('');
   const [query, setQuery] = useState('');
   const [speciesResults, setSpeciesResults] = useState<GardenSpecies[]>([]);
   const [selectedSpecies, setSelectedSpecies] = useState<GardenSpecies | null>(null);
@@ -2041,6 +2063,7 @@ function AddPlantModal({
         location_id: locationId || undefined,
         nickname: nickname || undefined,
       };
+      if (canAssign && caregiver) body.assigned_to = caregiver;
       if (potSize) body.pot_size_in = parseFloat(potSize);
       if (potMaterial) body.pot_material = potMaterial;
       if (windowDirection) body.window_direction = windowDirection;
@@ -2059,6 +2082,7 @@ function AddPlantModal({
       setSpeciesResults([]);
       setSelectedSpecies(null);
       setNickname('');
+      setCaregiver('');
       setLocationId('');
       setShowNewRoom(false);
       setShowTuning(false);
@@ -2260,6 +2284,28 @@ function AddPlantModal({
                   Suggest a name
                 </button>
               </div>
+
+              {canAssign && (
+                <div>
+                  <label htmlFor="garden-add-caregiver" className="block text-xs text-slate-400 mb-1">Caregiver</label>
+                  <select
+                    id="garden-add-caregiver"
+                    value={caregiver}
+                    onChange={(e) => setCaregiver(e.target.value)}
+                    className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">Unassigned</option>
+                    {family.map((member) => (
+                      <option key={member.username} value={member.username}>
+                        {member.display_name}{member.family_role ? ` (${member.family_role})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Adding a plant for another adult assigns them its care, and they can manage it from their own garden.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label htmlFor="garden-add-room" className="block text-xs text-slate-400 mb-1">Room</label>
