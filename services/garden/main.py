@@ -74,6 +74,7 @@ from services.garden.models import (
     utcnow,
 )
 from services.garden.achievements import evaluate as evaluate_achievements
+from services.garden import hub_rooms as rooms_hub
 from services.garden.notices import collect_due_tasks, build_digest, digest_loop, send_digest_to_member
 from services.garden.skylight_sync import mirror_care_log
 from services.garden.species_lookup import (
@@ -541,20 +542,100 @@ def put_profile(
 
 
 # --------------------------------------------------------------------------- locations
+#
+# Indoor rooms are Home Hub's areas (``services/garden/hub_rooms.py``): the hub's
+# area registry is the house's only list of rooms, so a room added from the
+# Garden page is added there and the Garden keeps no rooms of its own. What the
+# Garden does own are the outdoor places the hub knows nothing about -- raised
+# beds, herb stations, greenhouses.
+
+
+async def _place(session: Session, loc_id: str | None):
+    """A location id as a place: Garden's own row, else a Home Hub room.
+
+    Plants store whichever id they were given. A room is a hub area, so a plant
+    in the living room holds the area id and has no local row; the care paths
+    still need its name and to know that rain does not reach it.
+    """
+    if not loc_id:
+        return None
+    row = session.get(Location, loc_id)
+    if row is not None:
+        return row
+    area = await rooms_hub.room(loc_id)
+    return rooms_hub.as_place(area) if area else None
+
+
+def _room_names(areas: list[dict] | None) -> dict[str, str]:
+    """``area_id -> name`` for the places a plant's ``location_id`` may hold."""
+    return {str(a["area_id"]): str(a["name"]) for a in areas or []}
+
+
+async def _adopt_garden_rooms(session: Session, areas: list[dict]) -> list[dict]:
+    """Move rooms the Garden made before the hub owned them into the hub.
+
+    Such a row is only a name. Each is matched to a hub area by name (or the
+    area is made), its plants are repointed at the area id, and the row is
+    dropped -- so the house is left with one list of rooms, not two. With no
+    leftover rows this costs one query; a hub that refuses leaves the row for
+    the next read rather than losing it.
+    """
+    legacy = [r for r in session.exec(select(Location)).all() if r.kind == "indoor_room"]
+    if not legacy:
+        return areas
+    by_name = {str(a["name"]).strip().lower(): a for a in areas}
+    for row in legacy:
+        area = by_name.get(row.name.strip().lower())
+        if area is None:
+            area = await rooms_hub.create_room(row.name)
+            if area is None:
+                continue
+            by_name[str(area["name"]).strip().lower()] = area
+            areas = [*areas, area]
+        for plant in session.exec(select(Plant).where(Plant.location_id == row.id)).all():
+            plant.location_id = str(area["area_id"])
+            plant.updated_at = utcnow()
+            session.add(plant)
+        session.delete(row)
+        session.commit()
+        log.info("[rooms] moved garden room %r into Home Hub as %s", row.name, area["area_id"])
+    return areas
 
 
 @app.get("/locations")
-def list_locations(request: Request, session: Session = Depends(get_session)):
+async def list_locations(request: Request, session: Session = Depends(get_session)):
+    """Every place a plant can sit: Home Hub's rooms, then the Garden's beds."""
     _user(request)
-    rows = session.exec(select(Location).order_by(Location.name)).all()
-    return [LocationOut.model_validate(r).model_dump() for r in rows]
+    areas = await rooms_hub.list_rooms()
+    if areas is not None:
+        areas = await _adopt_garden_rooms(session, areas)
+        rooms = [rooms_hub.room_view(a) for a in areas]
+        own_rows = session.exec(
+            select(Location).where(Location.kind != "indoor_room").order_by(Location.name)
+        ).all()
+    else:
+        # No hub configured, or it is away: the garden's own rows still answer,
+        # so the page works and every plant keeps the room name it was given.
+        rooms = []
+        own_rows = session.exec(select(Location).order_by(Location.name)).all()
+    places = rooms + [LocationOut.model_validate(r).model_dump() for r in own_rows]
+    return sorted(places, key=lambda place: place["name"].lower())
 
 
 @app.post("/locations", status_code=201)
-def create_location(
+async def create_location(
     body: LocationIn, request: Request, session: Session = Depends(get_session)
 ):
+    """Add a place. An indoor room is added to Home Hub, where rooms live."""
     _require_admin_or_adult(request)
+    if body.kind == "indoor_room" and rooms_hub.enabled():
+        area = await rooms_hub.create_room(body.name)
+        if area is None:
+            raise HTTPException(
+                status_code=502,
+                detail="Home Hub did not add the room. Try again from Devices > Rooms & places.",
+            )
+        return rooms_hub.room_view(area)
     row = Location(**body.model_dump(exclude_unset=True))
     session.add(row)
     session.commit()
@@ -563,12 +644,29 @@ def create_location(
 
 
 @app.patch("/locations/{loc_id}")
-def patch_location(
+async def patch_location(
     loc_id: str,
     body: LocationIn,
     request: Request,
     session: Session = Depends(get_session),
 ):
+    area = await rooms_hub.room(loc_id)
+    if area is not None:
+        # A room lives in Home Hub; a rename goes there, and Garden's own
+        # columns (assignments, Skylight) mean nothing to the hub.
+        _require_admin_or_adult(request)
+        fields_set = body.model_fields_set
+        if "assigned_to" in fields_set or "skylight_sync_enabled" in fields_set:
+            raise HTTPException(
+                status_code=400,
+                detail="Home Hub rooms carry no Garden assignment; assign the plants instead.",
+            )
+        if "name" not in fields_set or body.name == area["name"]:
+            return rooms_hub.room_view(area)
+        updated = await rooms_hub.update_room(loc_id, {"name": body.name})
+        if updated is None:
+            raise HTTPException(status_code=502, detail="Home Hub did not rename the room.")
+        return rooms_hub.room_view(updated)
     row = session.get(Location, loc_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Location not found")
@@ -586,10 +684,21 @@ def patch_location(
 
 
 @app.delete("/locations/{loc_id}", status_code=204)
-def delete_location(
+async def delete_location(
     loc_id: str, request: Request, session: Session = Depends(get_session)
 ):
     _require_admin_or_adult(request)
+    area = await rooms_hub.room(loc_id)
+    if area is not None:
+        plants = session.exec(select(Plant).where(Plant.location_id == loc_id)).all()
+        if plants:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot delete room: {len(plants)} plant(s) still in it. Move or archive them first.",
+            )
+        if not await rooms_hub.delete_room(loc_id):
+            raise HTTPException(status_code=502, detail="Home Hub did not remove the room.")
+        return JSONResponse(status_code=204, content=None)
     row = session.get(Location, loc_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Location not found")
@@ -614,7 +723,7 @@ class LocationAssignmentIn(SQLModel):
 
 
 @app.patch("/locations/{loc_id}/assign")
-def assign_location(
+async def assign_location(
     loc_id: str,
     body: LocationAssignmentIn,
     request: Request,
@@ -628,6 +737,11 @@ def assign_location(
     _require_parent_or_admin(request)
     row = session.get(Location, loc_id)
     if row is None:
+        if await rooms_hub.room(loc_id) is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Home Hub rooms carry no Garden assignment; assign the plants instead.",
+            )
         raise HTTPException(status_code=404, detail="Location not found")
     fields_set = body.model_fields_set
     if "assigned_to" in fields_set:
@@ -690,7 +804,7 @@ def list_plants(request: Request, session: Session = Depends(get_session)):
 
 
 @app.post("/plants", status_code=201)
-def create_plant(
+async def create_plant(
     body: PlantIn, request: Request, session: Session = Depends(get_session)
 ):
     _require_admin_or_adult(request)
@@ -707,7 +821,7 @@ def create_plant(
     rain_skip_enabled = False
     location = None
     if body.location_id:
-        location = session.get(Location, body.location_id)
+        location = await _place(session, body.location_id)
     if location and _is_outdoor_uncovered_location(location):
         rain_skip_enabled = True
 
@@ -844,7 +958,7 @@ async def today(
             continue
 
         # Effective assignment: plant.assigned_to, else location.assigned_to.
-        location = session.get(Location, plant.location_id) if plant.location_id else None
+        location = await _place(session, plant.location_id) if plant.location_id else None
         plant_assigned = plant.assigned_to or (location.assigned_to if location else None)
 
         # Apply assignment filter.
@@ -1123,7 +1237,7 @@ async def test_notice(
     # Build a minimal digest: just the caller's due tasks.
     from services.common import notify
     from services.garden.notices import collect_due_tasks, build_digest
-    tasks = collect_due_tasks(session, user)
+    tasks = collect_due_tasks(session, user, room_names=_room_names(await rooms_hub.list_rooms()))
     digest = build_digest(user, tasks)
     if digest is None:
         payload = notify.notice(
@@ -1288,15 +1402,15 @@ def snooze_plant(
 
 
 @app.post("/locations/{loc_id}/water-all")
-def water_all(
+async def water_all(
     loc_id: str,
     request: Request,
     due_only: bool = Query(True, description="Only water due/overdue plants"),
     session: Session = Depends(get_session),
 ):
-    """Batch-water all (due) plants in a room."""
+    """Batch-water all (due) plants in a room (Home Hub rooms included)."""
     user = _user(request)
-    location = session.get(Location, loc_id)
+    location = await _place(session, loc_id)
     if location is None:
         raise HTTPException(status_code=404, detail="Location not found")
 

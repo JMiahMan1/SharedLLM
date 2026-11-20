@@ -778,9 +778,17 @@ services:
       - GARDEN_DATABASE_URL=${GARDEN_DATABASE_URL:-sqlite:////data/garden.db}
       - PLANT_SEED_PATH=${PLANT_SEED_PATH:-/app/plants-seed.db}
       - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
+      # Indoor rooms are Home Hub's areas (services/garden/hub_rooms.py): the
+      # garden reads and writes them through this. Empty = no hub, and the
+      # garden keeps its own rows (and works) instead.
+      - HOMEHUB_URL=${HOMEHUB_URL:-}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./data/garden:/data
+    # homehub runs with host networking (mDNS, WoL, WiZ UDP), so it is reached
+    # at host.docker.internal:8123, as HOMEHUB_URL says. Linux needs the mapping.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     dns:
       - 1.1.1.1
       - 8.8.8.8

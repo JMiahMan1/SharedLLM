@@ -313,6 +313,9 @@ class LocationOut(SQLModel):
     id: str
     name: str
     kind: str
+    #: ``homehub`` for an indoor room (Home Hub's area registry is the only
+    #: list of rooms); ``garden`` for the beds and stations Garden owns.
+    source: str = "garden"
     area_id: str | None
     width_ft: float | None
     length_ft: float | None

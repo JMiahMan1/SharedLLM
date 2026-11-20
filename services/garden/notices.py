@@ -81,11 +81,20 @@ def build_digest(member: str, due_tasks: list[dict]) -> dict | None:
     }
 
 
-def collect_due_tasks(session: Session, member: str | None = None) -> list[dict]:
+def collect_due_tasks(
+    session: Session,
+    member: str | None = None,
+    *,
+    room_names: dict[str, str] | None = None,
+) -> list[dict]:
     """Collect due/overdue care tasks, optionally filtered to one member.
 
     Effective assignment: ``plant.assigned_to``, else the location's
     ``assigned_to``.  ``member=None`` returns everything due.
+
+    Rooms are Home Hub's areas (``services/garden/hub_rooms.py``), so a plant in
+    one holds an area id and has no local row: ``room_names`` (``area_id ->
+    name``) is what names it here. Without it such a plant reads as unplaced.
     """
     now = datetime.now(UTC)
     rules = session.exec(select(CareRule).where(CareRule.paused == False)).all()  # noqa: E712
@@ -124,7 +133,7 @@ def collect_due_tasks(session: Session, member: str | None = None) -> list[dict]
                 "plant_id": plant.id,
                 "nickname": plant.nickname,
                 "common_name": plant.species_ref,
-                "location_name": location.name if location else None,
+                "location_name": location.name if location else (room_names or {}).get(plant.location_id or ""),
                 "location_id": plant.location_id,
                 "action": rule.action,
                 "next_due_at": rule.next_due_at,
@@ -171,9 +180,13 @@ async def send_digest_to_member(
     Returns True when telemetry accepted the notice.
     """
     from services.garden.main import _seed as _garden_seed
+    from services.garden import hub_rooms as rooms_hub
+
+    # Rooms are Home Hub's areas: name them for the digest.
+    rooms = {str(a["area_id"]): str(a["name"]) for a in await rooms_hub.list_rooms() or []}
 
     with Session(session_factory()) as session:
-        tasks = collect_due_tasks(session, member)
+        tasks = collect_due_tasks(session, member, room_names=rooms)
         seed = _garden_seed()
         # Enrich with species common names.
         for task in tasks:
