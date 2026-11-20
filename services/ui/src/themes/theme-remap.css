@@ -223,6 +223,7 @@
 [data-theme-scheme="light"] .bg-rose-900\/90 { background-color: color-mix(in srgb, oklch(94.1% 0.03 12.58) 90%, transparent) !important; }
 [data-theme-scheme="light"] .bg-sky-950\/70 { background-color: color-mix(in srgb, oklch(95.1% 0.026 236.824) 70%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-600 { background-color: var(--ht-surface) !important; }
+[data-theme-scheme="light"] .bg-slate-600\/20 { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .bg-slate-600\/80 { background-color: color-mix(in srgb, var(--ht-surface) 80%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-700 { background-color: var(--ht-surface) !important; }
 [data-theme-scheme="light"] .bg-slate-700\/40 { background-color: var(--site-card-bg) !important; }

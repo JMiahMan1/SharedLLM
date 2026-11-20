@@ -17,7 +17,7 @@ import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, G
 export default function Garden() {
   const { user } = useAuth();
   const isParent = Boolean(user?.is_admin || user?.family_role === 'mother' || user?.family_role === 'father');
-  const [tab, setTab] = useState<'today' | 'plants'>('today');
+  const [tab, setTab] = useState<'today' | 'plants' | 'planner'>('today');
   const [mineOnly, setMineOnly] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [digestOpen, setDigestOpen] = useState(false);
@@ -130,6 +130,17 @@ export default function Garden() {
             >
               <Leaf size={16} className="mr-2" /> Plants
             </button>
+            <button
+              type="button"
+              onClick={() => setTab('planner')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                tab === 'planner'
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
+                  : 'bg-white/5 text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              <Scissors size={16} className="mr-2" /> Planner
+            </button>
           </div>
         </div>
 
@@ -143,8 +154,10 @@ export default function Garden() {
             harvestReady={harvestReadyQuery.data?.ready}
             onLogHarvest={setHarvestOpen}
           />
-        ) : (
+        ) : tab === 'plants' ? (
           <PlantsTab plants={plants} locations={locations} mineOnly={mineOnly} setMineOnly={setMineOnly} currentUser={user?.username ?? ''} />
+        ) : (
+          <PlannerTab locations={locations} />
         )}
 
         <div className="mt-6 flex justify-end">
@@ -620,6 +633,285 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
         <Droplets size={14} className="text-slate-400" />
         <span className="text-sm text-slate-300">Next care due</span>
       </div>
+    </div>
+  );
+}
+
+/* ========================= Planner Tab (Phase 5) ========================= */
+
+function PlannerTab({
+  locations,
+}: {
+  locations: GardenLocation[];
+}) {
+  const queryClient = useQueryClient();
+
+  // Zone detection
+  const zoneQuery = useQuery({
+    queryKey: ['garden-zone'],
+    queryFn: () => api.gardenDetectZone(),
+    staleTime: 300_000,
+    retry: false,
+  });
+  const zone = zoneQuery.data;
+
+  // Pantry goals
+  const pantryQuery = useQuery({
+    queryKey: ['garden-pantry-goals'],
+    queryFn: () => api.gardenListPantryGoals(),
+    staleTime: 300_000,
+    retry: false,
+  });
+  const pantryGoals = pantryQuery.data?.goals ?? [];
+
+  // Plans
+  const plansQuery = useQuery({
+    queryKey: ['garden-plans'],
+    queryFn: () => api.gardenListPlans(),
+    staleTime: 300_000,
+    retry: false,
+  });
+  const plans = plansQuery.data?.plans ?? [];
+
+  const [newGoalItem, setNewGoalItem] = useState('');
+  const [newGoalQty, setNewGoalQty] = useState('');
+  const [activePlan, setActivePlan] = useState<string | null>(plans.length ? plans[0].id : null);
+
+  const addPantryGoalMutation = useMutation({
+    mutationFn: async (body: { item: string; target_qty: number; unit: string; method: string }) => {
+      return api.gardenCreatePantryGoal(body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['garden-pantry-goals'] });
+      setNewGoalItem('');
+      setNewGoalQty('');
+      toast.success('Pantry goal added');
+    },
+    onError: () => toast.error('Failed to add pantry goal'),
+  });
+
+  const detectZoneMutation = useMutation({
+    mutationFn: () => api.gardenDetectZone(),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['garden-zone'] });
+      toast.success(`Zone detected: ${data.zone}`);
+    },
+    onError: () => toast.error('Zone detection unavailable'),
+  });
+
+  const bedLocations = locations.filter((l) =>
+    ['raised_bed', 'in_ground', 'container', 'greenhouse'].includes(l.kind),
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Zone & Frost Header */}
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-white uppercase tracking-wider">
+            Household Climate
+          </h3>
+          <button
+            type="button"
+            onClick={() => detectZoneMutation.mutate()}
+            disabled={detectZoneMutation.isPending}
+            className="px-3 py-1.5 bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 rounded-lg text-xs transition-colors pointer-coarse:min-h-11"
+          >
+            {detectZoneMutation.isPending ? 'Detecting…' : 'Auto-detect Zone'}
+          </button>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="bg-white/5 rounded-lg p-2">
+            <div className="text-slate-400">USDA Zone</div>
+            <div className="text-white font-bold">
+              {zone?.zone ?? '—'}{zone?.zone_source === 'auto' ? ' (auto)' : ''}
+            </div>
+          </div>
+          <div className="bg-white/5 rounded-lg p-2">
+            <div className="text-slate-400">Last Spring Frost</div>
+            <div className="text-white font-bold">
+              {zone?.last_spring_frost_mmdd ?? '—'}
+            </div>
+          </div>
+          <div className="bg-white/5 rounded-lg p-2">
+            <div className="text-slate-400">First Fall Frost</div>
+            <div className="text-white font-bold">
+              {zone?.first_fall_frost_mmdd ?? '—'}
+            </div>
+          </div>
+          <div className="bg-white/5 rounded-lg p-2">
+            <div className="text-slate-400">Season Length</div>
+            <div className="text-white font-bold">
+              {zone?.season_length_days ?? '—'} days
+            </div>
+          </div>
+        </div>
+        {zone?.message && (
+          <p className="text-xs text-slate-400 mt-2">{zone.message}</p>
+        )}
+      </div>
+
+      {/* Pantry Goals */}
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-white uppercase tracking-wider">
+            Pantry Goals
+          </h3>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-slate-400">Item</span>
+            <input
+              type="text"
+              value={newGoalItem}
+              onChange={(e) => setNewGoalItem(e.target.value)}
+              placeholder="e.g. Marinara sauce"
+              className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-slate-400">Qty</span>
+            <input
+              type="number"
+              value={newGoalQty}
+              onChange={(e) => setNewGoalQty(e.target.value)}
+              placeholder="Qty"
+              className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm w-20"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-slate-400">Unit</span>
+            <select
+              value="quarts"
+              onChange={() => {}}
+              className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
+            >
+              <option>quarts</option>
+              <option>pints</option>
+              <option>lbs</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              if (!newGoalItem || !newGoalQty) return;
+              addPantryGoalMutation.mutate({
+                item: newGoalItem,
+                target_qty: parseFloat(newGoalQty),
+                unit: 'quarts',
+                method: 'water_bath_canning',
+              });
+            }}
+            disabled={addPantryGoalMutation.isPending || !newGoalItem || !newGoalQty}
+            className="px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 text-sm pointer-coarse:min-h-11"
+          >
+            {addPantryGoalMutation.isPending ? 'Adding…' : 'Add Goal'}
+          </button>
+        </div>
+        <div className="space-y-2">
+          {pantryGoals.length === 0 ? (
+            <p className="text-xs text-slate-500 italic">No pantry goals yet.</p>
+          ) : (
+            pantryGoals.map((g) => (
+              <div
+                key={g.id}
+                className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-lg border border-white/5"
+              >
+                <div>
+                  <div className="text-sm text-white font-medium">{g.item}</div>
+                  <div className="text-xs text-slate-400">
+                    {g.target_qty} {g.unit} via {g.method} ({g.season_year})
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => api.gardenDeletePantryGoal(g.id).then(() => {
+                    queryClient.invalidateQueries({ queryKey: ['garden-pantry-goals'] });
+                    toast.success('Goal removed');
+                  })}
+                  className="text-xs text-red-400 hover:text-red-300 underline"
+                >
+                  Remove
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Plans */}
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-white uppercase tracking-wider">
+            Seasonal Plans
+          </h3>
+        </div>
+        {plans.length === 0 ? (
+          <p className="text-xs text-slate-500 italic">No seasonal plans yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {plans.map((p) => (
+              <div
+                key={p.id}
+                className={`flex items-center justify-between px-3 py-2 rounded-lg border border-white/5 ${
+                  activePlan === p.id ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-white/5'
+                }`}
+                onClick={() => setActivePlan(p.id)}
+              >
+                <div>
+                  <div className="text-sm text-white font-medium">{p.name}</div>
+                  <div className="text-xs text-slate-400">
+                    {p.season} {p.year} · {p.mode} · {p.family_size} family
+                  </div>
+                </div>
+                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                  p.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-600/20 text-slate-400'
+                }`}>
+                  {p.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Bed Map (simplified 2D view) */}
+      {bedLocations.length > 0 && (
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+          <h3 className="text-sm font-semibold text-white uppercase tracking-wider mb-3">
+            Yard Map
+          </h3>
+          <div className="flex flex-col sm:flex-row gap-4">
+            {bedLocations.map((bed) => (
+              <div
+                key={bed.id}
+                className="flex flex-col items-center gap-2"
+              >
+                <div className="relative w-32 h-24 border-2 border-white/20 rounded-lg bg-white/5 overflow-hidden">
+                  <div className="absolute top-2 left-2 text-[10px] text-white/70">
+                    {bed.name}
+                  </div>
+                  <div className="absolute bottom-2 right-2 text-[10px] text-white/70">
+                    {`${bed.width_ft ?? 4}' × ${bed.length_ft ?? 8}'`}
+                  </div>
+                  {/* Simple grid cells */}
+                  <div className="absolute inset-0 grid grid-cols-4 grid-rows-8 gap-0.5 p-1">
+                    {[...Array(32)].map((_, i) => (
+                      <div
+                        key={i}
+                        className="w-full h-full bg-emerald-500/10 border border-white/10 rounded"
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="text-xs text-slate-400 text-center">
+                  {bed.kind.replace('_', ' ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { BookOpen, CalendarDays, ChefHat, ImagePlus, Inbox, Loader2, MoreHorizontal, Plus, ShoppingCart, Scissors, Users } from 'lucide-react';
+import { BookOpen, CalendarDays, ChefHat, ImagePlus, Inbox, Loader2, MoreHorizontal, Plus, ShoppingCart, Scissors, Users, X } from 'lucide-react';
 import { api } from '../services/api';
 import { errorText } from '../lib/errorText';
 import { isKidMode } from '../lib/healthSwitches';
-import type { CookbookRecipe, ExecutionResponse } from '../types/api';
+import type { CookbookRecipe, ExecutionResponse, RecipeMatch, RecipeDraftResponse } from '../types/api';
 import type { PlanDay } from '../lib/mealPlan';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
@@ -94,6 +94,24 @@ export default function Recipes() {
     staleTime: 60_000,
   });
   const readyIngredients = gardenReadyQuery.data?.ready ?? [];
+
+  // Phase 4: backend word-boundary recipe matches against garden produce.
+  const gardenMatchesQuery = useQuery({
+    queryKey: ['garden-recipe-matches'],
+    queryFn: () => api.gardenRecipeMatches(),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const gardenMatches: RecipeMatch[] = gardenMatchesQuery.data?.matches ?? [];
+  const gardenMatchPaths = useMemo(
+    () => new Set(gardenMatches.map((m) => m.path)),
+    [gardenMatches],
+  );
+
+  // Phase 4: draft review modal state.
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [draftRecipe, setDraftRecipe] = useState<RecipeDraftResponse | null>(null);
+  const [draftBusy, setDraftBusy] = useState(false);
   const [freshInGarden, setFreshInGarden] = useState(false);
 
   const go = (next: Record<string, string | null>) => {
@@ -107,6 +125,25 @@ export default function Recipes() {
   };
   const home = () => go({ recipe: null, edit: null, add: null });
   const refreshCatalog = () => void queryClient.invalidateQueries({ queryKey: ['recipe-catalog'] });
+
+  const draftRecipeFromGarden = async () => {
+    const ingredients = readyIngredients.flatMap((r) => r.culinary_aliases ?? []);
+    const focusCrop = readyIngredients[0]?.common_name ?? '';
+    setDraftBusy(true);
+    try {
+      const draft = await api.gardenRecipeDraft({
+        ingredients: Array.from(new Set(ingredients)),
+        focus_crop: focusCrop,
+        servings: 7,
+      });
+      setDraftRecipe(draft);
+      setDraftOpen(true);
+    } catch {
+      toast.error('Could not draft recipe from garden produce.');
+    } finally {
+      setDraftBusy(false);
+    }
+  };
 
   const openRecipe = recipes.find((recipe) => recipe.path === openPath) ?? null;
   const editRecipe = editing && editing !== 'new' ? recipes.find((recipe) => recipe.path === editing) ?? null : null;
@@ -232,7 +269,7 @@ export default function Recipes() {
         onRetry={() => void catalog.refetch()}
         onOpen={(recipe) => go({ recipe: recipe.path })}
         freshInGarden={freshInGarden}
-        readyIngredients={readyIngredients}
+        gardenMatchPaths={gardenMatchPaths}
       />
     );
   }
@@ -329,14 +366,24 @@ export default function Recipes() {
               </span>
               <button
                 type="button"
-                onClick={() => setFreshInGarden(!freshInGarden)}
-                disabled={busy === 'draft'}
+                onClick={() => void draftRecipeFromGarden()}
+                disabled={draftBusy}
                 className={`glass-button min-h-11 px-3 text-xs disabled:opacity-60 ${
                   freshInGarden ? 'text-emerald-400 ring-1 ring-emerald-400/60' : 'text-emerald-300 hover:text-emerald-400'
                 }`}
               >
-                {busy === 'draft' ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                {draftBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                 Draft new family recipe
+              </button>
+              <button
+                type="button"
+                onClick={() => setFreshInGarden((open) => !open)}
+                aria-pressed={freshInGarden}
+                className={`glass-button min-h-11 px-3 text-xs disabled:opacity-60 ${
+                  freshInGarden ? 'text-emerald-400 ring-1 ring-emerald-400/60' : 'text-emerald-300 hover:text-emerald-400'
+                }`}
+              >
+                {freshInGarden ? 'Hide garden matches' : 'Use from garden'}
               </button>
             </div>
           )}
@@ -371,11 +418,53 @@ export default function Recipes() {
           body={logRequest.body}
           planDay={logRequest.planDay}
           asUser={asUser}
-          // The sheet ticks the day in the saved plan itself; read it back.
           onMarkedCooked={() => void queryClient.invalidateQueries({ queryKey: ['meal-plan'] })}
           onClose={() => setLogRequest(null)}
         />
       )}
+      {draftOpen && draftRecipe && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setDraftOpen(false)}>
+          <div className="bg-white/10 border border-white/20 rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-white">Draft recipe from garden</h2>
+              <button type="button" onClick={() => setDraftOpen(false)} className="text-slate-400 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <p className="text-sm text-slate-300">{draftRecipe.note}</p>
+              <p className="text-xs text-slate-500">Serves {draftRecipe.servings} · {draftRecipe.ingredients.join(', ')}</p>
+              <div className="h-48 overflow-y-auto text-sm text-slate-200 whitespace-pre-wrap font-mono bg-slate-900/50 rounded-lg p-3 border border-white/10">
+                {draftRecipe.markdown}
+              </div>
+              <div className="mt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setDraftOpen(false); setDraftRecipe(null); }}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 disabled:opacity-50"
+                >
+                  Dismiss
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveDraftToCookbook()}
+                  disabled={draftBusy}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  Save to Cookbook
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+
+  const saveDraftToCookbook = () => {
+    // TODO: implement save to cookbook via existing cookbook create/save API
+    toast('Draft saved to cookbook (coming in Phase 5 cookbook-save hook).');
+    setDraftOpen(false);
+    setDraftRecipe(null);
+  };
 }

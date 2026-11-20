@@ -133,18 +133,22 @@ export default function ShoppingList({
                 <label className="flex min-h-12 cursor-pointer items-center gap-3 px-1 py-2">
                   <input type="checkbox" checked={item.checked} onChange={() => toggle(index)} className="h-5 w-5 shrink-0 accent-emerald-400" />
                   <span className={`text-sm ${item.checked ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{item.text}</span>
-                  {inGarden && !item.checked && (
-                    <button
-                      type="button"
-                      onClick={() => toggle(index)}
-                      className="ml-2 flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20"
-                      title="Skip buying — you have this in your garden"
-                    >
-                      <Scissors size={10} />
-                      <span>In your garden</span>
-                    </button>
-                  )}
                 </label>
+                {inGarden && !item.checked && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggle(index);
+                    }}
+                    className="ml-2 flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20"
+                    title="Skip buying — you have this in your garden"
+                  >
+                    <Scissors size={10} />
+                    <span>In your garden</span>
+                  </button>
+                )}
               </li>
             );
           })}

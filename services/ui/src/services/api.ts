@@ -360,6 +360,29 @@ export type {
   SavedPlace,
   SavedPlaceInput,
   VisitSuggestion,
+  PantryGoalIn,
+  PantryGoalOut,
+  GardenPlanIn,
+  GardenPlanOut,
+  PlanCellIn,
+  PlanCellOut,
+  ZoneDetectResponse,
+  PantryGoalCalcResponse,
+  PlannerSizingResponse,
+  PlanTimelineResponse,
+} from '../types/api';
+
+import type {
+  PantryGoalIn,
+  PantryGoalOut,
+  GardenPlanIn,
+  GardenPlanOut,
+  PlanCellIn,
+  PlanCellOut,
+  ZoneDetectResponse,
+  PantryGoalCalcResponse,
+  PlannerSizingResponse,
+  PlanTimelineResponse,
 } from '../types/api';
 
 declare module 'axios' {
@@ -2849,6 +2872,153 @@ export const api = {
     ready: any[];
   }> {
     const resp = await apiClient.get('/api/garden/harvest/ready');
+    return resp.data;
+  },
+
+  // --- Recipe matches & draft (Phase 4) ----------------
+
+  async gardenRecipeMatches(): Promise<{
+    ready_ingredients: any[];
+    matches: any[];
+  }> {
+    const resp = await apiClient.get('/api/garden/recipes/matches');
+    return resp.data;
+  },
+
+  async gardenRecipeDraft(body: {
+    ingredients?: string[];
+    focus_crop?: string;
+    servings?: number;
+  }): Promise<{
+    status: string;
+    draft: boolean;
+    servings: number;
+    ingredients: string[];
+    focus_crop: string;
+    markdown: string;
+    note: string;
+  }> {
+    const resp = await apiClient.post('/api/garden/recipes/draft', body);
+    return resp.data;
+  },
+
+  // --- Garden Planner (Phase 5) ----------------
+
+  async gardenDetectZone(): Promise<ZoneDetectResponse> {
+    const resp = await apiClient.get('/api/garden/profile/detect-zone');
+    return resp.data;
+  },
+
+  async gardenListPantryGoals(params?: { season_year?: number | null }): Promise<{
+    count: number;
+    goals: PantryGoalOut[];
+  }> {
+    const resp = await apiClient.get('/api/garden/pantry-goals', { params });
+    return resp.data;
+  },
+
+  async gardenCreatePantryGoal(body: PantryGoalIn): Promise<PantryGoalOut> {
+    const resp = await apiClient.post('/api/garden/pantry-goals', body);
+    return resp.data;
+  },
+
+  async gardenPatchPantryGoal(goalId: string, body: Partial<PantryGoalIn>): Promise<PantryGoalOut> {
+    const resp = await apiClient.patch(`/api/garden/pantry-goals/${encodeURIComponent(goalId)}`, body);
+    return resp.data;
+  },
+
+  async gardenDeletePantryGoal(goalId: string): Promise<void> {
+    await apiClient.delete(`/api/garden/pantry-goals/${encodeURIComponent(goalId)}`);
+  },
+
+  async gardenCalculatePantryGoal(params: {
+    item: string;
+    crop_refs?: string | null;
+    target_qty: number;
+    unit?: string;
+    method?: string;
+  }): Promise<PantryGoalCalcResponse> {
+    const resp = await apiClient.get('/api/garden/pantry-goals/calculate', { params });
+    return resp.data;
+  },
+
+  async gardenListPlans(params?: { status?: string | null; season?: string | null }): Promise<{
+    count: number;
+    plans: GardenPlanOut[];
+  }> {
+    const resp = await apiClient.get('/api/garden/plans', { params });
+    return resp.data;
+  },
+
+  async gardenCreatePlan(body: GardenPlanIn): Promise<GardenPlanOut> {
+    const resp = await apiClient.post('/api/garden/plans', body);
+    return resp.data;
+  },
+
+  async gardenGetPlan(planId: string): Promise<{
+    plan: GardenPlanOut;
+    cells: PlanCellOut[];
+  }> {
+    const resp = await apiClient.get(`/api/garden/plans/${encodeURIComponent(planId)}`);
+    return resp.data;
+  },
+
+  async gardenPatchPlan(planId: string, body: Partial<GardenPlanIn>): Promise<GardenPlanOut> {
+    const resp = await apiClient.patch(`/api/garden/plans/${encodeURIComponent(planId)}`, body);
+    return resp.data;
+  },
+
+  async gardenDeletePlan(planId: string): Promise<void> {
+    await apiClient.delete(`/api/garden/plans/${encodeURIComponent(planId)}`);
+  },
+
+  async gardenListPlanCells(planId: string, bedId: string): Promise<{
+    plan_id: string;
+    bed_id: string;
+    cells: PlanCellOut[];
+  }> {
+    const resp = await apiClient.get(`/api/garden/plans/${encodeURIComponent(planId)}/beds/${encodeURIComponent(bedId)}/cells`);
+    return resp.data;
+  },
+
+  async gardenUpsertPlanCells(planId: string, bedId: string, cells: PlanCellIn[]): Promise<{
+    plan_id: string;
+    bed_id: string;
+    cells_upserted: number;
+  }> {
+    const resp = await apiClient.put(`/api/garden/plans/${encodeURIComponent(planId)}/beds/${encodeURIComponent(bedId)}/cells`, cells);
+    return resp.data;
+  },
+
+  async gardenAutoArrange(planId: string, bedId: string): Promise<{
+    plan_id: string;
+    bed_id: string;
+    placements: any[];
+  }> {
+    const resp = await apiClient.post(`/api/garden/plans/${encodeURIComponent(planId)}/beds/${encodeURIComponent(bedId)}/auto-arrange`);
+    return resp.data;
+  },
+
+  async gardenPlanChecks(planId: string): Promise<{
+    plan_id: string;
+    checks: any[];
+    warning_count: number;
+  }> {
+    const resp = await apiClient.get(`/api/garden/plans/${encodeURIComponent(planId)}/checks`);
+    return resp.data;
+  },
+
+  async gardenPlanTimeline(planId: string): Promise<PlanTimelineResponse> {
+    const resp = await apiClient.get(`/api/garden/plans/${encodeURIComponent(planId)}/timeline`);
+    return resp.data;
+  },
+
+  async gardenPlannerSizing(params: {
+    mode?: string;
+    family_size?: number;
+    species_refs?: string | null;
+  }): Promise<PlannerSizingResponse> {
+    const resp = await apiClient.get('/api/garden/planner/sizing', { params });
     return resp.data;
   },
 

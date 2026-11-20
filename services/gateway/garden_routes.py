@@ -423,3 +423,133 @@ async def garden_recipes_draft(request: Request):
     caller = await _cookbook_caller(request)
     body = await request.json()
     return await recipe_draft(_cookbook_run, caller, body, request)
+
+
+# --------------------------------------------------------------------------- garden planner proxy (Phase 5)
+
+
+@router.get("/profile/detect-zone")
+async def garden_detect_zone(request: Request):
+    headers = await _verified_headers(request)
+    return await _call("GET", "/profile/detect-zone", headers=headers)
+
+
+@router.get("/pantry-goals")
+async def garden_list_pantry_goals(request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "GET",
+        "/pantry-goals",
+        params={k: v for k, v in request.query_params.items() if k in ("season_year",)},
+        headers=headers,
+    )
+
+
+@router.post("/pantry-goals")
+async def garden_create_pantry_goal(request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call("POST", "/pantry-goals", json=body, headers=headers)
+
+
+@router.patch("/pantry-goals/{goal_id}")
+async def garden_patch_pantry_goal(goal_id: str, request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    return await _call("PATCH", f"/pantry-goals/{goal_id}", json=body, headers=headers)
+
+
+@router.delete("/pantry-goals/{goal_id}")
+async def garden_delete_pantry_goal(goal_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call("DELETE", f"/pantry-goals/{goal_id}", headers=headers)
+
+
+@router.get("/pantry-goals/calculate")
+async def garden_calculate_pantry_goal(request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "GET",
+        "/pantry-goals/calculate",
+        params={k: v for k, v in request.query_params.items() if k in ("item", "crop_refs", "target_qty", "unit", "method")},
+        headers=headers,
+    )
+
+
+@router.get("/plans")
+async def garden_list_plans(request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "GET",
+        "/plans",
+        params={k: v for k, v in request.query_params.items() if k in ("status", "season")},
+        headers=headers,
+    )
+
+
+@router.post("/plans")
+async def garden_create_plan(request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call("POST", "/plans", json=body, headers=headers)
+
+
+@router.get("/plans/{plan_id}")
+async def garden_get_plan(plan_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call("GET", f"/plans/{plan_id}", headers=headers)
+
+
+@router.patch("/plans/{plan_id}")
+async def garden_patch_plan(plan_id: str, request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    return await _call("PATCH", f"/plans/{plan_id}", json=body, headers=headers)
+
+
+@router.delete("/plans/{plan_id}")
+async def garden_delete_plan(plan_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call("DELETE", f"/plans/{plan_id}", headers=headers)
+
+
+@router.get("/plans/{plan_id}/beds/{bed_id}/cells")
+async def garden_list_plan_cells(plan_id: str, bed_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call("GET", f"/plans/{plan_id}/beds/{bed_id}/cells", headers=headers)
+
+
+@router.put("/plans/{plan_id}/beds/{bed_id}/cells")
+async def garden_upsert_plan_cells(plan_id: str, bed_id: str, request: Request):
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call("PUT", f"/plans/{plan_id}/beds/{bed_id}/cells", json=body, headers=headers)
+
+
+@router.post("/plans/{plan_id}/beds/{bed_id}/auto-arrange")
+async def garden_auto_arrange(plan_id: str, bed_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call("POST", f"/plans/{plan_id}/beds/{bed_id}/auto-arrange", headers=headers)
+
+
+@router.get("/plans/{plan_id}/checks")
+async def garden_plan_checks(plan_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call("GET", f"/plans/{plan_id}/checks", headers=headers)
+
+
+@router.get("/plans/{plan_id}/timeline")
+async def garden_plan_timeline(plan_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call("GET", f"/plans/{plan_id}/timeline", headers=headers)
+
+
+@router.get("/planner/sizing")
+async def garden_planner_sizing(request: Request):
+    headers = await _verified_headers(request)
+    return await _call(
+        "GET",
+        "/planner/sizing",
+        params={k: v for k, v in request.query_params.items() if k in ("mode", "family_size", "species_refs")},
+        headers=headers,
+    )

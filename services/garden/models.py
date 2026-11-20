@@ -407,3 +407,128 @@ class HarvestLogOut(SQLModel):
     disposition: str
     notes: str | None
     created_at: str
+
+
+# ========================= Phase 5: Garden Planner Models =========================
+
+class PantryGoal(SQLModel, table=True):
+    """Yearly preservation target that back-calculates required plant counts and sq ft."""
+
+    __tablename__ = "pantry_goals"
+
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
+    item: str = Field(max_length=120)  # e.g., "Marinara sauce", "Dill pickles"
+    crop_refs_json: str = Field(max_length=500)  # JSON list of species_refs
+    target_qty: float = Field(default=0.0, ge=0)
+    unit: str = Field(max_length=32)  # quarts | pints | lbs | pieces
+    method: str = Field(max_length=32)  # water_bath_canning | pressure_canning | freezing | dehydrating | fermenting | cold_storage | oil_herb_cubes
+    season_year: int = Field(default=0)  # calendar year
+    notes: str | None = Field(default=None, max_length=1000)
+    created_at: str = Field(default_factory=utcnow)
+    updated_at: str = Field(default_factory=utcnow)
+
+
+class PantryGoalIn(SQLModel):
+    item: str
+    crop_refs_json: str | None = None
+    target_qty: float = Field(default=0.0, ge=0)
+    unit: str = Field(max_length=32)
+    method: str = Field(max_length=32)
+    season_year: int | None = None
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PantryGoalOut(SQLModel):
+    id: str
+    item: str
+    crop_refs_json: str | None
+    target_qty: float
+    unit: str
+    method: str
+    season_year: int
+    notes: str | None
+    created_at: str
+    updated_at: str
+
+
+class GardenPlan(SQLModel, table=True):
+    """Seasonal bed plan (e.g., "Spring/Summer 2027")."""
+
+    __tablename__ = "garden_plans"
+
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
+    name: str = Field(max_length=120)  # e.g., "Spring/Summer 2027"
+    season: str = Field(max_length=32)  # spring_summer | fall | winter
+    year: int = Field(default=0)
+    family_size: int = Field(default=7, ge=1)
+    mode: str = Field(max_length=32)  # fresh_only | fresh_plus_preserving | pantry_goals
+    status: str = Field(max_length=32, default="draft")  # draft | active | archived
+    created_at: str = Field(default_factory=utcnow)
+    updated_at: str = Field(default_factory=utcnow)
+
+
+class GardenPlanIn(SQLModel):
+    name: str
+    season: str
+    year: int | None = None
+    family_size: int | None = Field(default=None, ge=1)
+    mode: str | None = None
+    status: str | None = None
+
+
+class GardenPlanOut(SQLModel):
+    id: str
+    name: str
+    season: str
+    year: int
+    family_size: int
+    mode: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class PlanCell(SQLModel, table=True):
+    """One square-foot cell assignment in a seasonal bed plan."""
+
+    __tablename__ = "plan_cells"
+
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
+    plan_id: str = Field(max_length=128)
+    location_id: str = Field(max_length=128)  # bed
+    col: int = Field(default=0, ge=0)
+    row: int = Field(default=0, ge=0)
+    species_ref: str | None = Field(default=None, max_length=120)
+    plant_id: str | None = Field(default=None, max_length=128)  # linked once planted
+    crop_family: str | None = Field(default=None, max_length=80)  # for rotation checks
+    quantity: float = Field(default=1.0, ge=0)
+    notes: str | None = Field(default=None, max_length=500)
+    created_at: str = Field(default_factory=utcnow)
+    updated_at: str = Field(default_factory=utcnow)
+
+
+class PlanCellIn(SQLModel):
+    plan_id: str
+    location_id: str
+    col: int = Field(default=0, ge=0)
+    row: int = Field(default=0, ge=0)
+    species_ref: str | None = None
+    plant_id: str | None = None
+    crop_family: str | None = None
+    quantity: float = Field(default=1.0, ge=0)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class PlanCellOut(SQLModel):
+    id: str
+    plan_id: str
+    location_id: str
+    col: int
+    row: int
+    species_ref: str | None
+    plant_id: str | None
+    crop_family: str | None
+    quantity: float
+    notes: str | None
+    created_at: str
+    updated_at: str

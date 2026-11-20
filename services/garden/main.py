@@ -50,6 +50,9 @@ from services.garden.models import (
     CareRuleIn,
     CustomSpecies,
     CustomSpeciesIn,
+    GardenPlan,
+    GardenPlanIn,
+    GardenPlanOut,
     GardenProfile,
     GardenProfileIn,
     GardenProfileOut,
@@ -59,6 +62,12 @@ from services.garden.models import (
     Location,
     LocationIn,
     LocationOut,
+    PantryGoal,
+    PantryGoalIn,
+    PantryGoalOut,
+    PlanCell,
+    PlanCellIn,
+    PlanCellOut,
     Plant,
     PlantIn,
     PlantOut,
@@ -81,6 +90,23 @@ from services.garden.weather_care import (
     _is_outdoor_uncovered as _is_outdoor_uncovered_location,
 )
 from services.common import weather_client as weather
+from services.garden.planner import (
+    add_weeks,
+    auto_arrange_bed,
+    check_companions,
+    crop_family,
+    default_frost_dates,
+    frost_offset_weeks,
+    planting_milestones,
+    pantry_goal_backcalc,
+    plant_count_for_raw_lbs,
+    preservation_raw_lbs,
+    simple_sizing,
+    sqft_for_plants,
+    zone_in_range,
+    zone_number,
+    zone_sort_key,
+)
 from services.shared.info_endpoint import info_router
 
 logging.basicConfig(
@@ -1739,3 +1765,519 @@ def delete_care_rule(
     session.delete(rule)
     session.commit()
     return JSONResponse(status_code=204, content=None)
+
+
+# ========================= Phase 5: Garden Planner =========================
+
+@app.post("/profile/detect-zone")
+async def profile_detect_zone(request: Request, session: Session = Depends(get_session)):
+    """Auto-detect USDA zone + frost dates from household lat/lon (weather config).
+
+    Degrades gracefully with a clear message when geo/weather is unconfigured.
+    """
+    _user(request)
+    profile = session.exec(select(GardenProfile)).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Garden profile not found")
+
+    # Try to resolve zone from weather config (household lat/lon).
+    zone = None
+    source = "manual"
+    try:
+        from services.common.weather_client import current as weather_current
+
+        w = await weather_current()
+        if w and w.get("latitude") and w.get("longitude"):
+            lat = float(w["latitude"])
+            lon = float(w["longitude"])
+            # Approximate USDA zone from latitude (very rough, degrades gracefully).
+            # Northern latitudes = lower zones; southern = higher zones.
+            abs_lat = abs(lat)
+            if abs_lat >= 60:
+                zone = "3b"
+            elif abs_lat >= 50:
+                zone = "5b"
+            elif abs_lat >= 40:
+                zone = "7b"
+            elif abs_lat >= 30:
+                zone = "9a"
+            elif abs_lat >= 20:
+                zone = "10b"
+            else:
+                zone = "11b"
+            source = "auto"
+    except Exception as e:
+        log.info("[Garden] zone auto-detect unavailable: %s", e)
+
+    if not zone:
+        return {
+            "zone": profile.hardiness_zone,
+            "zone_source": profile.zone_source or "manual",
+            "last_spring_frost_mmdd": profile.last_spring_frost_mmdd,
+            "first_fall_frost_mmdd": profile.first_fall_frost_mmdd,
+            "message": "Geo/weather not configured; set zone manually in Garden Profile.",
+        }
+
+    spring_mmdd, fall_mmdd = default_frost_dates(zone)
+
+    # Update profile if auto source and no manual override.
+    if source == "auto" and (not profile.zone_source or profile.zone_source == "auto"):
+        profile.hardiness_zone = zone
+        profile.zone_source = "auto"
+        profile.last_spring_frost_mmdd = spring_mmdd or profile.last_spring_frost_mmdd
+        profile.first_fall_frost_mmdd = fall_mmdd or profile.first_fall_frost_mmdd
+        profile.updated_at = utcnow()
+        session.add(profile)
+        session.commit()
+        session.refresh(profile)
+
+    return {
+        "zone": zone,
+        "zone_source": source,
+        "last_spring_frost_mmdd": spring_mmdd,
+        "first_fall_frost_mmdd": fall_mmdd,
+        "season_length_days": season_length_days(zone) if zone else None,
+    }
+
+
+@app.get("/pantry-goals")
+def list_pantry_goals(
+    request: Request,
+    season_year: int | None = Query(None, description="Filter by calendar year"),
+    session: Session = Depends(get_session),
+):
+    """List pantry preservation goals."""
+    _user(request)
+    query = select(PantryGoal)
+    if season_year is not None:
+        query = query.where(PantryGoal.season_year == season_year)
+    query = query.order_by(PantryGoal.season_year.desc(), PantryGoal.created_at.desc())
+    rows = session.exec(query).all()
+    return {
+        "count": len(rows),
+        "goals": [
+            {
+                "id": r.id,
+                "item": r.item,
+                "crop_refs_json": r.crop_refs_json,
+                "target_qty": r.target_qty,
+                "unit": r.unit,
+                "method": r.method,
+                "season_year": r.season_year,
+                "notes": r.notes,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.post("/pantry-goals", status_code=201)
+def create_pantry_goal(
+    body: PantryGoalIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Create a pantry preservation goal."""
+    _require_admin_or_adult(request)
+    row = PantryGoal(
+        item=body.item,
+        crop_refs_json=body.crop_refs_json or "[]",
+        target_qty=body.target_qty,
+        unit=body.unit,
+        method=body.method,
+        season_year=body.season_year or datetime.now(UTC).year,
+        notes=body.notes,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return PantryGoalOut.model_validate(row).model_dump()
+
+
+@app.patch("/pantry-goals/{goal_id}")
+def patch_pantry_goal(
+    goal_id: str,
+    body: PantryGoalIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Update a pantry goal."""
+    _require_admin_or_adult(request)
+    row = session.get(PantryGoal, goal_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Pantry goal not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    row.updated_at = utcnow()
+    session.commit()
+    session.refresh(row)
+    return PantryGoalOut.model_validate(row).model_dump()
+
+
+@app.delete("/pantry-goals/{goal_id}", status_code=204)
+def delete_pantry_goal(
+    goal_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Delete a pantry goal."""
+    _require_admin_or_adult(request)
+    row = session.get(PantryGoal, goal_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Pantry goal not found")
+    session.delete(row)
+    session.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
+@app.get("/pantry-goals/calculate")
+def calculate_pantry_goal(
+    request: Request,
+    item: str = Query(..., description="Preserved item name"),
+    crop_refs: str = Query("", description="Comma-separated species_refs"),
+    target_qty: float = Query(..., ge=0, description="Target quantity"),
+    unit: str = Query("quarts", description="Output unit"),
+    method: str = Query("water_bath_canning", description="Preservation method"),
+    session: Session = Depends(get_session),
+):
+    """Back-calculate raw lbs, plant counts, and sq ft from a pantry goal."""
+    _user(request)
+    crop_list = [c.strip() for c in crop_refs.split(",") if c.strip()] if crop_refs else []
+    goal_in = PantryGoalIn(
+        item=item,
+        crop_refs_json=json.dumps(crop_list),
+        target_qty=target_qty,
+        unit=unit,
+        method=method,
+    )
+    return pantry_goal_backcalc(session, goal_in, crop_list)
+
+
+@app.get("/plans")
+def list_plans(
+    request: Request,
+    status: str | None = Query(None, description="Filter by plan status"),
+    season: str | None = Query(None, description="Filter by season"),
+    session: Session = Depends(get_session),
+):
+    """List seasonal garden plans."""
+    _user(request)
+    query = select(GardenPlan)
+    if status:
+        query = query.where(GardenPlan.status == status)
+    if season:
+        query = query.where(GardenPlan.season == season)
+    query = query.order_by(GardenPlan.year.desc(), GardenPlan.created_at.desc())
+    rows = session.exec(query).all()
+    return {
+        "count": len(rows),
+        "plans": [
+            {
+                "id": r.id,
+                "name": r.name,
+                "season": r.season,
+                "year": r.year,
+                "family_size": r.family_size,
+                "mode": r.mode,
+                "status": r.status,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.post("/plans", status_code=201)
+def create_plan(
+    body: GardenPlanIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Create a seasonal garden plan."""
+    _require_admin_or_adult(request)
+    row = GardenPlan(
+        name=body.name,
+        season=body.season,
+        year=body.year or datetime.now(UTC).year,
+        family_size=body.family_size or 7,
+        mode=body.mode or "fresh_only",
+        status=body.status or "draft",
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return GardenPlanOut.model_validate(row).model_dump()
+
+
+@app.get("/plans/{plan_id}")
+def get_plan(
+    plan_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Get a plan with its cells."""
+    _user(request)
+    plan = session.get(GardenPlan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    cells = session.exec(select(PlanCell).where(PlanCell.plan_id == plan_id)).all()
+    return {
+        "plan": GardenPlanOut.model_validate(plan).model_dump(),
+        "cells": [
+            {
+                "id": c.id,
+                "plan_id": c.plan_id,
+                "location_id": c.location_id,
+                "col": c.col,
+                "row": c.row,
+                "species_ref": c.species_ref,
+                "plant_id": c.plant_id,
+                "crop_family": c.crop_family,
+                "quantity": c.quantity,
+                "notes": c.notes,
+            }
+            for c in cells
+        ],
+    }
+
+
+@app.patch("/plans/{plan_id}")
+def patch_plan(
+    plan_id: str,
+    body: GardenPlanIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Update a plan."""
+    _require_admin_or_adult(request)
+    plan = session.get(GardenPlan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(plan, key, value)
+    plan.updated_at = utcnow()
+    session.commit()
+    session.refresh(plan)
+    return GardenPlanOut.model_validate(plan).model_dump()
+
+
+@app.delete("/plans/{plan_id}", status_code=204)
+def delete_plan(
+    plan_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Delete a plan and its cells."""
+    _require_admin_or_adult(request)
+    plan = session.get(GardenPlan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    session.exec(select(PlanCell).where(PlanCell.plan_id == plan_id)).all()
+    session.delete(plan)
+    session.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
+@app.get("/plans/{plan_id}/beds/{bed_id}/cells")
+def list_plan_cells(
+    plan_id: str,
+    bed_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """List plan cells for a bed within a plan."""
+    _user(request)
+    cells = session.exec(
+        select(PlanCell).where(PlanCell.plan_id == plan_id, PlanCell.location_id == bed_id)
+    ).all()
+    return {
+        "plan_id": plan_id,
+        "bed_id": bed_id,
+        "cells": [
+            {
+                "id": c.id,
+                "col": c.col,
+                "row": c.row,
+                "species_ref": c.species_ref,
+                "plant_id": c.plant_id,
+                "crop_family": c.crop_family,
+                "quantity": c.quantity,
+                "notes": c.notes,
+            }
+            for c in cells
+        ],
+    }
+
+
+@app.put("/plans/{plan_id}/beds/{bed_id}/cells")
+def upsert_plan_cells(
+    plan_id: str,
+    bed_id: str,
+    body: list[PlanCellIn],
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Upsert plan cells for a bed (replace all cells for that bed in the plan)."""
+    _require_admin_or_adult(request)
+    # Remove existing cells for this bed in this plan
+    existing = session.exec(
+        select(PlanCell).where(PlanCell.plan_id == plan_id, PlanCell.location_id == bed_id)
+    ).all()
+    for e in existing:
+        session.delete(e)
+
+    # Insert new cells
+    for cell_in in body:
+        cell = PlanCell(
+            plan_id=plan_id,
+            location_id=bed_id,
+            col=cell_in.col,
+            row=cell_in.row,
+            species_ref=cell_in.species_ref,
+            plant_id=cell_in.plant_id,
+            crop_family=cell_in.crop_family,
+            quantity=cell_in.quantity,
+            notes=cell_in.notes,
+        )
+        session.add(cell)
+
+    session.commit()
+    return {"plan_id": plan_id, "bed_id": bed_id, "cells_upserted": len(body)}
+
+
+@app.post("/plans/{plan_id}/beds/{bed_id}/auto-arrange")
+def auto_arrange_bed_endpoint(
+    plan_id: str,
+    bed_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Auto-arrange crops in a bed: tall crops north, companions paired, antagonists separated."""
+    _require_admin_or_adult(request)
+    plan = session.get(GardenPlan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    # Get existing cells for this bed to know what's already placed
+    existing = session.exec(
+        select(PlanCell).where(PlanCell.plan_id == plan_id, PlanCell.location_id == bed_id)
+    ).all()
+    species_refs = [c.species_ref for c in existing if c.species_ref]
+
+    if not species_refs:
+        return {"plan_id": plan_id, "bed_id": bed_id, "placements": [], "message": "No crops in bed"}
+
+    placements = auto_arrange_bed(session, existing, bed_id, species_refs)
+
+    return {
+        "plan_id": plan_id,
+        "bed_id": bed_id,
+        "placements": placements,
+    }
+
+
+@app.get("/plans/{plan_id}/checks")
+def plan_checks(
+    plan_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Run companion/antagonist/rotation checks across all beds in a plan."""
+    _user(request)
+    plan = session.get(GardenPlan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    cells = session.exec(select(PlanCell).where(PlanCell.plan_id == plan_id)).all()
+    warnings: list[dict] = []
+
+    for cell in cells:
+        species = resolve_species(session, cell.species_ref) if cell.species_ref else None
+        cell_warnings = check_companions(session, cells, cell, species)
+        for w in cell_warnings:
+            warnings.append({
+                "cell_id": cell.id,
+                "col": cell.col,
+                "row": cell.row,
+                "species_ref": cell.species_ref,
+                "bed_id": cell.location_id,
+                "message": w,
+            })
+
+    return {
+        "plan_id": plan_id,
+        "checks": warnings,
+        "warning_count": len(warnings),
+    }
+
+
+@app.get("/plans/{plan_id}/timeline")
+def plan_timeline(
+    plan_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Seasonal planting timeline with dated milestones per crop."""
+    _user(request)
+    plan = session.get(GardenPlan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    profile = session.exec(select(GardenProfile)).first()
+    spring_mmdd = profile.last_spring_frost_mmdd if profile else None
+    fall_mmdd = profile.first_fall_frost_mmdd if profile else None
+
+    cells = session.exec(select(PlanCell).where(PlanCell.plan_id == plan_id)).all()
+    timeline: list[dict] = []
+    for cell in cells:
+        species = resolve_species(session, cell.species_ref) if cell.species_ref else None
+        if not species:
+            continue
+        milestones = planting_milestones(species, spring_mmdd, fall_mmdd)
+        timeline.append({
+            "cell_id": cell.id,
+            "col": cell.col,
+            "row": cell.row,
+            "species_ref": cell.species_ref,
+            "common_name": species.get("common_name", cell.species_ref),
+            "category": species.get("category", ""),
+            "milestones": milestones,
+        })
+
+    # Sort by first milestone date
+    timeline.sort(key=lambda t: t["milestones"][0]["mmdd"] if t["milestones"] else "99-99")
+    return {
+        "plan_id": plan_id,
+        "plan_name": plan.name,
+        "season": plan.season,
+        "year": plan.year,
+        "spring_frost_mmdd": spring_mmdd,
+        "first_fall_frost_mmdd": fall_mmdd,
+        "timeline": timeline,
+    }
+
+
+@app.get("/planner/sizing")
+def planner_sizing(
+    request: Request,
+    mode: str = Query("fresh_only", description="fresh_only | fresh_plus_preserving | pantry_goals"),
+    family_size: int | None = Query(None, ge=1, description="Override family size"),
+    species_refs: str = Query("", description="Comma-separated species_refs"),
+    session: Session = Depends(get_session),
+):
+    """Simple mode sizing calculator: plant counts & sq ft per crop."""
+    _user(request)
+    profile = session.exec(select(GardenProfile)).first()
+    fs = family_size or (profile.family_size if profile else 7)
+    refs = [c.strip() for c in species_refs.split(",") if c.strip()] if species_refs else []
+    results = simple_sizing(session, fs, mode, refs)
+    return {
+        "mode": mode,
+        "family_size": fs,
+        "crops": results,
+        "total_sqft": round(sum(c["sqft"] for c in results), 1),
+        "total_plants": sum(c["plant_count"] for c in results),
+    }

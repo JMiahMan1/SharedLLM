@@ -5115,3 +5115,147 @@ export interface HarvestReadyResponse {
   count: number;
   ready: HarvestReadyItem[];
 }
+
+/* ---------- Recipe Matches (Phase 4) ---------- */
+
+export interface RecipeMatch {
+  path: string;
+  title: string;
+  matched_ingredients: string[];
+  match_count: number;
+  tags: string[];
+  servings: number | null;
+}
+
+export interface RecipeMatchesResponse {
+  ready_ingredients: HarvestReadyItem[];
+  matches: RecipeMatch[];
+}
+
+export interface RecipeDraftRequest {
+  ingredients?: string[];
+  focus_crop?: string;
+  servings?: number;
+}
+
+export interface RecipeDraftResponse {
+  status: string;
+  draft: boolean;
+  servings: number;
+  ingredients: string[];
+  focus_crop: string;
+  markdown: string;
+  note: string;
+}
+
+/* ---------- Garden Planner (Phase 5) ---------- */
+
+export interface PantryGoalIn {
+  item: string;
+  crop_refs_json?: string | null;
+  target_qty?: number;
+  unit?: string;
+  method?: string;
+  season_year?: number | null;
+  notes?: string | null;
+}
+
+export interface PantryGoalOut {
+  id: string;
+  item: string;
+  crop_refs_json: string | null;
+  target_qty: number;
+  unit: string;
+  method: string;
+  season_year: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GardenPlanIn {
+  name: string;
+  season: string;
+  year?: number | null;
+  family_size?: number | null;
+  mode?: string | null;
+  status?: string | null;
+}
+
+export interface GardenPlanOut {
+  id: string;
+  name: string;
+  season: string;
+  year: number;
+  family_size: number;
+  mode: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanCellIn {
+  plan_id: string;
+  location_id: string;
+  col?: number;
+  row?: number;
+  species_ref?: string | null;
+  plant_id?: string | null;
+  crop_family?: string | null;
+  quantity?: number | null;
+  notes?: string | null;
+}
+
+export interface PlanCellOut {
+  id: string;
+  plan_id: string;
+  location_id: string;
+  col: number;
+  row: number;
+  species_ref: string | null;
+  plant_id: string | null;
+  crop_family: string | null;
+  quantity: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ZoneDetectResponse {
+  zone: string;
+  zone_source: string;
+  last_spring_frost_mmdd: string | null;
+  first_fall_frost_mmdd: string | null;
+  season_length_days: number | null;
+  message?: string | null;
+}
+
+export interface PantryGoalCalcResponse {
+  item: string;
+  method: string;
+  unit: string;
+  target_qty: number;
+  total_raw_lbs_needed: number;
+  total_plant_count: number;
+  total_sqft: number;
+  crops: any[];
+}
+
+export interface PlannerSizingResponse {
+  mode: string;
+  family_size: number;
+  crops: any[];
+  total_sqft: number;
+  total_plants: number;
+}
+
+export interface PlanTimelineResponse {
+  plan_id: string;
+  plan_name: string;
+  season: string;
+  year: number;
+  spring_frost_mmdd: string | null;
+  first_fall_frost_mmdd: string | null;
+  timeline: any[];
+}
+/* ---------- end Garden Planner (Phase 5) ---------- */

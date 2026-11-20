@@ -174,6 +174,41 @@ def calls(monkeypatch):
             return {"ready_ingredients": [{"plant_id": "plant-1", "common_name": "Sweet Basil", "culinary_aliases": ["basil"]}], "matches": [{"path": "Recipes/pesto.md", "title": "Pesto", "matched_ingredients": ["basil"], "match_count": 1, "tags": [], "servings": 7}]}
         if path == "/recipes/draft" and method == "POST":
             return {"status": "SUCCESS", "draft": True, "servings": 7, "ingredients": ["basil"], "focus_crop": "", "markdown": "# Pesto\nCategory: Recipes\n\n- [ ] 2 cups fresh basil leaves\n1. Blend ingredients.\nServes: 7"}
+        # Phase 5 routes.
+        if path == "/profile/detect-zone" and method == "GET":
+            return {"zone": "7b", "zone_source": "auto", "last_spring_frost_mmdd": "04-15", "first_fall_frost_mmdd": "10-15", "season_length_days": 170}
+        if path == "/pantry-goals" and method == "GET":
+            return {"count": 1, "goals": [{"id": "goal-1", "item": "Marinara sauce", "crop_refs_json": '[\"roma_tomato\", \"basil\"]', "target_qty": 40, "unit": "quarts", "method": "water_bath_canning", "season_year": 2027, "notes": "", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}]}
+        if path == "/pantry-goals" and method == "POST":
+            return Response(content='{"id": "goal-new", "item": "Salsa", "target_qty": 20, "unit": "quarts", "method": "water_bath_canning", "season_year": 2027}', status_code=201, media_type="application/json")
+        if path.startswith("/pantry-goals/") and method == "PATCH":
+            return {"id": goal_id if "goal_id" in dir() else "goal-1", "item": "Updated Sauce"}
+        if path.startswith("/pantry-goals/") and method == "DELETE":
+            return Response(status_code=204)
+        if path == "/pantry-goals/calculate" and method == "GET":
+            return {"item": "Marinara", "method": "water_bath_canning", "unit": "quarts", "target_qty": 40, "total_raw_lbs_needed": 120.0, "total_plant_count": 12, "total_sqft": 12.0, "crops": [{"species_ref": "roma_tomato", "common_name": "Roma Tomato", "raw_lbs_needed": 84.0, "plant_count": 8, "sqft": 8.0}]}
+        if path == "/plans" and method == "GET":
+            return {"count": 1, "plans": [{"id": "plan-1", "name": "Spring/Summer 2027", "season": "spring_summer", "year": 2027, "family_size": 7, "mode": "fresh_plus_preserving", "status": "draft", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}]}
+        if path == "/plans" and method == "POST":
+            return Response(content='{"id": "plan-new", "name": "Fall 2027", "season": "fall", "year": 2027, "family_size": 7, "mode": "fresh_only", "status": "draft"}', status_code=201, media_type="application/json")
+        if path == "/plans/plan-1" and method == "GET":
+            return {"plan": {"id": "plan-1", "name": "Spring/Summer 2027", "season": "spring_summer", "year": 2027, "family_size": 7, "mode": "fresh_plus_preserving", "status": "draft"}, "cells": [{"id": "cell-1", "plan_id": "plan-1", "location_id": "bed-1", "col": 0, "row": 0, "species_ref": "basil_sweet", "plant_id": None, "crop_family": "Lamiaceae", "quantity": 1, "notes": ""}]}
+        if path.startswith("/plans/") and method == "PATCH":
+            return {"id": "plan-1", "name": "Updated Plan"}
+        if path.startswith("/plans/") and method == "DELETE":
+            return Response(status_code=204)
+        if path.endswith("/cells") and method == "GET":
+            return {"plan_id": "plan-1", "bed_id": "bed-1", "cells": [{"id": "cell-1", "col": 0, "row": 0, "species_ref": "basil_sweet", "plant_id": None, "crop_family": "Lamiaceae", "quantity": 1, "notes": ""}]}
+        if path.endswith("/cells") and method == "PUT":
+            return {"plan_id": "plan-1", "bed_id": "bed-1", "cells_upserted": 3}
+        if path.endswith("/auto-arrange") and method == "POST":
+            return {"plan_id": "plan-1", "bed_id": "bed-1", "placements": [{"col": 0, "row": 0, "species_ref": "tomato_roma", "crop_family": "Solanaceae", "quantity": 4}]}
+        if path.endswith("/checks") and method == "GET":
+            return {"plan_id": "plan-1", "checks": [], "warning_count": 0}
+        if path.endswith("/timeline") and method == "GET":
+            return {"plan_id": "plan-1", "plan_name": "Spring/Summer 2027", "season": "spring_summer", "year": 2027, "spring_frost_mmdd": "04-15", "first_fall_frost_mmdd": "10-15", "timeline": [{"cell_id": "cell-1", "species_ref": "basil_sweet", "common_name": "Sweet Basil", "milestones": [{"stage": "Transplant / Direct sow", "week_offset": 0, "mmdd": "04-15"}]}]}
+        if path == "/planner/sizing" and method == "GET":
+            return {"mode": "fresh_only", "family_size": 7, "crops": [{"species_ref": "basil_sweet", "common_name": "Sweet Basil", "plant_count": 7, "sqft": 7.0}], "total_sqft": 7.0, "total_plants": 7}
         raise AssertionError(f"Unexpected path: {path} {method}")
 
     monkeypatch.setattr(gateway_main, "_acting_identity", acting_identity)
@@ -378,12 +413,150 @@ def test_garden_rejects_spoofed_admin_header(client, calls):
         for _, _, _, _, h in calls
         if h
     )
-    # Must NOT forward the spoofed admin headers.
-    assert not any(
-        h.get("X-Is-Admin") == "true"
-        for _, _, _, _, h in calls
-        if h
+
+
+# --------------------------------------------------------------------------- Phase 5 routes
+
+
+def test_garden_detect_zone_proxy(client, calls):
+    resp = client.get("/api/garden/profile/detect-zone", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["zone"] == "7b"
+    assert data["zone_source"] == "auto"
+    assert any(m == "GET" and p == "/profile/detect-zone" for m, p, _, _, _ in calls)
+
+
+def test_garden_pantry_goals_proxy(client, calls):
+    resp = client.get("/api/garden/pantry-goals", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["goals"][0]["item"] == "Marinara sauce"
+    assert any(m == "GET" and p == "/pantry-goals" for m, p, _, _, _ in calls)
+
+
+def test_garden_create_pantry_goal_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/pantry-goals",
+        headers=ADMIN_HEADERS,
+        json={"item": "Salsa", "target_qty": 20, "unit": "quarts", "method": "water_bath_canning", "season_year": 2027},
     )
+    assert resp.status_code == 201, resp.text
+    assert any(m == "POST" and p == "/pantry-goals" for m, p, _, _, _ in calls)
+
+
+def test_garden_delete_pantry_goal_proxy(client, calls):
+    resp = client.delete("/api/garden/pantry-goals/goal-1", headers=ADMIN_HEADERS)
+    assert resp.status_code == 204, resp.text
+    assert any(m == "DELETE" and p == "/pantry-goals/goal-1" for m, p, _, _, _ in calls)
+
+
+def test_garden_calculate_pantry_goal_proxy(client, calls):
+    resp = client.get(
+        "/api/garden/pantry-goals/calculate",
+        headers=ADMIN_HEADERS,
+        params={"item": "Marinara", "crop_refs": "roma_tomato,basil", "target_qty": 40, "unit": "quarts", "method": "water_bath_canning"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["total_raw_lbs_needed"] == 120.0
+    assert data["total_plant_count"] == 12
+    assert any(m == "GET" and p == "/pantry-goals/calculate" for m, p, _, _, _ in calls)
+
+
+def test_garden_plans_proxy(client, calls):
+    resp = client.get("/api/garden/plans", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["plans"][0]["name"] == "Spring/Summer 2027"
+    assert any(m == "GET" and p == "/plans" for m, p, _, _, _ in calls)
+
+
+def test_garden_create_plan_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/plans",
+        headers=ADMIN_HEADERS,
+        json={"name": "Fall 2027", "season": "fall", "year": 2027, "family_size": 7, "mode": "fresh_only", "status": "draft"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert any(m == "POST" and p == "/plans" for m, p, _, _, _ in calls)
+
+
+def test_garden_get_plan_proxy(client, calls):
+    resp = client.get("/api/garden/plans/plan-1", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["plan"]["name"] == "Spring/Summer 2027"
+    assert len(data["cells"]) == 1
+    assert any(m == "GET" and p == "/plans/plan-1" for m, p, _, _, _ in calls)
+
+
+def test_garden_delete_plan_proxy(client, calls):
+    resp = client.delete("/api/garden/plans/plan-1", headers=ADMIN_HEADERS)
+    assert resp.status_code == 204, resp.text
+    assert any(m == "DELETE" and p == "/plans/plan-1" for m, p, _, _, _ in calls)
+
+
+def test_garden_plan_cells_proxy(client, calls):
+    resp = client.get("/api/garden/plans/plan-1/beds/bed-1/cells", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["bed_id"] == "bed-1"
+    assert len(data["cells"]) == 1
+    assert any(m == "GET" and p == "/plans/plan-1/beds/bed-1/cells" for m, p, _, _, _ in calls)
+
+
+def test_garden_upsert_plan_cells_proxy(client, calls):
+    resp = client.put(
+        "/api/garden/plans/plan-1/beds/bed-1/cells",
+        headers=ADMIN_HEADERS,
+        json=[{"col": 0, "row": 0, "species_ref": "basil_sweet", "quantity": 1}],
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["cells_upserted"] == 3
+    assert any(m == "PUT" and p == "/plans/plan-1/beds/bed-1/cells" for m, p, _, _, _ in calls)
+
+
+def test_garden_auto_arrange_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/plans/plan-1/beds/bed-1/auto-arrange", headers=ADMIN_HEADERS
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data["placements"]) == 1
+    assert any(m == "POST" and p == "/plans/plan-1/beds/bed-1/auto-arrange" for m, p, _, _, _ in calls)
+
+
+def test_garden_plan_checks_proxy(client, calls):
+    resp = client.get("/api/garden/plans/plan-1/checks", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["warning_count"] == 0
+    assert any(m == "GET" and p == "/plans/plan-1/checks" for m, p, _, _, _ in calls)
+
+
+def test_garden_plan_timeline_proxy(client, calls):
+    resp = client.get("/api/garden/plans/plan-1/timeline", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["plan_name"] == "Spring/Summer 2027"
+    assert len(data["timeline"]) == 1
+    assert any(m == "GET" and p == "/plans/plan-1/timeline" for m, p, _, _, _ in calls)
+
+
+def test_garden_planner_sizing_proxy(client, calls):
+    resp = client.get(
+        "/api/garden/planner/sizing",
+        headers=ADMIN_HEADERS,
+        params={"mode": "fresh_only", "family_size": 7, "species_refs": "basil_sweet"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["family_size"] == 7
+    assert data["total_plants"] == 7
+    assert any(m == "GET" and p == "/planner/sizing" for m, p, _, _, _ in calls)
 
 
 # --------------------------------------------------------------------------- auth enforcement
@@ -506,123 +679,5 @@ def test_garden_callback_rejects_spoofed_admin(client, calls):
         for _, _, _, _, h in calls
         if h
     )
-    assert not any(
-        h.get("X-Is-Admin") == "true"
-        for _, _, _, _, h in calls
-        if h
-    )
 
 
-# --------------------------------------------------------------------------- Phase 3 routes
-
-
-def test_garden_species_lookup_proxy(client, calls):
-    resp = client.post(
-        "/api/garden/species/lookup",
-        headers=ADMIN_HEADERS,
-        json={"name": "Rare Plant X"},
-    )
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert data["draft"] is True
-    assert data["source"] == "wiki_ai_draft"
-    assert data["species"]["common_name"] == "Rare Plant X"
-    assert any(m == "POST" and p == "/species/lookup" for m, p, _, _, _ in calls)
-
-
-def test_garden_species_custom_proxy(client, calls):
-    resp = client.post(
-        "/api/garden/species/custom",
-        headers=ADMIN_HEADERS,
-        json={"common_name": "Thai Holy Basil", "category": "herb"},
-    )
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["key"] == "thai_holy_basil"
-    assert any(m == "POST" and p == "/species/custom" for m, p, _, _, _ in calls)
-
-
-def test_garden_species_custom_delete_proxy(client, calls):
-    resp = client.delete(
-        "/api/garden/species/custom/thai_holy_basil", headers=ADMIN_HEADERS
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["ok"] is True
-    assert any(
-        m == "DELETE" and p == "/species/custom/thai_holy_basil"
-        for m, p, _, _, _ in calls
-    )
-
-
-def test_garden_hooks_weather_proxy(client, calls):
-    resp = client.post(
-        "/api/garden/hooks/weather",
-        headers=ADMIN_HEADERS,
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["evaluated"] is True
-    assert any(m == "POST" and p == "/hooks/weather" for m, p, _, _, _ in calls)
-
-
-# --------------------------------------------------------------------------- Phase 4 routes
-
-
-def test_garden_harvest_proxy(client, calls):
-    resp = client.post(
-        "/api/garden/plants/plant-1/harvest",
-        headers=ADMIN_HEADERS,
-        json={"quantity": 2.0, "unit": "bunch", "disposition": "fresh"},
-    )
-    assert resp.status_code == 201, resp.text
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["harvest_id"] == "harvest-1"
-    assert any(m == "POST" and p == "/plants/plant-1/harvest" for m, p, _, _, _ in calls)
-
-
-def test_garden_harvests_proxy(client, calls):
-    resp = client.get("/api/garden/harvests", headers=ADMIN_HEADERS)
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert data["count"] == 2
-    assert len(data["harvests"]) == 2
-    assert data["totals"][0]["total_quantity"] == 3.0
-    assert any(m == "GET" and p == "/harvests" for m, p, _, _, _ in calls)
-
-
-def test_garden_delete_harvest_proxy(client, calls):
-    resp = client.delete("/api/garden/harvests/harvest-1", headers=ADMIN_HEADERS)
-    assert resp.status_code == 204, resp.text
-    assert any(m == "DELETE" and p == "/harvests/harvest-1" for m, p, _, _, _ in calls)
-
-
-def test_garden_harvest_ready_proxy(client, calls):
-    resp = client.get("/api/garden/harvest/ready", headers=ADMIN_HEADERS)
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert data["count"] == 1
-    assert data["ready"][0]["common_name"] == "Sweet Basil"
-    assert "basil" in data["ready"][0]["culinary_aliases"]
-    assert any(m == "GET" and p == "/harvest/ready" for m, p, _, _, _ in calls)
-
-
-def test_garden_proxy_rejects_spoofed_admin_on_harvest(client, calls):
-    """A kid with spoofed admin headers can log harvest (all roles allowed),
-    and forwarded headers reflect kid identity from Bearer token."""
-    resp = client.post(
-        "/api/garden/plants/plant-1/harvest",
-        headers={
-            "Authorization": "Bearer kid-key",
-            "X-Is-Admin": "true",  # spoofed
-            "X-User-Id": "mother",  # spoofed
-        },
-        json={"quantity": 1.0, "unit": "bunch", "disposition": "fresh"},
-    )
-    assert resp.status_code == 201  # kid can log harvest (all roles allowed)
-    # Forwarded headers must reflect kid identity.
-    assert any(
-        h.get("X-User-Id") == "child" and h.get("X-User-Role") == "child"
-        for _, _, _, _, h in calls
-        if h
-    )

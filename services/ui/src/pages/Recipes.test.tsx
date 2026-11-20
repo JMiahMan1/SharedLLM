@@ -46,6 +46,9 @@ vi.mock('../services/api', async (importOriginal) => {
       sendSkylightRecipe: vi.fn(),
       pushSkylightWeek: vi.fn(),
       mirrorSkylightList: vi.fn(),
+      gardenHarvestReady: vi.fn(),
+      gardenRecipeMatches: vi.fn(),
+      gardenRecipeDraft: vi.fn(),
     },
   };
 });
@@ -137,6 +140,19 @@ beforeEach(() => {
   m.pushSkylightWeek.mockResolvedValue({ status: 'SUCCESS', planned: [], failed: [] });
   m.mirrorSkylightList.mockResolvedValue({ status: 'SUCCESS', added: 0, removed: 0 });
   m.syncNotesRag.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_sync_rag' });
+  m.gardenRecipeMatches.mockResolvedValue({
+    ready_ingredients: [],
+    matches: [],
+  });
+  m.gardenRecipeDraft.mockResolvedValue({
+    status: 'SUCCESS',
+    draft: true,
+    servings: 7,
+    ingredients: ['basil'],
+    focus_crop: 'Sweet Basil',
+    markdown: '# Garden Pesto\nCategory: Recipes\n\n- [ ] 2 cups fresh basil leaves\n1. Blend.\nServes: 7',
+    note: 'Unsaved preview. Save via /api/recipes/cookbook/save on approval.',
+  });
 });
 
 describe('browsing the cookbook', () => {
@@ -400,5 +416,94 @@ describe('the shared cookbook', () => {
     fireEvent.click(await screen.findByLabelText('More cookbook actions'));
     fireEvent.click(screen.getByRole('menuitem', { name: /teach jarvis/i }));
     await waitFor(() => expect(m.syncNotesRag).toHaveBeenCalledWith({ cookbook: true }));
+  });
+});
+
+describe('draft recipe from garden produce', () => {
+  it('shows "Fresh in garden" banner and drafts a recipe when clicking Draft', async () => {
+    m.gardenHarvestReady.mockResolvedValue({
+      count: 1,
+      ready: [
+        {
+          plant_id: 'plant-1',
+          nickname: 'Sir Basil',
+          common_name: 'Sweet Basil',
+          category: 'herb',
+          species_ref: 'basil_sweet',
+          culinary_aliases: ['basil'],
+          in_cooldown: false,
+        },
+      ],
+    });
+    m.gardenRecipeMatches.mockResolvedValue({
+      ready_ingredients: [
+        {
+          plant_id: 'plant-1',
+          nickname: 'Sir Basil',
+          common_name: 'Sweet Basil',
+          category: 'herb',
+          species_ref: 'basil_sweet',
+          culinary_aliases: ['basil'],
+          in_cooldown: false,
+        },
+      ],
+      matches: [],
+    });
+
+    renderAt();
+
+    // Banner shows fresh garden produce
+    expect(await screen.findByTestId('recipe-fresh-in-garden')).toHaveTextContent('Fresh in garden');
+    expect(await screen.findByText(/Sir Basil/)).toBeTruthy();
+
+    // Click Draft new family recipe
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /draft new family recipe/i })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /draft new family recipe/i }));
+
+    // Draft modal opens with markdown preview
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /draft recipe from garden/i })).toBeTruthy();
+    });
+    expect(screen.getByText(/# Garden Pesto/)).toBeTruthy();
+    expect(screen.getByText(/Serves 7/)).toBeTruthy();
+    expect(m.gardenRecipeDraft).toHaveBeenCalledWith({
+      ingredients: ['basil'],
+      focus_crop: 'Sweet Basil',
+      servings: 7,
+    });
+  });
+
+  it('dismiss closes the draft modal without saving', async () => {
+    m.gardenHarvestReady.mockResolvedValue({
+      count: 1,
+      ready: [
+        {
+          plant_id: 'plant-1',
+          nickname: 'Sir Basil',
+          common_name: 'Sweet Basil',
+          category: 'herb',
+          species_ref: 'basil_sweet',
+          culinary_aliases: ['basil'],
+          in_cooldown: false,
+        },
+      ],
+    });
+
+    renderAt();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('recipe-fresh-in-garden')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /draft new family recipe/i })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /draft new family recipe/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /draft recipe from garden/i })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+    expect(screen.queryByRole('heading', { name: /draft recipe from garden/i })).not.toBeInTheDocument();
   });
 });

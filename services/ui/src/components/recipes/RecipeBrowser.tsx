@@ -46,23 +46,15 @@ function RecipeTile({
   recipe,
   onOpen,
   freshInGarden = false,
-  gardenAliasWords,
+  gardenMatchPaths,
 }: {
   recipe: CookbookRecipe;
   onOpen: () => void;
   freshInGarden?: boolean;
-  gardenAliasWords?: Set<string>;
+  gardenMatchPaths?: Set<string>;
 }) {
   const time = formatCookTime(recipe.total_minutes);
-  const aliasWords = gardenAliasWords;
-  const matchesGarden = freshInGarden && aliasWords && aliasWords.size > 0 && [
-    recipe.title,
-    ...recipe.tags,
-    ...recipe.staples,
-    recipe.meal,
-    ...recipe.proteins,
-    recipe.owner_label,
-  ].join(' ').toLowerCase().split(/\s+/).some((w) => aliasWords!.has(w));
+  const matchesGarden = freshInGarden && gardenMatchPaths?.has(recipe.path);
   return (
     <button
       type="button"
@@ -133,7 +125,7 @@ export default function RecipeBrowser({
   onRetry,
   onOpen,
   freshInGarden = false,
-  readyIngredients: readyIngredientsProp = [],
+  gardenMatchPaths: gardenMatchPathsProp = new Set<string>(),
 }: {
   recipes: CookbookRecipe[];
   me: string;
@@ -142,7 +134,7 @@ export default function RecipeBrowser({
   onRetry: () => void;
   onOpen: (recipe: CookbookRecipe) => void;
   freshInGarden?: boolean;
-  readyIngredients?: Array<{ culinary_aliases?: string[] | null; nickname?: string | null; common_name?: string | null }>;
+  gardenMatchPaths?: Set<string>;
 }) {
   const [query, setQuery] = useState('');
   const [meal, setMeal] = useState<string | null>(null);
@@ -156,17 +148,7 @@ export default function RecipeBrowser({
     [recipes],
   );
 
-  // Phase 4: build a set of normalized garden alias words for matching.
-  const gardenAliasWords = useMemo(() => {
-    const words = new Set<string>();
-    for (const ri of readyIngredientsProp ?? []) {
-      for (const alias of ri.culinary_aliases ?? []) {
-        const normalized = alias.trim().toLowerCase();
-        if (normalized) words.add(normalized);
-      }
-    }
-    return words;
-  }, [readyIngredientsProp]);
+  const gardenMatchPaths = gardenMatchPathsProp;
 
   const visible = useMemo(() => {
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -178,11 +160,8 @@ export default function RecipeBrowser({
       if (quick.has('favorites') && !((recipe.rating ?? 0) >= 4)) return false;
       if (quick.has('untried') && recipe.made > 0) return false;
       if (quick.has('mine') && recipe.owner !== me) return false;
-      if (freshInGarden && gardenAliasWords.size > 0) {
-        const hay = [recipe.title, ...recipe.tags, ...recipe.staples, recipe.meal, ...recipe.proteins, recipe.owner_label]
-          .join(' ')
-          .toLowerCase();
-        if (![...gardenAliasWords].some((alias) => hay.includes(alias))) return false;
+      if (freshInGarden && gardenMatchPaths.size > 0) {
+        if (!gardenMatchPaths.has(recipe.path)) return false;
       }
       if (words.length) {
         const hay = [recipe.title, ...recipe.tags, ...recipe.staples, recipe.meal, ...recipe.proteins, recipe.owner_label]
@@ -193,7 +172,7 @@ export default function RecipeBrowser({
       return true;
     });
     return sortRecipes(filtered, sort);
-  }, [recipes, query, meal, protein, quick, sort, me]);
+  }, [recipes, query, meal, protein, quick, sort, me, freshInGarden, gardenMatchPaths]);
 
   const toggleQuick = (key: Quick) =>
     setQuick((current) => {
@@ -318,7 +297,7 @@ export default function RecipeBrowser({
             recipe={recipe}
             onOpen={() => onOpen(recipe)}
             freshInGarden={freshInGarden}
-            gardenAliasWords={gardenAliasWords}
+            gardenMatchPaths={gardenMatchPaths}
           />
         ))}
       </div>
