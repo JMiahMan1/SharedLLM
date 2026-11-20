@@ -427,11 +427,46 @@ async function postNdjson<T>(
   signal: AbortSignal | undefined,
   failure: string,
 ): Promise<void> {
+  await fetchNdjson(path, { method: 'POST', body: JSON.stringify(body) }, onEvent, signal, failure);
+}
+
+/** A failed NDJSON request: the server's own words, and its HTTP status. */
+export class NdjsonError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'NdjsonError';
+    this.status = status;
+  }
+}
+
+/**
+ * GET an NDJSON stream (one that stays open, like a device's live logs) and hand each line to ``onEvent`` as it
+ * arrives; resolves when the server ends it, rejects with an {@link NdjsonError} when it refuses.
+ */
+export async function getNdjson<T>(
+  path: string,
+  onEvent: (event: T) => void,
+  signal: AbortSignal | undefined,
+  failure: string,
+): Promise<void> {
+  await fetchNdjson(path, { method: 'GET' }, onEvent, signal, failure);
+}
+
+async function fetchNdjson<T>(
+  path: string,
+  init: { method: string; body?: string },
+  onEvent: (event: T) => void,
+  signal: AbortSignal | undefined,
+  failure: string,
+): Promise<void> {
   const { baseURL, headers } = directRequestConfig();
-  const resp = await fetch(`${baseURL || ''}${path}`, { method: 'POST', headers, body: JSON.stringify(body), signal });
+  if (init.method === 'GET') delete headers['Content-Type'];
+  const resp = await fetch(`${baseURL || ''}${path}`, { ...init, headers, signal });
   if (!resp.ok || !resp.body) {
     const detail = await resp.json().catch(() => ({}));
-    throw new Error((detail as { detail?: string }).detail || `${failure} (${resp.status})`);
+    throw new NdjsonError((detail as { detail?: string }).detail || `${failure} (${resp.status})`, resp.status);
   }
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();

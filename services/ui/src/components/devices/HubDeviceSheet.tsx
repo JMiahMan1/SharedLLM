@@ -5,6 +5,7 @@ import { ChevronRight, ExternalLink, EyeOff, KeyRound, Loader2, Pencil, Power, T
 import DeviceSheet from './DeviceSheet';
 import LabelChips from './LabelChips';
 import RestartsSection from './RestartsSection';
+import DeviceLogsSection from './DeviceLogsSection';
 import DeviceControl from './controls/registry';
 import DeviceGlyph from './DeviceGlyph';
 import { accentFor, isActiveState } from '../../lib/deviceIcons';
@@ -366,6 +367,7 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
       </Section>
 
       {device.domain === 'esphome' && <RestartsSection deviceId={device.id} />}
+      {device.domain === 'esphome' && <DeviceLogsSection deviceId={device.id} deviceName={device.name} />}
 
       <details className={`${CARD} group`} data-testid="device-info">
         <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 px-3 text-sm font-semibold text-slate-300 [&::-webkit-details-marker]:hidden">
