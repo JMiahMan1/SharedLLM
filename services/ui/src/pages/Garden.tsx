@@ -637,8 +637,9 @@ export function PlantDetail() {
           <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Assignment</h3>
           <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <label className="text-xs text-slate-400 w-24">Assigned to</label>
+              <label htmlFor="garden-assigned-to" className="text-xs text-slate-400 w-24">Assigned to</label>
               <select
+                id="garden-assigned-to"
                 value={plant.assigned_to || ''}
                 onChange={(e) => {
                   api.gardenAssignPlant(plant.id, {
@@ -789,8 +790,9 @@ function DigestSettingsModal({
 
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Morning digest time</label>
+            <label htmlFor="garden-digest-time" className="block text-xs text-slate-400 mb-1">Morning digest time</label>
             <input
+              id="garden-digest-time"
               type="time"
               value={digestTime}
               onChange={(e) => setDigestTime(e.target.value)}
