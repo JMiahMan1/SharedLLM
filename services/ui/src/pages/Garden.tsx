@@ -588,8 +588,9 @@ function AddPlantModal({
 
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Search species</label>
+            <label htmlFor="garden-add-species" className="block text-xs text-slate-400 mb-1">Search species</label>
             <input
+              id="garden-add-species"
               type="text"
               value={query}
               onChange={handleSearch}
@@ -629,8 +630,9 @@ function AddPlantModal({
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Personal name (optional)</label>
+                <label htmlFor="garden-add-nickname" className="block text-xs text-slate-400 mb-1">Personal name (optional)</label>
                 <input
+                  id="garden-add-nickname"
                   type="text"
                   value={nickname}
                   onChange={(e) => setNickname(e.target.value)}
@@ -647,9 +649,10 @@ function AddPlantModal({
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Room</label>
+                <label htmlFor="garden-add-room" className="block text-xs text-slate-400 mb-1">Room</label>
                 <div className="flex gap-2">
                   <select
+                    id="garden-add-room"
                     value={locationId}
                     onChange={(e) => setLocationId(e.target.value)}
                     className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -677,6 +680,7 @@ function AddPlantModal({
                       value={locationId}
                       onChange={(e) => setLocationId(e.target.value)}
                       placeholder="Room name"
+                      aria-label="New room name"
                       className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
                     <button
@@ -729,8 +733,9 @@ function AddPlantModal({
               {showTuning && (
                 <div className="space-y-3 pt-3 border-t border-white/10">
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Pot size (in)</label>
+                    <label htmlFor="garden-add-pot-size" className="block text-xs text-slate-400 mb-1">Pot size (in)</label>
                     <input
+                      id="garden-add-pot-size"
                       type="number"
                       value={potSize}
                       onChange={(e) => setPotSize(e.target.value)}
@@ -738,8 +743,9 @@ function AddPlantModal({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Pot material</label>
+                    <label htmlFor="garden-add-pot-material" className="block text-xs text-slate-400 mb-1">Pot material</label>
                     <select
+                      id="garden-add-pot-material"
                       value={potMaterial}
                       onChange={(e) => setPotMaterial(e.target.value)}
                       className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -752,8 +758,9 @@ function AddPlantModal({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Window direction</label>
+                    <label htmlFor="garden-add-window-direction" className="block text-xs text-slate-400 mb-1">Window direction</label>
                     <select
+                      id="garden-add-window-direction"
                       value={windowDirection}
                       onChange={(e) => setWindowDirection(e.target.value)}
                       className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -766,8 +773,9 @@ function AddPlantModal({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Distance from window (ft)</label>
+                    <label htmlFor="garden-add-window-distance" className="block text-xs text-slate-400 mb-1">Distance from window (ft)</label>
                     <input
+                      id="garden-add-window-distance"
                       type="number"
                       value={distanceFromWindow}
                       onChange={(e) => setDistanceFromWindow(e.target.value)}

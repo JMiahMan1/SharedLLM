@@ -9,7 +9,7 @@ import type {
   WidgetInstance,
 } from '../types/widget';
 import { api } from '../services/api';
-import { Activity, BookOpen, HeartPulse, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap, CloudSun, Image as ImageIcon, NotebookPen } from 'lucide-react';
+import { Activity, BookOpen, HeartPulse, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap, CloudSun, Image as ImageIcon, NotebookPen, Flower } from 'lucide-react';
 
 export interface WidgetStateItem {
   id: string;
@@ -74,6 +74,8 @@ export const defaultWidgetDefs: WidgetDef[] = [
   // tonight's dinner. It never reads steps (those stay on `health_activity`),
   // so the two never show the same number.
   { key: 'health_today', label: 'Health today', icon: HeartPulse, minSize: 'small', defaultSize: 'medium' },
+  // The garden hub's today card: plants due and overdue for care, one tap into /garden.
+  { key: 'garden_today', label: 'Garden today', icon: Flower, minSize: 'small', defaultSize: 'medium' },
   { key: 'climate', label: 'Climate', icon: Thermometer, minSize: 'small', defaultSize: 'medium', mountConditions: needsHomeHub },
   { key: 'presence', label: 'Family Presence', icon: Compass, minSize: 'small', defaultSize: 'medium' },
   // The reading app's front door. `small` is enough for the verse text, and the
