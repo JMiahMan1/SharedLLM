@@ -145,6 +145,33 @@ export default function Recipes() {
     }
   };
 
+  const saveDraftToCookbook = async () => {
+    if (!draftRecipe) return;
+    setDraftBusy(true);
+    try {
+      const focus = draftRecipe.focus_crop || draftRecipe.ingredients[0] || 'Garden';
+      const saved = await api.cookbookSave({
+        title: `${focus} Garden Recipe`,
+        content: draftRecipe.markdown,
+      });
+      if (saved.status === 'SUCCESS') {
+        toast.success('Saved to the family cookbook');
+        setDraftOpen(false);
+        setDraftRecipe(null);
+        refreshCatalog();
+        void queryClient.invalidateQueries({ queryKey: ['recipe-sources'] });
+        const savedPath = (saved.detail as { path?: string } | undefined)?.path;
+        if (savedPath) void queryClient.invalidateQueries({ queryKey: ['recipe-body', savedPath] });
+      } else {
+        toast.error(saved.message || 'Could not save the draft');
+      }
+    } catch {
+      toast.error('Could not save the draft');
+    } finally {
+      setDraftBusy(false);
+    }
+  };
+
   const openRecipe = recipes.find((recipe) => recipe.path === openPath) ?? null;
   const editRecipe = editing && editing !== 'new' ? recipes.find((recipe) => recipe.path === editing) ?? null : null;
   const editBody = editRecipe ? (queryClient.getQueryData(['recipe-body', editRecipe.path]) as ExecutionResponse | undefined) : undefined;
@@ -460,11 +487,4 @@ export default function Recipes() {
       )}
     </div>
   );
-
-  const saveDraftToCookbook = () => {
-    // TODO: implement save to cookbook via existing cookbook create/save API
-    toast('Draft saved to cookbook (coming in Phase 5 cookbook-save hook).');
-    setDraftOpen(false);
-    setDraftRecipe(null);
-  };
 }

@@ -10,6 +10,9 @@ import { toast } from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveShoppingList, readShoppingList } from '../lib/shoppingListStore';
 import { useAuth } from '../context/AuthContext';
+import {
+  BedGridEditor, DualSizingPanel, PlansPanel, TimelinePanel, YardMapPanel, ZoneFrostPanel,
+} from '../components/garden/PlannerPanels';
 import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn, HarvestLogIn, HarvestReadyItem } from '../types/api';
 
 /* ========================= Garden Page ========================= */
@@ -71,35 +74,59 @@ export default function Garden() {
     <div className="flex flex-col h-full w-full bg-slate-950 text-slate-200">
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-white">Garden</h1>
-            {streak > 0 && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
-                <Zap size={12} className="text-amber-400" />
-                <span className="text-xs font-semibold text-amber-300">{streak}-day streak</span>
-              </div>
-            )}
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold text-white">Garden</h1>
+              {streak > 0 && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
+                  <Zap size={12} className="text-amber-400" />
+                  <span className="text-xs font-semibold text-amber-300">{streak}-day streak</span>
+                </div>
+              )}
+            </div>
+            <p className="text-slate-400 text-sm">
+              {plants.length} plant{plants.length !== 1 ? 's' : ''} · {today?.due_count ?? 0} due today
+            </p>
           </div>
-          <p className="text-slate-400 text-sm">
-            {plants.length} plant{plants.length !== 1 ? 's' : ''} · {today?.due_count ?? 0} due today
-          </p>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setTab('today')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`inline-flex items-center gap-1.5 px-4 py-2 min-h-11 rounded-lg text-sm font-medium transition-all shrink-0 ${
                 tab === 'today'
                   ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
                   : 'bg-white/5 text-slate-300 hover:bg-white/10'
               }`}
             >
-              <Sun size={16} className="mr-2" /> Today
+              <Sun size={16} /> Today
             </button>
-            <div className="flex items-center gap-1 border border-white/10 rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setTab('plants')}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 min-h-11 rounded-lg text-sm font-medium transition-all shrink-0 ${
+                tab === 'plants'
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
+                  : 'bg-white/5 text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              <Leaf size={16} /> Plants
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('planner')}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 min-h-11 rounded-lg text-sm font-medium transition-all shrink-0 ${
+                tab === 'planner'
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
+                  : 'bg-white/5 text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              <Scissors size={16} /> Planner
+            </button>
+            <div className="inline-flex items-center shrink-0 border border-white/10 rounded-lg overflow-hidden">
               <button
                 type="button"
                 onClick={() => setMineOnly(false)}
-                className={`px-3 py-1.5 text-xs font-medium transition-all ${
+                className={`px-3 py-2 min-h-11 text-xs font-medium transition-all ${
                   !mineOnly
                     ? 'bg-purple-600/30 text-white'
                     : 'text-slate-300 hover:bg-white/10'
@@ -110,7 +137,7 @@ export default function Garden() {
               <button
                 type="button"
                 onClick={() => setMineOnly(true)}
-                className={`px-3 py-1.5 text-xs font-medium transition-all ${
+                className={`px-3 py-2 min-h-11 text-xs font-medium transition-all ${
                   mineOnly
                     ? 'bg-purple-600/30 text-white'
                     : 'text-slate-300 hover:bg-white/10'
@@ -119,28 +146,6 @@ export default function Garden() {
                 Mine
               </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setTab('plants')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                tab === 'plants'
-                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
-                  : 'bg-white/5 text-slate-300 hover:bg-white/10'
-              }`}
-            >
-              <Leaf size={16} className="mr-2" /> Plants
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('planner')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                tab === 'planner'
-                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
-                  : 'bg-white/5 text-slate-300 hover:bg-white/10'
-              }`}
-            >
-              <Scissors size={16} className="mr-2" /> Planner
-            </button>
           </div>
         </div>
 
@@ -160,11 +165,11 @@ export default function Garden() {
           <PlannerTab locations={locations} />
         )}
 
-        <div className="mt-6 flex justify-end">
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
           <button
             type="button"
             onClick={() => setAddOpen(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-purple-500/25"
+            className="inline-flex items-center gap-2 px-5 py-2.5 min-h-11 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-purple-500/25"
           >
             <Plus size={16} /> Add Plant
           </button>
@@ -172,9 +177,9 @@ export default function Garden() {
             <button
               type="button"
               onClick={() => setDigestOpen(true)}
-              className="ml-3 flex items-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 text-slate-300 rounded-xl text-sm font-medium transition-colors border border-white/10"
+              className="inline-flex items-center gap-2 px-5 py-2.5 min-h-11 bg-white/10 hover:bg-white/20 text-slate-300 rounded-xl text-sm font-medium transition-colors border border-white/10"
             >
-              <Settings size={16} className="mr-2" /> Digest Settings
+              <Settings size={16} /> Digest Settings
             </button>
           )}
         </div>
@@ -313,28 +318,28 @@ function TodayTab({
   const renderTask = (task: GardenTodayTask) => (
     <div
       key={task.plant_id + '-' + task.action}
-      className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 mb-2"
+      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 mb-2"
     >
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex flex-wrap items-center gap-2 mb-1">
           <span className="font-semibold text-white">{task.nickname || task.common_name}</span>
           {task.common_name && task.nickname && (
             <span className="text-xs text-slate-400">{task.common_name}</span>
           )}
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-          <Droplets size={12} />
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400 mb-1">
+          <Droplets size={12} className="shrink-0" />
           <span>{task.care_cue}</span>
           {task.location_name && (
-            <span className="ml-2">· {task.location_name}</span>
+            <span>· {task.location_name}</span>
           )}
           {task.toxicity_level && task.toxicity_level !== 'non_toxic' && (
-            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20">
               {task.toxicity_level}
             </span>
           )}
           {task.assigned_to && (
-            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20">
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20">
               {task.assigned_to}
             </span>
           )}
@@ -345,18 +350,18 @@ function TodayTab({
           <div className="text-xs text-emerald-400">Due {task.next_due_at}</div>
         )}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 shrink-0">
         <button
           type="button"
           onClick={() => logCareMutation.mutate({ plantId: task.plant_id, action: task.action })}
-          className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors pointer-coarse:min-h-11"
+          className="px-3 py-1.5 min-h-11 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors"
         >
           Done
         </button>
         <button
           type="button"
           onClick={() => snoozeMutation.mutate({ plantId: task.plant_id })}
-          className="px-3 py-1.5 bg-amber-500/10 text-amber-400 rounded-lg hover:bg-amber-500/20 border border-amber-500/20 text-xs font-medium transition-colors pointer-coarse:min-h-11"
+          className="px-3 py-1.5 min-h-11 bg-amber-500/10 text-amber-400 rounded-lg hover:bg-amber-500/20 border border-amber-500/20 text-xs font-medium transition-colors"
         >
           Still damp
         </button>
@@ -386,13 +391,13 @@ function TodayTab({
       {/* Phase 4: Ready to Harvest strip */}
       {readyItems.length > 0 && (
         <section className="mb-6">
-          <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div className="flex items-center gap-2">
               <Scissors size={18} className="text-emerald-400" />
               <h2 className="text-sm font-semibold text-white uppercase tracking-wider">
                 Ready to Harvest
               </h2>
-              <span className={`ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400`}>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">
                 {readyItems.length}
               </span>
             </div>
@@ -400,7 +405,7 @@ function TodayTab({
               <button
                 type="button"
                 onClick={() => onLogHarvest(readyNotInCooldown[0])}
-                className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors pointer-coarse:min-h-11"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors shrink-0"
               >
                 <Leaf size={12} /> Log Harvest
               </button>
@@ -412,8 +417,8 @@ function TodayTab({
                 key={item.plant_id}
                 className={`p-3 rounded-xl border ${item.in_cooldown ? 'border-amber-500/30 bg-amber-500/5' : 'border-emerald-500/30 bg-emerald-500/5'}`}
               >
-                <div className="flex items-start justify-between mb-1">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-white">{item.nickname || item.common_name}</span>
                     {item.in_cooldown && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
@@ -421,7 +426,7 @@ function TodayTab({
                       </span>
                     )}
                   </div>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${item.in_cooldown ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${item.in_cooldown ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
                     {item.category}
                   </span>
                 </div>
@@ -440,7 +445,7 @@ function TodayTab({
                   <button
                     type="button"
                     onClick={() => onLogHarvest(item)}
-                    className="w-full px-3 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors"
+                    className="w-full px-3 py-2 min-h-11 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors"
                   >
                     Log Harvest
                   </button>
@@ -464,13 +469,13 @@ function TodayTab({
             const room = locations.find((l) => l.name === roomName);
             return (
               <section key={roomName} className="mb-6">
-                <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <div className="flex items-center gap-2">
                     <Droplets size={18} className="text-emerald-400" />
                     <h2 className="text-sm font-semibold text-white uppercase tracking-wider">
                       {roomName}
                     </h2>
-                    <span className={`ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400`}>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">
                       {tasks.length}
                     </span>
                   </div>
@@ -478,7 +483,7 @@ function TodayTab({
                     <button
                       type="button"
                       onClick={() => waterAllMutation.mutate(room.id)}
-                      className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors pointer-coarse:min-h-11"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 bg-emerald-500/10 text-emerald-400 rounded-lg hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-medium transition-colors shrink-0"
                     >
                       <Droplets size={12} /> Water room
                     </button>
@@ -518,7 +523,7 @@ function PlantsTab({ plants, locations, mineOnly, setMineOnly, currentUser }: { 
             key={f}
             type="button"
             onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+            className={`inline-flex items-center px-3.5 py-2 min-h-11 rounded-full text-sm font-medium transition-all ${
               filter === f
                 ? 'bg-purple-600 text-white'
                 : 'bg-white/5 text-slate-300 hover:bg-white/10'
@@ -530,20 +535,20 @@ function PlantsTab({ plants, locations, mineOnly, setMineOnly, currentUser }: { 
         <button
           type="button"
           onClick={() => setMineOnly(!mineOnly)}
-          className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+          className={`inline-flex items-center gap-1.5 px-3.5 py-2 min-h-11 rounded-full text-sm font-medium transition-all ${
             mineOnly
               ? 'bg-purple-600 text-white'
               : 'bg-white/5 text-slate-300 hover:bg-white/10'
           }`}
         >
-          <User size={14} className="mr-1.5" />
+          <User size={14} />
           {mineOnly ? 'Mine' : 'All'}
         </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.length === 0 ? (
-          <div className="col-span-3 flex flex-col items-center justify-center py-16 text-slate-400">
+          <div className="col-span-full flex flex-col items-center justify-center py-16 text-slate-400">
             <Flower size={48} className="mb-4 opacity-50" />
             <h3 className="text-lg font-medium text-slate-300">No plants yet</h3>
             <p className="text-sm text-slate-500 mt-1">Add your first plant to start tracking care.</p>
@@ -646,271 +651,72 @@ function PlannerTab({
 }) {
   const queryClient = useQueryClient();
 
-  // Zone detection
-  const zoneQuery = useQuery({
-    queryKey: ['garden-zone'],
-    queryFn: () => api.gardenDetectZone(),
+  // Zone & frost profile (loaded on mount; never auto-detect).
+  const profileQuery = useQuery({
+    queryKey: ['garden-profile'],
+    queryFn: () => api.gardenGetProfile(),
     staleTime: 300_000,
     retry: false,
   });
-  const zone = zoneQuery.data;
 
-  // Pantry goals
-  const pantryQuery = useQuery({
-    queryKey: ['garden-pantry-goals'],
-    queryFn: () => api.gardenListPantryGoals(),
-    staleTime: 300_000,
-    retry: false,
-  });
-  const pantryGoals = pantryQuery.data?.goals ?? [];
-
-  // Plans
   const plansQuery = useQuery({
     queryKey: ['garden-plans'],
     queryFn: () => api.gardenListPlans(),
-    staleTime: 300_000,
+    staleTime: 120_000,
     retry: false,
   });
   const plans = plansQuery.data?.plans ?? [];
 
-  const [newGoalItem, setNewGoalItem] = useState('');
-  const [newGoalQty, setNewGoalQty] = useState('');
-  const [activePlan, setActivePlan] = useState<string | null>(plans.length ? plans[0].id : null);
-
-  const addPantryGoalMutation = useMutation({
-    mutationFn: async (body: { item: string; target_qty: number; unit: string; method: string }) => {
-      return api.gardenCreatePantryGoal(body);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['garden-pantry-goals'] });
-      setNewGoalItem('');
-      setNewGoalQty('');
-      toast.success('Pantry goal added');
-    },
-    onError: () => toast.error('Failed to add pantry goal'),
+  const speciesQuery = useQuery({
+    queryKey: ['garden-species', 'planner'],
+    queryFn: () => api.gardenListSpecies({ limit: 500 }),
+    staleTime: 600_000,
+    retry: false,
   });
 
-  const detectZoneMutation = useMutation({
-    mutationFn: () => api.gardenDetectZone(),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['garden-zone'] });
-      toast.success(`Zone detected: ${data.zone}`);
-    },
-    onError: () => toast.error('Zone detection unavailable'),
-  });
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
+  const [openBed, setOpenBed] = useState<GardenLocation | null>(null);
 
-  const bedLocations = locations.filter((l) =>
-    ['raised_bed', 'in_ground', 'container', 'greenhouse'].includes(l.kind),
+  useEffect(() => {
+    if (!plans.some((plan) => plan.id === activePlanId)) {
+      setActivePlanId(plans[0]?.id ?? null);
+    }
+  }, [plans, activePlanId]);
+
+  const bedLocations = locations.filter((location) =>
+    ['raised_bed', 'in_ground', 'container', 'greenhouse'].includes(location.kind),
   );
+  const activePlan = plans.find((plan) => plan.id === activePlanId) ?? null;
 
   return (
     <div className="space-y-6">
-      {/* Zone & Frost Header */}
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-white uppercase tracking-wider">
-            Household Climate
-          </h3>
-          <button
-            type="button"
-            onClick={() => detectZoneMutation.mutate()}
-            disabled={detectZoneMutation.isPending}
-            className="px-3 py-1.5 bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 rounded-lg text-xs transition-colors pointer-coarse:min-h-11"
-          >
-            {detectZoneMutation.isPending ? 'Detecting…' : 'Auto-detect Zone'}
-          </button>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          <div className="bg-white/5 rounded-lg p-2">
-            <div className="text-slate-400">USDA Zone</div>
-            <div className="text-white font-bold">
-              {zone?.zone ?? '—'}{zone?.zone_source === 'auto' ? ' (auto)' : ''}
-            </div>
-          </div>
-          <div className="bg-white/5 rounded-lg p-2">
-            <div className="text-slate-400">Last Spring Frost</div>
-            <div className="text-white font-bold">
-              {zone?.last_spring_frost_mmdd ?? '—'}
-            </div>
-          </div>
-          <div className="bg-white/5 rounded-lg p-2">
-            <div className="text-slate-400">First Fall Frost</div>
-            <div className="text-white font-bold">
-              {zone?.first_fall_frost_mmdd ?? '—'}
-            </div>
-          </div>
-          <div className="bg-white/5 rounded-lg p-2">
-            <div className="text-slate-400">Season Length</div>
-            <div className="text-white font-bold">
-              {zone?.season_length_days ?? '—'} days
-            </div>
-          </div>
-        </div>
-        {zone?.message && (
-          <p className="text-xs text-slate-400 mt-2">{zone.message}</p>
-        )}
-      </div>
+      <ZoneFrostPanel profile={profileQuery.data} />
 
-      {/* Pantry Goals */}
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-white uppercase tracking-wider">
-            Pantry Goals
-          </h3>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] text-slate-400">Item</span>
-            <input
-              type="text"
-              value={newGoalItem}
-              onChange={(e) => setNewGoalItem(e.target.value)}
-              placeholder="e.g. Marinara sauce"
-              className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] text-slate-400">Qty</span>
-            <input
-              type="number"
-              value={newGoalQty}
-              onChange={(e) => setNewGoalQty(e.target.value)}
-              placeholder="Qty"
-              className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm w-20"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] text-slate-400">Unit</span>
-            <select
-              value="quarts"
-              onChange={() => {}}
-              className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
-            >
-              <option>quarts</option>
-              <option>pints</option>
-              <option>lbs</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => {
-              if (!newGoalItem || !newGoalQty) return;
-              addPantryGoalMutation.mutate({
-                item: newGoalItem,
-                target_qty: parseFloat(newGoalQty),
-                unit: 'quarts',
-                method: 'water_bath_canning',
-              });
-            }}
-            disabled={addPantryGoalMutation.isPending || !newGoalItem || !newGoalQty}
-            className="px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 text-sm pointer-coarse:min-h-11"
-          >
-            {addPantryGoalMutation.isPending ? 'Adding…' : 'Add Goal'}
-          </button>
-        </div>
-        <div className="space-y-2">
-          {pantryGoals.length === 0 ? (
-            <p className="text-xs text-slate-500 italic">No pantry goals yet.</p>
-          ) : (
-            pantryGoals.map((g) => (
-              <div
-                key={g.id}
-                className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-lg border border-white/5"
-              >
-                <div>
-                  <div className="text-sm text-white font-medium">{g.item}</div>
-                  <div className="text-xs text-slate-400">
-                    {g.target_qty} {g.unit} via {g.method} ({g.season_year})
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => api.gardenDeletePantryGoal(g.id).then(() => {
-                    queryClient.invalidateQueries({ queryKey: ['garden-pantry-goals'] });
-                    toast.success('Goal removed');
-                  })}
-                  className="text-xs text-red-400 hover:text-red-300 underline"
-                >
-                  Remove
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      <DualSizingPanel
+        familySize={profileQuery.data?.family_size ?? 7}
+        species={speciesQuery.data?.results ?? []}
+      />
 
-      {/* Plans */}
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-white uppercase tracking-wider">
-            Seasonal Plans
-          </h3>
-        </div>
-        {plans.length === 0 ? (
-          <p className="text-xs text-slate-500 italic">No seasonal plans yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {plans.map((p) => (
-              <div
-                key={p.id}
-                className={`flex items-center justify-between px-3 py-2 rounded-lg border border-white/5 ${
-                  activePlan === p.id ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-white/5'
-                }`}
-                onClick={() => setActivePlan(p.id)}
-              >
-                <div>
-                  <div className="text-sm text-white font-medium">{p.name}</div>
-                  <div className="text-xs text-slate-400">
-                    {p.season} {p.year} · {p.mode} · {p.family_size} family
-                  </div>
-                </div>
-                <span className={`text-xs px-1.5 py-0.5 rounded ${
-                  p.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-600/20 text-slate-400'
-                }`}>
-                  {p.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <PlansPanel
+        plans={plans}
+        activePlanId={activePlanId}
+        onSelect={setActivePlanId}
+        onChanged={() => void queryClient.invalidateQueries({ queryKey: ['garden-plans'] })}
+      />
 
-      {/* Bed Map (simplified 2D view) */}
-      {bedLocations.length > 0 && (
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-          <h3 className="text-sm font-semibold text-white uppercase tracking-wider mb-3">
-            Yard Map
-          </h3>
-          <div className="flex flex-col sm:flex-row gap-4">
-            {bedLocations.map((bed) => (
-              <div
-                key={bed.id}
-                className="flex flex-col items-center gap-2"
-              >
-                <div className="relative w-32 h-24 border-2 border-white/20 rounded-lg bg-white/5 overflow-hidden">
-                  <div className="absolute top-2 left-2 text-[10px] text-white/70">
-                    {bed.name}
-                  </div>
-                  <div className="absolute bottom-2 right-2 text-[10px] text-white/70">
-                    {`${bed.width_ft ?? 4}' × ${bed.length_ft ?? 8}'`}
-                  </div>
-                  {/* Simple grid cells */}
-                  <div className="absolute inset-0 grid grid-cols-4 grid-rows-8 gap-0.5 p-1">
-                    {[...Array(32)].map((_, i) => (
-                      <div
-                        key={i}
-                        className="w-full h-full bg-emerald-500/10 border border-white/10 rounded"
-                      />
-                    ))}
-                  </div>
-                </div>
-                <div className="text-xs text-slate-400 text-center">
-                  {bed.kind.replace('_', ' ')}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      <YardMapPanel beds={bedLocations} onOpenBed={setOpenBed} />
+
+      {activePlanId && openBed && (
+        <BedGridEditor
+          planId={activePlanId}
+          bed={openBed}
+          species={speciesQuery.data?.results ?? []}
+          onClose={() => setOpenBed(null)}
+        />
+      )}
+
+      {activePlanId && activePlan && (
+        <TimelinePanel planId={activePlanId} planYear={activePlan.year} />
       )}
     </div>
   );
@@ -1000,8 +806,8 @@ export function PlantDetail() {
   if (!plant) return <div className="p-4 text-slate-400">Plant not found</div>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
+    <div className="p-4 md:p-6 space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">{plant.nickname || plant.species_ref}</h1>
           <p className="text-slate-400 text-sm">{plant.species?.common_name || plant.species_ref}</p>
@@ -1009,9 +815,9 @@ export function PlantDetail() {
         <button
           type="button"
           onClick={() => navigate('/garden')}
-          className="px-4 py-2 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10"
+          className="inline-flex items-center gap-1.5 px-4 py-2 min-h-11 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 shrink-0"
         >
-          <X size={16} className="mr-2" /> Back
+          <X size={16} /> Back
         </button>
       </div>
 
@@ -1161,9 +967,9 @@ export function PlantDetail() {
                   toast.success(`${action} logged`);
                 }).catch(() => toast.error('Failed to log care'));
               }}
-              className="px-4 py-2 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 text-sm transition-colors pointer-coarse:min-h-11"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 min-h-11 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 text-sm transition-colors"
             >
-              <RotateCw size={14} className="mr-2" />
+              <RotateCw size={14} className="shrink-0" />
               {action.charAt(0).toUpperCase() + action.slice(1)}
             </button>
           ))}
@@ -1171,13 +977,13 @@ export function PlantDetail() {
             <button
               type="button"
               onClick={() => setHarvestOpen(true)}
-              className="flex items-center justify-between px-4 py-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 text-sm transition-colors pointer-coarse:min-h-11"
+              className="col-span-2 sm:col-span-2 inline-flex items-center justify-center gap-2 px-4 py-2 min-h-11 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 text-sm transition-colors"
             >
-              <Scissors size={14} className="mr-2" />
-              Log Harvest
+              <Scissors size={14} className="shrink-0" />
+              <span>Log Harvest</span>
               {plant.regrowth_cooldown_days && plant.last_harvested_at && (
-                <span className="text-[10px] text-emerald-200 ml-2">
-                  {plant.regrowth_cooldown_days}d cooldown
+                <span className="text-[10px] text-emerald-200">
+                  ({plant.regrowth_cooldown_days}d cooldown)
                 </span>
               )}
             </button>
@@ -1185,10 +991,10 @@ export function PlantDetail() {
           <button
             type="button"
             onClick={() => addSuppliesToShoppingList(plant)}
-            className="flex items-center justify-between px-4 py-2 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 text-sm transition-colors pointer-coarse:min-h-11"
+            className="col-span-2 sm:col-span-2 inline-flex items-center justify-center gap-2 px-4 py-2 min-h-11 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 text-sm transition-colors"
           >
-            <ShoppingCart size={14} className="mr-2" />
-            Add Supplies to Shopping List
+            <ShoppingCart size={14} className="shrink-0" />
+            <span>Add Supplies to Shopping List</span>
           </button>
         </div>
       </div>
@@ -1284,11 +1090,11 @@ function HarvestModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white/10 border border-white/20 rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Log Harvest" className="bg-slate-900 border border-white/20 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white">Log Harvest</h2>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">
+          <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white">
             <X size={20} />
           </button>
         </div>
@@ -1418,11 +1224,11 @@ function DigestSettingsModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white/10 border border-white/20 rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Digest Settings" className="bg-slate-900 border border-white/20 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white">Digest Settings</h2>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">
+          <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white">
             <X size={20} />
           </button>
         </div>
@@ -1520,11 +1326,11 @@ function LogHarvestModal({
   if (!open || !plant) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white/10 border border-white/20 rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Log Harvest" className="bg-slate-900 border border-white/20 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white">Log Harvest</h2>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">
+          <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white">
             <X size={20} />
           </button>
         </div>
@@ -1873,11 +1679,11 @@ function AddPlantModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white/10 border border-white/20 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Add Plant" className="bg-slate-900 border border-white/20 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white">Add Plant</h2>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white">
+          <button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white">
             <X size={20} />
           </button>
         </div>
@@ -1891,7 +1697,7 @@ function AddPlantModal({
               value={query}
               onChange={handleSearch}
               placeholder="e.g. Monstera, Basil, Snake Plant"
-              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full px-3 py-2 min-h-11 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
           </div>
 
@@ -2160,7 +1966,7 @@ function AddPlantModal({
               type="button"
               onClick={onClose}
               disabled={creating}
-              className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 disabled:opacity-50"
+              className="flex-1 px-4 py-2.5 min-h-11 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 disabled:opacity-50"
             >
               Cancel
             </button>
@@ -2172,7 +1978,7 @@ function AddPlantModal({
                 createMutation.mutate();
               }}
               disabled={creating || !selectedSpecies}
-              className="flex-1 px-4 py-2.5 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50"
+              className="flex-1 px-4 py-2.5 min-h-11 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50"
             >
               {creating ? 'Adding…' : 'Add Plant'}
             </button>

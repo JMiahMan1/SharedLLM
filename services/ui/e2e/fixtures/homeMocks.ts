@@ -388,6 +388,11 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
         return json(registry.body, registry.status);
       }
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
+      if (method === 'POST' && p === '/api/garden/profile/detect-zone') {
+        return json({ zone: '6b', zone_source: 'auto', latitude: 36, longitude: -86.8,
+          last_spring_frost_mmdd: '04-15', first_fall_frost_mmdd: '10-15',
+          season_length_days: 170, message: 'Zone detected' });
+      }
       if (method === 'POST' && /^\/api\/homehub\/schedules\/[^/]+\/enabled$/.test(p)) return json({ schedule_id: p.split('/')[4], enabled: false });
       if (p === '/api/homehub/automations/validate') return json({ valid: true, errors: [], unsupported_reason: null, warnings: [] });
       if (method === 'POST' && /^\/api\/homehub\/automations\/(automation|script)$/.test(p)) {
@@ -658,6 +663,32 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
       return json({ available: false, version: null, sha256: null, git_sha: null, built_at: null, files: [] });
     }
 
+    // Garden (Dashboard widget, Recipes shelf, garden planner tab).
+    if (p === '/api/garden/today') {
+      return json({ date: '2026-01-01', due_count: 0, overdue_count: 0, by_room: {}, all: [] });
+    }
+    if (p === '/api/garden/harvest/ready') return json({ count: 0, ready: [] });
+    if (p === '/api/garden/recipes/matches') return json({ ready_ingredients: [], matches: [] });
+    if (p === '/api/garden/plants') return json([]);
+    if (p === '/api/garden/locations') return json([]);
+    if (p === '/api/garden/profile') {
+      return json({ user_id: 'household', family_size: 7, hardiness_zone: '6b', zone_source: 'manual',
+        last_spring_frost_mmdd: '04-15', first_fall_frost_mmdd: '10-15', units: 'imperial',
+        preservation_prefs: null, daily_digest_time: '08:00', yard_canvas_json: null,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
+    }
+    if (p === '/api/garden/streaks') {
+      return json({ user_id: 'parent', current_streak: 0, longest_streak: 0, total_logs: 0 });
+    }
+    if (p === '/api/garden/pantry-goals') return json({ count: 0, goals: [] });
+    if (p === '/api/garden/plans') return json({ count: 0, plans: [] });
+    if (p === '/api/garden/species/custom') return json({ count: 0, results: [] });
+    if (p === '/api/garden/species/search') {
+      return json({ query: url.searchParams.get('q') || '', category: null, count: 0, results: [], seed_present: true });
+    }
+    if (p === '/api/garden/species') {
+      return json({ category: null, usda_zone: null, count: 0, results: [], seed_present: true });
+    }
     // No deploy under way (the "Jarvis is updating" flag, served from a file: 404 when there is none).
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
     unmocked.push(`${method} ${p}`);

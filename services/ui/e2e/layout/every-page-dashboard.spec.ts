@@ -76,8 +76,11 @@ test.describe('the dashboard on every form factor', () => {
   test('every widget, filled in', async ({ page }, info) => {
     const run = await open(page);
     const findings: string[] = [];
-    // Every widget is on the board.
-    await expect(page.locator('[data-widget]')).toHaveCount(18);
+    // Every widget the fixture's saved settings leave switched on is on the
+    // board. This is the whole `defaultWidgetDefs` registry (19), including the
+    // Garden-today card registered in 04a6af21d -- bump this when a widget is
+    // added or retired, the count is the check that nothing silently drops.
+    await expect(page.locator('[data-widget]')).toHaveCount(19);
     await check(page, info, page.locator('main'), 'the dashboard', findings);
     await snapScrolling(page, info, `dashboard-${info.project.name}`, 14);
     await finish(run, findings);

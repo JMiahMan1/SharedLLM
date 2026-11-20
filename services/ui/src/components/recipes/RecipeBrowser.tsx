@@ -45,16 +45,14 @@ function Chip({ active, onClick, children, testId }: { active: boolean; onClick:
 function RecipeTile({
   recipe,
   onOpen,
-  freshInGarden = false,
   gardenMatchPaths,
 }: {
   recipe: CookbookRecipe;
   onOpen: () => void;
-  freshInGarden?: boolean;
   gardenMatchPaths?: Set<string>;
 }) {
   const time = formatCookTime(recipe.total_minutes);
-  const matchesGarden = freshInGarden && gardenMatchPaths?.has(recipe.path);
+  const matchesGarden = Boolean(gardenMatchPaths?.has(recipe.path));
   return (
     <button
       type="button"
@@ -296,7 +294,6 @@ export default function RecipeBrowser({
             key={recipe.path}
             recipe={recipe}
             onOpen={() => onOpen(recipe)}
-            freshInGarden={freshInGarden}
             gardenMatchPaths={gardenMatchPaths}
           />
         ))}

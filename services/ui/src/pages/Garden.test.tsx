@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import React from 'react';
 import Garden from '../pages/Garden';
 import { api } from '../services/api';
-import type { GardenSpecies } from '../types/api';
+import type { GardenLocation, GardenPlanOut, GardenSpecies } from '../types/api';
 import { AuthProvider } from '../context/AuthContext';
 
 vi.mock('../context/AuthContext', async (importActual) => {
@@ -33,6 +33,24 @@ vi.mock('../services/api', () => ({
     gardenCreatePlant: vi.fn(),
     gardenGetProfile: vi.fn(),
     gardenStreaks: vi.fn(),
+    gardenUpdateProfile: vi.fn(),
+    gardenDetectZone: vi.fn(),
+    gardenListPlans: vi.fn(),
+    gardenCreatePlan: vi.fn(),
+    gardenPatchPlan: vi.fn(),
+    gardenDeletePlan: vi.fn(),
+    gardenListPlanCells: vi.fn(),
+    gardenUpsertPlanCells: vi.fn(),
+    gardenAutoArrange: vi.fn(),
+    gardenPlanChecks: vi.fn(),
+    gardenPlanTimeline: vi.fn(),
+    gardenListPantryGoals: vi.fn(),
+    gardenCreatePantryGoal: vi.fn(),
+    gardenDeletePantryGoal: vi.fn(),
+    gardenCalculatePantryGoal: vi.fn(),
+    gardenPlannerSizing: vi.fn(),
+    gardenCreateLocation: vi.fn(),
+    gardenPatchLocation: vi.fn(),
   },
 }));
 
@@ -50,6 +68,38 @@ const createWrapper = () => {
     </BrowserRouter>
   );
 };
+
+// Planner defaults, set for every test; individual planner tests override them.
+beforeEach(() => {
+  vi.mocked(api.gardenListPlans).mockResolvedValue({ count: 0, plans: [] });
+  vi.mocked(api.gardenListPantryGoals).mockResolvedValue({ count: 0, goals: [] });
+  vi.mocked(api.gardenListSpecies).mockResolvedValue({
+    category: null,
+    usda_zone: null,
+    count: 0,
+    results: [],
+    seed_present: true,
+  });
+  vi.mocked(api.gardenPlanChecks).mockResolvedValue({ plan_id: '', checks: [], warning_count: 0 });
+  vi.mocked(api.gardenPlanTimeline).mockResolvedValue({
+    plan_id: '',
+    plan_name: '',
+    season: 'spring_summer',
+    year: 2027,
+    spring_frost_mmdd: null,
+    first_fall_frost_mmdd: null,
+    timeline: [],
+  });
+  vi.mocked(api.gardenListPlanCells).mockResolvedValue({ plan_id: '', bed_id: '', cells: [] });
+  vi.mocked(api.gardenDetectZone).mockResolvedValue({
+    zone: '6b',
+    zone_source: 'auto',
+    last_spring_frost_mmdd: '04-15',
+    first_fall_frost_mmdd: '10-15',
+    season_length_days: 170,
+    message: 'Zone detected',
+  });
+});
 
 describe('Garden Today tab', () => {
   let wrapper: ReturnType<typeof createWrapper>;
@@ -757,5 +807,227 @@ describe('Garden AddPlantModal lookup', () => {
     await screen.findByText(/Rare Plant X/);
     expect(screen.getByText(/Rare Plant X/)).toBeInTheDocument();
     expect(screen.getByText('Save & Select Species')).toBeInTheDocument();
+  });
+});
+
+describe('Garden Planner tab (Phase 5)', () => {
+  let wrapper: ReturnType<typeof createWrapper>;
+
+  const bed: GardenLocation = {
+    id: 'bed-1',
+    name: 'North Bed',
+    kind: 'raised_bed',
+    area_id: null,
+    width_ft: 2,
+    length_ft: 2,
+    area_sqft: 4,
+    sun_exposure: 'full_sun',
+    covered: false,
+    map_x: 1,
+    map_y: 1,
+    rotation_deg: 0,
+    light_notes: null,
+    draft_notes: null,
+    assigned_to: null,
+    skylight_sync_enabled: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  };
+
+  const plan: GardenPlanOut = {
+    id: 'plan-1',
+    name: 'Spring 2027',
+    season: 'spring_summer',
+    year: 2027,
+    family_size: 7,
+    mode: 'fresh_only',
+    status: 'draft',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  };
+
+  const speciesEntry = (key: string, commonName: string, category: string): GardenSpecies => ({
+    key,
+    category,
+    common_name: commonName,
+    scientific_name: null,
+    family: null,
+    light_level: null,
+    watering_method: null,
+    dryness_cue: null,
+    water_quality: null,
+    humidity_band: null,
+    misting_rule: null,
+    soil_mix: null,
+    temp_min_f: null,
+    temp_max_f: null,
+    cold_draft_sensitive: null,
+    toxicity_level: null,
+    toxicity_notes: null,
+    common_pests: null,
+    symptoms: null,
+    grooming_propagation: null,
+    fertilizing: null,
+    repot_interval_months: null,
+    description: null,
+    preservation_methods: null,
+    usda_acidity_class: null,
+    watering_interval_days: null,
+    winter_multiplier: null,
+    frost_tolerance: null,
+    usda_zone_min: 3,
+    usda_zone_max: 11,
+    days_to_maturity: 75,
+    tall_trellis: 1,
+    culinary_aliases: null,
+    pinching_bolting_notes: null,
+    regrowth_cadence: null,
+    herb_preservation_tips: null,
+  });
+
+  beforeEach(() => {
+    wrapper = createWrapper();
+    vi.mocked(api.gardenToday).mockResolvedValue({
+      date: '2026-11-20', due_count: 0, overdue_count: 0, by_room: {}, all: [],
+    });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([bed]);
+    vi.mocked(api.gardenStreaks).mockResolvedValue({
+      user_id: 'mother', current_streak: 0, longest_streak: 0, total_logs: 0,
+    });
+    vi.mocked(api.gardenGetProfile).mockResolvedValue({
+      user_id: 'household', family_size: 7, hardiness_zone: '6b', zone_source: 'manual',
+      last_spring_frost_mmdd: '04-15', first_fall_frost_mmdd: '10-15', units: 'imperial',
+      preservation_prefs: null, daily_digest_time: '08:00', yard_canvas_json: null,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    });
+    vi.mocked(api.gardenListPlans).mockResolvedValue({ count: 1, plans: [plan] });
+    vi.mocked(api.gardenListSpecies).mockResolvedValue({
+      category: null, usda_zone: null, count: 2,
+      results: [speciesEntry('tomato_roma', 'Roma Tomato', 'vegetable'), speciesEntry('basil_sweet', 'Sweet Basil', 'herb')],
+      seed_present: true,
+    });
+    vi.mocked(api.gardenPlanTimeline).mockResolvedValue({
+      plan_id: plan.id, plan_name: plan.name, season: plan.season, year: plan.year,
+      spring_frost_mmdd: '04-15', first_fall_frost_mmdd: '10-15', timeline: [],
+    });
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  const openPlanner = async () => {
+    render(<Garden />, { wrapper });
+    fireEvent.click(screen.getByText('Planner'));
+    await screen.findByText('Household Climate');
+  };
+
+  it('renders climate, sizing, plans, yard map, and timeline sections', async () => {
+    await openPlanner();
+    expect(screen.getByText('USDA Zone')).toBeInTheDocument();
+    expect(screen.getByText('Simple family sizing')).toBeInTheDocument();
+    await screen.findByText('Spring 2027');
+    expect(screen.getByText('Yard Map')).toBeInTheDocument();
+    await screen.findByText('Seasonal Timeline');
+    expect(await screen.findByLabelText(/open north bed bed grid/i)).toBeInTheDocument();
+  });
+
+  it('calls the auto-detect zone endpoint when Auto-detect is tapped', async () => {
+    await openPlanner();
+    fireEvent.click(screen.getByRole('button', { name: /auto-detect/i }));
+    await waitFor(() => expect(vi.mocked(api.gardenDetectZone)).toHaveBeenCalled());
+    await screen.findByText(/zone detected/i);
+  });
+
+  it('calculates simple family sizing for the selected crops', async () => {
+    vi.mocked(api.gardenPlannerSizing).mockResolvedValue({
+      mode: 'fresh_only', family_size: 7,
+      crops: [
+        { species_ref: 'tomato_roma', common_name: 'Roma Tomato', plant_count: 7, sqft: 7 },
+        { species_ref: 'basil_sweet', common_name: 'Sweet Basil', plant_count: 7, sqft: 7 },
+      ],
+      total_sqft: 14, total_plants: 14,
+    });
+    await openPlanner();
+    await screen.findByText('Roma Tomato');
+    await waitFor(() => {
+      expect((screen.getByLabelText('Roma Tomato') as HTMLInputElement).checked).toBe(true);
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^calculate$/i }));
+    await waitFor(() => expect(vi.mocked(api.gardenPlannerSizing)).toHaveBeenCalled());
+    const sent = vi.mocked(api.gardenPlannerSizing).mock.calls[0][0];
+    expect(sent.mode).toBe('fresh_only');
+    expect(sent.family_size).toBe(7);
+    expect(sent.species_refs?.split(',').sort()).toEqual(['basil_sweet', 'tomato_roma']);
+    await screen.findByText(/Total plants:/);
+  });
+
+  it('creates a seasonal plan from the New Plan form', async () => {
+    vi.mocked(api.gardenCreatePlan).mockResolvedValue({ ...plan, id: 'plan-2', name: 'Fall Plan' });
+    await openPlanner();
+    fireEvent.click(screen.getByRole('button', { name: /new plan/i }));
+    fireEvent.change(screen.getByLabelText(/^Name$/i), { target: { value: 'Fall Plan' } });
+    fireEvent.click(screen.getByRole('button', { name: /create plan/i }));
+    await waitFor(() => expect(vi.mocked(api.gardenCreatePlan)).toHaveBeenCalledWith(expect.objectContaining({ name: 'Fall Plan' })));
+  });
+
+  it('opens the square-foot bed grid and auto-arranges crops with alerts', async () => {
+    vi.mocked(api.gardenAutoArrange).mockResolvedValue({
+      plan_id: plan.id, bed_id: bed.id,
+      placements: [
+        { col: 0, row: 1, species_ref: 'tomato_roma' },
+        { col: 1, row: 0, species_ref: 'basil_sweet' },
+      ],
+      applied: true,
+    });
+    vi.mocked(api.gardenPlanChecks).mockResolvedValue({
+      plan_id: plan.id, warning_count: 1,
+      checks: [{ cell_id: 'c1', bed_id: bed.id, kind: 'antagonist', message: 'Antagonist adjacent: potato conflicts with tomato' }],
+    });
+
+    await openPlanner();
+    fireEvent.click(await screen.findByLabelText(/open north bed bed grid/i));
+    await screen.findByText(/square-foot grid/i);
+    fireEvent.click(screen.getByRole('button', { name: /auto-arrange/i }));
+    await waitFor(() => expect(vi.mocked(api.gardenAutoArrange)).toHaveBeenCalledWith(plan.id, bed.id, { apply: true }));
+    await screen.findByText(/Antagonist adjacent/);
+  });
+
+  it('shows dated milestones from the seasonal timeline', async () => {
+    vi.mocked(api.gardenPlanTimeline).mockResolvedValue({
+      plan_id: plan.id, plan_name: plan.name, season: plan.season, year: plan.year,
+      spring_frost_mmdd: '04-15', first_fall_frost_mmdd: '10-15',
+      timeline: [{
+        cell_id: 'c1', common_name: 'Roma Tomato', species_ref: 'tomato_roma',
+        milestones: [{ stage: 'Expected harvest', week_offset: 15, mmdd: '07-29' }],
+      }],
+    });
+    await openPlanner();
+    await screen.findByText('07-29');
+    expect(screen.getByText(/Expected harvest/)).toBeInTheDocument();
+  });
+
+  it('shows live pantry-goal back-calculations', async () => {
+    vi.mocked(api.gardenListPantryGoals).mockResolvedValue({
+      count: 1,
+      goals: [{
+        id: 'goal-1', item: 'Marinara sauce', crop_refs_json: '["tomato_roma"]',
+        target_qty: 40, unit: 'quarts', method: 'water_bath_canning', season_year: 2027,
+        notes: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+      }],
+    });
+    vi.mocked(api.gardenCalculatePantryGoal).mockResolvedValue({
+      item: 'Marinara sauce', method: 'water_bath_canning', unit: 'quarts', target_qty: 40,
+      total_raw_lbs_needed: 100, total_plant_count: 5, total_sqft: 5,
+      crops: [{ species_ref: 'tomato_roma', common_name: 'Roma Tomato', raw_lbs_needed: 70, plant_count: 4, sqft: 4 }],
+    });
+
+    await openPlanner();
+    fireEvent.click(screen.getByRole('button', { name: /pantry goals/i }));
+    await screen.findByText('Marinara sauce');
+    await screen.findByText('100');
+    expect(screen.getByText(/Raw lbs/)).toBeInTheDocument();
+    expect(vi.mocked(api.gardenCalculatePantryGoal)).toHaveBeenCalledWith(expect.objectContaining({
+      item: 'Marinara sauce', crop_refs: 'tomato_roma', target_qty: 40,
+    }));
   });
 });

@@ -81,8 +81,8 @@ test.describe('home integrations on every form factor', () => {
     const main = page.locator('main');
     await expect(main.getByText('Unload the dishwasher')).toBeVisible();
     for (const key of HUB_WIDGETS) await expect(page.locator(`[data-widget="${key}"]`)).toHaveCount(0);
-    // The dashboard spec turns on 18 widgets; three of them read the hub.
-    await expect(page.locator('[data-widget]')).toHaveCount(18 - HUB_WIDGETS.length);
+    // The dashboard spec turns on 19 widgets; three of them read the hub.
+    await expect(page.locator('[data-widget]')).toHaveCount(19 - HUB_WIDGETS.length);
     // Every widget left on the board is drawn (no empty cell standing in for a missing one).
     for (const box of await page.locator('[data-widget]').all()) {
       const b = await box.boundingBox();
@@ -135,7 +135,7 @@ test.describe('home integrations on every form factor', () => {
   test('HomeHub on: every hub page and widget is offered', async ({ page }, info) => {
     const run = await open(page, { homehub: true, homeAssistant: false });
     await expect(page.locator('main [data-widget="device_control"]').getByText('Garage door')).toBeVisible();
-    await expect(page.locator('[data-widget]')).toHaveCount(18);
+    await expect(page.locator('[data-widget]')).toHaveCount(19);
     const pages = await navPages(page);
     const has = (name: string) => pages.includes(name) || pages.includes(`/${name.toLowerCase()}`);
     for (const name of HUB_PAGES) expect(has(name), name).toBe(true);

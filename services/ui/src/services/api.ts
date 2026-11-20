@@ -2905,7 +2905,7 @@ export const api = {
   // --- Garden Planner (Phase 5) ----------------
 
   async gardenDetectZone(): Promise<ZoneDetectResponse> {
-    const resp = await apiClient.get('/api/garden/profile/detect-zone');
+    const resp = await apiClient.post('/api/garden/profile/detect-zone');
     return resp.data;
   },
 
@@ -2990,12 +2990,15 @@ export const api = {
     return resp.data;
   },
 
-  async gardenAutoArrange(planId: string, bedId: string): Promise<{
+  async gardenAutoArrange(planId: string, bedId: string, body?: { species_refs?: string[]; apply?: boolean }): Promise<{
     plan_id: string;
     bed_id: string;
     placements: any[];
+    checks?: any[];
+    warning_count?: number;
+    applied?: boolean;
   }> {
-    const resp = await apiClient.post(`/api/garden/plans/${encodeURIComponent(planId)}/beds/${encodeURIComponent(bedId)}/auto-arrange`);
+    const resp = await apiClient.post(`/api/garden/plans/${encodeURIComponent(planId)}/beds/${encodeURIComponent(bedId)}/auto-arrange`, body ?? {});
     return resp.data;
   },
 

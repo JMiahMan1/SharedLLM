@@ -506,4 +506,46 @@ describe('draft recipe from garden produce', () => {
     fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
     expect(screen.queryByRole('heading', { name: /draft recipe from garden/i })).not.toBeInTheDocument();
   });
+
+  it('saves the draft to the cookbook through the real save API', async () => {
+    m.gardenHarvestReady.mockResolvedValue({
+      count: 1,
+      ready: [
+        {
+          plant_id: 'plant-1',
+          nickname: 'Sir Basil',
+          common_name: 'Sweet Basil',
+          category: 'herb',
+          species_ref: 'basil_sweet',
+          culinary_aliases: ['basil'],
+          in_cooldown: false,
+        },
+      ],
+    });
+
+    renderAt();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('recipe-fresh-in-garden')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /draft new family recipe/i })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /draft new family recipe/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /draft recipe from garden/i })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /save to cookbook/i }));
+
+    await waitFor(() => {
+      expect(m.cookbookSave).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Sweet Basil Garden Recipe',
+        content: expect.stringContaining('# Garden Pesto'),
+      }));
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: /draft recipe from garden/i })).not.toBeInTheDocument();
+    });
+  });
 });
