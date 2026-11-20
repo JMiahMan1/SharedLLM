@@ -8956,8 +8956,8 @@ async def proxy_complete_skylight_chore(chore_id: str, request: Request):
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/complete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
         if resp.status == 200:
             try:
-                completed = await resp.json(content_type=None)
-            except ValueError:
+                completed = await resp.json()
+            except Exception:  # non-JSON or a stub without content_type
                 completed = {}
             if isinstance(completed, dict) and completed.get("status") == "SUCCESS":
                 # A plant's watering may be this chore: log it in Garden so the
