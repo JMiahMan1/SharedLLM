@@ -1667,6 +1667,7 @@ async def water_all(
     loc_id: str,
     request: Request,
     due_only: bool = Query(True, description="Only water due/overdue plants"),
+    source: str = Query("manual", description="Where this came from: manual, voice, push_action, nfc_tag"),
     session: Session = Depends(get_session),
 ):
     """Batch-water all (due) plants in a room (Home Hub rooms included)."""
@@ -1718,10 +1719,12 @@ async def water_all(
                 location_id=loc_id,
                 action="water",
                 performed_by=user,
-                source="manual",
+                source=source,
                 notes=f"batch water room: {location.name}",
             )
         )
+        if source != "skylight_chore":
+            mirror_care_log(session, plant_id=plant.id, action="water", performed_by=user)
         plant.updated_at = utcnow()
         common_name = species.get("common_name") if species else plant.species_ref
         watered.append(

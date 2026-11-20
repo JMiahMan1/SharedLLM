@@ -164,7 +164,7 @@ async def log_care(
             "POST",
             f"/locations/{location.get('location_id')}/water-all",
             creds=creds,
-            json={"source": source},
+            params={"source": source},
         )
         if answer.get("__error__"):
             return {"status": "error", "message": f"The garden said: {answer['__error__']}"}

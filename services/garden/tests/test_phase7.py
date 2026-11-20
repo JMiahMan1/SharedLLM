@@ -304,3 +304,21 @@ def test_resolution_carries_what_a_caller_needs_to_speak(client):
     assert "Monstera" in row["common_name"]
     assert row["category"] == "houseplant"
     assert row["assigned_to"] == "noah"
+
+
+def test_batch_watering_records_where_it_came_from(client, session):
+    from services.garden.models import CareLog
+
+    room = _room(client, "Living Room")
+    _plant(client, nickname="Monty", location_id=room["id"])
+
+    resp = client.post(
+        f"/locations/{room['id']}/water-all",
+        headers=CHILD,
+        params={"source": "voice", "due_only": "false"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["watered_count"] == 1
+    logs = session.query(CareLog).filter(CareLog.action == "water").all()
+    assert [row.source for row in logs] == ["voice"]
