@@ -87,10 +87,27 @@ _rain_skip_done: dict[str, str] = {}
 
 
 def _forecast_units(forecast: dict | None) -> str:
-    """Return ``"imperial"`` or ``"metric"`` based on the forecast payload."""
-    if forecast is None:
+    """Return ``"imperial"`` or ``"metric"`` based on the forecast payload.
+
+    ``weather.forecast()`` reports units as a mapping
+    (``{"system": "imperial", "temp": "°F", "wind": "mph", "precip": "in"}`` --
+    ``services/common/weather.py``), which is what execution reads too. A bare
+    string is still accepted, for a payload from elsewhere or an older shape;
+    anything else falls back to imperial rather than raising, because this runs
+    inside the weather poller and on every ``/today``: an AttributeError here
+    silently stopped rain-skip and every frost/heat/wind alert.
+    """
+    if not forecast:
         return "imperial"
-    return (forecast.get("units") or "imperial").lower()
+    units = forecast.get("units")
+    if isinstance(units, dict):
+        system = str(units.get("system") or "")
+    elif isinstance(units, str):
+        system = units
+    else:
+        system = ""
+    system = system.strip().lower()
+    return system if system in ("imperial", "metric") else "imperial"
 
 
 def _c_to_f(c: float | None) -> float | None:
