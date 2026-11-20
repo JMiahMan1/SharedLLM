@@ -143,6 +143,11 @@ jobs:
               - 'services/common/**'
               - 'services/config.py'
               - '.github/workflows/build-images.yml'
+            garden:
+              - 'services/garden/**'
+              - 'services/common/**'
+              - 'services/config.py'
+              - '.github/workflows/build-images.yml'
 
       - name: Set Outputs
         id: set-outputs
@@ -152,7 +157,7 @@ jobs:
           
           # If base changed, build all services
           if echo "$CHANGES" | grep -q '"base"'; then
-            SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","control_plane","dns","geo","bible","telemetry","health","homehub"]'
+            SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","control_plane","dns","geo","bible","telemetry","health","homehub","garden"]'
             BUILD_BASE='true'
           else
             # Filter out base, caddy, and ui from changes to build only changed services
