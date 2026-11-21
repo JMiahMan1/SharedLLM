@@ -142,21 +142,32 @@ async def _mock_auth_response(status: int = 200, json_data: dict | None = None):
     return resp
 
 
-def _mock_auth_context(username: str = "test", is_admin: bool = False, status: int = 200):
+def _mock_auth_context(
+    username: str = "test",
+    is_admin: bool = False,
+    status: int = 200,
+    resolved: dict | None = None,
+    resolve_status: int = 200,
+):
     """Return a context manager that patches get_client() for auth.
 
     The real endpoint does:
         async with get_client() as client:
-            resp = await client.get(url, ...)
-    We return a mock wrapper whose *method* 'get' is an async function.
+            resp = await client.get(url, ...)   # /api/users/me
+            resp = await client.post(url, ...)  # /api/resolve: the user's own integrations
+    We return a mock wrapper whose methods 'get' and 'post' are async functions.
     """
     from services.workspace_runtime import main as main_mod
 
     async def mock_get(*args, **kwargs):
         return await _mock_auth_response(status, {"username": username, "is_admin": is_admin})
 
+    async def mock_post(*args, **kwargs):
+        return await _mock_auth_response(resolve_status, resolved if resolved is not None else {"user": username})
+
     mock_wrapper = MagicMock()
     mock_wrapper.get = mock_get
+    mock_wrapper.post = mock_post
     mock_wrapper.__aenter__ = AsyncMock(return_value=mock_wrapper)
     mock_wrapper.__aexit__ = AsyncMock(return_value=None)
 
@@ -425,3 +436,64 @@ def test_terminal_output_split_inside_a_character_arrives_whole(client):
 
     assert received == "café ── ok\r\n"
     assert "�" not in received
+
+
+# ---------------------------------------------------------------------------
+# Credentials: the terminal user's own, never the service's
+# ---------------------------------------------------------------------------
+
+
+def _terminal_env(mock_client) -> dict:
+    assert mock_client.api.exec_create.call_count >= 1
+    return mock_client.api.exec_create.call_args.kwargs["environment"]
+
+
+def test_terminal_gets_the_users_own_token_not_the_servers(client, monkeypatch):
+    """A server GITHUB_TOKEN must never reach a user's terminal; their own does."""
+    import time
+
+    monkeypatch.setenv("GITHUB_TOKEN", "server-owner-github")
+    monkeypatch.setenv("NEXTCLOUD_PASSWORD", "server-owner-nc")
+    _setup_test_workspace(client)
+    mock_client = _make_mock_docker_client()
+    mock_client.containers.get.return_value.exec_run.return_value = MagicMock(exit_code=0, output=b"/home/raven\n")
+
+    with _mock_auth_context(resolved={"user": "test", "github_token": "users-own-token"}), patch(
+        "docker.from_env", return_value=mock_client
+    ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect(
+        "/ws/workspace/ws1/terminal?token=ok"
+    ):
+        time.sleep(0.2)
+
+    env = _terminal_env(mock_client)
+    assert env["GITHUB_TOKEN"] == "users-own-token"
+    assert "server-owner-github" not in env.values()
+    assert "server-owner-nc" not in env.values()
+
+
+def test_terminal_without_integrations_gets_no_server_token(client, monkeypatch):
+    import time
+
+    monkeypatch.setenv("GITHUB_TOKEN", "server-owner-github")
+    _setup_test_workspace(client)
+    mock_client = _make_mock_docker_client()
+    mock_client.containers.get.return_value.exec_run.return_value = MagicMock(exit_code=0, output=b"/home/raven\n")
+
+    with _mock_auth_context(resolved={"user": "test"}), patch("docker.from_env", return_value=mock_client), patch(
+        "services.workspace_sandbox.ensure_workspace_container"
+    ), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok"):
+        time.sleep(0.2)
+
+    env = _terminal_env(mock_client)
+    assert "GITHUB_TOKEN" not in env and "GH_TOKEN" not in env
+
+
+def test_terminal_refuses_when_integrations_cannot_be_loaded(client):
+    """Identity failing to resolve the user is an error, not a terminal without (or with others') creds."""
+    _setup_test_workspace(client)
+    with _mock_auth_context(resolve_status=500), pytest.raises(WebSocketDisconnect) as exc, client.websocket_connect(
+        "/ws/workspace/ws1/terminal?token=ok"
+    ) as ws:
+        ws.receive_text()
+    assert exc.value.code == 1011
+    assert "Could not load your integrations" in exc.value.reason

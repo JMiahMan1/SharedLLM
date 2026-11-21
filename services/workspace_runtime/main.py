@@ -3210,9 +3210,41 @@ class _TerminalSetupError(Exception):
         self.reason = reason
 
 
-def _open_terminal_exec(workspace_id: str, host_path: str) -> tuple[Any, str, Any]:
+async def _terminal_user_credentials(token: str) -> dict[str, str]:
+    """The terminal user's own integration credentials as environment variables.
+
+    Resolved by Identity from the same API key the browser authenticated with,
+    and mapped by the one shared implementation (``user_credential_env``).
+    A failure is an error the browser is told about, not a terminal that quietly
+    opens without (or with someone else's) credentials.
+    """
+    from services.workspace_sandbox import user_credential_env
+
+    try:
+        async with get_client() as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC_URL}/api/resolve",
+                json={"api_key": token},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if resp.status != 200:
+                raise _TerminalSetupError(f"Could not load your integrations (identity answered {resp.status})")
+            data = await resp.json()
+    except _TerminalSetupError:
+        raise
+    except Exception as e:
+        raise _TerminalSetupError("Could not load your integrations") from e
+    if not isinstance(data, dict):
+        raise _TerminalSetupError("Could not load your integrations (invalid identity response)")
+    return user_credential_env(data)
+
+
+def _open_terminal_exec(
+    workspace_id: str, host_path: str, user_env: dict[str, str] | None = None
+) -> tuple[Any, str, Any]:
     """Container ready, interactive shell created and attached (runs in a thread).
 
+    ``user_env`` is the terminal user's own credentials (``_terminal_user_credentials``).
     Returns the docker client, the exec id and the exec's socket.
     """
     try:
@@ -3245,7 +3277,7 @@ def _open_terminal_exec(workspace_id: str, host_path: str) -> tuple[Any, str, An
             # $HOME/.bashrc before the first prompt, and a home the user cannot
             # write (or /root, as a non-root user) made the shell open with
             # permission errors and no history. TERM is what makes xterm work.
-            terminal_env = build_exec_env(home=_home_for_uid(container, SANDBOX_UID))
+            terminal_env = build_exec_env(home=_home_for_uid(container, SANDBOX_UID), extra=user_env)
             terminal_env["TERM"] = "xterm-256color"
             terminal_env.setdefault("LANG", "C.UTF-8")
             exec_id = docker_client.api.exec_create(
@@ -3311,6 +3343,14 @@ async def websocket_terminal(
                     "user": user_data.get("username", "default"),
                     "is_admin": user_data.get("is_admin", False)
                 }
+        # The terminal runs with this person's own integrations (their GitHub
+        # token, their Nextcloud login), resolved by Identity, never the
+        # service's. The sandbox container itself carries none.
+        terminal_creds = await _terminal_user_credentials(token)
+    except _TerminalSetupError as e:
+        log.warning(f"[terminal] {e.reason}: {e.__cause__ or e}")
+        await websocket.close(code=1011, reason=e.reason)
+        return
     except Exception as e:
         log.warning(f"[terminal] Auth error: {e}")
         await websocket.close(code=1011, reason="Auth service unavailable")
@@ -3339,7 +3379,9 @@ async def websocket_terminal(
     # Docker calls block, sometimes for seconds (creating the container, a slow
     # daemon); made here on the event loop they stalled every other request.
     try:
-        docker_client, exec_id, sock = await asyncio.to_thread(_open_terminal_exec, workspace_id, host_path)
+        docker_client, exec_id, sock = await asyncio.to_thread(
+            _open_terminal_exec, workspace_id, host_path, terminal_creds
+        )
     except _TerminalSetupError as e:
         log.error(f"[terminal] {e.reason}: {e.__cause__ or e}")
         await websocket.close(code=1011, reason=e.reason)
