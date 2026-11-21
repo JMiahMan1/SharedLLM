@@ -129,26 +129,36 @@ final class DeviceOwnerGuard {
             Set<String> previously = GuardApi.suspendedPackages(context);
             Set<String> toUnsuspend = DeviceOwnerRules.packagesToUnsuspend(
                     owner, known, previously, nowSuspended);
-            if (!previously.equals(nowSuspended)) {
-                // Only on a change, so the log says when a lock took or gave back apps.
-                android.util.Log.i(TAG, "suspended " + nowSuspended + " unsuspending " + toUnsuspend);
-            }
+            // Logged on a change (a lock took or gave back apps) or a refusal, and
+            // always from Android's answer: setPackagesSuspended returns the
+            // packages it could NOT change.
+            boolean changed = !previously.equals(nowSuspended);
             if (!nowSuspended.isEmpty()) {
                 try {
-                    dpm.setPackagesSuspended(admin, nowSuspended.toArray(new String[0]), true);
-                } catch (Exception ignored) {
-                    // Platform refused one or more packages.
+                    String[] failed = dpm.setPackagesSuspended(admin, nowSuspended.toArray(new String[0]), true);
+                    if (changed || (failed != null && failed.length > 0)) {
+                        android.util.Log.i(TAG, DeviceOwnerRules.suspensionReport(true, nowSuspended, failed));
+                    }
+                } catch (Exception e) {
+                    android.util.Log.w(TAG, "suspend of " + nowSuspended.size() + " packages failed", e);
                 }
             }
+            // A package whose unsuspend failed is still suspended: it stays on the
+            // record so the next pass tries again instead of forgetting it.
+            Set<String> unsuspendFailed = new java.util.LinkedHashSet<>();
             if (!toUnsuspend.isEmpty()) {
                 try {
-                    dpm.setPackagesSuspended(admin, toUnsuspend.toArray(new String[0]), false);
-                } catch (Exception ignored) {
-                    // Nothing to unsuspend.
+                    String[] failed = dpm.setPackagesSuspended(admin, toUnsuspend.toArray(new String[0]), false);
+                    if (failed != null) unsuspendFailed.addAll(java.util.Arrays.asList(failed));
+                    android.util.Log.i(TAG, DeviceOwnerRules.suspensionReport(false, toUnsuspend, failed));
+                } catch (Exception e) {
+                    unsuspendFailed.addAll(toUnsuspend);
+                    android.util.Log.w(TAG, "unsuspend of " + toUnsuspend.size() + " packages failed", e);
                 }
             }
-            if (known || !nowSuspended.isEmpty()) {
-                GuardApi.setSuspendedPackages(context, nowSuspended);
+            Set<String> record = DeviceOwnerRules.suspensionsToRecord(nowSuspended, unsuspendFailed);
+            if (known || !record.isEmpty()) {
+                GuardApi.setSuspendedPackages(context, record);
             }
         }
         applyOutgoingCallFallback(context, dpm, admin, owner, prot, locked, unlocked);
@@ -255,9 +265,6 @@ final class DeviceOwnerGuard {
         }
     }
 
-    /** Android's UserManager.DISALLOW_OUTGOING_CALLS value. */
-    static final String DISALLOW_OUTGOING_CALLS = "no_outgoing_calls";
-
     /**
      * The fail-safe for the lock's call rule: while locked without the call
      * filter role, take outgoing calls away (Android still places emergency
@@ -271,11 +278,11 @@ final class DeviceOwnerGuard {
         boolean ours = GuardApi.outgoingCallsBlocked(context);
         try {
             if (block && !ours) {
-                dpm.addUserRestriction(admin, DISALLOW_OUTGOING_CALLS);
+                dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_OUTGOING_CALLS);
                 GuardApi.setOutgoingCallsBlocked(context, true);
                 android.util.Log.i(TAG, "locked without the call filter: outgoing calls off (emergency still allowed)");
             } else if (!block && ours) {
-                dpm.clearUserRestriction(admin, DISALLOW_OUTGOING_CALLS);
+                dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_OUTGOING_CALLS);
                 GuardApi.setOutgoingCallsBlocked(context, false);
                 android.util.Log.i(TAG, "outgoing calls back on");
             }

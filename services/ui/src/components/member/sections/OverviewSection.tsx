@@ -5,6 +5,7 @@ import { api } from '../../../services/api';
 import MemberCard from '../MemberCard';
 import ConcernsCard from '../ConcernsCard';
 import RequestsCard from '../../guardian/RequestsCard';
+import UnlockRequestsCard from '../../guardian/UnlockRequestsCard';
 import LiveFamilyMap from '../../geo/LiveFamilyMap';
 import { DailyBars, TimeRing } from '../charts';
 import { averageMinutes, dayBars, memberPath, nextRoutineLine, statusQuery, usageQuery } from '../../../lib/memberPage';
@@ -182,6 +183,7 @@ export default function OverviewSection({ username, name }: { username: string; 
     <>
       {/* What needs a parent first (answer a request, read a concern), then how the day and week went. */}
       <TodayCard username={username} />
+      <UnlockRequestsCard username={username} name={name} />
       <RequestsCard username={username} name={name} />
       <ConcernsCard username={username} name={name} />
       <CommsGlanceCard username={username} name={name} />

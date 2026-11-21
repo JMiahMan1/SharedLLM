@@ -15,8 +15,10 @@
 #   4. mints this device's own scoped agent key,
 #   5. copies jarvis-guard.exe to %ProgramFiles%\Jarvis Guard (readable by
 #      everyone, writable by administrators only, the Windows default there),
-#   6. writes the config to %ProgramData%\Jarvis Guard (SYSTEM +
-#      Administrators only; the public\ folder the tray reads is Users:Read),
+#   6. writes the config to %ProgramData%\Jarvis Guard (owned by
+#      Administrators, SYSTEM + Administrators only, nothing inherited; a
+#      folder found there that this installer did not make is emptied first,
+#      see below; the public\ folder the tray reads is Users:Read),
 #   7. registers the "Jarvis Guard (service)" task: SYSTEM, at startup, never
 #      stopped after a time limit or on battery, restarted if it ever exits,
 #   8. adds the tray shield to every sign-in, and starts the guard.
@@ -159,11 +161,115 @@ $uninstaller = Join-Path $PSScriptRoot 'uninstall.ps1'
 if (Test-Path $uninstaller) { Copy-Item -Force $uninstaller $installDir }
 
 # The data: %ProgramData%\Jarvis Guard, where the agent reads its config.
-# SYSTEM + Administrators only; the key, the cached rules and the log live here.
+# SYSTEM + Administrators only; the key, the cached rules, the offline-code
+# verifiers and the log live here.
+#
+# %ProgramData% lets any user create a folder there, and the creator owns it.
+# A child who made "Jarvis Guard" before this ran would own it for good (an
+# owner can always rewrite the ACL): they could read the PC's key, and plant
+# offline.codes.json or a cached status for the agent to trust. So the folder
+# is never trusted as found:
+#   1. if "Jarvis Guard" is a link (junction, symlink), the link is removed,
+#      never what it points to, and a real folder is made;
+#   2. Administrators take ownership of the folder itself, and its ACL is
+#      replaced with SYSTEM + Administrators only, inheriting nothing from
+#      %ProgramData% (every other entry goes, whoever added it);
+#   3. everything inside is checked without following links: anything owned
+#      by someone other than SYSTEM or Administrators, any link, and anything
+#      an administrator cannot read means the folder was not made by this
+#      installer. Then everything in it is deleted, with a warning naming what
+#      was found. A fresh install (no guard task yet) deletes it all too, so
+#      nothing planted before the guard existed survives;
+#   4. a reinstall or upgrade over a folder that passes the check keeps its
+#      files (today's minutes, the offline-code verifiers and their lockout),
+#      owned by Administrators and inheriting only the folder's ACL.
+# Links are never followed: takeown /R and icacls /T would walk through a
+# junction and change files elsewhere on the PC, so they only run once the
+# check has shown there are no links.
 $dataDir = Join-Path $env:ProgramData 'Jarvis Guard'
+$trustedOwners = @('S-1-5-18', 'S-1-5-32-544')
+
+function Test-Link($Item) { [bool]($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) }
+
+function Remove-Link([string]$Path) {
+    # The link itself; never through it into its target.
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.PSIsContainer) { [IO.Directory]::Delete($Path, $false) } else { [IO.File]::Delete($Path) }
+}
+
+# Everything under $Path, depth first, without walking into links.
+function Get-Tree([string]$Path) {
+    foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)) {
+        $child
+        if ($child.PSIsContainer -and -not (Test-Link $child)) { Get-Tree $child.FullName }
+    }
+}
+
+# Delete everything under $Path, taking each folder first (it may shut
+# administrators out), and links as links.
+function Clear-Folder([string]$Path) {
+    foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)) {
+        if (Test-Link $child) { Remove-Link $child.FullName; continue }
+        if ($child.PSIsContainer) {
+            takeown /F $child.FullName /A | Out-Null
+            icacls $child.FullName /grant '*S-1-5-32-544:(OI)(CI)F' /Q | Out-Null
+            Clear-Folder $child.FullName
+            [IO.Directory]::Delete($child.FullName, $false)
+        } else {
+            Remove-Item -LiteralPath $child.FullName -Force
+        }
+    }
+}
+
+if ((Test-Path -LiteralPath $dataDir) -and (Test-Link (Get-Item -LiteralPath $dataDir -Force))) {
+    Write-Warning "$dataDir was a link to somewhere else, not a folder. Removing the link (not its target) and making a real folder."
+    Remove-Link $dataDir
+}
 New-Item -ItemType Directory -Force $dataDir | Out-Null
-icacls $dataDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+
+# The folder itself: Administrators own it, and only SYSTEM and Administrators may use it.
+takeown /F $dataDir /A | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not take ownership of $dataDir for Administrators (takeown exit $LASTEXITCODE)." }
+icacls $dataDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /Q | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Could not lock down $dataDir." }
+$acl = Get-Acl -LiteralPath $dataDir
+foreach ($rule in @($acl.Access)) {
+    $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($trustedOwners -notcontains $sid) { $null = $acl.RemoveAccessRule($rule) }
+}
+Set-Acl -LiteralPath $dataDir -AclObject $acl
+$owner = (Get-Acl -LiteralPath $dataDir).GetOwner([Security.Principal.SecurityIdentifier]).Value
+if ($owner -ne 'S-1-5-32-544') { throw "$dataDir is still owned by $owner, not Administrators. Remove the folder by hand and run this again." }
+
+# What is inside: made by this installer and the agent, or not?
+$found = @()
+try {
+    foreach ($item in @(Get-Tree $dataDir)) {
+        if (Test-Link $item) { $found += "$($item.FullName) (a link)"; continue }
+        $itemOwner = (Get-Acl -LiteralPath $item.FullName).GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if ($trustedOwners -notcontains $itemOwner) { $found += "$($item.FullName) (owned by $itemOwner)" }
+    }
+} catch {
+    $found += "something an administrator could not read ($($_.Exception.Message))"
+}
+
+if ($found.Count -gt 0 -or -not $existing) {
+    if ($found.Count -gt 0) {
+        Write-Warning "$dataDir held things this installer did not make, so everything in it is deleted:"
+        $found | ForEach-Object { Write-Warning "  $_" }
+    }
+    Clear-Folder $dataDir
+    if (@(Get-ChildItem -LiteralPath $dataDir -Force).Count -gt 0) { throw "Could not empty $dataDir. Remove it by hand and run this again." }
+} else {
+    # No links inside (checked above), so walking the tree is safe: kept files
+    # belong to Administrators and inherit the folder's ACL and nothing else.
+    icacls $dataDir /setowner '*S-1-5-32-544' /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not make Administrators the owner of everything in $dataDir." }
+    if (@(Get-ChildItem -LiteralPath $dataDir -Force).Count -gt 0) {
+        icacls (Join-Path $dataDir '*') /reset /T /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not reset the permissions inside $dataDir." }
+    }
+}
 
 $config = [ordered]@{
     hubUrl    = $HubUrl

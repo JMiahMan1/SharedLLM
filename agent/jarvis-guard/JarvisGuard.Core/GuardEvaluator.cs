@@ -19,9 +19,17 @@ public static class GuardEvaluator
 
     private static readonly string[] SchoolDaysDefault = { "mon", "tue", "wed", "thu", "fri" };
 
-    public static Decision Evaluate(JsonElement? rules, DateTimeOffset now, DateTimeOffset? grantedUntil = null)
+    /// <summary>
+    /// <paramref name="remainingMinutes"/> is the day's time left as this PC
+    /// counts it offline (<see cref="OfflineLimit.Remaining"/>; null with no
+    /// limit): at 0 the day's limit locks, after a pause, bedtime and school,
+    /// as on the hub. Time a parent gave does not lift the limit (on the hub
+    /// it is already counted in the minutes left).
+    /// </summary>
+    public static Decision Evaluate(JsonElement? rules, DateTimeOffset now, DateTimeOffset? grantedUntil = null, int? remainingMinutes = null)
     {
-        if (rules is not { ValueKind: JsonValueKind.Object }) return new Decision(false, null);
+        if (rules is not { ValueKind: JsonValueKind.Object })
+            return remainingMinutes is 0 ? new Decision(true, "limit") : new Decision(false, null);
         var r = rules.Value;
 
         if (Bool(r, "paused") || (TryUntil(r, "paused_until", out var pausedUntil) && now < pausedUntil))
@@ -30,8 +38,33 @@ public static class GuardEvaluator
         var granted = grantedUntil is { } g && now < g;
         if (!granted && InWindow(r, "bedtime", now)) return new Decision(true, "bedtime");
         if (!granted && IsSchoolDay(r, now) && InWindow(r, "school", now)) return new Decision(true, "school");
+        if (remainingMinutes is 0) return new Decision(true, "limit");
         return new Decision(false, null);
     }
+
+    /// <summary>When the rules' pause was set (<c>paused_at</c>), if they say.</summary>
+    public static DateTimeOffset? PausedAt(JsonElement? rules) =>
+        rules is { ValueKind: JsonValueKind.Object } && TryUntil(rules.Value, "paused_at", out var at) ? at : null;
+
+    /// <summary>
+    /// The day's limit in minutes, as services/common/screen_time.py
+    /// limit_for: the weekly schedule's own day, else the weekend's, else the
+    /// daily. Null with no limit.
+    /// </summary>
+    public static int? LimitFor(JsonElement? rules, DayOfWeek day)
+    {
+        if (rules is not { ValueKind: JsonValueKind.Object }) return null;
+        var r = rules.Value;
+        var weekday = day.ToString()[..3].ToLowerInvariant();
+        var limit = IntOrNull(r, "daily_limit_min");
+        if (weekday is "sat" or "sun" && IntOrNull(r, "weekend_limit_min") is { } weekend) limit = weekend;
+        if (r.TryGetProperty("day_limits", out var days) && days.ValueKind == JsonValueKind.Object && IntOrNull(days, weekday) is { } own)
+            limit = own;
+        return limit;
+    }
+
+    private static int? IntOrNull(JsonElement r, string key) =>
+        r.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : null;
 
     private static bool IsSchoolDay(JsonElement r, DateTimeOffset now)
     {

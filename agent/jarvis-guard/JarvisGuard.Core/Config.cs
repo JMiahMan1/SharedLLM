@@ -31,6 +31,10 @@ public static class Config
     // The parents' offline-code verifiers (salt, iterations, hash; never a code)
     // and the recent wrong tries. Agent-side only: SYSTEM/Administrators ACL.
     public static readonly string OfflineCodesPath = Path.Combine(Root, "offline.codes.json");
+    // The day's limit as the hub last answered it, next to this PC's own count
+    // at that moment (OfflineLimit.Snapshot), so the limit still holds offline
+    // and across a restart. Agent-side only.
+    public static readonly string LimitSnapshotPath = Path.Combine(Root, "limit.snapshot.json");
 
     public static void WriteRawStatus(string json)
     {
@@ -65,14 +69,42 @@ public static class Config
     /// <summary>Named pipe the tray and the lock surface use to ask the SYSTEM agent for things.</summary>
     public const string PipeName = "JarvisGuard";
 
-    public static GuardConfig? Load()
+    /// <summary>
+    /// What loading the config found. Only a missing file means "not set up";
+    /// a file that cannot be read (access denied, locked) or that does not
+    /// hold a whole config is its own error, with the reason, so a damaged or
+    /// mis-permissioned install is never mistaken for an uninstalled one.
+    /// </summary>
+    public sealed record ConfigLoad(GuardConfig? Config, bool Missing, string? Error)
     {
-        try
+        public static ConfigLoad Ok(GuardConfig c) => new(c, false, null);
+        public static ConfigLoad NotSetUp(string path) =>
+            new(null, true, $"No Jarvis Guard configuration at {path}. Run install.ps1 as an administrator.");
+        public static ConfigLoad Broken(string error) => new(null, false, error);
+    }
+
+    public static ConfigLoad Load() => Load(ConfigPath, File.Exists, File.ReadAllText);
+
+    /// <summary>Testable core of <see cref="Load()"/>: the file system is passed in.</summary>
+    public static ConfigLoad Load(string path, Func<string, bool> exists, Func<string, string> read)
+    {
+        if (!exists(path)) return ConfigLoad.NotSetUp(path);
+        string text;
+        try { text = read(path); }
+        catch (UnauthorizedAccessException ex)
         {
-            if (!File.Exists(ConfigPath)) return null;
-            return ParseConfig(File.ReadAllText(ConfigPath));
+            return ConfigLoad.Broken($"Access to {path} was denied ({ex.Message}). The agent must run as SYSTEM; run install.ps1 again as an administrator to repair the folder's permissions.");
         }
-        catch { return null; }
+        catch (FileNotFoundException)
+        {
+            return ConfigLoad.NotSetUp(path);
+        }
+        catch (IOException ex)
+        {
+            return ConfigLoad.Broken($"{path} could not be read: {ex.Message}");
+        }
+        var (config, error) = TryParseConfig(text);
+        return config is not null ? ConfigLoad.Ok(config) : ConfigLoad.Broken($"{path} is not a usable configuration: {error} Run install.ps1 again as an administrator.");
     }
 
     /// <summary>
@@ -80,17 +112,21 @@ public static class Config
     /// PascalCase. Case-sensitive parsing left every field empty, so the agent
     /// started with no hub, no user and no key.
     /// </summary>
-    public static GuardConfig? ParseConfig(string json)
+    public static GuardConfig? ParseConfig(string json) => TryParseConfig(json).Config;
+
+    /// <summary>The config, or why the text is not one.</summary>
+    public static (GuardConfig? Config, string? Error) TryParseConfig(string json)
     {
-        try
-        {
-            var config = JsonSerializer.Deserialize<GuardConfig>(json.TrimStart('\uFEFF'), JsonOptions.Web);
-            if (config is null) return null;
-            if (string.IsNullOrWhiteSpace(config.HubUrl) || string.IsNullOrWhiteSpace(config.Username)
-                || string.IsNullOrWhiteSpace(config.AgentKey) || string.IsNullOrWhiteSpace(config.DeviceKey)) return null;
-            return config;
-        }
-        catch { return null; }
+        GuardConfig? config;
+        try { config = JsonSerializer.Deserialize<GuardConfig>(json.TrimStart('\uFEFF'), JsonOptions.Web); }
+        catch (JsonException ex) { return (null, $"it is not valid JSON ({ex.Message})."); }
+        if (config is null) return (null, "it is empty.");
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(config.HubUrl)) missing.Add("hubUrl");
+        if (string.IsNullOrWhiteSpace(config.Username)) missing.Add("username");
+        if (string.IsNullOrWhiteSpace(config.AgentKey)) missing.Add("agentKey");
+        if (string.IsNullOrWhiteSpace(config.DeviceKey)) missing.Add("deviceKey");
+        return missing.Count > 0 ? (null, $"it has no {string.Join(", ", missing)}.") : (config, null);
     }
 
     public static void WriteState(GuardState state)
@@ -150,8 +186,23 @@ public sealed class GuardState
     public string? ParentUnlockUntil { get; set; }
     /// <summary>When the agent last heard from the hub (UTC).</summary>
     public string AsOfUtc { get; set; } = "";
-    /// <summary>"hub" when the last poll reached the hub, "offline" when running on cached rules.</summary>
+    /// <summary>
+    /// <see cref="HubReach"/>: "hub" when the last poll reached the hub;
+    /// "offline" (no answer), "auth" (the hub refused this PC's key) or
+    /// "hub-error" when running on cached rules; "config-error" when the agent
+    /// could not load its configuration and is not guarding at all.
+    /// </summary>
     public string Source { get; set; } = "hub";
+    /// <summary>What is wrong, in words for the screen, when <see cref="Source"/> is not "hub"; else null.</summary>
+    public string? Problem { get; set; }
+    /// <summary>
+    /// A signed-in child session has no tray, so this PC's minutes are not
+    /// being counted: the used and remaining figures are the last known ones,
+    /// not today's truth. The parents are told.
+    /// </summary>
+    public bool UsageUnknown { get; set; }
+    /// <summary>When the parents' current pause was set (ISO), from the rules' paused_at; null with none.</summary>
+    public string? PausedAt { get; set; }
     public string HubUrl { get; set; } = "";
     public string Username { get; set; } = "";
 }

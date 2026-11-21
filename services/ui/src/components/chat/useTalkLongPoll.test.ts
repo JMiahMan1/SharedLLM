@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useTalkLongPoll } from './useTalkLongPoll';
+import { sleep, useTalkLongPoll } from './useTalkLongPoll';
 import { api } from '../../services/api';
 
 vi.mock('../../services/api', async (importOriginal) => {
@@ -72,5 +72,34 @@ describe('useTalkLongPoll', () => {
     const signal = vi.mocked(api.waitTalkMessages).mock.calls[0][4] as AbortSignal;
     unmount();
     expect(signal.aborted).toBe(true);
+  });
+});
+
+describe('sleep', () => {
+  it('takes its abort listener away when it wakes, so sleeps do not pile listeners on the poll', async () => {
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    for (let i = 0; i < 3; i += 1) await sleep(1, controller.signal);
+    expect(add).toHaveBeenCalledTimes(3);
+    expect(remove).toHaveBeenCalledTimes(3);
+    expect(remove.mock.calls.map((c) => c[1])).toEqual(add.mock.calls.map((c) => c[1]));
+  });
+
+  it('wakes at once on abort and removes its listener then too', async () => {
+    const controller = new AbortController();
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    const woke = sleep(60_000, controller.signal);
+    controller.abort();
+    await woke;
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not wait or listen on a signal that is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    await sleep(60_000, controller.signal);
+    expect(add).not.toHaveBeenCalled();
   });
 });

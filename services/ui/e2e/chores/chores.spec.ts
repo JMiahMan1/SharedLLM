@@ -55,7 +55,7 @@ async function mockAll(page: Page): Promise<Board> {
     if (/\/api\/screen-time\/[^/]+\/status/.test(p)) return route.fulfill({ json: {
       username: 'jordan', day: '', rules: { daily_limit_min: 120 }, can_manage: true, technical: false,
       limit_min: 120, used_min: 30, bonus_min: 0, remaining_min: 90, locked: false } });
-    if (/\/api\/(screen-time|guard)\/requests/.test(p)) return route.fulfill({ json: { requests: [] } });
+    if (/\/api\/(screen-time\/requests|guard\/requests|guard\/unlock-requests)/.test(p)) return route.fulfill({ json: { requests: [] } });
     // The Guardian and member pages' other cards, empty (shapes from e2e/family-member.spec.ts).
     if (p.startsWith('/api/guardian/concerns/')) return route.fulfill({ json: { status: 'SUCCESS', concerns: [] } });
     if (p.startsWith('/api/guardian/guidance/')) return route.fulfill({ json: { status: 'SUCCESS', week: { start: '', end: '' }, prompts: [] } });

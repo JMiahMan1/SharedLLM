@@ -107,7 +107,14 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const [backupOpen, setBackupOpen] = useState(false);
   // The key of a private chat just created, handed to its thread once so the creator is not asked again at once.
   const [createdKey, setCreatedKey] = useState<{ token: string; key: CryptoKey } | null>(null);
-  const [privateUnlocked, setPrivateUnlocked] = useState(false);
+  // Which private chats are unlocked, per chat: a chat just switched to is locked until its
+  // own thread says otherwise, so it never starts fetching on the previous chat's unlock.
+  const [unlockedChats, setUnlockedChats] = useState<Readonly<Record<string, boolean>>>({});
+  const setPrivateUnlocked = useCallback(
+    (token: string, unlocked: boolean) =>
+      setUnlockedChats((current) => (Boolean(current[token]) === unlocked ? current : { ...current, [token]: unlocked })),
+    [],
+  );
   const forgetCreatedKey = useCallback(() => setCreatedKey(null), []);
   const { startCall } = useCall();
 
@@ -202,6 +209,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   // its sealed messages are not asked for and nothing long-polls them. Fetching
   // here could not render anything, and a request per open would tell the server
   // when the parents look at the chat without opening it.
+  const privateUnlocked = Boolean(activeToken && unlockedChats[activeToken]);
   const privateLocked = privateMessages && !privateUnlocked;
 
   const privateInfoError = !isPrivate
@@ -312,12 +320,13 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     privateMessages ? waitPrivate : undefined,
   );
   const {
-    data: fetched = EMPTY_ARRAY,
+    data: page,
     isFetching: fetchingMessages,
+    isPlaceholderData: showingPreviousPage,
     isError: messagesError,
     error: messagesErrorObj,
     refetch: refetchMessages,
-  } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
+  } = useQuery<ExecutionResponse, Error, { messages: TalkMessage[]; hasMore: boolean }>({
     queryKey: ['talk-messages', activeToken, limit],
     // A FAILURE body used to render as an empty thread ("No messages yet"),
     // which reads as "nobody has said anything" rather than "the fetch failed".
@@ -342,8 +351,15 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
       const brisk = waitingForJarvis || sentRecently || gameRunning(detailList<TalkMessage>(query.state.data, 'messages'));
       return brisk ? 2000 : 10000;
     },
-    select: (response) => sortMessages(detailList<TalkMessage>(response, 'messages').filter((m) => !isHiddenUpdate(m))),
+    select: (response) => ({
+      messages: sortMessages(detailList<TalkMessage>(response, 'messages').filter((m) => !isHiddenUpdate(m))),
+      // The server counts this on the raw page, before reactions are taken out, so a
+      // short visible page can still have more. Only the server's own "true" offers it.
+      hasMore: (response.detail as { has_more?: unknown } | undefined)?.has_more === true,
+    }),
   });
+  const fetched: TalkMessage[] = page?.messages ?? EMPTY_ARRAY;
+  const hasMore = page?.hasMore ?? false;
 
   // A sent bubble is hidden as soon as a fetch contains the message, so it
   // never blinks out between "sent" and "Nextcloud indexed it". A failed one
@@ -360,8 +376,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
       ),
     ];
   }, [fetched, pending, activeToken]);
-  // "Show earlier" asked for more than is on screen and the fetch is out.
-  const loadingEarlier = fetchingMessages && fetched.length > 0 && fetched.length < limit;
+  // "Show earlier" asked for a bigger page and it is out: the previous page is on screen
+  // as a placeholder. A long poll's refetch of the same page is not "loading earlier".
+  const loadingEarlier = fetchingMessages && showingPreviousPage;
 
   // Jarvis has answered once an assistant message newer than the question shows up.
   const jarvisAnswered =
@@ -996,7 +1013,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           onRetry={(message) => void deliver(activeToken, message)}
           onDiscard={(message) => updatePending(activeToken, (list) => list.filter((m) => m.id !== message.id))}
           onLoadEarlier={
-            loadingEarlier || (fetched.length >= limit && limit < MAX_HISTORY)
+            loadingEarlier || (hasMore && limit < MAX_HISTORY)
               ? () => setHistoryLimit((current) => ({ ...current, [activeToken]: Math.min(limit + PAGE, MAX_HISTORY) }))
               : undefined
           }

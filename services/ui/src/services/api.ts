@@ -76,6 +76,7 @@ import type {
   ScreenTimeRequest,
   ChoreCheck,
   GuardRequest,
+  UnlockRequest,
   SpotifyStatus,
   RecommendationLane,
   RecommendationLanes,
@@ -1385,6 +1386,18 @@ export const api = {
   /** A parent answers; a site is allowed for `minutes` or `always`. */
   async decideGuardRequest(id: number, body: { approve: boolean; minutes?: number; always?: boolean }): Promise<{ request: GuardRequest }> {
     const resp = await apiClient.post(`/api/guard/requests/${id}`, body);
+    return resp.data;
+  },
+
+  /** Locked devices asking a parent to unlock them: the caller's children's (and their own). */
+  async getUnlockRequests(status: UnlockRequest['status'] = 'pending'): Promise<{ requests: UnlockRequest[] }> {
+    const resp = await apiClient.get('/api/guard/unlock-requests', { params: { status } });
+    return resp.data;
+  },
+
+  /** A parent answers an unlock request: approve for `minutes` (the minutes asked when left out), or deny. */
+  async decideUnlockRequest(id: number, body: { approve: boolean; minutes?: number }): Promise<{ request: UnlockRequest }> {
+    const resp = await apiClient.post(`/api/guard/unlock-requests/${id}`, body);
     return resp.data;
   },
 

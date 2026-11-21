@@ -5,6 +5,18 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { describeVoice, voiceGroups } from '../../lib/voices';
+import { errorText } from '../../lib/errorText';
+
+/** The reason a FAILURE body gives (`message`, `detail` or `error`), or null when it gives none. */
+function failureReason(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const raw = body as Record<string, unknown>;
+  for (const key of ['message', 'detail', 'error'] as const) {
+    const value = raw[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
 
 /**
  * The voice Jarvis uses with this person: in their spoken replies and on the
@@ -42,8 +54,8 @@ export default function MyVoicePanel() {
       const profile = await api.setMyVoice(next || null);
       queryClient.setQueryData(['me'], profile);
       toast.success(next ? `Jarvis will use ${describeVoice(next, featured).name} with you` : 'Jarvis will use its own voice with you');
-    } catch {
-      toast.error('Your voice was not saved. Try again.');
+    } catch (err) {
+      toast.error(`Your voice was not saved: ${errorText(err, 'no reason given')}`);
     } finally {
       setPending(null);
       setSaving(false);
@@ -65,9 +77,9 @@ export default function MyVoicePanel() {
       el.onerror = () => setPlaying(null);
       await el.play();
       setPlaying('playing');
-    } catch {
+    } catch (err) {
       setPlaying(null);
-      toast.error('That voice could not be played right now.');
+      toast.error(`That voice could not be played: ${errorText(err, 'no reason given')}`);
     }
   };
 
@@ -85,8 +97,8 @@ export default function MyVoicePanel() {
       {voices.isError || unreadable ? (
         <p className="px-1 text-sm text-amber-300" role="alert">
           {unreadable
-            ? 'The server did not send a list of voices. Everything else on this page still works.'
-            : 'The voices could not be loaded. Check your connection and open Settings again.'}
+            ? `The server did not send a list of voices: ${failureReason(data) ?? 'it gave no reason'}. Everything else on this page still works.`
+            : `The voices could not be loaded: ${errorText(voices.error, 'no reason given')}.`}
         </p>
       ) : (
         <div className="flex items-stretch gap-2">

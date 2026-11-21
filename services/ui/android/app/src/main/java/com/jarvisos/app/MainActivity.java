@@ -59,6 +59,9 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(PrivatePreviewPlugin.class);
         registerPlugin(ChatShortcutPlugin.class);
         super.onCreate(savedInstanceState);
+        // The chat's inline video players keep their own iframe navigations
+        // (PlayerFrameRules); everything else is Capacitor's as before.
+        getBridge().setWebViewClient(new PlayerFrameWebViewClient(getBridge()));
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             getWindow().setDecorFitsSystemWindows(false);

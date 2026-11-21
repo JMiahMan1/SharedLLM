@@ -80,7 +80,7 @@ and writes a loud warning on the Devices page.
    2026; net10.0 is the LTS choice).
 2. **Tray shield + signage** (`jarvis-tray.exe`, per-user from the service, or a
    shell start entry). Small shield icon; hover = "Managed by the family hub";
-   right-click → open Jarvis, ask a parent, parent-unlock. No off switch.
+   right-click → open Jarvis, ask a parent, ask a parent to unlock. No off switch.
 3. **Lock surface** (`jarvis-lock.exe`). A per-monitor, topmost, non-draggable
    informational overlay that explains why the machine is locked ("Screen time is
    up for today", "Bedtime"), offers "Ask for more time", "Message a parent" and
@@ -148,7 +148,7 @@ No new rules engine - reuse everything the phone uses, add Windows deltas:
 | Tamper taxonomy | Reuse `guard_tamper` events (`uninstall_attempt`, `safe_mode_boot`, `admin_revoked`, `service_stopped`, `clock_skew`) → devices page + `family_safety` notices, same as phone. |
 | Ask-to-time flow | Unchanged: `/api/screen-time/requests` + Approve/Disapprove push; granted minutes extend today's budget and suspend sleep locks (`granted_until`). The lock screen buttons call the same endpoints. |
 | Bonus / earn / chores | Unchanged: `/api/screen-time/{u}/bonus`, `EARN_KEYS`, chore-check approvals - Windows inherits step/exercise/chore earning automatically. |
-| Parent unlock on device | Unchanged: `/api/guard/parent-unlock` (parent Jarvis login, 5-fail → 10-minute wait), PBKDF2 offline codes cached locally (10-minute lifts) reported later via `offline_unlock`. |
+| Parent unlock on device | No password on the device: the lock surface asks (`POST /api/guard/unlock-requests`, bound to the PC's device key, ten-minute expiry, a newer request supersedes, once per 30 s and ten an hour per device); both parents answer Approve N min / Deny in the Jarvis app (push callback `guard_unlock_decide`, or the request card on the child's page); only a parent's own session may answer, never a device key or the child; the PC polls its own request (`GET /api/guard/unlock-requests/{id}`) and unlocks until the hub's `until`. The approval carries the PBKDF2 offline-code verifiers, so offline codes (10-minute lifts, reported later via `offline_unlock`) stay the no-network fallback. |
 | MDM | `Devices.tsx` gets a "Windows PC" section (Lock now / Lift / Ask log / Tamper log / Update). **No wipe button** for windows-pc v1. |
 | Publish endpoint | New `POST /api/app-updates/windows` (internal-secret, mirrors the APK publish step): stores `data/app_updates/jarvis-guard.exe` + `version.json`; the exe is not served to children, only fetched by enrolled machines. |
 
@@ -304,12 +304,12 @@ Client code in `agent/jarvis-guard/` (single-file .NET 10, BCL-only):
   "windows"` every 30 minutes; detects safe-mode boots (SafeBoot\Option,
   SAFEBOOT_OPTION) and reports `boot_without_guard`; named-pipe server
   for the tray/overlay (Windows ACLs: Authenticated Users, pipe carries
-  locked/reason/parent-unlock verdicts, never the API key).
+  locked/reason verdicts and unlock request status, never the API key).
 - `JarvisGuard.Tray` - the always-on managed-device signage (NotifyIcon):
-  shield tooltip, open the hub, ask a parent for more time, a parent can
-  unlock, about. Reads only `public\state.json`.
+  shield tooltip, open the hub, ask a parent for more time, ask a parent
+  to unlock, about. Reads only `public\state.json`.
 - `JarvisGuard.Overlay` - the lock surface: full-screen signage (reason +
-  until + ask/message/parent-unlock). Enforcement is the session sign-out;
+  until + ask/message/ask a parent to unlock). Enforcement is the session sign-out;
   the overlay communicates. User-close is vetoed while locked.
 
 Hub deltas shipped with it: `windows-pc` device kind in identity (device
