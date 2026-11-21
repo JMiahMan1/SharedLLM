@@ -239,6 +239,12 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 - `GET /api/trainer/models`: Alpaca's model inventory (size, context length, capabilities, router status) plus `chosen` (the model the trainer uses) and `trainer_model_missing`; admin only
 - `GET /api/trainer/benchmarks?limit=`: Alpaca's general and SharedLLM benchmark results per model, with `average_score` and `weak_categories` for the chosen model; admin only
 - `POST /api/trainer/benchmarks/ingest`: fold those measured results into lesson confidence through RAG `/rag/benchmark/ingest-results`; admin only
+- `GET /api/trainer/teacher`: teacher traces (counts by scrub status, outcome, source, location and model), lessons written and still eligible, `teacher` eval cases, the local model's `teacher` bucket scores report by report, recent dataset exports; admin only. See `docs/TEACHER_TRACES.md`
+- `GET /api/trainer/teacher/traces?limit=&outcome=&status=`: trace summaries, newest first (goal, outcome, scrub status, lesson and case ids; never the steps); admin only
+- `GET /api/trainer/teacher/traces/{id}`, `DELETE /api/trainer/teacher/traces/{id}`: one scrubbed trace with its steps; forget one; admin only
+- `POST /api/trainer/teacher/traces` `{traces: [...]}` (at most 200): import traces scrubbed by `scripts/collect_teacher_traces.py`; upserts by id; each trace is refused (with the reason, never the value) when scrubbed by another scrubber version, when a dropped stub carries content, or when the leak check still finds a secret. Admin, or an account named in `TRAINER_TEACHER_UPLOADERS`
+- `POST /api/trainer/teacher/lessons` `{limit, dry_run}`: write verified successes into `system_learnings` as `worked_example` lessons (deduplicated); returns `written`, `skipped` with reasons, `failed`; admin only
+- `POST /api/trainer/teacher/dataset` `{format: openai|sharegpt, eval_share, include_unverified}`: write train/eval JSONL with Raven's live system prompt (503 when Identity cannot supply it) and the teacher's steps mapped onto Raven's tools; admin only
 
 "Signed-in caller" routes return **401** without a valid API key (or the
 internal secret for service-to-service calls).
