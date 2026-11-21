@@ -354,6 +354,44 @@ def _require_admin_for_hub_rooms(request: Request) -> None:
         )
 
 
+#: Where a care log may say it came from when a caller sends it. The service's
+#: own paths stamp ``homehub_valve`` and ``skylight_chore`` themselves; a caller
+#: cannot claim them.
+CARE_SOURCES = frozenset({"manual", "voice", "push_action", "nfc_tag"})
+
+
+def _care_source(source: str | None) -> str:
+    """A caller's ``source``, checked against :data:`CARE_SOURCES` (422 otherwise)."""
+    value = (source or "manual").strip().lower()
+    if value not in CARE_SOURCES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"source must be one of: {', '.join(sorted(CARE_SOURCES))}.",
+        )
+    return value
+
+
+async def _on_behalf_of(request: Request, claimed: str | None) -> str:
+    """Who did it: the signed-in person, or someone a parent or admin names.
+
+    A body may say someone else did the watering or the picking (a parent
+    logging for a child). Only a parent or an admin may, and only for someone
+    in the household roster (Identity); everyone else is recorded as themselves.
+    """
+    user = _user(request)
+    name = (claimed or "").strip().lower()
+    if not name or name == user:
+        return user
+    if _role(request) not in PARENT_ROLES and not _is_admin(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a parent or an admin may log this for someone else.",
+        )
+    if name not in await household.usernames():
+        raise HTTPException(status_code=422, detail=f"{name} is not in the household.")
+    return name
+
+
 def _is_minor_role(role: str) -> bool:
     return role in ("child", "teen")
 
@@ -1798,14 +1836,15 @@ async def test_notice(
 
 
 @app.post("/plants/{plant_id}/care")
-def log_care(
+async def log_care(
     plant_id: str,
     body: CareLogIn,
     request: Request,
     session: Session = Depends(get_session),
 ):
     """Log a care action: advances next_due_at and writes care_logs."""
-    user = _user(request)
+    source = _care_source(body.source)
+    performed_by = await _on_behalf_of(request, body.performed_by)
     plant = session.get(Plant, plant_id)
     if plant is None:
         raise HTTPException(status_code=404, detail="Plant not found")
@@ -1816,8 +1855,8 @@ def log_care(
         session,
         plant,
         action=body.action,
-        source=body.source,
-        performed_by=body.performed_by or user,
+        source=source,
+        performed_by=performed_by,
         notes=body.notes,
         sensor_snapshot=body.sensor_snapshot,
     )
@@ -2018,6 +2057,7 @@ async def water_all(
 ):
     """Batch-water all (due) plants in a room (Home Hub rooms included)."""
     user = _user(request)
+    source = _care_source(source)
     location = await _place(session, loc_id)
     if location is None:
         raise HTTPException(status_code=404, detail="Location not found")
@@ -2094,7 +2134,7 @@ async def log_harvest(
     regrowth_cooldown_days, and pushes a yield metric to weather_client
     best-effort (never fails the request if weather is unavailable).
     """
-    user = _user(request)
+    harvested_by = await _on_behalf_of(request, body.harvested_by)
     plant = session.get(Plant, plant_id)
     if plant is None:
         raise HTTPException(status_code=404, detail="Plant not found")
@@ -2116,7 +2156,7 @@ async def log_harvest(
     row = HarvestLog(
         plant_id=plant_id,
         harvested_at=body.harvested_at or utcnow(),
-        harvested_by=body.harvested_by or user,
+        harvested_by=harvested_by,
         quantity=body.quantity,
         unit=body.unit,
         disposition=body.disposition,

@@ -28,8 +28,8 @@ TIMEOUT_S = 3.0
 #: keeps a page of planner calls to one request without hiding that.
 _CACHE_TTL_S = 300.0
 
-#: ``(read at, members)``; ``None`` until the first successful read.
-_cache: tuple[float, int] | None = None
+#: ``(read at, members, usernames)``; ``None`` until the first successful read.
+_cache: tuple[float, int, tuple[str, ...]] | None = None
 
 #: What a person reads when the size cannot be known.
 UNAVAILABLE_DETAIL = (
@@ -50,10 +50,30 @@ def invalidate() -> None:
 
 async def size() -> int | None:
     """How many people are in the household, or ``None`` when Identity cannot say."""
+    roster = await _roster()
+    return roster[1] if roster else None
+
+
+async def usernames() -> set[str]:
+    """Everyone in the household (Identity usernames, lower case).
+
+    Raises :class:`HouseholdUnavailable` when Identity cannot say: a check that
+    someone is in the household must not pass because the list was empty.
+    """
+    roster = await _roster()
+    if roster is None:
+        raise HouseholdUnavailable(
+            "Identity did not answer, so Garden cannot check who is in the household. Try again shortly."
+        )
+    return set(roster[2])
+
+
+async def _roster() -> tuple[float, int, tuple[str, ...]] | None:
+    """Identity's roster, cached briefly; ``None`` when it cannot be read."""
     global _cache
     now = time.monotonic()
     if _cache is not None and now - _cache[0] < _CACHE_TTL_S:
-        return _cache[1]
+        return _cache
     url = f"{config.IDENTITY_SVC_URL.rstrip('/')}/api/internal/household"
     try:
         async with aiohttp.ClientSession(
@@ -76,8 +96,9 @@ async def size() -> int | None:
     if members < 1:
         log.warning("[household] Identity reports an empty household")
         return None
-    _cache = (now, members)
-    return members
+    names = tuple(str(name).strip().lower() for name in (data or {}).get("usernames") or [] if name)
+    _cache = (now, members, names)
+    return _cache
 
 
 async def size_or_raise() -> int:
