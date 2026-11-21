@@ -470,7 +470,13 @@ function ProfileSheet({
             </legend>
             {children.map((row, index) => (
               <div key={index} className="space-y-1" data-testid="beloved-child">
-                <div className="flex min-w-0 items-center gap-2">
+                {/* A name, a date and a remove button do not fit one phone row: the
+                    date input's own width plus the button left the row wider than the
+                    sheet, and focusing a field scrolled that hidden overflow sideways
+                    (everything after it then measured off the card). On a phone the
+                    name takes its own row and the date shares the next; from `sm` up
+                    it is the single row it always was. */}
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <input
                     type="text"
                     value={row.name}
@@ -479,7 +485,7 @@ function ProfileSheet({
                     placeholder="Name"
                     aria-label={`Child ${index + 1} name`}
                     data-testid="beloved-child-name"
-                    className="glass-input min-h-11 min-w-0 flex-1 text-base sm:text-sm"
+                    className="glass-input min-h-11 min-w-0 flex-1 basis-full text-base sm:basis-0 sm:text-sm"
                   />
                   <input
                     type="date"
@@ -487,7 +493,7 @@ function ProfileSheet({
                     onChange={(e) => editChild(index, { birthday: e.target.value })}
                     aria-label={`${row.name.trim() || `Child ${index + 1}`}'s birthday`}
                     data-testid="beloved-child-birthday"
-                    className="glass-input min-h-11 w-[9.5rem] shrink-0 text-base sm:text-sm"
+                    className="glass-input min-h-11 min-w-0 flex-1 text-base sm:w-[9.5rem] sm:flex-none sm:shrink-0 sm:text-sm"
                   />
                   <button
                     type="button"
