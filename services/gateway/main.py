@@ -8121,10 +8121,30 @@ _TAMPER_EVENTS = {
     "other_vpn": "is running another VPN in place of Jarvis's web filter",
     "boot_without_guard": "started without Jarvis's guard (safe mode, most likely)",
     "multi_user": "has a second user or guest, where Jarvis's guard is not set up",
+    # The family PC (agent/jarvis-guard).
+    "offline_code_wrong": "had wrong offline unlock codes typed in",
+    "tray_missing": "is running without Jarvis Guard's tray, so its screen time is not being counted",
+    "guard_pipe_taken": "has another program posing as Jarvis Guard, which stopped the guard from starting",
+}
+
+#: Events whose detail reads better inside the sentence than after it. The
+#: PC sends whose offline code it was ("parent-a") and how many wrong codes
+#: ("3 wrong codes"); a phone's offline_unlock has no detail and keeps the
+#: plain sentence.
+_TAMPER_WITH_DETAIL = {
+    "offline_unlock": "was unlocked with {detail}'s offline code",
+    "offline_code_wrong": "had {detail} typed in at its offline unlock",
 }
 
 #: Longest detail kept with a tamper report (an app's name, a DNS host, a count).
 _TAMPER_DETAIL_MAX = 80
+
+
+def _tamper_sentence(event: str, detail: str) -> str:
+    """What a tamper report says, after "<name>'s <device> ", ending in a full stop."""
+    if detail and event in _TAMPER_WITH_DETAIL:
+        return _TAMPER_WITH_DETAIL[event].format(detail=detail) + "."
+    return _TAMPER_EVENTS[event] + (f": {detail}." if detail else ".")
 
 
 @app.get("/api/recommendation-lanes/{username}")
@@ -8244,20 +8264,35 @@ async def guard_tamper(request: Request):
     # Identity keeps the report on a minor's record (the father's Devices
     # section lists them) and says who to tell. A grown member's report comes
     # back with an empty list and ``dropped`` set: nobody is told.
-    async with borrow_http_client() as client:
-        resp = await client.post(
-            f"{IDENTITY_SVC}/api/internal/guard/tamper/{child}",
-            json=report,
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-        )
-        info = await resp.json(content_type=None) if resp.status == 200 else {}
-    name = (info or {}).get("display_name") or child
+    #
+    # When identity did not keep it, this answers an error, never a success:
+    # the device keeps the report queued (the PC's offline unlock, its wrong
+    # codes, a missing tray) and sends it again, instead of dropping a report
+    # nobody stored and nobody was told about.
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC}/api/internal/guard/tamper/{child}",
+                json=report,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if resp.status != 200:
+                log.warning("[guard] tamper report %s for %s not kept: identity answered %s", event, child, resp.status)
+                raise HTTPException(status_code=502, detail=f"The report was not kept (identity answered {resp.status}). Send it again.")
+            info = await resp.json(content_type=None)
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        log.warning("[guard] tamper report %s for %s not kept: identity unreachable: %s", event, child, exc)
+        raise HTTPException(status_code=502, detail="The report was not kept (identity unreachable). Send it again.") from exc
+    if not isinstance(info, dict):
+        log.warning("[guard] tamper report %s for %s: identity's answer is not an object", event, child)
+        raise HTTPException(status_code=502, detail="The report was not kept (identity's answer was unreadable). Send it again.")
+    name = info.get("display_name") or child
     # The kind of the device that reported it, when identity knows it.
-    device = (info or {}).get("device") or "device"
+    device = info.get("device") or "device"
     await _screen_time_notice(
-        (info or {}).get("parents") or [],
+        info.get("parents") or [],
         f"{device[:1].upper() + device[1:]} protection changed",
-        f"{name}'s {device} {_TAMPER_EVENTS[event]}" + (f": {detail}." if detail else "."),
+        f"{name}'s {device} {_tamper_sentence(event, detail)}",
         f"/family/member/{child}",
     )
     answer: dict = {"status": "SUCCESS"}
