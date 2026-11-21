@@ -1,5 +1,11 @@
 name: UI E2E
 
+# One run per branch, newest wins -- except on the nightly schedule, which
+# must not cancel a run someone started by hand.
+concurrency:
+  group: ui-e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
 # The hermetic Playwright suite in Chromium at every size the app is used at:
 # desktop, Pixel 7, a small phone (360x740) and a tablet in portrait and
 # landscape. It runs on every push that touches the UI's source, so each UI
@@ -37,6 +43,9 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      # Five screen sizes x two halves: ten runners run the suite in about a
+      # third of the wall-clock time one runner needed, and a failure names the
+      # half it came from.
       matrix:
         project:
           - hermetic-desktop
@@ -44,6 +53,7 @@ jobs:
           - hermetic-small-phone
           - hermetic-tablet-portrait
           - hermetic-tablet-landscape
+        shard: [1, 2]
 
     steps:
       - uses: actions/checkout@v4
@@ -59,15 +69,35 @@ jobs:
         working-directory: services/ui
         run: npm ci
 
-      - name: Install Chromium
+      # The browser download is ~150MB per run and changes only when Playwright
+      # does: key the cache on the version in the lockfile.
+      - name: Playwright version
+        id: playwright
         working-directory: services/ui
-        run: npx playwright install --with-deps chromium
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ hashFiles('services/ui/package-lock.json') }}
+
+      - name: Install Chromium and its system libraries
+        working-directory: services/ui
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            # The browser is cached; the OS libraries are not, and they come from apt.
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
 
       - name: Run the hermetic suite (${{ matrix.project }})
         working-directory: services/ui
         env:
           SKIP_VISUAL: '1'
-        run: npx playwright test --project=${{ matrix.project }} --reporter=line,html --workers=2
+        run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/2 --reporter=line,html --workers=2
 
       # Every run, not only a failed one: the per-page, per-format screenshots
       # are attached to the report.
@@ -75,7 +105,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.project }}
+          name: playwright-report-${{ matrix.project }}-shard-${{ matrix.shard }}
           path: |
             services/ui/playwright-report
             services/ui/test-results
