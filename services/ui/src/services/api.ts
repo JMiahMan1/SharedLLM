@@ -1767,6 +1767,18 @@ export const api = {
     return resp.data;
   },
 
+  /** Approve sentences taught at your voice satellite: they join your profile. */
+  async approvePendingVoice(id: string): Promise<VoiceStatus & { added: number }> {
+    const resp = await apiClient.post(`/api/users/me/voice/pending/${encodeURIComponent(id)}`);
+    return resp.data;
+  },
+
+  /** Discard sentences taught at your voice satellite without using them. */
+  async discardPendingVoice(id: string): Promise<VoiceStatus> {
+    const resp = await apiClient.delete(`/api/users/me/voice/pending/${encodeURIComponent(id)}`);
+    return resp.data;
+  },
+
   async getHealth(): Promise<HealthStatus> {
     const resp = await apiClient.get('/health/ready');
     return resp.data;

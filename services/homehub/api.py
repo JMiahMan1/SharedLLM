@@ -540,10 +540,10 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         try:
             if conv.source_url is None:
                 return Response(await esphome_audio.PROXY.clip_audio(conv), media_type=media_type, headers=headers)
-            body = await esphome_audio.PROXY.open_stream(conv)
+            stream = await esphome_audio.PROXY.open_stream(conv)
         except esphome_audio.ProxyError as exc:
             return _error(exc.status, exc.message)
-        return StreamingResponse(body, media_type=media_type, headers=headers)
+        return esphome_audio.stream_response(stream, media_type, headers)
 
     @api.post("/hub/esphome/audio_url")
     async def esphome_audio_url(request: Request) -> Response:

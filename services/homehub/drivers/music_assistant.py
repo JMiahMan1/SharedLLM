@@ -14,7 +14,7 @@ One persistent WebSocket (``/ws``, JSON-RPC: ``{"message_id", "command",
 players and queues as well, so a missed event costs at most one poll.
 
 Entities map by unique_id: a media_player's unique_id is the MA player_id
-(``media_player.den_speaker``, ``up000000000001``, a cast UUID...), and the
+(``media_player.example_speaker``, ``up000000000001``, a cast UUID...), and the
 "favorite current song" button is ``<player_id>_favorite_now_playing``.
 
 What each player is and can do comes from MA: its ``device_info`` (maker,

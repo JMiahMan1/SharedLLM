@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, Mic, Square, Trash2, UserCheck } from 'lucide-react';
+import { CheckCircle, Mic, ShieldQuestion, Square, Trash2, UserCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { VoiceCheck, VoiceStatus } from '../../services/api';
+import type { VoicePending } from '../../types/api';
 import { errorText } from '../../lib/errorText';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 
@@ -62,6 +63,62 @@ function statusLine(s: VoiceStatus): string {
   if (s.enrolled) return `Enrolled · ${s.samples} recording${s.samples === 1 ? '' : 's'}`;
   if (s.samples) return `${s.samples} of ${s.min_samples} recordings`;
   return 'Not set up';
+}
+
+/** "assist_satellite.office_assist_satellite" reads as "office". */
+function satelliteName(entity: string | null): string {
+  if (!entity) return 'a voice satellite';
+  const name = entity.replace(/^[a-z_]+\./, '').replace(/_?assist_satellite$/, '').replace(/_/g, ' ').trim();
+  return name ? `the ${name} satellite` : 'a voice satellite';
+}
+
+/**
+ * Sentences someone taught as your voice at your satellite before you had a
+ * voice profile. Nothing proves who spoke there, so they wait for you here
+ * (or on the notice Jarvis sent) and are never used until you approve them.
+ */
+function PendingTakes({ pending, onSaved }: { pending: VoicePending[]; onSaved: (s: VoiceStatus) => void }) {
+  const approve = useMutation({
+    mutationFn: (id: string) => api.approvePendingVoice(id),
+    onSuccess: (s) => {
+      onSaved(s);
+      toast.success(s.added ? `Added ${s.added} recording${s.added === 1 ? '' : 's'} to your voice` : 'Your voice profile is already full');
+    },
+    onError: (e) => toast.error(errorText(e, 'Could not approve those recordings')),
+  });
+  const discard = useMutation({
+    mutationFn: (id: string) => api.discardPendingVoice(id),
+    onSuccess: (s) => {
+      onSaved(s);
+      toast.success('Recordings discarded');
+    },
+    onError: (e) => toast.error(errorText(e, 'Could not discard those recordings')),
+  });
+  const busy = approve.isPending || discard.isPending;
+  return (
+    <ul className="flex flex-col gap-3" data-testid="voice-pending">
+      {pending.map((p) => (
+        <li key={p.id} className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 flex flex-col gap-3">
+          <p className="text-sm text-amber-300 flex items-start gap-2">
+            <ShieldQuestion size={18} className="shrink-0 mt-0.5" />
+            <span>
+              {p.samples} sentence{p.samples === 1 ? ' was' : 's were'} taught as your voice at {satelliteName(p.satellite)} on{' '}
+              {new Date(p.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}. Approve only if it
+              was you: anyone standing at the satellite could have spoken.
+            </span>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => approve.mutate(p.id)} disabled={busy} className="glass-button min-h-11 px-4 flex items-center gap-2 text-sm bg-indigo-600/30 border-indigo-500/50 text-indigo-100 disabled:opacity-50">
+              <CheckCircle size={16} /> It was me
+            </button>
+            <button type="button" onClick={() => discard.mutate(p.id)} disabled={busy} className="glass-button min-h-11 px-4 flex items-center gap-2 text-sm bg-red-500/20 border-red-500/40 text-red-200 disabled:opacity-50">
+              <Trash2 size={16} /> Not me, discard
+            </button>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function checkLine(c: VoiceCheck): string {
@@ -152,6 +209,8 @@ export default function VoiceSignaturePanel() {
           ))}
         </div>
       </div>
+
+      {status.pending && status.pending.length > 0 && <PendingTakes pending={status.pending} onSaved={saved} />}
 
       {status.enrolled && status.consistency !== null && (
         <p className="text-xs text-slate-400">

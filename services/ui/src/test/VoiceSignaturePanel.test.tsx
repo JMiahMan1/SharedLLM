@@ -136,4 +136,42 @@ describe('VoiceSignaturePanel', () => {
     await waitFor(() => expect(erased).toBe(true));
     expect(await screen.findByTestId('voice-status')).toHaveTextContent('Not set up');
   });
+
+  const held = { id: 'session-1', satellite: 'assist_satellite.office_assist_satellite', samples: 4, created_at: '2026-11-20T18:00:00Z' };
+
+  it('shows sentences taught at a satellite and adds them only once approved', async () => {
+    let approved: string | null = null;
+    server.use(
+      http.get('/api/users/me/voice', () => HttpResponse.json(status(0, { pending: [held] }))),
+      http.post('/api/users/me/voice/pending/:id', ({ params }) => {
+        approved = String(params.id);
+        return HttpResponse.json({ status: 'SUCCESS', added: 4, ...status(4, { pending: [] }) });
+      }),
+    );
+    renderWithProviders(<VoiceSignaturePanel />);
+    const pending = await screen.findByTestId('voice-pending');
+    expect(pending).toHaveTextContent('4 sentences were taught as your voice at the office satellite');
+    expect(pending).toHaveTextContent('Approve only if it was you');
+    expect(screen.getByTestId('voice-status')).toHaveTextContent('Not set up');
+    fireEvent.click(screen.getByRole('button', { name: /It was me/ }));
+    await waitFor(() => expect(approved).toBe('session-1'));
+    expect(await screen.findByTestId('voice-status')).toHaveTextContent('Enrolled · 4 recordings');
+    expect(screen.queryByTestId('voice-pending')).not.toBeInTheDocument();
+  });
+
+  it('discards sentences that were not the user', async () => {
+    let discarded: string | null = null;
+    server.use(
+      http.get('/api/users/me/voice', () => HttpResponse.json(status(0, { pending: [held] }))),
+      http.delete('/api/users/me/voice/pending/:id', ({ params }) => {
+        discarded = String(params.id);
+        return HttpResponse.json({ status: 'SUCCESS', ...status(0, { pending: [] }) });
+      }),
+    );
+    renderWithProviders(<VoiceSignaturePanel />);
+    fireEvent.click(await screen.findByRole('button', { name: /Not me, discard/ }));
+    await waitFor(() => expect(discarded).toBe('session-1'));
+    await waitFor(() => expect(screen.queryByTestId('voice-pending')).not.toBeInTheDocument());
+    expect(screen.getByTestId('voice-status')).toHaveTextContent('Not set up');
+  });
 });

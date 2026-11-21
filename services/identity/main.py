@@ -85,6 +85,7 @@ from services.identity.models import (
     UserWeatherSetting,
     UserWidget,
     UserWorkspaceSession,
+    VoicePendingEnrolment,
     VoiceSignature,
     WorkspaceChat,
     WorkspaceChatMessage,
@@ -1527,10 +1528,114 @@ def _voice_status(row: VoiceSignature | None) -> dict:
     }
 
 
+#: How long satellite takes wait for their owner's approval before they are dropped.
+VOICE_PENDING_DAYS = 7
+
+
+def _pending_enrolments(session: Session, username: str) -> list[VoicePendingEnrolment]:
+    """The person's satellite takes awaiting approval; expired ones are deleted."""
+    cutoff = datetime.now(UTC) - timedelta(days=VOICE_PENDING_DAYS)
+    live = []
+    for row in session.exec(select(VoicePendingEnrolment).where(VoicePendingEnrolment.username == username)).all():
+        created = row.created_at if row.created_at.tzinfo else row.created_at.replace(tzinfo=UTC)
+        if created < cutoff or row.model != voice.MODEL:
+            session.delete(row)
+            continue
+        live.append(row)
+    session.commit()
+    return live
+
+
+def _pending_read(row: VoicePendingEnrolment) -> dict:
+    return {
+        "id": row.session,
+        "satellite": row.satellite,
+        "samples": len(voice.load_samples(row.samples)),
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def _my_voice(session: Session, username: str) -> dict:
+    return {
+        **_voice_status(session.get(VoiceSignature, username)),
+        "pending": [_pending_read(r) for r in _pending_enrolments(session, username)],
+    }
+
+
 @app.get("/api/users/me/voice")
 def my_voice(user: User = Depends(require_api_key), session: Session = Depends(get_session)):
-    """How far the caller's voice enrollment has got."""
-    return _voice_status(session.get(VoiceSignature, user.username))
+    """How far the caller's voice enrollment has got, and satellite takes awaiting their approval."""
+    return _my_voice(session, user.username)
+
+
+@app.post("/api/users/me/voice/pending/{pending_id}")
+def approve_pending_voice(
+    pending_id: str,
+    request: Request,
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Approve satellite takes taught for the caller: they join the caller's profile.
+
+    Only the person they were taught for can approve them (anyone else gets a
+    404, as if there were nothing). Takes already in the profile are never
+    evicted to make room: if the caller enrolled elsewhere meanwhile, the
+    pending takes must sound like that profile and fill only free places.
+    """
+    live = {r.session: r for r in _pending_enrolments(session, user.username)}
+    row = live.get(pending_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such voice recording is waiting for you.")
+    pending = voice.load_samples(row.samples)
+    profile = session.get(VoiceSignature, user.username)
+    existing = voice.load_samples(profile.samples) if profile and profile.model == voice.MODEL else []
+    if existing and pending:
+        score = voice.cosine(voice.centroid(pending), voice.centroid(existing))
+        if score < voice.CONSISTENCY_FLOOR:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Those recordings do not sound like your voice profile (similarity {score:.2f}). "
+                    "Discard them, or erase your profile first if it was not you."
+                ),
+            )
+    added = pending[:max(0, voice.MAX_SAMPLES - len(existing))]
+    samples = existing + added
+    if profile is None:
+        profile = VoiceSignature(username=user.username, model=voice.MODEL)
+    profile.model = voice.MODEL
+    profile.samples = json.dumps(samples)
+    profile.updated_at = datetime.now(UTC)
+    session.add(profile)
+    user.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
+    session.add(user)
+    satellite = row.satellite
+    session.delete(row)
+    session.commit()
+    _audit(request, session, "user.voice_enroll", user.username, actor=user,
+           changes=[{"field": "voice_samples", "change": str(len(samples))}],
+           note=f"approved {len(added)} of {len(pending)} takes from {satellite or 'a voice satellite'}")
+    log.info(f"[voice] {user.username} approved {len(added)} satellite takes ({len(samples)} samples now)")
+    return {"status": "SUCCESS", "added": len(added), **_my_voice(session, user.username)}
+
+
+@app.delete("/api/users/me/voice/pending/{pending_id}")
+def discard_pending_voice(
+    pending_id: str,
+    request: Request,
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Discard satellite takes taught for the caller without using them."""
+    row = session.get(VoicePendingEnrolment, pending_id)
+    if row is None or row.username != user.username:
+        raise HTTPException(status_code=404, detail="No such voice recording is waiting for you.")
+    satellite = row.satellite
+    session.delete(row)
+    session.commit()
+    _audit(request, session, "user.voice_pending_discard", user.username, actor=user,
+           note=f"discarded takes from {satellite or 'a voice satellite'}")
+    return {"status": "SUCCESS", **_my_voice(session, user.username)}
 
 
 @app.post("/api/users/me/enroll")
@@ -1586,12 +1691,16 @@ def forget_my_voice(request: Request, user: User = Depends(require_api_key), ses
     row = session.get(VoiceSignature, user.username)
     if row is not None:
         session.delete(row)
+    for pending in session.exec(
+        select(VoicePendingEnrolment).where(VoicePendingEnrolment.username == user.username)
+    ).all():
+        session.delete(pending)
     user.voice_fingerprint = None
     session.add(user)
     session.commit()
     _audit(request, session, "user.voice_forget", user.username, actor=user,
            changes=[{"field": "voice_samples", "change": "cleared"}])
-    return {"status": "SUCCESS", **_voice_status(None)}
+    return {"status": "SUCCESS", **_voice_status(None), "pending": []}
 
 
 @app.post("/api/users/me/voice/check")
@@ -1691,14 +1800,21 @@ class VoiceEnrollRequest(BaseModel):
 
 @app.post("/api/voice/enroll", dependencies=[Depends(require_internal)])
 def enroll_voice_from_satellite(request: Request, req: VoiceEnrollRequest, session: Session = Depends(get_session)):
-    """Add a take spoken at the person's own voice satellite (internal).
+    """A take spoken at the person's own voice satellite (internal).
 
     The gateway calls this during a teaching session it opened for the one
-    person the satellite is assigned to. Unlike ``/api/voice/learn`` the
-    person need not be recognised yet: a profile recorded on a phone or laptop
-    microphone, or none at all, is exactly what this fixes. A take is checked
-    against the earlier takes of the same session, so someone else stepping in
-    halfway is refused instead of averaged in.
+    person the satellite is assigned to. Nothing proves who is speaking at a
+    satellite, so a take is never simply added to that person's profile:
+
+    * The person has a voice profile: the session's first take must sound
+      like it (``CONSISTENCY_FLOOR``, the same check as every other take), and
+      each later take like the session's earlier ones. Those takes are the
+      person's and are stored (``STORED``).
+    * The person has none: the takes are held apart, in
+      ``VoicePendingEnrolment`` (``PENDING``), until the person approves them
+      from their own signed-in app. Nothing in a profile is touched or evicted.
+
+    Either way someone else stepping in halfway is refused (422).
     """
     if req.model != voice.MODEL:
         raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
@@ -1711,41 +1827,70 @@ def enroll_voice_from_satellite(request: Request, req: VoiceEnrollRequest, sessi
     user = session.exec(select(User).where(User.username == req.username)).first()
     if user is None:
         raise HTTPException(status_code=404, detail="No such person.")
-    row = session.get(VoiceSignature, req.username)
-    samples = voice.load_samples(row.samples) if row and row.model == voice.MODEL else []
-    this_session = [s for s in samples if s.get("session") == req.session]
-    if this_session:
-        score = voice.cosine(embedding, voice.centroid(this_session))
-        if score < voice.CONSISTENCY_FLOOR:
-            raise HTTPException(
-                status_code=422,
-                detail=f"That take does not sound like the earlier ones (similarity {score:.2f}).",
-            )
-    samples.append({
+    take = {
         "embedding": embedding,
         "speech_seconds": req.speech_seconds,
         "recorded_at": datetime.now(UTC).isoformat(),
         "source": "satellite",
         "session": req.session,
-    })
-    samples = samples[-voice.MAX_SAMPLES:]
-    if row is None:
-        row = VoiceSignature(username=req.username, model=voice.MODEL)
-    row.model = voice.MODEL
-    row.samples = json.dumps(samples)
-    row.updated_at = datetime.now(UTC)
-    session.add(row)
-    user.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
-    session.add(user)
+    }
+    pending = session.get(VoicePendingEnrolment, req.session)
+    if pending is not None and pending.username != req.username:
+        raise HTTPException(status_code=409, detail="That teaching session belongs to someone else.")
+    row = session.get(VoiceSignature, req.username)
+    samples = voice.load_samples(row.samples) if row and row.model == voice.MODEL else []
+
+    if row is not None and samples and pending is None:
+        this_session = [s for s in samples if s.get("session") == req.session]
+        reference, against = (this_session, "the earlier ones") if this_session else (samples, "your voice profile")
+        score = voice.cosine(embedding, voice.centroid(reference))
+        if score < voice.CONSISTENCY_FLOOR:
+            raise HTTPException(
+                status_code=422,
+                detail=f"That take does not sound like {against} (similarity {score:.2f}).",
+            )
+        samples = [*samples, take][-voice.MAX_SAMPLES:]
+        row.model = voice.MODEL
+        row.samples = json.dumps(samples)
+        row.updated_at = datetime.now(UTC)
+        session.add(row)
+        user.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
+        session.add(user)
+        session.commit()
+        _audit(request, session, "user.voice_enroll", req.username,
+               changes=[{"field": "voice_samples", "change": str(len(samples))}],
+               note=f"taught at {req.satellite or 'a voice satellite'}, matched the profile")
+        log.info(
+            f"[voice] {req.username} taught sample {len(samples)} at {req.satellite or 'a satellite'} "
+            f"({req.speech_seconds}s of speech)"
+        )
+        return {"status": "STORED", "speech_seconds": req.speech_seconds, **_voice_status(row)}
+
+    held = voice.load_samples(pending.samples) if pending else []
+    if held:
+        score = voice.cosine(embedding, voice.centroid(held))
+        if score < voice.CONSISTENCY_FLOOR:
+            raise HTTPException(
+                status_code=422,
+                detail=f"That take does not sound like the earlier ones (similarity {score:.2f}).",
+            )
+    held = [*held, take][-voice.MAX_SAMPLES:]
+    if pending is None:
+        pending = VoicePendingEnrolment(session=req.session, username=req.username,
+                                        satellite=req.satellite, model=voice.MODEL)
+    pending.samples = json.dumps(held)
+    pending.updated_at = datetime.now(UTC)
+    session.add(pending)
     session.commit()
-    _audit(request, session, "user.voice_enroll", req.username,
-           changes=[{"field": "voice_samples", "change": str(len(samples))}],
-           note=f"taught at {req.satellite or 'a voice satellite'}")
-    log.info(
-        f"[voice] {req.username} taught sample {len(samples)} at {req.satellite or 'a satellite'} "
-        f"({req.speech_seconds}s of speech)"
-    )
-    return {"status": "STORED", "speech_seconds": req.speech_seconds, **_voice_status(row)}
+    _audit(request, session, "user.voice_pending", req.username,
+           note=f"take {len(held)} held for approval, taught at {req.satellite or 'a voice satellite'}")
+    log.info(f"[voice] {req.username}: take {len(held)} at {req.satellite or 'a satellite'} held for approval")
+    return {
+        "status": "PENDING",
+        "speech_seconds": req.speech_seconds,
+        "pending": _pending_read(pending),
+        **_voice_status(row),
+    }
 
 
 @app.get("/api/internal/satellite-owner", dependencies=[Depends(require_internal)])
@@ -2195,6 +2340,9 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     if stale_voice:
         session.delete(stale_voice)
         session.commit()
+    for row in session.exec(select(VoicePendingEnrolment).where(VoicePendingEnrolment.username == user.username)).all():
+        session.delete(row)
+    session.commit()
     # Nor chores waiting on a parent's OK.
     for row in session.exec(select(ChoreCheck).where(ChoreCheck.username == user.username)).all():
         session.delete(row)

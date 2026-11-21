@@ -209,6 +209,16 @@ export interface VoiceStatus {
   consistency: number | null;
   model: string;
   updated_at: string | null;
+  /** Sentences taught at the user's voice satellite, held until they approve them. */
+  pending?: VoicePending[];
+}
+
+/** Satellite takes held for the user's approval (identity VoicePendingEnrolment). */
+export interface VoicePending {
+  id: string;
+  satellite: string | null;
+  samples: number;
+  created_at: string;
 }
 
 export interface VoiceCandidate {

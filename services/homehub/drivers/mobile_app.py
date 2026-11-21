@@ -484,6 +484,19 @@ def _notice_kwargs(data: dict[str, Any]) -> dict[str, Any]:
     return kw
 
 
+def _signed_for(user: str, kw: dict[str, Any]) -> dict[str, Any]:
+    """The notice's buttons signed for ``user`` (services/common/home_action_sign.py): the gateway
+    fires a tapped button's event only for the person it was sent to."""
+    from services.common import home_action_sign
+
+    actions = kw.get("actions")
+    if not actions:
+        return kw
+    signed = [{**a, "params": home_action_sign.sign(user, a["params"])} if a.get("callback") == ACTION_CALLBACK
+              else a for a in actions]
+    return {**kw, "actions": signed}
+
+
 async def _send(users: list[str], data: dict[str, Any]) -> int:
     message = str(data.get("message") or "")
     if not message or message in COMMAND_MESSAGES or message.startswith("command_"):
@@ -493,7 +506,8 @@ async def _send(users: list[str], data: dict[str, Any]) -> int:
     kw = _notice_kwargs(data)
     sent = 0
     for user in users:
-        sent += int(await jarvis_notify.send(jarvis_notify.notice(user, NOTICE_CATEGORY, title, message, **kw)))
+        sent += int(await jarvis_notify.send(jarvis_notify.notice(user, NOTICE_CATEGORY, title, message,
+                                                                  **_signed_for(user, kw))))
     return sent
 
 

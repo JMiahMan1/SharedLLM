@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 
 import pytest
@@ -785,15 +786,71 @@ def test_a_limited_phone_may_not_stream_a_camera_it_may_not_see(env):
     assert ok.json()["mjpeg_path"] == "/api/camera_proxy_stream/camera.mine"
 
 
+def _answer(c, action, tag=None, webhook_id=LIMITED_HOOK):
+    event_data = {"action": action, **({"tag": tag} if tag else {})}
+    return hook(c, {"type": "fire_event", "data": {"event_type": "mobile_app_notification_action",
+                                                   "event_data": event_data}}, webhook_id)
+
+
 def test_a_limited_phone_fires_only_the_apps_own_events(env):
     c, hub = env["client"], env["hub"]
-    _limited_phone(env)
+    entry = _limited_phone(env)
     events = []
     hub.bus.subscribe(lambda t, d: events.append(t))
     assert hook(c, {"type": "fire_event", "data": {"event_type": "call_service"}}, LIMITED_HOOK).status_code == 403
-    assert hook(c, {"type": "fire_event", "data": {"event_type": "mobile_app_notification_action",
-                                                   "event_data": {"action": "OK"}}}, LIMITED_HOOK).status_code == 200
-    assert events == ["mobile_app_notification_action"]
+    assert hook(c, {"type": "fire_event", "data": {"event_type": "android.zone_entered"}},
+                LIMITED_HOOK).status_code == 200
+    env["mgr"].remember_offered(entry, {"message": "Garage open", "data": {
+        "tag": "garage", "actions": [{"action": "OK", "title": "OK"}]}})
+    assert _answer(c, "OK", "garage").status_code == 200
+    assert events == ["android.zone_entered", "mobile_app_notification_action"]
+
+
+def test_a_limited_phone_answers_only_buttons_it_was_sent(env, caplog):
+    c, hub = env["client"], env["hub"]
+    entry = _limited_phone(env)
+    events = []
+    hub.bus.subscribe(lambda t, d: events.append((t, d)))
+    # Nothing was sent to this phone: an answer is refused, with a warning.
+    assert _answer(c, "DISARM_ALARM").status_code == 403
+    assert [r for r in caplog.records if r.levelno == logging.WARNING and "DISARM_ALARM" in r.getMessage()]
+    env["mgr"].remember_offered(entry, {"message": "Front door open", "data": {
+        "tag": "door", "actions": [{"action": "CLOSE_DOOR", "title": "Close"},
+                                   {"action": "URI", "title": "Open", "uri": "https://example.invalid"}]}})
+    assert _answer(c, "DISARM_ALARM").status_code == 403      # a button it was not sent
+    assert _answer(c, "CLOSE_DOOR", "other-tag").status_code == 403  # the right button, another notice
+    assert _answer(c, "URI").status_code == 403                # a link, not an answer
+    assert _answer(c, "CLOSE_DOOR", "door").status_code == 200
+    assert _answer(c, "CLOSE_DOOR").status_code == 200         # the app does not always echo the tag
+    assert [t for t, _ in events] == ["mobile_app_notification_action"] * 2
+    # An admin's phone is not limited.
+    assert _answer(c, "ANYTHING", webhook_id=HOOK).status_code == 200
+
+
+def test_buttons_pushed_through_the_hub_are_remembered_for_that_phone_only(env):
+    c, hub = env["client"], env["hub"]
+    entry = _limited_phone(env)
+    entry.data = {**entry.data, "app_data": {"push_url": RELAY, "push_token": "tok-2"}}
+    env["mgr"].relay_allowed = lambda url: True
+    asyncio.run(env["mgr"].push(entry, {"message": "Leak", "data": {"tag": "leak",
+                                                                     "actions": [{"action": "SHUT_VALVE"}]}}))
+    assert _answer(c, "SHUT_VALVE", "leak").status_code == 200
+    other = hub.config_entries[next(e for e in hub.config_entries if e != entry.entry_id)]
+    assert not env["mgr"].was_offered(other, "SHUT_VALVE", "leak")
+
+
+def test_scanning_a_tag_needs_an_active_user_and_a_limited_one_a_known_tag(env):
+    c, hub, store = env["client"], env["hub"], env["store"]
+    _limited_phone(env)
+    _phone(hub, store, "e-orphan", "Spare Phone", "34" * 32, user_id="u-nobody")
+    store.set_kv("tags", [{"id": "tag-front-door", "name": "Front door"}])
+    events = []
+    hub.bus.subscribe(lambda t, d: events.append(d["tag_id"]), "tag_scanned")
+    assert hook(c, {"type": "scan_tag", "data": {"tag_id": "tag-front-door"}}, "34" * 32).status_code == 403
+    assert hook(c, {"type": "scan_tag", "data": {"tag_id": "tag-new"}}, LIMITED_HOOK).status_code == 403
+    assert hook(c, {"type": "scan_tag", "data": {"tag_id": "tag-front-door"}}, LIMITED_HOOK).status_code == 200
+    assert hook(c, {"type": "scan_tag", "data": {"tag_id": "tag-new"}}, HOOK).status_code == 200  # an admin's phone
+    assert events == ["tag-front-door", "tag-new"]
 
 
 def test_an_admin_phone_and_a_promoted_user_are_not_limited(env):

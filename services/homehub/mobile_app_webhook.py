@@ -216,6 +216,13 @@ async def _post_json(url: str, payload: dict[str, Any]) -> tuple[int, Any]:
         return resp.status, body
 
 
+#: The event a companion app fires when a notification button is tapped.
+NOTIFICATION_ACTION_EVENT = "mobile_app_notification_action"
+#: How long a pushed notification's buttons can be answered by a limited phone, and how many are kept per phone.
+OFFERED_ACTION_TTL = 7 * 24 * 3600.0
+OFFERED_ACTIONS_KEPT = 200
+
+
 # -- the manager -------------------------------------------------------------------------------
 
 class MobileAppManager:
@@ -229,8 +236,38 @@ class MobileAppManager:
         self._lock = asyncio.Lock()
         self._last_seen: dict[str, float] = dict(self.store.get_kv(LAST_SEEN_KEY, {}) or {})
         self._last_saved = 0.0
+        #: Notification buttons pushed to each phone (entry id -> {(action, tag): sent at}): a limited phone may
+        #: answer only a button it was actually sent (``_fire_event``).
+        self._offered: dict[str, dict[tuple[str, str | None], float]] = {}
         self.hub.mobile_app_manager = self  # type: ignore[attr-defined]
         self.apply_urls()
+
+    # -- notification buttons a phone was sent ---------------------------------------------
+    def remember_offered(self, entry: ConfigEntry, data: dict[str, Any]) -> None:
+        """Note the buttons in a notification pushed to ``entry``'s phone (HA's ``data.actions``)."""
+        extra = data.get("data") if isinstance(data.get("data"), dict) else {}
+        actions = extra.get("actions") if isinstance(extra.get("actions"), list) else []
+        tag = str(extra["tag"]) if extra.get("tag") else None
+        now = time.time()
+        offered = self._offered.setdefault(entry.entry_id, {})
+        for item in actions:
+            action = str(item.get("action") or "").strip() if isinstance(item, dict) else ""
+            if action and action.upper() != "URI":
+                offered[(action, tag)] = now
+        cutoff = now - OFFERED_ACTION_TTL
+        for key in [k for k, at in offered.items() if at < cutoff]:
+            del offered[key]
+        while len(offered) > OFFERED_ACTIONS_KEPT:
+            del offered[min(offered, key=offered.__getitem__)]
+
+    def was_offered(self, entry: ConfigEntry, action: str, tag: str | None) -> bool:
+        """Whether ``entry``'s phone was sent a button ``action`` recently: with ``tag``, in a notification
+        with that tag; without one (the app does not always echo it), in any notification."""
+        if not action:
+            return False
+        cutoff = time.time() - OFFERED_ACTION_TTL
+        offered = self._offered.get(entry.entry_id, {})
+        return any(a == action and (tag is None or t == tag) and at >= cutoff for (a, t), at in offered.items())
 
     # -- settings ---------------------------------------------------------------
     def settings(self) -> dict[str, Any]:
@@ -698,6 +735,7 @@ class MobileAppManager:
 
     async def push(self, entry: ConfigEntry, data: dict[str, Any]) -> str:
         """Send one notification the way HA did: local channel first, then the relay. Returns which."""
+        self.remember_offered(entry, data)
         wid = str(entry.data.get("webhook_id") or "")
         channel = self.channels.get(wid) if wid else None
         if channel is not None:
@@ -870,6 +908,15 @@ async def _fire_event(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -> W
             return _no_user(entry)
         if principal.restricted and not str(data["event_type"]).startswith(APP_EVENT_PREFIXES):
             return _refused(f"This account may not fire {data['event_type']}")
+        if principal.restricted and data["event_type"] == NOTIFICATION_ACTION_EVENT:
+            # The answer to a notification button can drive an automation (a blueprint waiting for it), so a
+            # limited phone may answer only a button it was actually sent.
+            action = str(event_data.get("action") or "")
+            tag = str(event_data["tag"]) if event_data.get("tag") else None
+            if not mgr.was_offered(entry, action, tag):
+                log.warning("%s answered notification button %r (tag %r) it was never sent: refused",
+                            entry.title, action, tag)
+                return _refused(f"This phone was not sent a notification with the button {action!r}")
         mgr.hub.bus.fire(str(data["event_type"]), event_data)
     return _ok()
 
@@ -1021,8 +1068,20 @@ async def _stream_camera(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -
 @command("scan_tag")
 async def _scan_tag(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -> WebhookResult:
     if isinstance(data, dict) and data.get("tag_id"):
+        # A scan can trigger any automation with a tag trigger, so it needs an active user, and a limited
+        # user's phone may scan only tags the hub already knows (an admin's phone may introduce a new one).
+        principal = webhook_principal(mgr, entry)
+        if principal is None:
+            return _no_user(entry)
+        tag_id = str(data["tag_id"])
+        if principal.restricted:
+            known = {str(t.get("id")) for t in mgr.store.get_kv("tags", []) or [] if isinstance(t, dict)}
+            if tag_id not in known:
+                log.warning("%s scanned tag %r, which the hub does not know: refused for a limited account",
+                            entry.title, tag_id)
+                return _refused(f"This account may not scan the unknown tag {tag_id!r}")
         dev = mgr.device_for(entry)
-        mgr.hub.bus.fire("tag_scanned", {"tag_id": str(data["tag_id"]), "device_id": dev.id if dev else None})
+        mgr.hub.bus.fire("tag_scanned", {"tag_id": tag_id, "device_id": dev.id if dev else None})
     return _ok()
 
 

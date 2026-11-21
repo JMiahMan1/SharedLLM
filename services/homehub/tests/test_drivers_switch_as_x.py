@@ -7,7 +7,7 @@ from services.homehub.core import ConfigEntry, Driver, EntityEntry, ServiceNotFo
 from services.homehub.drivers.switch_as_x import SwitchAsXDriver
 from services.homehub.tests.conftest import make_hub
 
-SOURCE = "switch.string_lights_front"
+SOURCE = "switch.example_plug"
 WRAPPER = "light.demo_plug_000001_demo_plug"
 
 
