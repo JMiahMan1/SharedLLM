@@ -93,7 +93,7 @@ export function ZoneFrostPanel({ profile }: { profile?: GardenProfile }) {
         <div className="bg-white/5 rounded-lg p-2">
           <div className="text-slate-400">Family Size</div>
           <div className="text-white font-bold" title={profile?.family_size_detail}>
-            {profile?.family_size ?? '—'}
+            {profile?.family_size ?? 'unknown'}
             {profile?.family_size_source === 'override' ? ' (set)' : ''}
           </div>
         </div>

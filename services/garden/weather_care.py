@@ -9,7 +9,7 @@ Responsibilities:
   * Rain skip for uncovered outdoor beds only (observed rain last 24h +
     upcoming 12h forecast >= threshold) — logs ``rain_auto_skip`` care logs,
     postpones ``next_due_at`` by 24h, dedupes per rain episode.
-  * Heatwave boost (forecast daily high >= 90°F / 32.2°C, dry) — the poller
+  * Heatwave boost (forecast daily high >= 90°F / 32.2°C, dry): the poller
     brings outdoor watering forward to ``interval * heat_factor`` (0.75), once
     a day, logged as ``heat_boost`` (:func:`apply_heat_boost`).
   * Plant-specific frost & high-wind alerts keyed to each species'
