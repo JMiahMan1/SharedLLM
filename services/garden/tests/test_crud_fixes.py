@@ -70,7 +70,7 @@ def _plant(client, **extra) -> dict:
 
 def test_activate_sends_only_a_status_and_is_accepted(client):
     plan = client.post(
-        "/plans", headers=PARENT, json={"name": "2027 Garden", "season": "spring_summer"}
+        "/plans", headers=PARENT, json={"name": "2027 Garden", "season": "spring_summer", "family_size": 4}
     ).json()
 
     resp = client.patch(f"/plans/{plan['id']}", headers=PARENT, json={"status": "active"})

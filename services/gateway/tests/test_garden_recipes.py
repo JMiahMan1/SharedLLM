@@ -17,7 +17,6 @@ from services.gateway.garden_recipes import (
     recipe_matches,
 )
 
-
 # --------------------------------------------------------------------------- word-boundary matching
 
 
@@ -233,13 +232,13 @@ def test_recipe_draft_returns_unsaved_markdown():
 
     profile_resp = AsyncMock()
     profile_resp.status = 200
-    profile_resp.json = AsyncMock(return_value={"family_size": 7})
+    profile_resp.json = AsyncMock(return_value={"family_size": 5})
 
     llm_resp = AsyncMock()
     llm_resp.status = 200
     llm_resp.json = AsyncMock(return_value={
         "choices": [{
-            "message": {"content": "# Garden Pesto\nCategory: Recipes\n\n- [ ] 2 cups basil\n1. Blend.\nServes: 7"}
+            "message": {"content": "# Garden Pesto\nCategory: Recipes\n\n- [ ] 2 cups basil\n1. Blend.\nServes: 5"}
         }]
     })
 
@@ -255,6 +254,76 @@ def test_recipe_draft_returns_unsaved_markdown():
 
     assert result["status"] == "SUCCESS"
     assert result["draft"] is True
-    assert result["servings"] == 7
+    assert result["servings"] == 5
     assert "# Garden Pesto" in result["markdown"]
     assert "Unsaved preview" in result["note"]
+
+
+def _profile_client(*, status=200, body=None, raises=None):
+    resp = AsyncMock()
+    resp.status = status
+    resp.json = AsyncMock(return_value=body)
+    client_mock = AsyncMock()
+    client_mock.__aenter__ = AsyncMock(return_value=client_mock)
+    client_mock.__aexit__ = AsyncMock(return_value=None)
+    client_mock.get = AsyncMock(side_effect=raises) if raises else AsyncMock(return_value=resp)
+    client_mock.post = AsyncMock(side_effect=AssertionError("must not draft without a size"))
+    return client_mock
+
+
+@pytest.mark.parametrize(
+    ("client", "said"),
+    (
+        (lambda: _profile_client(raises=__import__("aiohttp").ClientConnectionError("refused")), "garden is unavailable"),
+        (lambda: _profile_client(status=500, body={"detail": "boom"}), "HTTP 500"),
+        (
+            lambda: _profile_client(body={"family_size": None, "family_size_detail": "Identity did not answer."}),
+            "Identity did not answer.",
+        ),
+    ),
+)
+def test_no_household_size_is_a_503_not_a_made_up_number(client, said):
+    from fastapi import HTTPException
+
+    with patch("services.gateway.garden_recipes.shared_http_client", return_value=client()), pytest.raises(
+        HTTPException
+    ) as caught:
+        asyncio.run(recipe_draft(None, _make_caller(), {"ingredients": ["basil"]}, None))
+
+    assert caught.value.status_code == 503
+    assert said in caught.value.detail
+
+
+def test_explicit_servings_need_no_profile():
+    llm_resp = AsyncMock()
+    llm_resp.status = 200
+    llm_resp.json = AsyncMock(return_value={"choices": [{"message": {"content": "# Pesto"}}]})
+    client_mock = _profile_client(raises=AssertionError("profile must not be read"))
+    client_mock.post = AsyncMock(return_value=llm_resp)
+
+    with patch("services.gateway.garden_recipes.shared_http_client", return_value=client_mock):
+        result = asyncio.run(recipe_draft(None, _make_caller(), {"ingredients": ["basil"], "servings": 3}, None))
+
+    assert result["servings"] == 3
+
+
+def test_nothing_ready_reads_no_recipes():
+    class Cookbook:
+        reads = 0
+
+        async def __call__(self, creds, payload):
+            return {"status": "SUCCESS", "detail": {"notes": [{"path": "Recipes/Pesto.md"}]}}
+
+    caller = _make_caller()
+    client_mock = _make_client_mock({"count": 0, "ready": []})
+
+    async def no_reads(*_a, **_k):
+        raise AssertionError("no recipe should be read when nothing is ready")
+
+    with patch("services.gateway.garden_recipes.shared_http_client", return_value=client_mock), patch(
+        "services.gateway.garden_recipes.cookbook.list_recipes",
+        AsyncMock(return_value={"status": "SUCCESS", "detail": {"notes": [{"path": "Recipes/Pesto.md"}]}}),
+    ), patch("services.gateway.garden_recipes.cookbook.read_recipe", no_reads):
+        result = asyncio.run(recipe_matches(Cookbook(), caller))
+
+    assert result["matches"] == []

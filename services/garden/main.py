@@ -188,6 +188,7 @@ async def lifespan(app: FastAPI):
     added = add_missing_columns(engine, SQLModel.metadata)
     if added:
         log.info("[Garden] added missing column(s): %s", ", ".join(added))
+    migrate_family_size(engine)
     log.info("[Garden] ready db=%s seed=%s", _database_url(), _seed().path)
     # Start the quiet morning digest loop (disabled under pytest).
     digest_task = asyncio.create_task(digest_loop(_db, _family_list))
@@ -209,6 +210,43 @@ async def lifespan(app: FastAPI):
         valve_task.cancel()
         grow_light_task.cancel()
         auto_valve_task.cancel()
+
+
+def migrate_family_size(engine) -> str | None:
+    """Stop treating a copied roster count as the household's chosen size.
+
+    ``garden_profile.family_size`` used to be filled on the first read with
+    Identity's roster (or a fallback of 7) and then read forever, so the planner
+    kept planting for the family as it was that day. Only an explicit override
+    is stored now (``family_size_override``).
+
+    A profile that was never edited (``updated_at == created_at``) can only have
+    the copied number, so it is dropped. An edited profile may have had its size
+    set on purpose, and nothing recorded which fields an edit touched, so that
+    value is kept as an explicit override and logged: the owner can clear it on
+    the planner page (or ``PUT /profile {"family_size": null}``). Runs once; the
+    legacy column is 0 afterwards. Returns what it did, for the log and tests.
+    """
+    with Session(engine) as session:
+        profile = session.get(GardenProfile, "household")
+        if profile is None or not profile.family_size:
+            return None
+        legacy = int(profile.family_size)
+        if profile.family_size_override is None and profile.updated_at != profile.created_at:
+            profile.family_size_override = legacy
+            outcome = "kept"
+            log.warning(
+                "[Garden] kept the stored family size %s as an explicit override: the profile was "
+                "edited, so it may have been chosen on purpose. Clear it to follow Identity's roster.",
+                legacy,
+            )
+        else:
+            outcome = "dropped"
+            log.info("[Garden] dropped the copied family size %s; the roster comes from Identity now", legacy)
+        profile.family_size = 0
+        session.add(profile)
+        session.commit()
+        return outcome
 
 
 def _resolve_seed_get(key: str) -> dict | None:
@@ -250,6 +288,12 @@ async def require_internal_secret_middleware(request: Request, call_next):
 
 
 app.include_router(info_router)
+
+
+@app.exception_handler(household.HouseholdUnavailable)
+async def _household_unavailable(_request: Request, exc: household.HouseholdUnavailable):
+    """No family size and no Identity: say so, never plan for a made-up number."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 def _user(request: Request) -> str:
@@ -735,19 +779,37 @@ async def hooks_skylight_chore_completed(request: Request, session: Session = De
 # --------------------------------------------------------------------------- profile
 
 
+def _family_override(session: Session) -> int | None:
+    """The family size a person set on the profile, if any."""
+    profile = session.get(GardenProfile, "household")
+    return profile.family_size_override if profile else None
+
+
+async def _profile_out(profile: GardenProfile | None) -> dict:
+    """The profile as the UI reads it, with the family size resolved now.
+
+    The size is the explicit override when a person set one, otherwise Identity's
+    roster read at this moment; ``None`` with ``family_size_source="unavailable"``
+    when Identity cannot be asked (the rest of the profile still answers).
+    """
+    data = GardenProfileOut.model_validate(profile or GardenProfile()).model_dump()
+    override = profile.family_size_override if profile else None
+    data["family_size_override"] = override
+    if override:
+        data.update(family_size=override, family_size_source="override")
+        return data
+    members = await household.size()
+    data.update(family_size=members, family_size_source="identity" if members else "unavailable")
+    if members is None:
+        data["family_size_detail"] = household.UNAVAILABLE_DETAIL
+    return data
+
+
 @app.get("/profile")
 async def get_profile(request: Request, session: Session = Depends(get_session)):
+    """The household's garden profile. Reading it never stores anything."""
     _user(request)
-    profile = session.get(GardenProfile, "household")
-    if profile is None:
-        # The family size is Identity's roster, not a number of our own.
-        profile = GardenProfile(
-            user_id="household", family_size=await household.size_or_last_resort()
-        )
-        session.add(profile)
-        session.commit()
-        session.refresh(profile)
-    return GardenProfileOut.model_validate(profile).model_dump()
+    return await _profile_out(session.get(GardenProfile, "household"))
 
 
 @app.put("/profile")
@@ -757,17 +819,18 @@ async def put_profile(
     _require_admin_or_adult(request)
     profile = session.get(GardenProfile, "household")
     if profile is None:
-        profile = GardenProfile(
-            user_id="household", family_size=await household.size_or_last_resort()
-        )
+        profile = GardenProfile(user_id="household")
         session.add(profile)
     changes = body.model_dump(exclude_unset=True)
+    if "family_size" in changes:
+        # A size typed on purpose is an override; null hands it back to Identity.
+        profile.family_size_override = changes.pop("family_size")
     for key, value in changes.items():
         setattr(profile, key, value)
     profile.updated_at = utcnow()
     session.commit()
     session.refresh(profile)
-    return GardenProfileOut.model_validate(profile).model_dump()
+    return await _profile_out(profile)
 
 
 # --------------------------------------------------------------------------- locations
@@ -2409,12 +2472,7 @@ async def profile_detect_zone(request: Request, session: Session = Depends(get_s
     profile = session.exec(select(GardenProfile)).first()
     if not profile:
         # Auto-initialize default profile row if none exists yet.
-        profile = GardenProfile(
-            user_id="household",
-            # The household roster (Identity), not a number of our own.
-            family_size=await household.size_or_last_resort(),
-            zone_source="manual",
-        )
+        profile = GardenProfile(user_id="household", zone_source="manual")
         session.add(profile)
         session.commit()
         session.refresh(profile)
@@ -2648,8 +2706,9 @@ async def create_plan(
         name=body.name,
         season=body.season,
         year=body.year or datetime.now(UTC).year,
-        # An explicit size wins; otherwise the household roster (Identity).
-        family_size=body.family_size or await household.size_or_last_resort(),
+        # An explicit size wins, then the profile's override, then Identity's
+        # roster; with none of them answering this is a 503, never a guess.
+        family_size=body.family_size or await household.family_size(_family_override(session)),
         mode=body.mode or "fresh_only",
         status=body.status or "draft",
     )
@@ -2962,10 +3021,7 @@ async def planner_sizing(
 ):
     """Simple mode sizing calculator: plant counts & sq ft per crop."""
     _user(request)
-    profile = session.exec(select(GardenProfile)).first()
-    fs = family_size or (
-        profile.family_size if profile else await household.size_or_last_resort()
-    )
+    fs = family_size or await household.family_size(_family_override(session))
     refs = [c.strip() for c in species_refs.split(",") if c.strip()] if species_refs else []
     results = simple_sizing(session, fs, mode, refs)
     return {

@@ -4958,7 +4958,11 @@ export interface GardenNoticeTest {
 
 export interface GardenProfile {
   user_id: string;
-  family_size: number;
+  /** The override when set, else Identity's household roster; null when Identity is unavailable. */
+  family_size: number | null;
+  family_size_override?: number | null;
+  family_size_source?: 'override' | 'identity' | 'unavailable';
+  family_size_detail?: string;
   hardiness_zone: string | null;
   zone_source: string;
   last_spring_frost_mmdd: string | null;

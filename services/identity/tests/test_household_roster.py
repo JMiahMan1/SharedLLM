@@ -23,10 +23,11 @@ def client(monkeypatch):
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(main, "engine", engine)
     with Session(engine) as session:
+        # The stack's own default admin (user 1) is not a person to feed.
+        session.add(User(username="default", is_system_default=True, is_admin=True))
+        session.commit()
         for username in ("dad", "mom", "kid", "sib"):
             session.add(User(username=username))
-        # The stack's own default admin is not a person to feed.
-        session.add(User(username="default", is_system_default=True, is_admin=True))
         session.commit()
 
     app.dependency_overrides[require_internal] = lambda: True
@@ -58,7 +59,37 @@ def test_a_smaller_household_reports_itself(client, monkeypatch):
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(main, "engine", engine)
     with Session(engine) as session:
+        session.add(User(username="default", is_system_default=True, is_admin=True))
+        session.commit()
         session.add(User(username="only"))
         session.commit()
 
     assert client.get("/api/internal/household").json()["members"] == 1
+
+
+@pytest.mark.parametrize(
+    ("accounts", "people"),
+    (
+        # id 1 from before the flag existed: still the system account.
+        ((("admin_account", False),), ["parent_one"]),
+        # The legacy username, neither first nor flagged.
+        ((("system", True), ("default", False)), ["parent_one"]),
+    ),
+)
+def test_the_system_account_is_left_out_by_the_shared_rule(client, monkeypatch, accounts, people):
+    """The same rule as ``_is_system_default_user``: the flag, id 1, or "default"."""
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(main, "engine", engine)
+    with Session(engine) as session:
+        for username, flagged in accounts:
+            session.add(User(username=username, is_system_default=flagged))
+            session.commit()
+        session.add(User(username="parent_one"))
+        session.commit()
+
+    body = client.get("/api/internal/household").json()
+    assert body["usernames"] == people
+    assert body["members"] == len(people)

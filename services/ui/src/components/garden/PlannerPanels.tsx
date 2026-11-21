@@ -92,7 +92,10 @@ export function ZoneFrostPanel({ profile }: { profile?: GardenProfile }) {
         </div>
         <div className="bg-white/5 rounded-lg p-2">
           <div className="text-slate-400">Family Size</div>
-          <div className="text-white font-bold">{profile?.family_size ?? 7}</div>
+          <div className="text-white font-bold" title={profile?.family_size_detail}>
+            {profile?.family_size ?? '—'}
+            {profile?.family_size_source === 'override' ? ' (set)' : ''}
+          </div>
         </div>
       </div>
 
@@ -238,7 +241,7 @@ function PantryGoalCard({ goal }: { goal: PantryGoalOut }) {
   );
 }
 
-export function DualSizingPanel({ familySize, species }: { familySize: number; species: GardenSpecies[] }) {
+export function DualSizingPanel({ familySize, species }: { familySize: number | null; species: GardenSpecies[] }) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'simple' | 'pantry'>('simple');
   const [sizingMode, setSizingMode] = useState<'fresh_only' | 'fresh_plus_preserving'>('fresh_only');
@@ -266,7 +269,8 @@ export function DualSizingPanel({ familySize, species }: { familySize: number; s
   const calculate = useMutation({
     mutationFn: () => api.gardenPlannerSizing({
       mode: sizingMode,
-      family_size: familySize,
+      // Unknown here: the server asks Identity itself and says so if it cannot.
+      ...(familySize ? { family_size: familySize } : {}),
       species_refs: selected.join(','),
     }),
     onSuccess: (data) => setSizing(data),
@@ -324,7 +328,7 @@ export function DualSizingPanel({ familySize, species }: { familySize: number; s
           <div className="flex flex-wrap items-end gap-3">
             <label className={labelClass}>
               Family size
-              <input value={familySize} readOnly className={inputClass} />
+              <input value={familySize ?? ''} placeholder="Unknown" readOnly className={inputClass} />
             </label>
             <label className={labelClass}>
               Mode
@@ -440,7 +444,8 @@ export function PlansPanel({
   const [name, setName] = useState('');
   const [season, setSeason] = useState('spring_summer');
   const [year, setYear] = useState(String(new Date().getFullYear() + 1));
-  const [familySize, setFamilySize] = useState('7');
+  // Empty = the household roster from Identity, resolved by the server.
+  const [familySize, setFamilySize] = useState('');
   const [mode, setMode] = useState('fresh_only');
 
   const createPlan = useMutation({
@@ -448,7 +453,7 @@ export function PlansPanel({
       name: name.trim(),
       season,
       year: Number(year) || new Date().getFullYear() + 1,
-      family_size: Number(familySize) || 7,
+      ...(Number(familySize) > 0 ? { family_size: Number(familySize) } : {}),
       mode,
       status: 'draft',
     }),
@@ -516,7 +521,7 @@ export function PlansPanel({
           </label>
           <label className={labelClass}>
             Family size
-            <input type="number" min="1" value={familySize} onChange={(e) => setFamilySize(e.target.value)} className={inputClass} />
+            <input type="number" min="1" value={familySize} placeholder="Household" onChange={(e) => setFamilySize(e.target.value)} className={inputClass} />
           </label>
           <label className={labelClass}>
             Mode
