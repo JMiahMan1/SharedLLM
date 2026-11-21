@@ -70,7 +70,10 @@ def test_the_dispatchers_run_the_studio_tools_in_process():
     for tool in tools.TOOL_ACTIONS:
         assert tool.lower() in agent_loop.ALLOWED_TOOLS
         assert tool.lower() in agent_loop.WORKSPACE_TOOL_ACTIONS
-        assert tool.lower() not in orchestrator._TOOL_SERVICE_MAP, "never posted to a service URL"
+        # Studio rows map to the in-process marker, never to a service URL setting.
+        assert orchestrator._TOOL_SERVICE_MAP.get(tool.lower(), orchestrator.GATEWAY_IN_PROCESS) == (
+            orchestrator.GATEWAY_IN_PROCESS
+        ), "never posted to a service URL"
 
 
 def test_the_external_agent_reaches_a_studio_route_with_the_callers_key():

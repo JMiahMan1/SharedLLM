@@ -359,6 +359,14 @@ export function presentExport(
         at: when(r.created_at),
         item: { title: str(r.label) || sentence(r.target) || 'Request', subtitle: [sentence(r.kind), sentence(r.status), dateTime(r.created_at)].filter(Boolean).join(' · '), detail: str(r.note) },
       }),
+      unlock_requests: (r) => ({
+        at: when(r.created_at),
+        item: {
+          title: `Asked to unlock for ${count(num(r.minutes_asked) || 0, 'minute', 'minutes')}`,
+          subtitle: [sentence(r.device_kind), sentence(r.status), num(r.minutes_granted) ? `${num(r.minutes_granted)} granted` : '', dateTime(r.created_at)].filter(Boolean).join(' · '),
+          detail: str(r.note),
+        },
+      }),
       chore_checks: (r) => ({ at: when(r.day || r.created_at), item: { title: str(r.title) || 'Chore', subtitle: [date(r.day), sentence(r.status)].filter(Boolean).join(' · ') } }),
       guardian_notes_written: (r) => ({ at: when(r.created_at), item: { title: `About ${str(r.child)}`, subtitle: [dateTime(r.created_at), r.shared ? 'Shared with the other parent' : ''].filter(Boolean).join(' · '), detail: str(r.text) } }),
       account_history: (r) => {
@@ -565,7 +573,7 @@ export function presentExport(
     notification_preferences: 'Notifications', activity_sharing: 'Activity sharing', dashboard_widgets: 'Dashboard',
     workspace_sessions: 'Workspace sessions', workspace_chats: 'Workspace chats', assistant_conversations: 'Conversations with Jarvis',
     feature_usage: 'Features you use', screen_rules: 'Screen time rules', recommendation_lanes: 'Recommendations',
-    screen_time_requests: 'Screen time requests', guard_requests: 'App requests', chore_checks: 'Chores',
+    screen_time_requests: 'Screen time requests', guard_requests: 'App requests', unlock_requests: 'Unlock requests', chore_checks: 'Chores',
     guardian_notes_written: 'Journal notes you wrote', account_history: 'Account history', preferences: 'Preferences',
     metrics: 'Measurements', sleep: 'Sleep', checkins: 'Check-ins', food: 'Food log', fasting: 'Fasting', goals: 'Goals',
     cycle_settings: 'Cycle settings', cycle_periods: 'Periods', cycle_logs: 'Cycle log', recipe_ratings: 'Recipe ratings',
@@ -576,7 +584,7 @@ export function presentExport(
     places: 'Saved places', place_reminders: 'Place reminders', trips: 'Trips', workouts: 'Workouts', daily_steps: 'Daily steps',
     visits: 'Places you stopped', location_history: 'Location trail',
   };
-  const READ_ONLY = ['feature_usage', 'screen_rules', 'recommendation_lanes', 'screen_time_requests', 'guard_requests', 'chore_checks', 'guardian_notes_written', 'account_history', 'shares_given', 'cheers_sent', 'cheers_received', 'challenges_joined', 'plan_groups_joined', 'visits', 'location_history'];
+  const READ_ONLY = ['feature_usage', 'screen_rules', 'recommendation_lanes', 'screen_time_requests', 'guard_requests', 'unlock_requests', 'chore_checks', 'guardian_notes_written', 'account_history', 'shares_given', 'cheers_sent', 'cheers_received', 'challenges_joined', 'plan_groups_joined', 'visits', 'location_history'];
 
   const out: PresentedService[] = [];
   for (const service of Object.keys(services)) {
