@@ -99,6 +99,7 @@ from services.garden import hub_rooms as rooms_hub
 from services.garden import preservation as pantry
 from services.common import household_tz
 from services.garden import clock, household, weather_care
+from services.garden.models import MAX_DAILY_RUNS_LIMIT, MAX_RUN_MINUTES_LIMIT
 from services.garden.notices import collect_due_tasks, build_digest, digest_loop, send_digest_to_member
 from services.garden.skylight_sync import mirror_care_log
 from services.garden.species_lookup import (
@@ -3595,11 +3596,15 @@ def _validate_binding_fields(fields: dict) -> dict:
             detail=f"valve_mode must be one of {', '.join(VALVE_MODES)}",
         )
     minutes = fields.get("max_run_minutes")
-    if minutes is not None and not 1 <= int(minutes) <= 30:
-        raise HTTPException(status_code=400, detail="max_run_minutes must be between 1 and 30")
+    if minutes is not None and not 1 <= int(minutes) <= MAX_RUN_MINUTES_LIMIT:
+        raise HTTPException(
+            status_code=400, detail=f"max_run_minutes must be between 1 and {MAX_RUN_MINUTES_LIMIT}"
+        )
     runs = fields.get("daily_max_runs")
-    if runs is not None and not 1 <= int(runs) <= 4:
-        raise HTTPException(status_code=400, detail="daily_max_runs must be between 1 and 4")
+    if runs is not None and not 1 <= int(runs) <= MAX_DAILY_RUNS_LIMIT:
+        raise HTTPException(
+            status_code=400, detail=f"daily_max_runs must be between 1 and {MAX_DAILY_RUNS_LIMIT}"
+        )
     threshold = fields.get("moisture_threshold_pct")
     if threshold is not None and not 5.0 <= float(threshold) <= 80.0:
         raise HTTPException(status_code=400, detail="moisture_threshold_pct must be between 5 and 80")
@@ -3608,6 +3613,39 @@ def _validate_binding_fields(fields: dict) -> dict:
         if value and not _HHMM.match(str(value)):
             raise HTTPException(status_code=400, detail=f"{key} must be HH:MM")
     return fields
+
+
+#: Which discovered bucket each bound entity must come from.
+_BINDING_BUCKETS = {
+    "valve_entity_id": ("valves", "a valve (valve.*, or a switch named for watering)"),
+    "grow_light_entity_id": ("grow_lights", "a grow light (a light or switch named for growing)"),
+    "moisture_entity_id": ("moisture_sensors", "a soil moisture sensor"),
+    "temperature_entity_id": ("temperature_sensors", "a temperature sensor"),
+    "humidity_entity_id": ("humidity_sensors", "a humidity sensor"),
+    "lux_entity_id": ("lux_sensors", "a light-level sensor"),
+}
+
+
+async def _check_bound_entities(fields: dict) -> None:
+    """Every entity being bound must be one Home Hub reports as that kind.
+
+    A light bound as a valve would be "opened" for 30 minutes; a temperature
+    sensor bound as moisture would trigger the dry-soil watering. With the hub
+    unreachable nothing can be checked, so nothing new is bound (503).
+    """
+    wanted = {key: value for key, value in fields.items() if key in _BINDING_BUCKETS and value}
+    if not wanted:
+        return
+    found = await hardware.discover_hardware(fresh=True)
+    if not found.get("available"):
+        raise HTTPException(
+            status_code=503,
+            detail="Home Hub is not answering, so the device cannot be checked. Try again shortly.",
+        )
+    for key, entity_id in wanted.items():
+        bucket, what = _BINDING_BUCKETS[key]
+        if entity_id not in {row.get("entity_id") for row in found.get(bucket) or []}:
+            raise HTTPException(status_code=400, detail=f"{entity_id} is not {what} in Home Hub.")
 
 
 def _binding_target_name(session: Session, binding: HomeHubBinding) -> str | None:
@@ -3696,6 +3734,7 @@ async def upsert_binding(
     # to unbind.
     raw_fields = body.model_dump(exclude_unset=True)
     fields = _validate_binding_fields(_normalize_clears(raw_fields))
+    await _check_bound_entities(fields)
 
     binding = session.exec(
         select(HomeHubBinding).where(

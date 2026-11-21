@@ -10,20 +10,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlmodel import Session, select
 
-from services.garden import clock
 from services.common import notify
-from services import config
+from services.garden import clock
 from services.garden.models import (
-    CareLog,
     CareRule,
     GardenProfile,
     Location,
     Plant,
-    utcnow,
 )
 
 log = logging.getLogger("garden.notices")
@@ -87,11 +84,15 @@ def collect_due_tasks(
     member: str | None = None,
     *,
     room_names: dict[str, str] | None = None,
+    include_unassigned: bool = False,
 ) -> list[dict]:
     """Collect due/overdue care tasks, optionally filtered to one member.
 
     Effective assignment: ``plant.assigned_to``, else the location's
     ``assigned_to``.  ``member=None`` returns everything due.
+
+    ``include_unassigned`` adds the plants nobody is assigned to: everyone in the
+    household looks after those, so each person's digest lists them too.
 
     Rooms are Home Hub's areas (``services/garden/hub_rooms.py``), so a plant in
     one holds an area id and has no local row: ``room_names`` (``area_id ->
@@ -106,7 +107,7 @@ def collect_due_tasks(
             continue
         location = session.get(Location, plant.location_id) if plant.location_id else None
         plant_assigned = plant.assigned_to or (location.assigned_to if location else None)
-        if member is not None and plant_assigned != member:
+        if member is not None and plant_assigned != member and not (include_unassigned and not plant_assigned):
             continue
         next_due = rule.next_due_at
         if next_due:
@@ -146,10 +147,10 @@ def collect_due_tasks(
 
 
 def _digest_time_today(daily_digest_time: str | None) -> datetime | None:
-    """Today's ``HH:MM`` digest time as a household-timezone datetime, or None if unset.
+    """Today's ``HH:MM`` digest time in the household zone, or None if unset.
 
-    Uses the household timezone from the ``TZ`` environment variable so a
-    08:00 digest means 08:00 at home, not 08:00 UTC.
+    The zone is the household's (``clock``), so 08:00 means 08:00 at home; an
+    unset zone raises instead of sending at 08:00 UTC.
     """
     if not daily_digest_time:
         return None
@@ -157,17 +158,8 @@ def _digest_time_today(daily_digest_time: str | None) -> datetime | None:
         hh, mm = (int(p) for p in daily_digest_time.split(":"))
     except (ValueError, AttributeError):
         return None
-    import os
-
-    tz_name = os.getenv("TZ", "UTC")
-    try:
-        from zoneinfo import ZoneInfo
-
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = UTC
-    now = datetime.now(tz)
-    return now.replace(hour=hh, minute=mm, second=0, microsecond=0, tzinfo=tz)
+    now = clock.now()
+    return now.replace(hour=hh, minute=mm, second=0, microsecond=0)
 
 
 async def send_digest_to_member(
@@ -180,14 +172,14 @@ async def send_digest_to_member(
 
     Returns True when telemetry accepted the notice.
     """
-    from services.garden.main import _seed as _garden_seed
     from services.garden import hub_rooms as rooms_hub
+    from services.garden.main import _seed as _garden_seed
 
     # Rooms are Home Hub's areas: name them for the digest.
     rooms = {str(a["area_id"]): str(a["name"]) for a in await rooms_hub.list_rooms() or []}
 
     with Session(session_factory()) as session:
-        tasks = collect_due_tasks(session, member, room_names=rooms)
+        tasks = collect_due_tasks(session, member, room_names=rooms, include_unassigned=True)
         seed = _garden_seed()
         # Enrich with species common names.
         for task in tasks:
@@ -228,27 +220,40 @@ async def digest_loop(engine_factory, get_family, client=None):
         log.info("[Garden] digest loop disabled under pytest")
         return
 
+    sent_day: str | None = None
     while True:
         try:
-            now = datetime.now(UTC)
-            with Session(engine_factory()) as session:
-                profile = session.exec(
-                    select(GardenProfile).where(GardenProfile.user_id == "household")
-                ).first()
-                digest_time = profile.daily_digest_time if profile else None
-            if digest_time:
-                target = _digest_time_today(digest_time)
-                if target and now >= target and (now - target).total_seconds() < LOOP_INTERVAL_S:
-                    # Send to every family member.
-                    try:
-                        family = await get_family()
-                    except Exception as e:
-                        log.warning("[Garden] could not list family for digest: %s", e)
-                        family = []
-                    for member in family:
-                        await send_digest_to_member(member, engine_factory, client=client)
-                    # Sleep past the window to avoid re-sending.
-                    await asyncio.sleep(LOOP_INTERVAL_S * 2)
+            sent_day = await digest_tick(engine_factory, get_family, sent_day, client=client)
         except Exception as e:
             log.warning("[Garden] digest loop error: %s", e)
         await asyncio.sleep(LOOP_INTERVAL_S)
+
+
+async def digest_tick(engine_factory, get_family, sent_day: str | None, *, client=None,
+                      now: datetime | None = None) -> str | None:
+    """Send today's digests once the digest time has passed; returns the day sent.
+
+    Any time after the digest time counts, not only the minute after it: a
+    service restarted at 08:05 still sends the 08:00 digest. A digest already
+    sent today (this process, or before a restart) is not sent twice: the
+    ``once`` key per member and day makes telemetry drop a repeat.
+    """
+    with Session(engine_factory()) as session:
+        profile = session.exec(
+            select(GardenProfile).where(GardenProfile.user_id == "household")
+        ).first()
+        digest_time = profile.daily_digest_time if profile else None
+    if not digest_time:
+        return sent_day
+    target = _digest_time_today(digest_time)
+    moment = now or clock.now()
+    today = clock.today_iso(moment)
+    if target is None or moment < target or sent_day == today:
+        return sent_day
+    family = await get_family()
+    if not family:
+        log.error("[Garden] no family list for today's digest; will try again in a minute")
+        return sent_day
+    for member in family:
+        await send_digest_to_member(member, engine_factory, client=client)
+    return today

@@ -735,13 +735,20 @@ async def _toggle_light(entity_id: str, on: bool) -> bool:
     return status in (200, 201)
 
 
+#: The schedule's last answer per binding (and window), to tell a transition
+#: from a light someone switched by hand.
+_last_desired: dict[str, bool] = {}
+
+
 async def sync_grow_lights(
     session_factory: Callable[[], Any], *, now: datetime | None = None
 ) -> list[dict[str, Any]]:
     """Reconcile every scheduled grow light with its photoperiod window.
 
-    Only a *transition* is sent, so a light someone switched by hand is left
-    alone until the schedule genuinely changes its mind.
+    Only a *transition* of the schedule is sent: a light someone switched by
+    hand stays as they left it until the window next opens or closes. The first
+    look at a binding (after a start, or a new schedule) has no transition to
+    wait for, so it brings the light to the schedule once.
     """
     actions: list[dict[str, Any]] = []
     if not enabled():
@@ -756,6 +763,11 @@ async def sync_grow_lights(
             desired = grow_light_window(binding, moment)
             if desired is None:
                 continue
+            key = f"{binding.id}:{binding.grow_light_on_time}-{binding.grow_light_off_time}"
+            previous = _last_desired.get(key)
+            _last_desired[key] = desired
+            if previous is not None and previous == desired:
+                continue  # no transition: leave a hand-switched light alone
             row = rows.get(binding.grow_light_entity_id or "")
             if row is None:
                 continue

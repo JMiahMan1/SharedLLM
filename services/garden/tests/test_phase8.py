@@ -867,6 +867,64 @@ def test_a_light_already_on_is_left_alone(client, hub, monkeypatch):
     assert actions == []
 
 
+def test_a_hand_switched_light_is_left_until_the_window_changes(client, hub, monkeypatch):
+    import asyncio
+
+    import services.garden.main as main_module
+
+    bed = _bed(client)
+    _bind(
+        client, "location", bed["id"], grow_light_entity_id="light.grow_shelf",
+        grow_light_enabled=True, grow_light_on_time="06:00", grow_light_off_time="20:00",
+    )
+
+    def tick(hour, state):
+        rows = [dict(row) for row in HUB_STATES]
+        rows[5] = {**rows[5], "state": state}
+        fake = Hub(states_rows=rows)
+        monkeypatch.setattr(hardware, "_call", fake)
+        hardware.invalidate()
+        asyncio.run(hardware.sync_grow_lights(
+            lambda: main_module.app.state.engine, now=datetime(2026, 11, 20, hour, 0)
+        ))
+        return fake.services()
+
+    assert tick(12, "off") == ["light/turn_on"]  # first look: brought to the schedule
+    assert tick(13, "off") == []  # someone switched it off by hand: left alone
+    assert tick(21, "off") == []  # the window closed and it is already off
+    assert tick(22, "on") == []  # switched on by hand at night: left alone
+    assert tick(7, "on") == []  # the window opened and it is already on
+
+
+def test_a_binding_must_name_the_right_kind_of_device(client, hub):
+    bed = _bed(client)
+
+    as_valve = client.put(f"/bindings/location/{bed['id']}", headers=PARENT,
+                          json={"valve_entity_id": "light.grow_shelf"})
+    as_moisture = client.put(f"/bindings/location/{bed['id']}", headers=PARENT,
+                             json={"moisture_entity_id": "sensor.kitchen_temperature"})
+    unknown = client.put(f"/bindings/location/{bed['id']}", headers=PARENT,
+                         json={"grow_light_entity_id": "light.nowhere"})
+
+    assert as_valve.status_code == 400 and "is not a valve" in as_valve.json()["detail"]
+    assert as_moisture.status_code == 400
+    assert unknown.status_code == 400
+
+
+def test_binding_needs_the_hub_to_check_the_device(client, hub, monkeypatch):
+    async def away(*_a, **_k):
+        return (0, None)
+
+    monkeypatch.setattr(hardware, "_call", away)
+    hardware.invalidate()
+    bed = _bed(client)
+
+    resp = client.put(f"/bindings/location/{bed['id']}", headers=PARENT,
+                      json={"valve_entity_id": "valve.bed1_drip"})
+
+    assert resp.status_code == 503
+
+
 # --------------------------------------------------------------------------- NFC / QR tags
 
 def test_a_tag_scan_opens_the_bed_it_is_on(client, hub):
