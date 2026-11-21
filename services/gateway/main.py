@@ -901,6 +901,27 @@ app.include_router(automation_routes.router)  # Automations and schedules
 app.include_router(helper_routes.router)  # Helpers (toggles, numbers, timers...) kept by the hub
 app.include_router(email_routes.router)  # Email settings and notifications
 
+#: What a device holding a key revoked by identity's sign-in reset is told. Same body as
+#: identity's own answer (services/identity/sign_in_reset.py), so the web UI and the Android
+#: app clear the key and show "Your sign-in was reset, please sign in again".
+SIGN_IN_RESET_CODE = "sign_in_reset"
+SIGN_IN_RESET_MESSAGE = "Your sign-in was reset, please sign in again."
+
+
+class SignInWasReset(HTTPException):
+    def __init__(self) -> None:
+        super().__init__(status_code=401, detail=SIGN_IN_RESET_MESSAGE)
+
+
+@app.exception_handler(SignInWasReset)
+async def sign_in_reset_handler(_request: Request, _exc: SignInWasReset):
+    return JSONResponse(
+        status_code=401,
+        content={"detail": SIGN_IN_RESET_MESSAGE, "code": SIGN_IN_RESET_CODE},
+        headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Answer with a generic 500 and an error id; keep the traceback server-side.
@@ -2419,8 +2440,11 @@ async def _require_identity_from_request(request: Request, body: dict | None = N
             status_code=401,
             detail="Missing API Key. Sign in and send 'Authorization: Bearer <api_key>'.",
         )
+    _strict_key_was_reset.set(False)
     ident = await _resolve_strict_identity(api_key)
     if not ident:
+        if _strict_key_was_reset.get():
+            raise SignInWasReset()
         raise HTTPException(status_code=401, detail="Invalid API Key")
     # The key is proven real, so the permissive resolve can no longer fall back:
     # it will find this key's owner and return that user's credentials. It is the
@@ -2455,6 +2479,12 @@ STRICT_IDENTITY_ATTEMPTS = 4
 STRICT_IDENTITY_RETRY_S = 1.5
 
 
+#: Set by _resolve_strict_identity when identity refused the key because a sign-in reset
+#: revoked it. A context variable, so callers (and tests that replace the lookup) keep the
+#: plain ``dict | None`` answer and only the 401 gates read it to say why.
+_strict_key_was_reset: ContextVar[bool] = ContextVar("strict_key_was_reset", default=False)
+
+
 async def _resolve_strict_identity(api_key: str) -> dict | None:
     """Resolve an API key to its real owner, with NO default-user fallback.
 
@@ -2469,6 +2499,9 @@ async def _resolve_strict_identity(api_key: str) -> dict | None:
     narrowest possible question ("did this exact key authenticate?") and does
     not return a credential payload. Keeping it means a future resolver change
     cannot silently turn an authentication gate back into a fallback.
+
+    A key identity says was revoked by a sign-in reset still returns ``None``, and sets
+    ``_strict_key_was_reset`` so the 401 gates can answer with ``code: sign_in_reset``.
 
     Returns ``None`` when the key is not a real user's key. When Identity
     cannot be reached (after a few tries) it raises 503: the request is still
@@ -2501,6 +2534,13 @@ async def _resolve_strict_identity(api_key: str) -> dict | None:
         # deploy that restarted Identity was doing that to the family.
         raise HTTPException(status_code=503, detail="Sign-in check unavailable; try again shortly")
     if resp.status != 200:
+        if resp.status == 401:
+            try:
+                refused = await resp.json(content_type=None)
+            except Exception:
+                refused = None
+            if isinstance(refused, dict) and refused.get("code") == SIGN_IN_RESET_CODE:
+                _strict_key_was_reset.set(True)
         return None
     try:
         ident = await resp.json()
@@ -10159,8 +10199,53 @@ async def _require_workspace_admin(request: Request) -> None:
     await _require_admin(request)
 
 
+#: What a test account may set on a workspace it creates; everything else is decided here.
+_TEST_ACCOUNT_WORKSPACE_FIELDS = ("id", "display_name", "description")
+
+
+async def _test_account_of(request: Request) -> str | None:
+    """The username behind the request's key when it is an automated agent's test account."""
+    key = _presented_api_key(request)
+    ident = await _resolve_strict_identity(key) if key else None
+    if ident and ident.get("is_test_account") and not ident.get("is_admin"):
+        return str(ident["user"])
+    return None
+
+
+def _test_account_workspace(body: dict, owner: str) -> dict:
+    """A test account's own workspace: user scope, owned by it, under its own folder.
+
+    The id carries the owner's name as a prefix, so the runtime's "adopt an existing
+    workspace with this id" can never hand it someone else's. No path, sync, env or
+    webhook settings: the runtime derives the folder (users/<owner>/<id>).
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be a JSON object")
+    raw_id = str(body.get("id") or body.get("display_name") or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9-]+", "-", raw_id).strip("-")
+    if not slug:
+        raise HTTPException(status_code=422, detail="A workspace needs an id")
+    prefix = f"{owner}-"
+    clean = {k: body[k] for k in _TEST_ACCOUNT_WORKSPACE_FIELDS if k in body}
+    clean["id"] = slug if slug.startswith(prefix) else f"{prefix}{slug}"
+    clean["scope"] = "user"
+    clean["owner_user"] = owner
+    return clean
+
+
 @app.post("/api/workspaces")
 async def create_workspace_proxy(request: Request):
+    # An automated agent's test account may create its own workspaces (and nothing else
+    # here); every other registration stays an administrator's job.
+    internal = secret_matches(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET)
+    owner = None if internal else await _test_account_of(request)
+    if owner:
+        body = _test_account_workspace(await request.json(), owner)
+        resp = await get_http_client().request(
+            "POST", f"{WORKSPACE_RUNTIME_SVC}/workspaces", json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        return await _proxy_json_response(resp)
     await _require_workspace_admin(request)
     return await _proxy_workspace_runtime_json("POST", "/workspaces", request)
 

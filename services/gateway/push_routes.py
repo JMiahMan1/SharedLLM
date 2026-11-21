@@ -52,8 +52,11 @@ async def _caller(request: Request) -> dict[str, Any]:
     auth = request.headers.get("Authorization") or ""
     bearer = auth.startswith("Bearer ")
     key = auth.split(" ", 1)[1].strip() if bearer else (request.headers.get("X-Api-Key") or "").strip()
+    gateway._strict_key_was_reset.set(False)
     ident = await gateway._resolve_strict_identity(key) if key else None
     if not ident:
+        if gateway._strict_key_was_reset.get():
+            raise gateway.SignInWasReset()
         raise HTTPException(status_code=401, detail="Authentication required")
     if not bearer:
         request.scope["headers"] = [

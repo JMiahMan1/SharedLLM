@@ -16,6 +16,10 @@ class User(SQLModel, table=True):  # type: ignore
     display_name: str = Field(default="")
     is_admin: bool = Field(default=False)
     is_system_default: bool = Field(default=False)
+    # An account for automated agents and tests (scripts/create_test_account.py). Never an
+    # admin, never a parent, holds no roles, and is left out of the household roster, the
+    # family counts and notifications (GET /api/users without include_test_accounts).
+    is_test_account: bool = Field(default=False)
     # Family shape, used for household permissions and privacy rules. Admin
     # remains a separate flag: marking someone "father" never silently grants
     # account or server access.
@@ -173,6 +177,23 @@ class APIKey(SQLModel, table=True):  # type: ignore
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     user_id: int = Field(foreign_key="user.id")
     user: User | None = Relationship(back_populates="api_keys")
+
+class RevokedCredential(SQLModel, table=True):  # type: ignore
+    """A key the sign-in reset revoked, kept as its lookup hash only.
+
+    It lets a device that still presents the old key be told *why* it was refused
+    ("Your sign-in was reset, please sign in again") instead of a bare 401, so the
+    app clears the key and shows its sign-in screen. Never the key itself.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    key_hash: str = Field(index=True)
+    #: user_api_key | api_key | agent_key
+    kind: str = Field(default="user_api_key")
+    username: str | None = Field(default=None, index=True)
+    revoked_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    reason: str = Field(default="sign_in_reset")
+
 
 class GlobalSetting(SQLModel, table=True):  # type: ignore
     """System-wide configuration settings."""

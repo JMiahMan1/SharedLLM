@@ -114,6 +114,15 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         report = await mgr.sync(kind)
         return JSONResponse(report, status_code=200 if report.get("ok") else 502)
 
+    @router.post("/hub/auth/sign-out-everyone")
+    async def sign_out_everyone(request: Request) -> dict[str, Any]:
+        """Identity's sign-in reset: every person's hub login revoked (admins and the stack only)."""
+        admin(request)
+        ha = getattr(runtime, "ha_auth", None)
+        if ha is None:
+            raise HTTPException(503, detail="The hub's login service is not running")
+        return ha.sign_out_people()
+
     @router.get("/hub/users")
     async def list_users(request: Request) -> dict[str, Any]:
         admin(request)
