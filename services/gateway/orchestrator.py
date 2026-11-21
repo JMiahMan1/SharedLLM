@@ -12,12 +12,19 @@ import aiohttp
 
 from services.common.circuit_breaker import CircuitOpenError, get_breaker
 from services.common.rag_collections import HOME_DEVICES, canonical_collection
+from services.gateway import context_router, prompt_budget, tool_cache
 from services.gateway.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
     IDENTITY_SVC,
     INTERNAL_SECRET,
     LOGGING_SVC,
+    RAG_HIT_MAX_CHARS,
+    RAG_PREFETCH_K,
+    RAG_PREFETCH_MAX_CHARS,
+    RAG_PREFETCH_MIN_SIMILARITY,
+    RAG_PREFETCH_VOICE_MAX_CHARS,
+    RAG_SEARCH_MIN_SIMILARITY,
     RAG_SVC,
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
@@ -25,13 +32,21 @@ from services.gateway.config import (
 from services.gateway.device_claims import DEVICE_TOOLS, drop_repeated_request, honest_reply
 from services.gateway.history import get_history
 from services.gateway.intent_engine import is_raven_intent
+from services.gateway.knowledge_map import knowledge_map_for
 from services.gateway.llm_providers import get_provider
 from services.gateway.location_query import parse_location_query
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.studio import actions as studio_actions
 from services.gateway.studio import tools as studio_tools
-from services.gateway.tool_registry import hub_tool_guide, names_withheld_hub_tool, single_turn_tools
+from services.gateway.tool_registry import (
+    KNOWLEDGE_SEARCH_DEFAULT_K,
+    KNOWLEDGE_SEARCH_MAX_K,
+    SINGLE_TURN_GARDEN_TOOLS,
+    hub_tool_guide,
+    names_withheld_hub_tool,
+    single_turn_tools,
+)
 
 log = logging.getLogger("gateway.orchestrator")
 
@@ -42,10 +57,9 @@ MAX_RAG_CONTEXT_CHARS = 12000
 
 #: A spoken question gets a short spoken answer, and every token read before it is
 #: time the person stands waiting: 25k characters of context once took 38 s to read.
-#: A voice turn searches this much and skips Raven's always-on curriculum.
-VOICE_RAG_CHARS = 5000
-#: Room for a full page of matching devices (8, searched first) plus a few other hits.
-VOICE_RAG_HITS = 12
+#: A voice turn pre-fetches this much (devices first) and skips Raven's always-on curriculum.
+VOICE_RAG_CHARS = RAG_PREFETCH_VOICE_MAX_CHARS
+VOICE_RAG_HITS = 6
 #: A spoken follow-up ("turn it off", "and the kitchen?") needs the last exchange or two.
 #: The household's last ten messages (long answers included) were about 2,000 tokens,
 #: read again before every spoken answer: about 10 s on the household's card.
@@ -84,6 +98,31 @@ def _voice_history(history: list, query: str = "") -> list:
             content = content[:VOICE_HISTORY_CHARS].rstrip() + "..."
         out.append({**message, "content": content})
     return out
+
+
+def _conversation_of(job_payload: dict) -> str:
+    """A stable id for the conversation a job belongs to (the tool cache's scope).
+
+    A voice satellite's own conversation id, else the satellite; a workspace; a Talk
+    room; a caller-supplied id; else the person's one rolling chat on that client.
+    """
+    voice = job_payload.get("voice_context") or {}
+    for key, value in (
+        ("voice", voice.get("conversation_id") if isinstance(voice, dict) else None),
+        ("satellite", voice.get("satellite") if isinstance(voice, dict) else None),
+        ("mission", job_payload.get("_mission_id")),
+        ("workspace", job_payload.get("workspace_id")),
+        ("talk", job_payload.get("_talk_token")),
+        ("chat", job_payload.get("conversation_id")),
+    ):
+        if value:
+            return f"{key}:{value}"
+    return f"client:{job_payload.get('client') or 'chat'}:{job_payload.get('device_id') or ''}"
+
+
+def _history_chars(history: list) -> int:
+    """Characters of conversation history a prompt carries."""
+    return sum(len(str(m.get("content") or "")) for m in history if isinstance(m, dict))
 
 
 def _truncate_rag_context(rag_context: str) -> str:
@@ -196,85 +235,38 @@ def _library_intent_asked(query: str) -> bool:
     return any(signal in q for signal in LIBRARY_INTENT_SIGNALS)
 
 
-# Collections consulted for a query that names no particular source. Book text
-# is absent on purpose: see _collections_for_query.
-_BASE_COLLECTIONS = (HOME_DEVICES, "nextcloud_files", "system_capabilities", "system_learnings")
-_CODING_INTENT_TOKENS = ("file", "code", "git", "workspace", "fix", "repair")
-_CODING_COLLECTIONS = ("system_capabilities", "nextcloud_files", "system_learnings", HOME_DEVICES)
+def _collections_for_query(
+    query: str,
+    *,
+    include_library: bool = False,
+    devices_first: bool = False,
+    intent: str | None = None,
+    confidence: float = 0.0,
+) -> list[str]:
+    """Choose which RAG collections a query may pre-fetch from (``context_router``).
 
-# Specialized RAG collections searched only when the question plainly asks about that
-# source. Phrases, matched as whole words: every extra collection costs a search on the
-# reply's path (voice included), so a common word ("remember", "network", the "mission"
-# in "permission") must not pull one in.
-_INTENT_COLLECTION_SIGNALS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("user_facts", (
-        "about me", "who am i", "do you remember", "what do you remember", "remember that i",
-        "remember my", "my preference", "my preferences", "i prefer", "my favorite",
-        "my favourite", "my allergy", "my allergies", "allergic", "my birthday", "what do i like",
-    )),
-    ("mission_history", (
-        "raven mission", "raven missions", "past mission", "last mission", "previous mission",
-        "post-mortem", "postmortem", "previous run", "last run",
-    )),
-    ("network_topology", (
-        "docker", "container", "containers", "subnet", "vlan", "ip address",
-        "network topology", "open ports", "which port",
-    )),
-    ("telemetry_alerts", (
-        "alerts", "telemetry", "anomaly", "anomalies", "went offline", "gone offline",
-    )),
-    ("conversation_memory", (
-        "intercom", "transcript", "who said", "what did we say", "what did i say",
-    )),
-)
-_INTENT_COLLECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
-    (coll, re.compile(r"\b(?:" + "|".join(re.escape(s) for s in signals) + r")\b"))
-    for coll, signals in _INTENT_COLLECTION_SIGNALS
-)
+    Only what the question's intent or wording names: a question that names no source
+    pre-fetches nothing and the model fetches what it needs through the tools the
+    knowledge map lists. A standing set searched for every question is what gave
+    "What's the verse of the day?" 45 unrelated rows.
 
+    A book library is not searched unless the query asks for one (``LIBRARY_INTENT_SIGNALS``)
+    or the caller already knows books are wanted (``include_library``: the research mode,
+    where naming an author is the natural way to ask and no keyword list can match every
+    surname). When it is searched it goes first: a passage is the strongest evidence.
 
-def _collections_for_query(query: str, *, include_library: bool = False, devices_first: bool = False) -> list[str]:
-    """Choose which RAG collections a query is allowed to spend budget on.
-
-    A book library is not searched unless the query asks for one. It is by far
-    the largest collection in the index and the least likely to be relevant to
-    an arbitrary question, so including it by default would trade real answers
-    for noise on every turn and would quietly become the default as the library
-    grew. The same reasoning already keeps nextcloud_files out of the standing
-    set.
-
-    When a query does name books, they go first: a passage from a book is
-    stronger evidence for the question than anything the other collections hold,
-    and the caller's budget stops before they could crowd out the answer.
-
-    ``include_library`` covers the case keywords cannot: naming an author is the
-    most natural way to ask a library a question ("what did Macduff say about
-    trusting God in poverty"), and no keyword list can match 1,347 surnames. It
-    is set when the caller has already been told a library is wanted -- the user
-    picking the research mode, whose own description promises their books. It is
-    not set on the generic path, where the keyword test remains the gate.
-
-    Kept separate from the fetching loop so the decision itself is testable
-    without standing up an HTTP client.
+    No home hub set up: the device index is left out, as the hub tools are.
     """
-    q = query.lower()
-    collections = list(_CODING_COLLECTIONS) if any(token in q for token in _CODING_INTENT_TOKENS) else list(_BASE_COLLECTIONS)
-    for coll, pattern in _INTENT_COLLECTION_PATTERNS:
-        if coll not in collections and pattern.search(q):
-            collections.append(coll)
-    if include_library or _library_intent_asked(q):
-        collections = ["calibre_files"] + [c for c in collections if c != "calibre_files"]
     from services import config
 
-    if not config.any_home_hub():
-        # No home hub is set up: its device index is left over at best, and nothing in it can be
-        # read or commanded, so it is not offered as context (the hub tools are not offered either).
-        collections = [c for c in collections if c != HOME_DEVICES]
-    if devices_first and HOME_DEVICES in collections:
-        # A spoken request is most often about a device ("fix the thermostat" reads as coding),
-        # so the devices it names are searched before anything else can use up the budget.
-        collections = [HOME_DEVICES] + [c for c in collections if c != HOME_DEVICES]
-    return collections
+    return context_router.route_collections(
+        query,
+        intent=intent,
+        confidence=confidence,
+        library=include_library or (_library_intent_asked(query) and not context_router.tool_answers(query)),
+        hub=config.any_home_hub(),
+        devices_first=devices_first,
+    )
 
 
 # --- Default service URLs (Docker DNS), overridable via Identity settings ---
@@ -653,14 +645,31 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     if job_payload.get("voice_context") and not is_autonomous:
         short_term = _voice_history(short_term, query)
 
+    # The conversation this turn belongs to: what the tool cache keys follow-ups by.
+    tool_cache.CONVERSATION.set(_conversation_of(job_payload))
+
     # 2. Context Injection (RAG + live HA state + workspace memory)
     workspace_id = job_payload.get("workspace_id")
     include_curriculum = job_payload.get("include_curriculum", True)
     rag_budget: dict[str, int | bool] = {}
-    if job_payload.get("voice_context") and not is_autonomous:
+    is_voice = bool(job_payload.get("voice_context")) and not is_autonomous
+    if is_voice:
         # A voice satellite cannot use workspaces, the CLI toolchain or Raven's protocol lessons.
         include_curriculum = False
         rag_budget = {"search_chars": VOICE_RAG_CHARS, "max_hits": VOICE_RAG_HITS, "devices_first": True}
+    # The FastPath classifier's verdict, when the chat handler had one: it routes the pre-fetch.
+    intent = job_payload.get("intent")
+    try:
+        intent_confidence = float(job_payload.get("intent_confidence") or 0.0)
+    except (TypeError, ValueError):
+        intent_confidence = 0.0
+    if include_curriculum and not is_autonomous and not workspace_id \
+            and not context_router.wants_curriculum(query, intent=intent, confidence=intent_confidence):
+        # Raven's furniture (protocol lessons, the CLI toolchain, resource inventories) is
+        # about 11k characters; a chat question that is not about code or a workspace has no
+        # use for it. A Raven mission and a workspace turn always get it.
+        include_curriculum = False
+    sections: dict[str, int] = {}
     if grounded:
         # The caller already supplied the complete, authoritative passages;
         # unrelated household/workspace hits are what made Bible study answers
@@ -668,7 +677,8 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         rag_context = ""
     else:
         rag_context = await _fetch_rag_context(
-            query, user_id, creds, workspace_id=workspace_id, include_curriculum=include_curriculum, **rag_budget
+            query, user_id, creds, workspace_id=workspace_id, include_curriculum=include_curriculum,
+            intent=intent, confidence=intent_confidence, sections=sections, **rag_budget
         )
 
     # A Raven mission may arrive with context already retrieved at dispatch
@@ -681,6 +691,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     prefetched = (job_payload.get("rag_context") or "").strip()
     if prefetched and not grounded:
         rag_context = f"{prefetched}\n\n{rag_context}".strip() if rag_context else prefetched
+        sections["mission_brief_context"] = len(prefetched)
 
     # 4. Final Inference
     full_system = job_payload.get("system", "")
@@ -694,11 +705,16 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         workspace_id = job_payload.get("workspace_id")
         history_log = job_payload.get("history_log")
         raven_system = f"{full_system}\n\n{turn_note.strip()}" if turn_note.strip() else full_system
+        prompt_budget.record(
+            "raven", {"system": len(raven_system), "history": _history_chars(short_term),
+                      "question": len(query), **sections},
+            intent=intent, mission_id=job_payload.get("_mission_id"),
+        )
         ans = await AgentLoop(query, model, raven_system, short_term, user_id, creds, mission_id, rag_context=rag_context, show_thinking=show_thinking, workspace_id=workspace_id, history_log=history_log)
     else:
         # Librarian handles standard single-turn inference
         try:
-            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")))
+            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat")
         except InferenceUnavailable as exc:
             # A mission and the voice assistant have no status code to report
             # on: the answer field is the only channel they have, so the old
@@ -716,9 +732,15 @@ async def _fetch_rag_context(
     *,
     include_curriculum: bool = True,
     include_library: bool = False,
-    search_chars: int = 15000,
-    max_hits: int = 20,
+    search_chars: int = RAG_PREFETCH_MAX_CHARS,
+    max_hits: int = 12,
     devices_first: bool = False,
+    intent: str | None = None,
+    confidence: float = 0.0,
+    k: int = RAG_PREFETCH_K,
+    min_similarity: float | None = RAG_PREFETCH_MIN_SIMILARITY,
+    hit_chars: int = RAG_HIT_MAX_CHARS,
+    sections: dict[str, int] | None = None,
 ) -> str:
     """Assemble the retrieved context for one turn.
 
@@ -735,20 +757,37 @@ async def _fetch_rag_context(
 
     ``include_library`` forces the book collection in for a caller that has
     already established books are wanted; see ``_collections_for_query``.
+
+    The search part pre-fetches only from the collections the question's intent
+    routes to (``intent``/``confidence`` from the FastPath classifier, else its
+    wording), ``k`` hits each above ``min_similarity``, de-duplicated, inside
+    ``search_chars``. Nothing below the floor is included "just in case": the
+    knowledge map tells the model where to fetch anything else.
+
+    ``sections`` (when given) receives the characters each part contributed, keyed
+    ``prefetch:<collection>``, ``curriculum:<block>``, ``weather`` and so on, for the
+    prompt-size record (``prompt_budget``).
     """
+    if sections is None:
+        sections = {}
     rag_context = ""
     settings = await get_all_settings()
     rag_svc = _get(settings, "rag_svc_url")
     try:
         # Prioritize collections based on query intent
         q = query.lower()
-        collections = _collections_for_query(query, include_library=include_library, devices_first=devices_first)
+        collections = _collections_for_query(
+            query, include_library=include_library, devices_first=devices_first,
+            intent=intent, confidence=confidence,
+        )
+        log.info(f"[RAG prefetch] intent={intent} ({confidence:.2f}) collections={collections or 'none'}")
 
         # Context constraints
         MAX_TOTAL_HITS = max_hits
-        MAX_HITS_PER_COLL = min(8, max_hits)
-        MAX_CHARS_PER_HIT = 2000
-        TOTAL_CHARS_LIMIT = search_chars  # 15000 is about 4k tokens
+        MAX_HITS_PER_COLL = max(1, min(k, max_hits))
+        MAX_CHARS_PER_HIT = hit_chars
+        TOTAL_CHARS_LIMIT = search_chars
+        seen_hits: set[str] = set()
 
         total_hits = 0
         total_chars = 0
@@ -771,17 +810,21 @@ async def _fetch_rag_context(
             for coll in collections:
                 if total_hits >= MAX_TOTAL_HITS or total_chars >= TOTAL_CHARS_LIMIT:
                     break
+                coll_start = len(rag_context)
+                search_body: dict[str, Any] = {
+                    "collection_name": coll,
+                    "query": query,
+                    "user_id": user_id,
+                    "k": MAX_HITS_PER_COLL,
+                }
+                if min_similarity is not None:
+                    search_body["min_similarity"] = min_similarity
 
                 try:
                     resp = await breaker.call(
-                        lambda coll=coll: client.post(
+                        lambda coll=coll, search_body=search_body: client.post(
                             f"{rag_svc}/rag/search",
-                            json={
-                                "collection_name": coll,
-                                "query": query,
-                                "user_id": user_id,
-                                "k": MAX_HITS_PER_COLL,
-                            },
+                            json=search_body,
                             headers={"X-Internal-Secret": INTERNAL_SECRET},
                             timeout=aiohttp.ClientTimeout(total=10.0),
                         ),
@@ -805,6 +848,10 @@ async def _fetch_rag_context(
                         coll_added = False
                         for h in hits:
                             content = h["content"]
+                            _key = context_router.normalized(str(content))
+                            if _key in seen_hits:
+                                continue  # the same row from another collection
+                            seen_hits.add(_key)
                             if coll == "system_learnings" and names_withheld_hub_tool(str(content)):
                                 # A lesson that sends the model to a hub tool while no hub is set up
                                 # would only point it at a tool it is not offered.
@@ -860,6 +907,8 @@ async def _fetch_rag_context(
 
                             if total_hits >= MAX_TOTAL_HITS:
                                 break
+                if len(rag_context) > coll_start:
+                    sections[f"prefetch:{coll}"] = len(rag_context) - coll_start
     except Exception as e:
         log.error(f"RAG search failed: {e}")
 
@@ -870,6 +919,7 @@ async def _fetch_rag_context(
     # tools the workspace container actually has, and surface the resources it
     # can pull in (Nextcloud files, Home Assistant entities). All fetches are
     # best-effort with short timeouts; never block a mission on them.
+    before_curriculum = len(rag_context)
     if not skip_curriculum:
         try:
             from services.gateway.main import shared_http_client
@@ -972,12 +1022,15 @@ async def _fetch_rag_context(
                         log.warning(f"[Orchestrator] HA resources fetch skipped: {e}")
         except Exception as e:
             log.warning(f"[Orchestrator] awareness blocks skipped: {e}")
+    if len(rag_context) > before_curriculum:
+        sections["curriculum"] = len(rag_context) - before_curriculum
 
     # BRIDGE (read path): surface THIS workspace's own raven_memory.md journal so
     # repeatable tasks in the same workspace start from accumulated experience,
     # not just the global system_learnings store. system_learnings covers
     # cross-workspace reuse; this covers same-workspace reinforcement. Reads are
     # best-effort and never block the mission if the file is missing/unreadable.
+    before_memory = len(rag_context)
     if workspace_id:
         try:
             from services.gateway.main import shared_http_client
@@ -1010,6 +1063,8 @@ async def _fetch_rag_context(
                         )
         except Exception as _me:
             log.warning(f"[Orchestrator] raven_memory.md read skipped: {_me}")
+    if len(rag_context) > before_memory:
+        sections["workspace_memory"] = len(rag_context) - before_memory
 
     # Proactively inject weather context for weather-related queries
     weather_keywords = ["weather", "forecast", "rain", "snow", "temperature", "outside", "humid", "wind", "storm", "sunny", "cloudy", "cold", "hot", "warm"]
@@ -1017,6 +1072,7 @@ async def _fetch_rag_context(
         weather_ctx = await _fetch_weather_context(creds)
         if weather_ctx:
             rag_context += f"\n[WEATHER]\n{weather_ctx}\n"
+            sections["weather"] = len(weather_ctx) + 12
 
     # DREAM FEEDBACK: RSI self-test loop
     # After dreaming consolidates lessons, this injects two things:
@@ -1031,6 +1087,7 @@ async def _fetch_rag_context(
     # has no mission to validate on, and returning this as its only context
     # while grounding removed the search tools is how a question about a
     # library became a confident answer about Macbeth.
+    before_dream = len(rag_context)
     if not skip_curriculum and (workspace_id or workspace_id == ""):
         try:
             from services.gateway.main import shared_http_client as _gw_client
@@ -1060,6 +1117,8 @@ async def _fetch_rag_context(
                             )
         except Exception as _de:
             log.debug(f"[Orchestrator] dream feedback skipped: {_de}")
+    if len(rag_context) > before_dream:
+        sections["dream"] = len(rag_context) - before_dream
 
     return rag_context.strip()
 
@@ -1376,7 +1435,91 @@ def _format_workspace_search(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_context_search(result: dict, payload: dict) -> str:
+    """A knowledge search's hits, each cut to a readable size and attributed."""
+    results = result.get("results") or []
+    coll = payload.get("collection_name") or ""
+    if not results:
+        return (
+            f"Nothing in {coll} matched closely enough. Try other words, or another source "
+            "from the knowledge map."
+        )
+    lines = []
+    for r in results:
+        text = context_router.clip(" ".join(str(r.get("content", "")).split()), RAG_HIT_MAX_CHARS)
+        lines.append(f"- {text}{_citation_suffix(_as_meta_dict(r.get('metadata')))}")
+    return f"Found {len(results)} relevant results in {coll}:\n" + "\n".join(lines)
+
+
+#: Garden tools run in-process as the turn's user (garden_assist), normalized name -> tool.
+_GARDEN_ACTIONS = {re.sub(r"[\s_]+", "", name).lower(): name for name in SINGLE_TURN_GARDEN_TOOLS}
+
+
+async def _run_garden_tool(tool: str, tool_data: dict, creds: ResolvedCredentials) -> str:
+    """garden_summary / garden_log_care / garden_log_harvest, through the same helpers
+    the garden assistant routes use. A garden that cannot be read says so."""
+    from services.gateway import garden_assist
+
+    payload = tool_data.get("payload", tool_data)
+    payload = payload if isinstance(payload, dict) else {}
+    if tool == "garden_summary":
+        answer = await garden_assist.summarize(creds)
+    elif tool == "garden_log_care":
+        target = str(payload.get("target") or "").strip()
+        if not target:
+            return "Name a plant, a species or a room to log care for."
+        answer = await garden_assist.log_care(
+            creds, target,
+            action=str(payload.get("action") or "water"),
+            still_damp=bool(payload.get("still_damp")),
+            source="chat",
+            postpone_days=payload.get("postpone_days"),
+        )
+    else:
+        target = str(payload.get("target") or "").strip()
+        try:
+            quantity = float(payload.get("quantity"))
+        except (TypeError, ValueError):
+            return "A harvest needs a quantity."
+        if not target:
+            return "Name the plant that was picked."
+        answer = await garden_assist.log_harvest(
+            creds, target, quantity=quantity,
+            unit=str(payload.get("unit") or "lb"),
+            disposition=str(payload.get("disposition") or "fresh"),
+            notes=payload.get("notes"),
+        )
+    message = str(answer.get("message") or "").strip()
+    detail = {k: v for k, v in answer.items() if k not in ("message",)}
+    return f"{message}\n\nDetail:\n{_compact_detail(detail)}" if detail else message
+
+
+def _registry_names() -> dict[str, str]:
+    """Normalized tool name -> the registry's spelling (the key freshness is declared under)."""
+    from services.gateway import knowledge_map
+
+    names = {**knowledge_map.single_turn_tools(), **knowledge_map.raven_tools()}
+    return {re.sub(r"[\s_]+", "", n).lower(): n for n in names}
+
+
+_REGISTRY_NAMES = _registry_names()
+
+
 async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials, workspace_id: str | None = None) -> str:
+    """Run one tool call, reusing a result this conversation already fetched while its
+    declared freshness allows (``tool_cache``; live tools always go to the source)."""
+    norm = re.sub(r"[\s_]+", "", action or "").lower()
+    tool = _REGISTRY_NAMES.get(norm, action)
+    payload = tool_data.get("payload", tool_data)
+    return await tool_cache.call(
+        tool,
+        dict(payload) if isinstance(payload, dict) else {},
+        user=str(getattr(creds, "user", "") or ""),
+        fetch=lambda: _run_single_tool(action, tool_data, query, creds, workspace_id=workspace_id),
+    )
+
+
+async def _run_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials, workspace_id: str | None = None) -> str:
     """Execute a single tool call and return the result string.
 
     ``workspace_id``, when the turn belongs to a workspace, overrides whatever
@@ -1424,6 +1567,9 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
             return f"Sorry, I couldn't complete that action: {exc.detail} (HTTP {exc.status})"
         return studio_tools.summarize(action, result)
 
+    elif action in _GARDEN_ACTIONS:
+        return await _run_garden_tool(_GARDEN_ACTIONS[action], tool_data, creds)
+
     elif action in SINGLE_TURN_TOOL_ENDPOINTS:
         endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
         svc_key = _TOOL_SERVICE_MAP.get(action, "execution_svc_url")
@@ -1469,6 +1615,14 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                 # already holding. So refuse, and say what to pass.
                 if payload.get("collection_name"):
                     payload["collection_name"] = canonical_collection(str(payload["collection_name"]))
+                # A few close hits, not a page of nearest ones: the model can ask again,
+                # with other words or a larger k, if they do not answer the question.
+                try:
+                    _k = int(payload.get("k") or KNOWLEDGE_SEARCH_DEFAULT_K)
+                except (TypeError, ValueError):
+                    _k = KNOWLEDGE_SEARCH_DEFAULT_K
+                payload["k"] = max(1, min(_k, KNOWLEDGE_SEARCH_MAX_K))
+                payload.setdefault("min_similarity", RAG_SEARCH_MIN_SIMILARITY)
                 if not str(payload.get("collection_name") or "").strip():
                     return (
                         "collection_name is required and was not supplied, so the "
@@ -1637,14 +1791,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         if logs:
                             return f"{result.get('message', '')}\n\n```\n{logs}\n```"
                     if action == "contextsearchrequest":
-                        results = result.get("results", [])
-                        if not results:
-                            return "No relevant context found. Try a different query or collection."
-                        lines = [
-                            f"- {r.get('content', '')}{_citation_suffix(_as_meta_dict(r.get('metadata')))}"
-                            for r in results
-                        ]
-                        return f"Found {len(results)} relevant results:\n" + "\n".join(lines)
+                        return _format_context_search(result, payload)
                     if action == "entitysearchrequest":
                         detail = result.get("detail", {})
                         entities = detail.get("entities") or result.get("entities") or []
@@ -1798,8 +1945,14 @@ def _speaker_line(creds: ResolvedCredentials | None) -> str:
     return f"Speaker: {user}{how}."
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False) -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat") -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
+
+    The system message carries the knowledge map (``knowledge_map``): where every
+    kind of information lives and the tool that fetches it, since only a small,
+    intent-routed pre-fetch travels with the question. ``context_sections`` is that
+    pre-fetch's size by collection, for the prompt-size record (``prompt_budget``,
+    under ``budget_path``).
 
     ``speech_stream`` (a voice satellite) sends ``chunk_callback`` only whole sentences that are safe
     to say before the answer is finished (``speech_stream.SpeechGate``), never raw model words.
@@ -1833,7 +1986,15 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     # prompt keeper), so a new question reads only its own part: with the time and
     # the context inside the system message, every voice question re-read the whole
     # guide (about 27 s on the household's card).
+    # Where everything else lives, and the tool that fetches it. Built from the registry
+    # for this configuration and role, so it is the same text every time. A grounded
+    # turn is answered from the passages it was given and is offered no retrieval.
+    kmap = "" if grounded else knowledge_map_for(
+        "single_turn", is_admin=bool(getattr(creds, "is_admin", False)), guide=single_turn_guide
+    )
     system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{single_turn_guide}"
+    if kmap:
+        system += f"\n\n{kmap}"
     if workspace_context.strip():
         system += (
             f"\n\nWorkspace:\n{workspace_context.strip()}\n"
@@ -1851,6 +2012,23 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     if rag_context:
         log.info(f"[_single_turn_inference] RAG context preview: {rag_context[:300]}")
     messages = [{"role": "system", "content": system}, *history, {"role": "user", "content": question}]
+
+    prefetch = dict(context_sections or {})
+    if not prefetch and rag_context:
+        prefetch = {"retrieved": len(rag_context)}
+    budget = prompt_budget.record(
+        budget_path,
+        {
+            "system": len(system_prompt.strip()),
+            "tool_guide": len(single_turn_guide),
+            "knowledge_map": len(kmap),
+            "workspace": len(system) - len(system_prompt.strip()) - len(single_turn_guide) - len(kmap),
+            "history": _history_chars(history),
+            "question": len(question) - len(rag_context),
+            **prefetch,
+        },
+        model=model,
+    )
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
 
@@ -2002,6 +2180,15 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         #   {"tool": "LightControlRequest", "action": "turn_off", "entity_id": "..."}
         #   {"name": "LightControlRequest", "arguments": {"state": "off"}}
         # We need: action = normalized tool name for routing, payload.action = HA action.
+        # A garden tool's own "action" field (water, mist, ...) is a care verb, not a tool
+        # name: route by the tool and keep every other field as its payload.
+        _named = re.sub(r'[\s_]+', '', str(tool_data.get("tool") or tool_data.get("name") or "")).lower()
+        if _named in _GARDEN_ACTIONS:
+            _gp = tool_data.get("payload")
+            if not isinstance(_gp, dict):
+                _gp = {k: v for k, v in tool_data.items() if k not in ("tool", "name", "payload")}
+            tool_data = {"action": _named, "payload": _gp}
+
         _candidate = str(tool_data.get("action", "")).strip()
         _cand_norm = re.sub(r'[\s_]+', '', _candidate).lower()
         _is_ha_action = _cand_norm in ("turnon", "turnoff", "toggle", "play", "pause", "stop", "send", "messages", "list")
@@ -2122,6 +2309,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
         # Append tool result to conversation for next turn
         messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
+        prompt_budget.add_tool_result(budget, len(tool_result or ""))
         if event_callback:
             await event_callback({"type": "tool_result", "id": f"step{turn + 1}", "output": (tool_result or "")[:4000]})
 

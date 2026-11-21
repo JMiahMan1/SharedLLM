@@ -43,10 +43,10 @@ def test_the_library_appears_exactly_once():
 
 
 def test_a_coding_question_does_not_pull_in_the_library():
-    """Coding intent reorders the base set; it must not summon book text."""
-    collections = _collections_for_query("fix the failing test in this file")
+    """Coding wording routes to files and lessons; it must not summon book text."""
+    collections = _collections_for_query("fix the failing test in this file and the bug in the code")
     assert "calibre_files" not in collections
-    assert collections[0] == "system_capabilities"
+    assert collections == ["nextcloud_files", "system_learnings"]
 
 
 def test_book_intent_wins_over_coding_intent_when_both_are_present():
@@ -55,14 +55,17 @@ def test_book_intent_wins_over_coding_intent_when_both_are_present():
     assert collections[0] == "calibre_files"
 
 
-def test_the_base_set_is_unchanged_by_a_plain_question():
-    """Guard against the standing set drifting while book routing is added."""
-    assert _collections_for_query("is the garage door open") == [
-        "home_devices",
-        "nextcloud_files",
-        "system_capabilities",
-        "system_learnings",
-    ]
+def test_a_plain_device_question_pre_fetches_only_devices(monkeypatch):
+    """There is no standing set any more: a device question reads the device index only.
+
+    Searching devices, files, capabilities and lessons for every question is what gave
+    "What's the verse of the day?" 45 unrelated rows (see context_router).
+    """
+    from services import config
+
+    monkeypatch.setattr(config, "any_home_hub", lambda: True)
+    assert _collections_for_query("is the garage door open") == ["home_devices"]
+    assert _collections_for_query("What's the verse of the day?") == []
 
 
 def test_routing_is_case_insensitive():
@@ -109,7 +112,7 @@ def test_forcing_the_library_in_does_not_disturb_the_coding_set():
     """A forced library joins whatever set the query already chose."""
     got = _collections_for_query("fix the code in workspace", include_library=True)
     assert got[0] == "calibre_files"
-    assert "system_capabilities" in got
+    assert "system_learnings" in got
     assert got.count("calibre_files") == 1
 
 

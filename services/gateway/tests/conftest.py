@@ -12,6 +12,20 @@ from conftest_media import client, fake_identity, upstream  # noqa: F401
 WORKSPACE_CALLER = {"user": "alice", "is_admin": False}
 
 
+@pytest.fixture(autouse=True)
+def _tool_cache_store():
+    """Every test gets its own empty in-memory Redis for the tool cache (tool_cache.py),
+    so no test reaches a real Redis and no cached result leaks from one test to the next."""
+    import fakeredis
+
+    from services.gateway import tool_cache
+
+    store = fakeredis.FakeRedis(decode_responses=True)
+    tool_cache.set_client(store)
+    yield store
+    tool_cache.set_client(None)
+
+
 @pytest.fixture
 def one_loop_client():
     """A TestClient whose requests and websockets all run on one event loop.
