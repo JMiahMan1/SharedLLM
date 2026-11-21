@@ -42,7 +42,15 @@ class World:
         if path == "/plants/resolve":
             return self._resolve((params or {}).get("q") or "")
         if path.startswith("/plants/") and path.endswith("/care"):
-            return {"ok": True, "action": (json or {}).get("action"), "plant_id": path.split("/")[2], "next_due_at": "2026-11-27T09:00:00+00:00"}
+            # Relative, not a fixed date: "due in 7 days" must not drift with the clock.
+            from datetime import UTC, datetime, timedelta
+
+            return {
+                "ok": True,
+                "action": (json or {}).get("action"),
+                "plant_id": path.split("/")[2],
+                "next_due_at": (datetime.now(UTC) + timedelta(days=7)).isoformat(),
+            }
         if path.endswith("/snooze"):
             return {"ok": True, "still_damp": True, "next_due_at": "2026-11-21T09:00:00+00:00"}
         if path.endswith("/harvest"):

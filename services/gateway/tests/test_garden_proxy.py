@@ -34,6 +34,19 @@ KID_HEADERS = {
 }
 
 
+_BINDING = {
+    "id": "binding-1", "target_kind": "location", "target_id": "bed-1", "target_name": "Bed 1",
+    "moisture_entity_id": "sensor.bed1_soil_moisture", "temperature_entity_id": None,
+    "humidity_entity_id": None, "lux_entity_id": None, "grow_light_entity_id": None,
+    "grow_light_on_time": None, "grow_light_off_time": None, "grow_light_enabled": False,
+    "valve_entity_id": "valve.bed1_drip", "valve_mode": "notify_only",
+    "moisture_override_enabled": False, "moisture_threshold_pct": 30.0,
+    "max_run_minutes": 5, "daily_max_runs": 2, "rain_interlock": True,
+    "active_run_started_at": None, "active_run_ends_at": None, "nfc_tag_id": "tag-bed1",
+    "created_at": "2026-11-20T00:00:00+00:00", "updated_at": "2026-11-20T00:00:00+00:00",
+}
+
+
 @pytest.fixture
 def calls(monkeypatch):
     class Seen(list):
@@ -202,6 +215,34 @@ def calls(monkeypatch):
             return {"id": path.rsplit("/", 1)[-1], "label": "Marinara sauce", "storage_location": "Cold room"}
         if path.startswith("/pantry-batches/") and method == "DELETE":
             return Response(status_code=204)
+        # Phase 8: Home Hub hardware, bindings, valves and NFC/QR tags.
+        if path == "/hardware/discover" and method == "GET":
+            return {
+                "available": True, "has_any_hardware": True,
+                "moisture_sensors": [{"entity_id": "sensor.bed1_soil_moisture", "friendly_name": "Bed 1 Soil Moisture", "device_class": "moisture", "unit": "%", "state": "22"}],
+                "temperature_sensors": [], "humidity_sensors": [], "lux_sensors": [],
+                "valves": [{"entity_id": "valve.bed1_drip", "friendly_name": "Bed 1 Drip"}],
+                "grow_lights": [],
+                "tags": [{"tag_id": "tag-bed1", "name": "Bed 1", "last_scanned": None}],
+            }
+        if path == "/bindings" and method == "GET":
+            return {"count": 1, "bindings": [{**_BINDING, "readings": {"moisture_pct": 22.0}, "runs_today": 0}]}
+        if path.startswith("/bindings/") and path.endswith("/valve/run") and method == "POST":
+            return {"binding_id": "binding-1", "minutes": 3, "runs_today": 1, "closes_at": "2026-11-20T12:03:00+00:00"}
+        if path.startswith("/bindings/") and path.endswith("/valve/stop") and method == "POST":
+            return {"binding_id": "binding-1", "stopped": True}
+        if path.startswith("/bindings/") and method == "DELETE":
+            return Response(status_code=204)
+        if path.startswith("/bindings/") and method == "PUT":
+            return {**_BINDING, **(json or {}), "readings": {}, "runs_today": 0}
+        if path.startswith("/tags/") and method == "GET":
+            return {
+                "matched": True, "tag_id": path.rsplit("/", 1)[-1],
+                "target_kind": "location", "target_id": "bed-1", "target_name": "Bed 1",
+                "plant": None, "location": {"id": "bed-1", "name": "Bed 1", "kind": "raised_bed", "plant_count": 3},
+                "readings": {"moisture_pct": 22.0}, "moisture": {"applies": False},
+                "next_due_at": None, "due_today": False, "actions": ["water", "photo"],
+            }
         if path == "/plans" and method == "GET":
             return {"count": 1, "plans": [{"id": "plan-1", "name": "Spring/Summer 2027", "season": "spring_summer", "year": 2027, "family_size": 7, "mode": "fresh_plus_preserving", "status": "draft", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}]}
         if path == "/plans" and method == "POST":
@@ -908,3 +949,92 @@ def test_garden_delete_pantry_batch_proxy(client, calls):
 def test_garden_pantry_needs_authentication(client):
     assert client.get("/api/garden/pantry-batches").status_code == 401
     assert client.get("/api/garden/harvest/forecast").status_code == 401
+
+
+# --------------------------------------------------------------------------- Phase 8: hardware
+
+def test_garden_hardware_discover_proxy(client, calls):
+    resp = client.get("/api/garden/hardware/discover", headers=KID_HEADERS, params={"fresh": "true"})
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["has_any_hardware"] is True
+    assert data["moisture_sensors"][0]["entity_id"] == "sensor.bed1_soil_moisture"
+    assert any(
+        m == "GET" and p == "/hardware/discover" and params == {"fresh": "true"}
+        for m, p, params, _, _ in calls
+    )
+
+
+def test_garden_bindings_proxy_for_a_plant(client, calls):
+    resp = client.get("/api/garden/bindings", headers=KID_HEADERS, params={"plant_id": "plant-1"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["bindings"][0]["valve_mode"] == "notify_only"
+    forwarded = next(row for row in calls if row[1] == "/bindings")
+    assert forwarded[2] == {"plant_id": "plant-1"}
+    assert forwarded[4]["X-User-Id"] == "child"
+
+
+def test_garden_upsert_binding_proxy(client, calls):
+    resp = client.put(
+        "/api/garden/bindings/location/bed-1",
+        headers=ADMIN_HEADERS,
+        json={"valve_entity_id": "valve.bed1_drip", "max_run_minutes": 8},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["max_run_minutes"] == 8
+    forwarded = next(row for row in calls if row[0] == "PUT")
+    assert forwarded[1] == "/bindings/location/bed-1"
+    assert forwarded[3] == {"valve_entity_id": "valve.bed1_drip", "max_run_minutes": 8}
+
+
+def test_garden_delete_binding_proxy(client, calls):
+    resp = client.delete("/api/garden/bindings/location/bed-1", headers=ADMIN_HEADERS)
+
+    assert resp.status_code == 204, resp.text
+    assert any(m == "DELETE" and p == "/bindings/location/bed-1" for m, p, _, _, _ in calls)
+
+
+def test_garden_valve_run_proxy_forwards_the_duration(client, calls):
+    resp = client.post(
+        "/api/garden/bindings/binding-1/valve/run", headers=ADMIN_HEADERS, json={"minutes": 3}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["minutes"] == 3
+    forwarded = next(row for row in calls if row[1].endswith("/valve/run"))
+    assert forwarded[3] == {"minutes": 3}
+    assert forwarded[4]["X-User-Id"] == "mother"
+
+
+def test_garden_valve_run_proxy_without_a_body(client, calls):
+    resp = client.post("/api/garden/bindings/binding-1/valve/run", headers=ADMIN_HEADERS)
+
+    assert resp.status_code == 200, resp.text
+    forwarded = next(row for row in calls if row[1].endswith("/valve/run"))
+    assert forwarded[3] == {}
+
+
+def test_garden_valve_stop_proxy(client, calls):
+    resp = client.post("/api/garden/bindings/binding-1/valve/stop", headers=ADMIN_HEADERS)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["stopped"] is True
+    assert any(p == "/bindings/binding-1/valve/stop" for _, p, _, _, _ in calls)
+
+
+def test_garden_tag_scan_proxy_is_open_to_a_child(client, calls):
+    resp = client.get("/api/garden/tags/tag-bed1", headers=KID_HEADERS)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["target_name"] == "Bed 1"
+    forwarded = next(row for row in calls if row[1] == "/tags/tag-bed1")
+    assert forwarded[4]["X-User-Id"] == "child"
+
+
+def test_garden_hardware_needs_authentication(client):
+    assert client.get("/api/garden/hardware/discover").status_code == 401
+    assert client.get("/api/garden/bindings").status_code == 401
+    assert client.get("/api/garden/tags/tag-bed1").status_code == 401

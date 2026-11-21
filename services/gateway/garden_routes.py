@@ -1244,3 +1244,65 @@ async def garden_plant_photo_thumb(plant_id: str, photo_id: str, request: Reques
 async def garden_delete_plant_photo(plant_id: str, photo_id: str, request: Request):
     headers = await _verified_headers(request)
     return await _call("DELETE", f"/plants/{plant_id}/photos/{photo_id}", headers=headers)
+
+
+# --------------------------------------------------------------------------- Home Hub hardware (Phase 8)
+
+
+@router.get("/hardware/discover")
+async def garden_hardware_discover(request: Request, fresh: bool = False):
+    """What garden hardware Home Hub has (drives whether the UI shows any)."""
+    headers = await _verified_headers(request)
+    return await _call(
+        "GET", "/hardware/discover", params={"fresh": "true" if fresh else "false"}, headers=headers
+    )
+
+
+@router.get("/bindings")
+async def garden_list_bindings(
+    request: Request,
+    plant_id: str | None = None,
+    location_id: str | None = None,
+):
+    """Bindings for a plant, a bed, or the whole house, with live readings."""
+    headers = await _verified_headers(request)
+    params = {key: value for key, value in (("plant_id", plant_id), ("location_id", location_id)) if value}
+    return await _call("GET", "/bindings", params=params, headers=headers)
+
+
+@router.put("/bindings/{target_kind}/{target_id}")
+async def garden_upsert_binding(target_kind: str, target_id: str, request: Request):
+    """Create or update a plant's or bed's hardware binding (parents/admins)."""
+    headers = await _verified_headers(request)
+    body = await request.json()
+    return await _call(
+        "PUT", f"/bindings/{target_kind}/{target_id}", json=body, headers=headers
+    )
+
+
+@router.delete("/bindings/{target_kind}/{target_id}")
+async def garden_delete_binding(target_kind: str, target_id: str, request: Request):
+    headers = await _verified_headers(request)
+    return await _call("DELETE", f"/bindings/{target_kind}/{target_id}", headers=headers)
+
+
+@router.post("/bindings/{binding_id}/valve/run")
+async def garden_run_valve(binding_id: str, request: Request):
+    """Open a guarded irrigation valve (parents/admins)."""
+    headers = await _verified_headers(request)
+    body = await request.json() if await request.body() else {}
+    return await _call("POST", f"/bindings/{binding_id}/valve/run", json=body, headers=headers)
+
+
+@router.post("/bindings/{binding_id}/valve/stop")
+async def garden_stop_valve(binding_id: str, request: Request):
+    """Close an irrigation valve now (parents/admins)."""
+    headers = await _verified_headers(request)
+    return await _call("POST", f"/bindings/{binding_id}/valve/stop", headers=headers)
+
+
+@router.get("/tags/{tag_id}")
+async def garden_scan_tag(tag_id: str, request: Request):
+    """Scan an NFC/QR tag: which plant or bed, and what is owed (every role)."""
+    headers = await _verified_headers(request)
+    return await _call("GET", f"/tags/{tag_id}", headers=headers)
