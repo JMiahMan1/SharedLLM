@@ -44,6 +44,27 @@ def local_date(stamp: str) -> date:
     return today(datetime.fromisoformat(stamp))
 
 
+#: Months of winter by hemisphere (meteorological, one month either side).
+NORTHERN_WINTER = (11, 12, 1, 2)
+SOUTHERN_WINTER = (5, 6, 7, 8)
+#: Within the tropics there is no winter slow-down to apply.
+TROPICS_LATITUDE = 23.5
+
+
+def is_winter(latitude: float | None, day: date | None = None) -> bool | None:
+    """Is it winter at home? ``None`` when the home latitude is unknown.
+
+    The household's latitude decides the hemisphere: Nov-Feb in the north,
+    May-Aug in the south, never inside the tropics.
+    """
+    if latitude is None:
+        return None
+    if abs(latitude) < TROPICS_LATITUDE:
+        return False
+    month = (day or today()).month
+    return month in (NORTHERN_WINTER if latitude > 0 else SOUTHERN_WINTER)
+
+
 def day_bounds_utc(day: date | None = None) -> tuple[str, str]:
     """``[start, end)`` of a household day as UTC ISO strings, for stored stamps.
 

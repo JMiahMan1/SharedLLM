@@ -98,7 +98,7 @@ from services.garden import homehub_hardware as hardware
 from services.garden import hub_rooms as rooms_hub
 from services.garden import preservation as pantry
 from services.common import household_tz
-from services.garden import clock, household
+from services.garden import clock, household, weather_care
 from services.garden.notices import collect_due_tasks, build_digest, digest_loop, send_digest_to_member
 from services.garden.skylight_sync import mirror_care_log
 from services.garden.species_lookup import (
@@ -193,6 +193,9 @@ async def lifespan(app: FastAPI):
     # The household zone, logged once with its source. Unset is not fatal here:
     # every route that needs "today" answers 503 with how to set it.
     await household_tz.startup("garden")
+    # The home latitude (for which months are winter) comes with the forecast.
+    if await weather_care._fetch_forecast() is None:
+        log.warning("[Garden] no forecast at startup: winter slow-down waits for the weather location")
     log.info("[Garden] ready db=%s seed=%s", _database_url(), _seed().path)
     # Start the quiet morning digest loop (disabled under pytest).
     digest_task = asyncio.create_task(digest_loop(_db, _family_list))
@@ -765,6 +768,7 @@ def _advance_care_rule(
         distance_from_window=plant.distance_from_window,
         season_winter=_is_winter(),
         calibration_factor=rule.calibration_factor or 1.0,
+        action=action,
     )
     rule.next_due_at = ((since or datetime.now(UTC)) + timedelta(days=result.next_due_offset_days)).isoformat()
     rule.updated_at = utcnow()
@@ -1440,10 +1444,27 @@ async def create_plant(
     return _plant_out(row, species_full, session)
 
 
+_warned_no_latitude = False
+
+
 def _is_winter() -> bool:
-    """Northern hemisphere winter: Nov-Feb (inclusive)."""
-    month = datetime.now(UTC).month
-    return month in (11, 12, 1, 2)
+    """Winter at home: the hemisphere comes from the household's location.
+
+    The latitude is the weather location's (``weather_care.home_latitude``).
+    Before it is known no seasonal slow-down is applied, and that is logged
+    once with what to set, rather than assuming the northern hemisphere.
+    """
+    global _warned_no_latitude
+    winter = clock.is_winter(weather_care.home_latitude())
+    if winter is None:
+        if not _warned_no_latitude:
+            log.warning(
+                "[Garden] the home latitude is not known yet (no weather location), so no winter "
+                "slow-down is applied to care intervals. Set the weather location to fix this."
+            )
+            _warned_no_latitude = True
+        return False
+    return winter
 
 
 def _compute_next_due(rule: dict, species: dict, plant: Plant | None = None) -> str | None:
@@ -1471,6 +1492,7 @@ def _compute_next_due(rule: dict, species: dict, plant: Plant | None = None) -> 
         distance_from_window=plant.distance_from_window if plant else None,
         season_winter=season_winter,
         calibration_factor=cal,
+        action=str(rule.get("action") or "water"),
     )
     due = datetime.now(UTC) + timedelta(days=result.next_due_offset_days)
     return due.isoformat()

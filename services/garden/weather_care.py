@@ -184,13 +184,35 @@ def _now_iso() -> str:
 # --------------------------------------------------------------------------- weather data access
 
 
+#: The home latitude, learned from the forecast's location (the household's
+#: weather location). ``None`` until a forecast has been read.
+_home_latitude: float | None = None
+
+
+def home_latitude() -> float | None:
+    """The household's latitude as last reported by the weather service."""
+    return _home_latitude
+
+
+def _remember_location(forecast: dict | None) -> None:
+    global _home_latitude
+    try:
+        lat = ((forecast or {}).get("location") or {}).get("latitude")
+        if lat is not None:
+            _home_latitude = float(lat)
+    except (TypeError, ValueError):
+        pass
+
+
 async def _fetch_forecast() -> dict | None:
     """Best-effort forecast; None when weather is unavailable."""
     try:
-        return await weather.forecast()
+        forecast = await weather.forecast()
     except Exception as e:
         log.info("[Garden weather] forecast unavailable: %s", e)
         return None
+    _remember_location(forecast)
+    return forecast
 
 
 async def _fetch_day(date_iso: str) -> dict | None:
