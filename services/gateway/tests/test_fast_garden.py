@@ -249,13 +249,13 @@ def test_an_ambiguous_name_asks_instead_of_watering_one():
     assert world.posts() == []
 
 
-def test_an_unknown_plant_is_said_plainly_when_the_garden_was_named():
+def test_an_unknown_plant_goes_back_to_the_chat_path():
     import asyncio
 
     world = World()
-    answer = asyncio.run(_say(world, "I watered the plant Audrey"))
 
-    assert answer and "couldn't find" in answer
+    # Even with the garden named, a name it does not know is the model's to answer.
+    assert asyncio.run(_say(world, "I watered the plant Audrey")) is None
     assert world.posts() == []
 
 
@@ -285,7 +285,7 @@ def test_a_garden_outage_is_admitted_not_guessed():
     world = World(outage=True)
     answer = asyncio.run(_say(world, "I watered Monty"))
 
-    assert answer == "I couldn't reach the garden just now."
+    assert answer == fast_garden.UNAVAILABLE
 
 
 def test_watering_the_plants_alone_is_too_vague():
@@ -374,13 +374,11 @@ def test_anything_due_is_only_ours_with_the_garden_named():
     assert asyncio.run(_say(world, "is anything due in the garden?")) is not None
 
 
-def test_an_unknown_name_falls_through_unless_the_garden_was_named():
+def test_an_unknown_name_always_falls_through():
     import asyncio
 
     world = World()
 
-    # "water Audrey" names nothing the garden knows and never said garden.
     assert asyncio.run(_say(world, "water Audrey")) is None
-    # "water the plant Audrey" is a garden sentence: say we could not find her.
-    answer = asyncio.run(_say(world, "water the plant Audrey"))
-    assert answer and "couldn't find" in answer
+    assert asyncio.run(_say(world, "water the plant Audrey")) is None
+    assert world.posts() == []

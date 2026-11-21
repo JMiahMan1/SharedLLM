@@ -1080,6 +1080,7 @@ def assign_plant(
 def resolve_plant_target(
     request: Request,
     q: str = Query(..., description="A personal name, species or room, as spoken or typed"),
+    whole: bool = Query(False, description="Match only names the whole phrase makes up (voice)"),
     session: Session = Depends(get_session),
 ):
     """Match a spoken name to a plant, its species, or a room (Tier 1 & 2 helpers).
@@ -1103,10 +1104,10 @@ def resolve_plant_target(
     for row in rows:
         species = species_of(row)
         ranks = [
-            _match_rank(needle, row.nickname),
-            _match_rank(needle, (species or {}).get("common_name")),
-            _match_rank(needle, (species or {}).get("scientific_name")),
-            _match_rank(needle, row.species_ref.replace("_", " ")),
+            _match_rank(needle, row.nickname, whole=whole),
+            _match_rank(needle, (species or {}).get("common_name"), whole=whole),
+            _match_rank(needle, (species or {}).get("scientific_name"), whole=whole),
+            _match_rank(needle, row.species_ref.replace("_", " "), whole=whole),
         ]
         found = [r for r in ranks if r is not None]
         if found:
@@ -1124,9 +1125,12 @@ def resolve_plant_target(
         }
 
     room_hits = sorted(
-        (rank, loc_names[loc.id], loc)
-        for loc in loc_rows
-        if (rank := _match_rank(needle, loc.name)) is not None
+        (
+            (rank, loc_names[loc.id], loc)
+            for loc in loc_rows
+            if (rank := _match_rank(needle, loc.name, whole=whole)) is not None
+        ),
+        key=lambda hit: (hit[0], hit[1]),
     )
     if room_hits:
         top_rank = room_hits[0][0]
@@ -3151,11 +3155,16 @@ def _singular(word: str) -> str:
     return word
 
 
-def _match_rank(needle: str, candidate: str | None) -> int | None:
+def _match_rank(needle: str, candidate: str | None, *, whole: bool = False) -> int | None:
     """0 exact, 1 prefix, 2 substring, None when it does not match at all.
 
     Spoken plurals match (\"tomatoes\" finds Roma Tomato), and a phrase that
     *contains* the candidate matches too (\"kitchen herbs\" finds the Kitchen).
+
+    ``whole`` is the voice fast path's mode: every word of the phrase must be part
+    of the name, matched as whole words. "bedroom" finds the Bedroom and
+    "tomatoes" finds Roma Tomato, but "the plants in the bedroom at 6" finds
+    nothing, and "hair" does not find a Maidenhair Fern.
     """
     if not needle or not candidate:
         return None
@@ -3164,6 +3173,16 @@ def _match_rank(needle: str, candidate: str | None) -> int | None:
         return None
     words = needle.split()
     forms = {needle, " ".join([*words[:-1], _singular(words[-1])])} if words else {needle}
+    if whole:
+        padded = f" {value} "
+        for form in forms:
+            if value == form:
+                return 0
+            if padded.startswith(f" {form} "):
+                return 1
+            if f" {form} " in padded:
+                return 2
+        return None
     for form in forms:
         if value == form:
             return 0
