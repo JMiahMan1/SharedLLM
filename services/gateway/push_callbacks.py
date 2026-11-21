@@ -133,8 +133,17 @@ _HOME_ACTION_MAX = 255
 async def home_notification_action(request: Request, params: dict, reply: str | None) -> dict:
     """Fire ``mobile_app_notification_action`` in the device hub with the button's action id, the
     notice's tag and, for a reply button, ``reply_text``, as the companion app does in Home
-    Assistant. ``params`` is ``{"action", "tag"?}`` (services/homehub/drivers/mobile_app.py)."""
+    Assistant. ``params`` is ``{"action", "tag"?, "exp", "sig"}`` (services/homehub/drivers/mobile_app.py).
+
+    The event can answer an automation (a lock's confirmation), so only the person the hub sent the
+    notice to may press its buttons, and only the buttons it carried: the hub signs each one for its
+    recipient (services/common/home_action_sign.py). Anything else is a 403.
+    """
+    import logging
+
+    from services.common import home_action_sign
     from services.gateway.phone_routes import _hub
+    from services.gateway.push_routes import _caller
 
     action = params.get("action")
     if not isinstance(action, str) or not action.strip() or len(action) > _HOME_ACTION_MAX:
@@ -145,6 +154,12 @@ async def home_notification_action(request: Request, params: dict, reply: str | 
         if not isinstance(tag, str) or len(tag) > _HOME_ACTION_MAX:
             raise HTTPException(status_code=422, detail="params.tag must be text")
         data["tag"] = tag
+    user = (await _caller(request))["user"]
+    refused = home_action_sign.verify(user, params)
+    if refused:
+        logging.getLogger("gateway.push_callbacks").warning(
+            "home_notification_action %r from %s refused: %s", action, user, refused)
+        raise HTTPException(status_code=403, detail=f"This notification button cannot be used: {refused}")
     if reply is not None:
         data["reply_text"] = reply
     status, _body = await _hub("POST", f"/api/events/{HOME_ACTION_EVENT}", json=data)

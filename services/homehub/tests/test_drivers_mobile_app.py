@@ -251,7 +251,13 @@ async def test_actionable_notify_keeps_its_buttons_in_the_jarvis_notice(geo, sen
             {"action": "DISMISS_ctx1", "title": "Leave it"},
             {"action": "REPLY", "title": "Say why", "behavior": "textInput"},
         ]}})
-    assert sent[-1]["actions"] == [
+    from services.common import home_action_sign
+
+    actions = sent[-1]["actions"]
+    # Each button is signed for the one person the notice went to (the gateway checks it on a tap).
+    signs = [a["params"].pop("sig") for a in actions]
+    exps = {a["params"].pop("exp") for a in actions}
+    assert actions == [
         {"label": "Lock it", "type": "callback", "callback": "home_notification_action",
          "params": {"action": "CONFIRM_ctx1", "tag": "door-check"}},
         {"label": "Leave it", "type": "callback", "callback": "home_notification_action",
@@ -259,6 +265,10 @@ async def test_actionable_notify_keeps_its_buttons_in_the_jarvis_notice(geo, sen
         {"label": "Say why", "type": "reply", "callback": "home_notification_action",
          "params": {"action": "REPLY", "tag": "door-check"}},
     ]
+    recipient, (exp,) = sent[-1]["user"], exps
+    for a, sig in zip(actions, signs, strict=True):
+        assert home_action_sign.verify(recipient, {**a["params"], "exp": exp, "sig": sig}) is None
+        assert home_action_sign.verify("someone_else", {**a["params"], "exp": exp, "sig": sig}) is not None
 
 
 async def test_notify_uri_buttons_open_web_addresses_only(geo, sent):
