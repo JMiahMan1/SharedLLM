@@ -3189,10 +3189,19 @@ def _open_terminal_exec(workspace_id: str, host_path: str) -> tuple[Any, str, An
         except Exception as e:
             raise _TerminalSetupError("Container unavailable") from e
         try:
+            from services.workspace_sandbox import _home_for_uid, build_exec_env
+
+            # A real HOME, from the sandbox's own passwd entry: bash reads
+            # $HOME/.bashrc before the first prompt, and a home the user cannot
+            # write (or /root, as a non-root user) made the shell open with
+            # permission errors and no history. TERM is what makes xterm work.
+            terminal_env = build_exec_env(home=_home_for_uid(container, SANDBOX_UID))
+            terminal_env["TERM"] = "xterm-256color"
+            terminal_env.setdefault("LANG", "C.UTF-8")
             exec_id = docker_client.api.exec_create(
                 cname,
                 cmd=["/bin/bash", "-i"],
-                environment={"TERM": "xterm-256color"},
+                environment=terminal_env,
                 user=f"{SANDBOX_UID}:{SANDBOX_GID}",
                 workdir=host_path,
                 tty=True,

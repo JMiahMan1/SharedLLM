@@ -859,9 +859,15 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # This is injected for EVERY command (not just gh/git/python) so all
         # tools (terraform, aws, gcloud, node, rust, ...) see the user's creds.
         ws_env = (ws_details or {}).get("env") or {}
-        cmd_env = os.environ.copy()
-        cmd_env.update(build_sandbox_env(user_ctx, ws_env))
-        cmd_env["HOME"] = "/home/sharedllm"
+        # Only the user's own integration credentials plus the workspace's own
+        # overrides. Passing os.environ.copy() here handed the sandbox the
+        # execution service's whole environment (INTERNAL_SECRET, FERNET_KEY,
+        # cloud keys) -- exactly what workspace_sandbox's allowlist exists to
+        # prevent -- and a hardcoded HOME=/home/sharedllm that only exists in the
+        # gateway image, so npm/pip/git inside the sandbox failed with EACCES.
+        # HOME is chosen by the sandbox itself, from the container's passwd entry.
+        cmd_env = build_sandbox_env(user_ctx, ws_env)
+        cmd_env.pop("HOME", None)
         cmd_env["GH_PROMPT_DISABLED"] = "1"
         _gh_tok = cmd_env.get("GITHUB_TOKEN")
         if _gh_tok and base_command == "git":
@@ -908,7 +914,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                     await _bind_workspace_repo(workspace_id, _target_url)
                 except Exception:
                     log.debug("best-effort repo_url bind after push failed", exc_info=True)
-            cmd_prefix = req.command[:50] if req.command else "<unknown>"
+            cmd_prefix = (req.command or " && ".join(req.commands or []) or "<empty>")[:50]
             return _ok(f"Command executed successfully: {cmd_prefix}...", detail)
         else:
             log.error(f"[WORKSPACE SHELL FAIL] command='{final_cmd}' rc={rc} cwd={abs_cwd}\nstdout: {stdout}\nstderr: {stderr}")
