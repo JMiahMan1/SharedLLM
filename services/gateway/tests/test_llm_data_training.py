@@ -59,7 +59,10 @@ def _ast_dict(var_name: str) -> dict[str, str]:
 
 
 def test_every_live_raven_tool_is_in_capability_index():
-    indexed = {**_ast_dict("schema_map"), **_ast_dict("storage_map")}
+    from services.gateway.studio import tools as studio_tools
+
+    # The studio's tools are indexed from its own action table, not a literal.
+    indexed = {**_ast_dict("schema_map"), **_ast_dict("storage_map"), **studio_tools.TOOL_ACTIONS}
     expected = {row[0] for row in _RAVEN_TOOL_TABLE if row[0] != "StorageListRequest"}
     expected |= {"LocationRequest", "RavenMissionRequest"}
     missing = sorted(expected - set(indexed))

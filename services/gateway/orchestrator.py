@@ -537,12 +537,19 @@ _SINGLE_TURN_ONLY_TOOLS: dict[str, tuple[str, str]] = {
     # Location is answered for chat and voice; Raven has no use for it.
     "locationrequest": ("execution", "/execute/location"),
 }
+#: Service key of the tools the gateway runs itself (the Workspace Studio).
+GATEWAY_IN_PROCESS = "gateway_in_process"
+
 _SERVICE_SETTINGS_KEY = {
     "execution": "execution_svc_url",
     "workspace_runtime": "workspace_runtime_svc_url",
     "rag": "rag_svc_url",
     "storage": "storage_svc_url",
     "identity": "identity_svc_url",
+    # The Workspace Studio lives in this process: _execute_single_tool runs its
+    # rows in-process (studio/tools.py), never over HTTP. The key names no URL
+    # setting, so a row that ever reached the HTTP path fails loudly.
+    "gateway": GATEWAY_IN_PROCESS,
 }
 _SINGLE_TURN_TOOLS = {**single_turn_tools(), **_SINGLE_TURN_ONLY_TOOLS}
 
@@ -550,11 +557,12 @@ _SINGLE_TURN_TOOLS = {**single_turn_tools(), **_SINGLE_TURN_ONLY_TOOLS}
 SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {name: path for name, (_svc, path) in _SINGLE_TURN_TOOLS.items()}
 
 # Tool -> service settings key, for every tool not on the execution service.
-# Gateway rows (the Workspace Studio) are run in-process by _execute_single_tool.
+# Gateway rows (the Workspace Studio) map to GATEWAY_IN_PROCESS and are run
+# in-process by _execute_single_tool.
 _TOOL_SERVICE_MAP = {
     name: _SERVICE_SETTINGS_KEY[svc]
     for name, (svc, _path) in _SINGLE_TURN_TOOLS.items()
-    if svc not in ("execution", "gateway")
+    if svc != "execution"
 }
 
 # Tools that legitimately run for minutes. Everything else gets 60 seconds.
@@ -1419,6 +1427,8 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
     elif action in SINGLE_TURN_TOOL_ENDPOINTS:
         endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
         svc_key = _TOOL_SERVICE_MAP.get(action, "execution_svc_url")
+        if svc_key == GATEWAY_IN_PROCESS:
+            raise RuntimeError(f"{action} is a gateway tool and must run in-process, not over HTTP")
         svc_base = _get(settings, svc_key)
 
         try:
