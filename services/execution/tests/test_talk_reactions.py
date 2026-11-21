@@ -154,3 +154,22 @@ async def test_ordinary_system_lines_still_show(provider):
     result = await talk_handler.handle_talk(request("wait", token="room-alpha", last_known_id=13, wait_s=5))
 
     assert [m["id"] for m in result.detail["messages"]] == [14]
+
+
+async def test_a_full_page_with_reactions_in_it_still_has_more(provider):
+    # Three raw items for a page of three: one is a reaction, so only two are drawn,
+    # but Talk filled the page, so there are older messages to show.
+    provider.answers = [(True, [reaction_update(12, 10), talk_message(11), talk_message(10)], "")]
+
+    result = await talk_handler.handle_talk(request("messages", token="room-alpha", limit=3))
+
+    assert [m["id"] for m in result.detail["messages"]] == [11, 10]
+    assert result.detail["has_more"] is True
+
+
+async def test_a_short_page_is_the_whole_history(provider):
+    provider.answers = [(True, [talk_message(11), talk_message(10)], "")]
+
+    result = await talk_handler.handle_talk(request("messages", token="room-alpha", limit=3))
+
+    assert result.detail["has_more"] is False
