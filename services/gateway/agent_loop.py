@@ -1352,6 +1352,64 @@ def detect_repetitive_action(recent: list[tuple[str, bool]], window: int = 8) ->
     return len({sig for sig, _ in last}) == 1
 
 
+#: The mission-loop detector looks at this many recent tool calls...
+MISSION_LOOP_WINDOW = 16
+#: ...and calls it a loop when one read-only or failing call recurs this often,
+MISSION_LOOP_SAME_CALL = 5
+#: or when one error comes back this often, whatever call produced it.
+MISSION_LOOP_SAME_ERROR = 4
+#: Writes are allowed to recur (edit, test, edit again is normal work).
+_MUTATING_ACTIONS = ("workspacefilewriterequest", "workspacefilepatchrequest", "gitoperationrequest")
+
+
+def error_digest(exec_data: object) -> str:
+    """A short, stable form of a tool error, so the same error is recognised again.
+
+    Digits are folded (line numbers, ports, counts change between attempts) and
+    whitespace collapsed; only the first 120 characters count.
+    """
+    if not isinstance(exec_data, dict):
+        return ""
+    message = str(exec_data.get("message") or exec_data.get("error") or exec_data.get("stderr") or "")
+    message = re.sub(r"\d+", "N", message)
+    return re.sub(r"\s+", " ", message).strip()[:120]
+
+
+def detect_mission_loop(
+    history: list[tuple[str, bool, str]],
+    *,
+    window: int = MISSION_LOOP_WINDOW,
+    same_call: int = MISSION_LOOP_SAME_CALL,
+    same_error: int = MISSION_LOOP_SAME_ERROR,
+) -> str | None:
+    """``"looping: <call or error> repeated N times"`` when a mission goes round in circles.
+
+    ``history`` holds ``(signature, succeeded, error_digest)`` per tool call.
+    Unlike :func:`detect_repetitive_action` the repeats need not be
+    consecutive: alternating between two dead ends (read, fail, read, fail) is
+    the loop that used to run all the way to the iteration cap.
+    """
+    recent = history[-window:]
+    calls: dict[str, int] = {}
+    for sig, ok, _err in recent:
+        if ok and sig.split("::", 1)[0] in _MUTATING_ACTIONS:
+            continue
+        calls[sig] = calls.get(sig, 0) + 1
+    if calls:
+        sig, count = max(calls.items(), key=lambda item: item[1])
+        if count >= same_call:
+            return f"looping: {sig[:120]} repeated {count} times"
+    errors: dict[str, int] = {}
+    for _sig, ok, err in recent:
+        if not ok and err:
+            errors[err] = errors.get(err, 0) + 1
+    if errors:
+        err, count = max(errors.items(), key=lambda item: item[1])
+        if count >= same_error:
+            return f"looping: error '{err[:80]}' repeated {count} times"
+    return None
+
+
 # Shell commands that carry no git intent and are safe to drop when they appear
 # alongside intercepted git/gh ops (they only echo status / change dir).
 _SHELL_NOISE_CMDS = {
@@ -3008,6 +3066,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     _verification_nudge_sent = False
     _stagnation_nudge_sent = False
     _loop_nudge_sent = False
+    # (signature, succeeded, error digest) per tool call, for detect_mission_loop.
+    _loop_history: list[tuple[str, bool, str]] = []
+    _mission_loop_nudged_at: int | None = None
     _shell_loop_nudge_sent = False
     _shell_loop_diversify_sent = False
     _consecutive_no_tool = 0
@@ -5079,6 +5140,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         _consecutive_no_tool = 0
                         sig = action_signature(action_name, payload)
                         _recent_actions.append((sig, True))
+                        _loop_history.append((sig, True, ""))
                         if len(_recent_actions) > 12:
                             _recent_actions = _recent_actions[-12:]
                         if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
@@ -5122,6 +5184,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     successful_tool_calls -= 1
                                     sig2 = action_signature(action_name, payload)
                                     _recent_actions.append((sig2, False))
+                                    if _loop_history:
+                                        _loop_history[-1] = (sig2, False, error_digest(exec_data))
                                     if len(_recent_actions) > 12:
                                         _recent_actions = _recent_actions[-12:]
                                 else:
@@ -5133,6 +5197,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     else:
                         sig = action_signature(action_name, payload)
                         _recent_actions.append((sig, False))
+                        _loop_history.append((sig, False, error_digest(exec_data)))
                         if len(_recent_actions) > 12:
                             _recent_actions = _recent_actions[-12:]
                         if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
@@ -5233,6 +5298,28 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # STAGE 3: hard cap: probe + redirect both failed to break the loop.
                 log.error("[AgentLoop] No-progress loop persists after probe + route redirect. Terminating.")
                 ans = "ERROR: Detected a no-progress loop (same command repeated with identical output despite a probe and a route redirect). Aborting to avoid runaway."
+                await _clear_checkpoint()
+                break
+
+        # --- MISSION LOOP (fail fast instead of burning to the iteration cap) ---
+        # The same read-only or failing call, or the same error, keeps coming
+        # back even when the repeats are not consecutive. Nudge once; when it is
+        # still looping two calls later, stop with the cause named, so the
+        # trainer files it as a loop (a model mistake) rather than a timeout.
+        _loop_reason = detect_mission_loop(_loop_history)
+        if _loop_reason:
+            if _mission_loop_nudged_at is None:
+                _mission_loop_nudged_at = len(_loop_history)
+                log.warning(f"[AgentLoop] {_loop_reason}; nudging once.")
+                action_log.append(
+                    f"ITERATION {iter_num}: {_loop_reason}. You are going round in circles. "
+                    f"Do something different now (another tool, other arguments, read the error), "
+                    f"or finish and report what blocks you. The mission stops if this repeats."
+                )
+            elif detect_mission_loop(_loop_history[_mission_loop_nudged_at:], same_call=2, same_error=2):
+                # The nudge did not help: the same call or error came back twice since.
+                log.error(f"[AgentLoop] {_loop_reason} after a nudge. Stopping the mission.")
+                ans = f"ERROR: {_loop_reason}. Stopped early instead of running to the iteration cap."
                 await _clear_checkpoint()
                 break
 
