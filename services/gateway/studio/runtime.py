@@ -371,10 +371,10 @@ async def _run_probe(
 def _verify_hint(verdict: dict[str, Any], diagnosis: dict[str, Any]) -> str:
     """One sentence naming the first thing that is actually broken."""
     if verdict["ok"]:
+        ran = bool(verdict["tests"]) and verdict["tests"].get("available") is not False
         return (
             f"{verdict['label']}: the shell works, a program runs, and "
-            + ("the tests pass." if verdict["tests"] and verdict["tests"].get("available")
-               else "there are no tests to run.")
+            + ("the tests pass." if ran else "there are no tests to run.")
         )
     if not verdict["shell"]["ok"]:
         return str(diagnosis.get("hint") or "the sandbox shell is not usable")

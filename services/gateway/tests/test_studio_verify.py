@@ -224,3 +224,20 @@ async def test_a_broken_shell_is_not_mistaken_for_failing_tests(answering_shell,
     # the tests were never reached, so they are not blamed
     assert verdict["tests"] is not None and verdict["tests"]["ok"] is True
 
+
+
+async def test_a_passing_run_says_the_tests_pass_not_that_there_are_none(
+    answering_shell, workspace
+):
+    """A real RunResult carries no 'available' flag; it still ran its tests."""
+    _healthy(answering_shell)
+    answering_shell["answers"]["python3 _studio_probe.py"] = {
+        "status": "SUCCESS",
+        "detail": {"returncode": 0, "stdout": "studio-ok from python", "stderr": ""},
+    }
+
+    verdict = await runtime.verify("ws1")
+
+    assert verdict["ok"] is True
+    assert "the tests pass" in verdict["hint"]
+    assert "no tests to run" not in verdict["hint"]
