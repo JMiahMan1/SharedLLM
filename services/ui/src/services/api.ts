@@ -32,6 +32,13 @@ import type {
   TrainerReport,
   TrainerReportSummary,
 } from '../lib/trainer';
+import type {
+  StudioAsset,
+  StudioBuilt,
+  StudioPreview,
+  StudioProfile,
+  StudioRunResult,
+} from '../lib/studio';
 import { Capacitor } from '@capacitor/core';
 import { nativeBinaryAdapter, wantsNativeBinary } from '../lib/nativeBinary';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
@@ -5073,6 +5080,78 @@ export const api = {
   /** Alpaca's own benchmark results: the model's report card, weakest first. */
   async trainerBenchmarks(): Promise<TrainerBenchmarks> {
     const resp = await apiClient.get('/api/trainer/benchmarks', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  // Workspace Studio: what a workspace's project is, how to run and preview it,
+  // and the art / decks / games made for it.
+  async studioProfile(workspaceId: string): Promise<StudioProfile> {
+    const resp = await apiClient.get('/api/studio/profile', { params: { workspace_id: workspaceId } });
+    return resp.data;
+  },
+
+  async studioRun(
+    workspaceId: string,
+    action: string,
+    timeoutS = 600,
+  ): Promise<StudioRunResult> {
+    // A first npm install or a cargo build can take minutes; the default axios
+    // timeout would abandon a run that is still going.
+    const resp = await apiClient.post(
+      '/api/studio/run',
+      { workspace_id: workspaceId, action, timeout: timeoutS },
+      { timeout: (timeoutS + 60) * 1000 },
+    );
+    return resp.data;
+  },
+
+  async studioPreview(workspaceId: string, port?: number): Promise<StudioPreview> {
+    const resp = await apiClient.post(
+      '/api/studio/preview',
+      { workspace_id: workspaceId, ...(port ? { port } : {}) },
+      { timeout: 120_000 },
+    );
+    return resp.data;
+  },
+
+  async studioStopPreview(workspaceId: string): Promise<{ stopped_process: boolean; closed_ports: number[] }> {
+    const resp = await apiClient.post('/api/studio/preview/stop', { workspace_id: workspaceId });
+    return resp.data;
+  },
+
+  async studioAssets(workspaceId: string): Promise<{ assets: StudioAsset[]; updated_at: string | null }> {
+    const resp = await apiClient.get('/api/studio/assets', { params: { workspace_id: workspaceId } });
+    return resp.data;
+  },
+
+  async studioMakeImage(
+    workspaceId: string,
+    prompt: string,
+    name?: string,
+  ): Promise<StudioAsset> {
+    const resp = await apiClient.post(
+      '/api/studio/assets/image',
+      { workspace_id: workspaceId, prompt, ...(name ? { name } : {}) },
+      { timeout: 660_000 },
+    );
+    return resp.data;
+  },
+
+  async studioBuildDeck(workspaceId: string, markdown: string, title = ''): Promise<StudioBuilt> {
+    const resp = await apiClient.post('/api/studio/deck', { workspace_id: workspaceId, markdown, title });
+    return resp.data;
+  },
+
+  async studioScaffoldGame(
+    workspaceId: string,
+    title: string,
+    sprites?: Record<string, string>,
+  ): Promise<StudioBuilt> {
+    const resp = await apiClient.post('/api/studio/game', {
+      workspace_id: workspaceId,
+      title,
+      ...(sprites ? { sprites } : {}),
+    });
     return resp.data;
   },
 

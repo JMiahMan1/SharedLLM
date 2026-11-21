@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from services.gateway.trainer import selffix, workspace_api
+from services.gateway import workspace_api
+from services.gateway.trainer import selffix
 
 BROKEN = "def mean(values):\n    return sum(values) / len(values) + 1\n"
 FIXED = "def mean(values):\n    return sum(values) / len(values)\n"

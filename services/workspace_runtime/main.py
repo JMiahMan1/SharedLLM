@@ -435,6 +435,10 @@ class WorkspaceExposePortRequest(WorkspaceRef):
     host_port: int | None = None
 
 
+class WorkspaceUnexposePortRequest(WorkspaceRef):
+    host_port: int
+
+
 class PytestRequest(WorkspaceRef):
     targets: list[str] = Field(default_factory=list)
     timeout_seconds: int = Field(default=DEFAULT_PYTEST_TIMEOUT_SECONDS, ge=1, le=900)
@@ -2303,6 +2307,21 @@ def expose_workspace_port_endpoint(req: WorkspaceExposePortRequest, x_internal_s
     workspace = _resolve_workspace(req, check_recovery=True)
     from services.workspace_sandbox import expose_workspace_port
     return expose_workspace_port(workspace["id"], req.container_port, req.host_port)
+
+
+@app.post("/ports/unexpose")
+@app.post("/workspaces/ports/unexpose")
+def unexpose_workspace_port_endpoint(req: WorkspaceUnexposePortRequest, x_internal_secret: str | None = Header(default=None)):
+    """Stop forwarding one published workspace port (a preview server was stopped).
+
+    Resolving the workspace first keeps the same access rules as exposing it: a
+    caller who could not open the forward cannot close somebody else's.
+    """
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    from services.workspace_sandbox import unexpose_workspace_port
+    removed = unexpose_workspace_port(workspace["id"], req.host_port)
+    return {"status": "SUCCESS", "removed": removed, "host_port": req.host_port}
 
 
 @app.get("/ports/list/{workspace_id}")

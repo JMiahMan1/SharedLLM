@@ -165,6 +165,7 @@ Playback control (execution service):
 - `GET /health`: service health
 - `POST /files/read`, `POST /files/write`, `POST /files/delete`: workspace files
 - `POST /git/status`, `POST /git/pull`, `POST /git/commit`, ...: repository operations
+- `POST /ports/expose` `{workspace_id, container_port}`: publish a sandbox port through a TCP forward (returns `url` and `host_port`); `GET /ports/list/{workspace_id}`: the ports currently published; `POST /ports/unexpose` `{workspace_id, host_port}`: stop forwarding one of them
 - `POST /provider/sync/workspace`: sync a workspace with its Nextcloud folder
 - `POST /api/webhook/git-pull/{id}` (public via Caddy, authenticated by the workspace's webhook token): pull on push
 
@@ -204,6 +205,17 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 - `GET /api/integrations/skylight/members`, `POST /api/integrations/skylight/chores`, `PATCH`/`DELETE /api/integrations/skylight/chores/{id}` (`?apply_to=one|all`): parents (admins, the father, the mother) add, change and remove Skylight chores; `GET /api/integrations/skylight/chores?scope=<name>` lets them see anyone's. See `docs/ACHIEVEMENTS.md`, "Managing chores"
 - `GET /api/presence/all`, `GET /api/presence/rooms`, `GET /api/presence/{user_id}`:
   who is in which room (from the execution service). Signed-in caller only
+
+## Workspace Studio (a workspace that builds, runs and makes things, `docs/WORKSPACE_STUDIO.md`)
+
+- `GET /api/studio/profile?workspace_id=`: the detected stack (Python, Node/Vite/Next, Go, Rust, Java, .NET, static, unknown), the exact commands for its install/test/build/lint/serve steps, the preview port, and `all_stacks` when a repo holds more than one (signed-in caller)
+- `POST /api/studio/run` `{workspace_id, action, timeout}`: run one profile step in the workspace's sandbox and return `ok`, `returncode`, `duration_s`, the tail of `stdout`/`stderr` and the command that ran; a step the stack does not have is a 400 naming the ones it does
+- `POST /api/studio/preview` `{workspace_id, port?}`: start the dev server detached in the sandbox, publish its port, poll the URL, and return `{ok, url, container_port, host_port, log}`; `POST /api/studio/preview/stop` `{workspace_id}`: kill the recorded PID and close every published port
+- `GET /api/studio/assets?workspace_id=`: the art and audio made for this workspace, with the prompt and model that made each
+- `POST /api/studio/assets/image` `{workspace_id, prompt, name?, size?, model?}`: generate a picture into `assets/` through the household's image model
+- `POST /api/studio/assets/narration` `{workspace_id, text, name?, voice?}`: speak text into `assets/<name>.wav`
+- `POST /api/studio/deck` `{workspace_id, markdown, title?, footer?}`: render Markdown into one self-contained `decks/<slug>/index.html` (offline, keyboard and swipe), keeping `source.md` beside it
+- `POST /api/studio/game` `{workspace_id, title, sprites?}`: write a playable single-file canvas game to `games/<slug>/index.html` with a README that says what to edit
 
 ## Trainer (the local model's classroom, `docs/JARVIS_TRAINER.md`)
 

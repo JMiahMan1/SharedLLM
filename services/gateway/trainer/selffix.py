@@ -18,7 +18,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from services.gateway.trainer import workspace_api as ws
+from services.gateway import workspace_api as ws
 
 log = logging.getLogger("gateway.trainer.selffix")
 

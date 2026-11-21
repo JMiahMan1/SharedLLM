@@ -22,8 +22,8 @@ from typing import Any
 
 import aiohttp
 
+from services.gateway import workspace_api as ws
 from services.gateway.config import EXECUTION_SVC, INTERNAL_SECRET
-from services.gateway.trainer import workspace_api as ws
 
 log = logging.getLogger("gateway.trainer.sermon")
 
