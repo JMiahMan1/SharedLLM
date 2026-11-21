@@ -77,21 +77,30 @@ test('nothing raw reaches the gateway or the log', { skip: !(pythonOk && sqliteO
   const keyFile = path.join(work, 'key');
   const KEY = 'e2e-key-' + 'Z9'.repeat(10);
   fs.writeFileSync(keyFile, KEY);
-  const namesFile = path.join(work, 'names.txt');
-  fs.writeFileSync(namesFile, fixture.names.join('\n'));
   const envFile = path.join(work, '.env');
   fs.writeFileSync(envFile, fixture.env_file_lines.map((l) => l[0] + join(l.slice(1))).join('\n'));
 
   const bodies = [];
   const auth = [];
+  const heartbeats = [];
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
+      res.setHeader('Content-Type', 'application/json');
+      if (req.url === '/api/trainer/teacher/scrub-names') {
+        // The household's names come from Identity through the gateway.
+        res.end(JSON.stringify({ names: fixture.names }));
+        return;
+      }
+      if (req.url === '/api/trainer/teacher/heartbeat') {
+        heartbeats.push(JSON.parse(body));
+        res.end('{}');
+        return;
+      }
       bodies.push(body);
       auth.push(req.headers.authorization);
       const ids = JSON.parse(body).traces.map((t) => t.id);
-      res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ accepted: ids, updated: [], refused: [] }));
     });
   });
@@ -101,7 +110,7 @@ test('nothing raw reaches the gateway or the log', { skip: !(pythonOk && sqliteO
   const config = {
     ...resolveConfig({
       enabled: true, projects: [project], repo: REPO, python: PYTHON,
-      gateway: `http://127.0.0.1:${server.address().port}`, keyFile, namesFile, envFiles: [envFile],
+      gateway: `http://127.0.0.1:${server.address().port}`, keyFile, envFiles: [envFile],
       stateDir: path.join(work, 'state'), opencodeDb: dbFile, workDir: path.join(work, 'snap'),
     }, project),
     debounceSeconds: 0,
@@ -121,6 +130,8 @@ test('nothing raw reaches the gateway or the log', { skip: !(pythonOk && sqliteO
   for (const name of fixture.names) assert.ok(!sent.toLowerCase().includes(name.toLowerCase()), 'a name reached the gateway');
   const traces = JSON.parse(bodies[0]).traces;
   assert.equal(traces.length, 2);
+  assert.equal(heartbeats.at(-1).ok, true, 'the gateway hears how the sync went');
+  assert.ok(!JSON.stringify(heartbeats).includes(KEY));
   assert.ok(traces.every((t) => t.scrub.status === 'dropped'), 'a cloud session that touched secrets is dropped whole');
   const logged = JSON.stringify(logs);
   assert.ok(!logged.includes(KEY), 'the key reached the log');

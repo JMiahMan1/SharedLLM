@@ -28,8 +28,8 @@ and never sees the API key: it passes the key file's *path*.
 
 ## Install (after review)
 
-1. Prerequisites: `python3` 3.11+ and a SharedLLM checkout on the Mac; the names
-   file and key file from the runbook in `docs/TEACHER_TRACES.md`.
+1. Prerequisites: `python3` 3.11+ and a SharedLLM checkout on the Mac; the uploader
+   key file from the runbook in `docs/TEACHER_TRACES.md` (household names are fetched from Identity).
 2. Copy or link the plugin where opencode loads local plugins:
    ```bash
    mkdir -p ~/.config/opencode/plugins/trainer-sync
@@ -44,7 +44,6 @@ and never sees the API key: it passes the key file's *path*.
        "repo": "~/Code/SharedLLM",
        "gateway": "https://<jarvis>",
        "keyFile": "~/.config/sharedllm/trainer-key",
-       "namesFile": "~/.config/sharedllm/teacher-names.txt",
        "projects": ["~/Code/SharedLLM", "~/Code/alpaca"]
      }]
    ]

@@ -67,6 +67,10 @@ DEFAULT_NAMES_FILE = pathlib.Path(os.getenv("TEACHER_SCRUB_NAMES_FILE") or "~/.c
 DEFAULT_EXCLUDE_FILE = pathlib.Path("~/.config/sharedllm/teacher-exclude.txt")
 DEFAULT_STATE_DIR = pathlib.Path(os.getenv("TEACHER_TRACE_STATE_DIR") or "~/.local/state/sharedllm-teacher")
 UPLOAD_PATH = "/api/trainer/teacher/traces"
+NAMES_PATH = "/api/trainer/teacher/scrub-names"
+HEARTBEAT_PATH = "/api/trainer/teacher/heartbeat"
+#: A cached names list older than this is not trusted for an upload.
+NAMES_CACHE_MAX_AGE_S = 24 * 3600
 UPLOAD_BATCH = 50
 
 EXIT_QUEUED = 3
@@ -130,6 +134,7 @@ def opencode_sessions(
     since: str | None,
     until: str | None,
     include_children: bool,
+    updated_after_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -145,6 +150,9 @@ def opencode_sessions(
     if stop is not None:
         clauses.append("time_created < ?")
         params.append(stop)
+    if updated_after_ms is not None:
+        clauses.append("time_updated >= ?")
+        params.append(updated_after_ms)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
         f"SELECT id, directory, model, time_created FROM session_v2 {where} ORDER BY time_created", params
@@ -160,7 +168,14 @@ def opencode_traces(conn: sqlite3.Connection, session: dict[str, Any], local_pro
     return traces.opencode_tasks(session, rows, local_providers=local_providers)
 
 
-def cline_sessions(cline_dir: pathlib.Path, *, session_ids: list[str], since: str | None, until: str | None) -> Iterator[pathlib.Path]:
+def cline_sessions(
+    cline_dir: pathlib.Path,
+    *,
+    session_ids: list[str],
+    since: str | None,
+    until: str | None,
+    updated_after_ms: int | None = None,
+) -> Iterator[pathlib.Path]:
     if not cline_dir.is_dir():
         return
     start, stop = _epoch_ms(since), _epoch_ms(until, end=True)
@@ -168,7 +183,10 @@ def cline_sessions(cline_dir: pathlib.Path, *, session_ids: list[str], since: st
         if session_ids and folder.name not in session_ids:
             continue
         meta_path = folder / f"{folder.name}.json"
-        if not meta_path.is_file() or not (folder / f"{folder.name}.messages.json").is_file():
+        messages_path = folder / f"{folder.name}.messages.json"
+        if not meta_path.is_file() or not messages_path.is_file():
+            continue
+        if updated_after_ms is not None and messages_path.stat().st_mtime * 1000 < updated_after_ms:
             continue
         if start is not None or stop is not None:
             started = _cline_started_ms(meta_path)
@@ -198,13 +216,90 @@ def cline_traces(folder: pathlib.Path, local_providers: list[str]) -> list[dict[
 # ---------------------------------------------------------------------------
 
 
-def scrub_config(args: argparse.Namespace) -> scrub.ScrubConfig:
-    names: list[str] = []
-    if not args.no_names:
+def get_json(url: str, key: str, timeout: float = 30.0) -> dict[str, Any]:
+    """GET with the bearer key (the one seam tests replace for reads)."""
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
+    with urllib.request.urlopen(request, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8") or "{}")
+    return data if isinstance(data, dict) else {}
+
+
+def post_json(url: str, key: str, body: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
+    """POST with the bearer key (the one seam tests replace for small writes)."""
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8") or "{}")
+    return data if isinstance(data, dict) else {}
+
+
+class NamesUnavailable(CollectError):
+    """The household names could not be fetched (and no fresh cache exists)."""
+
+
+def names_cache(state_dir: pathlib.Path) -> pathlib.Path:
+    return state_dir / "names.json"
+
+
+def fetch_names(args: argparse.Namespace, state_dir: pathlib.Path, *, now: float | None = None) -> list[str]:
+    """The household's names from the gateway (Identity's family directory).
+
+    Cached in the state directory (mode 600). When the gateway cannot be asked,
+    a cache younger than ``NAMES_CACHE_MAX_AGE_S`` is used; otherwise the run
+    refuses to scrub for upload at all (fail closed).
+    """
+    now = time.time() if now is None else now
+    url, key = gateway_url(args), read_key(args)
+    try:
+        names = [str(n) for n in get_json(url + NAMES_PATH, key).get("names") or [] if str(n).strip()]
+        if not names:
+            raise CollectError("the gateway returned no household names")
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, CollectError) as exc:
+        cache = names_cache(state_dir)
         try:
-            names = scrub.load_names(args.names_file)
-        except (FileNotFoundError, ValueError) as exc:
-            raise CollectError(str(exc)) from exc
+            cached = json.loads(cache.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cached = {}
+        if cached.get("names") and now - float(cached.get("fetched_at") or 0) <= NAMES_CACHE_MAX_AGE_S:
+            return list(cached["names"])
+        raise NamesUnavailable(
+            f"household names could not be fetched ({_reason(exc)}) and there is no fresh cache; "
+            "nothing was scrubbed or sent, the next run retries"
+        ) from exc
+    state_dir.mkdir(parents=True, exist_ok=True)
+    cache = names_cache(state_dir)
+    tmp = cache.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"names": names, "fetched_at": now}), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, cache)
+    return names
+
+
+def _reason(exc: BaseException) -> str:
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"the gateway answered {exc.code}"
+    return f"{type(exc).__name__}: {exc}"[:200]
+
+
+def scrub_config(args: argparse.Namespace, *, remote_names: list[str] | None = None) -> scrub.ScrubConfig:
+    """Names from the gateway (when given) plus the optional local names file."""
+    names: list[str] = list(remote_names or [])
+    names_file = pathlib.Path(args.names_file or DEFAULT_NAMES_FILE).expanduser()
+    if not args.no_names:
+        if args.names_file or names_file.is_file():
+            try:
+                names += scrub.load_names(names_file)
+            except (FileNotFoundError, ValueError) as exc:
+                raise CollectError(str(exc)) from exc
+        if not names:
+            raise CollectError(
+                "No household names: pass --gateway and a key so they are fetched from Identity, "
+                f"add {names_file}, or pass --no-names (counts-only dry runs)."
+            )
     env_files = args.env_file or [p for p in (ROOT / ".env",) if p.is_file()]
     return scrub.ScrubConfig(
         names=tuple(names),
@@ -340,7 +435,9 @@ def flush_queue(args: argparse.Namespace, state_dir: pathlib.Path) -> dict[str, 
 # ---------------------------------------------------------------------------
 
 
-def collect_raw(args: argparse.Namespace, work_dir: pathlib.Path) -> list[dict[str, Any]]:
+def collect_raw(
+    args: argparse.Namespace, work_dir: pathlib.Path, *, updated_after_ms: int | None = None
+) -> list[dict[str, Any]]:
     """Every selected task as a raw (unscrubbed) trace. Never written or sent."""
     found: list[dict[str, Any]] = []
     local = [p.strip() for p in args.local_providers.split(",") if p.strip()]
@@ -353,7 +450,7 @@ def collect_raw(args: argparse.Namespace, work_dir: pathlib.Path) -> list[dict[s
             try:
                 for session in opencode_sessions(
                     conn, session_ids=args.session or [], since=args.since, until=args.until,
-                    include_children=args.include_subagents,
+                    include_children=args.include_subagents, updated_after_ms=updated_after_ms,
                 ):
                     if session["id"] in excluded:
                         continue
@@ -366,7 +463,10 @@ def collect_raw(args: argparse.Namespace, work_dir: pathlib.Path) -> list[dict[s
         cline_dir = pathlib.Path(args.cline_dir).expanduser()
         if not cline_dir.is_dir() and args.source == "cline":
             raise CollectError(f"No Cline sessions at {cline_dir}")
-        for folder in cline_sessions(cline_dir, session_ids=args.session or [], since=args.since, until=args.until):
+        for folder in cline_sessions(
+            cline_dir, session_ids=args.session or [], since=args.since, until=args.until,
+            updated_after_ms=updated_after_ms,
+        ):
             if folder.name in excluded:
                 continue
             found += cline_traces(folder, local)
@@ -419,7 +519,11 @@ def write_jsonl(path: pathlib.Path, rows: list[dict[str, Any]]) -> None:
 
 
 def cmd_collect(args: argparse.Namespace) -> int:
-    config = scrub_config(args)
+    remote = None
+    if args.upload:
+        # An upload is scrubbed with the household's names from Identity, always.
+        remote = fetch_names(args, pathlib.Path(args.state_dir).expanduser())
+    config = scrub_config(args, remote_names=remote)
     with tempfile.TemporaryDirectory(dir=_work_root(args), prefix="snapshot-") as work:
         raw = collect_raw(args, pathlib.Path(work))
     scrubbed = scrub_all(raw, config, per_task=args.per_task_policy)
@@ -462,19 +566,52 @@ def _save_state(state_dir: pathlib.Path, state: dict[str, Any]) -> None:
     os.replace(tmp, state_dir / "state.json")
 
 
+def post_heartbeat(args: argparse.Namespace, report: dict[str, Any]) -> str | None:
+    """Tell the gateway how this run went (counts and an error line only)."""
+    try:
+        url, key = gateway_url(args), read_key(args)
+    except CollectError as exc:
+        return str(exc)
+    try:
+        post_json(url + HEARTBEAT_PATH, key, report)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        return _reason(exc)
+    return None
+
+
+#: Sessions touched this long before the last full sync are looked at again.
+FULL_SYNC_OVERLAP_MS = 3600 * 1000
+
+
 def cmd_sync(args: argparse.Namespace) -> int:
-    """Send one session's new tasks; queue them when the gateway is unreachable."""
-    if not args.session:
-        raise CollectError("sync needs --session")
+    """Send new tasks (one session, or every session touched since the last run).
+
+    Fails closed: without the household's names nothing is scrubbed or sent,
+    the state is not advanced, and the next run tries again. A failed upload
+    is queued (scrubbed) and flushed by the next run. Either way the gateway
+    gets a heartbeat saying what happened.
+    """
     state_dir = pathlib.Path(args.state_dir).expanduser()
-    config = scrub_config(args)
     gateway_url(args)
     read_key(args)  # fail before reading anything when the key is missing
     flushed = flush_queue(args, state_dir)
     state = _load_state(state_dir)
+    started_ms = int(time.time() * 1000)
+    heartbeat: dict[str, Any] = {"command": "sync", "ok": True, "pending_sessions": 0}
+    try:
+        names = fetch_names(args, state_dir)
+    except NamesUnavailable as exc:
+        heartbeat.update(ok=False, error=str(exc), queue_length=_queue_length(state_dir))
+        _report(args, heartbeat, {"flushed": flushed, "error": str(exc)})
+        return EXIT_QUEUED
+    config = scrub_config(args, remote_names=names)
+    full = not args.session
+    after = None
+    if full and state.get("last_full_sync_ms"):
+        after = int(state["last_full_sync_ms"]) - FULL_SYNC_OVERLAP_MS
     with tempfile.TemporaryDirectory(dir=_work_root(args), prefix="snapshot-") as work:
-        raw = collect_raw(args, pathlib.Path(work))
-    # The whole session is scrubbed, so the session policy sees every task.
+        raw = collect_raw(args, pathlib.Path(work), updated_after_ms=after)
+    # Whole sessions are scrubbed, so the session policy sees every task.
     everything = scrub_all(raw, config, per_task=args.per_task_policy)
     del raw
     scrubbed: list[dict[str, Any]] = []
@@ -502,16 +639,46 @@ def cmd_sync(args: argparse.Namespace) -> int:
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     for key, newest in marks.items():
         state["sessions"][key] = {"last_task": newest, "synced_at": now}
+    if full:
+        state["last_full_sync_ms"] = started_ms
     _save_state(state_dir, state)
+    upload_result = result.get("upload") or {}
+    queue_length = _queue_length(state_dir)
+    heartbeat.update(
+        tasks=result["tasks"],
+        sent=int(upload_result.get("accepted") or 0) + int(upload_result.get("updated") or 0),
+        queue_length=queue_length,
+    )
+    errors = list(upload_result.get("errors") or []) + list(flushed.get("errors") or [])
+    if queue_length or errors:
+        heartbeat.update(ok=not queue_length, error="; ".join(errors)[:300] or None)
+    _report(args, heartbeat, result)
+    return EXIT_QUEUED if queue_length else 0
+
+
+def _queue_length(state_dir: pathlib.Path) -> int:
+    directory = queue_dir(state_dir)
+    return len(list(directory.glob("*.json"))) if directory.is_dir() else 0
+
+
+def _report(args: argparse.Namespace, heartbeat: dict[str, Any], result: dict[str, Any]) -> None:
+    failed = post_heartbeat(args, heartbeat)
+    if failed:
+        result["heartbeat_error"] = failed
     print(json.dumps(result))
-    queued = int((result.get("upload") or {}).get("queued") or 0) or int(flushed.get("left") or 0)
-    return EXIT_QUEUED if queued else 0
 
 
 def cmd_flush(args: argparse.Namespace) -> int:
-    result = flush_queue(args, pathlib.Path(args.state_dir).expanduser())
-    print(json.dumps(result))
-    return EXIT_QUEUED if result.get("left") else 0
+    state_dir = pathlib.Path(args.state_dir).expanduser()
+    result = flush_queue(args, state_dir)
+    left = int(result.get("left") or 0)
+    _report(
+        args,
+        {"command": "flush", "ok": not left, "queue_length": left, "sent": int(result.get("sent") or 0),
+         "error": "; ".join(result.get("errors") or [])[:300] or None},
+        result,
+    )
+    return EXIT_QUEUED if left else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -527,7 +694,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--include-subagents", action="store_true", help="opencode child sessions too")
         p.add_argument("--opencode-db", default=str(DEFAULT_OPENCODE_DB))
         p.add_argument("--cline-dir", default=str(DEFAULT_CLINE_DIR))
-        p.add_argument("--names-file", default=str(DEFAULT_NAMES_FILE))
+        p.add_argument("--names-file", help=f"extra household names, one per line (default {DEFAULT_NAMES_FILE} when it exists)")
         p.add_argument("--no-names", action="store_true", help="scrub without a household names file")
         p.add_argument("--env-file", action="append", help="mask every value in this .env file (repeatable)")
         p.add_argument("--keep-ips", action="store_true", help="do not mask IP addresses")
@@ -552,6 +719,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--dry-run", action="store_true", help="print counts only")
     collect.add_argument("--out", help="write the scrubbed traces as JSONL")
     collect.add_argument("--upload", action="store_true", help="post the scrubbed traces")
+    collect.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR), help="where the names cache is kept")
     collect.set_defaults(func=cmd_collect)
 
     sync = sub.add_parser("sync", help="post a session's new tasks (incremental, queued on failure)")
