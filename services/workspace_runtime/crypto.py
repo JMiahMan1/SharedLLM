@@ -1,41 +1,39 @@
 """
 Fernet encryption helpers for workspace-scoped secrets.
+
+Same key ring as identity (services/common/fernet_keys.py): sealed with
+FERNET_KEY, opened with FERNET_KEY then FERNET_KEY_PREVIOUS during a rotation.
 """
 import logging
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import InvalidToken
 
-from services.config import FERNET_KEY
+from services.common.fernet_keys import KeyRing
+from services.config import FERNET_KEY, FERNET_KEY_PREVIOUS
 
 log = logging.getLogger("workspace_runtime.crypto")
 
-_KEY = FERNET_KEY.encode()
-_fernet: Fernet | None = None
+_ring: KeyRing | None = None
 
 
-def _get_fernet() -> Fernet:
-    global _fernet
-    if _fernet is None:
-        if not _KEY:
-            raise RuntimeError(
-                "FERNET_KEY environment variable is not set. "
-                "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
-            )
-        _fernet = Fernet(_KEY)
-    return _fernet
+def key_ring() -> KeyRing:
+    global _ring
+    if _ring is None:
+        _ring = KeyRing.from_values(FERNET_KEY, FERNET_KEY_PREVIOUS)
+    return _ring
 
 
 def encrypt(plaintext: str | None) -> str | None:
     if not plaintext:
         return None
-    return _get_fernet().encrypt(plaintext.encode()).decode()
+    return key_ring().encrypt(plaintext.encode()).decode()
 
 
 def decrypt(ciphertext: str | None) -> str | None:
     if not ciphertext:
         return None
     try:
-        return _get_fernet().decrypt(ciphertext.encode()).decode()
+        return key_ring().decrypt(ciphertext.encode()).decode()
     except (InvalidToken, Exception) as exc:
-        log.error("[crypto] Decryption failed: %s", exc)
+        log.error("[crypto] Decryption failed: %s", type(exc).__name__)
         return None

@@ -84,7 +84,7 @@ def _provider_configs() -> dict[str, dict[str, str]]:
 
 class Service:
     def __init__(self) -> None:
-        self.store = Store(DB_PATH, os.getenv("FERNET_KEY"))
+        self.store = Store(DB_PATH, os.getenv("FERNET_KEY"), os.getenv("FERNET_KEY_PREVIOUS"))
         self.auth = Auth(self.store, os.getenv("INTERNAL_SECRET"))
         # One setting governs Jarvis and the hub (services/common/household_tz.py:
         # the household setting, then TZ, then the home location). No guessed
