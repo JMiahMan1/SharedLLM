@@ -394,6 +394,7 @@ public final class BleBeacon {
                 p.edit().putInt(KEY_FAILURES, failures + 1).putLong(KEY_TRY_AT, now)
                         .putString(KEY_HUB_DETAIL, "the gateway answered HTTP " + status).apply();
                 Log.w(TAG, "report HTTP " + status);
+                SignInReset.check(c, status, token);
             }
         } catch (Exception e) {
             p.edit().putInt(KEY_FAILURES, failures + 1).putLong(KEY_TRY_AT, now)

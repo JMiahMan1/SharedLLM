@@ -9,6 +9,7 @@ import { registerThisDevice } from '../lib/deviceRegistration';
 import { sharePushKey } from '../lib/push';
 import { mirrorIdentity } from '../lib/locationTracking';
 import { lockAll } from '../lib/privateChatSession';
+import { clearSignOutReason, recordSignOutReason, signOutMessage, signOutReasonFor, type SignOutReason } from '../lib/signOutNotice';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -17,7 +18,11 @@ interface AuthContextType {
   /** Whether the signed-in user's roles (or admin) allow this, e.g. "devices.assign". */
   can: (permission: string) => boolean;
   login: (credentials: { username: string; password: string }) => Promise<void>;
-  logout: () => Promise<void>;
+  /**
+   * Sign out. With a reason the login page says why (a reset sign-in, a
+   * refused key); without one it is the person's own choice and says nothing.
+   */
+  logout: (reason?: SignOutReason) => Promise<void>;
   isLoading: boolean;
   initError: string | null;
   refreshProfile: () => Promise<void>;
@@ -151,11 +156,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           break;
         } catch (error) {
           if (isSignInRefused(error)) {
-            setInitError('Session expired. Please log in again.');
+            const reason = signOutReasonFor(error);
+            recordSignOutReason(reason);
+            setInitError(signOutMessage(reason));
             setToken(null);
             setUser(null);
-            storageRemove('jarvis_api_key');
-            storageRemove('jarvis_user');
+            // Both clears also clear the native TokenBridge copy, so the
+            // background services stop sending the refused key.
+            await Promise.all([storageRemove('jarvis_api_key'), storageRemove('jarvis_user')]).catch((e: unknown) => {
+              console.error('[auth] could not clear the refused key:', e);
+            });
             break;
           }
           await new Promise((r) => setTimeout(r, retryDelay(attempt)));
@@ -170,7 +180,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [putMe, readMe]);
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (reason?: SignOutReason) => {
+    // A reason is shown on the login page; signing out on purpose shows none.
+    if (reason) recordSignOutReason(reason);
+    else clearSignOutReason();
     // Every unlocked private chat locks with the person leaving.
     lockAll();
     setToken(null);
@@ -211,7 +224,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await storageSet('jarvis_user', JSON.stringify(profile));
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 401) {
-        void logout();
+        void logout(signOutReasonFor(error));
       }
     }
   }, [logout, putMe, readMe]);
@@ -255,7 +268,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(profile);
       putMe(profile);
       await storageSet('jarvis_user', JSON.stringify(profile));
-      
+      // Signed in again: the "why you were signed out" notice has done its job.
+      clearSignOutReason();
+
       const displayName = profile.full_name || profile.username || credentials.username;
       toast.success(`Welcome back, ${displayName}!`);
 

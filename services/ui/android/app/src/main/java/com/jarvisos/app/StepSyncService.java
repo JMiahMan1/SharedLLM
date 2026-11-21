@@ -282,6 +282,8 @@ public class StepSyncService extends Service {
                 Log.i(TAG, "uploaded " + steps + " steps (" + status + ")");
             } else {
                 Log.w(TAG, "step upload failed HTTP " + status);
+                // A reset key pauses uploads until the next sign-in; the day's total goes then.
+                SignInReset.check(this, status, token);
             }
         } catch (Exception e) {
             Log.e(TAG, "step upload threw", e);

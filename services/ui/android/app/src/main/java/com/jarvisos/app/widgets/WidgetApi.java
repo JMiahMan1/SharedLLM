@@ -3,6 +3,7 @@ package com.jarvisos.app.widgets;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
+import com.jarvisos.app.SignInReset;
 import com.jarvisos.app.TokenBridgePlugin;
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -58,6 +59,10 @@ public final class WidgetApi {
             SharedPreferences cap = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
             String key = cap.getString("jarvis_api_key", null);
             String url = cap.getString("jarvis_server_url", null);
+            // A key the server refused stays forgotten until the app signs in
+            // again (it clears its own copy then); copying it back would only
+            // send it again.
+            if (SignInReset.wasRejected(context, key)) key = null;
             SharedPreferences.Editor ed = p.edit();
             boolean changed = false;
             if (key != null && !key.isEmpty() && !key.equals(p.getString(TokenBridgePlugin.KEY_API_KEY, null))) {
@@ -74,7 +79,7 @@ public final class WidgetApi {
                 String mirrored = p.getString(TokenBridgePlugin.KEY_API_KEY, null);
                 if (mirrored == null || mirrored.isEmpty()) {
                     String legacy = cap.getString("jarvis_api_key", null);
-                    if (legacy != null && !legacy.isEmpty()) {
+                    if (legacy != null && !legacy.isEmpty() && !SignInReset.wasRejected(context, legacy)) {
                         ed.putString(TokenBridgePlugin.KEY_API_KEY, legacy);
                         changed = true;
                     }
@@ -161,7 +166,7 @@ public final class WidgetApi {
         if (base == null) {
             throw new IllegalStateException("No server configured");
         }
-        return request(base, key, method, path, body, null);
+        return request(context, base, key, method, path, body, null);
     }
 
     /**
@@ -171,6 +176,15 @@ public final class WidgetApi {
      */
     public static JSONObject request(String base, String key, String method, String path, JSONObject body,
                                      Map<String, String> headers) throws Exception {
+        return request(null, base, key, method, path, body, headers);
+    }
+
+    /**
+     * The same call; with a context, a 401 forgets the key when it is still the
+     * stored one ({@link SignInReset}), so every background reader pauses.
+     */
+    public static JSONObject request(Context context, String base, String key, String method, String path,
+                                     JSONObject body, Map<String, String> headers) throws Exception {
         URL url = new URL(base + path);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         try {
@@ -193,6 +207,7 @@ public final class WidgetApi {
                 }
             }
             int code = conn.getResponseCode();
+            if (context != null) SignInReset.check(context, code, key);
             InputStream is = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
             if (is == null) {
                 throw new IllegalStateException("HTTP " + code);

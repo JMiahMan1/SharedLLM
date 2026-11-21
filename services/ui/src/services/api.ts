@@ -12,6 +12,7 @@ import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
 } from '../lib/weather';
 import { storageGetSync, storageSet } from '../lib/storage';
+import { carriedKey, recordSignOutReason, signOutReasonFor } from '../lib/signOutNotice';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { MessageMark, PrivateChatInfo, PrivateChatReminders, PrivateChatStatus } from '../components/chat/privateChatModel';
@@ -58,6 +59,8 @@ import type {
   WorkspaceListResponse,
   UserProfileRaw,
   UserProfile,
+  SignInResetPreview,
+  SignInResetResult,
   AccountAuditEvent,
   CredentialShares,
   ShareableService,
@@ -319,6 +322,10 @@ export type {
   VoiceCheck,
   VoiceStatus,
   APIKey,
+  ReEnrolItem,
+  ThirdPartyCredential,
+  SignInResetPreview,
+  SignInResetResult,
   GlobalSetting,
   HealthStatus,
   EsphomeDevice,
@@ -817,6 +824,11 @@ async function fetchImageEditJob(jobId: string): Promise<ImageEditResult> {
 }
 
 let isLoggingOut = false;
+
+/** Tests only: a 401 tears the session down once per page load; let the next test see it again. */
+export function resetSignOutLatchForTests(): void {
+  isLoggingOut = false;
+}
 let lastConnectivityToast = 0;
 // "Reconnected successfully!" needs the same throttle as the error toast. On a
 // page with several polling queries, each request retries independently, so
@@ -1016,7 +1028,13 @@ apiClient.interceptors.response.use(
       const isOptional = error.config?.skipAuthRedirect === true;
       if (!isLoginRequest && !isOptional) {
         isLoggingOut = true;
+        // Say why on the login page: a reset sign-in reads differently from a
+        // key that simply stopped working. Only a request that carried the
+        // stored key was a refusal of it.
+        if (carriedKey(error)) recordSignOutReason(signOutReasonFor(error));
         const { storageRemove } = await import('../lib/storage');
+        // storageRemove also clears the native TokenBridge copy, so the
+        // background services stop sending the refused key.
         await storageRemove('jarvis_api_key');
         await storageRemove('jarvis_user');
         window.location.href = '/login';
@@ -1089,9 +1107,35 @@ export const api = {
     return resp.data;
   },
 
-  async getUsers(): Promise<UserProfile[]> {
-    const resp = await apiClient.get('/api/users');
+  /**
+   * Every account. Test accounts are left out unless ``includeTestAccounts``:
+   * only the admin user lists ask for them, and they show them with a badge.
+   */
+  async getUsers(options: { includeTestAccounts?: boolean } = {}): Promise<UserProfile[]> {
+    const resp = await apiClient.get('/api/users', options.includeTestAccounts ? { params: { include_test_accounts: true } } : undefined);
     return (resp.data ?? []).map(normalizeUser);
+  },
+
+  /** What "Sign everyone out and reset keys" would touch (admin). */
+  async getSignInResetPreview(): Promise<SignInResetPreview> {
+    const resp = await apiClient.get('/api/users/security/sign-in-reset');
+    return resp.data;
+  },
+
+  /**
+   * Revoke and regenerate sign-in keys: everyone's, or one person's when
+   * ``username`` is given (admin). The server refuses without ``confirm: "RESET"``.
+   */
+  async resetSignIn(username?: string): Promise<SignInResetResult> {
+    const body = username ? { confirm: 'RESET', username } : { confirm: 'RESET' };
+    const resp = await apiClient.post('/api/users/security/sign-in-reset', body);
+    return resp.data;
+  },
+
+  /** The last sign-in reset's report, or null when there has been none (admin). */
+  async getLastSignInReset(): Promise<SignInResetResult | null> {
+    const resp = await apiClient.get('/api/users/security/sign-in-reset/last');
+    return resp.data ?? null;
   },
 
   async createUser(data: Partial<UserProfile> & { username: string }): Promise<UserProfile> {

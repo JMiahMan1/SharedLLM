@@ -125,6 +125,8 @@ export interface UserProfileRaw {
   has_password?: boolean;
   /** Whether the account still signs in with the seeded admin password. */
   has_default_password?: boolean;
+  /** A test account (kept out of household lists; admins see it with a badge). */
+  is_test_account?: boolean;
   family_role?: FamilyRole;
   mother_username?: string | null;
   /** Derived: child/teen. Their activity sharing cannot be switched off. */
@@ -5686,3 +5688,45 @@ export interface GardenTagScan {
 
 /* ---------- end Harvest forecast, preservation & Put-Up Pantry (Phase 6) ---------- */
 
+
+/** Something a sign-in reset cannot re-key by itself: a person has to enrol it again. */
+export interface ReEnrolItem {
+  kind: 'windows_guard' | 'esphome_satellite' | 'api_key' | 'homehub_companion_app' | 'homehub_long_lived_token';
+  label: string;
+  owner: string | null;
+  count?: number;
+  how: string;
+}
+
+/** A stored third-party credential the reset cannot rotate: it has to be changed at the provider. */
+export interface ThirdPartyCredential {
+  field: string;
+  label: string;
+  accounts: number;
+}
+
+/** What ``POST /api/users/security/sign-in-reset`` did. */
+export interface SignInResetResult {
+  status: string;
+  scope: 'everyone' | 'user';
+  username: string | null;
+  at: string;
+  by: string;
+  users_reset: number;
+  api_keys_revoked: number;
+  device_agent_keys_revoked: number;
+  homehub: { status: 'revoked' | 'skipped' | 'failed'; revoked: number; message: string };
+  re_enrol: ReEnrolItem[];
+  third_party: ThirdPartyCredential[];
+  caller_signed_out: boolean;
+}
+
+/** What a sign-in reset would touch, read before an admin confirms it. */
+export interface SignInResetPreview {
+  users: number;
+  api_keys: number;
+  device_agent_keys: number;
+  re_enrol: ReEnrolItem[];
+  third_party: ThirdPartyCredential[];
+  last_reset: SignInResetResult | null;
+}

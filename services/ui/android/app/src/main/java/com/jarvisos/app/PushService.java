@@ -190,8 +190,13 @@ public class PushService extends Service {
                     // as the app was never opened, so clear the mirrored key and
                     // stop. The WebView clears its own copy on the next 401.
                     Log.w(TAG, "not authorised (" + status + "); stopping");
-                    p.edit().remove(TokenBridgePlugin.KEY_API_KEY).apply();
                     PushNotifier.clearAll(this);
+                    if (SignInReset.isRejection(status)) {
+                        // After clearAll, so the sign-in notice it posts stays on screen.
+                        SignInReset.keyRejected(this, token);
+                    } else {
+                        p.edit().remove(TokenBridgePlugin.KEY_API_KEY).apply();
+                    }
                     running = false;
                     stopSelf();
                     return;
@@ -288,7 +293,13 @@ public class PushService extends Service {
             conn.setRequestProperty("Accept", "application/json");
             current = conn;
             int status = conn.getResponseCode();
-            if (status == 401 || status == 403) {
+            if (SignInReset.isRejection(status)) {
+                // The key was reset: forget it, and the loop stops on finding no key.
+                Log.w(TAG, "long poll not authorised (401); stopping");
+                SignInReset.keyRejected(this, token);
+                return backoffMs;
+            }
+            if (status == 403) {
                 Log.w(TAG, "not authorised (" + status + "); retrying in 5 min");
                 sleep(UNAUTHORISED_WAIT_MS);
                 return backoffMs;
