@@ -588,6 +588,164 @@ def test_a_valve_that_will_not_close_shouts_for_a_parent(client, hub, monkeypatc
     assert row["active_run_started_at"] is not None
 
 
+class ValveHub(Hub):
+    """A hub whose valve really changes state, and can be made to misbehave."""
+
+    def __init__(self, *, open_raises=None, open_status=200, stays_open=False, **kw):
+        super().__init__(**kw)
+        self.valve_state = "closed"
+        self.open_raises = open_raises
+        self.open_status = open_status
+        self.stays_open = stays_open
+        self.runs_seen_at_open: list[int] = []
+
+    async def __call__(self, method, path, *, body=None):
+        if method == "GET" and path == "/api/states":
+            self.calls.append((method, path, body))
+            rows = [dict(row) for row in self.states_rows]
+            for row in rows:
+                if row["entity_id"] == "valve.bed1_drip":
+                    row["state"] = self.valve_state
+            return (200, rows)
+        if method == "POST" and path.endswith("open_valve"):
+            self.calls.append((method, path, body))
+            self.runs_seen_at_open.append(self._runs())
+            # Whatever the hub answers, the valve did open (the dangerous case).
+            self.valve_state = "open"
+            if self.open_raises is not None:
+                raise self.open_raises
+            return (self.open_status, None)
+        if method == "POST" and path.endswith("close_valve"):
+            self.calls.append((method, path, body))
+            if not self.stays_open:
+                self.valve_state = "closed"
+            return (200, None)
+        return await super().__call__(method, path, body=body)
+
+    @staticmethod
+    def _runs() -> int:
+        from sqlmodel import select as _select
+
+        import services.garden.main as main_module
+        from services.garden.models import ValveRun
+
+        with Session(main_module.app.state.engine) as db:
+            return len(db.exec(_select(ValveRun)).all())
+
+
+def _valve_hub(monkeypatch, **kw) -> ValveHub:
+    fake = ValveHub(**kw)
+    monkeypatch.setattr(hardware, "_call", fake)
+    monkeypatch.setattr(hardware, "CLOSE_CONFIRM_DELAYS_S", (0.0, 0.0))
+    hardware.invalidate()
+    return fake
+
+
+def _run_rows(session) -> list:
+    from sqlmodel import select as _select
+
+    from services.garden.models import ValveRun
+
+    session.expire_all()
+    return session.exec(_select(ValveRun)).all()
+
+
+def _binding_row(client, binding_id) -> dict:
+    return next(r for r in client.get("/bindings", headers=PARENT).json()["bindings"] if r["id"] == binding_id)
+
+
+def test_the_run_is_recorded_before_the_valve_is_opened(client, hub, monkeypatch):
+    fake = _valve_hub(monkeypatch)
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+
+    resp = client.post(f"/bindings/{_binding_id(client, 'location', bed['id'])}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 200, resp.text
+    assert fake.runs_seen_at_open == [1]
+
+
+def test_an_open_that_times_out_is_closed_and_kept(client, hub, monkeypatch, session):
+    fake = _valve_hub(monkeypatch, open_raises=TimeoutError("hub too slow"))
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    resp = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 502, resp.text
+    assert "sent a close and the valve reports closed" in resp.json()["detail"]
+    assert fake.services() == ["valve/open_valve", "valve/close_valve"]
+    assert fake.valve_state == "closed"
+    rows = _run_rows(session)
+    assert len(rows) == 1 and rows[0].closed_at is not None
+    assert _binding_row(client, binding_id)["active_run_started_at"] is None
+
+
+def test_a_refused_open_that_opened_anyway_stays_with_the_watchdog(client, hub, monkeypatch, session):
+    fake = _valve_hub(monkeypatch, open_status=500, stays_open=True)
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    resp = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 502
+    assert "not confirmed: check the valve" in resp.json()["detail"]
+    assert fake.services() == ["valve/open_valve", "valve/close_valve"]
+    rows = _run_rows(session)
+    assert len(rows) == 1 and rows[0].closed_at is None
+    binding = _binding_row(client, binding_id)
+    assert binding["active_run_started_at"] is not None
+    # Due now, so the very next watchdog tick retries the close.
+    assert binding["active_run_ends_at"] <= datetime.now(UTC).isoformat()
+
+
+def test_a_close_the_valve_does_not_obey_is_not_closed(client, hub, monkeypatch):
+    fake = _valve_hub(monkeypatch, stays_open=True)
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    assert client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={}).status_code == 200
+
+    resp = client.post(f"/bindings/{binding_id}/valve/stop", headers=PARENT)
+
+    assert resp.status_code == 502
+    assert fake.valve_state == "open"
+    assert _binding_row(client, binding_id)["active_run_started_at"] is not None
+
+
+def test_an_open_valve_alert_with_no_family_goes_to_the_admins(client, hub, monkeypatch, session, caplog):
+    import asyncio
+    import logging
+
+    import services.garden.main as main_module
+
+    _valve_hub(monkeypatch, stays_open=True)
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"minutes": 1})
+    _rewind_timer(session, binding_id)
+    alerts: list[dict] = []
+
+    async def capture(payload, **_kw):
+        alerts.append(payload)
+        return True
+
+    monkeypatch.setattr(hardware.notify, "send", capture)
+
+    async def identity_down():
+        return []
+
+    with caplog.at_level(logging.ERROR, logger="garden.homehub_hardware"):
+        asyncio.run(hardware.check_valve_failsafe(lambda: main_module.app.state.engine, identity_down))
+
+    assert [alert["user"] for alert in alerts] == ["@admins"]
+    assert alerts[0]["category"] == "admin"
+    assert any("no family list" in record.getMessage() for record in caplog.records)
+
+
 # --------------------------------------------------------------------------- grow lights
 
 def test_a_photoperiod_window_can_cross_midnight():
