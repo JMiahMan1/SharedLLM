@@ -532,6 +532,22 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
             import patient
         }
     }
+    # What goes into the model's prompts: prompt budget, knowledge map, tool cache.
+    handle /api/admin/prompt-budget* {
+        reverse_proxy gateway:11435 {
+            import patient
+        }
+    }
+    handle /api/admin/knowledge-map* {
+        reverse_proxy gateway:11435 {
+            import patient
+        }
+    }
+    handle /api/admin/tool-cache* {
+        reverse_proxy gateway:11435 {
+            import patient
+        }
+    }
     handle /api/admin* {
         reverse_proxy workspace_runtime:8007 {
             import patient

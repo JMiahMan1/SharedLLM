@@ -18,8 +18,10 @@ Services targeted:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+from services.common.rag_collections import HOME_DEVICES as HOME_DEVICES_COLLECTION
 
 # Tool name constants (OpenAI tool names must be letters/numbers/underscores).
 TOOL_GH = "sharedllm_gh"
@@ -984,6 +986,324 @@ def get_raven_tool_schemas() -> list[dict]:
             },
         })
     return schemas
+
+
+# ---------------------------------------------------------------------------
+# Knowledge sources: where the model fetches information on demand.
+#
+# Nothing here is preloaded into a prompt. The knowledge map (knowledge_map.py)
+# lists each enabled source with the existing tool that reads it, so a question
+# that needs one is answered by calling that tool instead of by the dozens of
+# "just in case" retrieval hits every turn used to carry (a verse-of-the-day
+# question arrived with 45 device, capability and lesson rows, none of them used).
+# Each source points at a tool that already exists: a new source is a new row
+# here, not a new tool.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class KnowledgeSource:
+    """One place information lives, and the exact call that reads it."""
+
+    key: str
+    holds: str
+    tool: str
+    #: The call to copy, as the JSON the model emits.
+    example: str
+    #: Only while a home hub is set up (see ``hub_tools_offered``).
+    needs_hub: bool = False
+    #: Listed only for admins (operations data a household member has no use for).
+    admin_only: bool = False
+
+
+#: ContextSearchRequest's result size. Three good hits answer a household question;
+#: fifteen bury it (and the model is told it may ask for more, up to the max).
+KNOWLEDGE_SEARCH_DEFAULT_K = 3
+KNOWLEDGE_SEARCH_MAX_K = 8
+
+KNOWLEDGE_SOURCES: tuple[KnowledgeSource, ...] = (
+    KnowledgeSource(
+        "home_devices", "the home's devices and rooms: names, areas and their live state",
+        "EntitySearchRequest", '{"tool": "EntitySearchRequest", "query": "porch light"}', needs_hub=True,
+    ),
+    KnowledgeSource(
+        "lists", "the home's to-do and shopping lists",
+        "TodoListRequest", '{"tool": "TodoListRequest", "action": "list"}', needs_hub=True,
+    ),
+    KnowledgeSource(
+        "capabilities", "what Jarvis can do: its features, tools and the CLI programs it has",
+        "ContextSearchRequest",
+        '{"tool": "ContextSearchRequest", "collection_name": "system_capabilities", "query": "..."}',
+    ),
+    KnowledgeSource(
+        "lessons", "lessons learned from past work: fixes, rules and mistakes not to repeat",
+        "ContextSearchRequest",
+        '{"tool": "ContextSearchRequest", "collection_name": "system_learnings", "query": "..."}',
+    ),
+    KnowledgeSource(
+        "files", "the family's Nextcloud files, notes and recipes (search, then read one with StorageFileReadRequest)",
+        "ContextSearchRequest",
+        '{"tool": "ContextSearchRequest", "collection_name": "nextcloud_files", "query": "..."}',
+    ),
+    KnowledgeSource(
+        "user_facts", "facts and preferences remembered about the person asking",
+        "ContextSearchRequest",
+        '{"tool": "ContextSearchRequest", "collection_name": "user_facts", "query": "..."}',
+    ),
+    KnowledgeSource(
+        "conversation_memory", "recent intercom transcripts and spoken exchanges",
+        "ContextSearchRequest",
+        '{"tool": "ContextSearchRequest", "collection_name": "conversation_memory", "query": "..."}',
+    ),
+    KnowledgeSource(
+        "books", "the family's book library: passages from books, sermons and commentaries",
+        "ContextSearchRequest",
+        '{"tool": "ContextSearchRequest", "collection_name": "calibre_files", "query": "..."}',
+    ),
+    KnowledgeSource(
+        "bible", "Bible text, verse search, study notes and the verse of the day",
+        "BibleRequest", '{"tool": "BibleRequest", "action": "votd"}',
+    ),
+    KnowledgeSource(
+        "calendar", "the family calendar: what is next, events on a day",
+        "CalendarRequest", '{"tool": "CalendarRequest", "action": "read"}',
+    ),
+    KnowledgeSource(
+        "chores", "the family chore chart: who has what today",
+        "ChoreRequest", '{"tool": "ChoreRequest", "action": "list"}',
+    ),
+    KnowledgeSource(
+        "timers", "running timers, alarms and reminders",
+        "TimerRequest", '{"tool": "TimerRequest", "action": "list"}',
+    ),
+    KnowledgeSource(
+        "places", "where family members are, saved places, distances and travel times",
+        "LocationRequest", '{"tool": "LocationRequest", "user": "me"}',
+    ),
+    KnowledgeSource(
+        "garden", "the garden: what needs care, what is ready to harvest, pantry progress",
+        TOOL_GARDEN_SUMMARY, '{"tool": "garden_summary"}',
+    ),
+    KnowledgeSource(
+        "notes", "the person's notes",
+        "NoteRequest", '{"tool": "NoteRequest", "action": "list"}',
+    ),
+    KnowledgeSource(
+        "web", "anything current or outside the household",
+        "WebSearchRequest", '{"tool": "WebSearchRequest", "query": "..."}',
+    ),
+    KnowledgeSource(
+        "missions", "past Raven missions: what they did and how they failed",
+        "ContextSearchRequest",
+        '{"tool": "ContextSearchRequest", "collection_name": "mission_history", "query": "..."}',
+        admin_only=True,
+    ),
+    KnowledgeSource(
+        "network", "Docker containers, services, ports and addresses on the network",
+        "ContextSearchRequest",
+        '{"tool": "ContextSearchRequest", "collection_name": "network_topology", "query": "..."}',
+        admin_only=True,
+    ),
+    KnowledgeSource(
+        "alerts", "recent device, sensor and service alerts",
+        "ContextSearchRequest",
+        '{"tool": "ContextSearchRequest", "collection_name": "telemetry_alerts", "query": "..."}',
+        admin_only=True,
+    ),
+)
+
+#: Operations tools: listed in the knowledge map only for admins. Listing is all this
+#: decides; each service still enforces its own permissions on a call.
+ADMIN_TOOLS: frozenset[str] = frozenset({
+    "CapabilityIndexRequest", "ControlPlaneRequest", "DeploymentRequest", "DiscoverySyncRequest",
+    "DockerComposeRequest", "DockerLogsRequest", "ExecutionLogRequest", "HAConfigRequest",
+    "LLMInfoRequest", "NetworkDeviceScanRequest", "RedisInspectRequest", "StorageIndexRequest",
+    "SystemLearningRequest", "VolumeInventoryRequest",
+})
+
+#: Registered tools the knowledge map deliberately leaves out, with the reason. Every
+#: other tool must appear in it (test_knowledge_map.py), so a new tool is never invisible.
+MAP_INTERNAL: dict[str, str] = {
+    "IdentityRequest": "returns credential context; no chat turn or mission should ask for it",
+    "IdentityManageRequest": "creates users and API keys; the admin UI only",
+    "StorageListRequest": "no service serves /execute/storage_list; listing it would invite a 404",
+    "WorkspaceSettingsUpdateRequest": "a PATCH to a templated path the single-turn executor cannot send",
+    TOOL_GH: "external OpenAI-tools name for GhRequest, which the map lists",
+    TOOL_GIT: "external OpenAI-tools name for GitOperationRequest, which the map lists",
+    TOOL_WRITE_FILE: "external OpenAI-tools name for WorkspaceFileWriteRequest, which the map lists",
+    TOOL_IMAGE_GENERATE: "external clients only; chat and Raven make pictures with StudioImageRequest",
+    TOOL_IMAGE_EDIT: "external OpenAI-tools name for ImageEditRequest, which the map lists",
+    TOOL_LIST_IMAGE_MODELS: "external clients only",
+    TOOL_RAVEN_MISSION: "external OpenAI-tools name for RavenMissionRequest, which the map lists",
+    TOOL_WEBSCRAPER: "external OpenAI-tools name for WebScraperRequest, which the map lists",
+    TOOL_OCR: "external OpenAI-tools name for OcrRequest, which the map lists",
+    TOOL_WORKSPACE_EXPOSE_PORT: "Raven's protocol prompt documents it; chat cannot publish ports",
+    TOOL_PODCAST_RENDER: "external OpenAI-tools name for PodcastRenderRequest, which the map lists",
+    TOOL_SPEAKER_IDENTIFY: "external OpenAI-tools name for SpeakerIdentifyRequest, which the map lists",
+    TOOL_LIST_VOICES: "external OpenAI-tools name for ListVoicesRequest, which the map lists",
+    TOOL_GARDEN_RECIPE_MATCHES: "external clients only; served by gateway routes that need the caller's key",
+    TOOL_GARDEN_PRESERVATION_GUIDE: "external clients only; served by gateway routes that need the caller's key",
+    TOOL_GARDEN_PLAN_SUGGEST: "external clients only; served by gateway routes that need the caller's key",
+}
+
+#: Garden tools the single-turn path runs in-process (garden_assist), as the turn's user.
+SINGLE_TURN_GARDEN_TOOLS: dict[str, str] = {
+    TOOL_GARDEN_SUMMARY: _GARDEN_SUMMARY_TOOL["function"]["description"],
+    TOOL_GARDEN_LOG_CARE: _GARDEN_LOG_CARE_TOOL["function"]["description"],
+    TOOL_GARDEN_LOG_HARVEST: _GARDEN_LOG_HARVEST_TOOL["function"]["description"],
+}
+
+#: Tools only the single-turn path runs, with their one-line purpose (no Raven row).
+SINGLE_TURN_ONLY_DESCRIPTIONS: dict[str, str] = {
+    "RavenMissionRequest": "Send a long job (a build, a research task, a multi-step fix) to Raven as a background mission.",
+    "LocationRequest": "Where a family member is, how fast they are going, how long until they get somewhere, nearby places.",
+}
+
+
+def knowledge_sources(*, is_admin: bool, offered: set[str] | None = None) -> list[KnowledgeSource]:
+    """The sources a caller may read, in the table's order.
+
+    ``offered`` (tool names) drops a source whose tool the caller's path cannot run.
+    Decided from startup configuration and the role, never per request.
+    """
+    out = []
+    for src in KNOWLEDGE_SOURCES:
+        if src.needs_hub and not hub_tools_offered():
+            continue
+        if src.admin_only and not is_admin:
+            continue
+        if offered is not None and src.tool not in offered:
+            continue
+        out.append(src)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Freshness: how long a tool's result may be reused (tool_cache.py).
+#
+# Declared here, per tool and per reading action, never guessed. Four classes:
+#   live    never reused beyond the request: device states, locks, presence,
+#           timers, anything that acts, anything safety-related
+#   short   seconds to minutes (TOOL_CACHE_SHORT_S)
+#   daily   until local midnight
+#   static  rarely changes (TOOL_CACHE_STATIC_S): Bible text, capability
+#           descriptions, past lessons, book text
+# A tool absent from FRESHNESS, an action a row does not list, and every action
+# that changes something are live: the safe answer is always "ask the source".
+# ---------------------------------------------------------------------------
+
+LIVE, SHORT, DAILY, STATIC = "live", "short", "daily", "static"
+FRESHNESS_CLASSES: tuple[str, ...] = (LIVE, SHORT, DAILY, STATIC)
+
+
+@dataclass(frozen=True)
+class Freshness:
+    """How long one tool's reads stay good, and what its writes make stale."""
+
+    #: Class for a call with no action field (WebSearchRequest has none).
+    default: str = LIVE
+    #: Reading actions and their class. Any other action is live and counts as a write.
+    reads: dict[str, str] = field(default_factory=dict)
+    #: ContextSearchRequest: class by collection.
+    by_collection: dict[str, str] = field(default_factory=dict)
+    #: The same for every member of the household (no user's data in it), so one
+    #: fetch may serve everyone. False keeps every entry to its own user.
+    household_public: bool = False
+    #: What this tool's data is about. A write to any tool with a tag drops every
+    #: cached read carrying it; events (an index rebuild) drop them too.
+    tags: tuple[str, ...] = ()
+
+
+#: Collections that hold the same rows for everyone are not marked public: a RAG
+#: search filters by the asking user, so each user keeps their own entry.
+_COLLECTION_TAGS: dict[str, str] = {
+    "system_capabilities": "capabilities",
+    "system_learnings": "lessons",
+    "nextcloud_files": "files",
+    "calibre_files": "library",
+    "user_facts": "user_facts",
+    "conversation_memory": "intercom",
+    "mission_history": "missions",
+    "network_topology": "network",
+    "telemetry_alerts": "alerts",
+    HOME_DEVICES_COLLECTION: "devices",
+}
+
+FRESHNESS: dict[str, Freshness] = {
+    "BibleRequest": Freshness(
+        reads={"votd": DAILY, "read": STATIC, "search": STATIC, "study_notes": STATIC, "catalogue": STATIC},
+        household_public=True, tags=("bible",),
+    ),
+    "CalibreRequest": Freshness(
+        reads={"list": DAILY, "search": DAILY, "get_book": STATIC, "fetch_text": STATIC,
+               "tags": DAILY, "by_tag": DAILY, "audit": DAILY},
+        tags=("library",),
+    ),
+    "ContextSearchRequest": Freshness(
+        by_collection={
+            "system_capabilities": STATIC, "system_learnings": STATIC, "calibre_files": STATIC,
+            "nextcloud_files": DAILY, "user_facts": SHORT, "conversation_memory": SHORT,
+            "mission_history": SHORT, "network_topology": SHORT,
+            # Alerts and the device index describe the house as it is now.
+            "telemetry_alerts": LIVE, HOME_DEVICES_COLLECTION: LIVE,
+        },
+    ),
+    "CalendarRequest": Freshness(reads={"read": SHORT, "list": SHORT}, tags=("calendar",)),
+    "ChoreRequest": Freshness(reads={"list": SHORT, "checks": SHORT}, tags=("chores",)),
+    "NoteRequest": Freshness(reads={"list": SHORT, "read": SHORT}, tags=("notes",)),
+    "AudiobookshelfRequest": Freshness(
+        reads={"libraries": DAILY, "list": SHORT, "search": SHORT, "get_book": DAILY}, tags=("audiobooks",),
+    ),
+    "WebSearchRequest": Freshness(default=SHORT),
+    "WebReadRequest": Freshness(default=SHORT),
+    "StorageFileReadRequest": Freshness(default=SHORT, tags=("files",)),
+    "ListVoicesRequest": Freshness(default=DAILY, tags=("voices",)),
+    "AiCapabilitiesRequest": Freshness(default=SHORT, tags=("capabilities",)),
+    TOOL_GARDEN_SUMMARY: Freshness(default=SHORT, tags=("garden",)),
+}
+
+#: What a write through each tool makes stale, beyond the tool's own tags.
+WRITE_INVALIDATES: dict[str, tuple[str, ...]] = {
+    TOOL_GARDEN_LOG_CARE: ("garden",),
+    TOOL_GARDEN_LOG_HARVEST: ("garden",),
+    "StorageFileWriteRequest": ("files",),
+    "StorageIndexRequest": ("files", "library"),
+    "SystemLearningRequest": ("lessons",),
+    "CapabilityIndexRequest": ("capabilities", "devices"),
+    "DiscoverySyncRequest": ("devices",),
+    "MealPlanRequest": ("files", "notes"),
+    "TodoListRequest": ("lists",),
+    "TimerRequest": ("timers",),
+}
+
+
+def freshness_of(tool: str, payload: dict | None) -> tuple[str, bool, tuple[str, ...], bool]:
+    """``(class, household_public, tags, is_write)`` for one call.
+
+    Fail safe: an unknown tool, an unlisted action and an unknown collection are live.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    spec = FRESHNESS.get(tool)
+    invalidates = WRITE_INVALIDATES.get(tool, ())
+    if spec is None:
+        return LIVE, False, invalidates, bool(invalidates)
+    if spec.by_collection:
+        coll = str(payload.get("collection_name") or "")
+        tag = _COLLECTION_TAGS.get(coll)
+        return spec.by_collection.get(coll, LIVE), False, ((tag,) if tag else ()), False
+    action = ""
+    for key in ("action", "sub_action", "device_action"):
+        val = str(payload.get(key) or "").strip().lower()
+        if val and val != tool.lower():
+            action = val
+            break
+    if not spec.reads:
+        return spec.default, spec.household_public, spec.tags, False
+    if not action:
+        return LIVE, False, spec.tags, False
+    if action in spec.reads:
+        return spec.reads[action], spec.household_public, spec.tags, False
+    return LIVE, False, tuple(dict.fromkeys(spec.tags + invalidates)), True
 
 
 @dataclass

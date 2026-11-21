@@ -50,7 +50,6 @@ from services.common.guidance import guidance as _guidance
 from services.common.http import INTERNAL_KEEPALIVE_S
 from services.common.music_recommendations import recommend_music
 from services.common.podcast_recommendations import podcast_events, recommend_podcast
-from services.common.rag_collections import HOME_DEVICES
 from services.common.relay import until_either_ends
 from services.common.screen_time import (
     carried_over as carried_over_screen_time,
@@ -115,6 +114,7 @@ from services.gateway import (
 from services.gateway import beloved as beloved_routes
 from services.gateway import client_origin
 from services.gateway.trainer import routes as trainer_routes
+from services.gateway import context_routes
 from services.gateway.studio import routes as studio_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
@@ -823,6 +823,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # non-fatal
         log.warning(f"[device_usage] could not start: {e}")
 
+    # Tool results kept per conversation: hot household entries are refreshed before
+    # they expire, and freshness classes are tuned from what refetches find (tool_cache.py).
+    try:
+        from services.gateway import tool_cache
+        _run_in_background(tool_cache.maintain())
+    except Exception as e:  # non-fatal
+        log.warning(f"[tool-cache] maintenance could not start: {e}")
+
     # Warm RAG's embedding model in the background so the FIRST Raven mission's
     # lesson injection doesn't hit RAG's ~25s cold start and silently skip lessons.
     try:
@@ -874,6 +882,7 @@ app.include_router(network_routes.router)
 app.include_router(weather_routes.router)
 app.include_router(garden_routes.router)
 app.include_router(trainer_routes.router)  # Jarvis Trainer: catalogue, curriculum, eval, self-repair, sermons
+app.include_router(context_routes.router)  # prompt budget and knowledge map (admin)
 app.include_router(studio_routes.router)  # Workspace Studio: profile, run, preview, assets, deck, game
 app.include_router(calls.router)
 app.include_router(drawing.router)
@@ -4330,51 +4339,36 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_ollama_response(weather_text, selected_model, "weather")
 
     # 5. Retrieve Tiered Memory
-    if grounded:
-        short_term = []
-        long_term = ""
-    else:
-        short_term = await get_history(user_id)
-        long_term = await get_long_term_memory(user_id, query)
+    short_term = [] if grounded else await get_history(user_id)
 
-    # 6. Context Injection (RAG)
-    rag_context = ""
-    # MISSION LOCK: Disable RAG to prevent architectural hallucinations
-    if grounded:
-        log.info("[RAG] Grounded study request; skipping all collections.")
-    elif "MISSION LOCK" in query:
-        log.info("[RAG] MISSION LOCK detected; bypassing all collections to ensure focus.")
-    else:
-        try:
-            collections = ["nextcloud_files", "system_capabilities", "system_learnings"]
-            from services import config as _config
+    # 6. Context Injection (RAG), only for the paths below that put it in a prompt.
+    # An ordinary chat or voice turn is queued, and the orchestrator pre-fetches for it
+    # (routed by the intent classified above). Searching four collections fifteen deep
+    # here as well cost four RAG round trips on every question and the result was
+    # thrown away.
+    _rag_memo: dict[str, str] = {}
 
-            if _config.any_home_hub():  # no hub: no device index, as no hub tools are offered
-                collections.insert(0, HOME_DEVICES)
-            for coll in collections:
-                client = get_http_client()
-                resp = await client.post(
-                    f"{RAG_SVC}/rag/search",
-                    json={"collection_name": coll, "query": query, "user_id": user_id, "k": 15},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=aiohttp.ClientTimeout(total=10.0)
-                )
-                resp.raise_for_status()
-                res = await resp.json()
-                hits = res.get("results", [])
-                if hits:
-                    rag_context += f"\n[{coll.upper()}]\n" + "\n".join([h["content"] for h in hits])
-                    log.info(f"[RAG] Collection '{coll}' returned {len(hits)} hits.")
-                else:
-                    log.info(f"[RAG] Collection '{coll}' returned NO hits.")
-        except Exception as e:
-            log.error(f"RAG Retrieval error: {e}")
+    async def chat_rag_context() -> str:
+        if grounded:
+            log.info("[RAG] Grounded study request; skipping all collections.")
+            return ""
+        if "MISSION LOCK" in query:
+            # MISSION LOCK: no retrieval, to prevent architectural hallucinations.
+            log.info("[RAG] MISSION LOCK detected; bypassing all collections to ensure focus.")
+            return ""
+        if "ctx" not in _rag_memo:
+            from services.gateway.orchestrator import _fetch_rag_context
+
+            _rag_memo["ctx"] = await _fetch_rag_context(
+                query, user_id, creds, include_curriculum=False, intent=intent, confidence=confidence,
+            )
+        return _rag_memo["ctx"]
 
     # 7. Slow Path Execution (LLM Pipeline)
     shadow_context = ""
     complex_signals = ["complex", "bug", "refactor", "design", "how to", "fix", "error", "traceback", "implement", "logic"]
     if not grounded and any(k in query.lower() for k in complex_signals):
-        shadow_context = await perform_shadow_execution(query, creds, short_term, rag_context)
+        shadow_context = await perform_shadow_execution(query, creds, short_term, await chat_rag_context())
 
     system_instruction = (body.get("system") or "") if grounded else select_system_instruction_for_query(query, selected_model)
 
@@ -4393,10 +4387,13 @@ async def chat_handler(request: Request, background_tasks=None):
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
 
-    if grounded:
+    if grounded or not is_autonomous:
+        # Only a Raven mission is sent this system text; a queued turn builds its own.
         full_system = system_instruction
     else:
         protocols = await fetch_autonomous_protocols()
+        long_term = await get_long_term_memory(user_id, query)
+        rag_context = await chat_rag_context()
         full_system = f"{system_instruction}\n\n{protocols}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
 
     final_query = query
@@ -4490,11 +4487,12 @@ async def chat_handler(request: Request, background_tasks=None):
         _msgs: list[dict] = []
         if body.get("system"):
             _msgs.append({"role": "system", "content": str(body["system"])})
-        if rag_context:
+        _agentic_context = await chat_rag_context()
+        if _agentic_context:
             if _msgs and _msgs[0].get("role") == "system":
-                _msgs[0]["content"] += f"\n\nContext & Known Entities:\n{rag_context}"
+                _msgs[0]["content"] += f"\n\nContext & Known Entities:\n{_agentic_context}"
             else:
-                _msgs.append({"role": "system", "content": f"Context & Known Entities:\n{rag_context}"})
+                _msgs.append({"role": "system", "content": f"Context & Known Entities:\n{_agentic_context}"})
         for _m in body["messages"]:
             if isinstance(_m, dict) and _m.get("role"):
                 _msgs.append({k: _m.get(k) for k in ("role", "content", "tool_calls", "tool_call_id", "name") if _m.get(k) is not None})
@@ -4567,6 +4565,9 @@ async def chat_handler(request: Request, background_tasks=None):
             + (_voice_context_note(voice_context) if voice_context else "")
         ).strip(),
         "voice_context": voice_context,
+        # The FastPath classifier's verdict routes the orchestrator's pre-fetch (context_router).
+        "intent": intent,
+        "intent_confidence": float(confidence or 0.0),
         "creds": creds.model_dump(),
         "client": body.get("client"),
         "source": body.get("source"),
