@@ -32,8 +32,9 @@ three modes:
   60 minutes, with a note); "Message a parent" (a chat message to the
   child's parents, `/api/guard/message`); "Chores" (today's chores with a
   Done button each; a parent then confirms each one, as on Android; a
-  "chores first" lock opens on them); and "A parent can unlock" (a parent's
-  sign-in, or a parent's offline code when the hub cannot be reached). It
+  "chores first" lock opens on them); and "Ask a parent to unlock" (how long
+  and why; both parents approve or deny on their phones, nothing is typed
+  here; or a parent's offline code when the hub cannot be reached). It
   explains the lock; the session sign-out holds it. One centred column that
   wraps and scrolls, sized from the screen's DPI (PerMonitorV2), so it works
   from 1366x768 to 4K and at 150% scaling; buttons are at least 56 px tall.
@@ -116,9 +117,16 @@ tests/                xunit tests for JarvisGuard.Core (plain net10.0, any OS)
   as the assigned child with `is_admin` stripped.
 - `%ProgramData%\Jarvis Guard\public\state.json` is the only user-readable file: locked, reason, until,
   theme, hub URL and username. It is written by the agent.
-- A parent's unlock uses the parent's own username and password, checked by
-  identity (`POST /api/guard/parent-unlock`, five strikes → ten-minute wait),
-  and every unlock notifies the other parents, exactly like a phone unlock.
+- No password is ever typed on the PC. "Ask a parent to unlock" on the lock
+  surface sends a request (how long, an optional why) through the agent to
+  the hub with this PC's device key (`POST /api/guard/unlock-requests`); the
+  hub binds it to this device. Both parents get a notice in the Jarvis app
+  with **Approve N min** and **Deny**, and the child's page in the app shows
+  the same request with a choice of length. Only a parent's own session can
+  answer (never a device key, never the child); only this PC can read the
+  answer (`GET /api/guard/unlock-requests/{id}`). A request expires after ten
+  minutes, a newer one supersedes it, an answer is final, and a PC may ask
+  once every 30 seconds and ten times an hour.
 - The tray and the lock surface reach the agent over the named pipe
   `\\.\pipe\JarvisGuard`: one line of JSON each way per connection
   (`PipeProtocol`), read with a size cap and a time limit on both ends. The
@@ -157,13 +165,18 @@ tests/                xunit tests for JarvisGuard.Core (plain net10.0, any OS)
   enforced every 15 seconds; the hub is asked every 60.
 - Sessions of local administrators (the parents' own Windows accounts) are
   never signed out.
-- A parent's sign-in on the lock surface (`POST /api/guard/parent-unlock`)
-  lifts the lock on this PC until the time the hub answers (ten minutes),
-  even though the hub keeps reporting bedtime or the limit meanwhile, the
-  same as the phone. The answer carries the parents' offline-code verifiers,
+- A parent's approval lifts the lock on this PC until the hub's `until`
+  (fixed when the parent answered), starting at the hub's `decided_at`, even
+  though the hub keeps reporting bedtime or the limit meanwhile, the same as
+  the phone. The agent follows a waiting request every few seconds (pipe
+  `unlock-request` / `unlock-status`, and its own loop, so it unlocks even with
+  the lock surface closed) and unlocks only on the hub's approval of its own
+  request; an approval it cannot trust (another request's, no time it was
+  given, longer than 240 minutes) never unlocks. The approval carries the
+  parents' offline-code verifiers,
   kept in `%ProgramData%\Jarvis Guard\offline.codes.json` (SYSTEM and
-  Administrators only), so a parent's offline code works later with no
-  connection. Five wrong codes lock code entry for ten minutes, the next
+  Administrators only), so a parent's offline code (set and seen in the
+  parent's Jarvis app) works later with no connection. Five wrong codes lock code entry for ten minutes, the next
   five for twenty, then forty, up to a day; only a good code resets it, and
   all of it is kept on disk by the SYSTEM agent, so closing the lock surface,
   killing the tray or restarting resets nothing. A good code unlocks for ten
@@ -223,6 +236,3 @@ Locally: `dotnet test tests` (any OS) and
 - No remote wipe, by design.
 - No offline grant tracking: an offline PC cannot honour a grant that has
   not been seen, like a phone that dies before syncing.
-- The parent's password typed on the child's PC is to be replaced by an
-  unlock a parent approves on their phone; the offline code stays as the
-  no-network fallback.

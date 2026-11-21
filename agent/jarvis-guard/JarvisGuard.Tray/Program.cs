@@ -40,7 +40,7 @@ internal sealed class TrayContext : ApplicationContext
         hubItem.Click += (_, _) => OpenUrl(state: null);
         var askItem = new ToolStripMenuItem("Ask a parent for more time…");
         askItem.Click += (_, _) => AskForTime();
-        var unlockItem = new ToolStripMenuItem("A parent can unlock…");
+        var unlockItem = new ToolStripMenuItem("Ask a parent to unlock…");
         unlockItem.Click += (_, _) => { if (_overlay is null || _overlay.HasExited) _overlay = LaunchOverlay(); };
         var aboutItem = new ToolStripMenuItem("About Jarvis Guard");
         aboutItem.Click += (_, _) => ShowAbout();

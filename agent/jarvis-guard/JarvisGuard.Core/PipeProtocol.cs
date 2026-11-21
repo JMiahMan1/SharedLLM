@@ -35,12 +35,10 @@ public static class PipeProtocol
 
     public sealed class Request
     {
-        public string Cmd { get; set; } = "";          // "status" | "parent-unlock" | "offline-unlock" | "ask-time" | "message" | "chores" | "chore-done" | "usage"
+        public string Cmd { get; set; } = "";          // "status" | "unlock-request" | "unlock-status" | "offline-unlock" | "ask-time" | "message" | "chores" | "chore-done" | "usage"
         public string? HubUrl { get; set; }
-        public string? ParentUsername { get; set; }
-        public string? ParentPassword { get; set; }
-        public int Minutes { get; set; }               // for cmd=ask-time
-        public string? Note { get; set; }              // for cmd=ask-time: why, in the child's words
+        public int Minutes { get; set; }               // for cmd=ask-time and cmd=unlock-request
+        public string? Note { get; set; }              // for cmd=ask-time and cmd=unlock-request: why, in the child's words
         public Dictionary<string, long>? Apps { get; set; } // for cmd=usage: foreground ms per exe since the last report (empty: the tray's heartbeat)
         public string? Text { get; set; }              // for cmd=message: the child's message to their parents
         public string? ChoreId { get; set; }           // for cmd=chore-done
@@ -52,7 +50,8 @@ public static class PipeProtocol
         public bool Ok { get; set; }
         public string? Error { get; set; }
         public GuardState? State { get; set; }          // for cmd=status
-        public int UntilMinutes { get; set; }           // for cmd=parent-unlock / offline-unlock
+        public int UntilMinutes { get; set; }           // for cmd=unlock-status (approved) / offline-unlock
+        public string? UnlockStatus { get; set; }       // for cmd=unlock-request / unlock-status: an UnlockRequest status (None, Pending, Approved, ...)
         public List<ChoreItem>? Chores { get; set; }    // for cmd=chores
         public string? Info { get; set; }               // a line to show on success (who a message reached)
     }

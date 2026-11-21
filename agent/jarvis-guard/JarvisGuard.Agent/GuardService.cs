@@ -76,6 +76,17 @@ public sealed class GuardService
     /// <summary>Whether a signed-in child session has no tray (minutes not counted), and whether the hub has been told of the latest change.</summary>
     private bool _trayMissing;
     private bool _trayChangeDue;
+    /// <summary>
+    /// This PC's unlock request still waiting for a parent (null: none), when
+    /// it expires, and what the hub last said about the latest request (for the
+    /// lock surface). Only the hub's answer unlocks (<see cref="UnlockRequest"/>).
+    /// </summary>
+    private long? _unlockId;
+    private DateTimeOffset _unlockExpires;
+    private DateTimeOffset _unlockCheckedAt = DateTimeOffset.MinValue;
+    private string _unlockStatus = UnlockRequest.None;
+    private string? _unlockLine;
+    private readonly SemaphoreSlim _unlockGate = new(1, 1);
 
     public GuardService(GuardConfig config)
     {
@@ -128,6 +139,10 @@ public sealed class GuardService
             try { EnforceTick(); }
             catch (Exception ex) { Log($"enforce: {ex}"); }
             if (_trayChangeDue) await ReportTrayAsync();
+            // A request a parent has not answered yet is followed here too, so
+            // the PC unlocks on an approval even with the lock surface closed.
+            try { await CheckUnlockAsync(); }
+            catch (Exception ex) { Log($"unlock request: {ex}"); }
         } while (await tick.WaitForNextTickAsync());
     }
 
@@ -627,50 +642,70 @@ public sealed class GuardService
                     return NoConnection();
                 }
 
-            case "parent-unlock":
-                // To be replaced by an unlock request a parent approves on their phone.
-                if (string.IsNullOrWhiteSpace(request.ParentUsername) || request.ParentPassword is null)
-                    return new PipeProtocol.Response { Ok = false, Error = "A parent's username and password are needed." };
+            case "unlock-request":
+            {
+                // A parent answers on their phone; nothing is typed here. The
+                // hub binds the request to this PC's device key.
+                if (request.Minutes is < UnlockRequest.MinMinutes or > UnlockRequest.MaxMinutes)
+                    return new PipeProtocol.Response { Ok = false, Error = "Pick how long to ask for." };
+                var note = request.Note?.Trim();
+                if (note is { Length: > 200 }) note = note[..200];
+                string? lockReason;
+                lock (_stateLock) lockReason = _base is { Locked: true } ? _base.Reason : null;
                 try
                 {
-                    var resp = await _api.ParentUnlockAsync(request.ParentUsername.Trim().ToLowerInvariant(), request.ParentPassword);
+                    var resp = await _api.AskUnlockAsync(request.Minutes, note, lockReason);
                     var body = await resp.Content.ReadAsStringAsync();
                     if (!resp.IsSuccessStatusCode)
                     {
-                        var message = resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests
-                            ? "Too many tries. Wait ten minutes, then try again."
-                            : "That did not work. Check the parent's username and password.";
-                        return new PipeProtocol.Response { Ok = false, Error = message };
-                    }
-                    // The hub only lifts a parent's pause; bedtime and the day's
-                    // limit still read as locked there. The unlock is this PC's
-                    // to keep for the time the hub granted.
-                    var started = DateTimeOffset.Now;
-                    var until = started.AddMinutes(10);
-                    try
-                    {
-                        using var doc = System.Text.Json.JsonDocument.Parse(body);
-                        if (doc.RootElement.TryGetProperty("until", out var u) && u.ValueKind == System.Text.Json.JsonValueKind.String
-                            && DateTimeOffset.TryParse(u.GetString(), out var parsed)) until = parsed;
-                        // The parents' offline-code verifiers come with a real
-                        // parent unlock, as on the phone: kept for a later unlock
-                        // with no connection.
-                        if (doc.RootElement.TryGetProperty("offline_codes", out var codes))
+                        Log($"unlock request refused: {HubReach.LogReason((int)resp.StatusCode)}");
+                        return new PipeProtocol.Response
                         {
-                            lock (_stateLock) { _offline.Remember(codes); SaveOfflineCodes(); }
-                        }
+                            Ok = false,
+                            Error = HubReach.RefusalFor((int)resp.StatusCode) ?? Detail(body) ?? "The request did not go. Try again in a minute.",
+                        };
                     }
-                    catch (System.Text.Json.JsonException ex) { Log($"parent unlock: the hub's answer is not JSON ({ex.Message}); ten minutes"); }
-                    lock (_stateLock) _enforcer.ParentUnlocked(until, started);
-                    Log($"unlocked by a parent until {until:O}");
-                    try { EnforceTick(); } catch (Exception ex) { Log($"enforce: {ex.Message}"); }
-                    var minutes = (int)Math.Ceiling(Math.Max(0, (until - DateTimeOffset.Now).TotalMinutes));
-                    return new PipeProtocol.Response { Ok = true, UntilMinutes = minutes };
+                    (long Id, DateTimeOffset ExpiresAt) created;
+                    try { created = UnlockRequest.ParseCreated(body); }
+                    catch (InvalidDataException ex)
+                    {
+                        Log($"unlock request: {ex.Message}");
+                        return new PipeProtocol.Response { Ok = false, Error = "The family hub's answer could not be read. Try again in a minute." };
+                    }
+                    lock (_stateLock)
+                    {
+                        _unlockId = created.Id;
+                        _unlockExpires = created.ExpiresAt;
+                        _unlockStatus = UnlockRequest.Pending;
+                        _unlockLine = UnlockRequest.Describe(UnlockRequest.Pending);
+                        _unlockCheckedAt = DateTimeOffset.Now;
+                    }
+                    Log($"asked the parents to unlock this PC for {request.Minutes} minutes (request {created.Id})");
+                    return new PipeProtocol.Response
+                    {
+                        Ok = true,
+                        UnlockStatus = UnlockRequest.Pending,
+                        Info = "Asked. Both parents get it on their phones; this screen unlocks when one says yes.",
+                    };
                 }
                 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
                 {
                     return NoConnection();
                 }
+            }
+
+            case "unlock-status":
+            {
+                await CheckUnlockAsync();
+                lock (_stateLock)
+                {
+                    var now = DateTimeOffset.Now;
+                    var minutes = _unlockStatus == UnlockRequest.Approved && _enforcer.ParentUnlockActive(now) && _enforcer.UnlockUntil is { } until
+                        ? (int)Math.Ceiling((until - now).TotalMinutes)
+                        : 0;
+                    return new PipeProtocol.Response { Ok = true, UnlockStatus = _unlockStatus, Info = _unlockLine, UntilMinutes = minutes };
+                }
+            }
 
             case "offline-unlock":
             {
@@ -760,6 +795,114 @@ public sealed class GuardService
         new() { Ok = false, Error = "No connection to the family hub. Try again when the PC is online." };
 
     /// <summary>
+    /// Ask the hub about this PC's unlock request still waiting for a parent
+    /// (at most every <see cref="UnlockRequest.PollEvery"/>). An approval, read
+    /// from the hub for this PC's own request, unlocks the PC until the hub's
+    /// <c>until</c>, started at the hub's <c>decided_at</c>: a parent's pause
+    /// issued after that still overrides it (<see cref="LockEnforcer.EffectiveLocked"/>).
+    /// The approval also brings the parents' offline-code verifiers. A denial,
+    /// expiry or newer request ends it; an answer this PC cannot trust never
+    /// unlocks and is logged.
+    /// </summary>
+    private async Task CheckUnlockAsync()
+    {
+        long id;
+        DateTimeOffset expires;
+        var now = DateTimeOffset.Now;
+        lock (_stateLock)
+        {
+            if (_unlockId is not { } waiting || now - _unlockCheckedAt < UnlockRequest.PollEvery) return;
+            id = waiting;
+            expires = _unlockExpires;
+            _unlockCheckedAt = now;
+        }
+        if (!await _unlockGate.WaitAsync(0)) return;
+        try
+        {
+            if (!UnlockRequest.StillWorthAsking(expires, now))
+            {
+                Log($"unlock request {id}: no answer from the hub about it since it expired; stopped asking");
+                Settle(id, UnlockRequest.Expired, UnlockRequest.Describe(UnlockRequest.Expired));
+                return;
+            }
+            HttpResponseMessage resp;
+            string body;
+            try
+            {
+                resp = await _api.GetUnlockRequestAsync(id);
+                body = await resp.Content.ReadAsStringAsync();
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                Log($"unlock request {id}: no answer from the hub ({ex.Message}); asked again shortly");
+                return;
+            }
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Log($"unlock request {id}: the hub does not know it as this PC's request; stopped asking");
+                Settle(id, UnlockRequest.None, "The family hub lost this request. Ask again.");
+                return;
+            }
+            if (!resp.IsSuccessStatusCode)
+            {
+                Log($"unlock request {id}: {HubReach.LogReason((int)resp.StatusCode)}; asked again shortly");
+                return;
+            }
+            UnlockRequest.Answer answer;
+            try { answer = UnlockRequest.ParseAnswer(body, id); }
+            catch (InvalidDataException ex)
+            {
+                Log($"unlock request {id}: {ex.Message}; not unlocked");
+                Settle(id, UnlockRequest.None, "The family hub's answer could not be read, so the PC stays locked. Ask again.");
+                return;
+            }
+            if (answer.Status == UnlockRequest.Pending) return;
+            if (answer.Status != UnlockRequest.Approved)
+            {
+                Log($"unlock request {id}: {answer.Status}{(answer.DecidedBy is null ? "" : $" by {answer.DecidedBy}")}");
+                Settle(id, answer.Status, UnlockRequest.Describe(answer.Status, answer.DecidedBy));
+                return;
+            }
+            var until = answer.Until!.Value;
+            lock (_stateLock)
+            {
+                if (_unlockId != id) return; // a newer request replaced it meanwhile
+                _unlockId = null;
+                _unlockStatus = UnlockRequest.Approved;
+                if (until <= DateTimeOffset.Now)
+                {
+                    _unlockLine = "A parent said yes, but the time they gave has already run out. Ask again.";
+                }
+                else
+                {
+                    _unlockLine = UnlockRequest.Describe(UnlockRequest.Approved, answer.DecidedBy);
+                    _enforcer.ParentUnlocked(until, answer.DecidedAt);
+                }
+                if (answer.OfflineCodes is { } codes)
+                {
+                    _offline.Remember(codes);
+                    SaveOfflineCodes();
+                }
+            }
+            Log($"unlock request {id}: approved by {answer.DecidedBy ?? "a parent"} until {until:O}");
+            try { EnforceTick(); } catch (Exception ex) { Log($"enforce: {ex.Message}"); }
+        }
+        finally { _unlockGate.Release(); }
+    }
+
+    /// <summary>The request <paramref name="id"/> is over without an unlock; the lock surface shows <paramref name="line"/>.</summary>
+    private void Settle(long id, string status, string line)
+    {
+        lock (_stateLock)
+        {
+            if (_unlockId != id) return;
+            _unlockId = null;
+            _unlockStatus = status;
+            _unlockLine = line;
+        }
+    }
+
+    /// <summary>
     /// Offline codes are never silent: each good code (with whose it was) and
     /// the wrong ones (as a count) go to the hub, now if it answers, else at
     /// the next good poll. A report leaves the queue only once the hub said it
@@ -814,7 +957,7 @@ public sealed class GuardService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            Log($"offline codes unreadable ({ex.Message}): no offline unlock on this PC until a parent's online unlock brings the codes back");
+            Log($"offline codes unreadable ({ex.Message}): no offline unlock on this PC until a parent's approval of an unlock request brings the codes back");
             return OfflineCodes.Unreadable();
         }
     }

@@ -9,8 +9,9 @@ namespace JarvisGuard.Core;
 /// A parent's offline unlock code, checked on the PC with no connection: the
 /// same scheme as the phone (services/ui/android OfflineCode.java and
 /// GuardApi.offlineUnlock). The PC holds only PBKDF2-SHA256 verifiers (salt,
-/// iterations, hash) that arrived inside a real online parent unlock; the
-/// code itself never leaves the parent. A good code lifts the lock for ten
+/// iterations, hash) that arrived with a parent's approval of an unlock
+/// request from this PC (<see cref="UnlockRequest"/>); the code itself never
+/// leaves the parent. A good code lifts the lock for ten
 /// minutes.
 ///
 /// Wrong codes are rate limited and the limit grows: five wrong codes lock
@@ -88,7 +89,7 @@ public sealed class OfflineCodes
     /// <summary>Ok, or why not; <see cref="Parent"/> is whose code matched.</summary>
     public readonly record struct Result(bool Ok, string? Error, string? Parent = null);
 
-    /// <summary>Keep the verifiers an online parent unlock returned (<c>offline_codes</c>).</summary>
+    /// <summary>Keep the verifiers a parent's approval returned (<c>offline_codes</c>).</summary>
     public void Remember(JsonElement offlineCodes)
     {
         if (offlineCodes.ValueKind != JsonValueKind.Array) return;
@@ -119,7 +120,7 @@ public sealed class OfflineCodes
         if (LockedUntil is { } until && now < until)
             return new Result(false, $"Too many tries. Wait until {until.ToLocalTime():t}, then try again.");
         if (Codes.Count == 0)
-            return new Result(false, "No offline code is set up on this PC yet. A parent signs in here once while it is online to set it up.");
+            return new Result(false, "No offline code is set up on this PC yet. It arrives the first time a parent approves an unlock from their phone while the PC is online.");
         var typed = (code ?? "").Trim();
         var match = Codes.FirstOrDefault(c => Matches(typed, c.Salt, c.Iterations, c.Hash));
         if (match is not null)

@@ -12,8 +12,8 @@ namespace JarvisGuard.Core;
 /// The old code signed out once per lock and never again, so a child who
 /// signed straight back in kept the PC for the rest of the lock.
 ///
-/// A parent's sign-in on the lock surface lifts the lock on this PC for the
-/// time the hub granted (<see cref="UnlockUntil"/>), whatever the hub's
+/// A parent's approval from their phone (or a parent's offline code) lifts the
+/// lock on this PC for the time granted (<see cref="UnlockUntil"/>), whatever the hub's
 /// status says meanwhile: the hub keeps reporting bedtime or the day's limit,
 /// and the old code signed the session out again on the next poll.
 /// </summary>
