@@ -158,14 +158,14 @@ async def garden_species_list(request: Request):
 @router.post("/species/lookup")
 async def garden_species_lookup(request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call("POST", "/species/lookup", json=body, headers=headers)
 
 
 @router.post("/species/custom")
 async def garden_species_custom(request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call("POST", "/species/custom", json=body, headers=headers)
 
 
@@ -209,7 +209,7 @@ async def garden_profile(request: Request):
 @router.put("/profile")
 async def garden_put_profile(request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call("PUT", "/profile", json=body, headers=headers)
 
 
@@ -222,14 +222,14 @@ async def garden_list_locations(request: Request):
 @router.post("/locations")
 async def garden_create_location(request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call("POST", "/locations", json=body, headers=headers)
 
 
 @router.patch("/locations/{loc_id}")
 async def garden_patch_location(loc_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call(
         "PATCH", f"/locations/{seg(loc_id)}", json=body, headers=headers
     )
@@ -252,7 +252,7 @@ async def garden_list_plants(request: Request):
 @router.post("/plants")
 async def garden_create_plant(request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call("POST", "/plants", json=body, headers=headers)
 
 
@@ -265,7 +265,7 @@ async def garden_get_plant(plant_id: str, request: Request):
 @router.patch("/plants/{plant_id}")
 async def garden_patch_plant(plant_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call(
         "PATCH", f"/plants/{seg(plant_id)}", json=body, headers=headers
     )
@@ -295,7 +295,7 @@ async def garden_today(request: Request):
 @router.post("/plants/{plant_id}/care")
 async def garden_log_care(plant_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call(
         "POST", f"/plants/{seg(plant_id)}/care", json=body, headers=headers
     )
@@ -304,7 +304,7 @@ async def garden_log_care(plant_id: str, request: Request):
 @router.post("/plants/{plant_id}/snooze")
 async def garden_snooze(plant_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    body = await _json_body(request, required=False)
     return await _call(
         "POST",
         f"/plants/{seg(plant_id)}/snooze",
@@ -321,7 +321,7 @@ async def garden_snooze(plant_id: str, request: Request):
 @router.post("/plants/{plant_id}/harvest")
 async def garden_harvest(plant_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call(
         "POST", f"/plants/{seg(plant_id)}/harvest", json=body, headers=headers
     )
@@ -395,7 +395,7 @@ async def garden_list_care_rules(plant_id: str, request: Request):
 @router.post("/plants/{plant_id}/care-rules")
 async def garden_create_care_rule(plant_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call(
         "POST",
         f"/plants/{seg(plant_id)}/care-rules",
@@ -407,7 +407,7 @@ async def garden_create_care_rule(plant_id: str, request: Request):
 @router.patch("/plants/{plant_id}/care-rules/{rule_id}")
 async def garden_patch_care_rule(plant_id: str, rule_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call(
         "PATCH",
         f"/plants/{seg(plant_id)}/care-rules/{seg(rule_id)}",
@@ -419,16 +419,29 @@ async def garden_patch_care_rule(plant_id: str, rule_id: str, request: Request):
 @router.patch("/locations/{loc_id}/assign")
 async def garden_assign_location(loc_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call(
         "PATCH", f"/locations/{seg(loc_id)}/assign", json=body, headers=headers
     )
 
 
+#: The plant fields only the Skylight chore routes below may set.
+_SKYLIGHT_FIELDS = frozenset({"skylight_sync_enabled", "skylight_chore_id", "skylight_assignee"})
+#: Tells Garden a chore link went through those routes' rules (services/garden).
+_SKYLIGHT_LINK = {"X-Garden-Skylight-Link": "chore-link"}
+
+
 @router.patch("/plants/{plant_id}/assign")
 async def garden_assign_plant(plant_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
+    if _SKYLIGHT_FIELDS & set(body):
+        # Setting these directly skipped every rule of the chore chart (who a
+        # chore may go to, that they are on it, that the chore exists).
+        raise HTTPException(
+            status_code=400,
+            detail="Link or unlink a Skylight chore with /plants/{id}/skylight-chore, not here.",
+        )
     return await _call(
         "PATCH", f"/plants/{seg(plant_id)}/assign", json=body, headers=headers
     )
@@ -443,7 +456,7 @@ async def garden_streaks(request: Request):
 @router.post("/notices/test")
 async def garden_notices_test(request: Request):
     headers = await _verified_headers(request)
-    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    body = await _json_body(request, required=False)
     return await _call("POST", "/notices/test", json=body, headers=headers)
 
 
@@ -477,7 +490,7 @@ async def garden_recipes_draft(request: Request):
     from services.gateway.main import _cookbook_caller, _cookbook_run
 
     caller = await _cookbook_caller(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await recipe_draft(_cookbook_run, caller, body, request)
 
 
@@ -504,14 +517,14 @@ async def garden_list_pantry_goals(request: Request):
 @router.post("/pantry-goals")
 async def garden_create_pantry_goal(request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call("POST", "/pantry-goals", json=body, headers=headers)
 
 
 @router.patch("/pantry-goals/{goal_id}")
 async def garden_patch_pantry_goal(goal_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    body = await _json_body(request, required=False)
     return await _call("PATCH", f"/pantry-goals/{seg(goal_id)}", json=body, headers=headers)
 
 
@@ -546,7 +559,7 @@ async def garden_list_plans(request: Request):
 @router.post("/plans")
 async def garden_create_plan(request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call("POST", "/plans", json=body, headers=headers)
 
 
@@ -559,7 +572,7 @@ async def garden_get_plan(plan_id: str, request: Request):
 @router.patch("/plans/{plan_id}")
 async def garden_patch_plan(plan_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    body = await _json_body(request, required=False)
     return await _call("PATCH", f"/plans/{seg(plan_id)}", json=body, headers=headers)
 
 
@@ -578,7 +591,7 @@ async def garden_list_plan_cells(plan_id: str, bed_id: str, request: Request):
 @router.put("/plans/{plan_id}/beds/{bed_id}/cells")
 async def garden_upsert_plan_cells(plan_id: str, bed_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request, any_json=True)  # a list of cells
     return await _call("PUT", f"/plans/{seg(plan_id)}/beds/{seg(bed_id)}/cells", json=body, headers=headers)
 
 
@@ -587,7 +600,8 @@ async def garden_auto_arrange(plan_id: str, bed_id: str, request: Request):
     headers = await _verified_headers(request)
     # The body carries the arrangement the person is looking at
     # ({species_refs, apply}); dropping it arranged only what was last saved.
-    body = await _json_body(request)
+    # No body at all arranges what was last saved.
+    body = await _json_body(request, required=False)
     return await _call(
         "POST",
         f"/plans/{seg(plan_id)}/beds/{seg(bed_id)}/auto-arrange",
@@ -636,12 +650,26 @@ _CHILD_ROLES = frozenset({"child", "teen"})
 _SKYLIGHT_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
-async def _json_body(request: Request) -> dict:
-    try:
-        body = await request.json()
-    except ValueError:
+async def _json_body(request: Request, *, required: bool = True, any_json: bool = False) -> Any:
+    """The request's JSON body; 422 when it is malformed or the wrong shape.
+
+    ``required=False`` lets an empty body stand for ``{}`` (routes whose body is
+    optional). A body that is present but not JSON is always a 422: it used to
+    reach ``request.json()`` and come back as a 500, or be read as ``{}`` and
+    act as if the caller had sent nothing.
+    """
+    raw = await request.body()
+    if not raw.strip():
+        if required:
+            raise HTTPException(status_code=422, detail="A JSON body is required.")
         return {}
-    return body if isinstance(body, dict) else {}
+    try:
+        body = _json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="The request body is not valid JSON.") from None
+    if not any_json and not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The request body must be a JSON object.")
+    return body
 
 
 def _decode(response) -> dict:
@@ -681,9 +709,13 @@ async def _plant_or_404(plant_id: str, headers: dict) -> dict:
 
 
 def _same_person(a: str, b: str) -> bool:
-    """The chore chart's matching rule: case-insensitive, either name inside the other."""
-    x, y = a.strip().lower(), b.strip().lower()
-    return bool(x and y) and (x == y or x in y or y in x)
+    """The chore chart's matching rule: the same name, ignoring case and spacing.
+
+    Never by containment: "Ann" is not "Anna", and a chore given to the wrong
+    person is a chore the right one never sees.
+    """
+    x, y = " ".join(a.split()).lower(), " ".join(b.split()).lower()
+    return bool(x) and x == y
 
 
 def _may_link_skylight(ident: dict, plant: dict) -> bool:
@@ -900,10 +932,11 @@ async def garden_create_skylight_chore(plant_id: str, request: Request):
             detail="Skylight added the chore but returned no id, so it cannot be linked to the plant.",
         )
 
+    previous = str(plant.get("skylight_chore_id") or "") or None
     status, updated = await _garden_json(
         "PATCH",
         f"/plants/{seg(plant_id)}/assign",
-        headers=await _verified_headers(request),
+        headers={**await _verified_headers(request), **_SKYLIGHT_LINK},
         json={
             "skylight_sync_enabled": True,
             "skylight_chore_id": str(chore_ids[0]),
@@ -915,7 +948,7 @@ async def garden_create_skylight_chore(plant_id: str, request: Request):
             status_code=502,
             detail="The Skylight chore was added but could not be saved on the plant; remove it in Skylight if you try again.",
         )
-    return {
+    answer: dict[str, Any] = {
         "plant": updated,
         "chore": {
             "id": str(chore_ids[0]),
@@ -925,36 +958,71 @@ async def garden_create_skylight_chore(plant_id: str, request: Request):
             "title": spec["title"],
         },
     }
+    if previous and previous != str(chore_ids[0]):
+        # A relink replaces the chore: the old one must not stay on the chart,
+        # where someone would keep ticking off a chore nothing listens to.
+        removed, problem = await _remove_skylight_chore(previous)
+        answer["replaced_chore_id"] = previous
+        answer["replaced_chore_removed"] = removed
+        if problem:
+            answer["warning"] = f"The previous chore ({previous}) is still on the Skylight chart: {problem}"
+    return answer
+
+
+async def _remove_skylight_chore(chore_id: str) -> tuple[bool, str | None]:
+    """Remove a whole chore series from Skylight. ``(removed, why not)``.
+
+    Execution answers ``{"status": "SUCCESS"|"FAILURE", "message"}``; anything
+    but SUCCESS is a failure and is reported, never treated as removed.
+    """
+    from services.gateway.main import shared_http_client
+
+    try:
+        async with shared_http_client() as client:
+            resp = await client.delete(
+                f"{EXECUTION_SVC.rstrip('/')}/api/integrations/skylight/chores/{seg(chore_id)}",
+                params={"apply_to": "all"},
+                headers=_HEADERS,
+                timeout=_SKYLIGHT_TIMEOUT,
+            )
+            status = resp.status
+            data = await resp.json(content_type=None)
+    except (aiohttp.ClientError, TimeoutError, OSError, ValueError) as exc:
+        log.warning("[Garden] removing Skylight chore %s failed: %s", chore_id, exc)
+        return False, f"Skylight did not answer ({exc})."
+    if status == 200 and isinstance(data, dict) and data.get("status") == "SUCCESS":
+        return True, None
+    message = (data or {}).get("message") if isinstance(data, dict) else None
+    log.warning("[Garden] Skylight did not remove chore %s: HTTP %s %s", chore_id, status, message)
+    return False, message or f"Skylight answered HTTP {status}."
 
 
 
 @router.delete("/plants/{plant_id}/skylight-chore")
 async def garden_delete_skylight_chore(plant_id: str, request: Request):
-    """Unlink this plant's Skylight chore, removing it there best-effort."""
-    from services.gateway.main import shared_http_client
+    """Unlink this plant's Skylight chore and remove it from the chart.
 
+    The plant is unlinked even when Skylight cannot remove the chore (so the
+    garden stops following a chore it cannot reach), but the answer says so:
+    ``removed_chore_id`` is set only when Skylight confirmed the removal, and
+    ``chore_left_on_chart`` + ``warning`` name a chore that is still there.
+    """
     _, plant, _members, _chart = await _skylight_state(request, plant_id)
-    chore_id = plant.get("skylight_chore_id")
-    if chore_id:
-        try:
-            async with shared_http_client() as client:
-                await client.delete(
-                    f"{EXECUTION_SVC.rstrip('/')}/api/integrations/skylight/chores/{chore_id}",
-                    params={"apply_to": "all"},
-                    headers=_HEADERS,
-                    timeout=_SKYLIGHT_TIMEOUT,
-                )
-        except Exception:  # noqa: BLE001 - the link is cleared either way
-            pass  # the plant must still be unlinked when Skylight is away
+    chore_id = str(plant.get("skylight_chore_id") or "") or None
+    removed, problem = (await _remove_skylight_chore(chore_id)) if chore_id else (False, None)
     status, updated = await _garden_json(
         "PATCH",
         f"/plants/{seg(plant_id)}/assign",
-        headers=await _verified_headers(request),
+        headers={**await _verified_headers(request), **_SKYLIGHT_LINK},
         json={"skylight_sync_enabled": False, "skylight_chore_id": None, "skylight_assignee": None},
     )
     if status != 200 or not isinstance(updated, dict):
         raise HTTPException(status_code=502, detail="Could not unlink the Skylight chore from the plant.")
-    return {"plant": updated, "removed_chore_id": chore_id}
+    answer: dict[str, Any] = {"plant": updated, "removed_chore_id": chore_id if removed else None}
+    if chore_id and not removed:
+        answer["chore_left_on_chart"] = chore_id
+        answer["warning"] = f"The plant is unlinked, but the chore is still on the Skylight chart: {problem}"
+    return answer
 
 
 
@@ -997,14 +1065,14 @@ async def garden_list_pantry_batches(request: Request):
 @router.post("/pantry-batches")
 async def garden_create_pantry_batch(request: Request):
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call("POST", "/pantry-batches", json=body, headers=headers)
 
 
 @router.patch("/pantry-batches/{batch_id}")
 async def garden_patch_pantry_batch(batch_id: str, request: Request):
     headers = await _verified_headers(request)
-    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    body = await _json_body(request, required=False)
     return await _call("PATCH", f"/pantry-batches/{seg(batch_id)}", json=body, headers=headers)
 
 
@@ -1012,7 +1080,7 @@ async def garden_patch_pantry_batch(batch_id: str, request: Request):
 async def garden_use_pantry_batch(batch_id: str, request: Request):
     # Every family role may take something out of the pantry, children included.
     headers = await _verified_headers(request)
-    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    body = await _json_body(request, required=False)
     return await _call("POST", f"/pantry-batches/{seg(batch_id)}/use", json=body, headers=headers)
 
 
@@ -1065,7 +1133,7 @@ async def garden_assistant_log_care(request: Request):
     from services.gateway import garden_assist
 
     creds = await _acting(request)
-    body = await request.json()
+    body = await _json_body(request)
     target = str(body.get("target") or "").strip()
     if not target:
         raise HTTPException(status_code=422, detail="Name a plant, a species or a room.")
@@ -1085,7 +1153,7 @@ async def garden_assistant_log_harvest(request: Request):
     from services.gateway import garden_assist
 
     creds = await _acting(request)
-    body = await request.json()
+    body = await _json_body(request)
     target = str(body.get("target") or "").strip()
     try:
         quantity = float(body.get("quantity"))
@@ -1381,7 +1449,7 @@ async def garden_list_bindings(
 async def garden_upsert_binding(target_kind: str, target_id: str, request: Request):
     """Create or update a plant's or bed's hardware binding (parents/admins)."""
     headers = await _verified_headers(request)
-    body = await request.json()
+    body = await _json_body(request)
     return await _call(
         "PUT", f"/bindings/{seg(target_kind)}/{seg(target_id)}", json=body, headers=headers
     )
@@ -1397,7 +1465,7 @@ async def garden_delete_binding(target_kind: str, target_id: str, request: Reque
 async def garden_run_valve(binding_id: str, request: Request):
     """Open a guarded irrigation valve (parents/admins)."""
     headers = await _verified_headers(request)
-    body = await request.json() if await request.body() else {}
+    body = await _json_body(request, required=False)
     return await _call("POST", f"/bindings/{seg(binding_id)}/valve/run", json=body, headers=headers)
 
 

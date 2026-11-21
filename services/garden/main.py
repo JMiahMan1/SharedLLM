@@ -339,6 +339,11 @@ def _require_parent_or_admin(request: Request) -> None:
         )
 
 
+#: Set only by the gateway's Skylight chore routes (``garden_routes``), which
+#: apply the chore chart's eligibility rules before linking a chore to a plant.
+SKYLIGHT_LINK_HEADER = "X-Garden-Skylight-Link"
+
+
 def _require_admin_for_hub_rooms(request: Request) -> None:
     """403 unless an admin: Home Hub's own area routes are admin-only.
 
@@ -1162,6 +1167,14 @@ def assign_plant(
         _require_parent_or_admin(request)
     if fields_set - {"assigned_to"} - SKYLIGHT_ASSIGNMENT_FIELDS:
         _require_admin_or_adult(request)
+    if fields_set & SKYLIGHT_ASSIGNMENT_FIELDS and request.headers.get(SKYLIGHT_LINK_HEADER) != "chore-link":
+        # The chore link has rules (who a chore may go to, that the person is on
+        # the chart, that the chore exists) which only the gateway's Skylight
+        # chore routes apply. Anything else setting these fields bypassed them.
+        raise HTTPException(
+            status_code=403,
+            detail="A Skylight chore is linked through the plant's Skylight chore option, not set directly.",
+        )
     if fields_set & SKYLIGHT_ASSIGNMENT_FIELDS and "assigned_to" not in fields_set:
         # Skylight linkage: a parent/admin, or the adult_child this plant is
         # assigned to (narrower than "any adult" on purpose).

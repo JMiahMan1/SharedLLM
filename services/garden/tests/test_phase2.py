@@ -162,11 +162,10 @@ def test_assign_plant_parent_only(client):
     # Parent can assign.
     resp = client[0].patch(
         f"/plants/{plant['id']}/assign", headers=PARENT_HEADERS,
-        json={"assigned_to": "child", "skylight_sync_enabled": True},
+        json={"assigned_to": "child"},
     )
     assert resp.status_code == 200
     assert resp.json()["assigned_to"] == "child"
-    assert resp.json()["skylight_sync_enabled"] is True
 
     # Adult child cannot assign.
     resp = client[0].patch(

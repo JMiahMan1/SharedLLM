@@ -647,7 +647,7 @@ def test_garden_assign_plant(client, calls):
     resp = client.patch(
         "/api/garden/plants/plant-1/assign",
         headers=ADMIN_HEADERS,
-        json={"assigned_to": "child", "skylight_sync_enabled": True},
+        json={"assigned_to": "child"},
     )
     assert resp.status_code == 200
     assert resp.json()["assigned_to"] == "child"
@@ -655,6 +655,35 @@ def test_garden_assign_plant(client, calls):
         m == "PATCH" and p == "/plants/plant-1/assign"
         for m, p, _, _, _ in calls
     )
+
+
+@pytest.mark.parametrize(
+    "fields",
+    (
+        {"skylight_sync_enabled": True},
+        {"skylight_chore_id": "999"},
+        {"assigned_to": "child", "skylight_assignee": "child"},
+    ),
+)
+def test_skylight_fields_cannot_be_set_through_plain_assign(client, calls, fields):
+    """They have rules (who, on the chart, the chore exists) only the chore routes apply."""
+    resp = client.patch("/api/garden/plants/plant-1/assign", headers=ADMIN_HEADERS, json=fields)
+
+    assert resp.status_code == 400
+    assert "skylight-chore" in resp.json()["detail"]
+    assert not any(p == "/plants/plant-1/assign" for _m, p, _, _, _ in calls)
+
+
+@pytest.mark.parametrize("raw", (b"{not json", b"[1, 2]"))
+def test_a_malformed_body_is_a_422(client, calls, raw):
+    resp = client.post(
+        "/api/garden/plants/plant-1/care",
+        headers={**ADMIN_HEADERS, "Content-Type": "application/json"},
+        content=raw,
+    )
+
+    assert resp.status_code == 422
+    assert not any(p == "/plants/plant-1/care" for _m, p, _, _, _ in calls)
 
 
 def test_garden_streaks(client, calls):
