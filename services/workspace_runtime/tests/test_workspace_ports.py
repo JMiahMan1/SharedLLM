@@ -10,9 +10,20 @@ from __future__ import annotations
 
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("INTERNAL_SECRET", "test-internal-secret")
+
+@pytest.fixture(autouse=True)
+def _internal_secret(monkeypatch):
+    """Set the secret per test, never at import time.
+
+    A module-scope assignment races every config module that reads the same
+    variable (tests/unit/test_config_env_isolation.py exists to catch it), and
+    the value has to be in place before workspace_runtime.main is imported.
+    """
+    monkeypatch.setenv("INTERNAL_SECRET", "test-internal-secret")
+    return "test-internal-secret"
 
 
 def _client() -> TestClient:
