@@ -379,6 +379,47 @@ class HAAuth:
             cache.clear()
         return len(gone)
 
+    def sign_out_people(self) -> dict[str, Any]:
+        """Revoke every person's hub login: companion-app logins and people's long-lived tokens.
+
+        Part of Jarvis's "sign everyone out and reset keys" (identity's sign-in reset). Every
+        companion app (a ``normal`` refresh token) must log in again, and a long-lived token
+        that belongs to a person (one a Jarvis account kept as its Home Assistant token) stops
+        working. Service users' long-lived tokens (Music Assistant and the like, made by
+        :meth:`ensure_service_user`) are kept, because the service holding one cannot log in
+        again by itself; they are listed by client name so an admin can re-issue them if they
+        may have been exposed. ``system`` tokens are never touched. Returns counts, no values.
+        """
+        users = self.users()
+        with self._lock:
+            blob = self._blob()
+            gone: list[str] = []
+            kept: list[str] = []
+            companion = people_long_lived = 0
+            for tid, meta in list(blob["tokens"].items()):
+                kind = meta.get("token_type")
+                owner = users.get(str(meta.get("user_id") or "")) or {}
+                if kind == "normal":
+                    companion += 1
+                    gone.append(tid)
+                elif kind == "long_lived_access_token":
+                    if owner.get("service"):
+                        kept.append(str(meta.get("client_name") or owner.get("name") or "service"))
+                    else:
+                        people_long_lived += 1
+                        gone.append(tid)
+            for tid in gone:
+                blob["tokens"].pop(tid, None)
+                self.store._exec("DELETE FROM refresh_tokens WHERE id=?", (tid,))
+            self._save(blob)
+        cache = getattr(self.auth, "_cache", None)
+        if gone and isinstance(cache, dict):
+            cache.clear()  # access tokens they signed stop working now, not in a minute
+        log.warning("signed everyone out of the hub: %d companion login(s), %d personal long-lived token(s); "
+                    "%d service token(s) kept", companion, people_long_lived, len(kept))
+        return {"companion_logins_revoked": companion, "people_long_lived_revoked": people_long_lived,
+                "service_tokens_kept": sorted(kept)}
+
     def revoke(self, value: str | None) -> bool:
         """``/auth/revoke``: forget the refresh token and every access token it signed."""
         found = self.find_refresh_token(value or "")

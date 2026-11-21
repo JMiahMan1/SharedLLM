@@ -46,6 +46,7 @@ import { useIntegrations } from '../hooks/useIntegrations';
 import UserAvatar from '../components/UserAvatar';
 import AvatarPicker from '../components/AvatarPicker';
 import Modal from '../components/ui/Modal';
+import { TestAccountBadge, UserSignInResetButton } from '../components/admin/SignInResetPanel';
 
 // Tailwind only ships classes it can see whole in the source, so the tile
 // tints are spelled out rather than built from `bg-${color}-500/20`.
@@ -619,8 +620,9 @@ const Identity = () => {
   });
 
   const { data: usersList } = useQuery<UserProfile[]>({
-    queryKey: ['users'],
-    queryFn: () => api.getUsers(),
+    // Test accounts too, with a badge: an admin has to tell them apart.
+    queryKey: ['users', 'include-test-accounts'],
+    queryFn: () => api.getUsers({ includeTestAccounts: true }),
     enabled: !!fullUser?.is_admin
   });
 
@@ -948,12 +950,16 @@ const Identity = () => {
                <h3 className="font-bold text-white mb-4 text-xs tracking-widest uppercase">Family accounts</h3>
                <div className="space-y-3">
                   {usersList?.map((u) => (
-                    <div key={u.id} className="flex items-center justify-between gap-2 p-3 glass-card text-xs">
-                       <div className="flex min-w-0 items-center gap-3">
+                    <div key={u.id} className="flex items-center justify-between gap-2 p-3 glass-card text-xs" data-testid={`family-account-${u.username}`}>
+                       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                           <div className={`w-2 h-2 shrink-0 rounded-full ${u.is_admin ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.6)]' : 'bg-slate-600'}`} />
                           <span className="min-w-0 break-all font-bold text-slate-300">@{u.username}</span>
+                          {u.is_test_account === true && <TestAccountBadge />}
                        </div>
-                       <span className="shrink-0 text-[8px] uppercase font-black px-2 py-0.5 rounded-full bg-white/5 text-slate-500">{u.is_admin ? 'Admin' : 'User'}</span>
+                       <div className="flex shrink-0 items-center gap-1">
+                          <span className="text-[8px] uppercase font-black px-2 py-0.5 rounded-full bg-white/5 text-slate-500">{u.is_admin ? 'Admin' : 'User'}</span>
+                          <UserSignInResetButton username={u.username} name={u.full_name || u.username} />
+                       </div>
                     </div>
                   ))}
                </div>

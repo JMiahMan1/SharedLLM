@@ -880,7 +880,7 @@ public class LocationTrackingService extends Service {
         // server takes the last fix it gets as the current position, and Geo
         // skips a fix older than its newest when it builds trips.
         LocationOutbox.Sent sent = LocationOutbox.sendLive(LocationOutbox.store(this), user, body,
-                b -> LocationOutbox.send(serverUrl, token, user, b));
+                b -> LocationOutbox.send(this, serverUrl, token, user, b));
         switch (sent) {
             case OK:
                 Log.i(TAG, "uploaded " + user);

@@ -56,7 +56,7 @@ final class PushGateway {
         if (key == null || key.isEmpty()) throw new IllegalStateException("Not signed in");
         String base = WidgetApi.serverUrl(context);
         if (base == null) throw new IllegalStateException("No server configured");
-        return WidgetApi.request(base, key, method, path, body, headers(context));
+        return WidgetApi.request(context, base, key, method, path, body, headers(context));
     }
 
     /** POST with credentials given explicitly (the key being signed out). */

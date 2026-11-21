@@ -5,7 +5,9 @@
 1. **Secrets** (`.env` only): `INTERNAL_SECRET` (service-to-service auth) and
    `FERNET_KEY` (encrypts stored credentials). Required at import time
    (`services/config.py`); a service refuses to start without them. They are
-   never stored in the database, code, tests or docs.
+   never stored in the database, code, tests or docs. During a key rotation
+   `FERNET_KEY_PREVIOUS` holds the key being replaced (values sealed with it still
+   decrypt); `scripts/rotate_fernet_key.sh` sets and removes it (`docs/KEY_ROTATION.md`).
 2. **Bootstrap** (`.env`): `NETWORK_MODE` and the network-scoped service URLs
    (below), so a service can reach Identity at all.
 3. **Runtime** (Identity GlobalSettings): everything else. Each service calls

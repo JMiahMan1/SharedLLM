@@ -1023,6 +1023,8 @@ final class GuardApi {
                     body = out.toString("UTF-8");
                 }
             }
+            // A refused key is forgotten; the guard keeps enforcing its last known status.
+            SignInReset.check(context, status, body, token);
             return new HttpResult(status, body);
         } finally {
             conn.disconnect();
