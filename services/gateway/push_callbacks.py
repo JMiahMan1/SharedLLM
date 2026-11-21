@@ -269,7 +269,16 @@ async def _garden_proxy(
     from services.gateway import garden_routes
 
     headers = await garden_routes._verified_headers(request)
-    return await garden_routes._call(method, path, params=params, json=json, headers=headers)
+    response = await garden_routes._call(method, path, params=params, json=json, headers=headers)
+    # Decode here: the callers below build their own JSON answer, and a Starlette
+    # ``Response`` inside it is not serializable -- every digest tap used to 500
+    # with "Object of type Response is not JSON serializable".
+    body = garden_routes._decode(response)
+    status = int(getattr(response, "status_code", 200) or 200)
+    if status >= 400:
+        detail = body.get("detail") if isinstance(body, dict) else None
+        raise HTTPException(status_code=status, detail=detail or "The garden service refused that")
+    return body if isinstance(body, dict) else {"result": body}
 
 
 @push_callback("garden_done")

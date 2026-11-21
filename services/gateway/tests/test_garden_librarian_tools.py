@@ -147,12 +147,14 @@ def test_a_harvest_without_a_quantity_is_refused(client, parent):
 
 def test_the_plan_tool_answers_with_the_real_yard(client, parent, monkeypatch):
     async def call(method, path, *, params=None, json=None, headers=None):
+        # `/locations` really answers a bare list (it is the shape the UI reads),
+        # which is what used to crash this route with AttributeError: list.
         body = {
             "/profile": {"family_size": 7, "hardiness_zone": "5b"},
-            "/locations": {"locations": [
+            "/locations": [
                 {"id": "bed-1", "name": "Bed 1", "kind": "raised_bed"},
                 {"id": "room-1", "name": "Living Room", "kind": "indoor_room"},
-            ]},
+            ],
             "/pantry-goals": {"goals": [{"item": "Marinara sauce", "target_qty": 40}]},
             "/plans": {"plans": [{"id": "plan-1", "year": 2027}]},
         }[path]
@@ -170,3 +172,33 @@ def test_the_plan_tool_answers_with_the_real_yard(client, parent, monkeypatch):
     # Indoor rooms are Home Hub areas, not planting beds.
     assert [bed["id"] for bed in body["beds"]] == ["bed-1"]
     assert body["pantry_goals"][0]["item"] == "Marinara sauce"
+
+
+def test_the_weather_hook_is_not_anonymous(monkeypatch):
+    """Re-running the frost/rain pass is for a trusted service or a parent."""
+    async def acting(request):
+        # Signed in only with a Bearer token, like the real resolver.
+        if request.headers.get("Authorization") != "Bearer mother-key":
+            return None
+        return {"user": "mother", "is_admin": True, "family_role": "mother"}
+
+    monkeypatch.setattr(gateway_main, "_acting_identity", acting)
+    calls: list[str] = []
+
+    async def call(method, path, *, params=None, json=None, headers=None):
+        calls.append(path)
+        return Response(content=b'{"ok": true}', media_type="application/json")
+
+    monkeypatch.setattr(garden_routes, "_call", call)
+
+    # No credentials at all (no Bearer token, so no identity to fall back on).
+    anonymous = TestClient(app).post("/api/garden/hooks/weather")
+    assert anonymous.status_code == 401
+    assert calls == []
+
+    # A trusted service (the weather poller) is fine.
+    from services.gateway.config import INTERNAL_SECRET
+
+    service = TestClient(app).post("/api/garden/hooks/weather", headers={"X-Internal-Secret": INTERNAL_SECRET})
+    assert service.status_code == 200, service.text
+    assert "/hooks/weather" in calls

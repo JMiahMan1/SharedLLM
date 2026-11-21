@@ -11,12 +11,15 @@ service can enforce Phase 1 permissions ("open care, guarded structure").
 from __future__ import annotations
 
 import json as _json
+import logging
 from typing import Any
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from services.gateway.config import EXECUTION_SVC, GARDEN_SVC, IDENTITY_SVC, INTERNAL_SECRET
+
+log = logging.getLogger("gateway.garden_routes")
 
 router = APIRouter(prefix="/api/garden")
 
@@ -165,8 +168,25 @@ async def garden_species_custom_delete(key: str, request: Request):
 
 @router.post("/hooks/weather")
 async def garden_hooks_weather(request: Request):
-    headers = dict(_HEADERS)
-    return await _call("POST", "/hooks/weather", headers=headers)
+    """A weather event re-evaluates care: for a trusted service or a parent.
+
+    Anyone could POST this and make the garden re-run its frost/rain pass, so it
+    takes the internal secret (weather service, other containers) or an
+    authenticated parent/admin -- never an anonymous caller.
+    """
+    from services.common.secrets import secret_matches
+
+    if secret_matches(request.headers.get("X-Internal-Secret"), INTERNAL_SECRET):
+        headers = dict(_HEADERS)
+        return await _call("POST", "/hooks/weather", headers=headers)
+
+    ident = await _verified_headers(request)  # 401 for anyone not signed in
+    role = str(ident.get("X-User-Role") or "").lower()
+    if role not in ("mother", "father", "admin") and ident.get("X-Is-Admin") != "true":
+        raise HTTPException(
+            status_code=403, detail="Only parents and admins may re-run the garden weather check"
+        )
+    return await _call("POST", "/hooks/weather", headers={**ident, **dict(_HEADERS)})
 
 
 @router.get("/profile")
@@ -601,27 +621,31 @@ async def _json_body(request: Request) -> dict:
     return body if isinstance(body, dict) else {}
 
 
-async def _garden_json(
-    method: str, path: str, *, headers: dict | None = None, json: Any = None
-) -> tuple[int, Any]:
-    """Call Garden and return ``(status, parsed body)`` for logic that needs it."""
-    from services.gateway.main import shared_http_client
+def _decode(response) -> dict:
+    """A proxied Garden answer as a dict (an empty one when there is no body)."""
+    try:
+        body = _json.loads(getattr(response, "body", b"{}") or b"{}")
+    except Exception:
+        return {}
+    return body if isinstance(body, dict) else {"locations": body} if isinstance(body, list) else {}
 
-    merged = dict(_HEADERS)
-    if headers:
-        merged.update(headers)
-    async with shared_http_client() as client, client.request(
-        method,
-        f"{GARDEN_SVC.rstrip('/')}{path}",
-        json=json,
-        headers=merged,
-        timeout=_TIMEOUT,
-    ) as resp:
-        try:
-            data = await resp.json(content_type=None)
-        except ValueError:
-            data = None
-        return resp.status, data
+
+async def _garden_json(
+    method: str,
+    path: str,
+    *,
+    headers: dict | None = None,
+    params: dict | None = None,
+    json: Any = None,
+) -> tuple[int, Any]:
+    """Call Garden and return ``(status, parsed body)`` for logic that needs it.
+
+    Through ``_call`` like every other Garden route, so the timeout, the merged
+    headers and any patched client apply here too -- this used to open its own
+    session, which meant a test (or a proxy tweak) covered every route but these.
+    """
+    response = await _call(method, path, params=params, json=json, headers=headers)
+    return int(getattr(response, "status_code", 200) or 200), _decode(response)
 
 
 async def _plant_or_404(plant_id: str, headers: dict) -> dict:
@@ -982,12 +1006,25 @@ _ADULT_ROLES = frozenset({"adult_child", "mother", "father", "admin"})
 
 
 async def _acting(request: Request) -> dict:
-    """The verified caller, for the calls that need identity rather than headers."""
-    await _verified_headers(request)  # 401 for anyone not signed in
+    """The verified caller, with the credentials their own uploads will use.
+
+    The photo store needs the caller's Nextcloud account (``nextcloud_url``,
+    ``nextcloud_user``, ``nextcloud_pass``), so this is the full resolved
+    identity -- the same one the recipe photo import uses -- not the trimmed
+    ``{user, is_admin, family_role}``. Anyone not signed in is a 401.
+    """
     from services.gateway import main as gateway
 
-    ident = await gateway._acting_identity(request)
-    return dict(ident or {})
+    await _verified_headers(request)  # 401 for anyone not signed in
+    # `_acting_identity` is the authority on *who* (and their role); the resolved
+    # credentials add the Nextcloud account the photo is stored in.
+    trimmed = dict(await gateway._acting_identity(request) or {})
+    try:
+        full = gateway._identity_cred_dict(await gateway._resolve_acting_identity(request))
+    except Exception as exc:  # an identity service hiccup must not lose the caller
+        log.info("[garden] full identity unavailable: %s", exc)
+        full = {}
+    return {**full, **trimmed}
 
 
 @router.get("/assistant/summary")
@@ -1052,39 +1089,58 @@ async def garden_assistant_plan_context(request: Request):
     goals = await _call("GET", "/pantry-goals", headers=headers)
     plans = await _call("GET", "/plans", headers=headers)
 
-    def _json_body(response):
-        try:
-            return _json.loads(getattr(response, "body", b"{}") or b"{}")
-        except Exception:
-            return {}
+    def _json_body(response, *, key: str | None = None):
+        """A Garden answer, whether it is the target shape or wrapped in ``key``.
 
-    profile_data = _json_body(profile)
-    location_data = _json_body(locations)
+        ``GET /locations`` answers a bare list; the other three answer objects
+        that carry their own key. Reading only one of those was a 500.
+        """
+        try:
+            body = _json.loads(getattr(response, "body", b"{}") or b"{}")
+        except Exception:
+            return [] if key else {}
+        if isinstance(body, list):
+            return body if key else {"profile": {}}
+        if not isinstance(body, dict):
+            return [] if key else {}
+        if key is None:
+            return body
+        value = body.get(key)
+        return value if isinstance(value, list) else []
+
     beds = [
-        loc for loc in (location_data.get("locations") or [])
+        loc for loc in _json_body(locations, key="locations")
         if isinstance(loc, dict) and loc.get("kind") not in ("indoor_room",)
     ]
     return {
-        "profile": profile_data,
+        "profile": _json_body(profile),
         "beds": beds,
-        "pantry_goals": _json_body(goals).get("goals") or [],
-        "plans": _json_body(plans).get("plans") or [],
+        "pantry_goals": _json_body(goals, key="goals"),
+        "plans": _json_body(plans, key="plans"),
     }
 
 
 # --------------------------------------------------------------------------- Alpaca Vision: Plant ID, Plant Doctor, journal
 
 
-def _decode(response) -> dict:
-    """A proxied Garden answer as a dict (an empty one when there is no body)."""
-    try:
-        return _json.loads(getattr(response, "body", b"{}") or b"{}")
-    except Exception:
-        return {}
+async def _garden_json_body(
+    method: str, path: str, *, headers: dict, params: dict | None = None, json: Any = None
+) -> dict:
+    """A Garden answer as just its body, for routes that need nothing else."""
+    _, body = await _garden_json(method, path, headers=headers, params=params, json=json)
+    return body
 
 
-async def _garden_json(method: str, path: str, *, headers: dict, params: dict | None = None, json: Any = None) -> dict:
-    return _decode(await _call(method, path, params=params, json=json, headers=headers))
+def _detail_of(body: dict, fallback: str) -> str:
+    """A Garden refusal's message, so the caller hears the real reason."""
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if isinstance(detail, str) and detail:
+        return detail
+    if isinstance(detail, list) and detail:
+        first = detail[0]
+        if isinstance(first, dict) and first.get("msg"):
+            return str(first["msg"])
+    return fallback
 
 
 async def _read_upload(request: Request, field: str = "image") -> bytes:
@@ -1119,7 +1175,7 @@ async def garden_vision_identify(request: Request):
         params: dict = {"q": query, "limit": 5}
         if category:
             params["category"] = category
-        return await _garden_json("GET", "/species/search", headers=headers, params=params)
+        return await _garden_json_body("GET", "/species/search", headers=headers, params=params)
 
     try:
         return await garden_vision.identify(raw, creds=ident, search=search)
@@ -1138,22 +1194,22 @@ async def garden_diagnose_plant(plant_id: str, request: Request):
     """
     from services.gateway import garden_vision
 
-    ident = await _acting(request)
+    creds = await _acting(request)
     raw = await _read_upload(request)
     headers = await _verified_headers(request)
     form = await request.form()
     symptoms = form.get("symptoms")
 
-    plant = await _garden_json("GET", f"/plants/{plant_id}", headers=headers)
-    if not plant or plant.get("detail"):
+    plant_status, plant = await _garden_json("GET", f"/plants/{plant_id}", headers=headers)
+    if plant_status == 404 or not plant or plant.get("detail"):
         raise HTTPException(status_code=404, detail="Plant not found")
-    logs = await _garden_json("GET", f"/plants/{plant_id}/logs", headers=headers, params={"limit": 10})
-    today = await _garden_json("GET", "/today", headers=headers)
+    _, logs = await _garden_json("GET", f"/plants/{plant_id}/logs", headers=headers, params={"limit": 10})
+    _, today = await _garden_json("GET", "/today", headers=headers)
 
     try:
         diagnosis = await garden_vision.diagnose(
             raw,
-            creds=ident,
+            creds=creds,
             plant=plant,
             logs=logs.get("logs") or [],
             weather=today.get("weather"),
@@ -1164,8 +1220,8 @@ async def garden_diagnose_plant(plant_id: str, request: Request):
     except garden_vision.VisionFailed as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
-    stored = await garden_vision.upload_photo(raw, creds=ident, plant_id=plant_id)
-    photo = await _garden_json(
+    stored = await garden_vision.upload_photo(raw, creds=creds, plant_id=plant_id)
+    photo_status, photo = await _garden_json(
         "POST",
         f"/plants/{plant_id}/photos",
         headers=headers,
@@ -1177,6 +1233,8 @@ async def garden_diagnose_plant(plant_id: str, request: Request):
             "ai_summary_json": garden_vision.as_summary_json(diagnosis),
         },
     )
+    if photo_status >= 400:
+        raise HTTPException(status_code=photo_status, detail=_detail_of(photo, "The diagnosis could not be saved"))
     return {
         "diagnosis": diagnosis,
         "photo": photo,
@@ -1189,15 +1247,21 @@ async def garden_add_plant_photo(plant_id: str, request: Request):
     """Add a growth-journal photo (every family role; it is the family's journal)."""
     from services.gateway import garden_vision
 
-    ident = await _acting(request)
+    creds = await _acting(request)
     raw = await _read_upload(request)
     headers = await _verified_headers(request)
     form = await request.form()
     kind = str(form.get("kind") or "progress")
+
+    # A photo for a plant that does not exist must not reach Nextcloud: the
+    # upload happens first otherwise, and the file is orphaned.
+    plant_status, _plant = await _garden_json("GET", f"/plants/{plant_id}", headers=headers)
+    if plant_status == 404:
+        raise HTTPException(status_code=404, detail="Plant not found")
     notes = form.get("notes")
 
-    stored = await garden_vision.upload_photo(raw, creds=ident, plant_id=plant_id)
-    photo = await _garden_json(
+    stored = await garden_vision.upload_photo(raw, creds=creds, plant_id=plant_id)
+    photo_status, photo = await _garden_json(
         "POST",
         f"/plants/{plant_id}/photos",
         headers=headers,
@@ -1208,6 +1272,8 @@ async def garden_add_plant_photo(plant_id: str, request: Request):
             "thumb_base64": stored.get("thumb_base64"),
         },
     )
+    if photo_status >= 400:
+        raise HTTPException(status_code=photo_status, detail=_detail_of(photo, "The photo could not be saved"))
     return {"photo": photo, "nextcloud_warning": stored.get("warning")}
 
 

@@ -268,3 +268,131 @@ def test_a_garden_outage_never_fails_the_tick_off(monkeypatch):
 
     assert resp.status_code == 200, resp.text
     assert any(url.endswith("/hooks/skylight-chore-completed") for url in seen)
+
+
+# --------------------------------------------------------------------------- the real route stack
+
+class _ChoreResp:
+    def __init__(self, body, status: int = 200):
+        self._body, self.status = body, status
+
+    async def json(self, content_type=None):
+        return self._body
+
+
+def _route_world(monkeypatch, *, plant_status: int = 200):
+    """The Skylight routes with only the HTTP seam faked -- never `_garden_json`.
+
+    These two routes broke with a ``ValueError`` (unpacking a dict), because a
+    second ``_garden_json`` definition shadowed the first. Patching ``_call`` and
+    not the helper is what proves the route itself is sound.
+    """
+    import json as _json
+
+    from fastapi.responses import Response
+
+    import services.gateway.main as gateway_main
+
+    captured: list[tuple[str, str, dict | None]] = []
+
+    async def acting(_request):
+        return {"user": "kaleb", "is_admin": False, "family_role": "adult_child"}
+
+    async def household(_request):
+        return HOUSEHOLD
+
+    async def chart():
+        return CHART
+
+    async def call(method, path, *, params=None, json=None, headers=None):
+        captured.append((method, path, json))
+        if method == "GET" and path.startswith("/plants/"):
+            if plant_status != 200:
+                return Response(
+                    content='{"detail": "Plant not found"}', status_code=plant_status,
+                    media_type="application/json",
+                )
+            body = {
+                "id": "p-1", "nickname": "Monty", "assigned_to": "kaleb",
+                "skylight_chore_id": None, "skylight_assignee": None,
+                "skylight_sync_enabled": False,
+                "species": {
+                    "common_name": "Monstera", "watering_interval_days": 7,
+                    "dryness_cue": "top_2_inches_dry",
+                },
+            }
+            return Response(content=_json.dumps(body), media_type="application/json")
+        if method == "PATCH" and path.endswith("/assign"):
+            body = {
+                "id": "p-1", "nickname": "Monty",
+                **(json or {}),
+            }
+            body["skylight_chore_id"] = str(body.get("skylight_chore_id") or "")
+            return Response(content=_json.dumps(body), media_type="application/json")
+        if method == "POST" and path.endswith("/skylight-chore"):
+            body = {
+                "skylight_chore_id": "99", "skylight_assignee": "kaleb",
+                "skylight_sync_enabled": True,
+            }
+            return Response(content=_json.dumps(body), status_code=201, media_type="application/json")
+        return Response(content="{}", media_type="application/json")
+
+    class _ChoreClient:
+        """Execution's chore endpoint: the one HTTP call the create route makes."""
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def post(self, url, json=None, headers=None, timeout=None):
+            return _ChoreResp({"status": "SUCCESS", "chore_ids": ["chore-99"]})
+
+    monkeypatch.setattr(gateway_main, "_acting_identity", acting)
+    monkeypatch.setattr(gateway_main, "shared_http_client", lambda: _ChoreClient())
+    monkeypatch.setattr(garden_routes, "_household", household)
+    monkeypatch.setattr(garden_routes, "_skylight_chart", chart)
+    monkeypatch.setattr(garden_routes, "_call", call)
+    return captured
+
+
+def test_skylight_options_answer_through_the_real_route(monkeypatch):
+    calls = _route_world(monkeypatch)
+    client = TestClient(app, headers={"Authorization": "Bearer kaleb-key"})
+
+    resp = client.get("/api/garden/plants/p-1/skylight-options")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["can_assign_skylight"] is True
+    # An adult child may reach themselves, a teen and a child -- never a parent.
+    assert [row["username"] for row in body["eligible_assignees"]] == ["kaleb", "gracie", "noah"]
+    assert ("GET", "/plants/p-1") in [(method, path) for method, path, _ in calls]
+
+
+def test_creating_a_chore_answers_through_the_real_route(monkeypatch):
+    calls = _route_world(monkeypatch)
+    client = TestClient(app, headers={"Authorization": "Bearer kaleb-key"})
+
+    resp = client.post("/api/garden/plants/p-1/skylight-chore", json={"assignee_username": "kaleb"})
+
+    assert resp.status_code in (200, 201), resp.text
+    body = resp.json()
+    assert body["chore"]["id"] == "chore-99"
+    assert body["chore"]["assignee"] == "kaleb"
+    assert body["chore"]["skylight_name"] == "Kaleb"
+    assert body["plant"]["skylight_chore_id"] == "chore-99"
+    posted = [body for method, path, body in calls if path == "/plants/p-1/assign"]
+    assert posted and posted[0]["skylight_chore_id"] == "chore-99"
+
+
+def test_a_missing_plant_is_a_404_not_a_crash(monkeypatch):
+    _route_world(monkeypatch, plant_status=404)
+    client = TestClient(app, headers={"Authorization": "Bearer kaleb-key"})
+
+    options = client.get("/api/garden/plants/p-1/skylight-options")
+    created = client.post("/api/garden/plants/p-1/skylight-chore", json={"assignee_username": "kaleb"})
+
+    assert options.status_code == 404
+    assert created.status_code == 404

@@ -249,13 +249,23 @@ def test_an_ambiguous_name_asks_instead_of_watering_one():
     assert world.posts() == []
 
 
-def test_an_unknown_plant_is_said_plainly():
+def test_an_unknown_plant_is_said_plainly_when_the_garden_was_named():
     import asyncio
 
     world = World()
-    answer = asyncio.run(_say(world, "I watered Audrey"))
+    answer = asyncio.run(_say(world, "I watered the plant Audrey"))
 
-    assert "couldn't find" in answer
+    assert answer and "couldn't find" in answer
+    assert world.posts() == []
+
+
+def test_a_bare_unknown_name_is_left_to_jarvis():
+    import asyncio
+
+    world = World()
+
+    # No garden word at all: this could be anything, so the model takes it.
+    assert asyncio.run(_say(world, "I watered Audrey")) is None
     assert world.posts() == []
 
 
@@ -284,3 +294,93 @@ def test_watering_the_plants_alone_is_too_vague():
     world = World()
     assert asyncio.run(_say(world, "water the plants")) is None
     assert world.calls == []
+
+
+# --------------------------------------------------------------------------- it must not hijack
+
+#: Sentences that belong to the model (or to another feature entirely).
+NOT_OURS = (
+    "when should I water Monty?",
+    "how often should I water the monstera?",
+    "do I need to water the plants today?",
+    "add 2 pounds of chicken to my shopping list",
+    "add 3 pounds of potatoes to the grocery list",
+    "log 2 pounds of chicken in the recipe",
+    "snooze the alarm for 10 minutes",
+    "snooze the timer",
+    "snooze my reminder until tomorrow",
+    "is anything due for school?",
+    "what is due for school tomorrow",
+    "set a timer for 10 minutes",
+    "turn off the kitchen lights",
+    "write me a poem about rain",
+)
+
+
+@pytest.mark.parametrize("sentence", NOT_OURS)
+def test_a_sentence_that_is_not_a_garden_command_falls_through(sentence):
+    import asyncio
+
+    world = World()
+
+    assert asyncio.run(_say(world, sentence)) is None
+    assert world.calls == []
+
+
+def test_a_question_about_monty_never_logs_a_watering():
+    import asyncio
+
+    world = World()
+
+    assert asyncio.run(_say(world, "When should I water Monty?")) is None
+    assert world.posts() == []
+
+
+def test_a_shopping_list_phrase_is_never_a_harvest():
+    import asyncio
+
+    world = World()
+
+    assert asyncio.run(_say(world, "add 2 pounds of tomatoes to my shopping list")) is None
+    assert world.posts() == []
+
+
+def test_the_bare_verb_add_still_needs_a_garden_context():
+    import asyncio
+
+    world = World()
+
+    assert asyncio.run(_say(world, "add 2 pounds of tomatoes")) is None
+    # ... and with the garden named, it is a harvest again.
+    assert asyncio.run(_say(world, "add 2 pounds of tomatoes from the garden")) is not None
+
+
+def test_snoozing_a_device_is_not_snoozing_a_plant():
+    import asyncio
+
+    world = World()
+
+    for sentence in ("snooze the alarm for 10 minutes", "snooze the timer", "snooze the reminder until tomorrow"):
+        assert asyncio.run(_say(world, sentence)) is None
+    assert world.posts() == []
+
+
+def test_anything_due_is_only_ours_with_the_garden_named():
+    import asyncio
+
+    world = World()
+
+    assert asyncio.run(_say(world, "is anything due for school?")) is None
+    assert asyncio.run(_say(world, "is anything due in the garden?")) is not None
+
+
+def test_an_unknown_name_falls_through_unless_the_garden_was_named():
+    import asyncio
+
+    world = World()
+
+    # "water Audrey" names nothing the garden knows and never said garden.
+    assert asyncio.run(_say(world, "water Audrey")) is None
+    # "water the plant Audrey" is a garden sentence: say we could not find her.
+    answer = asyncio.run(_say(world, "water the plant Audrey"))
+    assert answer and "couldn't find" in answer
