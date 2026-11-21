@@ -1180,41 +1180,39 @@ async def garden_assistant_log_harvest(request: Request):
 
 @router.get("/assistant/plan-context")
 async def garden_assistant_plan_context(request: Request):
-    """The real yard and family the planner should reason from."""
+    """The real yard and family the planner should reason from.
+
+    Every part must be read: a planner told "no beds, no goals" because the
+    Garden answered 500 would plan for an empty yard. A failed read is a 502
+    naming which part and why.
+    """
     headers = await _verified_headers(request)
-    profile = await _call("GET", "/profile", headers=headers)
-    locations = await _call("GET", "/locations", headers=headers)
-    goals = await _call("GET", "/pantry-goals", headers=headers)
-    plans = await _call("GET", "/plans", headers=headers)
+    parts = {}
+    for name, path in (("profile", "/profile"), ("locations", "/locations"),
+                       ("pantry goals", "/pantry-goals"), ("plans", "/plans")):
+        status, body = await _garden_json("GET", path, headers=headers)
+        if status >= 400:
+            detail = body.get("detail") if isinstance(body, dict) else None
+            raise HTTPException(
+                status_code=502,
+                detail=f"The garden could not read its {name} (HTTP {status})" + (f": {detail}" if detail else "."),
+            )
+        parts[name] = body
 
-    def _json_body(response, *, key: str | None = None):
-        """A Garden answer, whether it is the target shape or wrapped in ``key``.
-
-        ``GET /locations`` answers a bare list; the other three answer objects
-        that carry their own key. Reading only one of those was a 500.
-        """
-        try:
-            body = _json.loads(getattr(response, "body", b"{}") or b"{}")
-        except Exception:
-            return [] if key else {}
-        if isinstance(body, list):
-            return body if key else {"profile": {}}
-        if not isinstance(body, dict):
-            return [] if key else {}
-        if key is None:
-            return body
-        value = body.get(key)
+    def listed(body: dict, key: str) -> list:
+        # ``_decode`` wraps a bare list (GET /locations) as {"locations": [...]}.
+        value = body.get(key) if isinstance(body, dict) else None
         return value if isinstance(value, list) else []
 
     beds = [
-        loc for loc in _json_body(locations, key="locations")
+        loc for loc in listed(parts["locations"], "locations")
         if isinstance(loc, dict) and loc.get("kind") not in ("indoor_room",)
     ]
     return {
-        "profile": _json_body(profile),
+        "profile": parts["profile"],
         "beds": beds,
-        "pantry_goals": _json_body(goals, key="goals"),
-        "plans": _json_body(plans, key="plans"),
+        "pantry_goals": listed(parts["pantry goals"], "goals"),
+        "plans": listed(parts["plans"], "plans"),
     }
 
 

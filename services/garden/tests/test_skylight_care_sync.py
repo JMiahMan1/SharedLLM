@@ -343,11 +343,20 @@ def test_a_watering_inside_a_running_loop_is_scheduled_not_blocked(client, sessi
     row = session.get(Plant, plant["id"])
     created: list[object] = []
 
+    class _Task:
+        def __init__(self):
+            self.callbacks = []
+
+        def add_done_callback(self, callback):
+            self.callbacks.append(callback)
+
+    task = _Task()
+
     class _Loop:
         def create_task(self, coro):
             created.append(coro)
             coro.close()
-            return None
+            return task
 
     monkeypatch.setattr(sync.asyncio, "get_running_loop", lambda: _Loop())
 
@@ -355,6 +364,11 @@ def test_a_watering_inside_a_running_loop_is_scheduled_not_blocked(client, sessi
 
     assert len(created) == 1
     assert asyncio.iscoroutine(created[0])
+    # Held until done, then let go.
+    assert task in sync._pending
+    for callback in task.callbacks:
+        callback(task)
+    assert task not in sync._pending
 
 
 def test_undoing_the_chore_undoes_todays_watering(client, session):
