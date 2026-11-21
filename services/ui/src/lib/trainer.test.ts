@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   benchmarkLine,
+  failureKinds,
   bucketBars,
   freeVramLabel,
   hardwareVerdict,
@@ -223,5 +224,16 @@ describe('teacher pipeline health', () => {
     expect(rows[1].value).toContain('1 new, 4 in all');
     expect(rows[2].value).toContain('waiting for an idle card');
     expect(rows[3].failing).toBe(false);
+  });
+});
+
+describe('failed missions', () => {
+  it('lists the kinds learned from, most frequent first, leaving outages out', () => {
+    expect(failureKinds({ infrastructure: 9, loop: 3, hallucinated_path: 3, wrong_tool: 1 })).toEqual([
+      { kind: 'hallucinated_path', label: 'hallucinated path', count: 3 },
+      { kind: 'loop', label: 'loop', count: 3 },
+      { kind: 'wrong_tool', label: 'wrong tool', count: 1 },
+    ]);
+    expect(failureKinds(undefined)).toEqual([]);
   });
 });

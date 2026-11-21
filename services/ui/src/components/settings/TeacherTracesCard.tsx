@@ -4,6 +4,7 @@ import { Download, GraduationCap, Lightbulb } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { errorText } from '../../lib/errorText';
 import {
+  failureKinds,
   healthRows,
   outcomeTone,
   passRateLabel,
@@ -63,6 +64,9 @@ export default function TeacherTracesCard() {
 
   const summary = summaryQuery.data;
   const trend = teacherTrend(summary?.scores);
+  const failureTrend = teacherTrend(
+    (summary?.raven_failures?.scores ?? []).map((row) => ({ ...row, model: '' })),
+  );
   const kept = (summary?.traces.by_status.clean ?? 0) + (summary?.traces.by_status.masked ?? 0);
   const exported = lastExport ?? summary?.exports?.[0] ?? null;
 
@@ -109,6 +113,29 @@ export default function TeacherTracesCard() {
               ))}
             </ul>
           ) : null}
+        </div>
+      ) : null}
+
+      {summary?.raven_failures ? (
+        <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3" data-testid="raven-failures">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Raven's own failed missions</p>
+          <p className="mt-1 text-[11px] text-slate-300">
+            Learned from {summary.raven_failures.learned_from} · {summary.raven_failures.lessons} avoid lessons ·{' '}
+            {summary.raven_failures.cases} test cases · {summary.raven_failures.infrastructure} outages left out
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {failureKinds(summary.raven_failures.by_kind).map((item) => (
+              <span
+                key={item.kind}
+                className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400"
+              >
+                {item.label} · {item.count}
+              </span>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-slate-400" data-testid="raven-failures-trend">
+            Local model on failed missions: {failureTrend.latest} ({failureTrend.change})
+          </p>
         </div>
       ) : null}
 

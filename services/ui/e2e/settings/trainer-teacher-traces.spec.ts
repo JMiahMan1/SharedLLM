@@ -59,6 +59,14 @@ const SUMMARY = {
     failures: [{ part: 'sync', label: 'Teacher sync from the Mac', reason: 'the last sync on the Mac failed: the gateway answered 502',
       since: '2026-11-21T09:30:00Z' }],
   },
+  raven_failures: {
+    missions_examined: 9, by_kind: { infrastructure: 4, loop: 3, hallucinated_path: 2 }, learned_from: 5,
+    infrastructure: 4, lessons: 3, cases: 5,
+    scores: [
+      { report_id: 'eval-1', started_at: '2026-11-01T00:00:00Z', cases: 5, passed: 1, pass_rate: 0.2 },
+      { report_id: 'eval-2', started_at: '2026-11-15T00:00:00Z', cases: 5, passed: 3, pass_rate: 0.6 },
+    ],
+  },
 };
 
 async function mockTrainer(page: Page) {
@@ -127,6 +135,10 @@ test.describe('teacher traces in the Training tab', () => {
     await expect(card.getByTestId('teacher-health')).toContainText('2 queued');
     await expect(card.getByTestId('teacher-health')).toContainText('5/10 passed');
     await expect(card.getByTestId('teacher-failures')).toContainText('the gateway answered 502');
+    await expect(card.getByTestId('raven-failures')).toContainText('Learned from 5');
+    await expect(card.getByTestId('raven-failures')).toContainText('loop · 3');
+    await expect(card.getByTestId('raven-failures')).not.toContainText('infrastructure ·');
+    await expect(card.getByTestId('raven-failures-trend')).toContainText('60% (+40 points since the first run)');
     await expect(card.getByTestId('teacher-score')).toContainText('50%');
     await expect(card.getByTestId('teacher-trend')).toContainText('+20 points since the first run');
     await expect(card.getByTestId('teacher-scores').locator('li')).toHaveCount(2);

@@ -287,6 +287,7 @@ export interface TeacherSummary {
   exports: TeacherExport[];
   scrub_version: string;
   health?: TeacherHealth;
+  raven_failures?: RavenFailureSummary;
 }
 
 export interface TeacherTraceRow {
@@ -422,4 +423,23 @@ export function healthRows(health: TeacherHealth | null | undefined): { label: s
       failing: failing.has('snapshot'),
     },
   ];
+}
+
+/** Raven's own failed missions, as the trainer learns from them. */
+export interface RavenFailureSummary {
+  missions_examined: number;
+  by_kind: Record<string, number>;
+  learned_from: number;
+  infrastructure: number;
+  lessons: number;
+  cases: number;
+  scores: { report_id: string; started_at: string; cases: number; passed: number; pass_rate: number }[];
+}
+
+/** Failure kinds for the card, most frequent first; infrastructure is shown apart. */
+export function failureKinds(byKind: Record<string, number> | null | undefined): { kind: string; label: string; count: number }[] {
+  return Object.entries(byKind ?? {})
+    .filter(([kind]) => kind !== 'infrastructure')
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([kind, count]) => ({ kind, label: kind.replace(/_/g, ' '), count }));
 }

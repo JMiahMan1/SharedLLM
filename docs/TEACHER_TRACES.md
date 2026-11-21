@@ -287,7 +287,50 @@ starts (a notice telemetry did not accept is retried) and clears when the part
 recovers. The four settings are seeded by Identity on start (Admin, LLM &
 Settings). The Lab buttons remain for manual runs.
 
-## 9. Runbook
+## 9. Learning from Raven's own failed missions
+
+The same pass learns from what the local model got wrong
+(`services/gateway/trainer/raven_failures.py`), server side, with no Mac step.
+It reads finished missions from Identity (`/api/raven/missions`, each new failed
+one once, with its `output_log`) and:
+
+1. **Classifies the cause first.** Infrastructure (the model unavailable or
+   busy, timeouts, 5xx, connection errors, restarts, orphaned or pre-empted
+   jobs) is counted and never becomes a lesson, the trainer's existing outage
+   rule; a repeated timeout is an outage, not a loop. Model mistakes:
+   `loop`, `iteration_cap`, `wrong_tool`, `bad_arguments`, `hallucinated_path`,
+   `ignored_errors`, `unverified_success`, `gave_up`. A user abort with no
+   visible cause is recorded but not learnt from.
+2. **Writes an "avoid" lesson** in `system_learnings` (`type: avoid`, tagged
+   `raven_failure`, the kind and the tool), keyed by kind, tool and the error's
+   shape (numbers, quoted values and paths folded), so one recurring mistake is
+   one lesson whose confidence rises from 0.4 by 0.1 each time it recurs, up to
+   0.8. At most 10 lessons per pass.
+3. **Keeps a `raven_failures` case**: the mission's goal, "plan it again in 8
+   lines", checked so that the answer names a way to verify and does not repeat
+   the specific failing call (a hallucinated path, a wrong tool). The teacher
+   pass evaluates this bucket with the `teacher` bucket on an idle card; the Lab
+   card shows the trend. The newest 60 cases are kept.
+4. **Pairs** a failed attempt with the verified teacher trace whose goal is
+   closest (at least 40% word overlap) in the dataset export, as
+   `teacher-<fmt>-<stamp>-contrastive.jsonl`: `{prompt, chosen, rejected}` rows
+   in the conversational form TRL's DPO trainer reads.
+
+Mission text can hold household data, so goals, results and steps are scrubbed
+with the same scrubber before anything is kept, written or exported; the names
+come from Identity's internal name roster (`GET /api/internal/name-roster`),
+and the pass refuses to run without them (fail closed, reported as a failure).
+
+**Loops stop early now.** The agent loop keeps `(call, ok, error)` for every
+tool call and `detect_mission_loop` flags the same read-only or failing call
+5 times, or the same error 4 times, within the last 16 calls, consecutive or
+not (writes may recur: edit, test, edit is normal). The model is nudged once;
+when the same call or error comes back twice more, the mission stops with
+`ERROR: looping: <call or error> repeated N times`, which the classifier files
+as a loop. A trivial mission that used to wander to iteration 38 of 60 now stops
+after about a dozen calls with the cause named.
+
+## 10. Runbook
 
 Once:
 

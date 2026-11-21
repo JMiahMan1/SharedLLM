@@ -15,7 +15,7 @@ import {
 import { api } from '../../services/api';
 import TeacherTracesCard from './TeacherTracesCard';
 
-const BUCKET_CHOICES = ['repair', 'writing', 'vision', 'workspace', 'memory', 'protocol', 'tools', 'teacher'];
+const BUCKET_CHOICES = ['repair', 'writing', 'vision', 'workspace', 'memory', 'protocol', 'tools', 'teacher', 'raven_failures'];
 
 /**
  * Training: what Jarvis can do, how the local model does on it, and what the
