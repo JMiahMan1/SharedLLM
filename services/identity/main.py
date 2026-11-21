@@ -8806,13 +8806,27 @@ def register_device(
 
 
 @app.post("/api/user-panel/devices/{device_key}/agent-key")
-def mint_device_agent_key(device_key: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+def mint_device_agent_key(
+    device_key: str,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
+):
     """Mint (or rotate) the device-scoped key the Windows agent stores on the PC.
 
     Admin only (the installer calls this once during elevated setup). The raw
     key is returned once and never stored -- only its hash is kept on the
     device row. Rotating invalidates the previous key immediately.
+
+    Only a person's own credential may mint. A PC's agent key authenticates as
+    the PC's owner (``require_api_key``), and a PC assigned to a parent would
+    otherwise pass ``_is_device_admin`` and mint keys for every other device.
     """
+    if _device_for_agent_key(session, authorization) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="A device agent key cannot mint device keys; sign in as a device manager to do this.",
+        )
     if not _is_device_admin(caller, session):
         raise HTTPException(status_code=403, detail="Admin only")
     device = session.exec(select(Device).where(Device.device_key == device_key)).first()
