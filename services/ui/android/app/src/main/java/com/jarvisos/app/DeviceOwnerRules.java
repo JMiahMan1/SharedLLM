@@ -173,6 +173,50 @@ public final class DeviceOwnerRules {
     }
 
     /**
+     * The packages a {@code setPackagesSuspended} call actually changed:
+     * everything asked for less the ones Android returned as failed (the
+     * method returns the packages it could NOT change, not the ones it did).
+     */
+    public static Set<String> suspensionApplied(Collection<String> requested, String[] failed) {
+        Set<String> out = new LinkedHashSet<>();
+        if (requested == null) return out;
+        Set<String> failedSet = failed == null ? Collections.<String>emptySet()
+                : new LinkedHashSet<>(Arrays.asList(failed));
+        for (String pkg : requested) {
+            if (pkg != null && !failedSet.contains(pkg)) out.add(pkg);
+        }
+        return out;
+    }
+
+    /**
+     * The log line for one {@code setPackagesSuspended} call's result: how many
+     * of the requested packages changed and which ones Android refused, so the
+     * log reports what happened rather than what was intended.
+     */
+    public static String suspensionReport(boolean suspend, Collection<String> requested, String[] failed) {
+        int asked = requested == null ? 0 : requested.size();
+        Set<String> applied = suspensionApplied(requested, failed);
+        String verb = suspend ? "suspend" : "unsuspend";
+        String failedList = failed == null ? "[]" : Arrays.toString(failed);
+        return verb + ": " + applied.size() + " of " + asked + " applied " + applied
+                + ", failed " + failedList;
+    }
+
+    /**
+     * What to remember as Jarvis-suspended after this pass: the packages that
+     * should be suspended now, plus every package whose unsuspend failed. A
+     * package Android refused to unsuspend is still suspended, so dropping it
+     * from the record would leave it suspended with nothing ever retrying.
+     */
+    public static Set<String> suspensionsToRecord(Collection<String> nowSuspended,
+                                                  Collection<String> unsuspendFailed) {
+        Set<String> out = new LinkedHashSet<>();
+        if (nowSuspended != null) out.addAll(nowSuspended);
+        if (unsuspendFailed != null) out.addAll(unsuspendFailed);
+        return out;
+    }
+
+    /**
      * Packages a parent queued for remote uninstall ({@code uninstall_apps})
      * that are currently installed on this device-owner protected phone. Never
      * uninstalls Jarvis itself, {@link GuardRules#NEVER_LOCKED} or {@code alwaysAllowed}.

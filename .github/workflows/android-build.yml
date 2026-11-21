@@ -107,6 +107,23 @@ jobs:
         cd android
         ./gradlew testDebugUnitTest -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m" --no-daemon --stacktrace
 
+    # A call above minSdkVersion (28, Android 9) without a version check crashes
+    # the oldest phones; app/build.gradle makes NewApi fatal, so this fails on
+    # one. Every other lint finding is a warning in the report.
+    - name: Android lint (NewApi gate)
+      run: |
+        cd android
+        ./gradlew lintDebug -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m" --no-daemon --stacktrace
+
+    - name: Upload lint report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-lint-report
+        path: services/ui/android/app/build/reports/lint-results-debug.*
+        retention-days: 14
+        if-no-files-found: ignore
+
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
