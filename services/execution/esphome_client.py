@@ -321,58 +321,21 @@ def _match_entity(entities: list, wanted: str):
 async def _with_connection(cfg: dict, coro_factory, name: str | None = None):
     """Open a connection, run coro_factory(client), always disconnect.
 
-    A device that has been reflashed over USB loses the API key Jarvis gave it
-    but keeps its `esphome_devices` entry, so the stored key is stale and the
-    handshake fails with EncryptionPlaintextAPIError. Rather than dead-ending
-    there, fall back to plaintext once *and* forget the stale key, so the next
-    configure_jarvis / pairing can provision a fresh one. That is a deliberate
-    downgrade on this path only: plaintext sessions are unauthenticated, so it
-    is acceptable for "get back in touch with a device we already trust by
-    address" and not for anything else.
+    Never downgrades. A device that was reflashed over USB loses the API key
+    Jarvis gave it but keeps its `esphome_devices` entry, so the handshake
+    fails with EncryptionPlaintextAPIError. Falling back to plaintext there
+    would talk, unauthenticated, to whatever now answers at that address, and
+    erasing the stored key would let a later key sync hand a freshly minted
+    Jarvis key to it in the clear. So the error is raised as it stands, the key
+    stays, and the way out is the explicit admin action Remove from Jarvis
+    (`forget_device`), then Add device. ``name`` is kept for callers' logging.
     """
-    client, downgraded = await _open(cfg["host"], cfg["port"], cfg.get("noise_psk"))
+    client = await _connect(cfg["host"], cfg["port"], cfg.get("noise_psk"))
     try:
-        if downgraded:
-            await _forget_stale_key(cfg, name)
         return await coro_factory(client)
     finally:
         with contextlib.suppress(Exception):
             await client.disconnect()
-
-
-async def _open(host: str, port: int, psk: str | None) -> tuple:
-    """Connect, downgrading to plaintext once if a stored key is no longer valid.
-
-    Returns (client, downgraded).
-    """
-    try:
-        return await _connect(host, port, psk), False
-    except EsphomeConfigError as e:
-        stale = isinstance(e.__cause__, aioesphomeapi.EncryptionPlaintextAPIError)
-        if not (stale and psk):
-            raise
-        log.warning(
-            "[esphome] %s holds a key Jarvis stored but the device answers in plaintext "
-            "(reflashed since pairing); dropping the stale key", host
-        )
-        return await _connect(host, port, None), True
-
-
-async def _forget_stale_key(cfg: dict, name: str | None) -> None:
-    """Remove a key that no longer works, so every later call stops paying for it."""
-    if not name:
-        return
-    current = await get_devices(force_refresh=True)
-    # Match on host, not on the caller's spelling: the same device can arrive
-    # here as "jarvis-watch", "Jarvis Watch" or a device_key, and upserting
-    # under the wrong name would leave the stale entry behind and add a ghost.
-    canonical = next((k for k, v in current.items() if v.get("host") == cfg.get("host")), None)
-    entry = current.get(canonical) if canonical else None
-    if not entry or not entry.get("noise_psk"):
-        return
-    await _save_device(canonical, {**entry, "noise_psk": None})
-
-
 
 
 _STATE_SETTLE_SECONDS = 0.35
@@ -1158,8 +1121,19 @@ async def _send_endpoint(client, services, url: str, mint_key) -> bool:
 
 
 async def push_jarvis_endpoint(device_name: str, url: str, mint_key) -> dict:
-    """Re-send Jarvis's URL and a new key to an already-registered device."""
+    """Re-send Jarvis's URL and a new key to an already-registered device.
+
+    Only over an encrypted session: a device with no stored key would receive
+    the freshly minted API key in the clear, so it is refused before any key
+    is minted or any connection opened.
+    """
     cfg = await get_device(device_name)
+    if not cfg.get("noise_psk"):
+        raise EsphomeConfigError(
+            f"Jarvis has no encryption key for '{device_name}', so it will not send it an "
+            "API key: that would travel unencrypted. Remove it from Jarvis and Add device "
+            "to pair it with a key first."
+        )
 
     async def op(client):
         _entities, services = await client.list_entities_services()
@@ -1202,14 +1176,14 @@ async def _connect(host: str, port: int, psk: str | None = None):
             "someone). Unpair it on the device, or enter its key in Admin → Hardware."
         ) from e
     except aioesphomeapi.EncryptionPlaintextAPIError as e:
-        # Jarvis sent a key, the device answered in plaintext: the device was
-        # reflashed and lost the key Jarvis gave it. `_open` uses __cause__ to
-        # recognise this and retries once without the key.
+        # Jarvis sent a key, the device answered in plaintext: it was reflashed
+        # and lost the key Jarvis gave it, or something else now answers at its
+        # address. Never retried without the key, and the key is kept.
         raise EsphomeConfigError(
-            "Jarvis has an encryption key stored for this device but it is answering in "
-            "plaintext, which means it was reflashed since it was paired. Send it Jarvis's "
-            "details again (Sync Jarvis key & URL) to give it a new key, or remove it from "
-            "Jarvis and add it again."
+            f"Jarvis has an encryption key stored for the device at {host} but it is "
+            "answering in plaintext: it was reflashed since it was paired, or another "
+            "device now has its address. Jarvis will not talk to it unencrypted. An "
+            "administrator can Remove it from Jarvis and then Add device to pair it again."
         ) from e
     return client
 

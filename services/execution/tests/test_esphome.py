@@ -293,17 +293,13 @@ async def test_forget_says_whether_the_key_was_stale_and_what_to_do_next(one_dev
     assert result.detail["had_key"] is True
 
 
-@pytest.mark.asyncio
-async def test_a_reflashed_device_falls_back_to_plaintext_and_drops_the_dead_key(one_device):
-    """Stored key -> plaintext handshake -> retry without it, and stop storing it."""
-    from services.execution.esphome_client import list_entities
+def _plaintext_device_factory(seen_psks, executed):
+    """An APIClient stand-in for a device that answers in plaintext.
 
-    entities = [aioesphomeapi.LightInfo(key=1, name="Office Light", object_id="office_light")]
-    info = MagicMock(friendly_name="Office Light", mac_address="02:00:00:00:00:01",
-                     esphome_version="2026.9.0", model="esp32")
-    info.name = "office-light"
-    seen_psks, saved = [], {}
-
+    A client built with a key fails the handshake as aioesphomeapi does; one
+    built without a key would connect and accept any action (which is what a
+    downgrade would talk to), recording what it was sent.
+    """
     def make(host, port, password, noise_psk=None):
         seen_psks.append(noise_psk)
         inst = MagicMock()
@@ -312,27 +308,73 @@ async def test_a_reflashed_device_falls_back_to_plaintext_and_drops_the_dead_key
             inst.connect = AsyncMock(side_effect=aioesphomeapi.EncryptionPlaintextAPIError("plaintext"))
         else:
             inst.connect = AsyncMock()
-            inst.device_info_and_list_entities = AsyncMock(return_value=(info, entities, []))
+            inst.list_entities_services = AsyncMock(return_value=([], [_configure_service()]))
+
+            async def execute(service, data, return_response=False):
+                executed.append(data)
+                return MagicMock(success=True)
+
+            inst.execute_service = execute
         return inst
-
-    async def fake_save(name, entry):
-        saved[name] = entry
-
-    cfg = {"host": "192.0.2.87", "port": 6053, "noise_psk": "psk-key-abc"}
-    with patch.object(one_device.aioesphomeapi, "APIClient", MagicMock(side_effect=make)), \
-         patch.object(one_device, "get_devices", AsyncMock(return_value={"office-light": cfg})), \
-         patch.object(one_device, "_save_device", fake_save):
-        data = await list_entities("office-light")
-
-    assert data["device"]["name"] == "Office Light"
-    assert seen_psks == ["psk-key-abc", None]           # tried the key, then plaintext
-    assert saved["office-light"]["noise_psk"] is None    # and stopped storing the dead one
-    assert saved["office-light"]["host"] == "192.0.2.87"  # rest of the entry untouched
+    return make
 
 
 @pytest.mark.asyncio
-async def test_a_dead_key_without_the_fallback_still_explains_itself(one_device):
-    """Connecting on the plain path must not silently downgrade."""
+@pytest.mark.parametrize("call", ["list", "configure_jarvis"])
+async def test_a_plaintext_answer_never_downgrades_keeps_the_key_and_sends_no_key(one_device, call):
+    """Stored key -> plaintext handshake -> clear error; no retry, no key erased, no key sent."""
+    seen_psks, executed, writes, minted = [], [], [], []
+
+    async def fake_write(devices):
+        writes.append(devices)
+
+    async def fake_save(name, entry):
+        writes.append({name: entry})
+
+    async def mint():
+        minted.append(True)
+        return "sk-device-new"
+
+    with patch.object(one_device.aioesphomeapi, "APIClient",
+                      MagicMock(side_effect=_plaintext_device_factory(seen_psks, executed))), \
+         patch.object(one_device, "_write_device_list", fake_write), \
+         patch.object(one_device, "_save_device", fake_save), \
+         pytest.raises(one_device.EsphomeConfigError) as exc:
+        if call == "list":
+            await one_device.list_entities("office-light")
+        else:
+            await one_device.push_jarvis_endpoint("office-light", "https://jarvis.example", mint)
+
+    assert seen_psks == ["psk-key-abc"]          # tried the key once, never plaintext
+    assert writes == []                           # the stored key is kept
+    assert minted == [] and executed == []        # no key minted, nothing sent
+    assert one_device._device_cache["office-light"]["noise_psk"] == "psk-key-abc"
+    assert "plaintext" in str(exc.value)
+    assert "Remove it from Jarvis" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_configure_jarvis_refuses_a_device_without_a_key_before_minting(one_device):
+    """A key sync to an unencrypted device would send the minted API key in the clear."""
+    one_device._device_cache["office-light"]["noise_psk"] = None
+    minted = []
+
+    async def mint():
+        minted.append(True)
+        return "sk-device-new"
+
+    api_cls = MagicMock()
+    with patch.object(one_device.aioesphomeapi, "APIClient", api_cls), \
+         pytest.raises(one_device.EsphomeConfigError) as exc:
+        await one_device.push_jarvis_endpoint("office-light", "https://jarvis.example", mint)
+    assert "no encryption key" in str(exc.value)
+    assert minted == []
+    api_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_dead_key_explains_itself(one_device):
+    """The error names the cause and the admin way out."""
     from services.execution.esphome_client import _connect
 
     inst = MagicMock()
