@@ -96,19 +96,54 @@ _ERROR_PREFIXES = (
 
 _client_override: Any = None
 
+#: After a Redis failure the cache stands aside this long (every call goes to the source),
+#: so an outage costs one timeout, not one per tool call. Device commands never touch it.
+BACKOFF_S = 30.0
+_down_until = 0.0
+#: Tags a write could not invalidate while Redis was away, dropped as soon as it is back:
+#: otherwise a lesson written during an outage could be served stale for days after it.
+_pending_invalidations: set[str] = set()
+
+
+class CacheUnavailable(RuntimeError):
+    """Redis failed recently; the cache is standing aside until BACKOFF_S has passed."""
+
 
 def set_client(client: Any) -> None:
     """Use ``client`` (a redis-py compatible object) instead of the gateway's Redis. Tests."""
-    global _client_override
+    global _client_override, _down_until
     _client_override = client
+    _down_until = 0.0
+    _pending_invalidations.clear()
+
+
+def _mark_down(exc: Exception) -> None:
+    global _down_until
+    if not isinstance(exc, CacheUnavailable):
+        _down_until = time.monotonic() + BACKOFF_S
+        log.warning("[tool-cache] Redis failed (%s: %s); calls go to the source for %ss",
+                    type(exc).__name__, exc, int(BACKOFF_S))
 
 
 def _redis():
+    if time.monotonic() < _down_until:
+        raise CacheUnavailable("the tool cache is standing aside after a Redis failure")
     if _client_override is not None:
-        return _client_override
-    from services.gateway.cache import get_redis
+        client = _client_override
+    else:
+        from services.gateway.cache import get_redis
 
-    return get_redis()
+        client = get_redis()
+    if _pending_invalidations:
+        pending = list(_pending_invalidations)
+        _pending_invalidations.clear()
+        for tag in pending:
+            keys = list(client.smembers(f"{PREFIX}:tag:{tag}"))
+            if keys:
+                client.delete(*keys)
+            client.delete(f"{PREFIX}:tag:{tag}")
+            log.info("[tool-cache] dropped %s entries tagged %s after the outage", len(keys), tag)
+    return client
 
 
 def _now() -> float:
@@ -157,7 +192,8 @@ def effective_class(tool: str, declared: str) -> str:
         return tr.LIVE
     try:
         override = _redis().hget(f"{PREFIX}:overrides", tool)
-    except Exception:
+    except Exception as exc:
+        _mark_down(exc)
         return declared
     return override if override in tr.FRESHNESS_CLASSES else declared
 
@@ -178,7 +214,7 @@ def _stat(tool: str, **fields: float) -> None:
                 pipe.hincrby(f"{PREFIX}:stats:{tool}", name, int(amount))
         pipe.execute()
     except Exception as exc:
-        log.debug("[tool-cache] stats write failed: %s", exc)
+        _mark_down(exc)
 
 
 def _looks_failed(result: str) -> bool:
@@ -211,12 +247,12 @@ async def call(
         _stat(tool, writes=1)
         return result
     if not ENABLED or declared == tr.LIVE:
-        _stat(tool, live=1)
+        # Never a Redis round trip on a live call: device commands and safety reads
+        # go straight to their source, whatever state the cache is in.
         return await fetch()
 
     cls = effective_class(tool, declared)
     if cls == tr.LIVE:
-        _stat(tool, live=1)
         return await fetch()
     conversation = conversation or CONVERSATION.get()
     args = normalize_args(payload)
@@ -225,8 +261,7 @@ async def call(
     try:
         raw = _redis().get(key)
     except Exception as exc:
-        log.warning("[tool-cache] Redis read failed, going to the source: %s", exc)
-        _stat(tool, errors=1)
+        _mark_down(exc)
         raw = None
     if raw:
         try:
@@ -283,8 +318,7 @@ def _remember(key: str, tool: str, args: str, payload: dict | None, result: str,
         pipe.execute()
         _bound(index)
     except Exception as exc:
-        log.warning("[tool-cache] Redis write failed, result not kept: %s", exc)
-        _stat(tool, errors=1)
+        _mark_down(exc)
 
 
 def _touch(key: str, entry: dict, *, public: bool, user: str) -> None:
@@ -300,7 +334,7 @@ def _touch(key: str, entry: dict, *, public: bool, user: str) -> None:
         if public:
             r.zincrby(f"{PREFIX}:hot", 1, key)
     except Exception as exc:
-        log.debug("[tool-cache] touch failed: %s", exc)
+        _mark_down(exc)
 
 
 def _bound(index: str) -> None:
@@ -323,7 +357,8 @@ def invalidate_tag(tag: str, *, reason: str = "") -> int:
             r.delete(*keys)
         r.delete(f"{PREFIX}:tag:{tag}")
     except Exception as exc:
-        log.warning("[tool-cache] could not invalidate %s: %s", tag, exc)
+        _mark_down(exc)
+        _pending_invalidations.add(tag)
         return 0
     if keys:
         log.info("[tool-cache] invalidated %s entries tagged %s (%s)", len(keys), tag, reason or "event")

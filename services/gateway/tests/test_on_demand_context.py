@@ -198,7 +198,14 @@ def _client(monkeypatch, admin: bool):
         return "admin"
 
     monkeypatch.setattr(main, "_require_admin", require_admin)
-    return TestClient(main.app)
+    # The routes alone: the gateway's middleware (identity, rate limits) is not what is tested.
+    from fastapi import FastAPI
+
+    from services.gateway import context_routes
+
+    app = FastAPI()
+    app.include_router(context_routes.router)
+    return TestClient(app)
 
 
 def test_the_prompt_budget_endpoint_is_admin_only(monkeypatch):

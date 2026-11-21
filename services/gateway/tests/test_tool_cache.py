@@ -199,6 +199,54 @@ async def test_without_redis_every_call_goes_to_the_source(clock):
     assert source.calls == 2
 
 
+class _Counting:
+    """A Redis that fails, and counts how often it is asked."""
+
+    def __init__(self):
+        self.asked = 0
+
+    def __getattr__(self, name):
+        def fail(*a, **k):
+            self.asked += 1
+            raise ConnectionError("redis is down")
+        return fail
+
+
+async def test_an_outage_costs_one_failed_round_trip_not_one_per_call(clock):
+    store = _Counting()
+    tc.set_client(store)
+    for _ in range(5):
+        await _call("CalendarRequest", {"action": "read"}, _Source("x"))
+    assert store.asked == 1
+
+
+async def test_a_live_call_never_touches_redis(clock):
+    store = _Counting()
+    tc.set_client(store)
+    for _ in range(3):
+        await _call("LightControlRequest", {"entity_id": "light.x", "action": "turn_on"}, _Source("On."))
+    assert store.asked == 0
+
+
+async def test_a_write_during_an_outage_invalidates_once_redis_is_back(clock, monkeypatch):
+    import fakeredis
+
+    store = fakeredis.FakeRedis(decode_responses=True)
+    tc.set_client(store)
+    reads = _Source("lesson v1")
+    payload = {"collection_name": "system_learnings", "query": "push"}
+    await _call("ContextSearchRequest", payload, reads)
+    # Redis goes away; a lesson is written; Redis comes back.
+    monkeypatch.setattr(tc, "_client_override", _Broken())
+    await _call("SystemLearningRequest", {"action": "ingest", "rule": "new"}, _Source("Saved."))
+    assert "lessons" in tc._pending_invalidations
+    monkeypatch.setattr(tc, "_client_override", store)
+    monkeypatch.setattr(tc, "_down_until", 0.0)
+    reads.answer = "lesson v2"
+    assert await _call("ContextSearchRequest", payload, reads) == "lesson v2"
+    assert not tc._pending_invalidations
+
+
 # --- learning -------------------------------------------------------------------------------
 
 def _seed_stats(store, tool, same, changed):
@@ -342,7 +390,14 @@ def _admin_client(monkeypatch, admin=True):
         return "admin"
 
     monkeypatch.setattr(main, "_require_admin", require_admin)
-    return TestClient(main.app)
+    # The routes alone: the gateway's middleware (identity, rate limits) is not what is tested.
+    from fastapi import FastAPI
+
+    from services.gateway import context_routes
+
+    app = FastAPI()
+    app.include_router(context_routes.router)
+    return TestClient(app)
 
 
 def test_the_cache_endpoints_are_admin_only(monkeypatch):
