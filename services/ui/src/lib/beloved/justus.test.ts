@@ -11,6 +11,7 @@ import {
   daysSince,
   markedDays,
   markedToday,
+  marksOn,
   monthGrid,
   nudgeAfter,
   openPlans,
@@ -120,6 +121,34 @@ describe('Just us: the month on screen', () => {
     expect(cells.filter((c) => c.today).map((c) => c.key)).toEqual(['2026-11-16']);
     // February 2027 starts on a Monday.
     expect(monthGrid(view(), 2027, 2, ymd('2026-11-16'))[0][0]).toBeNull();
+  });
+
+  it('counts every mark on a day, and a day with several still counts once', () => {
+    const v = view(
+      opened('together', { b: 'together', day: '2026-11-03' }, { at: 300 }),
+      opened('together', { b: 'together', day: '2026-11-03', note: 'first' }, { at: 100, own: true }),
+      opened('together', { b: 'together', day: '2026-11-03' }, { at: 200 }),
+      ...marked('2026-11-05'),
+    );
+    const cells = monthGrid(v, 2026, 11, ymd('2026-11-16')).flat().filter((c) => c !== null);
+    expect(cells.find((c) => c.key === '2026-11-03')).toMatchObject({ marked: true, marks: 3 });
+    expect(cells.find((c) => c.key === '2026-11-05')).toMatchObject({ marked: true, marks: 1 });
+    expect(cells.find((c) => c.key === '2026-11-04')).toMatchObject({ marked: false, marks: 0 });
+    // Distinct days for the counts and "days since".
+    expect(countIn(v, ymd('2026-11-16'), 2026, 11)).toBe(2);
+  });
+
+  it('lists the marks of one day oldest first, each its own record', () => {
+    const v = view(
+      opened('together', { b: 'together', day: '2026-11-03' }, { at: 300 }),
+      opened('together', { b: 'together', day: '2026-11-03', note: 'first' }, { at: 100 }),
+      ...marked('2026-11-04'),
+    );
+    const marks = marksOn(v, '2026-11-03');
+    expect(marks.map((m) => m.at)).toEqual([100, 300]);
+    expect(marks[0].record.note).toBe('first');
+    expect(new Set(marks.map((m) => m.id)).size).toBe(2);
+    expect(marksOn(v, '2026-11-09')).toEqual([]);
   });
 });
 

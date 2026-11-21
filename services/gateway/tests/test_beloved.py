@@ -297,6 +297,23 @@ def test_a_marked_day_is_never_announced(couple):
     assert couple["notices"] == []
 
 
+def test_several_marks_are_kept_apart_and_changed_one_at_a_time(couple):
+    """The day is sealed, so the server cannot (and must not) merge marks: two
+    on the same day are two records, each edited or removed on its own."""
+    c = couple["client"]
+    first = _add(couple, "together").json()["id"]
+    second = _add(couple, "together").json()["id"]
+    third = _add(couple, "together", user="sam").json()["id"]
+    assert len({first, second, third}) == 3
+    edited = c.put(f"{BASE}/together/{second}", json={"sealed": _envelope(ct=bytes(60))}, headers=_as("alex"))
+    assert edited.status_code == 200
+    assert c.delete(f"{BASE}/together/{first}", headers=_as("alex")).status_code == 200
+    rows = {r["id"]: r for r in c.get(BASE, headers=_as("sam")).json()["records"] if r["kind"] == "together"}
+    assert set(rows) == {second, third}
+    assert rows[second]["sealed"] == _envelope(ct=bytes(60))
+    assert rows[third]["sealed"] == _envelope()
+
+
 def test_an_unreadable_record_is_logged_without_its_kind(couple, caplog):
     folder = couple["root"] / "beloved" / TOKEN / "together"
     folder.mkdir(parents=True)

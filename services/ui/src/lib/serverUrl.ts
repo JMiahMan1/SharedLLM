@@ -41,3 +41,17 @@ export function getServerOrigin(): string {
 export function getWsProtocolFor(origin: string): 'wss' | 'ws' {
   return origin.startsWith('https') ? 'wss' : 'ws';
 }
+
+/**
+ * WebSocket URL for a gateway path, authenticated by `?token=` (a browser
+ * WebSocket handshake cannot carry an Authorization header).
+ *
+ * Built from getServerOrigin, never from `window.location`: inside the
+ * Android app the page is served from localhost, and a socket opened there
+ * reached nothing, so the workspace terminal never connected in the app.
+ */
+export function gatewaySocketUrl(path: string, token: string): string {
+  const origin = getServerOrigin();
+  const host = new URL(origin).host;
+  return `${getWsProtocolFor(origin)}://${host}${path}?token=${encodeURIComponent(token)}`;
+}

@@ -20,7 +20,7 @@ import aiohttp
 
 from services.config import JARVIS_TALK_CLAIM_KEY
 from services.gateway import notices
-from services.gateway.agent_loop import should_persist_learning
+from services.gateway.agent_loop import mission_stopped_early, should_persist_learning
 from services.gateway.config import (
     EXECUTION_SVC,
     IDENTITY_SVC,
@@ -52,7 +52,7 @@ from services.gateway.history import (  # noqa: E402
     update_history,
     update_room_history,
 )
-from services.gateway.messaging import TIER2_SEMAPHORE, TIER3_LOCK, InferenceJobQueue  # noqa: E402
+from services.gateway.messaging import PRIORITY_NORMAL, TIER2_SEMAPHORE, TIER3_LOCK, InferenceJobQueue  # noqa: E402
 from services.gateway.orchestrator import process_full_orchestration  # noqa: E402
 
 log = logging.getLogger("gateway.background_worker")
@@ -844,11 +844,54 @@ class RavenWorker:
             log.error(f"Failed to resolve system credentials: {e}")
         return None
 
+    @asynccontextmanager
+    async def _preemptible_mission(self, mission_id):
+        """Register a running mission with its own pause event for the time it
+        holds TIER3_LOCK, so an urgent Tier 2 job can pause it (messaging.py)."""
+        if not mission_id:
+            yield None
+            return
+        pause_event = asyncio.Event()
+        await self.job_queue.register_raven_mission(mission_id, pause_event)
+        try:
+            yield pause_event
+        finally:
+            try:
+                await self.job_queue.unregister_raven_mission(mission_id)
+            except Exception as e:
+                log.warning(f"[Worker] Could not unregister mission {mission_id}: {e}")
+
+    @asynccontextmanager
+    async def _preempting(self, job_id: str, priority: Any):
+        """Pause the running mission while an urgent job runs (HIGH or CRITICAL)."""
+        try:
+            urgent = int(priority) > PRIORITY_NORMAL
+        except (TypeError, ValueError):
+            urgent = False
+        paused = None
+        if urgent:
+            try:
+                paused = await self.job_queue.request_preemption(job_id, int(priority))
+            except Exception as e:
+                log.warning(f"[Worker] Preemption request for job {job_id} failed: {e}")
+        try:
+            yield paused
+        finally:
+            if paused:
+                try:
+                    await self.job_queue.release_preemption(job_id)
+                except Exception as e:
+                    log.warning(f"[Worker] Could not release the preemption of job {job_id}: {e}")
+
     async def _process_inference_job(self, job: dict[str, Any]):
         job_id = job["job_id"]
         payload = job["payload"]
         user_id = job.get("user_id", "")
         heartbeat_task = None
+        # Bound before anything can raise: the finally block below reads it,
+        # and a job cancelled while waiting for TIER2_SEMAPHORE used to end
+        # in UnboundLocalError instead of its cancellation.
+        mission_id = payload.get("_mission_id")
 
         # Determine job tier (2 = Librarian, 3 = Raven) for concurrency control
         is_autonomous = self._is_autonomous_job(payload, user_id)
@@ -873,13 +916,9 @@ class RavenWorker:
             # Acquire appropriate lock based on tier, then run orchestration
             if is_autonomous:
                 log.info(f"[Worker] Acquiring TIER3 (Raven) lock for job {job_id}")
-                
-                # Register this mission for preemption tracking
-                mission_id = payload.get("_mission_id")
-                if mission_id:
-                    await self.job_queue.register_raven_mission(mission_id)
-                
-                async with TIER3_LOCK:
+                # Registered only once the lock is held: a mission waiting its
+                # turn must not take the place of the one running.
+                async with TIER3_LOCK, self._preemptible_mission(mission_id):
                     started_ts = time.time()
                     started_iso = datetime.now(UTC).isoformat()
                     mission_id = payload.get("_mission_id")
@@ -934,7 +973,7 @@ class RavenWorker:
                                                 await pubsub.unsubscribe()
                                             with suppress(Exception):
                                                 await pubsub.aclose()
-                                    kill_monitor = asyncio.create_task(_monitor_kill(mission_id, orchestration_task))
+                                kill_monitor = asyncio.create_task(_monitor_kill(mission_id, orchestration_task))
 
                             # The loop checks its time limit only between steps, and
                             # one step (model retries, a long tool) can run for most
@@ -971,7 +1010,11 @@ class RavenWorker:
                                 raise
             else:
                 log.info(f"[Worker] Acquiring TIER2 (Librarian) semaphore for job {job_id}")
-                async with TIER2_SEMAPHORE:
+                # An urgent job pauses the running mission before it even waits
+                # for a slot, and lets it go on when it is done. Only Tier 2 may
+                # preempt: a Tier 3 job would wait for the lock the paused
+                # mission holds, and neither would ever move.
+                async with self._preempting(job_id, job.get("priority")), TIER2_SEMAPHORE:
                     if "history" not in payload:
                         if uses_chat_history:
                             try:
@@ -1064,8 +1107,12 @@ class RavenWorker:
             if mission_id:
                 try:
                     result_str = str(ans)
-                    is_meaningful = should_persist_learning(result_str)
-                    if is_meaningful:
+                    if mission_stopped_early(result_str):
+                        # Killed, cancelled, out of time or the model never
+                        # answered: a failure, with the reason kept as written.
+                        status = "failed"
+                        log.warning(f"[Worker] Mission {mission_id} stopped early: {result_str[:200]}")
+                    elif should_persist_learning(result_str):
                         status = "completed"
                         log.info(f"[Worker] Mission {mission_id} completed with meaningful result")
                     else:
@@ -1145,10 +1192,6 @@ class RavenWorker:
                                 pass  # best-effort, never block mission completion
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} status: {patch_e}")
-                finally:
-                    # Unregister mission for preemption tracking
-                    if mission_id:
-                        await self.job_queue.unregister_raven_mission(mission_id)
 
         except Exception as e:
             import traceback
@@ -1173,9 +1216,6 @@ class RavenWorker:
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} to failed: {patch_e}")
         finally:
-            # Unregister mission for preemption tracking
-            if mission_id:
-                await self.job_queue.unregister_raven_mission(mission_id)
             if heartbeat_task:
                 heartbeat_task.cancel()
                 with suppress(asyncio.CancelledError):

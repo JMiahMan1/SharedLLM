@@ -394,3 +394,34 @@ def test_terminal_socket_close_on_error(client):
             time.sleep(0.2)
 
         mock_client.api.exec_start.return_value._sock.shutdown.assert_called()
+
+
+def test_terminal_output_split_inside_a_character_arrives_whole(client):
+    """A multi-byte character cut between two socket reads is sent intact."""
+    _setup_test_workspace(client)
+
+    mock_client = _make_mock_docker_client()
+    mock_sock = mock_client.api.exec_start.return_value
+    text = "café ── ok\r\n".encode()
+    cut = text.index(b"\xa9")  # second byte of the e-acute
+    chunks = [text[:cut], text[cut:]]
+
+    def recv(_size):
+        if chunks:
+            return chunks.pop(0)
+        import time
+
+        time.sleep(0.05)
+        raise TimeoutError
+
+    mock_sock.recv = MagicMock(side_effect=recv)
+
+    with _mock_auth_context(), patch(
+        "docker.from_env", return_value=mock_client
+    ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect(
+        "/ws/workspace/ws1/terminal?token=ok"
+    ) as ws:
+        received = json.loads(ws.receive_text())["data"] + json.loads(ws.receive_text())["data"]
+
+    assert received == "café ── ok\r\n"
+    assert "�" not in received
