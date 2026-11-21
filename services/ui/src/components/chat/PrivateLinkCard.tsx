@@ -6,15 +6,24 @@ import { hostOf, playerUrl, type LinkPreview } from '../../lib/privateLinkPrevie
 const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
 
 function Words({ preview, compact = false }: { preview: LinkPreview; compact?: boolean }) {
-  const site = preview.site_name || hostOf(preview.url);
+  // The page's real host is always shown: og:site_name is only what the page chose to call itself.
+  const host = hostOf(preview.url);
+  const site = preview.site_name && preview.site_name.toLowerCase() !== host.toLowerCase() ? preview.site_name : '';
+  const media = preview.embed?.provider === 'file' ? hostOf(preview.embed.src) : '';
   return (
     <span className={`block min-w-0 ${compact ? '' : 'px-3 py-2'}`}>
       {preview.title && <span className={`font-semibold leading-snug ${compact ? 'line-clamp-1 text-sm' : 'line-clamp-2 text-sm'}`}>{preview.title}</span>}
       {preview.description && !compact && <span className="mt-0.5 line-clamp-2 text-xs leading-snug opacity-80">{preview.description}</span>}
-      {site && (
+      {host && (
         <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] opacity-70">
           <Globe size={11} className="shrink-0" aria-hidden />
-          <span className="truncate">{site}</span>
+          <span className="max-w-full shrink-0 truncate font-medium" data-testid="private-link-host">{host}</span>
+          {site && <span className="min-w-0 truncate" data-testid="private-link-site">{site}</span>}
+        </span>
+      )}
+      {media && (
+        <span className="mt-0.5 block truncate text-[11px] opacity-70" data-testid="private-link-media-host">
+          Plays from {media}
         </span>
       )}
     </span>

@@ -32,8 +32,9 @@ three modes:
   60 minutes, with a note); "Message a parent" (a chat message to the
   child's parents, `/api/guard/message`); "Chores" (today's chores with a
   Done button each; a parent then confirms each one, as on Android; a
-  "chores first" lock opens on them); and "A parent can unlock" (a parent's
-  sign-in, or a parent's offline code when the hub cannot be reached). It
+  "chores first" lock opens on them); and "Ask a parent to unlock" (how long
+  and why; both parents approve or deny on their phones, nothing is typed
+  here; or a parent's offline code when the hub cannot be reached). It
   explains the lock; the session sign-out holds it. One centred column that
   wraps and scrolls, sized from the screen's DPI (PerMonitorV2), so it works
   from 1366x768 to 4K and at 150% scaling; buttons are at least 56 px tall.
@@ -67,6 +68,18 @@ The installer signs in as the parent (that key is never written to disk),
 registers this PC as a Windows PC, assigns it to the child, mints a key that
 is scoped to this one device, and keeps only that scoped key in
 `%ProgramData%\Jarvis Guard\guard.config.json` (SYSTEM + Administrators only).
+
+`%ProgramData%` lets any user create a folder, and its creator owns it, so a
+child could make `Jarvis Guard` there first and keep it (read the key, plant
+`offline.codes.json` or a cached status). The installer never trusts the
+folder as it finds it: a link in its place is removed (never its target);
+Administrators take ownership; its ACL becomes SYSTEM + Administrators only
+with nothing inherited; and if anything inside is owned by someone else, is a
+link, or cannot be read by an administrator, everything in it is deleted and
+the installer says what it found. A fresh install (no guard task yet) empties
+it too. A reinstall over a folder that passes keeps its files (today's
+minutes, the offline-code verifiers and their lockout).
+
 The exe goes to `%ProgramFiles%\Jarvis Guard` (default ACL: everyone may run
 it, only administrators may change it). The child's own key and the parent's
 key are never stored.
@@ -104,12 +117,35 @@ tests/                xunit tests for JarvisGuard.Core (plain net10.0, any OS)
   as the assigned child with `is_admin` stripped.
 - `%ProgramData%\Jarvis Guard\public\state.json` is the only user-readable file: locked, reason, until,
   theme, hub URL and username. It is written by the agent.
-- A parent's unlock uses the parent's own username and password, checked by
-  identity (`POST /api/guard/parent-unlock`, five strikes → ten-minute wait),
-  and every unlock notifies the other parents, exactly like a phone unlock.
-- The tray and the lock surface reach the agent over a named pipe
-  (`JarvisGuard`) with an Authenticated Users ACL. The pipe carries commands
-  and verdicts, never keys.
+- No password is ever typed on the PC. "Ask a parent to unlock" on the lock
+  surface sends a request (how long, an optional why) through the agent to
+  the hub with this PC's device key (`POST /api/guard/unlock-requests`); the
+  hub binds it to this device. Both parents get a notice in the Jarvis app
+  with **Approve N min** and **Deny**, and the child's page in the app shows
+  the same request with a choice of length. Only a parent's own session can
+  answer (never a device key, never the child); only this PC can read the
+  answer (`GET /api/guard/unlock-requests/{id}`). A request expires after ten
+  minutes, a newer one supersedes it, an answer is final, and a PC may ask
+  once every 30 seconds and ten times an hour.
+- The tray and the lock surface reach the agent over the named pipe
+  `\\.\pipe\JarvisGuard`: one line of JSON each way per connection
+  (`PipeProtocol`), read with a size cap and a time limit on both ends. The
+  pipe is owned by SYSTEM; SYSTEM and Administrators have full control;
+  Authenticated Users may only read and write data (not create another
+  instance, change its permissions or take it over). The agent creates it
+  before anything else with `FirstPipeInstance`, so if another program holds
+  the name the agent stops, logs it and reports `guard_pipe_taken`; and it
+  always keeps a listening instance (the next is made before a client is
+  served), so the name is never free to take. The tray and the lock surface
+  send nothing until they have checked the pipe is owned by SYSTEM (and, where
+  Windows lets them read it, that the serving process runs as SYSTEM). The
+  pipe carries commands and verdicts, never the PC's key.
+- If the hub answers 401 or 403 the PC says so ("the hub turned this PC's
+  key down", `Source: "auth"`): that is a revoked or removed device, not a
+  network problem. It keeps enforcing the cached rules meanwhile.
+- A config that cannot be read (access denied) or is damaged is reported as
+  that, on the console, in `guard.log` and in `state.json`
+  (`Source: "config-error"`); only a missing file means "not set up".
 - Windows starts that bypass the guard (safe mode) are detected via the
   `SafeBoot\Option` registry key (and `SAFEBOOT_OPTION`) and reported as
   `boot_without_guard` through the existing tamper channel.
@@ -129,20 +165,42 @@ tests/                xunit tests for JarvisGuard.Core (plain net10.0, any OS)
   enforced every 15 seconds; the hub is asked every 60.
 - Sessions of local administrators (the parents' own Windows accounts) are
   never signed out.
-- A parent's sign-in on the lock surface (`POST /api/guard/parent-unlock`)
-  lifts the lock on this PC until the time the hub answers (ten minutes),
-  even though the hub keeps reporting bedtime or the limit meanwhile, the
-  same as the phone. The answer carries the parents' offline-code verifiers,
+- A parent's approval lifts the lock on this PC until the hub's `until`
+  (fixed when the parent answered), starting at the hub's `decided_at`, even
+  though the hub keeps reporting bedtime or the limit meanwhile, the same as
+  the phone. The agent follows a waiting request every few seconds (pipe
+  `unlock-request` / `unlock-status`, and its own loop, so it unlocks even with
+  the lock surface closed) and unlocks only on the hub's approval of its own
+  request; an approval it cannot trust (another request's, no time it was
+  given, longer than 240 minutes) never unlocks. The approval carries the
+  parents' offline-code verifiers,
   kept in `%ProgramData%\Jarvis Guard\offline.codes.json` (SYSTEM and
-  Administrators only), so a parent's offline code works later with no
-  connection: five wrong codes wait ten minutes, a good one unlocks for ten
-  minutes and is reported (`offline_unlock`) once the hub answers.
-- Offline (hub unreachable): the last cached rules are re-evaluated on the
-  local clock in the hub's order: a parent's pause (on, or until a time)
-  locks; bedtime and school lock unless the last answer carried time a parent
-  gave (`granted_until`) that has not run out. The daily limit and "chores
-  first" are not enforced offline (fail open). With no cache at all it fails
-  open.
+  Administrators only), so a parent's offline code (set and seen in the
+  parent's Jarvis app) works later with no connection. Five wrong codes lock code entry for ten minutes, the next
+  five for twenty, then forty, up to a day; only a good code resets it, and
+  all of it is kept on disk by the SYSTEM agent, so closing the lock surface,
+  killing the tray or restarting resets nothing. A good code unlocks for ten
+  minutes. Both are reported, queued while offline and sent once the hub
+  answers (and kept until the hub says it stored them): `offline_unlock`
+  with whose code it was, and `offline_code_wrong` with how many.
+- A parent's pause set after an unlock on this PC (the rules' `paused_at`)
+  overrides that unlock at once and ends it. The pause the unlock was for
+  (older than the unlock) does not.
+- Offline (no answer, a refused key or a hub error): the last cached rules
+  are re-evaluated on the local clock in the hub's order: a parent's pause
+  (on, or until a time) locks; bedtime and school lock unless the last answer
+  carried time a parent gave (`granted_until`) that has not run out; then the
+  day's limit. The limit is counted from what the hub last said was left
+  less the minutes this PC has counted since (`limit.snapshot.json`); on a
+  new day with no answer yet, the cached rules' limit for that day against
+  this PC's own minutes (no bonus or earned time assumed). "Chores first" is
+  not enforced offline. With no cache at all only a known limit applies.
+- The tray reports to the agent every 30 seconds, even with nothing to
+  report. A signed-in child session whose tray has gone quiet for two
+  minutes (three after sign-in) means that session's minutes are not being
+  counted: the state says so (`usageUnknown`), the hub is told
+  (`trayRunning: false` and a `tray_missing` report the parents see), and
+  `trayRunning` goes back to true when the tray returns.
 - Usage is reported as the day's running total for this PC (kept in
   `usage.today.json`, so a restart carries on), because the hub keeps the
   largest reading per device per day. Within 15 minutes of the limit it is

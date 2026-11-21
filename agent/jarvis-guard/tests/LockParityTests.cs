@@ -44,7 +44,7 @@ public class OfflineCodeTests
     public void FiveWrongCodesWaitTenMinutes()
     {
         var codes = WithCode();
-        for (var i = 0; i < OfflineCodes.MaxFails; i++) Assert.Equal("That code is not right.", codes.TryUnlock("000000", T0).Error);
+        for (var i = 0; i < OfflineCodes.MaxFails; i++) Assert.StartsWith("That code is not right.", codes.TryUnlock("000000", T0).Error);
         Assert.StartsWith("Too many tries", codes.TryUnlock("246810", T0.AddMinutes(1)).Error);
         Assert.True(codes.TryUnlock("246810", T0.AddMinutes(11)).Ok);
     }

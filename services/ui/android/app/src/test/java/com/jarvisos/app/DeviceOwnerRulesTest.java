@@ -224,4 +224,35 @@ public class DeviceOwnerRulesTest {
         assertEquals("-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----",
                 DeviceOwnerRules.cleanCaCertPem(validPem));
     }
+
+    @Test
+    public void suspensionAppliedIsWhatWasAskedLessWhatAndroidRefused() {
+        Set<String> asked = new java.util.LinkedHashSet<>(Arrays.asList("com.example.a", "com.example.b", "com.example.c"));
+        assertEquals(new HashSet<>(Arrays.asList("com.example.a", "com.example.c")),
+                DeviceOwnerRules.suspensionApplied(asked, new String[] {"com.example.b"}));
+        assertEquals(asked, DeviceOwnerRules.suspensionApplied(asked, new String[0]));
+        assertTrue(DeviceOwnerRules.suspensionApplied(null, new String[] {"com.example.a"}).isEmpty());
+    }
+
+    @Test
+    public void theSuspensionReportNamesTheFailuresNotTheIntent() {
+        Set<String> asked = new java.util.LinkedHashSet<>(Arrays.asList("com.example.a", "com.example.b"));
+        assertEquals("suspend: 1 of 2 applied [com.example.a], failed [com.example.b]",
+                DeviceOwnerRules.suspensionReport(true, asked, new String[] {"com.example.b"}));
+        assertEquals("unsuspend: 2 of 2 applied [com.example.a, com.example.b], failed []",
+                DeviceOwnerRules.suspensionReport(false, asked, new String[0]));
+    }
+
+    @Test
+    public void aPackageThatFailedToUnsuspendStaysOnTheRecordForARetry() {
+        Set<String> now = new java.util.LinkedHashSet<>(Collections.singletonList("com.example.a"));
+        Set<String> failed = new java.util.LinkedHashSet<>(Collections.singletonList("com.example.gone"));
+        assertEquals(new HashSet<>(Arrays.asList("com.example.a", "com.example.gone")),
+                DeviceOwnerRules.suspensionsToRecord(now, failed));
+        // Next pass: the failed one is "previously suspended" and not wanted, so it is retried.
+        assertEquals(Collections.singleton("com.example.gone"),
+                DeviceOwnerRules.packagesToUnsuspend(true, true,
+                        DeviceOwnerRules.suspensionsToRecord(now, failed), now));
+        assertEquals(now, DeviceOwnerRules.suspensionsToRecord(now, Collections.<String>emptySet()));
+    }
 }

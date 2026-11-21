@@ -15,6 +15,10 @@ const TAMPER_WORDS: Record<string, string> = {
   private_dns_attempt: 'Tried to change Private DNS',
   other_vpn: "Another VPN ran in place of Jarvis's web filter",
   boot_without_guard: "Started without Jarvis's guard (safe mode, most likely)",
+  // The family PC (agent/jarvis-guard).
+  offline_code_wrong: 'Wrong offline unlock codes were typed in',
+  tray_missing: "Jarvis Guard's tray was not running, so screen time was not counted",
+  guard_pipe_taken: 'Another program posed as Jarvis Guard and stopped it from starting',
 };
 
 /** One tamper report in words, with what it was about when the phone said (the app, the DNS host). */

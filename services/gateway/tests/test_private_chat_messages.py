@@ -82,6 +82,22 @@ def test_paging_before_and_after(chat):
     assert _list(chat, "alex", after=7) == []
 
 
+def test_a_page_says_whether_there_are_earlier_messages(chat):
+    for _ in range(5):
+        assert _send(chat, "alex").status_code == 200
+
+    def has_more(**params) -> bool:
+        resp = chat["client"].get(f"{BASE}/messages", params=params, headers=_as("alex"))
+        assert resp.status_code == 200, resp.text
+        return resp.json()["detail"]["has_more"]
+
+    assert has_more(limit=3) is True
+    assert has_more(limit=5) is False
+    assert has_more(limit=50) is False
+    assert has_more(limit=2, before=3) is False
+    assert has_more(limit=1, before=3) is True
+
+
 def test_a_reply_names_a_message_the_chat_has(chat):
     _send(chat, "alex")
     reply = _send(chat, "sam", reply_to=1).json()["detail"]["message"]
@@ -499,6 +515,30 @@ def test_until_it_moves_the_routes_pass_through_to_talk(env):  # noqa: F811
     assert not (env["root"] / "messages").exists()
 
 
+def test_a_chat_on_talk_passes_talks_has_more_through(env, monkeypatch):  # noqa: F811
+    _legacy(env)
+
+    async def talk(request, payload):
+        assert payload["action"] == "messages"
+        return 200, {"status": "SUCCESS", "detail": {"messages": [{"id": 4}], "has_more": True}}
+
+    monkeypatch.setattr(private_chat, "_talk", talk)
+    detail = env["client"].get(f"{BASE}/messages", headers=_as("alex")).json()["detail"]
+    assert detail["has_more"] is True and [m["id"] for m in detail["messages"]] == [4]
+
+
+def test_a_talk_page_that_does_not_say_whether_there_is_more_is_an_error(env, monkeypatch):  # noqa: F811
+    _legacy(env)
+
+    async def talk(request, payload):
+        return 200, {"status": "SUCCESS", "detail": {"messages": [{"id": 4}]}}
+
+    monkeypatch.setattr(private_chat, "_talk", talk)
+    resp = env["client"].get(f"{BASE}/messages", headers=_as("alex"))
+    assert resp.status_code == 502
+    assert "earlier messages" in resp.json()["detail"]
+
+
 # --- Moving a chat off Talk ---------------------------------------------------
 
 
@@ -748,7 +788,8 @@ async def test_a_store_missing_moved_messages_falls_back_to_talk(talk, monkeypat
         assert payload["action"] == "messages"
         from services.execution.handlers.talk import _message_summary
 
-        return 200, {"status": "SUCCESS", "detail": {"messages": [_message_summary(r) for r in talk["room"]["messages"]]}}
+        return 200, {"status": "SUCCESS", "detail": {
+            "messages": [_message_summary(r) for r in talk["room"]["messages"]], "has_more": False}}
 
     monkeypatch.setattr(private_chat, "_talk", talk_history)
     resp = talk["client"].get(f"{BASE}/messages", headers=_as("alex")).json()

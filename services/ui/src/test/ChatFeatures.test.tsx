@@ -196,7 +196,7 @@ describe('opening a conversation', () => {
         const limit = Number(new URL(request.url).searchParams.get('limit'));
         limits.push(limit);
         // 70 messages in all: the first page is full, the second is not.
-        return HttpResponse.json({ status: 'SUCCESS', detail: { messages: history(Math.min(limit, 70)) } });
+        return HttpResponse.json({ status: 'SUCCESS', detail: { messages: history(Math.min(limit, 70)), has_more: limit < 70 } });
       }),
     );
     renderWithProviders(<Family />);
@@ -206,6 +206,56 @@ describe('opening a conversation', () => {
     expect(limits).toContain(100);
     // Everything is loaded now: no more "earlier" to show.
     expect(screen.queryByRole('button', { name: /show earlier messages/i })).not.toBeInTheDocument();
+  });
+
+  it('offers earlier messages when the server says there are more, even on a page thinned by reactions', async () => {
+    const user = userEvent.setup();
+    const history = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: 1000 - i, actor_id: 'sam', actor_display_name: 'Sam', timestamp: 1715000000 - i * 60,
+        message_type: 'comment', message: `message ${1000 - i}`,
+      }));
+    server.use(
+      http.get('/api/communication/talk/messages', ({ request }) => {
+        const limit = Number(new URL(request.url).searchParams.get('limit'));
+        // A page of 50 of which three were reactions: 47 to draw, and the server still says there is more.
+        return HttpResponse.json({
+          status: 'SUCCESS',
+          detail: limit === 50 ? { messages: history(47), has_more: true } : { messages: history(80), has_more: false },
+        });
+      }),
+    );
+    renderWithProviders(<Family />);
+
+    await user.click(await screen.findByRole('button', { name: /show earlier messages/i }));
+    await waitFor(() => expect(screen.getByTestId('chat-feed')).toHaveTextContent('message 921'));
+    expect(screen.queryByRole('button', { name: /show earlier messages/i })).not.toBeInTheDocument();
+  });
+
+  it('a short page the server calls complete offers nothing, and a refresh of it is not "loading earlier"', async () => {
+    let calls = 0;
+    let release: () => void = () => undefined;
+    const short = Array.from({ length: 10 }, (_, i) => ({
+      id: 500 - i, actor_id: 'sam', actor_display_name: 'Sam', timestamp: 1715000000 - i * 60,
+      message_type: 'comment', message: `short ${500 - i}`,
+    }));
+    server.use(
+      http.get('/api/communication/talk/messages', async () => {
+        calls += 1;
+        // The refresh (a long poll's news) is held open, to look at the screen while it is out.
+        if (calls > 1) await new Promise<void>((resolve) => { release = resolve; });
+        return HttpResponse.json({ status: 'SUCCESS', detail: { messages: short, has_more: false } });
+      }),
+    );
+    const { queryClient } = renderWithProviders(<Family />);
+    await waitFor(() => expect(screen.getByTestId('chat-feed')).toHaveTextContent('short 491'));
+    expect(screen.queryByRole('button', { name: /show earlier messages/i })).not.toBeInTheDocument();
+
+    void queryClient.invalidateQueries({ queryKey: ['talk-messages'] });
+    await waitFor(() => expect(calls).toBe(2));
+    expect(screen.queryByRole('button', { name: /loading/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /show earlier messages/i })).not.toBeInTheDocument();
+    release();
   });
 });
 

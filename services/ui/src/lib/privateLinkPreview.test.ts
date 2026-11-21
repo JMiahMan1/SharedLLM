@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   hostOf,
+  isPublicWebHost,
   linkPreviewsOn,
   MAX_PREVIEW_DESCRIPTION_CHARS,
   MAX_PREVIEW_IMAGE_BYTES,
@@ -107,6 +108,45 @@ describe('players and addresses', () => {
     expect(webAddress('https://example.com')).toBe('https://example.com');
     expect(webAddress('ftp://example.com')).toBeNull();
     expect(webAddress(7)).toBeNull();
+  });
+});
+
+describe('media from a private host', () => {
+  const PRIVATE = [
+    'http://10.0.0.5/a.mp4',
+    'http://172.16.0.1/a.mp4',
+    'http://172.31.255.254/a.mp4',
+    'http://192.168.1.20/a.mp4',
+    'http://127.0.0.1/a.mp4',
+    'http://127.1/a.mp4',
+    'http://0x7f.1/a.mp4',
+    'http://2130706433/a.mp4',
+    'http://169.254.169.254/a.mp4',
+    'http://100.64.0.1/a.mp4',
+    'http://0.0.0.0/a.mp4',
+    'http://8.8.8.8/a.mp4',
+    'http://[::1]/a.mp4',
+    'http://[fd00::1]/a.mp4',
+    'http://[::ffff:127.0.0.1]/a.mp4',
+    'http://localhost/a.mp4',
+    'http://cam.localhost/a.mp4',
+    'http://nas.local/a.mp4',
+    'http://box.internal/a.mp4',
+    'http://router.lan/a.mp4',
+    'http://printer.home.arpa/a.mp4',
+    'http://nas/a.mp4',
+    'http://nas./a.mp4',
+  ];
+
+  it.each(PRIVATE)('refuses %s as a player source and keeps the card a plain link', (src) => {
+    const raw = { url: 'https://example.com/', title: 'v', kind: 'video', embed: { provider: 'file', src, mime: 'video/mp4' } };
+    expect(readLinkPreview(raw)).toEqual({ url: 'https://example.com/', title: 'v', kind: 'link' });
+  });
+
+  it('accepts a public host', () => {
+    expect(isPublicWebHost('cdn.example.com')).toBe(true);
+    expect(isPublicWebHost('media.example')).toBe(true);
+    expect(isPublicWebHost('NAS.LOCAL')).toBe(false);
   });
 });
 

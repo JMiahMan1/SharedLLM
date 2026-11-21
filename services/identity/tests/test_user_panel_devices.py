@@ -654,3 +654,44 @@ class TestDeviceManager:
             assert r.json() == {"can_manage": False}
         finally:
             app.dependency_overrides = {}
+
+
+class TestMintingAgentKeys:
+    """Only a person's own credential mints a PC's agent key; a PC's key never does, whoever owns the PC."""
+
+    def _parent_pc(self, session: Session) -> str:
+        parent = session.exec(select(User).where(User.username == "kate")).first()
+        parent.family_role = "father"
+        session.add(parent)
+        raw = "wg_" + "b" * 48
+        session.add(Device(device_key="windows-parent-pc", kind="windows-pc", registered_by="self",
+                           owner_username="kate", agent_key_hash=main.digest_secret(raw)))
+        session.add(Device(device_key="windows-other-pc", kind="windows-pc", registered_by="self",
+                           owner_username="sam"))
+        session.commit()
+        return raw
+
+    def test_a_parents_pc_key_is_refused_with_a_clear_403(self, session):
+        c = _client(session, "alex")
+        try:
+            raw = self._parent_pc(session)
+            # The real auth path: the agent key authenticates as the PC's (parent) owner.
+            app.dependency_overrides.pop(require_api_key, None)
+            r = c.post("/api/user-panel/devices/windows-other-pc/agent-key", headers={"Authorization": f"Bearer {raw}"})
+            assert r.status_code == 403
+            assert "device agent key cannot mint" in r.json()["detail"]
+            other = session.exec(select(Device).where(Device.device_key == "windows-other-pc")).first()
+            session.refresh(other)
+            assert not other.agent_key_hash
+        finally:
+            app.dependency_overrides = {}
+
+    def test_the_parent_signed_in_as_themselves_may_mint(self, session):
+        c = _client(session, "kate")
+        try:
+            self._parent_pc(session)
+            r = c.post("/api/user-panel/devices/windows-other-pc/agent-key", headers={"Authorization": "Bearer user-key"})
+            assert r.status_code == 200, r.text
+            assert r.json()["agent_key"].startswith("wg_")
+        finally:
+            app.dependency_overrides = {}

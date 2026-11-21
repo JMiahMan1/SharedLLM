@@ -16,13 +16,20 @@ export type LongPollWait = (token: string, lastId: number, wait: number, signal:
   detail?: unknown;
 }>;
 
-const sleep = (ms: number, signal: AbortSignal) =>
+/** Wait `ms`, or less if `signal` aborts. Its abort listener goes with it, so a long-lived poll does not pile them up. */
+export const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve) => {
-    const timer = window.setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => {
-      window.clearTimeout(timer);
+    if (signal.aborted) {
       resolve();
-    });
+      return;
+    }
+    const done = () => {
+      window.clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = window.setTimeout(done, ms);
+    signal.addEventListener('abort', done);
   });
 
 /**
