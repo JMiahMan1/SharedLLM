@@ -191,7 +191,16 @@ def _current_image_id(client: Any, img: str) -> str | None:
         return None
 
 
-def _get_or_recreate(client: Any, cname: str, img: str) -> Any | None:
+def _mounts_path(container: Any, host_path: str) -> bool | None:
+    """Whether ``container`` bind-mounts ``host_path`` (None when unknown)."""
+    mounts = (getattr(container, "attrs", None) or {}).get("Mounts")
+    if not isinstance(mounts, list):
+        return None
+    want = os.path.normpath(host_path)
+    return any(os.path.normpath(str(m.get("Destination") or "")) == want for m in mounts if isinstance(m, dict))
+
+
+def _get_or_recreate(client: Any, cname: str, img: str, host_path: str | None = None) -> Any | None:
     """Return the running container for ``cname``, recreating it when its image
     is stale.
 
@@ -210,6 +219,18 @@ def _get_or_recreate(client: Any, cname: str, img: str) -> Any | None:
         c = client.containers.get(cname)
     except NotFound:
         return None
+    # A sandbox is found by name, so one made for another path (the
+    # workspace's local_path changed, or two ids slug to the same name) would
+    # be reused with the workspace not mounted, and every command would run
+    # in a directory that is not there. Recreate it for the right path.
+    if host_path and _mounts_path(c, host_path) is False:
+        log.info(f"[Sandbox] {cname} does not mount {host_path}; recreating it")
+        try:
+            c.remove(force=True)
+            return None
+        except Exception as e:
+            log.warning(f"[Sandbox] Could not recreate {cname} for its new path: {e}")
+            return c
     current_id = _current_image_id(client, img)
     if current_id is not None and getattr(c.image, "id", None) != current_id:
         log.info(f"[Sandbox] Image changed for {cname}; recreating from {img}")
@@ -360,7 +381,7 @@ def ensure_workspace_container(
     cname = _container_name(workspace_id)
     img = image or SANDBOX_IMAGE
     ensure_workspace_network(workspace_id)
-    c = _get_or_recreate(client, cname, img)
+    c = _get_or_recreate(client, cname, img, host_path)
     if c is not None:
         if c.status != "running":
             c.start()
@@ -462,11 +483,16 @@ def remove_workspace_container(workspace_id: str) -> None:
         with contextlib.suppress(Exception):
             c.stop(timeout=5)
         c.remove(force=True)
+    # Any failure here (an endpoint still attached is an APIError, not
+    # NotFound) used to turn DELETE /workspaces/{id} into a 500 after the
+    # workspace row was already gone. Teardown is best-effort.
     try:
         net = client.networks.get(_network_name(workspace_id))
         net.remove()
     except NotFound:
         pass
+    except Exception as e:
+        log.warning(f"[Sandbox] Could not remove the network of {workspace_id}: {e}")
 
 
 def _to_container_cwd(cwd: str | None, host_path: str) -> str:
@@ -493,6 +519,18 @@ def _build_exec_cmd(cmd: str | list[str], shell: bool) -> list[str]:
     return list(cmd)
 
 
+def _sandbox_exec_env(env: dict[str, str] | None) -> dict[str, str]:
+    """The environment a workspace command runs with: the non-secret baseline,
+    the integration credentials (so `gh` and git pushes authenticate even when
+    the caller passed none) and the caller's own variables."""
+    full_env = {k: os.environ[k] for k in _SANDBOX_BASE_ENV_KEYS if k in os.environ}
+    for _k, _v in _sandbox_credential_env().items():
+        full_env.setdefault(_k, _v)
+    if env:
+        full_env.update({k: str(v) for k, v in env.items()})
+    return full_env
+
+
 def _exec_blocking(
     workspace_id: str,
     host_path: str,
@@ -509,7 +547,7 @@ def _exec_blocking(
         raise RuntimeError("docker-unavailable")
     cname = _container_name(workspace_id)
     img = image or SANDBOX_IMAGE
-    c = _get_or_recreate(client, cname, img)
+    c = _get_or_recreate(client, cname, img, host_path)
     if c is None:
         # Only create the sandbox if its image is already pulled locally.
         # Pulling a large image mid-command would hang; in that case we raise
@@ -526,13 +564,7 @@ def _exec_blocking(
     elif c.status != "running":
         c.start()
 
-    full_env = {k: os.environ[k] for k in _SANDBOX_BASE_ENV_KEYS if k in os.environ}
-    # Guarantee the sandbox shell inherits integration credentials even when the
-    # caller did not explicitly pass them, so `gh`/`git push` always authenticate.
-    for _k, _v in _sandbox_credential_env().items():
-        full_env.setdefault(_k, _v)
-    if env:
-        full_env.update({k: str(v) for k, v in env.items()})
+    full_env = _sandbox_exec_env(env)
 
     res = c.exec_run(
         cmd,
@@ -558,12 +590,14 @@ async def _host_exec(
     shell: bool,
     timeout: float,
 ) -> dict[str, Any]:
-    """Fallback used when the Docker daemon is unavailable: run the command on
-    the host exactly like the legacy path, so callers keep working in CI / on
-    dev machines without Docker."""
-    run_env = dict(os.environ)
-    if env:
-        run_env.update({k: str(v) for k, v in env.items()})
+    """Run a command for a workspace that lives outside the sandbox mount root
+    (tests and dev machines) as a host subprocess.
+
+    The environment is the same one a sandbox exec gets. It used to be the
+    service's whole environment, which handed INTERNAL_SECRET, FERNET_KEY and
+    every other service secret to whatever the command was.
+    """
+    run_env = _sandbox_exec_env(env)
     try:
         rc, out, err = await run_process(cmd, cwd=cwd, env=run_env, shell=shell, timeout=timeout)
         if rc is None:
@@ -632,16 +666,16 @@ async def run_workspace_cmd(
             "stderr": f"[Sandbox] Command timed out after {timeout}s",
         }
     except Exception as e:
-        # Docker daemon unreachable or exec failed: fall back to a host
-        # subprocess so the command still runs (CI runners, dev machines).
-        log.warning(f"[Sandbox] docker execution failed for {workspace_id}, falling back to host: {e}")
-        return await _host_exec(
-            cmd,
-            cwd=container_cwd,
-            env=env,
-            shell=shell,
-            timeout=timeout,
-        )
+        # A workspace under the mount root runs in its sandbox or not at all.
+        # This used to run the command in the service's own container instead,
+        # silently, outside the sandbox the agent's code is meant to be in.
+        log.error(f"[Sandbox] docker execution failed for {workspace_id}; not running it outside the sandbox: {e}")
+        return {
+            "args": real_cmd,
+            "returncode": 125,
+            "stdout": "",
+            "stderr": f"[Sandbox] The workspace sandbox is unavailable ({type(e).__name__}: {e}). The command did not run.",
+        }
     if rc == 124:
         err = (err + "\n" if err else "") + f"[Sandbox] Command timed out after {timeout}s"
     return {"args": real_cmd, "returncode": rc, "stdout": out, "stderr": err}
@@ -672,7 +706,7 @@ async def run_workspace_terminal(
         raise RuntimeError("docker-unavailable")
     cname = _container_name(workspace_id)
     img = image or SANDBOX_IMAGE
-    c = _get_or_recreate(client, cname, img)
+    c = _get_or_recreate(client, cname, img, host_path)
     if c is None:
         # Only create the sandbox if its image is already pulled locally.
         try:

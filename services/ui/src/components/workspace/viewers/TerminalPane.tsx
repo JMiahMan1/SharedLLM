@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { storageGetSync } from '../../../lib/storage';
+import { gatewaySocketUrl } from '../../../lib/serverUrl';
 import type { Workspace } from '../../../services/api';
 import '@xterm/xterm/css/xterm.css';
 
@@ -118,8 +119,10 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
   useEffect(() => {
     if (!ref.current) return;
 
+    // No convertEol: the shell runs on a pty, which already sends CR LF. With
+    // it on, a bare LF from a full-screen program (vim, less, top) became
+    // CR LF and every such screen was drawn in the wrong columns.
     const term = new XTerm({
-      convertEol: true,
       cursorBlink: true,
       fontSize: 13,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
@@ -168,11 +171,19 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     termRef.current = term;
     focusTerminal();
 
-    // Build the WebSocket connection URL
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
+    // The server's origin, not the page's: inside the Android app the page is
+    // served from localhost and a socket opened there reached nothing.
     const token = storageGetSync('jarvis_api_key') || '';
-    const wsUrl = `${protocol}//${host}/api/workspaces/${workspace.id}/terminal?token=${encodeURIComponent(token)}`;
+    let wsUrl: string;
+    try {
+      wsUrl = gatewaySocketUrl(`/api/workspaces/${encodeURIComponent(workspace.id)}/terminal`, token);
+    } catch (err) {
+      term.writeln(`\x1b[31m${err instanceof Error ? err.message : 'No server is configured.'}\x1b[0m`);
+      return () => {
+        term.element?.removeEventListener('contextmenu', handleContextMenu);
+        term.dispose();
+      };
+    }
 
     term.writeln('\x1b[90mConnecting to workspace sandbox interactive terminal...\x1b[0m');
 

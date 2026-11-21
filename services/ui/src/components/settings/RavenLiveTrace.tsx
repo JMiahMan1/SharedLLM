@@ -3,6 +3,7 @@ import { Terminal, Loader, Download } from 'lucide-react';
 import Modal from '../ui/Modal';
 import { api } from '../../services/api';
 import { storageGetSync } from '../../lib/storage';
+import { gatewaySocketUrl } from '../../lib/serverUrl';
 import { downloadMissionLog, type MissionLogEvent } from '../../lib/missionLog';
 import { MissionTimeline } from './MissionTimeline';
 
@@ -29,9 +30,9 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
   useEffect(() => {
     if (!isOpen || !missionId) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const token = storageGetSync('jarvis_api_key') || '';
-    const wsUrl = `${protocol}//${window.location.host}/api/raven/missions/${missionId}/stream?token=${encodeURIComponent(token)}`;
+    // The server's origin, not the page's: in the Android app they differ.
+    const wsUrl = gatewaySocketUrl(`/api/raven/missions/${missionId}/stream`, token);
     let stopped = false;
 
     const fetchHttpLogs = () => {

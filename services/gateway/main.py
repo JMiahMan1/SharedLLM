@@ -21129,6 +21129,11 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
                 except Exception as e:
                     log.warning(f"[workspaces-terminal] Client->Run error: {e}")
 
+            # Why the runtime ended the session ("Docker unavailable",
+            # "Workspace not found", ...). The browser used to get a bare 1000
+            # instead, so the terminal said "closed" with no reason at all.
+            runtime_close: dict[str, Any] = {}
+
             async def forward_run_to_client():
                 try:
                     while True:
@@ -21139,14 +21144,23 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
                             await websocket.send_bytes(message)
                 except WebSocketDisconnect:
                     log.info("[workspaces-terminal] Browser disconnected (Run->Client)")
+                except websockets.ConnectionClosed as closed:
+                    rcvd = getattr(closed, "rcvd", None)
+                    if rcvd is not None:
+                        runtime_close["code"] = rcvd.code
+                        runtime_close["reason"] = rcvd.reason
                 except Exception as e:
                     log.warning(f"[workspaces-terminal] Run->Client error: {e}")
 
             # When either side ends the other stops, so a closed tab no longer
             # leaves this relay (and the runtime's shell) open.
             await until_either_ends(forward_client_to_run(), forward_run_to_client())
+            code = runtime_close.get("code")
             with suppress(Exception):
-                await websocket.close()
+                if code and code != 1000 and 1000 <= code < 5000 and code not in (1005, 1006, 1015):
+                    await websocket.close(code=code, reason=str(runtime_close.get("reason") or "")[:120])
+                else:
+                    await websocket.close()
     except Exception as e:
         log.error(f"[workspaces-terminal] Failed to connect to workspace runtime: {e}", exc_info=True)
         with suppress(Exception):

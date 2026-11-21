@@ -1,4 +1,5 @@
 import asyncio
+import codecs
 import fnmatch
 import functools
 import hashlib
@@ -53,6 +54,10 @@ from .models import Workspace
 
 log = logging.getLogger("workspace_runtime")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+# basicConfig does nothing once the root logger has a handler, which an earlier
+# import has already added, and that left the root at WARNING: every INFO line
+# of the runtime (startup, "[toolchain] synced", sandbox creation) was dropped.
+logging.getLogger().setLevel(logging.INFO)
 
 WORKSPACE_SYNC_LOCKS: dict[str, threading.RLock] = {}
 WORKSPACE_LOCKS_MUTEX = threading.Lock()
@@ -748,7 +753,9 @@ async def lifespan(app: FastAPI):
         await _sync_task
     if _toolchain_task is not None:
         _toolchain_task.cancel()
-        with suppress(Exception):
+        # CancelledError is a BaseException: suppress(Exception) let a
+        # shutdown during the startup sync skip the rest of this cleanup.
+        with suppress(BaseException):
             await _toolchain_task
     with suppress(Exception):
         await _shutdown_identity_loop()
@@ -970,6 +977,19 @@ def _strip_workspace_path_prefix(relative_path: str, workspace: dict[str, Any]) 
 WORKSPACE_CLONING_IN_PROGRESS: set[str] = set()
 WORKSPACE_CLONING_MUTEX = threading.Lock()
 
+def _restore_recovery_backup(resolved_path: Path, backup_path: Path | None) -> None:
+    """Put the files a failed recovery moved aside back where they were."""
+    if backup_path is None or not backup_path.exists():
+        return
+    try:
+        if resolved_path.exists():
+            shutil.rmtree(resolved_path)
+        backup_path.rename(resolved_path)
+        log.warning(f"Recovery clone failed; restored the original files of {resolved_path}")
+    except OSError as e:
+        log.error(f"Recovery clone failed and the files in {backup_path} could not be restored: {e}")
+
+
 def _ensure_workspace_recovered(workspace: dict[str, Any]) -> None:
     ws_id = workspace.get("id")
     if not ws_id:
@@ -1005,6 +1025,7 @@ def _ensure_workspace_recovered(workspace: dict[str, Any]) -> None:
                     clone_args.extend(["--branch", branch_name])
                 clone_args.extend([repo_url, str(resolved_path)])
 
+                backup_path: Path | None = None
                 if any(resolved_path.iterdir()):
                     backup_path = Path(str(resolved_path) + f"-backup-{int(time.time_ns())}")
                     log.info(f"Workspace path not empty during recovery. Backing up to {backup_path}")
@@ -1012,14 +1033,30 @@ def _ensure_workspace_recovered(workspace: dict[str, Any]) -> None:
                     resolved_path.mkdir(parents=True, exist_ok=True)
 
                 identity = workspace.get("resolved_identity") or {}
-                _run_git_with_optional_askpass(
+                result = _run_git_with_optional_askpass(
                     resolved_path.parent,
                     clone_args,
                     identity=identity,
                     remote_url=repo_url,
                     timeout_seconds=60
                 )
+                if result.get("returncode") != 0:
+                    # The helper reports failure in its result, it does not
+                    # raise. Recovery used to log success here regardless and
+                    # leave the workspace empty, with the user's files parked
+                    # in a -backup- directory, and try again on every request.
+                    _restore_recovery_backup(resolved_path, backup_path)
+                    stderr = str(result.get("stderr") or "").strip()[-500:]
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            "Workspace repository was missing and the recovery clone failed "
+                            f"(exit {result.get('returncode')}): {stderr or 'no output'}"
+                        ),
+                    )
                 log.info(f"Auto-recovery successful: cloned {repo_url} into {resolved_path}")
+            except HTTPException:
+                raise
             except Exception as recovery_err:
                 log.error(f"Auto-recovery failed to clone repository {repo_url}: {recovery_err}")
                 raise HTTPException(
@@ -1166,6 +1203,12 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
                 display_name=str(match.get("display_name", workspace_id)),
                 access_policy=str(match.get("access_policy", "authenticated")),
                 local_path=match.get("local_path"),
+                # Without these the new row said has_repo=false from its first
+                # read on, and recovery never knew which repository to clone.
+                repo_url=match.get("repo_url"),
+                git_remote=match.get("git_remote"),
+                default_branch=match.get("default_branch"),
+                sync_mode=match.get("sync_mode"),
                 scope=match.get("scope", "user"),
                 owner_user=match.get("owner_user"),
             ))
@@ -1911,16 +1954,10 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
                 "remote": remote_name,
                 "repo_url": remote_url,
             }
-        if any(target_path.iterdir()):
-            backup_path = Path(str(target_path) + f"-backup-{int(time.time_ns())}")
-            log.warning(f"Git repo is missing (.git folder not found) in non-empty workspace {target_path}. Backing up to {backup_path} and recreating/cloning fresh.")
-            try:
-                target_path.rename(backup_path)
-            except Exception as rename_err:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Git repo is missing, and failed to back up existing directory to {backup_path}: {rename_err}"
-                ) from rename_err
+    # A non-empty directory without .git is moved aside only once there is a
+    # repository to clone in its place. It used to be moved first, so a call
+    # without repo_url failed with 400 after hiding the user's files.
+    needs_backup = target_path.is_dir() and any(target_path.iterdir())
 
     repo_url = str(req.repo_url or workspace.get("repo_url") or "").strip()
     branch_name = str(req.branch or workspace.get("default_branch") or "main").strip()
@@ -1964,6 +2001,18 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
             clone_args.extend(["--branch", branch_name])
     clone_args.extend([repo_url, str(target_path)])
 
+    backup_path: Path | None = None
+    if needs_backup:
+        backup_path = Path(str(target_path) + f"-backup-{int(time.time_ns())}")
+        log.warning(f"Git repo is missing (.git folder not found) in non-empty workspace {target_path}. Backing up to {backup_path} and recreating/cloning fresh.")
+        try:
+            target_path.rename(backup_path)
+        except Exception as rename_err:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Git repo is missing, and failed to back up existing directory to {backup_path}: {rename_err}"
+            ) from rename_err
+
     result = _run_git_with_optional_askpass(
         parent_path,
         clone_args,
@@ -1972,6 +2021,7 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
         timeout_seconds=180,
     )
     if result["returncode"] != 0:
+        _restore_recovery_backup(target_path, backup_path)
         raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git clone failed")
 
     if remote_name and remote_name != "origin":
@@ -3270,9 +3320,17 @@ async def websocket_terminal(
     # ---- Start streaming ----
     try:
         # Helper to send stdout to client
+        # Output arrives in 4 KiB reads, which split multi-byte characters
+        # (box drawing, emoji, accented names) between two reads; decoding each
+        # read on its own turned both halves into replacement characters.
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
         async def send_to_client(data: bytes):
+            text = decoder.decode(data)
+            if not text:
+                return
             with suppress(Exception):
-                await websocket.send_text(json.dumps({"type": "stdout", "data": data.decode(errors="replace")}))
+                await websocket.send_text(json.dumps({"type": "stdout", "data": text}))
 
         input_warning_logged = False
         # Set once the browser is gone. The socket reader checks it after every
