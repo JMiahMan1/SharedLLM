@@ -734,8 +734,13 @@ async def hooks_weather(request: Request):
 # --------------------------------------------------------------------------- Skylight chore completion
 
 
-def _advance_care_rule(session: Session, plant: Plant, action: str) -> CareRule | None:
+def _advance_care_rule(
+    session: Session, plant: Plant, action: str, *, since: datetime | None = None
+) -> CareRule | None:
     """Push a plant's next due date forward as if that care had just been logged.
+
+    ``since`` is when the care happened (default now): an undone Skylight tick
+    reschedules from the watering before it.
 
     The same arithmetic every care path uses (``compute_interval`` with the
     plant's pot/window/soil, the rule's winter multiplier and the calibration
@@ -758,7 +763,7 @@ def _advance_care_rule(session: Session, plant: Plant, action: str) -> CareRule 
         season_winter=_is_winter(),
         calibration_factor=rule.calibration_factor or 1.0,
     )
-    rule.next_due_at = (datetime.now(UTC) + timedelta(days=result.next_due_offset_days)).isoformat()
+    rule.next_due_at = ((since or datetime.now(UTC)) + timedelta(days=result.next_due_offset_days)).isoformat()
     rule.updated_at = utcnow()
     rule.snoozed_until = None  # care happened; any snooze is spent
     session.add(rule)
@@ -769,34 +774,22 @@ def _advance_care_rule(session: Session, plant: Plant, action: str) -> CareRule 
 async def hooks_skylight_chore_completed(request: Request, session: Session = Depends(get_session)):
     """Internal: a linked Skylight chore was ticked off -- log the watering here.
 
-    The gateway calls this the moment Execution reports the chore complete
-    (``POST /api/integrations/skylight/chores/{chore_id}/complete``), so the
-    garden's schedule follows the chore chart. It never mirrors back to
-    Skylight: the chore is already done, and a loop is how two systems keep
-    re-completing each other.
+    Execution calls this whenever it completes a chore in Skylight
+    (``complete_skylight_chore``, the one path every tick-off takes: the app,
+    Jarvis, the chores handler), so the garden's schedule follows the chore
+    chart. It never mirrors back to Skylight: the chore is already done, and a
+    loop is how two systems keep re-completing each other (a completion that
+    Garden itself mirrored is not reported back, see ``origin=garden``).
+
+    Skylight has no push of its own: a chore ticked on the Skylight display or
+    in Skylight's app reaches Garden only when it next goes through Execution.
 
     ``chore_id`` may be a dated instance (``52409380-2026-11-20``) or the series
     id; the plant stores the series id, so both are matched. Idempotent per
-    plant per UTC day -- phones retry, and the same completion can be reported
-    twice.
+    plant per household day -- phones retry, and the same completion can be
+    reported twice.
     """
-    secret = request.headers.get("X-Internal-Secret")
-    if not _verify_internal_secret(secret):
-        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
-    try:
-        body = await request.json()
-    except ValueError:
-        body = {}
-    chore_id = str((body or {}).get("chore_id") or "").strip()
-    if not chore_id:
-        raise HTTPException(status_code=422, detail="chore_id is required")
-    performed_by = (body or {}).get("performed_by") or None
-    base_id = chore_id.split("-")[0]
-
-    linked = session.exec(
-        select(Plant).where(Plant.skylight_sync_enabled == True)  # noqa: E712
-    ).all()
-    matches = [plant for plant in linked if plant.skylight_chore_id in (chore_id, base_id)]
+    matches, performed_by = await _chore_hook_plants(request, session)
     if not matches:
         return {"ok": True, "matched": 0, "logged": 0, "skipped_duplicate": 0}
 
@@ -829,6 +822,68 @@ async def hooks_skylight_chore_completed(request: Request, session: Session = De
         logged += 1
     session.commit()
     return {"ok": True, "matched": len(matches), "logged": logged, "skipped_duplicate": skipped}
+
+
+async def _chore_hook_plants(request: Request, session: Session) -> tuple[list[Plant], str | None]:
+    """The plants a Skylight chore hook names, and who did it (internal secret only)."""
+    if not _verify_internal_secret(request.headers.get("X-Internal-Secret")):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="The body is not valid JSON.") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be a JSON object.")
+    chore_id = str(body.get("chore_id") or "").strip()
+    if not chore_id:
+        raise HTTPException(status_code=422, detail="chore_id is required")
+    base_id = chore_id.split("-")[0]
+    linked = session.exec(
+        select(Plant).where(Plant.skylight_sync_enabled == True)  # noqa: E712
+    ).all()
+    matches = [plant for plant in linked if plant.skylight_chore_id in (chore_id, base_id)]
+    return matches, (str(body.get("performed_by") or "").strip().lower() or None)
+
+
+@app.post("/hooks/skylight-chore-uncompleted")
+async def hooks_skylight_chore_uncompleted(request: Request, session: Session = Depends(get_session)):
+    """Internal: a linked chore was un-ticked -- undo the watering it logged today.
+
+    Removes today's ``skylight_chore`` watering for each linked plant and
+    reschedules from the watering before it (or from now when there is none),
+    so a mistaken tick in Skylight does not leave a plant marked watered.
+    """
+    matches, _who = await _chore_hook_plants(request, session)
+    day_start, day_end = clock.day_bounds_utc()
+    undone = 0
+    for plant in matches:
+        rows = session.exec(
+            select(CareLog).where(
+                CareLog.plant_id == plant.id,
+                CareLog.source == "skylight_chore",
+                CareLog.created_at >= day_start,
+                CareLog.created_at < day_end,
+            )
+        ).all()
+        if not rows:
+            continue
+        for row in rows:
+            session.delete(row)
+        session.flush()
+        previous = session.exec(
+            select(CareLog)
+            .where(CareLog.plant_id == plant.id, CareLog.action == "water")
+            .order_by(CareLog.created_at.desc())
+        ).first()
+        since = datetime.fromisoformat(previous.created_at) if previous else datetime.now(UTC)
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=UTC)
+        _advance_care_rule(session, plant, "water", since=since)
+        plant.updated_at = utcnow()
+        session.add(plant)
+        undone += 1
+    session.commit()
+    return {"ok": True, "matched": len(matches), "undone": undone}
 
 
 # --------------------------------------------------------------------------- profile

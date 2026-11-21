@@ -355,3 +355,39 @@ def test_a_watering_inside_a_running_loop_is_scheduled_not_blocked(client, sessi
 
     assert len(created) == 1
     assert asyncio.iscoroutine(created[0])
+
+
+def test_undoing_the_chore_undoes_todays_watering(client, session):
+    from datetime import UTC, datetime, timedelta
+
+    plant = _linked_plant(client)
+    earlier = (datetime.now(UTC) - timedelta(days=3)).isoformat()
+    session.add(CareLog(plant_id=plant["id"], action="water", performed_by="alex", source="manual",
+                        created_at=earlier))
+    session.commit()
+    hook = {"X-Internal-Secret": INTERNAL_SECRET}
+    client.post("/hooks/skylight-chore-completed", headers=hook, json={"chore_id": "52409380", "performed_by": "alex"})
+    session.expire_all()
+    after_tick = session.exec(
+        select(CareRule).where(CareRule.plant_id == plant["id"], CareRule.action == "water")
+    ).first().next_due_at
+
+    resp = client.post("/hooks/skylight-chore-uncompleted", headers=hook, json={"chore_id": "52409380-2026-11-20"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["undone"] == 1
+    session.expire_all()
+    sources = [row.source for row in session.exec(select(CareLog).where(CareLog.plant_id == plant["id"])).all()]
+    assert "skylight_chore" not in sources
+    rule = session.exec(select(CareRule).where(CareRule.plant_id == plant["id"], CareRule.action == "water")).first()
+    # Rescheduled from the watering three days ago, not from now.
+    moved = datetime.fromisoformat(after_tick) - datetime.fromisoformat(rule.next_due_at)
+    assert timedelta(days=2, hours=23) < moved < timedelta(days=3, hours=1)
+
+
+def test_the_hooks_refuse_a_malformed_body(client):
+    hook = {"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"}
+
+    assert client.post("/hooks/skylight-chore-completed", headers=hook, content=b"{nope").status_code == 422
+    assert client.post("/hooks/skylight-chore-uncompleted", headers={"X-Internal-Secret": "wrong"},
+                       json={"chore_id": "1"}).status_code == 403

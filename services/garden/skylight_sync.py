@@ -75,7 +75,9 @@ def mirror_care_log(
 
     async def _post_complete() -> None:
         headers = {"X-Internal-Secret": secret}
-        params = {"user": performed_by or ""}
+        # origin=garden: Execution must not report this completion back to
+        # Garden's hook, which would log the same watering a second time.
+        params = {"user": performed_by or "", "origin": "garden"}
         try:
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=10.0)

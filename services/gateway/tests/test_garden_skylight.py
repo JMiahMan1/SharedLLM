@@ -316,23 +316,16 @@ def _completion_world(monkeypatch, garden_raises: bool = False):
     return TestClient(app), seen
 
 
-def test_completing_a_chore_tells_garden(monkeypatch):
+def test_completing_a_chore_goes_through_execution_only(monkeypatch):
+    """Execution tells Garden itself (every tick-off path goes through it), so
+    the gateway must not call Garden's hook too: that would log it twice."""
     client, seen = _completion_world(monkeypatch)
 
     resp = client.post("/api/integrations/skylight/chores/52409380-2026-11-20/complete", headers=ADULT)
 
     assert resp.status_code == 200, resp.text
     assert any("/api/integrations/skylight/chores/52409380-2026-11-20/complete" in url for url in seen)
-    assert any(url.endswith("/hooks/skylight-chore-completed") for url in seen)
-
-
-def test_a_garden_outage_never_fails_the_tick_off(monkeypatch):
-    client, seen = _completion_world(monkeypatch, garden_raises=True)
-
-    resp = client.post("/api/integrations/skylight/chores/52409380/complete", headers=ADULT)
-
-    assert resp.status_code == 200, resp.text
-    assert any(url.endswith("/hooks/skylight-chore-completed") for url in seen)
+    assert not any("skylight-chore-completed" in url for url in seen)
 
 
 # --------------------------------------------------------------------------- the real route stack

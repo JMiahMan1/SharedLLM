@@ -137,7 +137,6 @@ from services.gateway.config import (
     CONFIG,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
-    GARDEN_SVC,
     GEO_SVC,
     HEALTH_SVC,
     IDENTITY_SVC,
@@ -8969,24 +8968,10 @@ async def proxy_complete_skylight_chore(chore_id: str, request: Request):
 
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
+    # Execution tells Garden about the completion itself (every tick-off path
+    # goes through it), so a linked plant's watering follows the chore chart.
     async with shared_http_client() as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/complete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
-        if resp.status == 200:
-            try:
-                completed = await resp.json()
-            except Exception:  # non-JSON or a stub without content_type
-                completed = {}
-            if isinstance(completed, dict) and completed.get("status") == "SUCCESS":
-                # A plant's watering may be this chore: log it in Garden so the
-                # garden's own schedule follows the chore chart. Best-effort and
-                # short: a Garden problem must never fail a chore tick-off.
-                with suppress(Exception):
-                    await client.post(
-                        f"{GARDEN_SVC.rstrip('/')}/hooks/skylight-chore-completed",
-                        json={"chore_id": chore_id, "performed_by": creds.get("user") or ""},
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=5.0),
-                    )
     _forget_chores(creds.get("user") or None)  # the phone's "chores first" lock follows at once
     return await _proxy_json_response(resp)
 
