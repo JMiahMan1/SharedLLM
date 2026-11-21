@@ -69,7 +69,7 @@ def test_it_sends_only_the_callers_messages(model):
 
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"content": "{\"common_name\": \"Fern\"}", "model": "assistant-model"}
-    (model_name, sent, options), = seen
+    (_model, sent, options), = seen
     assert sent == messages
     assert options == {"temperature": 0.1, "num_predict": 4096}
 
