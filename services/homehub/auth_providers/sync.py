@@ -145,13 +145,19 @@ def apply_users(store: Any, ha_auth: Any, provider: AuthProvider, users: list[Pr
             user["group_ids"] = _groups(pu.is_admin)
         link.update({"username": pu.username, "is_admin": pu.is_admin, "roles": list(pu.roles), "avatar": pu.avatar,
                      "person": pu.person, "can_login": pu.can_login, "disabled": pu.disabled, "removed": False})
-        if pu.is_admin or pu.disabled:
-            user["entity_access"] = None if pu.is_admin else user.get("entity_access")
-        elif pu.key in access:
+        if pu.is_admin:
+            user["entity_access"] = None
+        elif pu.key in access and not pu.disabled:
             limits = access[pu.key]
             user["entity_access"] = None if limits is None else limits.snapshot()
         elif "entity_access" not in user:
             user["entity_access"] = EntityAccess().snapshot()  # never read: nothing until the provider answers
+        elif user["entity_access"] is None:
+            # No longer an admin (or now disabled) and no fresh limits arrived: "no limits" was an admin's,
+            # so it becomes nothing at all until the provider answers, never everything.
+            user["entity_access"] = EntityAccess().snapshot()
+            log.warning("%s account %s is not an admin and its entity limits could not be read: it sees and "
+                        "controls nothing until the next sync reads them", provider.type, pu.username)
         after = (user.get("name"), user.get("is_active", True), {k: v for k, v in link.items() if k != "synced_at"},
                  user.get("entity_access"), list(user.get("group_ids") or []))
         if before != after and before[2].get("username"):
