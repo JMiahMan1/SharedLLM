@@ -273,6 +273,16 @@ and its exact home spot**:
 - **Motivation & chores:** garden streaks and badges in `achievements.json` (*Green Thumb*, *7-Day
   Watering Streak*, *First Harvest*, *Master Preserver*) + opt-in per-assignment toggle to mirror
   a watering chore to Skylight.
+- **What the Skylight sync covers, and what it does not.** A watering logged in Garden completes
+  the linked chore (Garden calls Execution with `origin=garden`). A chore ticked or un-ticked
+  through Jarvis (the app's chore list, the chores voice/chat handler, any path through Execution's
+  `complete_skylight_chore` / `uncomplete_skylight_chore`) logs or undoes the plant's watering via
+  `POST /hooks/skylight-chore-completed` / `-uncompleted`. **It is not full two-way sync:**
+  Skylight has no push, so a chore ticked directly on the Skylight display or in Skylight's own app
+  is not seen by Garden (nothing polls Skylight for completions). A link is made only through the
+  plant's Skylight chore option (`/api/garden/plants/{id}/skylight-chore`), which applies who may be
+  given the chore; relinking removes the previous chore from the chart, and an unlink that Skylight
+  refuses says the chore is still on the chart.
 
 ### G. Jarvis Voice, Chat & Camera (Alpaca Vision)
 
