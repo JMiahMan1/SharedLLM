@@ -17,6 +17,7 @@
     "recommendation_lanes",
     "screen_time_requests",
     "guard_requests",
+    "unlock_requests",
     "chore_checks",
     "guardian_notes_written",
     "account_history"

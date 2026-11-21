@@ -50,7 +50,6 @@ from services.common.guidance import guidance as _guidance
 from services.common.http import INTERNAL_KEEPALIVE_S
 from services.common.music_recommendations import recommend_music
 from services.common.podcast_recommendations import podcast_events, recommend_podcast
-from services.common.rag_collections import HOME_DEVICES
 from services.common.relay import until_either_ends
 from services.common.screen_time import (
     carried_over as carried_over_screen_time,
@@ -115,6 +114,7 @@ from services.gateway import (
 from services.gateway import beloved as beloved_routes
 from services.gateway import client_origin
 from services.gateway.trainer import routes as trainer_routes
+from services.gateway import context_routes
 from services.gateway.studio import routes as studio_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
@@ -823,6 +823,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # non-fatal
         log.warning(f"[device_usage] could not start: {e}")
 
+    # Tool results kept per conversation: hot household entries are refreshed before
+    # they expire, and freshness classes are tuned from what refetches find (tool_cache.py).
+    try:
+        from services.gateway import tool_cache
+        _run_in_background(tool_cache.maintain())
+    except Exception as e:  # non-fatal
+        log.warning(f"[tool-cache] maintenance could not start: {e}")
+
     # Warm RAG's embedding model in the background so the FIRST Raven mission's
     # lesson injection doesn't hit RAG's ~25s cold start and silently skip lessons.
     try:
@@ -874,6 +882,7 @@ app.include_router(network_routes.router)
 app.include_router(weather_routes.router)
 app.include_router(garden_routes.router)
 app.include_router(trainer_routes.router)  # Jarvis Trainer: catalogue, curriculum, eval, self-repair, sermons
+app.include_router(context_routes.router)  # prompt budget and knowledge map (admin)
 app.include_router(studio_routes.router)  # Workspace Studio: profile, run, preview, assets, deck, game
 app.include_router(calls.router)
 app.include_router(drawing.router)
@@ -901,6 +910,61 @@ app.include_router(private_chat.router)  # Private chat: the parents' end-to-end
 app.include_router(automation_routes.router)  # Automations and schedules
 app.include_router(helper_routes.router)  # Helpers (toggles, numbers, timers...) kept by the hub
 app.include_router(email_routes.router)  # Email settings and notifications
+
+#: What a device holding a key revoked by identity's sign-in reset is told. Same body as
+#: identity's own answer (services/identity/sign_in_reset.py), so the web UI and the Android
+#: app clear the key and show "Your sign-in was reset, please sign in again".
+SIGN_IN_RESET_CODE = "sign_in_reset"
+SIGN_IN_RESET_MESSAGE = "Your sign-in was reset, please sign in again."
+
+
+#: The gateway's own refusal of the key a request presented (unknown or revoked). The apps
+#: sign out ONLY on this code or ``sign_in_reset``: a 401 an upstream service answered and a
+#: route passed through says nothing about the phone's own key.
+API_KEY_INVALID_CODE = "api_key_invalid"
+API_KEY_INVALID_MESSAGE = "Invalid API Key"
+
+
+class SignInWasReset(HTTPException):
+    def __init__(self) -> None:
+        super().__init__(status_code=401, detail=SIGN_IN_RESET_MESSAGE)
+
+
+class ApiKeyRefused(HTTPException):
+    def __init__(self) -> None:
+        super().__init__(status_code=401, detail=API_KEY_INVALID_MESSAGE)
+
+
+@app.exception_handler(SignInWasReset)
+async def sign_in_reset_handler(_request: Request, _exc: SignInWasReset):
+    return JSONResponse(
+        status_code=401,
+        content={"detail": SIGN_IN_RESET_MESSAGE, "code": SIGN_IN_RESET_CODE},
+        headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+    )
+
+
+@app.exception_handler(ApiKeyRefused)
+async def api_key_refused_handler(_request: Request, _exc: ApiKeyRefused):
+    return JSONResponse(
+        status_code=401,
+        content={"detail": API_KEY_INVALID_MESSAGE, "code": API_KEY_INVALID_CODE},
+        headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+    )
+
+
+def _key_refusal(request: Request, detail: str = "Authentication required") -> HTTPException:
+    """The 401 for a request no verified identity stands behind.
+
+    When it presented a key, say that the key itself was refused (``sign_in_reset`` or
+    ``api_key_invalid``), so the app clears it; with no key it is a plain 401.
+    """
+    if _strict_key_was_reset.get():
+        return SignInWasReset()
+    if _presented_api_key(request):
+        return ApiKeyRefused()
+    return HTTPException(status_code=401, detail=detail)
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -2420,9 +2484,10 @@ async def _require_identity_from_request(request: Request, body: dict | None = N
             status_code=401,
             detail="Missing API Key. Sign in and send 'Authorization: Bearer <api_key>'.",
         )
+    _strict_key_was_reset.set(False)
     ident = await _resolve_strict_identity(api_key)
     if not ident:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
+        raise _key_refusal(request)
     # The key is proven real, so the permissive resolve can no longer fall back:
     # it will find this key's owner and return that user's credentials. It is the
     # *allow anonymous* resolver on purpose -- going back through
@@ -2456,6 +2521,12 @@ STRICT_IDENTITY_ATTEMPTS = 4
 STRICT_IDENTITY_RETRY_S = 1.5
 
 
+#: Set by _resolve_strict_identity when identity refused the key because a sign-in reset
+#: revoked it. A context variable, so callers (and tests that replace the lookup) keep the
+#: plain ``dict | None`` answer and only the 401 gates read it to say why.
+_strict_key_was_reset: ContextVar[bool] = ContextVar("strict_key_was_reset", default=False)
+
+
 async def _resolve_strict_identity(api_key: str) -> dict | None:
     """Resolve an API key to its real owner, with NO default-user fallback.
 
@@ -2470,6 +2541,9 @@ async def _resolve_strict_identity(api_key: str) -> dict | None:
     narrowest possible question ("did this exact key authenticate?") and does
     not return a credential payload. Keeping it means a future resolver change
     cannot silently turn an authentication gate back into a fallback.
+
+    A key identity says was revoked by a sign-in reset still returns ``None``, and sets
+    ``_strict_key_was_reset`` so the 401 gates can answer with ``code: sign_in_reset``.
 
     Returns ``None`` when the key is not a real user's key. When Identity
     cannot be reached (after a few tries) it raises 503: the request is still
@@ -2502,6 +2576,13 @@ async def _resolve_strict_identity(api_key: str) -> dict | None:
         # deploy that restarted Identity was doing that to the family.
         raise HTTPException(status_code=503, detail="Sign-in check unavailable; try again shortly")
     if resp.status != 200:
+        if resp.status == 401:
+            try:
+                refused = await resp.json(content_type=None)
+            except Exception:
+                refused = None
+            if isinstance(refused, dict) and refused.get("code") == SIGN_IN_RESET_CODE:
+                _strict_key_was_reset.set(True)
         return None
     try:
         ident = await resp.json()
@@ -2563,17 +2644,19 @@ async def _caller_is_admin(request: Request) -> bool:
 
 async def _require_authenticated(request: Request) -> str:
     """401 unless the caller is authenticated; returns their username."""
+    _strict_key_was_reset.set(False)
     ident = await _acting_identity(request)
     if not ident:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise _key_refusal(request)
     return ident["user"]
 
 
 async def _require_admin(request: Request) -> str:
     """403 unless the caller is an authenticated administrator; returns their username."""
+    _strict_key_was_reset.set(False)
     ident = await _acting_identity(request)
     if not ident:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise _key_refusal(request)
     if not ident.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
     return ident["user"]
@@ -4256,51 +4339,36 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_ollama_response(weather_text, selected_model, "weather")
 
     # 5. Retrieve Tiered Memory
-    if grounded:
-        short_term = []
-        long_term = ""
-    else:
-        short_term = await get_history(user_id)
-        long_term = await get_long_term_memory(user_id, query)
+    short_term = [] if grounded else await get_history(user_id)
 
-    # 6. Context Injection (RAG)
-    rag_context = ""
-    # MISSION LOCK: Disable RAG to prevent architectural hallucinations
-    if grounded:
-        log.info("[RAG] Grounded study request; skipping all collections.")
-    elif "MISSION LOCK" in query:
-        log.info("[RAG] MISSION LOCK detected; bypassing all collections to ensure focus.")
-    else:
-        try:
-            collections = ["nextcloud_files", "system_capabilities", "system_learnings"]
-            from services import config as _config
+    # 6. Context Injection (RAG), only for the paths below that put it in a prompt.
+    # An ordinary chat or voice turn is queued, and the orchestrator pre-fetches for it
+    # (routed by the intent classified above). Searching four collections fifteen deep
+    # here as well cost four RAG round trips on every question and the result was
+    # thrown away.
+    _rag_memo: dict[str, str] = {}
 
-            if _config.any_home_hub():  # no hub: no device index, as no hub tools are offered
-                collections.insert(0, HOME_DEVICES)
-            for coll in collections:
-                client = get_http_client()
-                resp = await client.post(
-                    f"{RAG_SVC}/rag/search",
-                    json={"collection_name": coll, "query": query, "user_id": user_id, "k": 15},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=aiohttp.ClientTimeout(total=10.0)
-                )
-                resp.raise_for_status()
-                res = await resp.json()
-                hits = res.get("results", [])
-                if hits:
-                    rag_context += f"\n[{coll.upper()}]\n" + "\n".join([h["content"] for h in hits])
-                    log.info(f"[RAG] Collection '{coll}' returned {len(hits)} hits.")
-                else:
-                    log.info(f"[RAG] Collection '{coll}' returned NO hits.")
-        except Exception as e:
-            log.error(f"RAG Retrieval error: {e}")
+    async def chat_rag_context() -> str:
+        if grounded:
+            log.info("[RAG] Grounded study request; skipping all collections.")
+            return ""
+        if "MISSION LOCK" in query:
+            # MISSION LOCK: no retrieval, to prevent architectural hallucinations.
+            log.info("[RAG] MISSION LOCK detected; bypassing all collections to ensure focus.")
+            return ""
+        if "ctx" not in _rag_memo:
+            from services.gateway.orchestrator import _fetch_rag_context
+
+            _rag_memo["ctx"] = await _fetch_rag_context(
+                query, user_id, creds, include_curriculum=False, intent=intent, confidence=confidence,
+            )
+        return _rag_memo["ctx"]
 
     # 7. Slow Path Execution (LLM Pipeline)
     shadow_context = ""
     complex_signals = ["complex", "bug", "refactor", "design", "how to", "fix", "error", "traceback", "implement", "logic"]
     if not grounded and any(k in query.lower() for k in complex_signals):
-        shadow_context = await perform_shadow_execution(query, creds, short_term, rag_context)
+        shadow_context = await perform_shadow_execution(query, creds, short_term, await chat_rag_context())
 
     system_instruction = (body.get("system") or "") if grounded else select_system_instruction_for_query(query, selected_model)
 
@@ -4319,10 +4387,13 @@ async def chat_handler(request: Request, background_tasks=None):
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
 
-    if grounded:
+    if grounded or not is_autonomous:
+        # Only a Raven mission is sent this system text; a queued turn builds its own.
         full_system = system_instruction
     else:
         protocols = await fetch_autonomous_protocols()
+        long_term = await get_long_term_memory(user_id, query)
+        rag_context = await chat_rag_context()
         full_system = f"{system_instruction}\n\n{protocols}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
 
     final_query = query
@@ -4416,11 +4487,12 @@ async def chat_handler(request: Request, background_tasks=None):
         _msgs: list[dict] = []
         if body.get("system"):
             _msgs.append({"role": "system", "content": str(body["system"])})
-        if rag_context:
+        _agentic_context = await chat_rag_context()
+        if _agentic_context:
             if _msgs and _msgs[0].get("role") == "system":
-                _msgs[0]["content"] += f"\n\nContext & Known Entities:\n{rag_context}"
+                _msgs[0]["content"] += f"\n\nContext & Known Entities:\n{_agentic_context}"
             else:
-                _msgs.append({"role": "system", "content": f"Context & Known Entities:\n{rag_context}"})
+                _msgs.append({"role": "system", "content": f"Context & Known Entities:\n{_agentic_context}"})
         for _m in body["messages"]:
             if isinstance(_m, dict) and _m.get("role"):
                 _msgs.append({k: _m.get(k) for k in ("role", "content", "tool_calls", "tool_call_id", "name") if _m.get(k) is not None})
@@ -4493,6 +4565,9 @@ async def chat_handler(request: Request, background_tasks=None):
             + (_voice_context_note(voice_context) if voice_context else "")
         ).strip(),
         "voice_context": voice_context,
+        # The FastPath classifier's verdict routes the orchestrator's pre-fetch (context_router).
+        "intent": intent,
+        "intent_confidence": float(confidence or 0.0),
         "creds": creds.model_dump(),
         "client": body.get("client"),
         "source": body.get("source"),
@@ -10146,8 +10221,53 @@ async def _require_workspace_admin(request: Request) -> None:
     await _require_admin(request)
 
 
+#: What a test account may set on a workspace it creates; everything else is decided here.
+_TEST_ACCOUNT_WORKSPACE_FIELDS = ("id", "display_name", "description")
+
+
+async def _test_account_of(request: Request) -> str | None:
+    """The username behind the request's key when it is an automated agent's test account."""
+    key = _presented_api_key(request)
+    ident = await _resolve_strict_identity(key) if key else None
+    if ident and ident.get("is_test_account") and not ident.get("is_admin"):
+        return str(ident["user"])
+    return None
+
+
+def _test_account_workspace(body: dict, owner: str) -> dict:
+    """A test account's own workspace: user scope, owned by it, under its own folder.
+
+    The id carries the owner's name as a prefix, so the runtime's "adopt an existing
+    workspace with this id" can never hand it someone else's. No path, sync, env or
+    webhook settings: the runtime derives the folder (users/<owner>/<id>).
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be a JSON object")
+    raw_id = str(body.get("id") or body.get("display_name") or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9-]+", "-", raw_id).strip("-")
+    if not slug:
+        raise HTTPException(status_code=422, detail="A workspace needs an id")
+    prefix = f"{owner}-"
+    clean = {k: body[k] for k in _TEST_ACCOUNT_WORKSPACE_FIELDS if k in body}
+    clean["id"] = slug if slug.startswith(prefix) else f"{prefix}{slug}"
+    clean["scope"] = "user"
+    clean["owner_user"] = owner
+    return clean
+
+
 @app.post("/api/workspaces")
 async def create_workspace_proxy(request: Request):
+    # An automated agent's test account may create its own workspaces (and nothing else
+    # here); every other registration stays an administrator's job.
+    internal = secret_matches(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET)
+    owner = None if internal else await _test_account_of(request)
+    if owner:
+        body = _test_account_workspace(await request.json(), owner)
+        resp = await get_http_client().request(
+            "POST", f"{WORKSPACE_RUNTIME_SVC}/workspaces", json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        return await _proxy_json_response(resp)
     await _require_workspace_admin(request)
     return await _proxy_workspace_runtime_json("POST", "/workspaces", request)
 

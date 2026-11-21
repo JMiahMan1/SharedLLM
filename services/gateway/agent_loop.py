@@ -3004,6 +3004,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # No home hub set up: the device tools are not offered (tool_registry.HUB_TOOLS), as on
     # the single-turn path. Fixed per configuration, so the prompt's start stays the same.
     full_system = hub_tool_prompt(full_system)
+    # Where information lives and the tool that fetches it (knowledge_map.py): only a
+    # small, routed pre-fetch arrives as Retrieved Context. Fixed per configuration and role.
+    from services.gateway.knowledge_map import knowledge_map_for
+
+    full_system = f"{full_system}\n\n{knowledge_map_for('raven', is_admin=bool(getattr(creds, 'is_admin', False)), guide=full_system)}"
     enhanced_system = f"{full_system}\n\nCurrent Date/Time: {now}\n\nRetrieved Context:\n{rag_context}"
 
     ollama_payload = {
@@ -4239,6 +4244,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         payload["_outer_action"] = tool_data.get("action") or tool_data.get("operation") or ""
                     _normalize_git_payload_action(payload)
                     payload.pop("_outer_action", None)
+
+                # A knowledge search returns a few close hits, as on the chat path: the
+                # vector index answers every query with its nearest rows otherwise.
+                if lookup_action == "contextsearchrequest" and isinstance(payload, dict):
+                    from services.gateway.config import RAG_SEARCH_MIN_SIMILARITY
+                    from services.gateway.tool_registry import KNOWLEDGE_SEARCH_DEFAULT_K, KNOWLEDGE_SEARCH_MAX_K
+
+                    try:
+                        _k = int(payload.get("k") or KNOWLEDGE_SEARCH_DEFAULT_K)
+                    except (TypeError, ValueError):
+                        _k = KNOWLEDGE_SEARCH_DEFAULT_K
+                    payload["k"] = max(1, min(_k, KNOWLEDGE_SEARCH_MAX_K))
+                    payload.setdefault("min_similarity", RAG_SEARCH_MIN_SIMILARITY)
 
                 # RECOVERY: ensure light/climate/ha_service payload has the device action
                 if lookup_action in ("lightcontrolrequest", "climaterequest", "haservicerequest") and isinstance(payload, dict):

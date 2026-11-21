@@ -113,6 +113,41 @@ def _safe_float(key: str, default: float) -> float:
         return default
 
 
+def _bounded(key: str, default: float, lo: float, hi: float, cast=float):
+    """A numeric setting read once at startup; a malformed or out-of-range value stops the
+    service with the variable named, instead of silently running on the default."""
+    raw = os.getenv(key)
+    if raw is None or raw.strip() == "":
+        return cast(default)
+    try:
+        value = cast(float(raw))
+    except ValueError:
+        raise RuntimeError(f"{key}={raw!r} is not a number") from None
+    if not lo <= value <= hi:
+        raise RuntimeError(f"{key}={value} is outside {lo}..{hi}")
+    return value
+
+
+# --- Retrieval budget (context_router.py) ---
+# What a question carries before the model asks for anything. Everything else is
+# fetched on demand through the tools the knowledge map names.
+#: Characters of pre-fetched hits a typed question may carry, all collections together.
+RAG_PREFETCH_MAX_CHARS = _bounded("RAG_PREFETCH_MAX_CHARS", 1500, 0, 20000, int)
+#: The same for a spoken question: every token read is time the person stands waiting.
+RAG_PREFETCH_VOICE_MAX_CHARS = _bounded("RAG_PREFETCH_VOICE_MAX_CHARS", 800, 0, 20000, int)
+#: Hits pre-fetched per collection.
+RAG_PREFETCH_K = _bounded("RAG_PREFETCH_K", 3, 1, 3, int)
+#: Cosine floor for a pre-fetched hit. Measured with nomic-embed-text-v1.5 on household
+#: questions: the right device/file/capability scored 0.54-0.82, the best unrelated row
+#: 0.41-0.50.
+RAG_PREFETCH_MIN_SIMILARITY = _bounded("RAG_PREFETCH_MIN_SIMILARITY", 0.53, -1.0, 1.0)
+#: Cosine floor for a search the model asked for (ContextSearchRequest): looser, since
+#: the model chose the collection and the words.
+RAG_SEARCH_MIN_SIMILARITY = _bounded("RAG_SEARCH_MIN_SIMILARITY", 0.45, -1.0, 1.0)
+#: Most characters one retrieved hit may contribute (to a prefetch or a search result).
+RAG_HIT_MAX_CHARS = _bounded("RAG_HIT_MAX_CHARS", 600, 100, 4000, int)
+
+
 # --- Inter-service auth (set by docker-compose) ---
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
 

@@ -1,0 +1,25 @@
+{
+  "about": "Household questions for the on-demand context eval (knowledge_eval.py). Each names the tool a model should call first when the answer is not in the prompt (null: answer directly, no tool), any argument the call must carry, and the collections the pre-fetch may read (an empty list: none). Generic wording only: no household names, devices or addresses.",
+  "cases": [
+    {"id": "votd", "question": "What's the verse of the day?", "tool": "BibleRequest", "args": {"action": "votd"}, "prefetch": []},
+    {"id": "bible_read", "question": "Read me John 3:16.", "tool": "BibleRequest", "args": {"action": "read"}, "prefetch": ["calibre_files"]},
+    {"id": "calendar_next", "question": "What's next on my calendar?", "tool": "CalendarRequest", "args": {}, "prefetch": []},
+    {"id": "chores_today", "question": "What chores do the kids have today?", "tool": "ChoreRequest", "args": {"action": "list"}, "prefetch": []},
+    {"id": "timers", "question": "How long is left on the timer?", "tool": "TimerRequest", "args": {}, "prefetch": []},
+    {"id": "where_is", "question": "Where is my wife right now?", "tool": "LocationRequest", "args": {}, "prefetch": []},
+    {"id": "garden_today", "question": "What needs doing in the garden today?", "tool": "garden_summary", "args": {}, "prefetch": []},
+    {"id": "recipe", "question": "Find our chicken soup recipe.", "tool": "ContextSearchRequest", "args": {"collection_name": "nextcloud_files"}, "prefetch": ["nextcloud_files"]},
+    {"id": "file_budget", "question": "Where is the budget spreadsheet?", "tool": "ContextSearchRequest", "args": {"collection_name": "nextcloud_files"}, "prefetch": ["nextcloud_files"]},
+    {"id": "capability", "question": "What can you do with podcasts?", "tool": "ContextSearchRequest", "args": {"collection_name": "system_capabilities"}, "prefetch": ["system_capabilities"]},
+    {"id": "lesson", "question": "What did we learn last time the git push in the workspace failed?", "tool": "ContextSearchRequest", "args": {"collection_name": "system_learnings"}, "prefetch": ["system_learnings"]},
+    {"id": "facts", "question": "Do you remember my favorite color?", "tool": "ContextSearchRequest", "args": {"collection_name": "user_facts"}, "prefetch": ["user_facts"]},
+    {"id": "book", "question": "What does the commentary in our library say about the prodigal son?", "tool": "ContextSearchRequest", "args": {"collection_name": "calibre_files"}, "prefetch": ["calibre_files"]},
+    {"id": "news", "question": "Who won the game last night?", "tool": "WebSearchRequest", "args": {}, "prefetch": []},
+    {"id": "notes", "question": "What notes do I have?", "tool": "NoteRequest", "args": {}, "prefetch": []},
+    {"id": "device_state", "question": "Is the back door locked?", "tool": "EntitySearchRequest", "args": {}, "prefetch": ["home_devices"], "needs_hub": true},
+    {"id": "shopping", "question": "What's on the shopping list?", "tool": "TodoListRequest", "args": {"action": "list"}, "prefetch": [], "needs_hub": true},
+    {"id": "joke", "question": "Tell me a joke.", "tool": null, "args": {}, "prefetch": []},
+    {"id": "math", "question": "What is 15 percent of 80?", "tool": null, "args": {}, "prefetch": []},
+    {"id": "greeting", "question": "Good morning!", "tool": null, "args": {}, "prefetch": []}
+  ]
+}

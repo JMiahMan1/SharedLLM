@@ -466,6 +466,8 @@ export const server = setupServer(
     HttpResponse.json({ status: 'SUCCESS', removed: true })
   ),
   http.get('/api/users', () => HttpResponse.json(users)),
+  // No sign-in reset has happened in the default household (Admin > Security reads it).
+  http.get('/api/users/security/sign-in-reset/last', () => HttpResponse.json(null)),
   http.post('/api/users', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
     const created = {

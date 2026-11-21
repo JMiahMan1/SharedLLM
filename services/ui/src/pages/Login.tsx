@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { storageGet, storageSet } from '../lib/storage';
 import { checkConnectivity, normalizeServerUrl } from '../lib/connectivity';
 import { DEFAULT_SERVER_URL } from '../lib/serverUrl';
+import { readSignOutMessage } from '../lib/signOutNotice';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -21,6 +22,10 @@ const Login = () => {
   const { trigger } = useHaptics();
   const navigate = useNavigate();
   const showServerField = Capacitor.isNativePlatform();
+  // Why this device was signed out (a reset sign-in, a refused key). It stays
+  // until the next successful sign-in, so a reload does not lose it.
+  const [signOutNotice] = useState(() => readSignOutMessage());
+  const notices = [signOutNotice, initError].filter((m, i, all): m is string => Boolean(m) && all.indexOf(m) === i);
 
   useEffect(() => {
     const loadSaved = async () => {
@@ -98,15 +103,18 @@ const Login = () => {
           <p className="text-slate-400 mt-2">Family AI Home Operating System</p>
         </div>
 
-        {initError && (
-          <motion.div 
+        {notices.map((notice) => (
+          <motion.div
+            key={notice}
+            role="status"
+            data-testid="login-notice"
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-2 mb-6"
           >
-            <AlertCircle size={16} /> {initError}
+            <AlertCircle size={16} className="shrink-0" /> {notice}
           </motion.div>
-        )}
+        ))}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {showServerField && (

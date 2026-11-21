@@ -93,7 +93,8 @@ Architecture decision records:
 
 - `RAVEN_MAX_TOTAL_SECONDS`: 1800 s; `RAVEN_ITERATION_TIMEOUT`: 600 s, defined but not yet enforced (`services/config.py`)
 - `raven_max_iterations`: 60 (`MAX_TOOL_ITERATIONS` in `services/gateway/agent_loop.py`)
-- `INTERNAL_SECRET`, `FERNET_KEY`: required bootstrap secrets, `.env` only
+- `INTERNAL_SECRET`, `FERNET_KEY`: required bootstrap secrets, `.env` only (`FERNET_KEY_PREVIOUS` only during a rotation)
+- `docs/KEY_ROTATION.md`: after a leak: sign everyone out and reset keys, rotate `FERNET_KEY`, the agents' test account
 
 ## Quick commands
 

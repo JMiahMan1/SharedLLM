@@ -39,6 +39,7 @@ async def test_chat_orchestration_can_skip_the_curriculum(monkeypatch):
         *,
         include_curriculum=True,
         include_library=False,
+        **_routing,
     ):
         seen["include_curriculum"] = include_curriculum
         return "retrieved context"
@@ -96,6 +97,7 @@ async def test_repeated_rag_failures_skip_further_searches(monkeypatch):
         assert await orchestrator._fetch_rag_context("hello", "u") == ""
 
     assert calls == 3
+    reset_breakers()  # an open breaker would starve every later test that searches
 
 
 async def test_a_voice_turn_reads_a_short_context_with_devices_first(monkeypatch):
@@ -122,13 +124,32 @@ async def test_a_voice_turn_reads_a_short_context_with_devices_first(monkeypatch
     assert seen["devices_first"] is True
 
     seen.clear()
-    await orchestrator.process_full_orchestration({"query": "hello", "creds": {"user": "u"}, "model": "m"})
+    await orchestrator.process_full_orchestration(
+        {"query": "fix the bug in my python script", "creds": {"user": "u"}, "model": "m"})
     assert seen["include_curriculum"] is True and "search_chars" not in seen
 
+    # A typed question about nothing to build carries no workspace curriculum.
+    seen.clear()
+    await orchestrator.process_full_orchestration({"query": "hello", "creds": {"user": "u"}, "model": "m"})
+    assert seen["include_curriculum"] is False and "search_chars" not in seen
 
-def test_devices_come_first_for_a_voice_turn_even_when_it_sounds_like_coding():
-    assert orchestrator._collections_for_query("fix the thermostat")[0] != "home_devices"
-    assert orchestrator._collections_for_query("fix the thermostat", devices_first=True)[0] == "home_devices"
+    # A workspace turn and a Raven mission always get it.
+    seen.clear()
+    await orchestrator.process_full_orchestration(
+        {"query": "hello", "creds": {"user": "u"}, "model": "m", "workspace_id": "ws-1"})
+    assert seen["include_curriculum"] is True
+
+
+def test_devices_come_first_for_a_voice_turn_even_when_it_sounds_like_coding(monkeypatch):
+    from services import config
+
+    monkeypatch.setattr(config, "any_home_hub", lambda: True)
+    got = orchestrator._collections_for_query("check the lessons on the bug, then fix the thermostat")
+    assert got == ["home_devices", "system_learnings"]
+    assert orchestrator._collections_for_query("the bug in the thermostat code", devices_first=True)[0] == "home_devices"
+    # and without a hub there is no device index to read
+    monkeypatch.setattr(config, "any_home_hub", lambda: False)
+    assert "home_devices" not in orchestrator._collections_for_query("fix the thermostat", devices_first=True)
 
 
 async def test_the_system_message_is_the_same_for_every_question_so_it_stays_cached(monkeypatch):

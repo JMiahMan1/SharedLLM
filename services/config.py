@@ -44,6 +44,9 @@ def _safe_float(key: str, default: float) -> float:
 # --- Required secrets (only these come from .env for bootstrapping) ---
 INTERNAL_SECRET = _required("INTERNAL_SECRET")
 FERNET_KEY = _required("FERNET_KEY")
+# During a key rotation (scripts/rotate_fernet_key.sh) the key being replaced, comma separated
+# if more than one: values sealed with it still decrypt while they are re-encrypted. Empty otherwise.
+FERNET_KEY_PREVIOUS = _optional("FERNET_KEY_PREVIOUS")
 
 # --- Network mode: a container detects its network at runtime and selects the
 # correct service-URL set. BRIDGE_* = docker bridge network, HOST_* = host

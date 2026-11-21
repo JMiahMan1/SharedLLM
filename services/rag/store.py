@@ -47,6 +47,27 @@ class VectorStoreAdapter(abc.ABC):
     ) -> list[tuple[str, float]]:
         """Return ``(doc_id, distance)`` pairs sorted by ascending distance."""
 
+    def stored_vectors(self, doc_ids: list[str]) -> dict[str, np.ndarray]:
+        """The stored embedding of each id that has one."""
+        return {}
+
+    def cosine_similarities(self, query_vector: list[float], doc_ids: list[str]) -> dict[str, float]:
+        """Cosine similarity of the query to each stored document, by id.
+
+        Computed from the vectors, not from ``search``'s distance: vec0 reports L2,
+        and fastembed's nomic vectors are not unit length (norm about 21), so no
+        formula turns that distance into a similarity.
+        """
+        if not doc_ids:
+            return {}
+        q = np.asarray(query_vector, dtype=np.float32)
+        q_norm = float(np.linalg.norm(q)) or 1.0
+        out: dict[str, float] = {}
+        for doc_id, vec in self.stored_vectors(doc_ids).items():
+            v_norm = float(np.linalg.norm(vec)) or 1.0
+            out[doc_id] = float(np.dot(q, vec) / (q_norm * v_norm))
+        return out
+
     @abc.abstractmethod
     def delete(self, doc_id: str) -> None:
         ...
@@ -92,6 +113,13 @@ class SqliteVecAdapter(VectorStoreAdapter):
             [blob, collection, user_id, k],
         ).fetchall()
         return [(r["id"], float(r["distance"])) for r in rows]
+
+    def stored_vectors(self, doc_ids: list[str]) -> dict[str, np.ndarray]:
+        marks = ",".join("?" * len(doc_ids))
+        rows = self.conn.execute(
+            f"SELECT id, embedding FROM vec_rag_items WHERE id IN ({marks})", list(doc_ids)
+        ).fetchall()
+        return {r["id"]: deserialize_vector(r["embedding"]) for r in rows}
 
     def delete(self, doc_id: str) -> None:
         self.conn.execute("DELETE FROM vec_rag_items WHERE id = ?", [doc_id])
@@ -146,6 +174,13 @@ class NumpyVecAdapter(VectorStoreAdapter):
 
         scored.sort(key=lambda x: x[1])
         return scored[:k]
+
+    def stored_vectors(self, doc_ids: list[str]) -> dict[str, np.ndarray]:
+        marks = ",".join("?" * len(doc_ids))
+        rows = self.conn.execute(
+            f"SELECT id, embedding FROM vec_store WHERE id IN ({marks})", list(doc_ids)
+        ).fetchall()
+        return {r["id"]: deserialize_vector(r["embedding"]) for r in rows}
 
     def delete(self, doc_id: str) -> None:
         self.conn.execute("DELETE FROM vec_store WHERE id = ?", [doc_id])
