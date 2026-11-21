@@ -79,7 +79,7 @@ POST /api/studio/preview/stop {"workspace_id": "arcade"}
 
 Stopping kills the recorded PID and closes **every** port the workspace published,
 so a preview never leaks a listener. If the process already died, the ports are
-still closed and the answer says the process was gone (`"process": "gone"`), 
+still closed and the answer says the process was gone (`"process": "gone"`),
 that is not an error. A kill that fails, a port list that cannot be read, or a
 forward that will not close **is** an error naming it (after every other port has
 been tried). Starting a preview stops any earlier one first, and its answer says
