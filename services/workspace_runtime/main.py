@@ -906,24 +906,33 @@ async def _http_post_async(url: str, **kwargs) -> Any:
     return await resp.json()
 
 
+def _is_within(target: Path, root: Path) -> bool:
+    try:
+        target.relative_to(root)
+    except (ValueError, RuntimeError):
+        return False
+    return True
+
+
 def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Path:
     """
-    Resolves a path against a base directory for user workspaces, or uses it directly
-    for absolute paths (system workspaces). Ensures user workspaces don't escape the
-    workspace root, but allows absolute paths for system workspaces.
+    Resolves a path against ``base`` and refuses anything that escapes it.
+
+    ``base`` is the caller's own workspace directory (or the workspace root for
+    the few callers that resolve a workspace's ``local_path``). An absolute path
+    is accepted only when it lies under that same ``base``: models echo back the
+    ``resolved_path`` of their own workspace, which always does. Checking an
+    absolute path against the workspace *root* instead let one user name
+    another user's files (``/workspaces/users/<other>/...``) and read or
+    overwrite them.
     """
     try:
-        # If path is already absolute, use it directly (system workspaces);
-        # but still confined to the workspace root. Absolute inputs come from
-        # models echoing back resolved_path values, which always live under
-        # the root; anything else is traversal.
         if os.path.isabs(relative):
             target = Path(relative).resolve()
-            try:
-                target.relative_to(get_workspace_root())
-            except (ValueError, RuntimeError):
-                log.warning(f"SECURITY ALERT: Absolute path outside workspace root blocked! Root='{get_workspace_root()}', Path='{relative}'")
-                raise HTTPException(status_code=403, detail="Forbidden: Path outside the workspace root") from None
+            allowed = {base, base.resolve()}
+            if not any(_is_within(target, root) for root in allowed):
+                log.warning(f"SECURITY ALERT: Absolute path outside the workspace blocked! Base='{base}', Path='{relative}'")
+                raise HTTPException(status_code=403, detail="Forbidden: Path outside this workspace") from None
             if must_exist and not target.exists():
                 raise HTTPException(status_code=404, detail=f"Path not found: {relative}")
             return target

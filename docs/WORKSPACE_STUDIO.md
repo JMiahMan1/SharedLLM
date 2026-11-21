@@ -79,7 +79,12 @@ POST /api/studio/preview/stop {"workspace_id": "arcade"}
 
 Stopping kills the recorded PID and closes **every** port the workspace published,
 so a preview never leaks a listener. If the process already died, the ports are
-still closed and the answer says the process was gone — that is not an error.
+still closed and the answer says the process was gone (`"process": "gone"`) —
+that is not an error. A kill that fails, a port list that cannot be read, or a
+forward that will not close **is** an error naming it (after every other port has
+been tried). Starting a preview stops any earlier one first, and its answer says
+what it replaced (`"replaced"`). A server that takes its port as an argument
+(the static site's `http.server {port}`) is started on the requested `port`.
 A server that starts but never answers says so, with its own log, instead of
 leaving you with a dead link.
 
@@ -96,6 +101,15 @@ leaving you with a dead link.
 Every generated file is recorded in `assets/manifest.json` with the prompt, the
 model and the time, because art you cannot re-make is art you cannot fix.
 Re-generating the same name replaces the entry rather than piling up duplicates.
+The manifest is read whole and written back only if it is still what was read
+(`expected_sha256`; a concurrent writer means read and merge again). A manifest
+that is corrupt or cannot be read is an error, never treated as empty, so it is
+never overwritten with one entry.
+
+A deck or game that already exists is **not** overwritten: the answer is a `409`
+naming the file, and `"replace": true` rebuilds it (hand edits to it are lost).
+The panel asks before sending that. Titles are HTML-escaped and sprite paths are
+JSON-escaped for a `<script>` element, so neither can inject markup.
 
 **Decks** are Markdown in, one self-contained HTML file out:
 
@@ -182,9 +196,17 @@ detected project's test step — and return one verdict:
  "hint": "the tests fail (`python -m pytest -q`): 1 failed, 4 passed"}
 ```
 
-The order matters: a broken shell is reported as a shell problem and the tests are
-never blamed for it. The probe file is removed even when it fails — a probe is not
-a deliverable.
+The order matters: a broken shell is reported as a shell problem and the check
+stops there (`program` and `tests` are `null`): nothing else is run or blamed. The
+probe file is removed even when it fails — a probe is not a deliverable.
+
+`ok` needs proof: a one-line program that ran, or tests that ran and passed. A
+stack with no probe (`"skipped": true`) and no test step is "nothing proved code
+runs here", not a pass. A test step that exits 0 having run **no tests** (`go test`
+on a package without tests, `cargo test` with `running 0 tests`, pytest's
+`no tests ran`) is a failure, and every test run reports `extra.tests_ran` (the
+count read from the runner's summary; `null` when the runner does not say). A
+shell answer counts as success only with status `SUCCESS` **and** exit code 0.
 
 ## 8. 3D models: reading and editing STL
 
@@ -204,10 +226,21 @@ edits them:
   (uniform or per-axis), `center`, `translate`, in that order, which is the order
   a person uses them.
 
-An edit writes a **new** file (`bracket.stl` → `bracket_edited.stl`) and returns
-the measurements before *and* after, so the caller quotes both instead of
-trusting the resize. A negative scale is refused (it would mirror the solid inside
-out); rotation never changes the volume, which is what the tests assert.
+An edit writes a **new** file (`bracket.stl` → `bracket_edited.stl`, then
+`bracket_edited_2.stl` ...) and returns the measurements before *and* after, so
+the caller quotes both instead of trusting the resize. A named `out_path` that
+exists is refused (`409`) unless `replace` is set, and the source itself can never
+be the output. Paths are workspace-relative `.stl` files: an absolute path is a
+`400` here and a `403` in the Workspace Runtime, which confines every absolute
+path to the caller's **own** workspace (it used to accept anything under the
+workspace root, i.e. other users' files). A non-finite number, a vector that is
+not three numbers, or a scale list of the wrong length is a `400`. A negative
+scale is refused (it would mirror the solid inside out); rotation never changes
+the volume, which is what the tests assert.
+
+Parsing and editing run in a worker thread (at most two at once), never on the
+gateway's event loop; a file over 64 MiB is refused before it is buffered, and
+the ASCII parser stops at the triangle cap.
 
 `GET /api/studio/stl/preview` returns an indexed mesh (shared vertices merged,
 capped at `limit` triangles) for a browser viewer.
@@ -225,7 +258,24 @@ capped at `limit` triangles) for a browser viewer.
   an edit that would mirror a solid inside out is refused.
 - **No leftover probe.** `verify` deletes what it ran, even on failure.
 
-## 10. Where it lives
+## 10. The model's tools
+
+The workspace chat and Raven reach the studio as tools, not by HTTP: the sandbox
+cannot call the gateway, and the tool registry had no row for the routes the RAG
+lessons taught. `tool_registry` now has one row per action (`StudioProfileRequest`,
+`StudioDiagnoseRequest`, `StudioVerifyRequest`, `StudioRunRequest`,
+`StudioPreviewRequest`, `StudioPreviewStopRequest`, `StudioAssetsRequest`,
+`StudioImageRequest`, `StudioNarrationRequest`, `StudioDeckRequest`,
+`StudioGameRequest`, `StlInspectRequest`, `StlTransformRequest`), served by the
+gateway itself. The single-turn executor and Raven's agent loop run them
+in-process through `studio.tools.call`, which validates the payload with the
+route's own model and runs the route's own handler **as the turn's user**, so the
+Workspace Runtime applies that user's access exactly as for the button. The
+external OpenAI-compatible agent reaches the same routes with the caller's own key.
+A tool result is the whole answer with `ok` first, so a failing test run reaches
+the model as a failure.
+
+## 11. Where it lives
 
 - `services/gateway/studio/profiles.py` — detection and commands (pure)
 - `services/gateway/studio/runtime.py` — run, preview, stop, diagnose, verify
@@ -233,7 +283,9 @@ capped at `limit` triangles) for a browser viewer.
 - `services/gateway/studio/media.py` — image generation and narration into `assets/`
 - `services/gateway/studio/deck.py`, `templates.py` — the deck and game documents
 - `services/gateway/studio/works.py` — writing decks and games (with their READMEs)
-- `services/gateway/studio/routes.py` — `/api/studio/*`
+- `services/gateway/studio/actions.py` — every action once: request model, handler, error to status
+- `services/gateway/studio/routes.py` — `/api/studio/*` (thin: authenticate, run the action)
+- `services/gateway/studio/tools.py` — the same actions as model tools
 - `services/gateway/workspace_api.py` — the one client for files, raw bytes, ports and tests
 - `services/workspace_sandbox.py` — the sandbox environment (`build_exec_env`, `_home_for_uid`)
 - `services/ui/src/components/workspace/WorkspaceStudio.tsx` — the panel in

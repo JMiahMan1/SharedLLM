@@ -7,6 +7,7 @@ explains where it came from.
 """
 from __future__ import annotations
 
+import html
 import logging
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -87,13 +88,44 @@ prompt and model that made it.
 """
 
 
+class WorkExists(WorkError):
+    """The work is already in the workspace and the caller did not ask to replace it."""
+
+
+async def _write_work(
+    workspace_id: str, files: dict[str, str], *, replace: bool, user: str
+) -> None:
+    """Write a work's files, refusing to overwrite any of them unless ``replace``.
+
+    A person edits a generated game or deck by hand (the README tells them to);
+    re-running the scaffold must not silently throw that work away. Each file is
+    created with ``expected_sha256="new"``, so the Workspace Runtime refuses the
+    write if the file appeared in between, not only if this check saw it.
+    """
+    for path, content in files.items():
+        try:
+            await ws.write_file(
+                workspace_id,
+                path,
+                content,
+                user=user,
+                expected_sha256=None if replace else ws.CREATE_ONLY,
+            )
+        except ws.WorkspaceConflict as exc:
+            raise WorkExists(
+                f"{path} already exists. Choose another title, or rebuild with replace=true "
+                "to overwrite it (hand edits to it will be lost)."
+            ) from exc
+
+
 async def build_deck(
     workspace_id: str,
     markdown: str,
     *,
     title: str = "",
     footer: str = "",
-    user: str = "default",
+    replace: bool = False,
+    user: str,
 ) -> Built:
     """Render a Markdown deck into ``decks/<slug>/index.html`` (+ its source)."""
     slides = deck_mod.parse(markdown)
@@ -103,17 +135,26 @@ async def build_deck(
     folder = f"{DECKS_DIR}/{slug(heading)}"
     page = deck_mod.render(slides, heading, footer=footer)
 
-    files = [f"{folder}/index.html", f"{folder}/source.md"]
-    await ws.write_file(workspace_id, files[0], page, user=user)
-    await ws.write_file(workspace_id, files[1], markdown, user=user)
+    files = {f"{folder}/index.html": page, f"{folder}/source.md": markdown}
+    await _write_work(workspace_id, files, replace=replace, user=user)
     return Built(
         kind="deck",
-        path=files[0],
+        path=f"{folder}/index.html",
         title=heading,
-        files=files,
+        files=list(files),
         slides=len(slides),
         assets=[slide.image for slide in slides if slide.image],
         message=f"{len(slides)} slides, offline, one file",
+    )
+
+
+def game_page(title: str, sprites: dict[str, str] | None = None) -> str:
+    """The game's ``index.html``, with the title and sprite paths escaped for where they land."""
+    return templates.render(
+        templates.GAME_HTML,
+        title=html.escape(title, quote=True),
+        sprites=templates.script_json({k: v for k, v in (sprites or {}).items() if v}),
+        js=templates.GAME_JS,
     )
 
 
@@ -122,29 +163,22 @@ async def scaffold_game(
     title: str,
     *,
     sprites: dict[str, str] | None = None,
-    user: str = "default",
+    replace: bool = False,
+    user: str,
 ) -> Built:
     """Write a playable game to ``games/<slug>/index.html`` with a README."""
-    import json
-
     heading = (title or "").strip() or "Untitled Game"
     folder = f"{GAMES_DIR}/{slug(heading)}"
-    payload = json.dumps({k: v for k, v in (sprites or {}).items() if v})
-
-    page = templates.render(
-        templates.GAME_HTML,
-        title=heading,
-        sprites=payload,
-        js=templates.GAME_JS,
-    )
-    files = [f"{folder}/index.html", f"{folder}/README.md"]
-    await ws.write_file(workspace_id, files[0], page, user=user)
-    await ws.write_file(workspace_id, files[1], game_readme(heading, sprites=sprites), user=user)
+    files = {
+        f"{folder}/index.html": game_page(heading, sprites),
+        f"{folder}/README.md": game_readme(heading, sprites=sprites),
+    }
+    await _write_work(workspace_id, files, replace=replace, user=user)
     return Built(
         kind="game",
-        path=files[0],
+        path=f"{folder}/index.html",
         title=heading,
-        files=files,
+        files=list(files),
         assets=[path for path in (sprites or {}).values() if path],
         message="one file, keyboard and touch, ready to play",
     )

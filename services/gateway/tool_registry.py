@@ -789,6 +789,33 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
 )
 
 
+def _studio_rows() -> tuple[tuple, ...]:
+    """The Workspace Studio's tools, from the studio's own action table.
+
+    Served by the gateway itself (``SVC_GATEWAY``): the single-turn executor and
+    Raven run them in-process as the turn's user (``studio.tools.call``), and the
+    external agent reaches the same routes with the caller's own Bearer key.
+    """
+    from services.gateway.studio import actions as studio_actions
+    from services.gateway.studio import tools as studio_tools
+
+    return tuple(
+        (
+            tool,
+            SVC_GATEWAY,
+            "POST",
+            studio_tools.TOOL_PATHS[tool],
+            True,
+            studio_actions.ACTIONS[action].description,
+            studio_actions.ACTIONS[action].hint,
+        )
+        for tool, action in studio_tools.TOOL_ACTIONS.items()
+    )
+
+
+_RAVEN_TOOL_TABLE = _RAVEN_TOOL_TABLE + _studio_rows()
+
+
 # Rows the single-turn path (chat, voice, the workspace composer) must not
 # dispatch. Everything else in _RAVEN_TOOL_TABLE is reachable from it.
 SINGLE_TURN_EXCLUDED: dict[str, str] = {

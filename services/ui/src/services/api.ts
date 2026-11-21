@@ -5206,19 +5206,23 @@ export const api = {
     return resp.data;
   },
 
-  async studioBuildDeck(workspaceId: string, markdown: string, title = ''): Promise<StudioBuilt> {
-    const resp = await apiClient.post('/api/studio/deck', { workspace_id: workspaceId, markdown, title });
+  /** `replace` overwrites an existing deck of the same title; without it that is a 409. */
+  async studioBuildDeck(workspaceId: string, markdown: string, title = '', replace = false): Promise<StudioBuilt> {
+    const resp = await apiClient.post('/api/studio/deck', { workspace_id: workspaceId, markdown, title, replace });
     return resp.data;
   },
 
+  /** `replace` overwrites an existing game of the same title; without it that is a 409. */
   async studioScaffoldGame(
     workspaceId: string,
     title: string,
     sprites?: Record<string, string>,
+    replace = false,
   ): Promise<StudioBuilt> {
     const resp = await apiClient.post('/api/studio/game', {
       workspace_id: workspaceId,
       title,
+      replace,
       ...(sprites ? { sprites } : {}),
     });
     return resp.data;

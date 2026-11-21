@@ -29,6 +29,8 @@ from services.gateway.llm_providers import get_provider
 from services.gateway.location_query import parse_location_query
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
+from services.gateway.studio import actions as studio_actions
+from services.gateway.studio import tools as studio_tools
 from services.gateway.tool_registry import hub_tool_guide, names_withheld_hub_tool, single_turn_tools
 
 log = logging.getLogger("gateway.orchestrator")
@@ -548,10 +550,11 @@ _SINGLE_TURN_TOOLS = {**single_turn_tools(), **_SINGLE_TURN_ONLY_TOOLS}
 SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {name: path for name, (_svc, path) in _SINGLE_TURN_TOOLS.items()}
 
 # Tool -> service settings key, for every tool not on the execution service.
+# Gateway rows (the Workspace Studio) are run in-process by _execute_single_tool.
 _TOOL_SERVICE_MAP = {
     name: _SERVICE_SETTINGS_KEY[svc]
     for name, (svc, _path) in _SINGLE_TURN_TOOLS.items()
-    if svc != "execution"
+    if svc not in ("execution", "gateway")
 }
 
 # Tools that legitimately run for minutes. Everything else gets 60 seconds.
@@ -1399,6 +1402,19 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
         except Exception as e:
             log.error(f"Control Plane execution error: {e}")
             return f"Control Plane execution failed: {e}"
+
+    elif studio_tools.tool_for(action):
+        # The Workspace Studio runs in this process, as the turn's user, through
+        # the same handlers as /api/studio/* (services/gateway/studio/tools.py).
+        payload = tool_data.get("payload", tool_data)
+        try:
+            result = await studio_tools.call(
+                action, payload if isinstance(payload, dict) else {},
+                user=creds.user, workspace_id=workspace_id,
+            )
+        except studio_actions.StudioActionError as exc:
+            return f"Sorry, I couldn't complete that action: {exc.detail} (HTTP {exc.status})"
+        return studio_tools.summarize(action, result)
 
     elif action in SINGLE_TURN_TOOL_ENDPOINTS:
         endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]

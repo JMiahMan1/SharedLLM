@@ -261,8 +261,9 @@ def _seed_cases() -> list[Case]:
                 "Name the cause and the fix in at most three sentences."
             ),
             checks={
-                # The model has to reach for the diagnosis surface, not guess a chmod.
-                "must_include": ["/api/studio/diagnose"],
+                # The model has to reach for the diagnosis tool (StudioDiagnoseRequest,
+                # which it can call), not guess a chmod.
+                "must_include": ["StudioDiagnoseRequest"],
                 "must_match": [r"(?i)HOME"],
                 "must_not_match": [r"(?i)chmod\s+777"],
                 "max_chars": 900,
@@ -277,11 +278,11 @@ def _seed_cases() -> list[Case]:
             tags=("workspace", "3d", "stl"),
             prompt=(
                 "A workspace has `parts/bracket.stl` (80 mm long) and the printer needs it 120 mm "
-                "long, centred on the origin. Which single call does it, and what must you report "
-                "afterwards? Name the endpoint and the fields. Three sentences at most."
+                "long, centred on the origin. Which single tool call does it, and what must you "
+                "report afterwards? Name the tool and the fields. Three sentences at most."
             ),
             checks={
-                "must_include": ["/api/studio/stl/transform"],
+                "must_include": ["StlTransformRequest"],
                 "must_match": [r"(?i)fit", r"(?i)center", r"(?i)before", r"(?i)after"],
                 "max_chars": 900,
             },
