@@ -3,7 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, FlaskConical, Image as ImageIcon, Play, RefreshCcw, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { errorText } from '../../lib/errorText';
-import { bucketBars, passRateLabel, proposalTone, summariseCatalog } from '../../lib/trainer';
+import {
+  benchmarkLine,
+  bucketBars,
+  freeVramLabel,
+  hardwareVerdict,
+  passRateLabel,
+  proposalTone,
+  summariseCatalog,
+} from '../../lib/trainer';
 import { api } from '../../services/api';
 
 const BUCKET_CHOICES = ['repair', 'writing', 'vision', 'workspace', 'memory', 'protocol', 'tools'];
@@ -24,6 +32,12 @@ export default function TrainerPane() {
     queryFn: () => api.trainerCurriculum(undefined, 500),
   });
   const backlogQuery = useQuery({ queryKey: ['trainer', 'backlog'], queryFn: () => api.trainerBacklog() });
+  const hardwareQuery = useQuery({ queryKey: ['trainer', 'hardware'], queryFn: () => api.trainerHardware() });
+  const modelsQuery = useQuery({ queryKey: ['trainer', 'models'], queryFn: () => api.trainerModels() });
+  const benchmarksQuery = useQuery({
+    queryKey: ['trainer', 'benchmarks'],
+    queryFn: () => api.trainerBenchmarks(),
+  });
   const reportsQuery = useQuery({ queryKey: ['trainer', 'reports'], queryFn: () => api.trainerReports() });
   const latestReportQuery = useQuery({
     queryKey: ['trainer', 'report', reportsQuery.data?.[0]?.id],
@@ -66,6 +80,7 @@ export default function TrainerPane() {
 
   return (
     <div className="space-y-8">
+      <HostCard hardware={hardwareQuery.data} models={modelsQuery.data} benchmarks={benchmarksQuery.data} />
       <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -247,6 +262,77 @@ function Stat({ label, value }: { label: string; value: number | string }) {
       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</p>
       <p className="mt-1 text-2xl font-black text-white">{value}</p>
     </div>
+  );
+}
+
+/**
+ * The host: Alpaca owns the GPU, so the trainer asks it what it has and whether a
+ * pass may start. When the household is using the model, this card says so
+ * instead of letting a run fail on timeouts.
+ */
+function HostCard({
+  hardware,
+  models,
+  benchmarks,
+}: {
+  hardware?: Awaited<ReturnType<typeof api.trainerHardware>>;
+  models?: Awaited<ReturnType<typeof api.trainerModels>>;
+  benchmarks?: Awaited<ReturnType<typeof api.trainerBenchmarks>>;
+}) {
+  const verdict = hardwareVerdict(hardware);
+  const loaded = (hardware?.loaded_models ?? []).map((item) => item.model).filter(Boolean) as string[];
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-black uppercase tracking-tight text-white">Model host</h3>
+          <p className="mt-1 text-sm text-slate-400">
+            Alpaca holds the GPU. The trainer asks it for a free slot before every call and steps aside when
+            the household is using the model.
+          </p>
+        </div>
+        <span
+          className={`rounded-xl border px-3 py-2 text-[10px] font-black uppercase tracking-widest ${
+            verdict.ready
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+              : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+          }`}
+        >
+          {verdict.ready ? 'ready' : 'busy'} · {verdict.label}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="GPU" value={freeVramLabel(hardware)} />
+        <Stat label="Loaded" value={loaded.length ? loaded.join(', ') : 'none'} />
+        <Stat label="Queued" value={hardware?.queued_requests ?? '—'} />
+        <Stat label="LoRA" value={hardware?.lora?.total ?? 0} />
+      </div>
+
+      <p className="mt-3 text-[11px] text-slate-400">
+        Trainer model: <span className="font-bold text-slate-200">{models?.chosen || 'not configured'}</span>
+        {models?.trainer_model_missing ? (
+          <span className="text-amber-300">
+            {' '}
+            — trainer_model names a model this host does not have; the trainer is using the first available one.
+          </span>
+        ) : null}
+        {hardware?.context_length ? ` · ${hardware.context_length} token context` : ''}
+        {hardware?.base_url ? ` · ${hardware.base_url}` : ''}
+      </p>
+      <p className="mt-1 text-[11px] text-slate-400">
+        Benchmark: <span className="text-slate-300">{benchmarkLine(benchmarks)}</span>
+        {benchmarks?.chosen_model ? ` · ${benchmarks.chosen_model}` : ''}
+      </p>
+      {(hardware?.errors ?? []).length ? (
+        <ul className="mt-2 list-disc pl-5 text-[11px] text-amber-300">
+          {(hardware?.errors ?? []).map((error) => (
+            <li key={error}>{error}</li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 

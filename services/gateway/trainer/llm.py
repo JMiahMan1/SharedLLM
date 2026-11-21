@@ -65,8 +65,8 @@ def model_from_settings(settings: dict[str, Any]) -> str:
     return ""
 
 
-async def _resolve(model: str | None) -> tuple[Any, str]:
-    """The provider and model to call. Split out so tests never touch a model."""
+async def _resolve(model: str | None) -> tuple[Any, str, dict[str, Any]]:
+    """The provider, model and settings to call. Split out so tests never touch a model."""
     from services.gateway.llm_providers import get_provider
     from services.gateway.orchestrator import get_llm_settings
 
@@ -78,7 +78,48 @@ async def _resolve(model: str | None) -> tuple[Any, str]:
             "coding_model) in Settings > AI & Compute."
         )
     provider = await get_provider(settings)
-    return provider, chosen
+    return provider, chosen, settings
+
+
+#: Defaults for the polite-wait: the trainer will queue behind the household for
+#: this long, then give up rather than burn its budget on a busy GPU.
+DEFAULT_SLOT_WAIT_S = 45.0
+
+
+def _wait_for_slot_enabled(settings: dict[str, Any]) -> bool:
+    return str(settings.get("trainer_wait_for_slot", "true")).strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+async def _admit(settings: dict[str, Any]) -> None:
+    """Ask Alpaca for a free llama-server slot before spending the model.
+
+    ``ready`` proceeds; a timeout means somebody else is using the GPU right now
+    and this call should fail loudly (so the run records why, instead of timing
+    out mid-generation); ``unavailable`` means the host has no queue endpoint at
+    all (a plain llama.cpp server) and the call proceeds as before.
+    """
+    if not _wait_for_slot_enabled(settings):
+        return
+    from services.gateway.trainer import alpaca
+
+    try:
+        wait_s = float(settings.get("trainer_slot_wait_seconds") or DEFAULT_SLOT_WAIT_S)
+    except (TypeError, ValueError):
+        wait_s = DEFAULT_SLOT_WAIT_S
+    answer = await alpaca.wait_for_slot(settings, timeout=wait_s)
+    status = str(answer.get("status") or "")
+    if status == "timeout":
+        raise LocalModelUnavailable(
+            "The model host is busy with the household right now "
+            f"(no free slot after {wait_s:.0f}s). The trainer will try again later."
+        )
+    if status == "ready":
+        log.debug("[trainer] slot opened after %ss", answer.get("wait_time"))
 
 
 async def complete(
@@ -92,7 +133,8 @@ async def complete(
     timeout: float = DEFAULT_TIMEOUT_S,
 ) -> Completion:
     """Ask the local model once, bounded in prompt size, tokens and wall clock."""
-    provider, chosen = await _resolve(model)
+    provider, chosen, settings = await _resolve(model)
+    await _admit(settings)
     user_text, truncated = trim_prompt(prompt, context_chars)
     messages: list[dict[str, str]] = []
     if system:

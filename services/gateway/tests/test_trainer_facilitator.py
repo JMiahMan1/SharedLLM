@@ -25,6 +25,30 @@ def data_dir(tmp_path: pathlib.Path, monkeypatch):
     return tmp_path
 
 
+#: A developer machine (or a bare llama.cpp server): no Alpaca admin surface.
+#: That must never block a run and must never become a "hardware" proposal.
+OFFLINE = {"reachable": False, "ready": False, "reasons": ["llm_local_url is not set"]}
+
+#: The household is using the GPU right now.
+BUSY = {
+    "reachable": True,
+    "ready": False,
+    "reasons": ["only 400 MB of GPU memory is free"],
+    "free_vram_mb": 400,
+    "models": {"chosen": "qwen3:8b"},
+    "lora": {"total": 0},
+}
+
+IDLE = {
+    "reachable": True,
+    "ready": True,
+    "reasons": [],
+    "free_vram_mb": 9000,
+    "models": {"chosen": "qwen3:8b"},
+    "lora": {"total": 1},
+}
+
+
 def _dream_ok() -> dict:
     return {
         "status": "SUCCESS",
@@ -75,7 +99,7 @@ async def test_a_cycle_evaluates_proposes_and_remembers(data_dir, monkeypatch):
     async def always_wrong(case):
         return "I am not sure."
 
-    summary = await facilitator.cycle(limit=4, complete_fn=always_wrong)
+    summary = await facilitator.cycle(limit=4, complete_fn=always_wrong, hardware=OFFLINE)
 
     assert summary["status"] == "SUCCESS"
     assert summary["curriculum"]["total"] == 4
@@ -94,7 +118,9 @@ async def test_a_cycle_survives_rag_being_down(data_dir, monkeypatch):
     async def right_answer(case):
         return "WorkspaceFileWriteRequest path content Apply: [lesson-abc123]"
 
-    summary = await facilitator.cycle(limit=2, apply_lessons=False, complete_fn=right_answer)
+    summary = await facilitator.cycle(
+        limit=2, apply_lessons=False, complete_fn=right_answer, hardware=OFFLINE
+    )
 
     assert summary["status"] == "SUCCESS"
     assert summary["dream"]["status"] is None
@@ -127,6 +153,7 @@ async def test_a_cycle_can_include_a_proven_repair(data_dir, monkeypatch):
         limit=1,
         apply_lessons=False,
         complete_fn=answer,
+        hardware=OFFLINE,
         repair={"workspace_id": "sermons", "path": "math_utils.py", "error_text": "boom"},
     )
 
@@ -143,7 +170,7 @@ async def test_the_backlog_is_readable_after_a_cycle(data_dir, monkeypatch):
     async def answer(case):
         return "no"
 
-    await facilitator.cycle(limit=1, apply_lessons=False, complete_fn=answer)
+    await facilitator.cycle(limit=1, apply_lessons=False, complete_fn=answer, hardware=OFFLINE)
     backlog = facilitator.read_backlog()
 
     assert backlog["eval_report_id"]
@@ -157,3 +184,75 @@ def test_reading_a_missing_backlog_returns_an_empty_one(data_dir):
     backbone = facilitator.read_backlog()
 
     assert backbone == {"generated_at": None, "eval_report_id": None, "proposals": [], "lessons": []}
+
+
+async def test_a_busy_host_is_respected_and_recorded(data_dir, monkeypatch):
+    """The household keeps the GPU: no evaluation, one honest proposal."""
+    async def fake_dream(user_id, **kwargs):
+        return _dream_ok()
+
+    monkeypatch.setattr(facilitator.dream_mod, "dream", fake_dream)
+    calls: list[int] = []
+
+    async def must_not_run(cases, **kwargs):
+        calls.append(len(cases))
+        raise AssertionError("the evaluation must not run while the host is busy")
+
+    monkeypatch.setattr(facilitator.runner, "run_curriculum", must_not_run)
+
+    summary = await facilitator.cycle(limit=4, apply_lessons=False, hardware=BUSY)
+
+    assert calls == []
+    assert summary["eval"]["skipped"] == "hardware"
+    assert summary["hardware"]["ready"] is False
+    assert any(proposal["kind"] == "hardware_busy" for proposal in summary["proposals"])
+    backlog = facilitator.read_backlog()
+    assert backlog["eval_report_id"] is None
+    assert backlog["hardware_ready"] is False
+
+
+async def test_an_unconfigured_host_does_not_block_training(data_dir):
+    """A dev machine has no Alpaca: the run still happens and files no proposal."""
+    async def answer(case):
+        return "no"
+
+    summary = await facilitator.cycle(limit=2, apply_lessons=False, complete_fn=answer, hardware=OFFLINE)
+
+    assert summary["eval"]["totals"]["cases"] == 2
+    assert not any(proposal["kind"] == "hardware_busy" for proposal in summary["proposals"])
+
+
+def test_a_weak_benchmark_category_becomes_a_proposal():
+    summary = {
+        "results": [
+            {
+                "suite": "general",
+                "model": "qwen3:8b",
+                "categories": {
+                    "coding": {"score": 20, "tests_run": 6, "tests_passed": 1, "letter": "F"},
+                    "knowledge": {"score": 95, "tests_run": 8, "tests_passed": 8, "letter": "A"},
+                },
+            }
+        ]
+    }
+
+    proposals = facilitator.benchmark_proposals("qwen3:8b", summary)
+
+    assert len(proposals) == 1
+    assert proposals[0]["kind"] == "benchmark_gap"
+    assert "coding" in proposals[0]["title"]
+    assert proposals[0]["priority"] == 7
+
+
+def test_one_unlucky_test_is_not_a_benchmark_proposal():
+    summary = {
+        "results": [
+            {
+                "suite": "general",
+                "model": "qwen3:8b",
+                "categories": {"coding": {"score": 0, "tests_run": 1, "tests_passed": 0}},
+            }
+        ]
+    }
+
+    assert facilitator.benchmark_proposals("qwen3:8b", summary) == []

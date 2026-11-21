@@ -386,8 +386,8 @@ class RavenWorker:
                     )
                     log.info(
                         "[Trainer] cycle: %s cases, %s passed, %s proposals, %s lessons",
-                        summary["eval"]["totals"].get("cases"),
-                        summary["eval"]["totals"].get("passed"),
+                        (summary.get("eval") or {}).get("totals", {}).get("cases"),
+                        (summary.get("eval") or {}).get("totals", {}).get("passed"),
                         len(summary.get("proposals") or []),
                         len(summary.get("lessons") or []),
                     )

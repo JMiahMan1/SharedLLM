@@ -21,8 +21,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from services.gateway.trainer import alpaca, curriculum, facilitator, runner, selffix
 from services.gateway.trainer import catalog as catalog_mod
-from services.gateway.trainer import curriculum, facilitator, runner, selffix
 from services.gateway.trainer import dream as dream_mod
 from services.gateway.trainer import sermon as sermon_mod
 from services.gateway.trainer.llm import LocalModelUnavailable
@@ -124,6 +124,65 @@ async def get_curriculum(request: Request, buckets: str | None = None, limit: in
         "buckets": list(curriculum.BUCKETS),
         "cases": [case.to_dict() for case in cases],
     }
+
+
+@router.get("/hardware")
+async def get_hardware(request: Request) -> dict[str, Any]:
+    """The machine that hosts the model: GPU, slots, loaded models, LoRA, verdict."""
+    await _admin(request)
+    from services.gateway.orchestrator import get_llm_settings
+
+    return await alpaca.probe(await get_llm_settings())
+
+
+@router.get("/models")
+async def get_models(request: Request) -> dict[str, Any]:
+    """Alpaca's model inventory, and which one the trainer would use."""
+    await _admin(request)
+    from services.gateway.orchestrator import get_llm_settings
+
+    settings = await get_llm_settings()
+    base = alpaca.proxy_base(settings)
+    if not base:
+        return {
+            "total": 0,
+            "models": [],
+            "chosen": "",
+            "trainer_model_setting": "",
+            "trainer_model_missing": False,
+            "reason": "llm_local_url is not set, so there is no model host to ask",
+        }
+    try:
+        payload = await alpaca.get_json(f"{base}/admin/models")
+    except Exception as exc:
+        return {"total": 0, "models": [], "chosen": "", "error": str(exc)}
+    return alpaca.summarise_models(payload, settings)
+
+
+@router.get("/benchmarks")
+async def get_benchmarks(request: Request, limit: int = 20) -> dict[str, Any]:
+    """Alpaca's own benchmark results, and the categories worth teaching next."""
+    await _admin(request)
+    from services.gateway.orchestrator import get_llm_settings
+
+    summary = alpaca.benchmark_summary(limit=max(1, min(limit, 100)))
+    settings = await get_llm_settings()
+    model = alpaca.choose_model(settings, [str(row["model"]) for row in summary["results"] if row.get("model")])
+    return {
+        **summary,
+        "chosen_model": model,
+        "weak_categories": alpaca.weakest_categories(summary, model),
+    }
+
+
+@router.post("/benchmarks/ingest")
+async def ingest_benchmarks(request: Request) -> dict[str, Any]:
+    """Fold Alpaca's measured results into lesson confidence (RAG ingest-results)."""
+    await _admin(request)
+    try:
+        return await dream_mod.ingest_benchmark_results()
+    except dream_mod.RagUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/eval")

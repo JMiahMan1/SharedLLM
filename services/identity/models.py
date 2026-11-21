@@ -573,6 +573,8 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "image_edit_steps", "value": "", "description": "Sampling steps for image edits (1-100). Empty uses the model default (20). The rapid edit models are made for about 4 to 8 steps."},
     {"key": "trainer_model", "value": "", "description": "Local model the Jarvis Trainer uses for curriculum runs, sermon drafts and self-repair. Empty falls back to coding_model, then assistant_model. See docs/JARVIS_TRAINER.md."},
     {"key": "trainer_cycle_interval_minutes", "value": "0", "description": "How often the background trainer runs one bounded improve cycle (dream, evaluate a few cases, rank proposals). 0 leaves it off: the local model is shared with the household. See docs/JARVIS_TRAINER.md."},
+    {"key": "trainer_wait_for_slot", "value": "true", "description": "Before each trainer model call, wait for a free llama-server slot on the model host (Alpaca /api/queue/wait) instead of competing with the household. false: call immediately. See docs/JARVIS_TRAINER.md."},
+    {"key": "trainer_slot_wait_seconds", "value": "45", "description": "How long a trainer model call waits for a free slot before giving up (the run records the host as busy). Only used when trainer_wait_for_slot is true."},
 
     # --- SPOTIFY LINKING (Phase 11, music everywhere; docs/HEALTH_HUB.md) ---
     # The household's own app at developer.spotify.com. All three empty: linking says "not configured".

@@ -222,11 +222,75 @@ python scripts/train_jarvis.py eval --buckets repair       # just the repair cas
 python scripts/train_jarvis.py dataset --report eval-...   # JSONL fine-tuning rows
 ```
 
-## 11. Where the notes are
+## 11. The host: Alpaca (`trainer/alpaca.py`)
+
+The trainer does not own the GPU. **Alpaca** does: the Ollama/OpenAI-compatible
+proxy on 11434 (which is what `llm_local_url` points at) holds the models, the
+slots and the LoRA adapters, and its dashboard on 5000 keeps the benchmark
+results. The trainer asks that machine three questions.
+
+**1. What do you have?** `GET /api/trainer/hardware` and
+`GET /api/trainer/models` read:
+
+| Alpaca endpoint | Used for |
+|---|---|
+| `/admin/system` | GPU name, total/used/free VRAM, RAM, the live `n_ctx` |
+| `/admin/runtime` | loaded models, active and queued requests |
+| `/admin/slots` | aggregate slots (or the per-model list) |
+| `/admin/models` | the inventory: size, context, capabilities, router status |
+| `/admin/lora` | loaded LoRA adapters — proof that a fine-tune is in play |
+
+`proxy_base()` is the one place that resolves the host: the resolved
+`llm_local_url` setting when there is one, and `LLM_URL` only for a caller that
+has no settings at all. It never mixes the two, so an unset setting cannot
+silently inherit a stale environment value.
+
+**2. May I spend it now?** `readiness()` is conservative and it says why not:
+
+- free VRAM below 1.2 GB → not ready;
+- requests already queued → not ready;
+- no free slot reported while a model is loaded → not ready;
+- host unreachable → **reachable: false**, which is *not* "busy".
+
+A pass that finds the host busy does not run the evaluation at all (dreaming is
+RAG-only and still runs) and files one `hardware_busy` proposal saying so. A
+host that is merely *unconfigured* (a dev machine, a bare llama.cpp server)
+never blocks a pass and never files a proposal — those are different facts.
+
+**3. Wait your turn.** Before every model call, `llm._admit()` asks
+`POST /api/queue/wait` for a free llama-server slot. A timeout becomes a loud
+`LocalModelUnavailable` ("The model host is busy with the household right now")
+instead of a mid-generation timeout; `unavailable` (no such endpoint) means the
+call proceeds as before. Two settings control it:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `trainer_wait_for_slot` | `true` | ask for a slot before each call |
+| `trainer_slot_wait_seconds` | `45` | how long to queue behind the household |
+
+### Benchmarks: the model's own report card
+
+Alpaca already benchmarks models on Jarvis-shaped tasks and writes one file per
+model: `../alpaca/data/llm_benchmarks/models/general_<model>.json` (its own
+suite, 0-100 per category) and `.../shared_llm_benchmarks/models/shared_<model>.json`
+(FastPath intent, Librarian tool use, Raven coding, planning, context retention).
+
+`GET /api/trainer/benchmarks` reads both suites offline and reports, per model,
+scores, test counts and the weakest categories. `cycle()` uses them: a category
+below 60 with at least **two** graded tests becomes a `benchmark_gap` proposal
+(priority 7) — "add one coding lesson and a matching case". One unlucky test is
+noise and is ignored. `POST /api/trainer/benchmarks/ingest` folds the same
+results into lesson confidence through RAG's `/rag/benchmark/ingest-results`.
+
+Directories are overridable with `ALPACA_BENCHMARK_RESULTS_DIR` and
+`ALPACA_SHARED_BENCHMARK_RESULTS_DIR`; the default is the sibling checkout, the
+same one RAG's curriculum ingest already uses.
+
+## 12. Where the notes are
 
 - `docs/RAVEN_LEARNING_MEMORY.md` — what Raven is, the mission loop, and the
   lessons this trainer writes and scores.
 - `docs/api_reference.md` — the trainer's endpoints alongside the rest.
 - `services/gateway/trainer/` — the modules; each has a docstring saying what it
   refuses to do (overwrite without a conflict check, write unproven code, call
-  the model without a budget).
+  the model without a budget or a free slot).

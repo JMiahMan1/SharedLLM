@@ -218,6 +218,10 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 - `POST /api/trainer/dream`, `POST /api/trainer/dream/validate`: dreaming plus the proposals it implies, and a lesson self-test result; admin only
 - `GET /api/trainer/backlog`: the last facilitator cycle's ranked proposals; admin only
 - `POST /api/trainer/cycle`: dream, evaluate, merge proposals, write the top lessons into RAG and optionally repair a file, in one pass; admin only
+- `GET /api/trainer/hardware`: the model host (Alpaca) as it really is — GPU total/used/free VRAM, loaded models, active and queued requests, slots, LoRA adapters, the model the trainer would use, and a `ready` verdict with the reasons it is not; admin only
+- `GET /api/trainer/models`: Alpaca's model inventory (size, context length, capabilities, router status) plus `chosen` (the model the trainer uses) and `trainer_model_missing`; admin only
+- `GET /api/trainer/benchmarks?limit=`: Alpaca's general and SharedLLM benchmark results per model, with `average_score` and `weak_categories` for the chosen model; admin only
+- `POST /api/trainer/benchmarks/ingest`: fold those measured results into lesson confidence through RAG `/rag/benchmark/ingest-results`; admin only
 
 "Signed-in caller" routes return **401** without a valid API key (or the
 internal secret for service-to-service calls).

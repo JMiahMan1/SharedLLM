@@ -96,6 +96,73 @@ export interface TrainerProposal {
   action: string;
 }
 
+/** The machine that hosts the model (Alpaca), as `GET /api/trainer/hardware` reports it. */
+export interface TrainerHardware {
+  reachable: boolean;
+  ready: boolean;
+  reasons: string[];
+  free_vram_mb?: number | null;
+  total_vram_mb?: number | null;
+  context_length?: number | null;
+  base_url?: string;
+  dashboard_url?: string | null;
+  errors?: string[];
+  active_requests?: number;
+  queued_requests?: number;
+  loaded_models?: Array<{ model?: string | null; backend_model?: string | null }>;
+  slots?: { total: number; available: number; status?: string | null; message?: string | null };
+  models?: { chosen: string; total: number; trainer_model_missing?: boolean };
+  lora?: { total: number; adapters?: Array<{ id?: number; path?: string | null; scale?: number | null }> };
+}
+
+/** Alpaca's benchmark results, as `GET /api/trainer/benchmarks` reports them. */
+export interface TrainerBenchmarks {
+  total: number;
+  chosen_model: string;
+  directories: Record<string, string>;
+  weak_categories: Array<{
+    category: string;
+    score: number;
+    tests_run: number;
+    tests_passed: number;
+    letter?: string | null;
+  }>;
+  results: Array<{
+    suite: string;
+    model: string;
+    generated_at: string | null;
+    average_score: number | null;
+    categories: Record<string, { score?: number | null; tests_run?: number | null }>;
+  }>;
+}
+
+/** One line for the model's report card: its weakest graded categories. */
+export function benchmarkLine(benchmarks: TrainerBenchmarks | null | undefined): string {
+  if (!benchmarks) return 'no benchmark results yet';
+  if (!benchmarks.total) return 'no benchmark results yet';
+  const weak = (benchmarks.weak_categories ?? []).slice(0, 3);
+  if (!weak.length) return 'every graded category is above 60';
+  return weak.map((item) => `${item.category} ${item.score}/100`).join(' · ');
+}
+
+/** Alpaca's model inventory, as `GET /api/trainer/models` reports it. */
+export interface TrainerModels {
+  total: number;
+  chosen: string;
+  trainer_model_setting: string;
+  trainer_model_missing: boolean;
+  reason?: string;
+  error?: string;
+  models: Array<{
+    name: string;
+    size_gb: number;
+    context_length: number | null;
+    capabilities: string[];
+    complete: boolean;
+    router_status: string;
+  }>;
+}
+
 export interface TrainerBacklog {
   generated_at: string | null;
   eval_report_id: string | null;
@@ -140,6 +207,30 @@ export function summariseCatalog(catalog: TrainerCatalog) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 6),
   };
+}
+
+/** Bytes of free VRAM as a short label, for the host card. */
+export function freeVramLabel(hardware: TrainerHardware | null | undefined): string {
+  const free = hardware?.free_vram_mb;
+  if (!hardware?.reachable) return 'no host';
+  if (typeof free !== 'number') return 'unknown';
+  return `${(free / 1024).toFixed(1)} GB free`;
+}
+
+/** Whether a pass can run now, and the one line that explains it. */
+export function hardwareVerdict(hardware: TrainerHardware | null | undefined): { ready: boolean; label: string } {
+  if (!hardware) return { ready: false, label: 'asking the model host…' };
+  if (!hardware.reachable) {
+    return { ready: false, label: hardware.reasons?.[0] || 'the model host did not answer' };
+  }
+  if (hardware.ready) {
+    const slots = hardware.slots;
+    return {
+      ready: true,
+      label: slots ? `${slots.available} of ${slots.total} slots free` : 'the host is idle',
+    };
+  }
+  return { ready: false, label: hardware.reasons?.[0] || 'the host is busy' };
 }
 
 /** A percentage as the tab shows it. */

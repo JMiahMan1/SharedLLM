@@ -73,6 +73,21 @@ async def pending(user_id: str = "default") -> dict[str, Any]:
     return await request("GET", "/rag/dream/pending", params={"user_id": user_id})
 
 
+async def ingest_benchmark_results(models: list[str] | None = None) -> dict[str, Any]:
+    """Fold Alpaca's measured benchmark results into lesson confidence.
+
+    RAG owns the reading (``ALPACA_BENCHMARK_RESULTS_DIR``) and the scoring; this
+    is the one call that makes the trainer's lesson priorities reflect what the
+    model has actually proven on this machine.
+    """
+    return await request(
+        "POST",
+        "/rag/benchmark/ingest-results",
+        body=list(models or []),
+        timeout=180.0,
+    )
+
+
 async def validate(lesson_id: str, passed: bool, evidence: str, *, user_id: str = "default") -> dict[str, Any]:
     """Record that a lesson was tested, so dreaming can weight it later."""
     return await request(

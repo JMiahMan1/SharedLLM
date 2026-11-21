@@ -23,9 +23,12 @@ import type { FreshPosition } from '../lib/freshPosition';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
 import type {
   TrainerBacklog,
+  TrainerBenchmarks,
   TrainerCatalog,
   TrainerCycle,
   TrainerCurriculum,
+  TrainerHardware,
+  TrainerModels,
   TrainerReport,
   TrainerReportSummary,
 } from '../lib/trainer';
@@ -5052,6 +5055,24 @@ export const api = {
 
   async trainerBacklog(): Promise<TrainerBacklog> {
     const resp = await apiClient.get('/api/trainer/backlog');
+    return resp.data;
+  },
+
+  /** The machine that hosts the model: GPU, slots, loaded models, LoRA, verdict. */
+  async trainerHardware(): Promise<TrainerHardware> {
+    const resp = await apiClient.get('/api/trainer/hardware', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** Alpaca's model inventory, and which model the trainer would use. */
+  async trainerModels(): Promise<TrainerModels> {
+    const resp = await apiClient.get('/api/trainer/models', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** Alpaca's own benchmark results: the model's report card, weakest first. */
+  async trainerBenchmarks(): Promise<TrainerBenchmarks> {
+    const resp = await apiClient.get('/api/trainer/benchmarks', { timeout: 30_000 });
     return resp.data;
   },
 
