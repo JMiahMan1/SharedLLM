@@ -69,6 +69,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUser((prev) => (prev && prev.username === next.username && prev !== next ? next : prev));
   }), [queryClient]);
 
+  // The ['me'] values this provider wrote itself (a server answer, or the copy
+  // kept on this phone), as opposed to a local edit such as the avatar picker's.
+  const ownMe = useRef(new WeakSet<object>());
+  const putMe = useCallback((profile: UserProfile) => {
+    queryClient.setQueryData(['me'], profile);
+    // Structural sharing may keep a different object than the one passed in.
+    const stored = queryClient.getQueryData<UserProfile>(['me']);
+    if (stored) ownMe.current.add(stored);
+  }, [queryClient]);
+  // GET /api/users/me, unless a local edit of the same person's profile landed
+  // while it was in flight: that edit is newer than the answer, which was read
+  // before it. Taking the answer anyway put the old avatar back over the one
+  // just chosen (the second read a token change makes, landing late).
+  const readMe = useCallback(async (): Promise<UserProfile> => {
+    const before = queryClient.getQueryData<UserProfile>(['me']);
+    const profile = await api.getMe();
+    const now = queryClient.getQueryData<UserProfile>(['me']);
+    if (now && now !== before && !ownMe.current.has(now) && now.username === profile.username) return now;
+    return profile;
+  }, [queryClient]);
+
   useEffect(() => {
     // Only reading the phone's own storage is timed: a server that is slow to
     // answer (the network waking up after an app update) must never send a
@@ -83,7 +104,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setToken(storedToken);
       setUser(profile);
       setInitError(null);
-      queryClient.setQueryData(['me'], profile);
+      putMe(profile);
       await storageSet('jarvis_user', JSON.stringify(profile));
       // Register here too, not only on an explicit login: a user who installed
       // an update and kept using the app was otherwise never registered.
@@ -118,14 +139,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (cached) {
         setToken(storedToken);
         setUser(cached);
-        queryClient.setQueryData(['me'], cached);
+        putMe(cached);
         setIsLoading(false);
       }
       // Confirm with the server, retrying quietly while it cannot be reached.
       // Only the server refusing the key (401/403) signs out.
       for (let attempt = 0; !cancelled; attempt += 1) {
         try {
-          const profile = await api.getMe();
+          const profile = await readMe();
           if (!cancelled) await signedIn(storedToken, profile);
           break;
         } catch (error) {
@@ -147,7 +168,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       cancelled = true;
       clearTimeout(storageTimeout);
     };
-  }, [queryClient]);
+  }, [putMe, readMe]);
 
   const logout = useCallback(async () => {
     // Every unlocked private chat locks with the person leaving.
@@ -184,16 +205,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const currentToken = tokenRef.current;
     if (!currentToken) return;
     try {
-      const profile = await api.getMe();
+      const profile = await readMe();
       setUser(profile);
-      queryClient.setQueryData(['me'], profile);
+      putMe(profile);
       await storageSet('jarvis_user', JSON.stringify(profile));
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 401) {
         void logout();
       }
     }
-  }, [logout, queryClient]);
+  }, [logout, putMe, readMe]);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -229,10 +250,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setInitError(null);
       await storageSet('jarvis_api_key', authToken);
       
-      const profile = await api.getMe();
+      const profile = await readMe();
       console.log('Login profile response:', JSON.stringify(profile));
       setUser(profile);
-      queryClient.setQueryData(['me'], profile);
+      putMe(profile);
       await storageSet('jarvis_user', JSON.stringify(profile));
       
       const displayName = profile.full_name || profile.username || credentials.username;
@@ -255,7 +276,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       console.error('Login error:', error);
       throw error;
     }
-  }, [queryClient]);
+  }, [putMe, readMe]);
 
   const role = useMemo(
     () => (user ? user.role || (user.is_admin ? 'admin' : 'user') : null),

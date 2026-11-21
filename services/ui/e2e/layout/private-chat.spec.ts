@@ -901,6 +901,48 @@ test.describe('private chat on every form factor', () => {
     done(run);
   });
 
+  test('received previews name the real host, and a player on a private address is only a link', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    const asked: string[] = [];
+    page.on('request', (req) => {
+      const host = new URL(req.url()).hostname;
+      if (/^(192\.168\.|10\.|127\.)|media\.example|\.local$/.test(host)) asked.push(req.url());
+    });
+    const run = await open(page, server);
+    const from = async (id: number, text: string, preview: Record<string, unknown>) => ({
+      id, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 300 + id, message_type: 'comment',
+      message: await sealMessage(key, { t: 'text', text, preview } as unknown as PrivatePayload),
+    });
+    server.messages.push(
+      // A page that calls itself something it is not: the card still names the host it lives on.
+      await from(2, 'Sign in https://login-help.example.net/x', { url: 'https://login-help.example.net/x', title: 'Account check',
+        site_name: 'Your Bank', kind: 'link' }),
+      // A player sealed by the other device that points at this house's network: drawn as a plain link, never a player.
+      await from(3, 'Cam https://news.example/cam', { url: 'https://news.example/cam', title: 'Camera clip', site_name: 'News',
+        kind: 'video', embed: { provider: 'file', src: 'http://192.168.1.20/cam.mp4', mime: 'video/mp4' } }),
+      await from(4, 'Memo https://news.example/memo', { url: 'https://news.example/memo', title: 'Memo', site_name: 'News',
+        kind: 'audio', embed: { provider: 'file', src: 'https://media.example/memo.wav', mime: 'audio/wav' } }),
+    );
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    const feed = page.getByTestId('private-feed');
+    await expect(feed.getByTestId('private-link-card')).toHaveCount(3);
+    const spoof = feed.getByTestId('private-link-card').filter({ hasText: 'Account check' });
+    await expect(spoof.getByTestId('private-link-host')).toHaveText('login-help.example.net');
+    await expect(spoof.getByTestId('private-link-host')).toBeVisible();
+    await expect(spoof.getByTestId('private-link-site')).toHaveText('Your Bank');
+    const cam = feed.getByTestId('private-link-card').filter({ hasText: 'Camera clip' });
+    await expect(cam).toHaveAttribute('href', 'https://news.example/cam');
+    await expect(feed.getByRole('button', { name: /Play video: Camera clip/ })).toHaveCount(0);
+    const memo = feed.locator('[data-testid="private-link-card"][data-kind="audio"]');
+    await expect(memo.getByTestId('private-link-media-host')).toHaveText('Plays from media.example');
+    await expect(memo.getByTestId('private-link-media-host')).toBeVisible();
+    const inline = { where: /^private link hosts/, finding: /under 44px: https:\/\//, why: 'an inline link in message text' };
+    await check(page, info, run, 'private link hosts', page.getByTestId('chat-thread'), [...await overPanel(page, /^private link hosts$/), inline]);
+    expect(asked).toEqual([]);
+    done(run);
+  });
+
   test('a child account: no private chat anywhere, and never a private-chat request', async ({ page }, info) => {
     const asked: string[] = [];
     page.on('request', (req) => {
