@@ -158,6 +158,7 @@ class RavenWorker:
         self._admin_alerts_task = None
         self._songs_task = None
         self._reminders_task = None
+        self._trainer_task = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         # Initialize the self-repair cooldown here rather than lazily behind a
@@ -250,7 +251,11 @@ class RavenWorker:
         self._admin_alerts_task = self._loop.create_task(self._admin_alerts_loop())
         self._songs_task = self._loop.create_task(self._songs_loop())
         self._reminders_task = self._loop.create_task(self._private_chat_reminders_loop())
-        log.info("Raven Background Worker (Health + Inference + Talk Monitor + Chat Notify + Cleanup + Admin Alerts) started.")
+        self._trainer_task = self._loop.create_task(self._trainer_loop())
+        log.info(
+            "Raven Background Worker (Health + Inference + Talk Monitor + Chat Notify + Cleanup + "
+            "Admin Alerts + Trainer) started."
+        )
 
     def stop(self):
         """Signal the worker loops to stop and shut the worker loop down."""
@@ -268,7 +273,7 @@ class RavenWorker:
     async def _shutdown(self):
         for t in (self._health_task, self._inference_task, self._talk_task,
                   self._chat_notify_task, self._cleanup_task, self._admin_alerts_task, self._songs_task,
-                  self._reminders_task):
+                  self._reminders_task, self._trainer_task):
             if t is not None:
                 t.cancel()
         # The inference loop cancels and awaits its in-flight jobs in its own
@@ -349,6 +354,53 @@ class RavenWorker:
             except Exception as e:
                 log.error(f"Error in Health loop: {e}")
                 await asyncio.sleep(300)
+
+    async def _trainer_loop(self):
+        """Trainer cycle: dream, evaluate a small slice, propose improvements.
+
+        Off unless ``trainer_cycle_interval_minutes`` is set in Admin >
+        LLM & Settings. The local model is shared with the household, so this is
+        a deliberate choice, and each pass is bounded (a few cases, a short
+        budget) so a cycle can never monopolise the model. ``raven_suspended``
+        also pauses it, because that switch means "leave the model alone".
+        """
+        log.info("Trainer loop started (idle until trainer_cycle_interval_minutes is set).")
+
+        while self.is_running:
+            interval_s = 300
+            try:
+                from services.gateway.agent_loop import get_dynamic_llm_settings
+
+                settings = await get_dynamic_llm_settings()
+                minutes = int(float(settings.get("trainer_cycle_interval_minutes") or 0))
+                suspended = str(settings.get("raven_suspended") or "false").lower() == "true"
+                interval_s = max(60, minutes * 60) if minutes > 0 else 300
+
+                if minutes > 0 and not suspended and await self.job_queue.claim_loop(
+                    "trainer", self._lease_token, max(600, interval_s * 2)
+                ):
+                    from services.gateway.trainer import facilitator
+
+                    summary = await facilitator.cycle(
+                        user="default", limit=6, budget_s=240.0, apply_lessons=True
+                    )
+                    log.info(
+                        "[Trainer] cycle: %s cases, %s passed, %s proposals, %s lessons",
+                        summary["eval"]["totals"].get("cases"),
+                        summary["eval"]["totals"].get("passed"),
+                        len(summary.get("proposals") or []),
+                        len(summary.get("lessons") or []),
+                    )
+            except Exception as e:
+                log.warning(f"Trainer loop error: {e}")
+
+            # Sleep in small increments so a stop does not wait out the interval.
+            for _ in range(interval_s):
+                if not self.is_running:
+                    break
+                await asyncio.sleep(1)
+
+        log.info("Trainer loop stopped.")
 
     async def _inference_loop(self):
         """Claim jobs continuously and run each one in its own task.

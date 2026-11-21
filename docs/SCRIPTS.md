@@ -35,6 +35,7 @@ API keys, HA token) from the environment; none are hard-coded.
 | `run_ci_unit_tests.sh` | Quick unit-test subset (used by Workspace Runtime's `/api/admin/tests/unit`) |
 | `android_functional_test.sh` | Android smoke tests over adb (artifacts in `.tmp/android-func`) |
 | `test_raven_pipeline.sh` | Raven hardening checks (container UIDs, Redis kill switch) |
+| `train_jarvis.py` | Drive the Jarvis Trainer from a shell: `catalog`, `curriculum`, `eval`, `cycle`, `repair`, `sermon`, `dataset`. One bounded pass per invocation; authenticates with `INTERNAL_SECRET` from the environment (or `DEPLOY_HOST` to read it over ssh). See `docs/JARVIS_TRAINER.md` |
 
 ## Benchmarks
 

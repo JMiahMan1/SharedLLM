@@ -21,6 +21,14 @@ import type { RestoreBatch, RestoreClient, RestoreCounts } from '../lib/privateC
 import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
 import type { FreshPosition } from '../lib/freshPosition';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
+import type {
+  TrainerBacklog,
+  TrainerCatalog,
+  TrainerCycle,
+  TrainerCurriculum,
+  TrainerReport,
+  TrainerReportSummary,
+} from '../lib/trainer';
 import { Capacitor } from '@capacitor/core';
 import { nativeBinaryAdapter, wantsNativeBinary } from '../lib/nativeBinary';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
@@ -5003,6 +5011,72 @@ export const api = {
 
   async getMissionLogs(id: number | string): Promise<{ logs: string[] }> {
     const resp = await apiClient.get(`/api/raven/missions/${id}/logs`);
+    return resp.data;
+  },
+
+  // Jarvis Trainer (Admin → Lab → Training): what the local model can do, how
+  // well it does it, and what the last cycle decided to improve.
+  async trainerCatalog(): Promise<TrainerCatalog> {
+    const resp = await apiClient.get('/api/trainer/catalog');
+    return resp.data;
+  },
+
+  async trainerCurriculum(buckets?: string[], limit = 200): Promise<TrainerCurriculum> {
+    const resp = await apiClient.get('/api/trainer/curriculum', {
+      params: { ...(buckets?.length ? { buckets: buckets.join(',') } : {}), limit },
+    });
+    return resp.data;
+  },
+
+  async runTrainerEval(body: { buckets?: string[]; limit?: number; budget_s?: number }): Promise<TrainerReport> {
+    // A run is sequential on a small model, so the request outlives the default
+    // 30s axios timeout by design.
+    const resp = await apiClient.post('/api/trainer/eval', body, { timeout: 900_000 });
+    return resp.data;
+  },
+
+  async trainerReports(): Promise<TrainerReportSummary[]> {
+    const resp = await apiClient.get('/api/trainer/reports');
+    return resp.data?.reports ?? [];
+  },
+
+  async trainerReport(id: string): Promise<TrainerReport> {
+    const resp = await apiClient.get(`/api/trainer/reports/${encodeURIComponent(id)}`);
+    return resp.data;
+  },
+
+  async runTrainerCycle(body: { limit?: number; budget_s?: number; apply_lessons?: boolean }): Promise<TrainerCycle> {
+    const resp = await apiClient.post('/api/trainer/cycle', body, { timeout: 900_000 });
+    return resp.data;
+  },
+
+  async trainerBacklog(): Promise<TrainerBacklog> {
+    const resp = await apiClient.get('/api/trainer/backlog');
+    return resp.data;
+  },
+
+  /** Draft a sermon from a passage; the markdown lands in the workspace. */
+  async draftSermon(body: {
+    workspace_id: string;
+    passage: string;
+    title?: string;
+    theme?: string;
+    translation?: string;
+    points?: number;
+    series?: string;
+  }): Promise<{ title: string; path: string; words: number; notes: string[]; markdown: string }> {
+    const resp = await apiClient.post('/api/trainer/sermon', body, { timeout: 600_000 });
+    return resp.data;
+  },
+
+  /** Edit an image inside a workspace (an illustration, a series header). */
+  async illustrateInWorkspace(body: {
+    workspace_id: string;
+    image_path: string;
+    prompt: string;
+    output_path?: string;
+  }): Promise<{ status: string; output_path?: string | null; message?: string }> {
+    const resp = await apiClient.post('/api/trainer/illustrate', body, { timeout: 1_200_000 });
     return resp.data;
   },
 

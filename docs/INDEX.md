@@ -63,6 +63,7 @@
 ## Raven
 
 - `docs/RAVEN_LEARNING_MEMORY.md`: how Raven works, its tools and its learning memory
+- `docs/JARVIS_TRAINER.md`: the trainer around the local model: the feature catalogue derived from the code, the evaluation curriculum (repairs, sermons, image edits, memory), self-repair proven by workspace tests, dreaming's improvement backlog, and the Lab's Training tab
 
 Architecture decision records:
 

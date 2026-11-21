@@ -8,6 +8,7 @@ import { api } from '../services/api';
 import type { LogEntry, RavenMission, SmokeTestResult, Workspace } from '../services/api';
 import RavenLiveTrace from '../components/settings/RavenLiveTrace';
 import RavenMissionDetail from '../components/settings/RavenMissionDetail';
+import TrainerPane from '../components/settings/TrainerPane';
 import { useWebSocket, type ConnectionState } from '../lib/wsManager';
 import { useAuth } from '../context/AuthContext';
 import { useSystemHealth } from '../hooks/useSystemHealth';
@@ -25,14 +26,15 @@ const MISSION_TEMPLATES = [
 const JarvisLab = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabQuery = searchParams.get('tab');
-  const initialTab = tabQuery === 'tests' || tabQuery === 'missions' ? tabQuery : 'missions';
-  const [activeTab, setActiveTab] = useState<'tests' | 'missions'>(initialTab);
+  const initialTab =
+    tabQuery === 'tests' || tabQuery === 'missions' || tabQuery === 'training' ? tabQuery : 'missions';
+  const [activeTab, setActiveTab] = useState<'tests' | 'missions' | 'training'>(initialTab);
   const { user } = useAuth();
   const isAdmin = user?.is_admin ?? false;
   const navigate = useNavigate();
 
   // Sync tab state to query parameter when changed
-  const handleTabChange = (tab: 'tests' | 'missions') => {
+  const handleTabChange = (tab: 'tests' | 'missions' | 'training') => {
     setActiveTab(tab);
     setSearchParams({ tab });
   };
@@ -49,6 +51,7 @@ const JarvisLab = () => {
             {([
               ['missions', 'Missions'],
               ['tests', 'Tests'],
+              ['training', 'Training'],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -77,6 +80,7 @@ const JarvisLab = () => {
 
       {activeTab === 'tests' && <TestsPane />}
       {activeTab === 'missions' && <MissionsPane />}
+      {activeTab === 'training' && <TrainerPane />}
     </div>
   );
 };

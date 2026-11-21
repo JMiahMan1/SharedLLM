@@ -571,6 +571,8 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "image_edit_model", "value": "", "description": "Image editing model for editing existing images (qwen-image-edit via the LLM proxy /v1/images/edits). Default: qwen-image-edit-rapid-aio:q4_k"},
     {"key": "family_drawing_edit_model", "value": "qwen-image-edit-2511:q3_k_s", "description": "Image editing model for the Family drawing 'Make it way better' button. Default: qwen-image-edit-2511:q3_k_s, the newest Qwen edit model that runs on an 8 GB card. Change it in Settings > AI & Compute."},
     {"key": "image_edit_steps", "value": "", "description": "Sampling steps for image edits (1-100). Empty uses the model default (20). The rapid edit models are made for about 4 to 8 steps."},
+    {"key": "trainer_model", "value": "", "description": "Local model the Jarvis Trainer uses for curriculum runs, sermon drafts and self-repair. Empty falls back to coding_model, then assistant_model. See docs/JARVIS_TRAINER.md."},
+    {"key": "trainer_cycle_interval_minutes", "value": "0", "description": "How often the background trainer runs one bounded improve cycle (dream, evaluate a few cases, rank proposals). 0 leaves it off: the local model is shared with the household. See docs/JARVIS_TRAINER.md."},
 
     # --- SPOTIFY LINKING (Phase 11, music everywhere; docs/HEALTH_HUB.md) ---
     # The household's own app at developer.spotify.com. All three empty: linking says "not configured".

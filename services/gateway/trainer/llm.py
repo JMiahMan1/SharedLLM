@@ -1,0 +1,128 @@
+"""One local completion, inside a hardware budget.
+
+The household's model is small and often CPU-bound, so every call here is
+shaped for that: a trimmed prompt (head and tail kept, middle dropped), a hard
+wall-clock limit, and a token ceiling the caller chooses. There is no retry and
+no streaming: a trainer run is a sequence of short, comparable questions, and a
+hung call must surface as a failure rather than stall the whole run.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from dataclasses import dataclass
+from typing import Any
+
+log = logging.getLogger("gateway.trainer.llm")
+
+#: One short answer, a context the loaded model can hold, and no creativity:
+#: the curriculum's checks are exact strings, so sampling noise only hurts.
+DEFAULT_MAX_TOKENS = 320
+DEFAULT_CONTEXT_CHARS = 6000
+DEFAULT_TIMEOUT_S = 180.0
+DEFAULT_TEMPERATURE = 0.2
+
+#: Share of the context budget kept from the start of a prompt. The end matters
+#: too (the instruction usually lives there), so both ends are kept.
+_HEAD_SHARE = 0.7
+_TRIM_MARKER = "\n\n[... middle of the request trimmed to fit the local model ...]\n\n"
+
+
+class LocalModelUnavailable(RuntimeError):
+    """The model is not configured, not reachable, or did not answer in time."""
+
+
+@dataclass(frozen=True)
+class Completion:
+    text: str
+    model: str
+    elapsed_s: float
+    prompt_chars: int
+    truncated: bool = False
+
+
+def trim_prompt(prompt: str, limit: int = DEFAULT_CONTEXT_CHARS) -> tuple[str, bool]:
+    """Keep the head and the tail of a prompt inside ``limit`` characters.
+
+    A long file plus a traceback easily exceeds a small model's window. Dropping
+    the middle keeps the task statement (top) and the instruction/error (bottom),
+    which is where the useful signal is.
+    """
+    if limit <= 0 or len(prompt) <= limit:
+        return prompt, False
+    head = int(limit * _HEAD_SHARE)
+    tail = max(0, limit - head - len(_TRIM_MARKER))
+    return prompt[:head] + _TRIM_MARKER + prompt[len(prompt) - tail:], True
+
+
+def model_from_settings(settings: dict[str, Any]) -> str:
+    """The model the trainer should use: its own, then coding, then assistant."""
+    for key in ("trainer_model", "coding_model", "assistant_model"):
+        value = str(settings.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+async def _resolve(model: str | None) -> tuple[Any, str]:
+    """The provider and model to call. Split out so tests never touch a model."""
+    from services.gateway.llm_providers import get_provider
+    from services.gateway.orchestrator import get_llm_settings
+
+    settings = await get_llm_settings()
+    chosen = (model or "").strip() or model_from_settings(settings)
+    if not chosen:
+        raise LocalModelUnavailable(
+            "No local model is configured for training. Set trainer_model (or "
+            "coding_model) in Settings > AI & Compute."
+        )
+    provider = await get_provider(settings)
+    return provider, chosen
+
+
+async def complete(
+    prompt: str,
+    *,
+    system: str | None = None,
+    model: str | None = None,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    temperature: float = DEFAULT_TEMPERATURE,
+    context_chars: int = DEFAULT_CONTEXT_CHARS,
+    timeout: float = DEFAULT_TIMEOUT_S,
+) -> Completion:
+    """Ask the local model once, bounded in prompt size, tokens and wall clock."""
+    provider, chosen = await _resolve(model)
+    user_text, truncated = trim_prompt(prompt, context_chars)
+    messages: list[dict[str, str]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": user_text})
+    options = {
+        "temperature": temperature,
+        "num_predict": max(16, int(max_tokens)),
+        "num_ctx": 4096,
+    }
+
+    started = time.monotonic()
+    try:
+        raw = await asyncio.wait_for(
+            provider.generate(chosen, messages, options=options), timeout=timeout
+        )
+    except TimeoutError as exc:
+        raise LocalModelUnavailable(
+            f"The local model ({chosen}) did not answer within {timeout:.0f}s."
+        ) from exc
+    except Exception as exc:  # a trainer run must report this, not crash
+        raise LocalModelUnavailable(f"The local model ({chosen}) failed: {exc}") from exc
+
+    text = (raw or "").strip()
+    if not text:
+        raise LocalModelUnavailable(f"The local model ({chosen}) returned an empty answer.")
+    return Completion(
+        text=text,
+        model=chosen,
+        elapsed_s=round(time.monotonic() - started, 2),
+        prompt_chars=len(user_text),
+        truncated=truncated,
+    )

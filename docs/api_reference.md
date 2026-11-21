@@ -205,6 +205,20 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 - `GET /api/presence/all`, `GET /api/presence/rooms`, `GET /api/presence/{user_id}`:
   who is in which room (from the execution service). Signed-in caller only
 
+## Trainer (the local model's classroom, `docs/JARVIS_TRAINER.md`)
+
+- `GET /api/trainer/catalog`: every capability Jarvis has, derived from the code (service routes, the live gateway app, the Raven tool table, the UI route table), with counts by service/kind/tag (signed-in caller)
+- `GET /api/trainer/curriculum?buckets=&limit=`: the derived evaluation/training cases and a summary by bucket (signed-in caller)
+- `POST /api/trainer/sermon`: draft a sermon from a passage (scripture read from the Bible service first) and save it as `sermons/<slug>.md` in the workspace (signed-in caller)
+- `POST /api/trainer/illustrate`: edit an image inside a workspace (`image_path` + `prompt`, optional `output_path`) through the execution image handler (signed-in caller)
+- `POST /api/trainer/eval`: run a bounded slice of the curriculum (`limit`, `budget_s`, `buckets`) and keep the report; admin only
+- `GET /api/trainer/reports`, `GET /api/trainer/reports/{id}`: report summaries and one report with every answer; admin only
+- `POST /api/trainer/reports/dataset` `{report_id, accepted_only}`: export the report's rows as JSONL for fine-tuning; admin only
+- `POST /api/trainer/repair` `{workspace_id, path, error_text?, test_targets?, attempts?}`: ask the local model for the corrected file, write it through the Workspace API with a sha256 conflict check, and prove it with the workspace's own pytest; admin only
+- `POST /api/trainer/dream`, `POST /api/trainer/dream/validate`: dreaming plus the proposals it implies, and a lesson self-test result; admin only
+- `GET /api/trainer/backlog`: the last facilitator cycle's ranked proposals; admin only
+- `POST /api/trainer/cycle`: dream, evaluate, merge proposals, write the top lessons into RAG and optionally repair a file, in one pass; admin only
+
 "Signed-in caller" routes return **401** without a valid API key (or the
 internal secret for service-to-service calls).
 
