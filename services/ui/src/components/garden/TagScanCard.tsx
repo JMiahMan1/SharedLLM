@@ -32,7 +32,9 @@ export function TagScanCard({ tagId, onDismiss }: { tagId: string; onDismiss: ()
       if (target.target_kind === 'plant') {
         return api.gardenLogCare(target.target_id, { action: 'water', source: 'nfc_tag' });
       }
-      return api.gardenWaterAll(target.target_id);
+      // A tag watering is its own source: the garden's history should show that
+      // a phone touched a pot, not that someone found the room button.
+      return api.gardenWaterAll(target.target_id, { source: 'nfc_tag' });
     },
     onSuccess: () => {
       toast.success('Watered');

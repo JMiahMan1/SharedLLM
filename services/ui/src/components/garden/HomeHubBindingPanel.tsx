@@ -109,15 +109,23 @@ function ValveControls({
   const [confirming, setConfirming] = useState(false);
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['garden-bindings'] });
+  const [rainBlocked, setRainBlocked] = useState<string | null>(null);
   const run = useMutation({
-    mutationFn: () => api.gardenRunValve(binding.id, { minutes: Number(minutes) || undefined }),
+    mutationFn: (override?: boolean) =>
+      api.gardenRunValve(binding.id, {
+        minutes: Number(minutes) || undefined,
+        ...(override ? { override_rain: true } : {}),
+      }),
     onSuccess: (result) => {
       setConfirming(false);
+      setRainBlocked(null);
       toast.success(`Valve opened for ${result.minutes} min (${result.runs_today}/${result.daily_max_runs} today)`);
       refresh();
     },
     onError: (error: unknown) => {
       const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      // A rain block is a *choice*, not a failure: offer the deliberate override.
+      setRainBlocked(detail && /rain interlock/i.test(detail) ? detail : null);
       toast.error(detail || 'The valve could not be opened');
     },
   });
@@ -161,7 +169,7 @@ function ValveControls({
           <button
             type="button"
             className={`${buttonClass} bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20`}
-            onClick={() => (confirming ? run.mutate() : setConfirming(true))}
+            onClick={() => (confirming ? run.mutate(false) : setConfirming(true))}
             disabled={run.isPending || running}
           >
             <Play size={12} /> {confirming ? 'Confirm run' : 'Run valve'}
@@ -176,6 +184,19 @@ function ValveControls({
           </button>
         </div>
       )}
+      {rainBlocked && canEdit && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 space-y-1">
+          <p className="text-[11px] text-amber-200">{rainBlocked}</p>
+          <button
+            type="button"
+            onClick={() => run.mutate(true)}
+            disabled={run.isPending}
+            className={`${buttonClass} bg-amber-500/15 border-amber-500/40 text-amber-200 hover:bg-amber-500/25`}
+          >
+            <Play size={12} /> Run anyway (override rain)
+          </button>
+        </div>
+      )}
       {confirming && (
         <p className="text-[11px] text-amber-200">
           Tap again to open for {minutes} min. The valve closes itself; the cap is {binding.max_run_minutes} min.
@@ -187,6 +208,20 @@ function ValveControls({
     </div>
   );
 }
+
+/**
+ * A grow-light schedule needs both times, and the inputs show 06:00 / 20:00
+ * until they are touched -- so those are what gets saved.
+ */
+function withScheduleDefaults(draft: GardenBindingIn): GardenBindingIn {
+  if (!draft.grow_light_enabled) return draft;
+  return {
+    ...draft,
+    grow_light_on_time: draft.grow_light_on_time ?? '06:00',
+    grow_light_off_time: draft.grow_light_off_time ?? '20:00',
+  };
+}
+
 
 /**
  * A plant's or bed's Home Hub hardware.
@@ -237,8 +272,18 @@ export function HomeHubBindingPanel({
   }, [own]);
 
   const queryClient = useQueryClient();
+  const unbind = useMutation({
+    mutationFn: () => api.gardenDeleteBinding(targetKind, targetId),
+    onSuccess: () => {
+      setDraft({});
+      toast.success('Hardware unbound');
+      void queryClient.invalidateQueries({ queryKey: ['garden-bindings'] });
+      void queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
+    },
+    onError: () => toast.error('That binding could not be removed'),
+  });
   const save = useMutation({
-    mutationFn: () => api.gardenSaveBinding(targetKind, targetId, draft),
+    mutationFn: () => api.gardenSaveBinding(targetKind, targetId, withScheduleDefaults(draft)),
     onSuccess: () => {
       toast.success('Hardware saved');
       void queryClient.invalidateQueries({ queryKey: ['garden-bindings'] });
@@ -329,6 +374,16 @@ export function HomeHubBindingPanel({
             />
           </div>
           <SaveControls draft={draft} set={set} discovery={discovery} onSave={() => save.mutate()} saving={save.isPending} />
+          {own && (
+            <button
+              type="button"
+              onClick={() => unbind.mutate()}
+              disabled={unbind.isPending}
+              className={`${buttonClass} mt-2 bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20`}
+            >
+              {unbind.isPending ? 'Removing…' : 'Remove hardware'}
+            </button>
+          )}
         </details>
       )}
     </div>

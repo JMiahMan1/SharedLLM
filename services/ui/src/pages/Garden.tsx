@@ -219,7 +219,7 @@ export default function Garden() {
         ) : tab === 'plants' ? (
           <PlantsTab plants={plants} locations={locations} mineOnly={mineOnly} currentUser={user?.username ?? ''} />
         ) : tab === 'planner' ? (
-          <PlannerTab locations={locations} />
+          <PlannerTab locations={locations} canEdit={isParent} />
         ) : (
           <PantryTab
             canEdit={isAdult}
@@ -693,9 +693,11 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
 /* ========================= Planner Tab (Phase 5) ========================= */
 
 function PlannerTab({
-  locations,
+  locations, canEdit,
 }: {
   locations: GardenLocation[];
+  /** Parents and admins may bind a bed's hardware. */
+  canEdit: boolean;
 }) {
   const queryClient = useQueryClient();
 
@@ -813,6 +815,7 @@ function PlannerTab({
         <BedGridEditor
           planId={activePlanId}
           bed={openBed}
+          canEdit={canEdit}
           species={speciesQuery.data?.results ?? []}
           onClose={() => setOpenBed(null)}
         />
@@ -1224,6 +1227,15 @@ function SkylightChorePanel({
 export function PlantDetail() {
   const { id } = useParams();
   const { user } = useAuth();
+  // `?journal=1` is where a scanned tag's "Add photo" lands: bring the journal
+  // into view instead of leaving the person at the top of a long page.
+  const [searchParams] = useSearchParams();
+  const wantsJournal = searchParams.get('journal') === '1';
+  useEffect(() => {
+    if (!wantsJournal) return;
+    const node = document.getElementById('garden-journal');
+    node?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [wantsJournal]);
   const canEdit = Boolean(user?.is_admin || ['mother', 'father', 'adult_child'].includes(user?.family_role ?? ''));
   // Re-assigning care is a parent/admin decision (services/garden agrees); the
   // adult looking after the plant can still log care and link its chore.
@@ -1532,7 +1544,9 @@ export function PlantDetail() {
 
       <HomeHubBindingPanel targetKind="plant" targetId={plant.id} canEdit={canEdit} />
 
-      <PhotoJournalPanel plant={plant} canDeleteAny={canEdit} currentUser={user?.username ?? ''} />
+      <div id="garden-journal" className="scroll-mt-20">
+        <PhotoJournalPanel plant={plant} canDeleteAny={canEdit} currentUser={user?.username ?? ''} />
+      </div>
 
       <div className="bg-white/5 border border-white/10 rounded-xl p-4">
         <h3 className="text-sm font-semibold text-slate-300 mb-3 uppercase tracking-wider">Recent Harvests</h3>

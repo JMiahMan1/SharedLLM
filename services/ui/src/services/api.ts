@@ -2788,8 +2788,20 @@ export const api = {
     return resp.data;
   },
 
-  async gardenWaterAll(locationId: string): Promise<{ ok: boolean; location_id: string; location_name: string; watered_count: number; watered: GardenPlant[] }> {
-    const resp = await apiClient.post(`/api/garden/locations/${encodeURIComponent(locationId)}/water-all`);
+  async gardenWaterAll(
+    locationId: string,
+    options?: { source?: string; dueOnly?: boolean },
+  ): Promise<{ ok: boolean; location_id: string; location_name: string; watered_count: number; watered: GardenPlant[] }> {
+    const params: Record<string, string> = {};
+    // The Garden records where a watering came from, so a scanned tag is not
+    // indistinguishable from someone tapping the room button.
+    if (options?.source) params.source = options.source;
+    if (options?.dueOnly === false) params.due_only = 'false';
+    const resp = await apiClient.post(
+      `/api/garden/locations/${encodeURIComponent(locationId)}/water-all`,
+      {},
+      { params: Object.keys(params).length ? params : undefined },
+    );
     return resp.data;
   },
 

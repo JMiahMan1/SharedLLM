@@ -6,6 +6,7 @@ import { BrowserRouter, MemoryRouter, Route, Routes } from 'react-router-dom';
 import React from 'react';
 import Garden, { PlantDetail } from '../pages/Garden';
 import { HomeHubBindingPanel } from '../components/garden/HomeHubBindingPanel';
+import { BedGridEditor } from '../components/garden/PlannerPanels';
 import { api } from '../services/api';
 import { saveShoppingList } from '../lib/shoppingListStore';
 import type { GardenLocation, GardenPlant, GardenPlanOut, GardenSpecies } from '../types/api';
@@ -1792,7 +1793,10 @@ describe('Garden NFC/QR tag cards (Phase 8)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Water this bed/i }));
 
-    await waitFor(() => expect(vi.mocked(api.gardenWaterAll)).toHaveBeenCalledWith('bed-1'));
+    // The Garden records that a scanned tag did this, not the room button.
+    await waitFor(() =>
+      expect(vi.mocked(api.gardenWaterAll)).toHaveBeenCalledWith('bed-1', { source: 'nfc_tag' }),
+    );
   });
 
   it('says plainly when a tag is not linked yet', async () => {
@@ -1805,5 +1809,89 @@ describe('Garden NFC/QR tag cards (Phase 8)', () => {
     render(<Garden />, { wrapper: createWrapper() });
 
     expect(await screen.findByText(/not linked to a plant or bed yet/i)).toBeInTheDocument();
+  });
+});
+
+describe('Home Hub hardware edits (Phase 8)', () => {
+  const binding = {
+    id: 'binding-1', target_kind: 'plant' as const, target_id: 'plant-1', target_name: 'Roma Row',
+    moisture_entity_id: 'sensor.bed1_soil_moisture', temperature_entity_id: null,
+    humidity_entity_id: null, lux_entity_id: null,
+    grow_light_entity_id: 'light.grow_shelf', grow_light_on_time: null, grow_light_off_time: null,
+    grow_light_enabled: false, valve_entity_id: null, valve_mode: 'notify_only' as const,
+    moisture_override_enabled: false, moisture_threshold_pct: 30,
+    max_run_minutes: 5, daily_max_runs: 2, rain_interlock: true,
+    active_run_started_at: null, active_run_ends_at: null, nfc_tag_id: null,
+    readings: { moisture_pct: 22 }, runs_today: 0, created_at: '', updated_at: '',
+  };
+
+  const discovery = {
+    available: true, has_any_hardware: true,
+    moisture_sensors: [], temperature_sensors: [], humidity_sensors: [], lux_sensors: [], valves: [],
+    grow_lights: [{ entity_id: 'light.grow_shelf', friendly_name: 'Grow Shelf', device_class: null, unit: null, state: 'off' }],
+    tags: [],
+  };
+
+  const renderPanel = () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(api.gardenHardwareDiscover).mockResolvedValue(discovery);
+    vi.mocked(api.gardenListBindings).mockResolvedValue({ count: 1, bindings: [binding] });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <HomeHubBindingPanel targetKind="plant" targetId="plant-1" canEdit />
+      </QueryClientProvider>,
+    );
+  };
+
+  it('saves the grow-light times the inputs are showing', async () => {
+    vi.mocked(api.gardenSaveBinding).mockImplementation(async (_kind, _id, body) => ({ ...binding, ...body } as never));
+    renderPanel();
+
+    fireEvent.click(await screen.findByText(/Edit hardware/i));
+    fireEvent.click(screen.getByLabelText(/Grow light schedule/i));
+    fireEvent.click(screen.getByRole('button', { name: /Save hardware/i }));
+
+    await waitFor(() => expect(vi.mocked(api.gardenSaveBinding)).toHaveBeenCalled());
+    const [, , body] = vi.mocked(api.gardenSaveBinding).mock.calls[0];
+    expect(body.grow_light_enabled).toBe(true);
+    // Never a 400 for times the person could see but never touched.
+    expect(body.grow_light_on_time).toBe('06:00');
+    expect(body.grow_light_off_time).toBe('20:00');
+  });
+
+  it('can remove a binding again', async () => {
+    vi.mocked(api.gardenDeleteBinding).mockResolvedValue(undefined);
+    renderPanel();
+
+    fireEvent.click(await screen.findByText(/Edit hardware/i));
+    fireEvent.click(screen.getByRole('button', { name: /Remove hardware/i }));
+
+    await waitFor(() =>
+      expect(vi.mocked(api.gardenDeleteBinding)).toHaveBeenCalledWith('plant', 'plant-1'),
+    );
+  });
+
+  it('shows a bed\'s hardware inside the bed grid for a parent', async () => {
+    const bed = {
+      id: 'bed-1', name: 'North Bed', kind: 'raised_bed', source: 'garden', area_id: null,
+      width_ft: 2, length_ft: 2, area_sqft: 4, sun_exposure: 'full_sun', covered: false,
+      map_x: 1, map_y: 1, rotation_deg: 0, light_notes: null, draft_notes: null,
+      assigned_to: null, skylight_sync_enabled: false, created_at: '', updated_at: '',
+    } as unknown as GardenLocation;
+    vi.mocked(api.gardenHardwareDiscover).mockResolvedValue(discovery);
+    vi.mocked(api.gardenListBindings).mockResolvedValue({
+      count: 1,
+      bindings: [{ ...binding, target_kind: 'location', target_id: 'bed-1', target_name: 'North Bed' }],
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BedGridEditor planId="plan-1" bed={bed} species={[]} onClose={vi.fn()} canEdit />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(/Home Hub Hardware/)).toBeInTheDocument();
+    expect(vi.mocked(api.gardenListBindings)).toHaveBeenCalledWith({ location_id: 'bed-1' });
   });
 });

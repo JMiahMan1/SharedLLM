@@ -6,6 +6,7 @@ import {
   RotateCw, Search, Sprout, Trash2, X,
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { HomeHubBindingPanel } from './HomeHubBindingPanel';
 import type {
   GardenLocation, GardenPlanOut, GardenProfile, GardenSpecies, PantryGoalCalcResponse,
   PantryGoalOut, PlanCellIn, PlannerSizingResponse,
@@ -787,12 +788,14 @@ const CHECK_STYLES: Record<string, string> = {
 };
 
 export function BedGridEditor({
-  planId, bed, species, onClose,
+  planId, bed, species, onClose, canEdit = false,
 }: {
   planId: string;
   bed: GardenLocation;
   species: GardenSpecies[];
   onClose: () => void;
+  /** Parents and admins may bind this bed's sensors, valve, light and tag. */
+  canEdit?: boolean;
 }) {
   const queryClient = useQueryClient();
   const width = Math.max(1, Math.round(bed.width_ft ?? 4));
@@ -999,6 +1002,10 @@ export function BedGridEditor({
             </button>
           )}
         </div>
+      </div>
+      {/* A bed is where the valve and the soil probe actually are. */}
+      <div className="mt-4">
+        <HomeHubBindingPanel targetKind="location" targetId={bed.id} canEdit={canEdit} />
       </div>
     </section>
   );
