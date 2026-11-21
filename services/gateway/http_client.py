@@ -10,12 +10,12 @@ import logging
 import random
 import threading
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import aiohttp
 
-from services.common.http import INTERNAL_KEEPALIVE_S
+from services.common.http import INTERNAL_KEEPALIVE_S, _close_connector, _session_dead
 
 log = logging.getLogger("gateway.http_client")
 
@@ -55,12 +55,14 @@ def get_http_client() -> aiohttp.ClientSession:
     if current_loop is None:
         # No running loop (e.g. a synchronous context). Fall back to a module global.
         global _fallback_http_client
-        if _fallback_http_client is None or _fallback_http_client.closed:
+        if _session_dead(_fallback_http_client):
             _fallback_http_client = _new_http_client()
         return _fallback_http_client
 
     client = _http_clients.get(current_loop)
-    if client is None or client.closed:
+    # _session_dead also catches a session whose connector was closed under it
+    # (it still reports closed == False and fails with "Connector is closed").
+    if _session_dead(client):
         client = _new_http_client()
         _http_clients[current_loop] = client
     return client
@@ -110,8 +112,8 @@ async def recreate_http_client():
                 return
             if _fallback_http_client is not None:
                 log.info("[DNSRecovery] Closing stale fallback HTTP client to refresh DNS resolution")
-                with contextlib.suppress(Exception):
-                    _fallback_http_client.close()
+                # No loop is running here, so close() (a coroutine) cannot be awaited.
+                _close_connector(_fallback_http_client)
                 _fallback_http_client = None
         _last_client_recreate = now
         log.info("[DNSRecovery] HTTP client marked for refresh (recreated on next use)")
@@ -195,13 +197,37 @@ async def borrow_http_client() -> AsyncIterator[aiohttp.ClientSession]:
 
 
 async def close_all_clients():
-    """Close all HTTP clients. Call during application shutdown."""
+    """Close all HTTP clients. Call during application shutdown.
+
+    A session belongs to the loop that made it: the running loop's session is
+    awaited, a session of another loop that still runs is closed on that loop,
+    and one whose loop has stopped has its connector closed directly. Closing
+    another loop's session from this one raised or left it half-closed.
+    """
     global _fallback_http_client
-    for _client in list(_http_clients.values()):
-        with contextlib.suppress(Exception):
-            await _client.close()
+    try:
+        current = asyncio.get_running_loop()
+    except RuntimeError:
+        current = None
+    failures: list[str] = []
+    for loop, client in list(_http_clients.items()):
+        if client.closed:
+            continue
+        try:
+            if loop is current:
+                await client.close()
+            elif loop.is_running() and not loop.is_closed():
+                asyncio.run_coroutine_threadsafe(client.close(), loop)
+            else:
+                _close_connector(client)
+        except Exception as e:  # keep closing the others, then report
+            failures.append(f"loop {id(loop)}: {e!r}")
     _http_clients.clear()
     if _fallback_http_client is not None:
-        with contextlib.suppress(Exception):
-            await _fallback_http_client.close()
+        try:
+            _close_connector(_fallback_http_client)
+        except Exception as e:
+            failures.append(f"fallback: {e!r}")
         _fallback_http_client = None
+    if failures:
+        log.error("Could not close every HTTP client: %s", "; ".join(failures))

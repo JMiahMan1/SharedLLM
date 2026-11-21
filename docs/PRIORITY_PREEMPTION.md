@@ -141,11 +141,11 @@ await job_queue.enqueue_job(user_id="default", payload=payload)
 
 ```bash
 # Pause a mission
-curl -X POST http://ai.local:8080/api/raven/missions/5/pause \
+curl -X POST http://<gateway-host>:8080/api/raven/missions/5/pause \
   -H "Authorization: Bearer <api_key>"
 
 # Resume
-curl -X POST http://ai.local:8080/api/raven/missions/5/resume \
+curl -X POST http://<gateway-host>:8080/api/raven/missions/5/resume \
   -H "Authorization: Bearer <api_key>"
 ```
 

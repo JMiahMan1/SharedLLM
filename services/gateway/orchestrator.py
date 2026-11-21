@@ -864,13 +864,19 @@ async def _fetch_rag_context(
             from services.gateway.main import shared_http_client
             async with shared_http_client() as client:
                 try:
+                    # Every seeded lesson, by id: a newest-first page of
+                    # `tag=protocol` dropped the oldest, most basic ones.
                     _pr = await client.get(
-                        f"{rag_svc}/rag/learning",
-                        params={"tag": "protocol", "limit": 25},
+                        f"{rag_svc}/rag/learning/protocol",
                         headers={"X-Internal-Secret": INTERNAL_SECRET},
                         timeout=aiohttp.ClientTimeout(total=5.0),
                     )
-                    if _pr.status == 200:
+                    if _pr.status != 200:
+                        log.error(
+                            f"[Orchestrator] protocol curriculum unavailable: HTTP {_pr.status} "
+                            f"{(await _pr.text())[:300]}"
+                        )
+                    else:
                         _proto = (await _pr.json()).get("items") or []
                         if _proto:
                             rag_context += (

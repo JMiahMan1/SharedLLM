@@ -1090,6 +1090,42 @@ async def list_collection_documents(
         raise HTTPException(status_code=500, detail="Could not list that collection") from e
 
 
+@app.get("/rag/learning/protocol", dependencies=[Depends(require_internal)])
+async def list_protocol_lessons():
+    """Every seeded protocol lesson, in curriculum order, with no limit.
+
+    The gateway pins these into every Raven prompt. It used to ask
+    ``/rag/learning?tag=protocol&limit=25`` (newest first): with more than 25
+    tagged lessons the oldest, most basic ones fell out of every prompt.
+    Asking by the seeded ids returns exactly the curriculum, whatever else is
+    tagged ``protocol``. A seeded lesson missing from the store is a 500.
+    """
+    ids = [lesson["id"] for lesson in _PROTOCOL_LESSONS]
+    placeholders = ",".join("?" for _ in ids)
+    rows = _conn().execute(
+        f"SELECT id, content, metadata, created_at, usage_count, applied_count "
+        f"FROM rag_items WHERE collection_name = ? AND user_id = ? AND id IN ({placeholders})",
+        ["system_learnings", "default", *ids],
+    ).fetchall()
+    by_id = {r["id"]: r for r in rows}
+    missing = [i for i in ids if i not in by_id]
+    if missing:
+        log.error(f"[RAG] Seeded protocol lessons missing from the store: {missing}")
+        raise HTTPException(status_code=500, detail=f"Protocol lessons missing: {', '.join(missing)}")
+    items = [
+        {
+            "id": i,
+            "content": by_id[i]["content"],
+            "metadata": json.loads(by_id[i]["metadata"]),
+            "created_at": by_id[i]["created_at"],
+            "usage_count": by_id[i]["usage_count"] or 0,
+            "applied_count": by_id[i]["applied_count"] or 0,
+        }
+        for i in ids
+    ]
+    return {"status": "SUCCESS", "collection": "system_learnings", "count": len(items), "items": items}
+
+
 @app.get("/rag/learning", dependencies=[Depends(require_internal)])
 async def list_learnings(user_id: str = "default", limit: int = 200, sort: str = "recent", tag: str | None = None):
     """List Raven lessons (system_learnings) with reuse stats.

@@ -502,6 +502,9 @@ export default function FamilyGames() {
     if (!wanted || !data) return;
     const shelf = [...(data.games ?? []), ...(data.review ?? []), ...(data.unpublished ?? [])];
     const game = shelf.find((g) => g.slug === wanted);
+    // A deep link is input from outside React: open() also clears a ref and
+    // resets a mutation, which cannot run during render, so this stays an effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot launch from the URL
     if (game) open(game, wantedRoom);
     const next = new URLSearchParams(searchParams);
     next.delete('play');

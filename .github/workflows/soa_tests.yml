@@ -48,7 +48,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
+        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split "fakeredis[lua]" respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
         # Heavy ML packages (fastembed models, torch) are not installed here:
         # the tests mock them, so only the API contracts are needed.
 
@@ -74,8 +74,10 @@ jobs:
     - name: Import every test module
       run: pytest --collect-only -q
 
-  # Six shards, all at once. pytest-split distributes by measured duration, so
-  # each shard finishes at about the same time as the others.
+  # Six shards, all at once. No .test_durations file is committed, so
+  # pytest-split gives each shard the same NUMBER of tests, not the same run
+  # time: a shard that draws the slow tests finishes last. To balance by time,
+  # run `pytest --store-durations` locally and commit .test_durations.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -99,7 +101,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
+        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split "fakeredis[lua]" respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
         # Heavy ML packages (fastembed models, torch) are not installed here:
         # the tests mock them, so only the API contracts are needed.
 
@@ -122,6 +124,8 @@ jobs:
         # here: a runner has no .env, no SERVER_IP and no route to a deployed
         # stack, so those tests run only their hermetic parts.
         SHAREDLLM_RUN_LIVE: "1"
+        # One data file per shard, so the coverage job can combine them.
+        COVERAGE_FILE: .coverage.${{ matrix.shard }}
       run: |
         # Excludes only the markers that genuinely need live infrastructure:
         # local_only (live Home Assistant / Nextcloud) and server_only (a
@@ -133,7 +137,10 @@ jobs:
       if: always()
       with:
         name: coverage-report-${{ matrix.shard }}
-        path: coverage-${{ matrix.shard }}.xml
+        include-hidden-files: true
+        path: |
+          coverage-${{ matrix.shard }}.xml
+          .coverage.${{ matrix.shard }}
 
     - name: Upload Test Results
       uses: actions/upload-artifact@v4
@@ -141,3 +148,37 @@ jobs:
       with:
         name: pytest-results-${{ matrix.shard }}
         path: pytest-report-${{ matrix.shard }}.xml
+
+  # One coverage figure for the whole suite: each shard covers only its slice.
+  coverage:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Download shard coverage
+      uses: actions/download-artifact@v4
+      with:
+        pattern: coverage-report-*
+        merge-multiple: true
+
+    - name: Combine
+      run: |
+        pip install coverage
+        coverage combine .coverage.*
+        coverage xml -o coverage.xml
+        coverage report --format=total | xargs -I{} echo "Total coverage: {}%" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload combined coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report-combined
+        path: coverage.xml

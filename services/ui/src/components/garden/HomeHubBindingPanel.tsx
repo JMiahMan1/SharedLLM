@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { Droplets, Play, Square, Thermometer, Sun, Wind } from 'lucide-react';
 import { api } from '../../services/api';
@@ -18,7 +18,7 @@ const buttonClass =
   'inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 rounded-lg border text-xs transition-colors disabled:opacity-50';
 
 /** Does this house have any garden hardware worth showing? */
-export function useGardenHardware() {
+function useGardenHardware() {
   const query = useQuery({
     queryKey: ['garden-hardware'],
     queryFn: () => api.gardenHardwareDiscover(),
@@ -249,8 +249,11 @@ export function HomeHubBindingPanel({
   const own = bindings.find((row) => row.target_kind === targetKind && row.target_id === targetId);
   const [draft, setDraft] = useState<GardenBindingIn>({});
 
-  useEffect(() => {
-    if (!own) return;
+  // The draft follows the stored binding whenever a new one arrives (set
+  // during render, React's pattern for state derived from changing data).
+  const [draftOf, setDraftOf] = useState<GardenHomeHubBinding | undefined>(undefined);
+  if (own && own !== draftOf) {
+    setDraftOf(own);
     setDraft({
       moisture_entity_id: own.moisture_entity_id,
       temperature_entity_id: own.temperature_entity_id,
@@ -269,7 +272,7 @@ export function HomeHubBindingPanel({
       rain_interlock: own.rain_interlock,
       nfc_tag_id: own.nfc_tag_id,
     });
-  }, [own]);
+  }
 
   const queryClient = useQueryClient();
   const unbind = useMutation({

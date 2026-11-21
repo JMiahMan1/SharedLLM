@@ -18,7 +18,8 @@ const beacon = vi.hoisted(() => ({
 }));
 vi.mock('../../plugins/bleBeacon', () => ({ default: beacon }));
 
-import RoomDetectionPanel, { beaconStateLine } from './RoomDetectionPanel';
+import RoomDetectionPanel from './RoomDetectionPanel';
+import { beaconStateLine } from './beaconState';
 
 const base: BeaconStatus = {
   enabled: true,

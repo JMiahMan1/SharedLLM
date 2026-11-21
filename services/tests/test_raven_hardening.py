@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from services.execution.handlers import git as git_handler
 from services.execution.handlers import workspace as workspace_handler
 from services.execution.schemas import GitOperationRequest, UserContext, WorkspaceShellRequest
-from services.gateway.messaging import InferenceJobQueue, JobStatus
+from services.gateway.messaging import _CLAIM_JOB, InferenceJobQueue, JobStatus
 
 
 class FakeRedis:
@@ -79,6 +79,26 @@ class FakeRedis:
 
     async def expire(self, key, ttl):
         return True
+
+    async def eval(self, script, numkeys, *args):
+        assert script == _CLAIM_JOB
+        queue, processing, job_key, lease_key, job_id, read, new, _ttl, lease, _lease_ttl = args
+        # Python twin of messaging._CLAIM_JOB (test_claim_job_lua runs the real script).
+        if job_id not in self.zsets[queue]:
+            return 0
+        current = self.kv.get(job_key)
+        if current is None:
+            if read == "":
+                self.zsets[queue].pop(job_id)
+                return -1
+            return 0
+        if current != read:
+            return 0
+        self.zsets[queue].pop(job_id)
+        self.kv[job_key] = new
+        self.kv[lease_key] = str(lease)
+        self.lists[processing].append(job_id)
+        return 1
 
     async def close(self):
         return None
