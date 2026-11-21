@@ -572,6 +572,13 @@ class Driver:
         chosen = (entity.options.get("sensor") or {}).get("unit_of_measurement") if entity.options else None
         return str(chosen) if chosen else None
 
+    def push_fed_entities(self) -> set[str]:
+        """Entity ids a live push keeps current even while polls fail; the runtime leaves them available.
+
+        Empty by default: a driver says which (and only while its push is actually connected).
+        """
+        return set()
+
     def mark_unavailable(self, entities: Iterable[EntityEntry] | None = None) -> None:
         for e in entities if entities is not None else self.entities:
             cur = self.hub.states.get(e.entity_id)

@@ -12,6 +12,17 @@ subscribed when the hub allows it; the 30 s poll reads everything else and
 covers the events when the push is down. Battery cameras are only woken for a
 full state read once an hour, as HA does, because every wake costs battery.
 
+Timing: the hub's runtime gives a poll 60 s. reolink-aio retries a request up
+to three times, each bounded by ``HOST_TIMEOUT_S`` + 5 s, and a poll makes
+several, so a slow hub could exceed it (seen several times an hour). So the
+frequent poll reads only what does not wake a battery camera, inside its own
+``POLL_READ_TIMEOUT_S``; the hourly wake read and the twice-daily firmware
+check run as a background job (``SLOW_JOB_TIMEOUT_S``) the poll never waits
+for. A read that fails or times out drops the session (a stuck session is the
+usual cause; the next read logs in afresh). While the push is live, a failing
+poll never makes the motion, AI and doorbell sensors unavailable
+(``push_fed_entities``): they are still being told.
+
 Host: ``entry.data["host"]`` is ``ReoLink-Hub.local``, which only resolves
 where mDNS works (not inside a Docker bridge network). ``entry.options["host"]``
 overrides it with an address; set it to the hub's IP (and give the hub a DHCP
@@ -63,8 +74,16 @@ from services.homehub.drivers.mjpeg import CameraTokens, RecordingStream, camera
 
 #: Seconds between full state reads that wake battery cameras (HA's value).
 BATTERY_WAKE_S = 3600.0
-HOST_TIMEOUT_S = 15
+#: One HTTP request (reolink-aio retries up to 3 times, each bounded by this + 5 s).
+HOST_TIMEOUT_S = 10
 RESOLVE_TIMEOUT_S = 5.0
+#: Everything the frequent poll awaits, below the runtime's 60 s so the reason is this driver's own.
+POLL_READ_TIMEOUT_S = 40.0
+#: A background job: waking battery cameras for a full read, or the firmware check.
+SLOW_JOB_TIMEOUT_S = 180.0
+#: Dropping a stuck session (closing its connection) must not hang either.
+SESSION_RESET_TIMEOUT_S = 5.0
+
 
 #: Camera stream keys (the unique_id suffix of a camera entity).
 CAMERA_STREAMS = {"sub": "sub", "main": "main", "ext": "ext", "snapshots_sub": "sub", "snapshots_main": "main",
@@ -72,6 +91,8 @@ CAMERA_STREAMS = {"sub": "sub", "main": "main", "ext": "ext", "snapshots_sub": "
 #: binary_sensor key -> reolink-aio AI object type.
 AI_TYPES = {"person": "people", "vehicle": "vehicle", "pet": "dog_cat", "animal": "dog_cat", "face": "face",
             "package": "package"}
+#: binary_sensor keys the Baichuan push keeps current (motion, AI detections, the doorbell).
+PUSH_KEYS = frozenset({"motion", "visitor", *AI_TYPES})
 #: switch key -> (getter, setter); both take the channel first.
 SWITCHES = {
     "email": ("email_enabled", "set_email"),
@@ -120,6 +141,10 @@ class ReolinkDriver(Driver):
         #: (entity_id, file) -> None, newest last; the files a listing returned.
         self._listed: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._vod_session: aiohttp.ClientSession | None = None
+        #: The background job (battery wake read and/or firmware check) while one runs.
+        self._slow_job: asyncio.Task | None = None
+        #: Set while the background job wakes battery cameras for a full read (which covers the frequent one).
+        self._waking = False
 
     # -- addressing -----------------------------------------------------------
     async def _address(self) -> str:
@@ -238,32 +263,108 @@ class ReolinkDriver(Driver):
                                     sw_version=ask("camera_sw_version", ch))
 
     async def async_poll(self) -> None:
+        """The frequent read: what does not wake a battery camera, bounded by ``POLL_READ_TIMEOUT_S``.
+
+        The slow parts (the hourly wake read, the firmware check) are started as a background job and never
+        waited for here; while the wake read runs it reads everything, so this read is skipped.
+        """
         host = self.host
         if host is None:
             return
-        battery = [ch for ch in self._channels() if host.supported(ch, "battery")]
-        wake_all = time.monotonic() - self._last_wake >= BATTERY_WAKE_S
-        wake = {ch: (wake_all or ch not in battery) for ch in host.stream_channels}
-        try:
-            await host.get_states(wake=wake)
-            if wake_all:
-                self._last_wake = time.monotonic()
-            if not host.baichuan.events_active:
-                await host.get_motion_state_all_ch()
-        except CredentialsInvalidError as exc:
-            self.mark_unavailable()
-            raise AuthRequired("Reolink hub no longer accepts its username and password", needs="login") from exc
-        except ReolinkError as exc:
-            self.mark_unavailable()
-            raise DeviceUnavailable(f"Reolink hub: {exc}") from exc
+        self._start_slow_job(host)
+        if not self._waking:
+            battery = {ch for ch in self._channels() if host.supported(ch, "battery")}
+            wake = {ch: ch not in battery for ch in host.stream_channels}
+            await self._read_states(host, wake, POLL_READ_TIMEOUT_S, "state read")
         for ent in self.entities:
             if ent.domain == "camera" and self.tokens.due(ent.entity_id):
                 self.tokens.rotate(ent.entity_id)
-        await self._check_firmware()
         self._publish_all()
+
+    async def _read_states(self, host: Host, wake: dict[int, bool], budget: float, what: str) -> None:
+        """``get_states`` (and the motion fallback while the push is down) within ``budget`` seconds."""
+        try:
+            async with asyncio.timeout(budget):
+                await host.get_states(wake=wake)
+                if not host.baichuan.events_active:
+                    await host.get_motion_state_all_ch()
+        except CredentialsInvalidError as exc:
+            self.mark_unavailable()  # parked until an admin enters the login again
+            raise AuthRequired("Reolink hub no longer accepts its username and password", needs="login") from exc
+        except (ReolinkError, TimeoutError) as exc:
+            # reolink-aio already logs in again on "please login first"; what is left is usually a session the
+            # hub stopped answering on. Drop it, so the next read starts on a fresh connection and login.
+            await self._reset_session(host)
+            why = f"no answer in {budget:g} s" if type(exc) is TimeoutError else str(exc) or type(exc).__name__
+            raise DeviceUnavailable(f"Reolink hub {what}: {why}") from exc
+
+    async def _reset_session(self, host: Host) -> None:
+        try:
+            async with asyncio.timeout(SESSION_RESET_TIMEOUT_S):
+                await host.expire_session(unsubscribe=False)
+        except Exception as exc:
+            self.log.warning("Reolink hub: dropping the stuck session failed: %s", exc)
+
+    def _start_slow_job(self, host: Host) -> None:
+        """Start the hourly battery wake read and the firmware check, when due, as one background job."""
+        if self._slow_job is not None:
+            if not self._slow_job.done():
+                return
+            self._slow_job = None
+        wake_due = time.monotonic() - self._last_wake >= BATTERY_WAKE_S
+        firmware_due = not self._firmware_checked or time.monotonic() - self._firmware_checked >= FIRMWARE_CHECK_S
+        if not (wake_due or firmware_due):
+            return
+        # Set now, not when the job first runs, so this poll does not read alongside the wake read.
+        self._waking = wake_due
+        self._slow_job = asyncio.get_running_loop().create_task(self._slow(host, wake_due, firmware_due))
+
+    async def _slow(self, host: Host, wake_due: bool, firmware_due: bool) -> None:
+        try:
+            await self._slow_parts(host, wake_due, firmware_due)
+        finally:
+            self._waking = False
+
+    async def _slow_parts(self, host: Host, wake_due: bool, firmware_due: bool) -> None:
+        if wake_due:
+            # Marked first: a hub that cannot finish a wake read is not asked again every 30 s.
+            self._last_wake = time.monotonic()
+            try:
+                await self._read_states(host, dict.fromkeys(host.stream_channels, True), SLOW_JOB_TIMEOUT_S,
+                                        "battery camera wake read")
+            except (DeviceUnavailable, AuthRequired) as exc:
+                self.log.warning("%s; the next one is in %.0f min", exc, BATTERY_WAKE_S / 60)
+            else:
+                self._publish_all()
+            self._waking = False
+        if firmware_due:
+            await self._check_firmware()
+            self._publish_all()
+
+    def push_fed_entities(self) -> set[str]:
+        """The motion, AI and doorbell sensors of online cameras, while the Baichuan push is live.
+
+        A failing poll leaves these as they are: the push still says when they change.
+        """
+        host = self.host
+        if host is None or not host.baichuan.events_active:
+            return set()
+        out = set()
+        for ent in self.entities:
+            if ent.domain != "binary_sensor":
+                continue
+            ch, key = self.locate(ent)
+            if ch is not None and key in PUSH_KEYS and host.camera_online(ch):
+                out.add(ent.entity_id)
+        return out
 
     async def async_unload(self) -> None:
         host, self.host = self.host, None
+        job, self._slow_job = self._slow_job, None
+        if job is not None and not job.done():
+            job.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await job
         session, self._vod_session = self._vod_session, None
         if session is not None:
             await session.close()
@@ -369,9 +470,10 @@ class ReolinkDriver(Driver):
             return
         self._firmware_checked = time.monotonic()
         try:
-            self._firmware = dict(await host.check_new_firmware())
-        except ReolinkError as exc:
-            self.log.warning("Reolink firmware check failed: %s", exc)
+            async with asyncio.timeout(SLOW_JOB_TIMEOUT_S):
+                self._firmware = dict(await host.check_new_firmware())
+        except (ReolinkError, TimeoutError) as exc:
+            self.log.warning("Reolink firmware check failed: %s", exc or f"no answer in {SLOW_JOB_TIMEOUT_S:g} s")
 
     def _disable_unsupported(self) -> None:
         """Entities reolink-aio cannot drive: disabled by the integration, once, and said in the log."""

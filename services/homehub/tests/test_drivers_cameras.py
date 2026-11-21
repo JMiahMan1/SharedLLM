@@ -1,6 +1,8 @@
 """MJPEG and Reolink cameras: states, the camera contract and Reolink's controls, with no network."""
 from __future__ import annotations
 
+import asyncio
+import time
 import typing
 
 import pytest
@@ -395,10 +397,12 @@ async def test_reolink_poll_does_not_wake_battery_cameras_every_time(fake_host):
     await drv.async_setup()
     host = fake_host.instances[0]
     await drv.async_poll()
+    await drv._slow_job  # the firmware check, in the background
     wake = [c for c in host.calls if c[0] == "get_states"][-1][1]
     assert wake == {0: False, 1: False}
     drv._last_wake -= reolink.BATTERY_WAKE_S + 1
     await drv.async_poll()
+    await drv._slow_job  # the hourly wake read runs in the background, never inside the poll
     assert [c for c in host.calls if c[0] == "get_states"][-1][1] == {0: True, 1: True}
 
 
@@ -522,6 +526,7 @@ async def test_reolink_firmware_is_read_only_and_what_reolink_aio_cannot_do_is_d
     assert hub.entities["select.reolink_hub_scene_mode"].disabled_by == "integration"
     assert hub.states.get("update.garage_camera_1_firmware").state == "unknown"  # not checked yet
     await drv.async_poll()
+    await drv._slow_job  # checked in the background, never inside the poll
     await drv.async_poll()
     assert len(checks) == 1  # twice a day, not every poll
     cam = hub.states.get("update.garage_camera_1_firmware")
@@ -530,3 +535,110 @@ async def test_reolink_firmware_is_read_only_and_what_reolink_aio_cannot_do_is_d
     hub_fw = hub.states.get("update.reolink_hub_firmware")
     assert hub_fw.state == "off" and hub_fw.attributes["latest_version"] == "v3.0.0.1"
     assert hub.states.get("button.garage_camera_1_pre_siren") is None
+
+
+# -- a slow hub never stalls the poll ---------------------------------------------------------------------
+
+async def test_reolink_a_slow_state_read_fails_inside_its_own_budget_and_drops_the_session(fake_host, monkeypatch):
+    monkeypatch.setattr(reolink, "POLL_READ_TIMEOUT_S", 0.05)
+    hub, entry = reolink_hub()
+    drv = reolink.ReolinkDriver(hub, entry)
+    await drv.async_setup()
+    host = fake_host.instances[0]
+    drv._firmware_checked = time.monotonic()  # nothing slow is due
+    expired = []
+
+    async def stuck(wake=True, cmd_list=None):
+        await asyncio.Event().wait()
+
+    async def expire_session(unsubscribe=True):
+        expired.append(unsubscribe)
+
+    host.get_states = stuck
+    host.expire_session = expire_session
+    started = time.monotonic()
+    with pytest.raises(reolink.DeviceUnavailable) as raised:
+        await drv.async_poll()
+    assert time.monotonic() - started < 1.0
+    assert "state read: no answer in 0.05 s" in str(raised.value)
+    assert expired == [False]  # the stuck session is dropped, the push subscription kept
+    # A single failed poll leaves the entities as they were (the runtime decides after several).
+    assert hub.states.get("light.reolink_hub_status_led").state == "on"
+
+
+async def test_reolink_the_hourly_wake_read_never_holds_up_a_poll(fake_host):
+    hub, entry = reolink_hub()
+    drv = reolink.ReolinkDriver(hub, entry)
+    await drv.async_setup()
+    host = fake_host.instances[0]
+    drv._firmware_checked = time.monotonic()
+    drv._last_wake -= reolink.BATTERY_WAKE_S + 1
+    release = asyncio.Event()
+    reads = []
+
+    async def slow_when_waking(wake=True, cmd_list=None):
+        reads.append(wake)
+        if any(wake.values()):
+            await release.wait()
+
+    host.get_states = slow_when_waking
+    await asyncio.wait_for(drv.async_poll(), 1.0)  # starts the wake read and returns
+    for _ in range(5):
+        await asyncio.sleep(0)  # let the background job begin
+    assert drv._waking and reads == [{0: True, 1: True}]
+    await asyncio.wait_for(drv.async_poll(), 1.0)  # the wake read covers it: no second read meanwhile
+    assert reads == [{0: True, 1: True}]
+    release.set()
+    await drv._slow_job
+    await drv.async_poll()
+    assert reads[-1] == {0: False, 1: False} and not drv._waking
+
+
+async def test_reolink_push_fed_sensors_are_only_the_live_pushes(fake_host):
+    hub, entry = reolink_hub()
+    drv = reolink.ReolinkDriver(hub, entry)
+    await drv.async_setup()
+    host = fake_host.instances[0]
+    assert drv.push_fed_entities() == {"binary_sensor.garage_camera_1_motion", "binary_sensor.garage_camera_1_person",
+                                       "binary_sensor.backyard_camera_1_motion"}
+    host.online[1] = False
+    assert "binary_sensor.backyard_camera_1_motion" not in drv.push_fed_entities()
+    host.baichuan.events_active = False
+    assert drv.push_fed_entities() == set()
+
+
+async def test_reolink_failed_polls_keep_push_fed_sensors_available_in_the_runtime(fake_host, monkeypatch):
+    from services.homehub import runtime as runtime_mod
+
+    hub, entry = reolink_hub()
+    drv = reolink.ReolinkDriver(hub, entry)
+    await drv.async_setup()
+    host = fake_host.instances[0]
+    drv._firmware_checked = time.monotonic()
+
+    async def refused(wake=True, cmd_list=None):
+        from reolink_aio.exceptions import ReolinkConnectionError
+
+        raise ReolinkConnectionError("connection reset")
+
+    async def expire_session(unsubscribe=True):
+        return None
+
+    host.get_states = refused
+    host.expire_session = expire_session
+    monkeypatch.setattr(drv, "poll_interval", 0.001)
+    rt = runtime_mod.Runtime(hub, store=None)
+    task = asyncio.create_task(rt._poll_forever(entry, drv))
+    try:
+        for _ in range(2000):
+            if hub.states.get("light.reolink_hub_status_led").state == "unavailable":
+                break
+            await asyncio.sleep(0.002)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert hub.states.get("light.reolink_hub_status_led").state == "unavailable"
+    assert hub.states.get("binary_sensor.garage_camera_1_motion").state != "unavailable"  # the push still tells
+    host.motion[0] = True
+    host.baichuan.callbacks["homehub"]()
+    assert hub.states.get("binary_sensor.garage_camera_1_motion").state == "on"
