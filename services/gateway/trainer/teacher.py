@@ -172,6 +172,35 @@ def import_traces(traces: list[Any], *, uploader: str) -> dict[str, Any]:
     return {"accepted": accepted, "updated": updated, "refused": refused}
 
 
+#: Accounts in the directory that are not people.
+_SERVICE_ACCOUNTS = {"default", "anonymous", "household", "system", "jarvis", "raven", "admin"}
+
+
+def household_name_words(directory: Any) -> list[str]:
+    """Every name the scrubber should mask, from Identity's family directory.
+
+    Usernames, Nextcloud accounts, full display names and each word of them
+    (so a two-word display name also masks each word alone). Service accounts
+    and words of fewer than three letters are left out.
+    """
+    if not isinstance(directory, list):
+        return []
+    words: set[str] = set()
+    for member in directory:
+        if not isinstance(member, dict):
+            continue
+        username = str(member.get("username") or "").strip()
+        if not username or username.lower() in _SERVICE_ACCOUNTS:
+            continue
+        for value in (username, member.get("nextcloud_user"), member.get("display_name")):
+            text = str(value or "").strip()
+            if not text:
+                continue
+            candidates = {text, *re.split(r"[\s._-]+", text)}
+            words.update(c for c in candidates if len(c) >= 3 and c.lower() not in _SERVICE_ACCOUNTS)
+    return sorted(words, key=str.lower)
+
+
 def load_trace(trace_id: str) -> dict[str, Any] | None:
     if not _TRACE_ID.match(trace_id or ""):
         return None
@@ -751,4 +780,11 @@ def summary(report_limit: int = 30) -> dict[str, Any]:
         "scores": score_history(report_limit),
         "exports": _read_json(teacher_dir() / "exports.json", {"exports": []})["exports"][:5],
         "scrub_version": scrub_mod.SCRUB_VERSION,
+        "health": _health(),
     }
+
+
+def _health() -> dict[str, Any]:
+    from services.gateway.trainer import teacher_auto
+
+    return teacher_auto.health()

@@ -159,6 +159,7 @@ class RavenWorker:
         self._songs_task = None
         self._reminders_task = None
         self._trainer_task = None
+        self._teacher_task = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         # Initialize the self-repair cooldown here rather than lazily behind a
@@ -252,6 +253,7 @@ class RavenWorker:
         self._songs_task = self._loop.create_task(self._songs_loop())
         self._reminders_task = self._loop.create_task(self._private_chat_reminders_loop())
         self._trainer_task = self._loop.create_task(self._trainer_loop())
+        self._teacher_task = self._loop.create_task(self._teacher_loop())
         log.info(
             "Raven Background Worker (Health + Inference + Talk Monitor + Chat Notify + Cleanup + "
             "Admin Alerts + Trainer) started."
@@ -273,7 +275,7 @@ class RavenWorker:
     async def _shutdown(self):
         for t in (self._health_task, self._inference_task, self._talk_task,
                   self._chat_notify_task, self._cleanup_task, self._admin_alerts_task, self._songs_task,
-                  self._reminders_task, self._trainer_task):
+                  self._reminders_task, self._trainer_task, self._teacher_task):
             if t is not None:
                 t.cancel()
         # The inference loop cancels and awaits its in-flight jobs in its own
@@ -407,6 +409,45 @@ class RavenWorker:
                 await asyncio.sleep(1)
 
         log.info("Trainer loop stopped.")
+
+    async def _teacher_loop(self):
+        """Teacher traces, hands-off: lessons, evaluation, snapshots, sync health.
+
+        Runs every ``teacher_auto.PASS_SECONDS`` while ``trainer_teacher_auto``
+        is true (the default). Writing lessons and checking the Mac's heartbeat
+        never touch the model; the evaluation itself waits for an idle card
+        (Alpaca's readiness gate). ``raven_suspended`` pauses the whole pass.
+        """
+        from services.gateway.trainer import teacher_auto
+
+        log.info("Teacher loop started.")
+        await asyncio.sleep(teacher_auto.START_DELAY_S)  # let the gateway finish starting first
+        while self.is_running:
+            try:
+                from services.gateway.agent_loop import get_dynamic_llm_settings
+
+                settings = await get_dynamic_llm_settings()
+                suspended = str(settings.get("raven_suspended") or "false").lower() == "true"
+                if not settings:
+                    log.warning("[Teacher] Identity settings could not be read; skipping this pass.")
+                elif not suspended and await self.job_queue.claim_loop(
+                    "trainer-teacher", self._lease_token, teacher_auto.PASS_SECONDS * 2
+                ):
+                    async def notify(notice: dict) -> bool:
+                        from services.gateway.admin_alerts import notify_admins
+
+                        async with _shared_http_client() as client:
+                            return await notify_admins(client, notice)
+
+                    done = await teacher_auto.run_pass(settings, notify=notify)
+                    log.info("[Teacher] pass: %s", done)
+            except Exception as e:
+                log.warning(f"Teacher loop error: {e}")
+            for _ in range(teacher_auto.PASS_SECONDS):
+                if not self.is_running:
+                    break
+                await asyncio.sleep(1)
+        log.info("Teacher loop stopped.")
 
     async def _inference_loop(self):
         """Claim jobs continuously and run each one in its own task.

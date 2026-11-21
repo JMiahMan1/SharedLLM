@@ -512,3 +512,72 @@ async def teacher_dataset(request: Request, body: TeacherDatasetRequest) -> dict
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except runner.TrainerStorageError as exc:
         raise _storage_error(exc) from exc
+
+
+class TeacherHeartbeat(BaseModel):
+    """What the Mac reports after each sync or flush: counts and an error line only."""
+
+    command: str = Field(default="sync", max_length=20)
+    ok: bool
+    queue_length: int = Field(default=0, ge=0)
+    pending_sessions: int = Field(default=0, ge=0)
+    tasks: int = Field(default=0, ge=0)
+    sent: int = Field(default=0, ge=0)
+    error: str | None = Field(default=None, max_length=1000)
+
+
+@router.post("/teacher/heartbeat")
+async def teacher_heartbeat(request: Request, body: TeacherHeartbeat) -> dict[str, Any]:
+    """Record the Mac's last sync, so a silent or failing collector is noticed."""
+    from services.gateway.trainer import teacher_auto
+
+    user = await _uploader(request)
+    try:
+        return teacher_auto.record_heartbeat(body.model_dump(), uploader=user)
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+
+
+@router.get("/teacher/status")
+async def teacher_status(request: Request) -> dict[str, Any]:
+    """Last sync, queue length, last lesson write, last eval, last snapshot, failures."""
+    from services.gateway.trainer import teacher_auto
+
+    await _admin(request)
+    try:
+        return teacher_auto.health()
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+
+
+@router.get("/teacher/scrub-names")
+async def teacher_scrub_names(request: Request) -> dict[str, Any]:
+    """The household's names, for the Mac's scrubber to mask (uploader accounts only).
+
+    Read from Identity's family directory with the caller's own key, so the
+    collector never needs a hand-made names file. Only name words are returned.
+    """
+    import aiohttp
+
+    from services.gateway.config import IDENTITY_SVC
+    from services.gateway.http_client import shared_http_client
+
+    await _uploader(request)
+    auth = request.headers.get("Authorization")
+    if not auth:
+        raise HTTPException(status_code=400, detail="Send the uploader key as a bearer token")
+    try:
+        async with shared_http_client() as client, client.get(
+            f"{IDENTITY_SVC}/api/users/family-directory",
+            headers={"Authorization": auth},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        ) as resp:
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail=f"Identity answered {resp.status} for the family directory")
+            directory = await resp.json()
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        raise HTTPException(status_code=503, detail=f"Identity did not answer: {type(exc).__name__}") from exc
+    names = teacher_mod.household_name_words(directory)
+    if not names:
+        raise HTTPException(status_code=502, detail="The family directory listed no names")
+    return {"names": names}

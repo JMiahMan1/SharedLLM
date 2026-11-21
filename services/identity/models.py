@@ -575,6 +575,10 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "trainer_cycle_interval_minutes", "value": "0", "description": "How often the background trainer runs one bounded improve cycle (dream, evaluate a few cases, rank proposals). 0 leaves it off: the local model is shared with the household. See docs/JARVIS_TRAINER.md."},
     {"key": "trainer_wait_for_slot", "value": "true", "description": "Before each trainer model call, wait for a free llama-server slot on the model host (Alpaca /api/queue/wait) instead of competing with the household. false: call immediately. See docs/JARVIS_TRAINER.md."},
     {"key": "trainer_slot_wait_seconds", "value": "45", "description": "How long a trainer model call waits for a free slot before giving up (the run records the host as busy). Only used when trainer_wait_for_slot is true."},
+    {"key": "trainer_teacher_auto", "value": "true", "description": "Run the teacher-trace pass every 30 minutes: write worked-example lessons from new verified traces, evaluate the teacher bucket when due on an idle card, export a dataset snapshot, and watch the Mac's sync. false turns it off. See docs/TEACHER_TRACES.md."},
+    {"key": "trainer_teacher_eval_interval_hours", "value": "24", "description": "How often the local model is evaluated on the teacher bucket (only when the model host is idle). See docs/TEACHER_TRACES.md."},
+    {"key": "trainer_teacher_snapshot_every", "value": "100", "description": "Export a fine-tuning snapshot of the teacher traces once this many new verified traces have arrived since the last one; admins are told when it is ready."},
+    {"key": "trainer_teacher_sync_stale_minutes", "value": "180", "description": "Admins are told when the Mac has not reported a teacher-trace sync for this long (the launchd agent runs every 30 minutes)."},
 
     # --- SPOTIFY LINKING (Phase 11, music everywhere; docs/HEALTH_HUB.md) ---
     # The household's own app at developer.spotify.com. All three empty: linking says "not configured".
