@@ -12781,6 +12781,49 @@ async def _build_raven_system_prompt(query: str) -> str:
     )
 
 
+def _mission_owner_id(creds: dict) -> int:
+    """The numeric Identity id of the person who owns a new mission.
+
+    400 when ``creds`` is not a real user (the household, anonymous, or an
+    internal caller that named nobody): a mission must have an owner.
+    """
+    for key in ("user_id", "id"):
+        value = creds.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+    who = creds.get("user") or "this caller"
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"A Raven mission needs a real user as its owner, and '{who}' is not one. "
+            "Sign in with your own API key; internal callers must send X-User-Id."
+        ),
+    )
+
+
+async def _mission_creds_from_request(request: Request) -> Any:
+    """Credentials of the person acting on a mission (every /api/raven/missions route).
+
+    A user's API key is resolved as usual. An internal caller (the internal
+    secret, no API key) must name the person with ``X-User-Id`` (a username or a
+    numeric id); without it the request is a 400 here, instead of acting as the
+    household and failing at Identity with a 422.
+    """
+    if not _presented_api_key(request) and secret_matches(
+        request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET
+    ):
+        named = (request.headers.get("X-User-Id") or "").strip()
+        if not named:
+            raise HTTPException(status_code=400, detail="internal callers must send X-User-Id")
+        payload: dict[str, Any] = {"user_id": int(named)} if named.isdigit() else {"rag_user": named}
+        return await resolve_identity(payload)
+    return await _resolve_identity_from_request(request)
+
+
 async def _enqueue_user_mission(
     *,
     query: str,
@@ -12821,8 +12864,10 @@ async def _enqueue_user_mission(
         raise RuntimeError("No coding model configured. Mission cannot be dispatched.")
 
     # Identity returns the caller's numeric id as "id"; older payloads used
-    # "user_id". Accept both so a mission is never persisted ownerless.
-    owner_user = creds.get("user_id") or creds.get("id") or creds.get("user")
+    # "user_id". A mission is owned by a real person: the household and
+    # anonymous identities have no id, and their name ("household") sent as
+    # user_id was answered 422 by Identity after the request had been accepted.
+    owner_user = _mission_owner_id(creds)
 
     mission_payload = {
         "slug": slug,
@@ -12881,9 +12926,14 @@ async def _enqueue_user_mission(
 
 @app.post("/api/raven/missions")
 async def create_user_mission(body: UserMissionRequest, request: Request):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    if hasattr(creds, "model_dump"):
+        creds = creds.model_dump()
+    # Fail before the coding-model lookup and the prompt build: an ownerless
+    # mission is refused, not half-dispatched.
+    _mission_owner_id(creds)
 
     try:
         settings = await get_llm_settings()
@@ -12918,7 +12968,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
 
 @app.get("/api/raven/missions/{id_or_slug}")
 async def get_mission_details(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -12969,7 +13019,7 @@ async def _signal_mission(mission_id, kind: str, value: str, *, clear: bool = Fa
 
 @app.post("/api/raven/missions/{id_or_slug}/kill")
 async def kill_mission(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13077,7 +13127,7 @@ async def cancel_mission(request: Request, id_or_slug: str):
 
 @app.post("/api/raven/missions/{id_or_slug}/pause")
 async def pause_mission(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13096,7 +13146,7 @@ async def pause_mission(request: Request, id_or_slug: str):
 
 @app.post("/api/raven/missions/{id_or_slug}/resume")
 async def resume_mission(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13118,7 +13168,7 @@ class MissionRefineRequest(BaseModel):
 
 @app.post("/api/raven/missions/{id_or_slug}/refine")
 async def refine_mission(request: Request, id_or_slug: str, body: MissionRefineRequest):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13191,7 +13241,7 @@ async def refine_mission(request: Request, id_or_slug: str, body: MissionRefineR
 
 @app.delete("/api/raven/missions/{id_or_slug}")
 async def delete_mission(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13209,7 +13259,7 @@ async def delete_mission(request: Request, id_or_slug: str):
 
 @app.get("/api/raven/missions")
 async def get_user_missions(request: Request):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13287,7 +13337,7 @@ async def proxy_docker_exec(service_name: str, body: dict[str, Any], request: Re
 
 @app.get("/api/raven/missions/{id_or_slug}/logs")
 async def get_mission_logs(id_or_slug: str, request: Request):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
