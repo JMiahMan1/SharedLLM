@@ -743,11 +743,11 @@ function PlannerTab({
     onError: (err) => toast.error(failureText(err)),
   });
 
-  useEffect(() => {
-    if (!plans.some((plan) => plan.id === activePlanId)) {
-      setActivePlanId(plans[0]?.id ?? null);
-    }
-  }, [plans, activePlanId]);
+  // A plan that no longer exists falls back to the first (during render).
+  const firstPlanId = plans[0]?.id ?? null;
+  if (!plans.some((plan) => plan.id === activePlanId) && activePlanId !== firstPlanId) {
+    setActivePlanId(firstPlanId);
+  }
 
   const bedLocations = locations.filter((location) =>
     // Every outdoor place a plan can plant in -- a trellis and an orchard are
@@ -1748,9 +1748,12 @@ function DigestSettingsModal({
   const queryClient = useQueryClient();
   const [digestTime, setDigestTime] = useState(initialDigestTime);
 
-  useEffect(() => {
+  // Follows the saved time when it changes (set during render, not in an effect).
+  const [digestOf, setDigestOf] = useState(initialDigestTime);
+  if (initialDigestTime !== digestOf) {
+    setDigestOf(initialDigestTime);
     setDigestTime(initialDigestTime);
-  }, [initialDigestTime]);
+  }
 
   const saveMutation = useMutation({
     mutationFn: async (time: string) => {
@@ -2146,7 +2149,7 @@ function AddPlantModal({
         light_level: lookupDraft.light_level ?? undefined,
         temp_min_f: lookupDraft.temp_min_f ?? undefined,
         temp_max_f: lookupDraft.temp_max_f ?? undefined,
-        cold_draft_sensitive: Boolean(lookupDraft.cold_draft_sensitive) ?? undefined,
+        cold_draft_sensitive: Boolean(lookupDraft.cold_draft_sensitive),
         humidity_band: lookupDraft.humidity_band ?? undefined,
         misting_rule: lookupDraft.misting_rule ?? undefined,
         soil_mix: lookupDraft.soil_mix ?? undefined,

@@ -475,6 +475,9 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
     # minutes, in case this session dies before it can clear it. "app" says
     # whether the web app itself is in this deploy (a browser can reload).
     mkdir -p data/deploy_status
+    # Created here, as the deploying user, so the gateway (PUID) can write its
+    # trainer reports; a directory Docker creates for a bind mount is root's.
+    mkdir -p data/trainer
     deploy_status() {
         printf '{"updating": %s, "at": %s, "app": %s}\n' "\$1" "\$(date +%s)" "\$2" > data/deploy_status/.status.json.tmp \
             && mv -f data/deploy_status/.status.json.tmp data/deploy_status/status.json \

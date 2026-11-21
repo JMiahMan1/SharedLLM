@@ -7,9 +7,10 @@ Raven will create the game, test it, and push to GitHub.
 """
 
 import os
-import httpx
-import time
 import sys
+import time
+
+import httpx
 
 MISSION_SPEC = {
     "query": """
@@ -60,8 +61,17 @@ Build a Python space shooter game using pygame.
 }
 
 
+
+def _mission_user() -> str:
+    """The username (or id) that owns the mission, from MISSION_USER."""
+    user = os.getenv("MISSION_USER", "").strip()
+    if not user:
+        print("ERROR: MISSION_USER required (the user who owns the mission)")
+        sys.exit(1)
+    return user
+
 def dispatch_mission(gateway_url: str, internal_secret: str, mission: dict = MISSION_SPEC) -> dict:
-    headers = {"X-Internal-Secret": internal_secret, "Content-Type": "application/json"}
+    headers = {"X-Internal-Secret": internal_secret, "X-User-Id": _mission_user(), "Content-Type": "application/json"}
     with httpx.Client(timeout=60.0) as client:
         resp = client.post(f"{gateway_url}/api/raven/missions", json=mission, headers=headers)
         resp.raise_for_status()
@@ -69,7 +79,7 @@ def dispatch_mission(gateway_url: str, internal_secret: str, mission: dict = MIS
 
 
 def wait_for_mission(gateway_url: str, internal_secret: str, mission_id: int, timeout: int = 1800) -> dict:
-    headers = {"X-Internal-Secret": internal_secret}
+    headers = {"X-Internal-Secret": internal_secret, "X-User-Id": _mission_user()}
     deadline = time.time() + timeout
     with httpx.Client(timeout=30.0) as client:
         while time.time() < deadline:
@@ -90,12 +100,12 @@ def main():
     if not internal_secret:
         print("ERROR: INTERNAL_SECRET required")
         sys.exit(1)
-    
+
     print(f"Dispatching: {MISSION_SPEC['slug']}")
     result = dispatch_mission(gateway_url, internal_secret, MISSION_SPEC)
     mission_id = result.get("mission", {}).get("id")
     print(f"Mission #{mission_id} dispatched")
-    
+
     final = wait_for_mission(gateway_url, internal_secret, mission_id)
     print(f"Final: {final.get('status')}")
     if final.get("status") != "completed":

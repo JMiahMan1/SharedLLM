@@ -29,6 +29,8 @@ from services.gateway.llm_providers import get_provider
 from services.gateway.location_query import parse_location_query
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
+from services.gateway.studio import actions as studio_actions
+from services.gateway.studio import tools as studio_tools
 from services.gateway.tool_registry import hub_tool_guide, names_withheld_hub_tool, single_turn_tools
 
 log = logging.getLogger("gateway.orchestrator")
@@ -535,12 +537,19 @@ _SINGLE_TURN_ONLY_TOOLS: dict[str, tuple[str, str]] = {
     # Location is answered for chat and voice; Raven has no use for it.
     "locationrequest": ("execution", "/execute/location"),
 }
+#: Service key of the tools the gateway runs itself (the Workspace Studio).
+GATEWAY_IN_PROCESS = "gateway_in_process"
+
 _SERVICE_SETTINGS_KEY = {
     "execution": "execution_svc_url",
     "workspace_runtime": "workspace_runtime_svc_url",
     "rag": "rag_svc_url",
     "storage": "storage_svc_url",
     "identity": "identity_svc_url",
+    # The Workspace Studio lives in this process: _execute_single_tool runs its
+    # rows in-process (studio/tools.py), never over HTTP. The key names no URL
+    # setting, so a row that ever reached the HTTP path fails loudly.
+    "gateway": GATEWAY_IN_PROCESS,
 }
 _SINGLE_TURN_TOOLS = {**single_turn_tools(), **_SINGLE_TURN_ONLY_TOOLS}
 
@@ -548,6 +557,8 @@ _SINGLE_TURN_TOOLS = {**single_turn_tools(), **_SINGLE_TURN_ONLY_TOOLS}
 SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {name: path for name, (_svc, path) in _SINGLE_TURN_TOOLS.items()}
 
 # Tool -> service settings key, for every tool not on the execution service.
+# Gateway rows (the Workspace Studio) map to GATEWAY_IN_PROCESS and are run
+# in-process by _execute_single_tool.
 _TOOL_SERVICE_MAP = {
     name: _SERVICE_SETTINGS_KEY[svc]
     for name, (svc, _path) in _SINGLE_TURN_TOOLS.items()
@@ -864,13 +875,19 @@ async def _fetch_rag_context(
             from services.gateway.main import shared_http_client
             async with shared_http_client() as client:
                 try:
+                    # Every seeded lesson, by id: a newest-first page of
+                    # `tag=protocol` dropped the oldest, most basic ones.
                     _pr = await client.get(
-                        f"{rag_svc}/rag/learning",
-                        params={"tag": "protocol", "limit": 25},
+                        f"{rag_svc}/rag/learning/protocol",
                         headers={"X-Internal-Secret": INTERNAL_SECRET},
                         timeout=aiohttp.ClientTimeout(total=5.0),
                     )
-                    if _pr.status == 200:
+                    if _pr.status != 200:
+                        log.error(
+                            f"[Orchestrator] protocol curriculum unavailable: HTTP {_pr.status} "
+                            f"{(await _pr.text())[:300]}"
+                        )
+                    else:
                         _proto = (await _pr.json()).get("items") or []
                         if _proto:
                             rag_context += (
@@ -1394,9 +1411,24 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
             log.error(f"Control Plane execution error: {e}")
             return f"Control Plane execution failed: {e}"
 
+    elif studio_tools.tool_for(action):
+        # The Workspace Studio runs in this process, as the turn's user, through
+        # the same handlers as /api/studio/* (services/gateway/studio/tools.py).
+        payload = tool_data.get("payload", tool_data)
+        try:
+            result = await studio_tools.call(
+                action, payload if isinstance(payload, dict) else {},
+                user=creds.user, workspace_id=workspace_id,
+            )
+        except studio_actions.StudioActionError as exc:
+            return f"Sorry, I couldn't complete that action: {exc.detail} (HTTP {exc.status})"
+        return studio_tools.summarize(action, result)
+
     elif action in SINGLE_TURN_TOOL_ENDPOINTS:
         endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
         svc_key = _TOOL_SERVICE_MAP.get(action, "execution_svc_url")
+        if svc_key == GATEWAY_IN_PROCESS:
+            raise RuntimeError(f"{action} is a gateway tool and must run in-process, not over HTTP")
         svc_base = _get(settings, svc_key)
 
         try:

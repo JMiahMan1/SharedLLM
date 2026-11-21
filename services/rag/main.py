@@ -486,19 +486,19 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-studio",
         "topic": "Workspace protocol: run, preview and make things with the studio",
-        "rule": "In a workspace never guess a build or test command: GET /api/studio/profile names the stack (python, node-vite, node-next, go, rust, java, dotnet, static) and its exact install/test/build/lint/serve steps; POST /api/studio/run runs one in the sandbox and returns the exit code and output. POST /api/studio/preview starts the dev server, publishes its port and returns a URL (POST /api/studio/preview/stop closes it). For media use POST /api/studio/assets/image (prompt, name) or /api/studio/assets/narration (text, name), which write into assets/; for written work POST /api/studio/deck (Markdown, '---' between slides) or /api/studio/game.",
+        "rule": "In a workspace never guess a build or test command: the StudioProfileRequest tool names the stack (python, node-vite, node-next, go, rust, java, dotnet, static) and its exact install/test/build/lint/serve steps; StudioRunRequest {action: install|test|build|lint} runs one in the sandbox and returns the exit code and output (a test step that ran no tests is a failure). StudioPreviewRequest starts the dev server, publishes its port and returns a URL (StudioPreviewStopRequest closes it). For media use StudioImageRequest {prompt, name} or StudioNarrationRequest {text, name}, which write into assets/; for written work StudioDeckRequest {markdown with '---' between slides, title} or StudioGameRequest {title, sprites}. An existing deck or game is never overwritten unless you pass replace: true.",
         "tags": ["protocol", "workspace", "studio", "coding", "media"],
     },
     {
         "id": "lesson-proto-studio-verify",
         "topic": "Workspace protocol: prove the workspace works, and edit 3D models",
-        "rule": "Before blaming your own code for a workspace failure call POST /api/studio/diagnose {workspace_id}: it runs safe probes (identity, HOME writability, the working directory, /bin/bash, python3, git) and returns each one's output plus a hint naming the cause. POST /api/studio/verify {workspace_id} goes further: it writes a one-line program, runs it, deletes it, then runs the project's test step, and returns one verdict -- so 'it works' is proven, not assumed.",
+        "rule": "Before blaming your own code for a workspace failure call the StudioDiagnoseRequest tool: it runs safe probes (identity, HOME writability, the working directory, /bin/bash, python3, git) and returns each one's output plus a hint naming the cause. StudioVerifyRequest goes further: it writes a one-line program, runs it, deletes it, then runs the project's test step, and returns one verdict -- so 'it works' is proven, not assumed. A broken shell stops the check there, and a run with no tests is not a pass.",
         "tags": ["protocol", "workspace", "studio", "shell", "testing"],
     },
     {
         "id": "lesson-proto-studio-3d",
         "topic": "Workspace protocol: reading and editing STL models",
-        "rule": "STL files are read and edited in the gateway, not by guessing: POST /api/studio/stl/inspect {workspace_id, path} returns triangles, size, volume, area, whether the mesh is watertight and every warning (open surface, inside-out winding, no-area facets, unit guess). POST /api/studio/stl/transform {workspace_id, path, scale (number or [x,y,z]), rotate [x,y,z] degrees, translate [x,y,z], fit (longest side), center, format binary|ascii, out_path} writes a NEW file (default <name>_edited.stl) and returns the measurements before and after -- quote both. GET /api/studio/stl/preview returns an indexed mesh for drawing. STL is unitless: say which unit you assumed (mm unless the model is metres across).",
+        "rule": "STL files are read and edited in the gateway, not by guessing: the StlInspectRequest tool {path} returns triangles, size, volume, area, whether the mesh is watertight and every warning (open surface, inside-out winding, no-area facets, unit guess). StlTransformRequest {path, scale (number or [x,y,z]), rotate [x,y,z] degrees, translate [x,y,z], fit (longest side), center, format binary|ascii, out_path} writes a NEW file (default the first free <name>_edited.stl; an existing out_path needs replace: true) and returns the measurements before and after -- quote both. Paths are relative to the workspace and must end in .stl. STL is unitless: say which unit you assumed (mm unless the model is metres across).",
         "tags": ["protocol", "workspace", "studio", "3d", "stl"],
     },
     {
@@ -1088,6 +1088,42 @@ async def list_collection_documents(
         log.error(f"Failed to list collection {collection_name}: {e}")
         # A 200 with {"status": "ERROR"} is not an error to any HTTP client.
         raise HTTPException(status_code=500, detail="Could not list that collection") from e
+
+
+@app.get("/rag/learning/protocol", dependencies=[Depends(require_internal)])
+async def list_protocol_lessons():
+    """Every seeded protocol lesson, in curriculum order, with no limit.
+
+    The gateway pins these into every Raven prompt. It used to ask
+    ``/rag/learning?tag=protocol&limit=25`` (newest first): with more than 25
+    tagged lessons the oldest, most basic ones fell out of every prompt.
+    Asking by the seeded ids returns exactly the curriculum, whatever else is
+    tagged ``protocol``. A seeded lesson missing from the store is a 500.
+    """
+    ids = [lesson["id"] for lesson in _PROTOCOL_LESSONS]
+    placeholders = ",".join("?" for _ in ids)
+    rows = _conn().execute(
+        f"SELECT id, content, metadata, created_at, usage_count, applied_count "
+        f"FROM rag_items WHERE collection_name = ? AND user_id = ? AND id IN ({placeholders})",
+        ["system_learnings", "default", *ids],
+    ).fetchall()
+    by_id = {r["id"]: r for r in rows}
+    missing = [i for i in ids if i not in by_id]
+    if missing:
+        log.error(f"[RAG] Seeded protocol lessons missing from the store: {missing}")
+        raise HTTPException(status_code=500, detail=f"Protocol lessons missing: {', '.join(missing)}")
+    items = [
+        {
+            "id": i,
+            "content": by_id[i]["content"],
+            "metadata": json.loads(by_id[i]["metadata"]),
+            "created_at": by_id[i]["created_at"],
+            "usage_count": by_id[i]["usage_count"] or 0,
+            "applied_count": by_id[i]["applied_count"] or 0,
+        }
+        for i in ids
+    ]
+    return {"status": "SUCCESS", "collection": "system_learnings", "count": len(items), "items": items}
 
 
 @app.get("/rag/learning", dependencies=[Depends(require_internal)])

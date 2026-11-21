@@ -80,7 +80,15 @@ export default function TrainerPane() {
 
   return (
     <div className="space-y-8">
-      <HostCard hardware={hardwareQuery.data} models={modelsQuery.data} benchmarks={benchmarksQuery.data} />
+      <HostCard
+        hardware={hardwareQuery.data}
+        models={modelsQuery.data}
+        benchmarks={benchmarksQuery.data}
+        modelsError={modelsQuery.isError ? errorText(modelsQuery.error, 'The model list could not be read') : ''}
+        benchmarksError={
+          benchmarksQuery.isError ? errorText(benchmarksQuery.error, 'The benchmark results could not be read') : ''
+        }
+      />
       <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -274,10 +282,14 @@ function HostCard({
   hardware,
   models,
   benchmarks,
+  modelsError = '',
+  benchmarksError = '',
 }: {
   hardware?: Awaited<ReturnType<typeof api.trainerHardware>>;
   models?: Awaited<ReturnType<typeof api.trainerModels>>;
   benchmarks?: Awaited<ReturnType<typeof api.trainerBenchmarks>>;
+  modelsError?: string;
+  benchmarksError?: string;
 }) {
   const verdict = hardwareVerdict(hardware);
   const loaded = (hardware?.loaded_models ?? []).map((item) => item.model).filter(Boolean) as string[];
@@ -315,7 +327,8 @@ function HostCard({
         {models?.trainer_model_missing ? (
           <span className="text-amber-300">
             {' '}
-            — trainer_model names a model this host does not have; the trainer is using the first available one.
+            trainer_model names a model this host does not have, so training will not run until it is installed
+            or the setting is changed.
           </span>
         ) : null}
         {hardware?.context_length ? ` · ${hardware.context_length} token context` : ''}
@@ -325,9 +338,9 @@ function HostCard({
         Benchmark: <span className="text-slate-300">{benchmarkLine(benchmarks)}</span>
         {benchmarks?.chosen_model ? ` · ${benchmarks.chosen_model}` : ''}
       </p>
-      {(hardware?.errors ?? []).length ? (
+      {[...(hardware?.errors ?? []), modelsError, benchmarksError].filter(Boolean).length ? (
         <ul className="mt-2 list-disc pl-5 text-[11px] text-amber-300">
-          {(hardware?.errors ?? []).map((error) => (
+          {[...(hardware?.errors ?? []), modelsError, benchmarksError].filter(Boolean).map((error) => (
             <li key={error}>{error}</li>
           ))}
         </ul>

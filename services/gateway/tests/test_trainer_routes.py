@@ -294,3 +294,75 @@ def test_benchmark_ingest_reports_a_rag_outage(client, monkeypatch):
 
     assert resp.status_code == 503
     assert "did not answer" in resp.json()["detail"]
+
+
+def test_a_second_cycle_while_one_runs_is_a_409(client, monkeypatch):
+    async def busy_cycle(**kwargs):
+        raise facilitator.CycleBusy("A trainer cycle is already running; wait for it to finish.")
+
+    monkeypatch.setattr(facilitator, "cycle", busy_cycle)
+
+    resp = client.post("/api/trainer/cycle", json={"limit": 1})
+
+    assert resp.status_code == 409
+    assert "already running" in resp.json()["detail"]
+
+
+def test_a_cycle_repair_with_unbounded_attempts_is_refused(client, monkeypatch):
+    called: list[dict] = []
+
+    async def fake_cycle(**kwargs):
+        called.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(facilitator, "cycle", fake_cycle)
+
+    resp = client.post(
+        "/api/trainer/cycle",
+        json={"limit": 1, "repair": {"workspace_id": "w", "path": "a.py", "attempts": 500}},
+    )
+
+    assert resp.status_code == 422
+    assert called == []
+
+
+def test_a_cycle_repair_reaches_the_facilitator_as_checked_fields(client, monkeypatch):
+    seen: dict = {}
+
+    async def fake_cycle(**kwargs):
+        seen.update(kwargs)
+        return {"status": "SUCCESS"}
+
+    monkeypatch.setattr(facilitator, "cycle", fake_cycle)
+
+    resp = client.post(
+        "/api/trainer/cycle",
+        json={"limit": 1, "repair": {"workspace_id": "w", "path": "a.py", "attempts": 2}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert seen["repair"] == {
+        "workspace_id": "w", "path": "a.py", "error_text": None, "test_targets": [], "attempts": 2,
+    }
+
+
+def test_unmounted_benchmarks_are_a_503_not_an_empty_list(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("ALPACA_BENCHMARK_RESULTS_DIR", str(tmp_path / "none-a"))
+    monkeypatch.setenv("ALPACA_SHARED_BENCHMARK_RESULTS_DIR", str(tmp_path / "none-b"))
+
+    resp = client.get("/api/trainer/benchmarks")
+
+    assert resp.status_code == 503
+    assert "ALPACA_BENCHMARK_RESULTS_DIR" in resp.json()["detail"]
+
+
+def test_a_rag_refusal_is_a_502_with_its_words(client, monkeypatch):
+    async def refused():
+        raise dream_module.RagRejected("RAG /rag/benchmark/ingest-results answered 422: bad body", status=422)
+
+    monkeypatch.setattr(dream_module, "ingest_benchmark_results", refused)
+
+    resp = client.post("/api/trainer/benchmarks/ingest")
+
+    assert resp.status_code == 502
+    assert "422" in resp.json()["detail"]

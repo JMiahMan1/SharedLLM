@@ -381,16 +381,22 @@ class RavenWorker:
                 ):
                     from services.gateway.trainer import facilitator
 
-                    summary = await facilitator.cycle(
-                        user="default", limit=6, budget_s=240.0, apply_lessons=True
-                    )
-                    log.info(
-                        "[Trainer] cycle: %s cases, %s passed, %s proposals, %s lessons",
-                        (summary.get("eval") or {}).get("totals", {}).get("cases"),
-                        (summary.get("eval") or {}).get("totals", {}).get("passed"),
-                        len(summary.get("proposals") or []),
-                        len(summary.get("lessons") or []),
-                    )
+                    try:
+                        summary = await facilitator.cycle(
+                            user="default", limit=6, budget_s=240.0, apply_lessons=True
+                        )
+                    except facilitator.CycleBusy:
+                        # A manual cycle (POST /api/trainer/cycle) is running: never two at once.
+                        log.info("[Trainer] a cycle is already running; skipping this pass.")
+                    else:
+                        log.info(
+                            "[Trainer] cycle: %s cases, %s passed, %s proposals, %s lessons, errors: %s",
+                            (summary.get("eval") or {}).get("totals", {}).get("cases"),
+                            (summary.get("eval") or {}).get("totals", {}).get("passed"),
+                            len(summary.get("proposals") or []),
+                            len(summary.get("lessons") or []),
+                            summary.get("errors") or "none",
+                        )
             except Exception as e:
                 log.warning(f"Trainer loop error: {e}")
 

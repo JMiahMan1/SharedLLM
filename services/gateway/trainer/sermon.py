@@ -13,6 +13,7 @@ The finished sermon is written into the workspace through the Workspace API, and
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -47,6 +48,15 @@ _LABEL = re.compile(
 
 class SermonError(RuntimeError):
     """The sermon could not be drafted."""
+
+
+class ExecutionError(RuntimeError):
+    """The execution service refused or failed a call (any non-2xx answer)."""
+
+
+#: A draft never replaces an existing sermon. ``sermons/<slug>.md`` is tried
+#: first, then ``<slug>-2.md`` and so on, each written create-only.
+MAX_NAME_ATTEMPTS = 20
 
 
 @dataclass
@@ -209,17 +219,26 @@ def render_markdown(sermon: Sermon) -> str:
 
 
 async def _execution_post(endpoint: str, payload: dict[str, Any], timeout: float = 120.0) -> dict[str, Any]:
-    """POST to the execution service (the one seam tests replace)."""
+    """POST to the execution service (the one seam tests replace).
+
+    A non-2xx answer raises :class:`ExecutionError` with the service's own words;
+    it used to be returned like a result, so a 500 looked like an empty passage.
+    """
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as client, client.post(
         f"{EXECUTION_SVC}{endpoint}",
         json=payload,
         headers={"X-Internal-Secret": INTERNAL_SECRET},
     ) as resp:
-        try:
-            body = await resp.json(content_type=None)
-        except Exception:
-            body = {"status": "ERROR", "message": (await resp.text())[:500]}
-        return body if isinstance(body, dict) else {"status": "ERROR", "message": str(body)}
+        text = await resp.text()
+        status = resp.status
+    try:
+        body: Any = json.loads(text) if text.strip() else {}
+    except ValueError:
+        body = {"status": "ERROR", "message": text[:500]}
+    if status >= 400:
+        detail = (body.get("detail") or body.get("message")) if isinstance(body, dict) else body
+        raise ExecutionError(f"{endpoint} answered {status}: {str(detail)[:300]}")
+    return body if isinstance(body, dict) else {"status": "ERROR", "message": str(body)}
 
 
 async def fetch_scripture(passage: str, translation: str, user: str) -> str:
@@ -240,11 +259,15 @@ async def fetch_scripture(passage: str, translation: str, user: str) -> str:
     return str(body.get("message") or "").strip()
 
 
-async def _ask(ask: AskFn | None, prompt: str, max_tokens: int, llm_mod: Any) -> tuple[str, str]:
+async def _ask(
+    ask: AskFn | None, prompt: str, max_tokens: int, llm_mod: Any, model: str | None = None
+) -> tuple[str, str]:
     """One model call; returns ``(text, model)``."""
     if ask is not None:
         return str(await ask(prompt, max_tokens=max_tokens) or ""), ""
-    completion = await llm_mod.complete(prompt, max_tokens=max_tokens, context_chars=8000, timeout=300.0)
+    completion = await llm_mod.complete(
+        prompt, model=model, max_tokens=max_tokens, context_chars=8000, timeout=300.0
+    )
     return completion.text, completion.model
 
 
@@ -290,7 +313,13 @@ async def compose_sermon(
         series=series,
         scripture=sermon.scripture,
     )
-    outline_text, model = await _ask(ask, outline_prompt, OUTLINE_MAX_TOKENS, llm_mod)
+    resolved: str | None = None
+    if ask is None:
+        # One model for the outline and every point, checked against the host once.
+        from services.gateway.orchestrator import get_llm_settings
+
+        resolved = await llm_mod.resolve_model(await get_llm_settings())
+    outline_text, model = await _ask(ask, outline_prompt, OUTLINE_MAX_TOKENS, llm_mod, resolved)
     sermon.model = model
     outline = parse_outline(outline_text)
 
@@ -308,7 +337,7 @@ async def compose_sermon(
             tone=tone,
             scripture=sermon.scripture,
         )
-        body, point_model = await _ask(ask, prompt, POINT_MAX_TOKENS, llm_mod)
+        body, point_model = await _ask(ask, prompt, POINT_MAX_TOKENS, llm_mod, resolved)
         sermon.model = sermon.model or point_model
         sermon.points.append({"heading": heading, "text": body.strip()})
 
@@ -321,10 +350,27 @@ async def compose_sermon(
     sermon.words = len(sermon.markdown.split())
 
     if save:
-        slug = slugify(sermon.title)
-        sermon.path = f"sermons/{slug}.md"
-        await ws.write_file(workspace_id, sermon.path, sermon.markdown, user=user)
+        sermon.path = await _save_new(workspace_id, slugify(sermon.title), sermon.markdown, user)
     return sermon
+
+
+async def _save_new(workspace_id: str, slug: str, markdown: str, user: str) -> str:
+    """Write the draft under a name nobody is using; never over an existing sermon.
+
+    Every write is create-only (``expected_sha256="new"``), so the runtime itself
+    refuses to replace a file, even one created a moment ago by someone else.
+    """
+    for attempt in range(1, MAX_NAME_ATTEMPTS + 1):
+        path = f"sermons/{slug}.md" if attempt == 1 else f"sermons/{slug}-{attempt}.md"
+        try:
+            await ws.write_file(workspace_id, path, markdown, expected_sha256=ws.CREATE_ONLY, user=user)
+        except ws.WorkspaceConflict:
+            continue
+        return path
+    raise SermonError(
+        f"sermons/{slug}.md and {MAX_NAME_ATTEMPTS - 1} numbered copies already exist; "
+        "give the sermon a different title."
+    )
 
 
 async def illustrate(

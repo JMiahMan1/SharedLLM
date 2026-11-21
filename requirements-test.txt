@@ -11,3 +11,4 @@ sqlmodel>=0.0.14
 cryptography>=41.0.0
 ruff>=0.3.0
 flake8>=7.0.0
+fakeredis[lua]>=2.20

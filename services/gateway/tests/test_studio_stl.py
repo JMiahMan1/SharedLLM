@@ -160,12 +160,14 @@ def workspace(monkeypatch):
     """A workspace holding one STL; records whatever is written back."""
     state = {"files": {"parts/bracket.stl": binary_of(TETRA)}, "written": []}
 
-    async def fake_read_bytes(workspace_id, path, **kwargs):
+    async def fake_read_bytes(workspace_id, path, *, user, max_bytes=64 * 1024 * 1024, timeout=120.0):
         if path not in state["files"]:
             raise ws.WorkspaceError(f"not found: {path}")
         return state["files"][path]
 
-    async def fake_write_bytes(workspace_id, path, data, **kwargs):
+    async def fake_write_bytes(workspace_id, path, data, *, expected_sha256=None, user, create_parents=True):
+        if expected_sha256 == ws.CREATE_ONLY and path in state["files"]:
+            raise ws.WorkspaceConflict(f"Could not write {path}: exists", 409)
         state["files"][path] = data
         state["written"].append({"path": path, "data": data})
         return {"status": "SUCCESS"}
@@ -176,7 +178,7 @@ def workspace(monkeypatch):
 
 
 async def test_inspecting_a_workspace_model_reports_it_readable(workspace):
-    described = await stl.inspect("ws1", "parts/bracket.stl")
+    described = await stl.inspect("ws1", "parts/bracket.stl", user="u1")
 
     assert described["triangles"] == 4
     assert described["watertight"] is True
@@ -185,7 +187,7 @@ async def test_inspecting_a_workspace_model_reports_it_readable(workspace):
 
 
 async def test_an_edit_writes_a_new_file_and_reports_both_measurements(workspace):
-    result = await stl.transform("ws1", "parts/bracket.stl", fit=20.0, center=True)
+    result = await stl.transform("ws1", "parts/bracket.stl", fit=20.0, center=True, user="u1")
 
     assert result["path"] == "parts/bracket_edited.stl"
     assert workspace["written"], "the edited mesh has to land in the workspace"
@@ -200,7 +202,7 @@ async def test_an_edit_writes_a_new_file_and_reports_both_measurements(workspace
 
 
 async def test_an_edit_can_leave_the_original_format_as_ascii(workspace):
-    result = await stl.transform("ws1", "parts/bracket.stl", scale=2.0, format="ascii")
+    result = await stl.transform("ws1", "parts/bracket.stl", scale=2.0, format="ascii", user="u1")
 
     assert result["format"] == "ascii"
     assert workspace["files"]["parts/bracket_edited.stl"].startswith(b"solid ")
@@ -208,17 +210,17 @@ async def test_an_edit_can_leave_the_original_format_as_ascii(workspace):
 
 async def test_an_edit_with_nothing_to_do_is_refused(workspace):
     with pytest.raises(stl.StlError, match="nothing to do"):
-        await stl.transform("ws1", "parts/bracket.stl")
+        await stl.transform("ws1", "parts/bracket.stl", user="u1")
 
 
 async def test_an_unknown_format_is_refused(workspace):
     with pytest.raises(stl.StlError, match="binary"):
-        await stl.transform("ws1", "parts/bracket.stl", scale=2.0, format="obj")
+        await stl.transform("ws1", "parts/bracket.stl", scale=2.0, format="obj", user="u1")
 
 
 async def test_a_missing_model_names_the_file_it_could_not_read(workspace):
     with pytest.raises(ws.WorkspaceError, match=r"nope\.stl"):
-        await stl.inspect("ws1", "nope.stl")
+        await stl.inspect("ws1", "nope.stl", user="u1")
 
 
 # --- the viewer --------------------------------------------------------------
@@ -239,3 +241,49 @@ def test_a_large_model_previews_partially_rather_than_not_at_all():
     assert view["triangles"] == 8
     assert view["truncated"] is True
 
+
+
+async def test_a_second_edit_gets_its_own_file(workspace):
+    first = await stl.transform("ws1", "parts/bracket.stl", scale=2.0, user="u1")
+    second = await stl.transform("ws1", "parts/bracket.stl", scale=3.0, user="u1")
+
+    assert first["path"] == "parts/bracket_edited.stl"
+    assert second["path"] == "parts/bracket_edited_2.stl"
+    assert max(stl.read(workspace["files"]["parts/bracket_edited.stl"]).size()) == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize(
+    "kwargs, words",
+    [
+        ({"scale": [1.0, 2.0]}, "three numbers"),
+        ({"scale": float("nan")}, "finite"),
+        ({"rotate": [0, float("inf"), 0]}, "finite"),
+        ({"fit": float("nan")}, "finite"),
+        ({"scale": 2.0, "out_path": "parts/bracket.stl"}, "source model"),
+        ({"scale": 2.0, "out_path": "/elsewhere/x.stl"}, "relative"),
+        ({"scale": 2.0, "out_path": "../x.stl"}, "inside the workspace"),
+        ({"scale": 2.0, "out_path": "parts/x.obj"}, ".stl"),
+    ],
+)
+async def test_a_bad_edit_is_refused_before_anything_is_read_or_written(workspace, kwargs, words):
+    with pytest.raises(stl.StlError, match=words):
+        await stl.transform("ws1", "parts/bracket.stl", user="u1", **kwargs)
+    assert workspace["written"] == []
+
+
+async def test_an_absolute_source_path_is_refused(workspace):
+    with pytest.raises(stl.StlError, match="relative"):
+        await stl.inspect("ws1", "/workspaces/users/someone/secret.stl", user="u1")
+
+
+def test_an_ascii_parse_stops_at_the_triangle_cap():
+    facet = "facet normal 0 0 0\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\n"
+    data = ("solid big\n" + facet * 11 + "endsolid big\n").encode()
+
+    with pytest.raises(stl.StlError, match="more than 10"):
+        stl.read(data, max_triangles=10)
+
+
+def test_a_non_finite_vertex_is_refused():
+    with pytest.raises(stl.StlError, match="finite"):
+        stl.read(binary_of([((0.0, 0.0, float("nan")), B, C), *TETRA[1:]]))

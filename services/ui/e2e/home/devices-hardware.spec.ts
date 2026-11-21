@@ -402,8 +402,7 @@ test.describe('Devices: every kind gets its control', () => {
     await snap(page, info, 'controls-lock');
     await dialog.getByRole('button', { name: 'Close' }).click();
 
-    let detail: Locator;
-    ({ dialog, detail } = await kind(page, 'Desk bulb'));
+    const { detail } = await kind(page, 'Desk bulb');
     const fw = detail.getByTestId('firmware-control');
     await expect(fw).toContainText('2026.11.0 available (2026.10.1 installed)');
     await fw.getByRole('button', { name: /^Install 2026.11.0/ }).click();
@@ -434,7 +433,9 @@ test.describe('Devices: every kind gets its control', () => {
       await page.waitForTimeout(900);
       await expect(slider).toHaveAttribute('aria-valuenow', want);
     };
-    let { dialog, control } = await kind(page, 'Desk bulb');
+    const bulb = await kind(page, 'Desk bulb');
+    const { dialog } = bulb;
+    let { control } = bulb;
     const brightness = control.getByRole('slider', { name: 'Desk bulb brightness' });
     const white = control.getByRole('slider', { name: 'Desk bulb colour temperature' });
     for (const [keys, want, label] of [[['Home'], '1', '0'], [Array(19).fill('ArrowRight'), '20', '20'],
@@ -450,7 +451,7 @@ test.describe('Devices: every kind gets its control', () => {
     }
     await expect.poll(() => run.devices.commands.length).toBeGreaterThan(0);
     await dialog.getByRole('button', { name: 'Close' }).click();
-    ({ dialog, control } = await kind(page, 'Den TV'));
+    ({ control } = await kind(page, 'Den TV'));
     const volume = control.getByRole('slider', { name: 'Den TV volume' });
     for (const [keys, want] of [[['Home'], '0'], [Array(2).fill('PageUp'), '20'], [Array(3).fill('PageUp'), '50'], [['End'], '100']] as const) {
       await setTo(volume, [...keys], want);

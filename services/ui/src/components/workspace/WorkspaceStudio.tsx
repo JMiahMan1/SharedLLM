@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { ExternalLink, Hammer, Image as ImageIcon, Play, Square, Sparkles, Stethoscope, Wand2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { errorText } from '../../lib/errorText';
@@ -17,6 +18,11 @@ import {
   type StudioVerdict,
 } from '../../lib/studio';
 import { api } from '../../services/api';
+
+/** The server refused because the file already exists (it never overwrites unasked). */
+function isConflict(error: unknown): boolean {
+  return isAxiosError(error) && error.response?.status === 409;
+}
 
 /**
  * Studio: the workspace as a place to build, test, preview and make pictures.
@@ -105,19 +111,35 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
     onSettled: () => setBusy(false),
   });
 
+  // A deck or game that already exists is never overwritten silently (the
+  // server answers 409): the person is asked, and only a yes replaces it.
   const buildDeck = useMutation({
-    mutationFn: () => api.studioBuildDeck(workspaceId, deckBody, deckTitle.trim()),
+    mutationFn: (replace: boolean) =>
+      api.studioBuildDeck(workspaceId, deckBody, deckTitle.trim(), replace),
     onMutate: () => setBusy(true),
     onSuccess: (built) => toast.success(`Wrote ${built.path} (${built.slides} slides)`),
-    onError: (error) => toast.error(errorText(error, 'The deck could not be built')),
+    onError: (error) => {
+      if (isConflict(error) && window.confirm(`${errorText(error)}\n\nReplace it?`)) {
+        buildDeck.mutate(true);
+        return;
+      }
+      toast.error(errorText(error, 'The deck could not be built'));
+    },
     onSettled: () => setBusy(false),
   });
 
   const scaffoldGame = useMutation({
-    mutationFn: () => api.studioScaffoldGame(workspaceId, gameTitle.trim()),
+    mutationFn: (replace: boolean) =>
+      api.studioScaffoldGame(workspaceId, gameTitle.trim(), undefined, replace),
     onMutate: () => setBusy(true),
     onSuccess: (built) => toast.success(`Wrote ${built.path}`),
-    onError: (error) => toast.error(errorText(error, 'The game could not be created')),
+    onError: (error) => {
+      if (isConflict(error) && window.confirm(`${errorText(error)}\n\nReplace it?`)) {
+        scaffoldGame.mutate(true);
+        return;
+      }
+      toast.error(errorText(error, 'The game could not be created'));
+    },
     onSettled: () => setBusy(false),
   });
 
@@ -374,7 +396,7 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
           className={`mt-1.5 ${field} font-mono`}
         />
         <button
-          onClick={() => buildDeck.mutate()}
+          onClick={() => buildDeck.mutate(false)}
           disabled={busy || !deckBody.trim()}
           className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/5 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-300 hover:bg-white/10 disabled:opacity-40 pointer-coarse:min-h-11"
         >
@@ -389,7 +411,7 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
             className={field}
           />
           <button
-            onClick={() => scaffoldGame.mutate()}
+            onClick={() => scaffoldGame.mutate(false)}
             disabled={busy || !gameTitle.trim()}
             className="shrink-0 rounded-lg border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-purple-300 disabled:opacity-40"
           >

@@ -47,7 +47,29 @@ WEAK_BENCHMARK_SCORE = 60
 
 
 class AlpacaUnavailable(RuntimeError):
-    """The Alpaca proxy did not answer."""
+    """The Alpaca proxy did not answer, or answered with an error status.
+
+    ``status`` is the HTTP status when there was one (``None`` for a connection
+    failure), so a caller can tell "this host has no such endpoint" (404/405)
+    from "the host is broken" without parsing the message.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class BenchmarksUnavailable(RuntimeError):
+    """Alpaca's benchmark result directories are not mounted here."""
+
+
+#: The only answers that mean "this host does not have that endpoint at all".
+NO_ENDPOINT_STATUSES = (404, 405)
+
+
+def is_missing_endpoint(exc: BaseException) -> bool:
+    """True only when the host answered that the endpoint does not exist."""
+    return isinstance(exc, AlpacaUnavailable) and exc.status in NO_ENDPOINT_STATUSES
 
 
 def proxy_base(settings: dict[str, Any] | None = None) -> str:
@@ -98,7 +120,7 @@ async def get_json(url: str, *, timeout: float = PROBE_TIMEOUT_S) -> dict[str, A
         timeout=aiohttp.ClientTimeout(total=timeout), headers=_headers()
     ) as client, client.get(url) as resp:
         if resp.status >= 400:
-            raise AlpacaUnavailable(f"{url} answered {resp.status}")
+            raise AlpacaUnavailable(f"{url} answered {resp.status}", status=resp.status)
         data = await resp.json(content_type=None)
         return data if isinstance(data, dict) else {"data": data}
 
@@ -108,7 +130,7 @@ async def post_json(url: str, body: dict[str, Any], *, timeout: float = PROBE_TI
         timeout=aiohttp.ClientTimeout(total=timeout), headers=_headers()
     ) as client, client.post(url, json=body) as resp:
         if resp.status >= 400:
-            raise AlpacaUnavailable(f"{url} answered {resp.status}")
+            raise AlpacaUnavailable(f"{url} answered {resp.status}", status=resp.status)
         data = await resp.json(content_type=None)
         return data if isinstance(data, dict) else {"data": data}
 
@@ -118,21 +140,53 @@ async def wait_for_slot(
 ) -> dict[str, Any]:
     """Block until llama-server has a free slot, or give up.
 
-    Returns ``{"status": "ready"|"timeout"|"unavailable", ...}``. ``unavailable``
-    means the proxy has no queue endpoint at all (a plain llama.cpp server), so
-    the caller should proceed rather than refuse to train.
+    Returns ``{"status": "ready"|"timeout"|"no_queue"|"unavailable", ...}``.
+
+    * ``no_queue``: the host answered 404/405 for ``/api/queue/wait``, so it is a
+      plain llama.cpp server with no queue; the caller may proceed.
+    * ``unavailable``: anything else went wrong (no URL, connection refused, a
+      5xx, a timeout). That is *not* permission to proceed: the trainer does not
+      know whether the household is using the GPU, so it must not start.
     """
     base = proxy_base(settings)
     if not base:
         return {"status": "unavailable", "reason": "llm_local_url is not set"}
     try:
         answer = await post_json(f"{base}/api/queue/wait", {"timeout": timeout}, timeout=timeout + 5.0)
-    except Exception as exc:  # no queue endpoint, or the host is down
+    except AlpacaUnavailable as exc:
+        if is_missing_endpoint(exc):
+            return {"status": "no_queue", "reason": str(exc)}
         return {"status": "unavailable", "reason": str(exc)}
+    except Exception as exc:  # connection refused, DNS, timeout, bad JSON
+        return {"status": "unavailable", "reason": f"{type(exc).__name__}: {exc}"}
     status = str(answer.get("status") or "").lower()
     if status == "ready":
         return {"status": "ready", "slots": answer.get("slots"), "wait_time": answer.get("wait_time")}
     return {"status": "timeout", "waited": answer.get("waited"), "slots": answer.get("slots")}
+
+
+def _vram_sum(gpus: list[Any], key: str) -> int | None:
+    """Total MB across the cards, or ``None`` when it is not actually known.
+
+    A failed ``nvidia-smi`` shows up as no cards at all, or as cards reporting
+    ``0`` total memory. Summing those to ``0`` (or skipping them) used to read as
+    a measured number, so an unreadable card looked either full or empty at
+    random. Unknown stays unknown.
+    """
+    if not gpus:
+        return None
+    total = 0
+    for gpu in gpus:
+        if not isinstance(gpu, dict):
+            return None
+        value = gpu.get(key)
+        capacity = gpu.get("total_mb")
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return None
+        if not isinstance(capacity, (int, float)) or capacity <= 0:
+            return None
+        total += int(value)
+    return total
 
 
 def clean_system(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -146,8 +200,8 @@ def clean_system(payload: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "hostname": payload.get("hostname"),
         "gpus": gpus,
-        "free_vram_mb": sum(int(gpu.get("free_mb") or 0) for gpu in gpus),
-        "total_vram_mb": sum(int(gpu.get("total_mb") or 0) for gpu in gpus),
+        "free_vram_mb": _vram_sum(gpus, "free_mb"),
+        "total_vram_mb": _vram_sum(gpus, "total_mb"),
         "ram_available_gb": ram.get("available_gb"),
         "context_length": props.get("n_ctx"),
         "gpu_layers": props.get("n_gpu_layers"),
@@ -176,9 +230,14 @@ def clean_runtime(payload: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def summarise_slots(payload: dict[str, Any] | None) -> dict[str, Any]:
-    """``/admin/slots`` reports either aggregate counts or a per-model list."""
-    payload = payload or {}
+def summarise_slots(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """``/admin/slots`` reports either aggregate counts or a per-model list.
+
+    ``None`` in, ``None`` out: a slots probe that failed is unknown, not "zero
+    slots", and :func:`readiness` treats it that way.
+    """
+    if payload is None:
+        return None
     total = int(payload.get("total") or 0)
     available = payload.get("available")
     if available is None:
@@ -209,7 +268,7 @@ def can_train(name: str | None) -> bool:
     return bool(name) and not is_image_model(name)
 
 
-def _matches(name: str, wanted: str) -> bool:
+def matches_model(name: str, wanted: str) -> bool:
     return name == wanted or name.startswith(f"{wanted}:") or name.replace(":", "--") == wanted
 
 
@@ -221,6 +280,8 @@ def choose_model(settings: dict[str, Any] | None, models: list[dict[str, Any]]) 
     stall, no eviction of what the household is using), then any text model, and
     only then anything at all. Image models are never picked while a text model
     exists -- Alpaca serves both through one router and labels both "completion".
+    A preference that names an image model is not honoured either: the caller
+    that must run a model (``llm.resolve_model``) refuses that setting loudly.
     """
     settings = settings or {}
     rows = [item for item in models if isinstance(item, dict) and item.get("name")]
@@ -231,7 +292,7 @@ def choose_model(settings: dict[str, Any] | None, models: list[dict[str, Any]]) 
         if not wanted:
             continue
         for name in names:
-            if _matches(name, wanted):
+            if matches_model(name, wanted) and can_train(name):
                 return name
 
     for item in rows:
@@ -286,38 +347,66 @@ def summarise_models(payload: dict[str, Any] | None, settings: dict[str, Any] | 
             row["name"] == chosen and row.get("router_status") == "loaded" for row in rows
         ),
         "trainer_model_setting": preferred,
-        "trainer_model_missing": bool(preferred) and not any(_matches(name, preferred) for name in names),
+        "trainer_model_missing": bool(preferred) and not any(matches_model(name, preferred) for name in names),
         "largest_context": max((row["context_length"] or 0) for row in rows) if rows else 0,
     }
 
 
 def readiness(system: dict[str, Any] | None, runtime: dict[str, Any] | None,
               slots: dict[str, Any] | None) -> dict[str, Any]:
-    """May a training pass start now? Conservative, and it says why not."""
-    system = system or {}
-    runtime = runtime or {}
-    slots = slots or {}
-    reasons: list[str] = []
+    """May a training pass start now? Conservative, and it says why not.
 
-    if system.get("error"):
+    Unknown is not ready: a figure the host could not report (free GPU memory, the
+    runtime, the slots of a loaded model) blocks the pass with a reason, because
+    the trainer cannot know it would not take the GPU from the household.
+
+    * no model loaded and enough free memory: ready (an idle card);
+    * a model loaded: every slot must be known, at least one free, and no
+      household request may be running or queued.
+    """
+    reasons: list[str] = []
+    if system and system.get("error"):
         return {"ready": False, "reasons": [str(system["error"])],
                 "free_vram_mb": None, "loaded_models": [], "slots": slots}
 
+    system = system or {}
     free = system.get("free_vram_mb")
-    if isinstance(free, int) and free and free < MIN_FREE_VRAM_MB:
+    if not isinstance(free, int):
+        reasons.append("free GPU memory is unknown (the host could not read its cards)")
+    elif free < MIN_FREE_VRAM_MB:
         reasons.append(f"only {free} MB of GPU memory is free")
-    if int(runtime.get("queued_requests") or 0) > 0:
-        reasons.append(f"{runtime['queued_requests']} request(s) are already queued")
-    if slots and slots.get("status") not in (None, "ok", "ready") and slots.get("available") == 0:
-        reasons.append(slots.get("message") or "llama-server reports no free slot")
 
+    loaded: list[Any] = []
+    if runtime is None:
+        reasons.append("the host did not report its runtime (loaded models and requests are unknown)")
+    else:
+        loaded = list(runtime.get("loaded_models") or [])
+        active = int(runtime.get("active_requests") or 0)
+        queued = int(runtime.get("queued_requests") or 0)
+        if active > 0:
+            reasons.append(f"{active} request(s) are running on the model")
+        if queued > 0:
+            reasons.append(f"{queued} request(s) are already queued")
+
+    if loaded:
+        if slots is None:
+            reasons.append("the host did not report its slots")
+        else:
+            total = int(slots.get("total") or 0)
+            available = int(slots.get("available") or 0)
+            if total <= 0:
+                reasons.append(slots.get("message") or "the loaded model reports no slots")
+            elif available <= 0:
+                reasons.append(slots.get("message") or f"all {total} slot(s) are busy")
+
+    runtime = runtime or {}
     return {
         "ready": not reasons,
         "reasons": reasons,
         "free_vram_mb": free,
         "total_vram_mb": system.get("total_vram_mb"),
         "context_length": system.get("context_length"),
-        "loaded_models": runtime.get("loaded_models") or [],
+        "loaded_models": loaded,
         "active_requests": runtime.get("active_requests", 0),
         "queued_requests": runtime.get("queued_requests", 0),
         "slots": slots,
@@ -384,13 +473,16 @@ async def probe(settings: dict[str, Any] | None) -> dict[str, Any]:
             "reasons": errors or ["the model host did not answer"],
         }
 
-    system = clean_system(system_payload)
-    runtime = clean_runtime(runtime_payload)
+    system = clean_system(system_payload) if system_payload is not None else {
+        "error": "the host did not report its GPU (/admin/system failed)"
+    }
+    runtime = clean_runtime(runtime_payload) if runtime_payload is not None else None
     slots = summarise_slots(slots_payload)
     verdict = readiness(system, runtime, slots)
     try:
         models_payload = await get_json(f"{base}/admin/models")
-    except Exception:
+    except Exception as exc:
+        errors.append(f"models: {exc}")
         models_payload = {}
 
     return {
@@ -468,18 +560,29 @@ def benchmark_summary(*, limit: int = 20) -> dict[str, Any]:
     """Every per-model result Alpaca has written, newest first.
 
     Reads both suites from disk (``data/llm_benchmarks/models`` and
-    ``data/shared_llm_benchmarks/models``). A missing directory is reported, not
-    raised: a machine with no results yet is a normal, honest state.
+    ``data/shared_llm_benchmarks/models``). An existing but empty directory is a
+    machine with no results yet, which is honest. *No* directory at all means the
+    results were never mounted into this container, and that raises
+    :class:`BenchmarksUnavailable`: an empty answer there would read as "the model
+    has no weak categories" when the truth is "nobody can see the results".
     """
     rows: list[dict[str, Any]] = []
     directories = results_dirs()
-    for suite, directory in directories.items():
-        if not directory.is_dir():
-            continue
+    present = {suite: directory for suite, directory in directories.items() if directory.is_dir()}
+    if not present:
+        raise BenchmarksUnavailable(
+            "Alpaca's benchmark results are not visible to this service: none of "
+            + ", ".join(str(path) for path in directories.values())
+            + " exists. Mount the alpaca results directories and point "
+            "ALPACA_BENCHMARK_RESULTS_DIR / ALPACA_SHARED_BENCHMARK_RESULTS_DIR at them."
+        )
+    unreadable: list[str] = []
+    for suite, directory in present.items():
         pattern = "general_*.json" if suite == "general" else "shared_*.json"
         for path in directory.glob(pattern):
             payload = _load_json(path)
             if not payload:
+                unreadable.append(str(path))
                 continue
             record = _model_record(payload)
             rows.append(
@@ -501,6 +604,8 @@ def benchmark_summary(*, limit: int = 20) -> dict[str, Any]:
         row["average_score"] = round(sum(scores) / len(scores), 1) if scores else None
     return {
         "directories": {name: str(path) for name, path in directories.items()},
+        "missing_directories": [str(path) for suite, path in directories.items() if suite not in present],
+        "unreadable": unreadable,
         "total": len(rows),
         "results": rows[: max(1, limit)],
     }

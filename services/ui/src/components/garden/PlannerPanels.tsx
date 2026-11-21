@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import {
@@ -28,11 +28,16 @@ export function ZoneFrostPanel({ profile }: { profile?: GardenProfile }) {
   const [fall, setFall] = useState(profile?.first_fall_frost_mmdd ?? '');
   const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => {
+  // The form follows the saved profile when it changes (set during render,
+  // React's pattern for state derived from changing data).
+  const profileKey = [profile?.hardiness_zone, profile?.last_spring_frost_mmdd, profile?.first_fall_frost_mmdd].join('|');
+  const [formOf, setFormOf] = useState(profileKey);
+  if (profileKey !== formOf) {
+    setFormOf(profileKey);
     setZone(profile?.hardiness_zone ?? '');
     setSpring(profile?.last_spring_frost_mmdd ?? '');
     setFall(profile?.first_fall_frost_mmdd ?? '');
-  }, [profile?.hardiness_zone, profile?.last_spring_frost_mmdd, profile?.first_fall_frost_mmdd]);
+  }
 
   const detectZone = useMutation({
     mutationFn: () => api.gardenDetectZone(),
@@ -259,12 +264,11 @@ export function DualSizingPanel({ familySize, species }: { familySize: number | 
     [species],
   );
 
-  useEffect(() => {
-    if (choices.length && selected.length === 0) {
-      setSelected(choices.slice(0, 3).map((entry) => entry.key));
-    }
-    if (choices.length && !goalCrop) setGoalCrop(choices[0].key);
-  }, [choices, goalCrop, selected.length]);
+  // Defaults once the species list arrives (set during render, not in an effect).
+  if (choices.length && selected.length === 0) {
+    setSelected(choices.slice(0, 3).map((entry) => entry.key));
+  }
+  if (choices.length && !goalCrop) setGoalCrop(choices[0].key);
 
   const calculate = useMutation({
     mutationFn: () => api.gardenPlannerSizing({
@@ -814,13 +818,16 @@ export function BedGridEditor({
     queryFn: () => api.gardenListPlanCells(planId, bed.id),
   });
 
-  useEffect(() => {
+  // The grid follows the stored cells whenever they load or change.
+  const [assignedFrom, setAssignedFrom] = useState<typeof cellsQuery.data>(undefined);
+  if (cellsQuery.data !== assignedFrom) {
+    setAssignedFrom(cellsQuery.data);
     const next: Record<string, string> = {};
     for (const cell of cellsQuery.data?.cells ?? []) {
       if (cell.species_ref) next[`${cell.col},${cell.row}`] = cell.species_ref;
     }
     setAssigned(next);
-  }, [cellsQuery.data]);
+  }
 
   const checksQuery = useQuery({
     queryKey: ['garden-plan-checks', planId],

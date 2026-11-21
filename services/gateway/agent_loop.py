@@ -39,6 +39,8 @@ from services.gateway.llm_providers import (
 from services.gateway.http_client import get_http_client, shared_http_client
 from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION, load_prompt
 from services.gateway.schemas import ResolvedCredentials
+from services.gateway.studio import actions as studio_actions
+from services.gateway.studio import tools as studio_tools
 from services.gateway.tool_registry import hub_tool_prompt, hub_tool_withheld
 from services.shared.media_validation import MEDIA_EXTS, media_extension, rewrite_media_extension, validate_media_bytes
 
@@ -653,6 +655,13 @@ ALLOWED_TOOLS = {
     # Diagnostics variations
     "diagnostics_check", "diagnostics_report", "diagnostics_screenshot"
 }
+
+# The Workspace Studio's tools run in this process as the mission's user
+# (services/gateway/studio/tools.py); they are workspace tools, so the mission's
+# workspace is forced onto them like any other.
+STUDIO_TOOL_ACTIONS = frozenset(name.lower() for name in studio_tools.TOOL_ACTIONS)
+ALLOWED_TOOLS |= STUDIO_TOOL_ACTIONS
+WORKSPACE_TOOL_ACTIONS |= STUDIO_TOOL_ACTIONS
 
 def _extract_json_with_brace_depth(text: str, start: int = 0) -> dict | list | None:
     """Extract JSON from text using brace-depth tracking for accurate nesting."""
@@ -4129,6 +4138,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "speakeridentifyrequest": (EXECUTION_SVC, "/execute/speaker_identify"),
                 "listvoicesrequest": (EXECUTION_SVC, "/execute/list_voices"),
                 "controlplanerequest": (CONTROL_PLANE_URL, "/api/restart/{service_name}"),
+                # Served in-process below (no HTTP): the path is for the logs.
+                **{name: ("", studio_tools.TOOL_PATHS[tool])
+                   for tool in studio_tools.TOOL_ACTIONS
+                   for name in (tool.lower(),)},
             }
 
             lookup_action = action.lower().strip() if action else ""
@@ -4288,6 +4301,33 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # workspace. If Raven attempts `gh repo create` (or similar) there, fail
                 # loudly so it creates a workspace first instead of polluting a shared one.
                 _skip_post = False
+
+                # Workspace Studio: the same handlers as /api/studio/*, run here as
+                # the mission's user. A failed step (tests failing, nothing ran) is
+                # FAILURE with the whole answer, never a bare success.
+                if lookup_action in STUDIO_TOOL_ACTIONS:
+                    _studio_ws = workspace_id or (payload.get("workspace_id") if isinstance(payload, dict) else None)
+                    if not _has_valid_workspace_id(_studio_ws):
+                        exec_data = {"status": "ERROR", "message": f"{action} needs a workspace_id."}
+                    else:
+                        try:
+                            _studio_result = await studio_tools.call(
+                                lookup_action,
+                                payload if isinstance(payload, dict) else {},
+                                user=creds.user,
+                                workspace_id=str(_studio_ws),
+                            )
+                            exec_data = {
+                                "status": "SUCCESS" if _studio_result.get("ok", True) else "FAILURE",
+                                "message": studio_tools.summarize(lookup_action, _studio_result),
+                                "detail": _studio_result,
+                            }
+                        except studio_actions.StudioActionError as _studio_err:
+                            exec_data = {
+                                "status": "ERROR",
+                                "message": f"{action} failed (HTTP {_studio_err.status}): {_studio_err.detail}",
+                            }
+                    _skip_post = True
                 _creates_repo = False
 
                 # ImageGenerationRequest: generate an image via the alpaca Stable Diffusion

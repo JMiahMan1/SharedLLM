@@ -1,3 +1,4 @@
+import copy
 import os
 import sys
 import tempfile
@@ -305,8 +306,15 @@ def _isolate_config_modules():
       module in place against the test's own environment and leaves those
       values behind.
 
-    Snapshot the module objects, the package attributes and each module's
-    namespace, and put all three back after every test.
+    * ``config.CONFIG["key"] = value`` edits a dict in place. The namespace
+      snapshot holds the same dict object, so restoring the namespace did not
+      undo it, and modules that did ``from services.config import CONFIG``
+      hold that object too. Mutable containers are therefore deep-copied and
+      restored in place, so every reference sees the original contents.
+
+    Snapshot the module objects, the package attributes, each module's
+    namespace and the contents of its containers, and put them back after
+    every test.
     """
     saved = []
     for name in _CONFIG_MODULES:
@@ -315,9 +323,15 @@ def _isolate_config_modules():
             continue
         parent_name, _, attr = name.rpartition(".")
         parent = sys.modules.get(parent_name)
-        saved.append((name, mod, parent, attr, getattr(parent, attr, None), dict(vars(mod))))
+        namespace = dict(vars(mod))
+        containers = [
+            (value, copy.deepcopy(value))
+            for key, value in namespace.items()
+            if not key.startswith("__") and type(value) in (dict, list, set)
+        ]
+        saved.append((name, mod, parent, attr, getattr(parent, attr, None), namespace, containers))
     yield
-    for name, mod, parent, attr, parent_attr, namespace in saved:
+    for name, mod, parent, attr, parent_attr, namespace, containers in saved:
         sys.modules[name] = mod
         if parent is not None and parent_attr is not None:
             setattr(parent, attr, parent_attr)
@@ -325,6 +339,16 @@ def _isolate_config_modules():
         if current != namespace:
             current.clear()
             current.update(namespace)
+        for obj, original in containers:
+            if obj == original:
+                continue
+            obj.clear()
+            if isinstance(obj, dict):
+                obj.update(copy.deepcopy(original))
+            elif isinstance(obj, list):
+                obj.extend(copy.deepcopy(original))
+            else:
+                obj.update(copy.deepcopy(original))
 
 
 @pytest.fixture(autouse=True)

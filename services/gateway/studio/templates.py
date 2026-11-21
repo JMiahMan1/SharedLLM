@@ -7,7 +7,17 @@ a stylesheet ends up on the slide. ``render`` swaps the tokens in one pass.
 Neither document fetches anything: no CDN, no fonts, no scripts. A deck opens
 from a workspace on a phone with no signal, and a game runs from the sandbox
 without a build step -- which is the whole point of putting them in a workspace.
+
+``render`` inserts values verbatim: escaping is the caller's job, per context
+(``html.escape`` for text and attributes, :func:`script_json` inside a
+``<script>`` element).
 """
+
+import json
+import re
+from typing import Any
+
+_TOKEN = re.compile(r"__([A-Z]+)__")
 
 DECK_CSS = """
 :root { color-scheme: dark; }
@@ -111,11 +121,39 @@ __SLIDES__
 
 
 def render(template: str, **values: str) -> str:
-    """Replace ``__TOKEN__`` placeholders in one pass (no brace escaping)."""
-    out = template
-    for key, value in values.items():
-        out = out.replace(f"__{key.upper()}__", str(value))
-    return out
+    """Replace ``__TOKEN__`` placeholders in one pass (no brace escaping).
+
+    Truly one pass: a value is never scanned for tokens again, so a title that
+    happens to contain ``__SPRITES__`` stays text instead of pulling the next
+    value into the page. An unknown token in the template is an error.
+    """
+    wanted = {key.upper(): str(value) for key, value in values.items()}
+
+    def _swap(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name not in wanted:
+            raise KeyError(f"the template needs a value for __{name}__")
+        return wanted[name]
+
+    return _TOKEN.sub(_swap, template)
+
+
+def script_json(value: Any) -> str:
+    """JSON that is safe inside a ``<script>`` element.
+
+    ``json.dumps`` leaves ``<``, ``>`` and ``&`` alone, so a sprite path holding
+    ``</script><script>...`` would close the element and run as page script.
+    Escaped as ``\\u003c`` and friends they are the same JSON to the parser and
+    inert to the HTML tokenizer.
+    """
+    return (
+        json.dumps(value, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace(chr(0x2028), "\\u2028")
+        .replace(chr(0x2029), "\\u2029")
+    )
 
 
 #: A playable canvas game with no dependencies: keyboard, touch, score, lives and

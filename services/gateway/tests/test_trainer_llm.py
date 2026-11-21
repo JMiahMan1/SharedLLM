@@ -67,6 +67,7 @@ async def test_a_completion_is_bounded_and_recorded(monkeypatch):
     assert completion.model == "qwen3:8b"
     assert provider.calls[0]["messages"][0] == {"role": "system", "content": "be brief"}
     assert provider.calls[0]["options"]["num_predict"] == 64
+    assert "num_ctx" not in provider.calls[0]["options"], "forcing a context reloads the household model"
 
 
 async def test_an_empty_answer_is_a_failure_not_a_result(monkeypatch):
@@ -115,12 +116,32 @@ async def test_a_busy_host_refuses_the_call_loudly(monkeypatch):
 
 
 async def test_a_host_without_a_queue_is_not_a_refusal(monkeypatch):
-    async def no_queue(settings, timeout=45.0):
-        return {"status": "unavailable", "reason": "404"}
+    async def no_endpoint(url, body, *, timeout=6.0):
+        raise alpaca.AlpacaUnavailable(f"{url} answered 404", status=404)
 
-    monkeypatch.setattr(alpaca, "wait_for_slot", no_queue)
+    monkeypatch.setattr(alpaca, "post_json", no_endpoint)
 
     await llm._admit({"llm_local_url": "http://plain:8080"})  # must not raise
+
+
+async def test_an_unanswered_slot_question_is_not_permission(monkeypatch):
+    async def down(url, body, *, timeout=6.0):
+        raise ConnectionError("connection refused")
+
+    monkeypatch.setattr(alpaca, "post_json", down)
+
+    with pytest.raises(llm.LocalModelUnavailable, match="free slot"):
+        await llm._admit({"llm_local_url": "http://host:11434"})
+
+
+async def test_a_busy_host_is_reported_as_busy_not_broken(monkeypatch):
+    async def busy(url, body, *, timeout=6.0):
+        return {"status": "timeout", "waited": 45.0}
+
+    monkeypatch.setattr(alpaca, "post_json", busy)
+
+    with pytest.raises(llm.LocalModelBusy):
+        await llm._admit({"llm_local_url": "http://host:11434"})
 
 
 async def test_the_polite_wait_can_be_turned_off(monkeypatch):
@@ -135,3 +156,73 @@ async def test_the_polite_wait_can_be_turned_off(monkeypatch):
     await llm._admit({"llm_local_url": "http://host:11434", "trainer_wait_for_slot": "false"})
 
     assert called == [], "the setting must be honoured before any network call"
+
+
+INVENTORY = {
+    "models": [
+        {"name": "qwen3:8b", "router_status": "loaded"},
+        {"name": "coder:14b"},
+        {"name": "flux-image:q8"},
+    ]
+}
+
+
+def _inventory(monkeypatch, payload=INVENTORY, error: Exception | None = None):
+    async def fake_get(url, *, timeout=6.0):
+        assert url.endswith("/admin/models")
+        if error:
+            raise error
+        return payload
+
+    monkeypatch.setattr(alpaca, "get_json", fake_get)
+
+
+HOST = {"llm_local_url": "http://llm-host:11434"}
+
+
+async def test_resolve_uses_the_trainer_choice_from_the_inventory(monkeypatch):
+    _inventory(monkeypatch)
+
+    assert await llm.resolve_model({**HOST, "coding_model": "coder:14b"}) == "coder:14b"
+    assert await llm.resolve_model(HOST) == "qwen3:8b", "no preference: the loaded text model"
+
+
+async def test_resolve_honours_a_requested_model_and_checks_it(monkeypatch):
+    _inventory(monkeypatch)
+
+    assert await llm.resolve_model(HOST, "coder:14b") == "coder:14b"
+    with pytest.raises(llm.LocalModelUnavailable, match="not installed"):
+        await llm.resolve_model(HOST, "missing:1b")
+
+
+@pytest.mark.parametrize(
+    "settings, requested",
+    [({**HOST, "trainer_model": "flux-image:q8"}, None), (HOST, "flux-image:q8")],
+)
+async def test_resolve_refuses_a_picture_model(monkeypatch, settings, requested):
+    _inventory(monkeypatch)
+
+    with pytest.raises(llm.LocalModelUnavailable, match="picture model"):
+        await llm.resolve_model(settings, requested)
+
+
+async def test_resolve_refuses_a_missing_trainer_model(monkeypatch):
+    _inventory(monkeypatch)
+
+    with pytest.raises(llm.LocalModelUnavailable, match="trainer_model"):
+        await llm.resolve_model({**HOST, "trainer_model": "gone:7b", "coding_model": "coder:14b"})
+
+
+async def test_resolve_refuses_when_the_inventory_cannot_be_read(monkeypatch):
+    _inventory(monkeypatch, error=alpaca.AlpacaUnavailable("answered 500", status=500))
+
+    with pytest.raises(llm.LocalModelUnavailable, match="Could not list"):
+        await llm.resolve_model({**HOST, "coding_model": "coder:14b"})
+
+
+async def test_resolve_on_a_plain_server_uses_the_setting_but_never_an_image_model(monkeypatch):
+    _inventory(monkeypatch, error=alpaca.AlpacaUnavailable("answered 404", status=404))
+
+    assert await llm.resolve_model({**HOST, "coding_model": "coder:14b"}) == "coder:14b"
+    with pytest.raises(llm.LocalModelUnavailable, match="picture model"):
+        await llm.resolve_model({**HOST, "coding_model": "sdxl-turbo"})
