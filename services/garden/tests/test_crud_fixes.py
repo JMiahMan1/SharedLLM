@@ -70,7 +70,7 @@ def _plant(client, **extra) -> dict:
 
 def test_activate_sends_only_a_status_and_is_accepted(client):
     plan = client.post(
-        "/plans", headers=PARENT, json={"name": "2027 Garden", "season": "spring_summer"}
+        "/plans", headers=PARENT, json={"name": "2027 Garden", "season": "spring_summer", "family_size": 4}
     ).json()
 
     resp = client.patch(f"/plans/{plan['id']}", headers=PARENT, json={"status": "active"})
@@ -123,7 +123,31 @@ def test_a_location_can_carry_a_skylight_chore(client):
 
 # --------------------------------------------------------------------------- bindings
 
-def test_clearing_one_sensor_leaves_the_others(client):
+@pytest.fixture()
+def hub(monkeypatch):
+    """A hub that reports the two devices these tests bind (a binding is
+    checked against what Home Hub says each device is)."""
+    from services import config
+    from services.garden import homehub_hardware as hardware
+
+    rows = [
+        {"entity_id": "sensor.m", "state": "40", "attributes": {"device_class": "moisture"}},
+        {"entity_id": "valve.v", "state": "closed", "attributes": {}},
+    ]
+
+    async def call(method, path, *, body=None):
+        if path == "/api/states":
+            return (200, rows)
+        if path == "/hub/tags":
+            return (200, {"tags": []})
+        return (404, None)
+
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test")
+    monkeypatch.setattr(hardware, "_call", call)
+    hardware.invalidate()
+
+
+def test_clearing_one_sensor_leaves_the_others(client, hub):
     plant = _plant(client)
     created = client.put(
         f"/bindings/plant/{plant['id']}",
@@ -142,7 +166,7 @@ def test_clearing_one_sensor_leaves_the_others(client):
     assert cleared.json()["valve_entity_id"] == "valve.v"
 
 
-def test_an_explicit_null_clears_a_binding_field(client):
+def test_an_explicit_null_clears_a_binding_field(client, hub):
     plant = _plant(client)
     client.put(f"/bindings/plant/{plant['id']}", headers=PARENT, json={"valve_entity_id": "valve.v"})
 

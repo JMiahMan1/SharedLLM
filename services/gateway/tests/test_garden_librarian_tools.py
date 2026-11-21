@@ -35,7 +35,12 @@ def parent(monkeypatch):
     async def acting(_request):
         return {"user": "mother", "is_admin": True, "family_role": "mother"}
 
+    async def resolved(_request, as_user=None):
+        # The full identity (Nextcloud account and so on) the assistant routes read.
+        return {"user": "mother", "is_admin": True}
+
     monkeypatch.setattr(gateway_main, "_acting_identity", acting)
+    monkeypatch.setattr(gateway_main, "_resolve_acting_identity", resolved)
 
 
 def test_all_six_tools_are_offered_to_the_model():
@@ -150,7 +155,7 @@ def test_the_plan_tool_answers_with_the_real_yard(client, parent, monkeypatch):
         # `/locations` really answers a bare list (it is the shape the UI reads),
         # which is what used to crash this route with AttributeError: list.
         body = {
-            "/profile": {"family_size": 7, "hardiness_zone": "5b"},
+            "/profile": {"family_size": 4, "hardiness_zone": "5b"},
             "/locations": [
                 {"id": "bed-1", "name": "Bed 1", "kind": "raised_bed"},
                 {"id": "room-1", "name": "Living Room", "kind": "indoor_room"},
@@ -172,6 +177,24 @@ def test_the_plan_tool_answers_with_the_real_yard(client, parent, monkeypatch):
     # Indoor rooms are Home Hub areas, not planting beds.
     assert [bed["id"] for bed in body["beds"]] == ["bed-1"]
     assert body["pantry_goals"][0]["item"] == "Marinara sauce"
+
+
+def test_plan_context_never_reads_a_failure_as_an_empty_yard(client, parent, monkeypatch):
+    """A Garden error on any part is a 502 naming it, not "no beds, no goals"."""
+    import json as _json
+
+    async def call(method, path, *, params=None, json=None, headers=None):
+        if path == "/locations":
+            return Response(content=_json.dumps({"detail": "database is locked"}), status_code=500,
+                            media_type="application/json")
+        return Response(content=b"{}", media_type="application/json")
+
+    monkeypatch.setattr(garden_routes, "_call", call)
+
+    resp = client.get("/api/garden/assistant/plan-context")
+
+    assert resp.status_code == 502
+    assert "locations" in resp.json()["detail"] and "database is locked" in resp.json()["detail"]
 
 
 def test_the_weather_hook_is_not_anonymous(monkeypatch):

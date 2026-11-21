@@ -1230,7 +1230,7 @@ describe('Adding a plant for another adult', () => {
       } as GardenSpecies],
     });
     vi.mocked(api.getFamilyDirectory).mockResolvedValue([
-      { username: 'kaleb', display_name: 'Kaleb', nextcloud_user: null, avatar: null, family_role: 'adult_child' },
+      { username: 'alex', display_name: 'Alex', nextcloud_user: null, avatar: null, family_role: 'adult_child' },
     ] as never);
     vi.mocked(api.gardenCreatePlant).mockResolvedValue({} as never);
   });
@@ -1242,12 +1242,12 @@ describe('Adding a plant for another adult', () => {
     fireEvent.click(await screen.findByText('Monstera'));
 
     const caregiver = await screen.findByLabelText('Caregiver');
-    fireEvent.change(caregiver, { target: { value: 'kaleb' } });
+    fireEvent.change(caregiver, { target: { value: 'alex' } });
     const dialog = screen.getByRole('dialog', { name: /add plant/i });
     fireEvent.click(within(dialog).getByRole('button', { name: /^add plant$/i }));
 
     await waitFor(() => expect(vi.mocked(api.gardenCreatePlant)).toHaveBeenCalledWith(
-      expect.objectContaining({ assigned_to: 'kaleb', species_ref: 'monstera_deliciosa' }),
+      expect.objectContaining({ assigned_to: 'alex', species_ref: 'monstera_deliciosa' }),
     ));
   });
 });
@@ -1265,15 +1265,15 @@ describe('Garden plant detail (Skylight, edit, supplies)', () => {
     pot_size_in: 6, pot_material: 'terracotta', has_drainage: true, soil_mix: null,
     window_direction: 'e', distance_from_window: 2, planted_date: null, last_repotted_date: null,
     planting_method: null, expected_harvest_start: null, expected_harvest_end: null,
-    status: 'active', assigned_to: 'kaleb', skylight_sync_enabled: false,
+    status: 'active', assigned_to: 'alex', skylight_sync_enabled: false,
     skylight_chore_id: null, skylight_assignee: null, next_due_at: null,
     notes: null, calibration_factor: 1, last_harvested_at: null, regrowth_cooldown_days: null,
     created_at: '', updated_at: '', species: null,
   } as unknown as GardenPlant;
   const household = [
-    { username: 'michele', display_name: 'Michele', nextcloud_user: null, avatar: null, family_role: 'mother' },
-    { username: 'kaleb', display_name: 'Kaleb', nextcloud_user: null, avatar: null, family_role: 'adult_child' },
-    { username: 'noah', display_name: 'Noah', nextcloud_user: null, avatar: null, family_role: 'child' },
+    { username: 'pat', display_name: 'Pat', nextcloud_user: null, avatar: null, family_role: 'mother' },
+    { username: 'alex', display_name: 'Alex', nextcloud_user: null, avatar: null, family_role: 'adult_child' },
+    { username: 'jamie', display_name: 'Jamie', nextcloud_user: null, avatar: null, family_role: 'child' },
   ];
   let wrapper: React.ComponentType<{ children?: React.ReactNode }>;
 
@@ -1300,16 +1300,16 @@ describe('Garden plant detail (Skylight, edit, supplies)', () => {
       can_assign_skylight: true,
       skylight_configured: true,
       eligible_assignees: [
-        { username: 'kaleb', display_name: 'Kaleb', family_role: 'adult_child', skylight_name: 'Kaleb', is_self: true },
-        { username: 'noah', display_name: 'Noah', family_role: 'child', skylight_name: 'Noah', is_self: false },
+        { username: 'alex', display_name: 'Alex', family_role: 'adult_child', skylight_name: 'Alex', is_self: true },
+        { username: 'jamie', display_name: 'Jamie', family_role: 'child', skylight_name: 'Jamie', is_self: false },
       ],
       current_chore_id: null,
       current_assignee: null,
       skylight_sync_enabled: false,
     });
     vi.mocked(api.gardenCreateSkylightChore).mockResolvedValue({
-      plant: { ...plant, skylight_sync_enabled: true, skylight_assignee: 'noah' },
-      chore: { id: '52409380', assignee: 'noah', skylight_name: 'Noah', repeat: 'weekly', title: 'Water Monty' },
+      plant: { ...plant, skylight_sync_enabled: true, skylight_assignee: 'jamie' },
+      chore: { id: '52409380', assignee: 'jamie', skylight_name: 'Jamie', repeat: 'weekly', title: 'Water Monty' },
     });
     vi.mocked(api.gardenPatchPlant).mockResolvedValue(plant);
   });
@@ -1319,18 +1319,18 @@ describe('Garden plant detail (Skylight, edit, supplies)', () => {
 
     const picker = await screen.findByLabelText('Assigned to');
     const names = Array.from((picker as HTMLSelectElement).options).map((o) => o.textContent);
-    expect(names).toContain('Kaleb (adult_child)');
-    expect(names).toContain('Michele (mother)');
+    expect(names).toContain('Alex (adult_child)');
+    expect(names).toContain('Pat (mother)');
   });
 
   it('creates the Skylight chore for the chosen person', async () => {
     render(<PlantDetail />, { wrapper });
 
-    fireEvent.change(await screen.findByLabelText('Assign Skylight chore to'), { target: { value: 'noah' } });
+    fireEvent.change(await screen.findByLabelText('Assign Skylight chore to'), { target: { value: 'jamie' } });
     fireEvent.click(screen.getByRole('button', { name: /assign as skylight chore/i }));
 
     await waitFor(() => expect(vi.mocked(api.gardenCreateSkylightChore)).toHaveBeenCalledWith(
-      'plant-1', expect.objectContaining({ assignee_username: 'noah' }),
+      'plant-1', expect.objectContaining({ assignee_username: 'jamie' }),
     ));
   });
 
@@ -1518,7 +1518,7 @@ describe('Garden photos, snap-to-add and the Plant Doctor (Phase 7)', () => {
     pot_size_in: 6, pot_material: 'terracotta', has_drainage: true, soil_mix: null,
     window_direction: 'e', distance_from_window: 2, planted_date: null, last_repotted_date: null,
     planting_method: null, expected_harvest_start: null, expected_harvest_end: null,
-    status: 'active', assigned_to: 'kaleb', skylight_sync_enabled: false,
+    status: 'active', assigned_to: 'alex', skylight_sync_enabled: false,
     skylight_chore_id: null, skylight_assignee: null, next_due_at: null,
     notes: null, calibration_factor: 1, last_harvested_at: null, regrowth_cooldown_days: null,
     created_at: '', updated_at: '', species: null,
@@ -1550,7 +1550,7 @@ describe('Garden photos, snap-to-add and the Plant Doctor (Phase 7)', () => {
 
   const journalPhoto = {
     id: 'photo-1', plant_id: 'plant-1', nextcloud_path: 'Garden/Photos/plant-1/a.jpg',
-    thumb_path: 'photo-1.jpg', taken_at: '2026-11-18T09:00:00+00:00', taken_by: 'kaleb',
+    thumb_path: 'photo-1.jpg', taken_at: '2026-11-18T09:00:00+00:00', taken_by: 'alex',
     kind: 'progress', ai_summary_json: null, notes: 'New leaf', created_at: '2026-11-18T09:00:00+00:00',
   };
 
@@ -1766,7 +1766,7 @@ describe('Garden Home Hub hardware (Phase 8)', () => {
   it('gives an adult child the readings but no valve or editor', async () => {
     // `canEdit` is true for an adult child, `canAssign` is not -- and the server
     // is the authority (``_require_parent_or_admin``), so this must follow it.
-    authUser.current = { username: 'kaleb', is_admin: false, family_role: 'adult_child' };
+    authUser.current = { username: 'alex', is_admin: false, family_role: 'adult_child' };
     vi.mocked(api.gardenHardwareDiscover).mockResolvedValue(discovery);
     vi.mocked(api.gardenListBindings).mockResolvedValue({ count: 1, bindings: [binding] });
     renderDetail();

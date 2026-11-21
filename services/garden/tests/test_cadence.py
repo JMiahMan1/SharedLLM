@@ -233,3 +233,40 @@ def test_placement_no_warning_when_fit():
     )
     assert pf.warning is None
     assert pf.severity == "info"
+
+
+# --------------------------------------------------------------------------- review fixes
+
+def test_soil_drying_factors_apply_to_watering_only():
+    from services.garden.cadence import compute_interval as _compute
+
+    kwargs = dict(
+        base_interval_days=30.0, winter_multiplier=1.0, pot_material="plastic", pot_size_in=16,
+        soil_mix="moisture_retentive", window_direction="n", distance_from_window=12, calibration_factor=1.5,
+    )
+
+    assert _compute(**kwargs, action="water").interval_days > 30.0
+    for action in ("fertilize", "rotate", "repot", "check_pests"):
+        result = _compute(**kwargs, action=action)
+        assert result.interval_days == 30.0
+        assert set(result.factors.values()) == {1.0}
+
+
+def test_no_window_is_neutral_not_north():
+    from services.garden.cadence import compute_interval as _compute
+
+    outdoor = _compute(base_interval_days=4.0, winter_multiplier=1.0, pot_size_in=8, window_direction=None)
+
+    assert outdoor.factors["window"] == 1.0
+
+
+def test_winter_follows_the_hemisphere():
+    from datetime import date
+
+    from services.garden.clock import is_winter
+
+    july, january = date(2026, 7, 15), date(2026, 1, 15)
+    assert is_winter(39.7, january) is True and is_winter(39.7, july) is False
+    assert is_winter(-33.9, july) is True and is_winter(-33.9, january) is False
+    assert is_winter(1.3, january) is False  # tropics
+    assert is_winter(None, january) is None

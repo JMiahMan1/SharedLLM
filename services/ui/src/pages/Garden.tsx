@@ -761,7 +761,7 @@ function PlannerTab({
       <ZoneFrostPanel profile={profileQuery.data} />
 
       <DualSizingPanel
-        familySize={profileQuery.data?.family_size ?? 7}
+        familySize={profileQuery.data?.family_size ?? null}
         species={speciesQuery.data?.results ?? []}
       />
 

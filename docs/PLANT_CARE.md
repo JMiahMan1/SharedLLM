@@ -242,8 +242,15 @@ and its exact home spot**:
 - **Rain skip (uncovered outdoor beds only):** checks observed rain (last 24h) + upcoming 12h
   forecast; defers outdoor watering with a logged `rain_auto_skip` note (never skips indoor
   houseplants or covered pots).
-- **Heatwave boost:** high temps + low humidity shorten outdoor/container watering intervals and
-  suggest early-morning watering and mulch checks.
+- **Heatwave boost:** a forecast high of 90°F / 32.2°C or more with no rain in the next 12 hours
+  brings watering forward for plants in outdoor places (beds, in-ground, containers, orchards): the
+  weather poller moves each one's next watering to its interval x 0.75 (never earlier than now),
+  once a day, logged as `heat_boost`; `/today` shows the advisory, early-morning watering and
+  mulch advice, and which plants moved.
+- **Rain skip and `/today`:** only the weather poller (and `POST /hooks/weather`) applies a rain skip
+  or a heat boost; reading `/today` reports what was applied and never changes a schedule. A rain
+  skip never moves a later due date earlier (the new due date is the later of the current one and
+  24 hours from now).
 - **Plant-specific frost & wind alerts:** subscribes to `weather:events` and filters active
   outdoor plants by `frost_tolerance` so alerts name exactly what to cover or bring inside vs
   what is hardy.
@@ -266,6 +273,16 @@ and its exact home spot**:
 - **Motivation & chores:** garden streaks and badges in `achievements.json` (*Green Thumb*, *7-Day
   Watering Streak*, *First Harvest*, *Master Preserver*) + opt-in per-assignment toggle to mirror
   a watering chore to Skylight.
+- **What the Skylight sync covers, and what it does not.** A watering logged in Garden completes
+  the linked chore (Garden calls Execution with `origin=garden`). A chore ticked or un-ticked
+  through Jarvis (the app's chore list, the chores voice/chat handler, any path through Execution's
+  `complete_skylight_chore` / `uncomplete_skylight_chore`) logs or undoes the plant's watering via
+  `POST /hooks/skylight-chore-completed` / `-uncompleted`. **It is not full two-way sync:**
+  Skylight has no push, so a chore ticked directly on the Skylight display or in Skylight's own app
+  is not seen by Garden (nothing polls Skylight for completions). A link is made only through the
+  plant's Skylight chore option (`/api/garden/plants/{id}/skylight-chore`), which applies who may be
+  given the chore; relinking removes the previous chore from the chart, and an unlink that Skylight
+  refuses says the chore is still on the chart.
 
 ### G. Jarvis Voice, Chat & Camera (Alpaca Vision)
 
