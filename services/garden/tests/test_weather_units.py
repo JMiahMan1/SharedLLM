@@ -71,7 +71,7 @@ async def test_a_metric_forecast_no_longer_breaks_the_summary(monkeypatch):
 
     # Nothing is relevant, so the summary is None -- reached without the units
     # read raising on the mapping, which is the whole point.
-    assert await wc.build_weather_summary(_NoProfileSession(), None) is None
+    assert await wc.build_weather_summary(_NoProfileSession(), None, apply_skips=True) is None
 
 
 class _NoProfileSession:

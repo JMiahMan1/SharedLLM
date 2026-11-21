@@ -563,6 +563,15 @@ async def run_valve(
 
     if binding.rain_interlock and location is not None and weather_care.is_outdoor_uncovered(location):
         rain = await weather_care.rain_state(profile)
+        if not rain.get("known") and not override_rain:
+            # No forecast means nobody knows whether it rained: say so, and let a
+            # person decide (override_rain) rather than water blind.
+            raise HardwareBlocked(
+                "The rain interlock cannot tell whether it rained (weather is unavailable). "
+                "Run it again with the rain override to water anyway.",
+                status=409,
+                detail=rain,
+            )
         if rain.get("active") and not override_rain:
             raise HardwareBlocked(
                 f"Blocked by rain interlock: {rain.get('rain_in')} in of rain in the last/next hours.",

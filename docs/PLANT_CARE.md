@@ -242,8 +242,15 @@ and its exact home spot**:
 - **Rain skip (uncovered outdoor beds only):** checks observed rain (last 24h) + upcoming 12h
   forecast; defers outdoor watering with a logged `rain_auto_skip` note (never skips indoor
   houseplants or covered pots).
-- **Heatwave boost:** high temps + low humidity shorten outdoor/container watering intervals and
-  suggest early-morning watering and mulch checks.
+- **Heatwave boost:** a forecast high of 90°F / 32.2°C or more with no rain in the next 12 hours
+  brings watering forward for plants in outdoor places (beds, in-ground, containers, orchards): the
+  weather poller moves each one's next watering to its interval x 0.75 (never earlier than now),
+  once a day, logged as `heat_boost`; `/today` shows the advisory, early-morning watering and
+  mulch advice, and which plants moved.
+- **Rain skip and `/today`:** only the weather poller (and `POST /hooks/weather`) applies a rain skip
+  or a heat boost; reading `/today` reports what was applied and never changes a schedule. A rain
+  skip never moves a later due date earlier (the new due date is the later of the current one and
+  24 hours from now).
 - **Plant-specific frost & wind alerts:** subscribes to `weather:events` and filters active
   outdoor plants by `frost_tolerance` so alerts name exactly what to cover or bring inside vs
   what is hardy.

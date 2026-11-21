@@ -9,8 +9,9 @@ Responsibilities:
   * Rain skip for uncovered outdoor beds only (observed rain last 24h +
     upcoming 12h forecast >= threshold) — logs ``rain_auto_skip`` care logs,
     postpones ``next_due_at`` by 24h, dedupes per rain episode.
-  * Heatwave boost (forecast daily high >= 90°F / 32.2°C, dry) — shortens
-    effective outdoor/container watering interval (``heat_factor = 0.75``).
+  * Heatwave boost (forecast daily high >= 90°F / 32.2°C, dry) — the poller
+    brings outdoor watering forward to ``interval * heat_factor`` (0.75), once
+    a day, logged as ``heat_boost`` (:func:`apply_heat_boost`).
   * Plant-specific frost & high-wind alerts keyed to each species'
     ``frost_tolerance``.
   * Internal webhook ``POST /hooks/weather`` (X-Internal-Secret) plus a
@@ -305,15 +306,26 @@ def _max_gust_mph(hourly: list[dict] | None, hours: int, units: str = "imperial"
 # --------------------------------------------------------------------------- rain skip
 
 
-async def _observed_and_forecast_rain_in(units: str = "imperial") -> float:
-    """Observed rain (today) + upcoming 12h forecast rain, in inches."""
-    today = datetime.now(UTC).date().isoformat()
-    day = await _fetch_day(today)
-    observed = _daily_rain_in(day, units)
+class WeatherUnavailable(RuntimeError):
+    """The forecast could not be read, so nobody can say whether it rained."""
+
+
+async def _observed_and_forecast_rain_in() -> float:
+    """Observed rain (today, at home) + upcoming 12h forecast rain, in inches.
+
+    Both amounts are converted by the units the *weather data* is in (the
+    forecast's ``units``), never by the household's display preference: the
+    valve interlock and ``/today`` used to convert the same millimetres
+    differently. No forecast is :class:`WeatherUnavailable`, not "no rain".
+    """
     fc = await _fetch_forecast()
-    forecast_units = _forecast_units(fc)
-    hourly = (fc or {}).get("hourly") or []
-    upcoming = _hourly_rain_in(hourly, RAIN_LOOKAHEAD_H, forecast_units)
+    if fc is None:
+        raise WeatherUnavailable("the weather forecast is unavailable")
+    data_units = _forecast_units(fc)
+    day = await _fetch_day(clock.today_iso())
+    observed = _daily_rain_in(day, data_units)
+    hourly = fc.get("hourly") or []
+    upcoming = _hourly_rain_in(hourly, RAIN_LOOKAHEAD_H, data_units)
     return observed + upcoming
 
 
@@ -328,13 +340,13 @@ async def rain_state(profile: GardenProfile | None = None) -> dict:
     Same source and same threshold as the rain-skip the day's plan already uses,
     so a valve and a schedule can never disagree about whether it rained.
     """
-    units = _units(profile)
     threshold = _rain_threshold_in(profile)
     try:
-        rain_in = await _observed_and_forecast_rain_in(units)
+        rain_in = await _observed_and_forecast_rain_in()
     except Exception as e:
-        log.info("[Garden weather] rain state unavailable: %s", e)
-        return {"active": False, "known": False, "rain_in": None, "threshold_in": threshold}
+        log.warning("[Garden weather] rain state unavailable: %s", e)
+        return {"active": False, "known": False, "rain_in": None, "threshold_in": threshold,
+                "reason": str(e)}
     return {
         "active": rain_in >= threshold,
         "known": True,
@@ -343,19 +355,20 @@ async def rain_state(profile: GardenProfile | None = None) -> dict:
     }
 
 
-async def apply_rain_skip(session: Session, profile: GardenProfile | None,
-                          units: str = "imperial") -> list[dict]:
+async def apply_rain_skip(session: Session, profile: GardenProfile | None) -> list[dict]:
     """Postpone watering for uncovered outdoor plants when rain meets the threshold.
 
     Returns a list of ``{"plant_id", "nickname", "rain_in", "next_due_at"}`` dicts
     for every plant that was skipped.  Deduplicates within a rain episode via
-    ``_rain_skip_done`` and existing ``rain_auto_skip`` care logs.
+    ``_rain_skip_done`` and existing ``rain_auto_skip`` care logs. This writes,
+    so only the weather poller and its webhook call it; ``GET /today`` reads
+    what was skipped (:func:`rain_skipped_today`).
     """
     skipped: list[dict] = []
     try:
-        rain_in = await _observed_and_forecast_rain_in(units)
+        rain_in = await _observed_and_forecast_rain_in()
     except Exception as e:
-        log.info("[Garden weather] rain lookup failed: %s", e)
+        log.warning("[Garden weather] rain lookup failed, nothing skipped: %s", e)
         return skipped
 
     threshold = _rain_threshold_in(profile)
@@ -393,8 +406,12 @@ async def apply_rain_skip(session: Session, profile: GardenProfile | None,
             _rain_skip_done[plant.id] = today_iso
             continue
 
+        # Never pull a later due date earlier: a plant due in three days stays
+        # due in three days; only one due sooner waits a day for the rain.
         next_due = datetime.now(UTC) + timedelta(hours=24)
-        rule.next_due_at = next_due.isoformat()
+        current = _parse_due(rule.next_due_at)
+        if current is None or current < next_due:
+            rule.next_due_at = next_due.isoformat()
         rule.updated_at = utcnow()
         session.add(rule)
 
@@ -425,6 +442,45 @@ async def apply_rain_skip(session: Session, profile: GardenProfile | None,
         session.commit()
         log.info("[Garden weather] rain-skip applied to %d plant(s) (%.2f in)", len(skipped), rain_in)
     return skipped
+
+
+def _parse_due(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def rain_skipped_today(session: Session) -> list[dict]:
+    """The rain skips already applied today (household day), read-only, for ``/today``."""
+    day_start, day_end = clock.day_bounds_utc()
+    rows = session.exec(
+        select(CareLog).where(
+            CareLog.action == "rain_skip",
+            CareLog.source == "rain_auto_skip",
+            CareLog.created_at >= day_start,
+            CareLog.created_at < day_end,
+        )
+    ).all()
+    out: list[dict] = []
+    for row in rows:
+        plant = session.get(Plant, row.plant_id)
+        if plant is None:
+            continue
+        rule = session.exec(
+            select(CareRule).where(CareRule.plant_id == plant.id, CareRule.action == "water")
+        ).first()
+        out.append({
+            "plant_id": plant.id,
+            "nickname": plant.nickname or plant.species_ref,
+            "rain_in": None,
+            "notes": row.notes,
+            "next_due_at": rule.next_due_at if rule else None,
+        })
+    return out
 
 
 # --------------------------------------------------------------------------- frost / heat / wind alerts
@@ -525,6 +581,83 @@ async def check_heat_advisory(session: Session, forecast: dict | None,
     }
 
 
+def apply_heat_boost(session: Session, factor: float) -> list[dict]:
+    """Bring outdoor watering forward in a heatwave: the interval times ``factor``.
+
+    A plant due ``interval`` days after its last watering becomes due after
+    ``interval * factor`` days (never earlier than now), once per household day,
+    logged as a ``heat_boost`` care log so ``/today`` can say what moved. Only
+    plants in outdoor places (beds, in-ground, containers, orchards; covered or
+    not, since a roof does not cool the soil) are boosted. Called by the weather
+    poller, never by a page read.
+    """
+    if factor >= 1.0:
+        return []
+    now = datetime.now(UTC)
+    day_start, day_end = clock.day_bounds_utc()
+    boosted: list[dict] = []
+    rules = session.exec(
+        select(CareRule).where(CareRule.action == "water", CareRule.paused == False)  # noqa: E712
+    ).all()
+    for rule in rules:
+        plant = session.get(Plant, rule.plant_id)
+        if plant is None or plant.status != "active" or not rule.interval_days:
+            continue
+        location = session.get(Location, plant.location_id) if plant.location_id else None
+        if location is None or location.kind not in OUTDOOR_UNCOVERED_KINDS:
+            continue
+        done = session.exec(
+            select(CareLog).where(
+                CareLog.plant_id == plant.id,
+                CareLog.action == "heat_boost",
+                CareLog.created_at >= day_start,
+                CareLog.created_at < day_end,
+            )
+        ).first()
+        due = _parse_due(rule.next_due_at)
+        if done is not None or due is None:
+            continue
+        sooner = max(now, due - timedelta(days=float(rule.interval_days) * (1.0 - factor)))
+        if sooner >= due:
+            continue
+        rule.next_due_at = sooner.isoformat()
+        rule.updated_at = utcnow()
+        session.add(rule)
+        session.add(CareLog(
+            plant_id=plant.id,
+            location_id=plant.location_id,
+            action="heat_boost",
+            performed_by=None,
+            source="weather_heat_boost",
+            notes=f"Heatwave: watering brought forward (interval x {factor:g})",
+            created_at=_now_iso(),
+        ))
+        boosted.append({"plant_id": plant.id, "nickname": plant.nickname or plant.species_ref,
+                        "next_due_at": rule.next_due_at})
+    if boosted:
+        session.commit()
+        log.info("[Garden weather] heat boost brought %d watering(s) forward", len(boosted))
+    return boosted
+
+
+def heat_boosted_today(session: Session) -> list[dict]:
+    """The heat boosts already applied today, read-only, for ``/today``."""
+    day_start, day_end = clock.day_bounds_utc()
+    rows = session.exec(
+        select(CareLog).where(
+            CareLog.action == "heat_boost",
+            CareLog.created_at >= day_start,
+            CareLog.created_at < day_end,
+        )
+    ).all()
+    out = []
+    for row in rows:
+        plant = session.get(Plant, row.plant_id)
+        if plant is not None:
+            out.append({"plant_id": plant.id, "nickname": plant.nickname or plant.species_ref})
+    return out
+
+
 async def check_wind_advisory(session: Session, forecast: dict | None, seed_get,
                               units: str = "imperial") -> dict | None:
     """High-wind warning for tall/trellis or potted outdoor plants.
@@ -569,8 +702,12 @@ async def check_wind_advisory(session: Session, forecast: dict | None, seed_get,
 # --------------------------------------------------------------------------- weather summary for GET /today
 
 
-async def build_weather_summary(session: Session, seed_get) -> dict | None:
+async def build_weather_summary(session: Session, seed_get, *, apply_skips: bool = False) -> dict | None:
     """Build the ``weather`` object for ``GET /today``, or None when unavailable.
+
+    ``apply_skips`` is for the weather poller and webhook only: they postpone
+    watering when it rained. ``GET /today`` passes False and reports the skips
+    already applied, so reading the page never changes a schedule.
 
     Shape::
         {
@@ -606,9 +743,11 @@ async def build_weather_summary(session: Session, seed_get) -> dict | None:
 
     profile = session.exec(select(GardenProfile).where(GardenProfile.user_id == "household")).first()
 
-    rain_skipped = await apply_rain_skip(session, profile, units)
+    rain_skipped = await apply_rain_skip(session, profile) if apply_skips else rain_skipped_today(session)
     frost_alerts = await check_frost_alerts(session, forecast, seed_get, units)
     heat = await check_heat_advisory(session, forecast, units)
+    if heat is not None:
+        heat["boosted"] = apply_heat_boost(session, heat["heat_factor"]) if apply_skips else heat_boosted_today(session)
     wind = await check_wind_advisory(session, forecast, seed_get, units)
 
     relevant = (
@@ -738,7 +877,7 @@ async def weather_poller(session_factory, get_family, seed_get, poll_s: int = 30
                 engine = _garden_db()
                 with Session(engine) as session:
                     family = await _family_list()
-                    summary = await build_weather_summary(session, seed_get)
+                    summary = await build_weather_summary(session, seed_get, apply_skips=True)
                     await dispatch_weather_notices(session, family, summary)
         except Exception as e:
             log.warning("[Garden weather] poller error: %s", e)
@@ -759,6 +898,6 @@ async def handle_weather_webhook(session_factory, get_family, seed_get) -> dict[
     engine = _garden_db()
     with Session(engine) as session:
         family = await _family_list()
-        summary = await build_weather_summary(session, seed_get)
+        summary = await build_weather_summary(session, seed_get, apply_skips=True)
         await dispatch_weather_notices(session, family, summary)
     return {"evaluated": True, "weather": summary}

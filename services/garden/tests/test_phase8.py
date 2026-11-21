@@ -77,6 +77,10 @@ ADULT = _headers("alex", "adult_child")
 CHILD = _headers("jamie", "child")
 
 
+#: The real function, kept before the ``hub`` fixture replaces it with a stub.
+_REAL_RAIN_STATE = weather_care.rain_state
+
+
 class Hub:
     """A fake Home Hub: states, tags and every service call it received."""
 
@@ -477,6 +481,49 @@ def test_the_rain_interlock_blocks_an_uncovered_bed(client, hub, monkeypatch):
     # A parent may still choose to water through it.
     override = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"override_rain": True})
     assert override.status_code == 200
+
+
+def test_unknown_rain_does_not_water_blind(client, hub, monkeypatch):
+    """No forecast: the interlock refuses and says so; a person may override."""
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    async def no_forecast(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(weather_care, "rain_state", _REAL_RAIN_STATE)
+    monkeypatch.setattr(weather_care, "_fetch_forecast", no_forecast)
+
+    resp = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 409
+    assert "cannot tell whether it rained" in resp.json()["detail"]
+    assert hub.services() == []
+    override = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"override_rain": True})
+    assert override.status_code == 200
+
+
+def test_the_interlock_and_today_convert_rain_the_same_way(monkeypatch):
+    """Millimetres from the weather data are converted by the data's units."""
+    import asyncio
+
+    metric = {"units": {"system": "metric"}, "hourly": [{"rain": 10.0}] + [{"rain": 0.0}] * 11}
+
+    async def forecast():
+        return metric
+
+    async def day(_date):
+        return {"rain": 2.54}  # millimetres, like the forecast
+
+    monkeypatch.setattr(weather_care, "_fetch_forecast", forecast)
+    monkeypatch.setattr(weather_care, "_fetch_day", day)
+
+    rain_in = asyncio.run(weather_care._observed_and_forecast_rain_in())
+    state = asyncio.run(_REAL_RAIN_STATE(None))
+
+    assert round(rain_in, 3) == round((10.0 + 2.54) / 25.4, 3)
+    assert state["known"] is True and state["rain_in"] == round(rain_in, 3)
 
 
 def test_rain_cannot_reach_a_covered_bed(client, hub, monkeypatch):

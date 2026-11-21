@@ -109,6 +109,100 @@ def _make_plant(garden_client, headers, species_ref="monstera_deliciosa", locati
 # --------------------------------------------------------------------------- heat_factor (cadence)
 
 
+def _rain_bed_plant(garden_client):
+    from services.garden.models import CareRule
+
+    client, engine = garden_client
+    loc = _make_location(garden_client, PARENT_HEADERS, name="Rain Bed", kind="raised_bed", covered=False)
+    plant = _make_plant(garden_client, PARENT_HEADERS, species_ref="basil_sweet",
+                        location_id=loc["id"], category="herb", nickname="Rain Basil")
+    with Session(engine) as session:
+        rule = session.exec(select(CareRule).where(CareRule.plant_id == plant["id"],
+                                                   CareRule.action == "water")).first()
+        rule.rain_skip_enabled = True
+        session.add(rule)
+        session.commit()
+    return plant
+
+
+def test_rain_never_brings_a_later_due_date_earlier(garden_client):
+    from datetime import UTC, datetime, timedelta
+
+    from services.garden import weather_care as wc
+    from services.garden.models import CareRule
+
+    _client, engine = garden_client
+    plant = _rain_bed_plant(garden_client)
+    later = (datetime.now(UTC) + timedelta(days=4)).isoformat()
+    with Session(engine) as session:
+        rule = session.exec(select(CareRule).where(CareRule.plant_id == plant["id"],
+                                                   CareRule.action == "water")).first()
+        rule.next_due_at = later
+        session.add(rule)
+        session.commit()
+
+    with patch("services.garden.weather_care._observed_and_forecast_rain_in", return_value=0.5), \
+            Session(engine) as session:
+        skipped = asyncio.run(wc.apply_rain_skip(session, session.get(GardenProfile, "household")))
+
+    assert skipped and skipped[0]["next_due_at"] == later
+
+
+def test_reading_today_never_applies_a_rain_skip(garden_client, monkeypatch):
+    from services.garden import weather_care as wc
+    from services.garden.models import CareLog
+
+    client, engine = garden_client
+    plant = _rain_bed_plant(garden_client)
+
+    async def wet_forecast():
+        return {"units": {"system": "imperial"}, "hourly": [{"rain": 1.0}], "current": {"label": "Rain"}}
+
+    monkeypatch.setattr(wc, "_fetch_forecast", wet_forecast)
+    with patch("services.garden.weather_care._observed_and_forecast_rain_in", return_value=1.0):
+        resp = client.get("/today", headers=PARENT_HEADERS)
+
+    assert resp.status_code == 200, resp.text
+    with Session(engine) as session:
+        logs = session.exec(select(CareLog).where(CareLog.plant_id == plant["id"],
+                                                  CareLog.action == "rain_skip")).all()
+    assert logs == []
+
+    # The poller applies it, and the next /today reports it without writing.
+    with patch("services.garden.weather_care._observed_and_forecast_rain_in", return_value=1.0), \
+            Session(engine) as session:
+        asyncio.run(wc.build_weather_summary(session, None, apply_skips=True))
+    weather = client.get("/today", headers=PARENT_HEADERS).json()["weather"]
+    assert [row["plant_id"] for row in weather["rain_skipped"]] == [plant["id"]]
+
+
+def test_a_heatwave_brings_outdoor_watering_forward_once(garden_client):
+    from datetime import UTC, datetime, timedelta
+
+    from services.garden import weather_care as wc
+    from services.garden.models import CareRule
+
+    _client, engine = garden_client
+    plant = _rain_bed_plant(garden_client)
+    with Session(engine) as session:
+        rule = session.exec(select(CareRule).where(CareRule.plant_id == plant["id"],
+                                                   CareRule.action == "water")).first()
+        rule.interval_days = 4.0
+        rule.next_due_at = (datetime.now(UTC) + timedelta(days=4)).isoformat()
+        session.add(rule)
+        session.commit()
+
+        boosted = wc.apply_heat_boost(session, 0.75)
+        again = wc.apply_heat_boost(session, 0.75)
+
+        session.refresh(rule)
+        due = datetime.fromisoformat(rule.next_due_at)
+    assert [row["plant_id"] for row in boosted] == [plant["id"]]
+    assert again == []  # once a day
+    # 4 days x 0.75 = 3 days from the last watering: one day sooner.
+    assert timedelta(days=2, hours=23) < due - datetime.now(UTC) < timedelta(days=3, hours=1)
+
+
 def test_heat_factor_returns_075_in_heatwave():
     assert heat_factor(95.0, dry=True) == 0.75
     assert heat_factor(90.0, dry=True) == 0.75
