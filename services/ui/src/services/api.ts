@@ -21,6 +21,28 @@ import type { RestoreBatch, RestoreClient, RestoreCounts } from '../lib/privateC
 import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
 import type { FreshPosition } from '../lib/freshPosition';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
+import type {
+  TrainerBacklog,
+  TrainerBenchmarks,
+  TrainerCatalog,
+  TrainerCycle,
+  TrainerCurriculum,
+  TrainerHardware,
+  TrainerModels,
+  TrainerReport,
+  TrainerReportSummary,
+} from '../lib/trainer';
+import type {
+  StlEdit,
+  StlSummary,
+  StudioAsset,
+  StudioBuilt,
+  StudioDiagnosis,
+  StudioPreview,
+  StudioProfile,
+  StudioRunResult,
+  StudioVerdict,
+} from '../lib/studio';
 import { Capacitor } from '@capacitor/core';
 import { nativeBinaryAdapter, wantsNativeBinary } from '../lib/nativeBinary';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
@@ -5003,6 +5025,222 @@ export const api = {
 
   async getMissionLogs(id: number | string): Promise<{ logs: string[] }> {
     const resp = await apiClient.get(`/api/raven/missions/${id}/logs`);
+    return resp.data;
+  },
+
+  // Jarvis Trainer (Admin → Lab → Training): what the local model can do, how
+  // well it does it, and what the last cycle decided to improve.
+  async trainerCatalog(): Promise<TrainerCatalog> {
+    const resp = await apiClient.get('/api/trainer/catalog');
+    return resp.data;
+  },
+
+  async trainerCurriculum(buckets?: string[], limit = 200): Promise<TrainerCurriculum> {
+    const resp = await apiClient.get('/api/trainer/curriculum', {
+      params: { ...(buckets?.length ? { buckets: buckets.join(',') } : {}), limit },
+    });
+    return resp.data;
+  },
+
+  async runTrainerEval(body: { buckets?: string[]; limit?: number; budget_s?: number }): Promise<TrainerReport> {
+    // A run is sequential on a small model, so the request outlives the default
+    // 30s axios timeout by design.
+    const resp = await apiClient.post('/api/trainer/eval', body, { timeout: 900_000 });
+    return resp.data;
+  },
+
+  async trainerReports(): Promise<TrainerReportSummary[]> {
+    const resp = await apiClient.get('/api/trainer/reports');
+    return resp.data?.reports ?? [];
+  },
+
+  async trainerReport(id: string): Promise<TrainerReport> {
+    const resp = await apiClient.get(`/api/trainer/reports/${encodeURIComponent(id)}`);
+    return resp.data;
+  },
+
+  async runTrainerCycle(body: { limit?: number; budget_s?: number; apply_lessons?: boolean }): Promise<TrainerCycle> {
+    const resp = await apiClient.post('/api/trainer/cycle', body, { timeout: 900_000 });
+    return resp.data;
+  },
+
+  async trainerBacklog(): Promise<TrainerBacklog> {
+    const resp = await apiClient.get('/api/trainer/backlog');
+    return resp.data;
+  },
+
+  /** The machine that hosts the model: GPU, slots, loaded models, LoRA, verdict. */
+  async trainerHardware(): Promise<TrainerHardware> {
+    const resp = await apiClient.get('/api/trainer/hardware', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** Alpaca's model inventory, and which model the trainer would use. */
+  async trainerModels(): Promise<TrainerModels> {
+    const resp = await apiClient.get('/api/trainer/models', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** Alpaca's own benchmark results: the model's report card, weakest first. */
+  async trainerBenchmarks(): Promise<TrainerBenchmarks> {
+    const resp = await apiClient.get('/api/trainer/benchmarks', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  // Workspace Studio: what a workspace's project is, how to run and preview it,
+  // and the art / decks / games made for it.
+  async studioProfile(workspaceId: string): Promise<StudioProfile> {
+    const resp = await apiClient.get('/api/studio/profile', { params: { workspace_id: workspaceId } });
+    return resp.data;
+  },
+
+  async studioRun(
+    workspaceId: string,
+    action: string,
+    timeoutS = 600,
+  ): Promise<StudioRunResult> {
+    // A first npm install or a cargo build can take minutes; the default axios
+    // timeout would abandon a run that is still going.
+    const resp = await apiClient.post(
+      '/api/studio/run',
+      { workspace_id: workspaceId, action, timeout: timeoutS },
+      { timeout: (timeoutS + 60) * 1000 },
+    );
+    return resp.data;
+  },
+
+  async studioPreview(workspaceId: string, port?: number): Promise<StudioPreview> {
+    const resp = await apiClient.post(
+      '/api/studio/preview',
+      { workspace_id: workspaceId, ...(port ? { port } : {}) },
+      { timeout: 120_000 },
+    );
+    return resp.data;
+  },
+
+  async studioStopPreview(workspaceId: string): Promise<{ stopped_process: boolean; closed_ports: number[] }> {
+    const resp = await apiClient.post('/api/studio/preview/stop', { workspace_id: workspaceId });
+    return resp.data;
+  },
+
+  async studioAssets(workspaceId: string): Promise<{ assets: StudioAsset[]; updated_at: string | null }> {
+    const resp = await apiClient.get('/api/studio/assets', { params: { workspace_id: workspaceId } });
+    return resp.data;
+  },
+
+  async studioMakeImage(
+    workspaceId: string,
+    prompt: string,
+    name?: string,
+  ): Promise<StudioAsset> {
+    const resp = await apiClient.post(
+      '/api/studio/assets/image',
+      { workspace_id: workspaceId, prompt, ...(name ? { name } : {}) },
+      { timeout: 660_000 },
+    );
+    return resp.data;
+  },
+
+  /** Which parts of the sandbox shell work, and what is wrong when one is not. */
+  async studioDiagnose(workspaceId: string): Promise<StudioDiagnosis> {
+    const resp = await apiClient.post('/api/studio/diagnose', { workspace_id: workspaceId });
+    return resp.data;
+  },
+
+  /** Prove the workspace works: the shell, a real program, and its tests. */
+  async studioVerify(
+    workspaceId: string,
+    options: { runTests?: boolean; timeoutS?: number } = {},
+  ): Promise<StudioVerdict> {
+    const resp = await apiClient.post(
+      '/api/studio/verify',
+      {
+        workspace_id: workspaceId,
+        ...(options.runTests === undefined ? {} : { run_tests: options.runTests }),
+        ...(options.timeoutS === undefined ? {} : { timeout: options.timeoutS }),
+      },
+      { timeout: 700_000 },
+    );
+    return resp.data;
+  },
+
+  /** Open a 3D model in the workspace and describe it. */
+  async stlInspect(workspaceId: string, path: string): Promise<StlSummary> {
+    const resp = await apiClient.post('/api/studio/stl/inspect', {
+      workspace_id: workspaceId,
+      path,
+    });
+    return resp.data;
+  },
+
+  /** Scale / rotate / centre / move a model; the answer carries both sizes. */
+  async stlTransform(
+    workspaceId: string,
+    path: string,
+    edit: {
+      scale?: number | number[];
+      rotate?: number[];
+      translate?: number[];
+      fit?: number;
+      center?: boolean;
+      format?: 'binary' | 'ascii';
+      outPath?: string;
+    },
+  ): Promise<StlEdit> {
+    const resp = await apiClient.post('/api/studio/stl/transform', {
+      workspace_id: workspaceId,
+      path,
+      ...(edit.scale === undefined ? {} : { scale: edit.scale }),
+      ...(edit.rotate === undefined ? {} : { rotate: edit.rotate }),
+      ...(edit.translate === undefined ? {} : { translate: edit.translate }),
+      ...(edit.fit === undefined ? {} : { fit: edit.fit }),
+      ...(edit.center === undefined ? {} : { center: edit.center }),
+      ...(edit.format === undefined ? {} : { format: edit.format }),
+      ...(edit.outPath === undefined ? {} : { out_path: edit.outPath }),
+    });
+    return resp.data;
+  },
+
+  async studioBuildDeck(workspaceId: string, markdown: string, title = ''): Promise<StudioBuilt> {
+    const resp = await apiClient.post('/api/studio/deck', { workspace_id: workspaceId, markdown, title });
+    return resp.data;
+  },
+
+  async studioScaffoldGame(
+    workspaceId: string,
+    title: string,
+    sprites?: Record<string, string>,
+  ): Promise<StudioBuilt> {
+    const resp = await apiClient.post('/api/studio/game', {
+      workspace_id: workspaceId,
+      title,
+      ...(sprites ? { sprites } : {}),
+    });
+    return resp.data;
+  },
+
+  /** Draft a sermon from a passage; the markdown lands in the workspace. */
+  async draftSermon(body: {
+    workspace_id: string;
+    passage: string;
+    title?: string;
+    theme?: string;
+    translation?: string;
+    points?: number;
+    series?: string;
+  }): Promise<{ title: string; path: string; words: number; notes: string[]; markdown: string }> {
+    const resp = await apiClient.post('/api/trainer/sermon', body, { timeout: 600_000 });
+    return resp.data;
+  },
+
+  /** Edit an image inside a workspace (an illustration, a series header). */
+  async illustrateInWorkspace(body: {
+    workspace_id: string;
+    image_path: string;
+    prompt: string;
+    output_path?: string;
+  }): Promise<{ status: string; output_path?: string | null; message?: string }> {
+    const resp = await apiClient.post('/api/trainer/illustrate', body, { timeout: 1_200_000 });
     return resp.data;
   },
 

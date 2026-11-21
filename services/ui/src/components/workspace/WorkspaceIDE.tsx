@@ -89,6 +89,7 @@ import {
 } from '../../lib/workspaceUpload';
 import type { WorkspaceSyncDirection } from '../../types/api';
 import { confirmDialog } from '../ui/confirmDialog';
+import WorkspaceStudio from './WorkspaceStudio';
 
 interface WorkspaceIDEProps {
   workspace: Workspace;
@@ -1944,6 +1945,7 @@ export default function WorkspaceIDE({
           {activeView === 'tools' && (
             <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
               <div className="text-[11px] uppercase tracking-wide text-slate-500">Tools</div>
+              <WorkspaceStudio workspaceId={workspace.id} />
               <button onClick={runLint} disabled={toolBusy} className="flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40">
                 {toolBusy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
                 Lint {activeTab ? 'file' : 'workspace'}

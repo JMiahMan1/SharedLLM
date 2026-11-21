@@ -135,3 +135,102 @@ def test_run_workspace_cmd_shell_wraps_sh(fake_docker):
     args, _ = container.exec_run.call_args
     # Run under timeout(1) so a command that never exits ends by itself.
     assert args[0][:3] == ["timeout", "-k", "5"] and args[0][4:] == ["/bin/sh", "-c", "echo hi && ls"]
+
+
+
+# --- HOME and the environment the sandbox receives ---------------------------
+#
+# The workspace shell used to hand the sandbox the execution service's whole
+# environment and HOME=/home/sharedllm, a directory that exists only in the
+# gateway image. Inside the sandbox (whose user is `raven`, home /home/raven) npm,
+# `pip install --user`, git's config and bash's own startup failed with EACCES,
+# which reads exactly like "the shell is broken". These tests pin the fix.
+
+def _home_aware_container(home: bytes):
+    """A container whose first exec (the passwd probe) reports ``home``."""
+    container = _fake_container(stdout=b"done\n")
+    container.id = "container-1"
+    probe = MagicMock(exit_code=0, output=home)
+    real = MagicMock(exit_code=0, output=(b"done\n", b""))
+    container.exec_run.side_effect = [probe, real, real, real]
+    return container
+
+
+def test_the_home_is_read_from_the_sandbox_user(monkeypatch):
+    sb._HOME_CACHE.clear()
+    container = _home_aware_container(b"/home/raven\n")
+    client = _fake_client(container)
+    monkeypatch.setattr(sb, "_docker_client", lambda: client)
+
+    async def go():
+        return await sb.run_workspace_cmd("ws", "/workspaces/w", ["ls"], timeout=5.0)
+
+    asyncio.run(go())
+    _args, kwargs = container.exec_run.call_args
+    assert kwargs["environment"]["HOME"] == "/home/raven"
+
+
+def test_a_missing_passwd_entry_falls_back_to_a_writable_tmp(monkeypatch):
+    sb._HOME_CACHE.clear()
+    container = _home_aware_container(b"")
+    client = _fake_client(container)
+    monkeypatch.setattr(sb, "_docker_client", lambda: client)
+
+    async def go():
+        return await sb.run_workspace_cmd("ws", "/workspaces/w", ["ls"], timeout=5.0)
+
+    asyncio.run(go())
+    _args, kwargs = container.exec_run.call_args
+    assert kwargs["environment"]["HOME"] == "/tmp"
+
+
+def test_a_callers_home_never_wins_over_the_sandbox_one(monkeypatch):
+    """The caller cannot point HOME at a path the sandbox user cannot write."""
+    sb._HOME_CACHE.clear()
+    container = _home_aware_container(b"/home/raven\n")
+    client = _fake_client(container)
+    monkeypatch.setattr(sb, "_docker_client", lambda: client)
+
+    async def go():
+        return await sb.run_workspace_cmd(
+            "ws", "/workspaces/w", ["ls"], timeout=5.0, env={"HOME": "/home/sharedllm"}
+        )
+
+    asyncio.run(go())
+    _args, kwargs = container.exec_run.call_args
+    assert kwargs["environment"]["HOME"] == "/home/raven"
+
+
+def test_the_services_own_environment_is_never_handed_to_the_sandbox(monkeypatch):
+    """INTERNAL_SECRET, FERNET_KEY and cloud keys stay in the service."""
+    sb._HOME_CACHE.clear()
+    container = _home_aware_container(b"/home/raven\n")
+    client = _fake_client(container)
+    monkeypatch.setattr(sb, "_docker_client", lambda: client)
+    monkeypatch.setenv("INTERNAL_SECRET", "shhh")
+    monkeypatch.setenv("FERNET_KEY", "also-secret")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-secret")
+
+    async def go():
+        return await sb.run_workspace_cmd("ws", "/workspaces/w", ["ls"], timeout=5.0)
+
+    asyncio.run(go())
+    _args, kwargs = container.exec_run.call_args
+    env = kwargs["environment"]
+    assert "INTERNAL_SECRET" not in env
+    assert "FERNET_KEY" not in env
+    assert "OPENROUTER_API_KEY" not in env
+    assert env["HOME"] == "/home/raven"
+
+
+def test_the_baseline_environment_is_still_there(monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin:/bin")
+    env = sb.build_exec_env(home="/home/raven", cred_env={"GITHUB_TOKEN": "t"}, extra={"FOO": "bar"})
+
+    assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin"
+    assert env["GITHUB_TOKEN"] == "t" and env["FOO"] == "bar"
+    assert env["HOME"] == "/home/raven"
+
+
+def test_a_blank_home_falls_back_rather_than_being_empty():
+    assert sb.build_exec_env(home="")["HOME"] == "/tmp"

@@ -1,7 +1,14 @@
 name: UI CI
 
+# One run per branch: a new push cancels the previous run instead of queueing
+# behind it. Tag pushes are not a UI change.
+concurrency:
+  group: ui-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
+    branches: [main, master, microservices, 'feat/**']
     paths:
       - 'services/ui/**'
   pull_request:
@@ -9,9 +16,11 @@ on:
       - 'services/ui/**'
 
 jobs:
-  test:
+  # Three jobs, one runner each, all at once. They used to be five steps in one
+  # job, so a lint failure waited for npm ci and the typecheck waited for lint.
+  lint-and-typecheck:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
     - uses: actions/checkout@v4
 
@@ -23,30 +32,60 @@ jobs:
         cache-dependency-path: services/ui/package-lock.json
 
     - name: Install dependencies
-      run: |
-        cd services/ui
-        npm ci
-        npm install -D msw
+      working-directory: services/ui
+      run: npm ci
 
     - name: Run Lint
-      run: |
-        cd services/ui
-        npm run lint || echo "Linting failed, but continuing for tests"
+      working-directory: services/ui
+      run: npm run lint || echo "Linting failed, but continuing for tests"
 
     # The root tsconfig only references the real configs ("files": []), so
     # plain `tsc -p .` checks nothing, and the Vite build strips types without
     # checking them. This is the step that actually typechecks the UI.
     - name: Typecheck
-      run: |
-        cd services/ui
-        npm run typecheck
+      working-directory: services/ui
+      run: npm run typecheck
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: 'npm'
+        cache-dependency-path: services/ui/package-lock.json
+
+    # msw is a devDependency already: `npm install -D msw` here re-resolved the
+    # whole lockfile on every run for nothing.
+    - name: Install dependencies
+      working-directory: services/ui
+      run: npm ci
 
     - name: Run Unit Tests
-      run: |
-        cd services/ui
-        npm run test
+      working-directory: services/ui
+      run: npm run test
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: 'npm'
+        cache-dependency-path: services/ui/package-lock.json
+
+    - name: Install dependencies
+      working-directory: services/ui
+      run: npm ci
 
     - name: Build
-      run: |
-        cd services/ui
-        npm run build
+      working-directory: services/ui
+      run: npm run build

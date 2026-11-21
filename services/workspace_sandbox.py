@@ -272,9 +272,16 @@ _SANDBOX_CRED_ENV_KEYS = (
 # arbitrary repo code, so the service's full environment (INTERNAL_SECRET,
 # FERNET_KEY, cloud keys, ...) must never be passed through wholesale;
 # only this baseline plus the scoped _SANDBOX_CRED_ENV_KEYS overlay.
+#
+# HOME is deliberately NOT here: it is set per exec to the *sandbox user's* real
+# home (see _home_for_uid). A caller used to pass HOME=/home/sharedllm, which
+# exists only in the gateway image -- inside the sandbox (the workspace_runtime
+# image, whose user is `raven` in /home/raven) it does not exist and uid 1000
+# cannot create it under /home, so npm, `pip install --user`, `git config`
+# (without GIT_CONFIG_*), cargo's registry and bash's own startup all failed
+# with EACCES.
 _SANDBOX_BASE_ENV_KEYS = (
     "PATH",
-    "HOME",
     "LANG",
     "LC_ALL",
     "TZ",
@@ -285,6 +292,12 @@ _SANDBOX_BASE_ENV_KEYS = (
     "GIT_COMMITTER_NAME",
     "GIT_COMMITTER_EMAIL",
 )
+
+#: Fallback home when the sandbox user has no passwd entry (always writable).
+_SANDBOX_FALLBACK_HOME = "/tmp"
+
+#: uid -> home, per container id. A container's user does not change under us.
+_HOME_CACHE: dict[tuple[str, int], str] = {}
 
 
 #: Home Assistant's keys: passed to a sandbox only while that integration is on.
@@ -369,6 +382,11 @@ def ensure_workspace_container(
     cred_env = _sandbox_credential_env()
     if env:
         cred_env.update({k: str(v) for k, v in env.items()})
+    # The container's own HOME: an interactive terminal (and any exec that names
+    # no environment) inherits it, so bash does not try to read /root/.bashrc as
+    # a non-root user. It is set from the image's own passwd entry, never guessed.
+    container_home = _image_home_for_uid(img, uid, client) or _SANDBOX_FALLBACK_HOME
+    cred_env.setdefault("HOME", container_home)
     # The SOURCE must be the real Docker-host path (e.g. /home/<user>/workspaces/...),
     # not the container-internal /workspaces/... path, or the daemon would bind an
     # unrelated empty host directory. The TARGET stays host_path so the agent's
@@ -493,6 +511,94 @@ def _build_exec_cmd(cmd: str | list[str], shell: bool) -> list[str]:
     return list(cmd)
 
 
+def _image_home_for_uid(image: str, uid: int, client: Any) -> str:
+    """The uid's home as the *image* defines it, read once and cached.
+
+    Asked of a throwaway container so a workspace sandbox can be created with the
+    right ``HOME`` before the workspace container exists. Failure is not fatal:
+    the caller falls back to ``/tmp``.
+    """
+    key = (f"image:{image}", int(uid))
+    cached = _HOME_CACHE.get(key)
+    if cached:
+        return cached
+    home = ""
+    try:
+        probe = client.containers.run(
+            image,
+            command=["sh", "-c", f"getent passwd {int(uid)} | cut -d: -f6"],
+            remove=True,
+            user="0:0",
+            network_disabled=True,
+        )
+        candidate = (probe or b"").decode(errors="replace").strip()
+        if candidate.startswith("/"):
+            home = candidate
+    except Exception as exc:  # image not pulled, no getent, docker hiccup
+        log.debug("[Sandbox] could not read a home for uid %s from %s: %s", uid, image, exc)
+    if home:
+        _HOME_CACHE[key] = home
+    return home
+
+
+def _home_for_uid(container: Any, uid: int) -> str:
+    """The sandbox user's home directory, as the container itself reports it.
+
+    Tools write to ``$HOME`` (npm's cache, ``pip --user``, git's config, bash's
+    history). If it points somewhere the user cannot write, every one of them
+    fails with EACCES and the workspace looks broken. The container's own passwd
+    entry is the only trustworthy answer across images; ``/tmp`` is the fallback
+    because it is world-writable.
+
+    One exec per (container, uid): the answer cannot change while the container
+    lives, and a lookup per command would double the round trips.
+    """
+    key = (getattr(container, "id", "") or getattr(container, "name", ""), int(uid))
+    cached = _HOME_CACHE.get(key)
+    if cached:
+        return cached
+    home = ""
+    try:
+        probe = container.exec_run(
+            ["sh", "-c", f"getent passwd {int(uid)} | cut -d: -f6"],
+            user="0:0",
+            stdout=True,
+            stderr=False,
+        )
+        out = probe.output if isinstance(probe.output, bytes) else b""
+        candidate = out.decode(errors="replace").strip()
+        if candidate.startswith("/"):
+            home = candidate
+    except Exception as exc:  # no getent, no permission, docker hiccup
+        log.debug("[Sandbox] could not read the home for uid %s: %s", uid, exc)
+    if not home:
+        home = _SANDBOX_FALLBACK_HOME
+    _HOME_CACHE[key] = home
+    return home
+
+
+def build_exec_env(
+    *,
+    home: str,
+    cred_env: dict[str, str] | None = None,
+    extra: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """The environment one sandbox exec gets.
+
+    Only the documented baseline plus credentials plus the caller's own keys.
+    ``HOME`` is always the last word: a caller that names a path the sandbox user
+    cannot write (``/home/sharedllm`` in a ``raven``-based image) is exactly the
+    bug this prevents.
+    """
+    env = {k: os.environ[k] for k in _SANDBOX_BASE_ENV_KEYS if k in os.environ}
+    for key, value in (cred_env or {}).items():
+        env.setdefault(str(key), str(value))
+    if extra:
+        env.update({str(k): str(v) for k, v in extra.items()})
+    env["HOME"] = home or _SANDBOX_FALLBACK_HOME
+    return env
+
+
 def _exec_blocking(
     workspace_id: str,
     host_path: str,
@@ -526,13 +632,11 @@ def _exec_blocking(
     elif c.status != "running":
         c.start()
 
-    full_env = {k: os.environ[k] for k in _SANDBOX_BASE_ENV_KEYS if k in os.environ}
-    # Guarantee the sandbox shell inherits integration credentials even when the
-    # caller did not explicitly pass them, so `gh`/`git push` always authenticate.
-    for _k, _v in _sandbox_credential_env().items():
-        full_env.setdefault(_k, _v)
-    if env:
-        full_env.update({k: str(v) for k, v in env.items()})
+    full_env = build_exec_env(
+        home=_home_for_uid(c, uid),
+        cred_env=_sandbox_credential_env(),
+        extra=env,
+    )
 
     res = c.exec_run(
         cmd,
@@ -685,12 +789,14 @@ async def run_workspace_terminal(
     elif c.status != "running":
         c.start()
 
-    # Build environment with credentials
-    full_env = dict(os.environ)
-    for _k, _v in _sandbox_credential_env().items():
-        full_env.setdefault(_k, _v)
-    if env:
-        full_env.update({k: str(v) for k, v in env.items()})
+    # Build environment with credentials: the documented baseline plus creds,
+    # never the service's whole environment (see _SANDBOX_BASE_ENV_KEYS), and a
+    # HOME the sandbox user can actually write to.
+    full_env = build_exec_env(
+        home=_home_for_uid(c, uid),
+        cred_env=_sandbox_credential_env(),
+        extra=env,
+    )
 
     # Create the PTY
     # Using docker-py's low-level API to get direct socket access

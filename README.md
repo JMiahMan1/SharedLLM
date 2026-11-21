@@ -69,6 +69,11 @@ See `CONTRIBUTING.md` for the project rules (including deploys) and `docs/SCRIPT
 
 - **Raven**: the coding and long-running task agent, with a RAG-backed
   learning memory.
+- **Jarvis Trainer**: the facilitator around the local model. It derives the
+  feature catalogue from the code, scores a curriculum built from the
+  household's real work (self-repairs, sermons, image edits, memory hygiene),
+  and turns the failures into lessons, workspace repairs and UI proposals
+  (`docs/JARVIS_TRAINER.md`).
 - **Fast path routing**: semantic intent classification skips the LLM for
   strong matches.
 - **Family hub**: Nextcloud Talk chat, games, drawing, music, recipes, voice

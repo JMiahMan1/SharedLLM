@@ -1,5 +1,5 @@
 import { test, expect as baseExpect, type Page, type Route } from '@playwright/test';
-import { isServerCall } from './fixtures/serverCalls';
+import { INTEGRATIONS_STATUS_PATH, integrationsStatus, isServerCall } from './fixtures/serverCalls';
 import { REQUEST_VETTING, appVettingAnswer } from './fixtures/appVettingMocks';
 
 // The page fills in from many small reads (fourteen nights of sleep alone), so a
@@ -178,6 +178,10 @@ async function mockApi(page: Page, viewer: Viewer) {
     }
 
     // No deploy under way (the "Jarvis is updating" flag, served from a file: 404 when there is none).
+    // Every signed-in page asks once whether the home integrations are on, and the
+    // nav, widgets and gates all read it. Without an answer the catch-all below
+    // records it as unmocked and the test fails for a request the page always makes.
+    if (p === INTEGRATIONS_STATUS_PATH) return json(integrationsStatus());
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
     unmocked.push(`${route.request().method()} ${p}`);
     return route.fulfill({ json: [] });

@@ -70,7 +70,15 @@ export function voiceGroups(
   voices: readonly string[],
   featured: readonly { id: string; name: string }[],
 ): Array<{ group: string; voices: VoiceInfo[] }> {
-  const ids = [...new Set([...featured.map((f) => f.id), ...voices])];
+  // Tolerate a caller that hands over a malformed answer: a spread of undefined
+  // here used to throw inside render and take a whole page down.
+  const ids = [
+    ...new Set([
+      ...(Array.isArray(featured) ? featured : []).map((f) => f?.id).filter((id): id is string => typeof id === 'string'),
+      // Only strings are voices: a junk entry (or a padded-out array) is skipped.
+      ...(Array.isArray(voices) ? voices.filter((id): id is string => typeof id === 'string' && id.length > 0) : []),
+    ]),
+  ];
   const byGroup = new Map<string, VoiceInfo[]>();
   for (const id of ids) {
     const info = describeVoice(id, featured);

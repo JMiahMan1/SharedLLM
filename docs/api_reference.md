@@ -165,6 +165,7 @@ Playback control (execution service):
 - `GET /health`: service health
 - `POST /files/read`, `POST /files/write`, `POST /files/delete`: workspace files
 - `POST /git/status`, `POST /git/pull`, `POST /git/commit`, ...: repository operations
+- `POST /ports/expose` `{workspace_id, container_port}`: publish a sandbox port through a TCP forward (returns `url` and `host_port`); `GET /ports/list/{workspace_id}`: the ports currently published; `POST /ports/unexpose` `{workspace_id, host_port}`: stop forwarding one of them
 - `POST /provider/sync/workspace`: sync a workspace with its Nextcloud folder
 - `POST /api/webhook/git-pull/{id}` (public via Caddy, authenticated by the workspace's webhook token): pull on push
 
@@ -204,6 +205,40 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 - `GET /api/integrations/skylight/members`, `POST /api/integrations/skylight/chores`, `PATCH`/`DELETE /api/integrations/skylight/chores/{id}` (`?apply_to=one|all`): parents (admins, the father, the mother) add, change and remove Skylight chores; `GET /api/integrations/skylight/chores?scope=<name>` lets them see anyone's. See `docs/ACHIEVEMENTS.md`, "Managing chores"
 - `GET /api/presence/all`, `GET /api/presence/rooms`, `GET /api/presence/{user_id}`:
   who is in which room (from the execution service). Signed-in caller only
+
+## Workspace Studio (a workspace that builds, runs and makes things, `docs/WORKSPACE_STUDIO.md`)
+
+- `GET /api/studio/profile?workspace_id=`: the detected stack (Python, Node/Vite/Next, Go, Rust, Java, .NET, static, unknown), the exact commands for its install/test/build/lint/serve steps, the preview port, and `all_stacks` when a repo holds more than one (signed-in caller)
+- `POST /api/studio/run` `{workspace_id, action, timeout}`: run one profile step in the workspace's sandbox and return `ok`, `returncode`, `duration_s`, the tail of `stdout`/`stderr` and the command that ran; a step the stack does not have is a 400 naming the ones it does
+- `POST /api/studio/preview` `{workspace_id, port?}`: start the dev server detached in the sandbox, publish its port, poll the URL, and return `{ok, url, container_port, host_port, log}`; `POST /api/studio/preview/stop` `{workspace_id}`: kill the recorded PID and close every published port
+- `GET /api/studio/assets?workspace_id=`: the art and audio made for this workspace, with the prompt and model that made each
+- `POST /api/studio/assets/image` `{workspace_id, prompt, name?, size?, model?}`: generate a picture into `assets/` through the household's image model
+- `POST /api/studio/assets/narration` `{workspace_id, text, name?, voice?}`: speak text into `assets/<name>.wav`
+- `POST /api/studio/deck` `{workspace_id, markdown, title?, footer?}`: render Markdown into one self-contained `decks/<slug>/index.html` (offline, keyboard and swipe), keeping `source.md` beside it
+- `POST /api/studio/game` `{workspace_id, title, sprites?}`: write a playable single-file canvas game to `games/<slug>/index.html` with a README that says what to edit
+- `POST /api/studio/diagnose` `{workspace_id}`: run six safe shell probes (identity, `$HOME` writability, working directory, `/bin/bash`, `python3`, `git`) and return each one's `ok`, `returncode`, output and a `hint` naming the cause; a probe that fails never hides the others (signed-in caller)
+- `POST /api/studio/verify` `{workspace_id, run_tests?, timeout?}`: prove the workspace works end to end — diagnose the shell, write and run a one-line program (`_studio_probe.py` / `.mjs`) and delete it, then run the detected project's test step — returning `{ok, shell, program, tests, hint}`
+- `POST /api/studio/stl/inspect` `{workspace_id, path}`: read a binary or ASCII STL in pure Python and report `triangles`, `vertices`, `size`, `volume`, `area`, `watertight`, `open_edges`, `degenerate`, the unit it looks like, and every warning (open surface, inside-out winding, zero-area facets) (signed-in caller)
+- `POST /api/studio/stl/transform` `{workspace_id, path, scale? (number or [x,y,z]), rotate? [x,y,z] degrees, translate? [x,y,z], fit?, center?, format? binary|ascii, out_path?}`: rotate → fit/scale → centre → translate, write a **new** file (default `<name>_edited.stl`), and return the measurements `before` and `after` plus what was `applied`; a request with nothing to do, a non-positive scale, or an unknown format is a 400
+- `GET /api/studio/stl/preview?workspace_id=&path=&limit=`: an indexed mesh (`positions` + `faces`, shared vertices merged, capped triangle list) for drawing a model in the browser
+
+## Trainer (the local model's classroom, `docs/JARVIS_TRAINER.md`)
+
+- `GET /api/trainer/catalog`: every capability Jarvis has, derived from the code (service routes, the live gateway app, the Raven tool table, the UI route table), with counts by service/kind/tag (signed-in caller)
+- `GET /api/trainer/curriculum?buckets=&limit=`: the derived evaluation/training cases and a summary by bucket (signed-in caller)
+- `POST /api/trainer/sermon`: draft a sermon from a passage (scripture read from the Bible service first) and save it as `sermons/<slug>.md` in the workspace (signed-in caller)
+- `POST /api/trainer/illustrate`: edit an image inside a workspace (`image_path` + `prompt`, optional `output_path`) through the execution image handler (signed-in caller)
+- `POST /api/trainer/eval`: run a bounded slice of the curriculum (`limit`, `budget_s`, `buckets`) and keep the report; admin only
+- `GET /api/trainer/reports`, `GET /api/trainer/reports/{id}`: report summaries and one report with every answer; admin only
+- `POST /api/trainer/reports/dataset` `{report_id, accepted_only}`: export the report's rows as JSONL for fine-tuning; admin only
+- `POST /api/trainer/repair` `{workspace_id, path, error_text?, test_targets?, attempts?}`: ask the local model for the corrected file, write it through the Workspace API with a sha256 conflict check, and prove it with the workspace's own pytest; admin only
+- `POST /api/trainer/dream`, `POST /api/trainer/dream/validate`: dreaming plus the proposals it implies, and a lesson self-test result; admin only
+- `GET /api/trainer/backlog`: the last facilitator cycle's ranked proposals; admin only
+- `POST /api/trainer/cycle`: dream, evaluate, merge proposals, write the top lessons into RAG and optionally repair a file, in one pass; admin only
+- `GET /api/trainer/hardware`: the model host (Alpaca) as it really is — GPU total/used/free VRAM, loaded models, active and queued requests, slots, LoRA adapters, the model the trainer would use, and a `ready` verdict with the reasons it is not; admin only
+- `GET /api/trainer/models`: Alpaca's model inventory (size, context length, capabilities, router status) plus `chosen` (the model the trainer uses) and `trainer_model_missing`; admin only
+- `GET /api/trainer/benchmarks?limit=`: Alpaca's general and SharedLLM benchmark results per model, with `average_score` and `weak_categories` for the chosen model; admin only
+- `POST /api/trainer/benchmarks/ingest`: fold those measured results into lesson confidence through RAG `/rag/benchmark/ingest-results`; admin only
 
 "Signed-in caller" routes return **401** without a valid API key (or the
 internal secret for service-to-service calls).
