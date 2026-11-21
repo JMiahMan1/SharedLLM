@@ -265,6 +265,7 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
           value={modelPath}
           onChange={(event) => setModelPath(event.target.value)}
           placeholder="parts/bracket.stl"
+          aria-label="model path"
           className={`mt-1.5 ${field}`}
         />
         <div className="mt-1.5 flex gap-1.5">
@@ -273,6 +274,7 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
             onChange={(event) => setFitMm(event.target.value)}
             inputMode="decimal"
             placeholder="longest side (mm)"
+          aria-label="longest side in millimetres"
             className={field}
           />
           <button
@@ -323,6 +325,7 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
           value={artPrompt}
           onChange={(event) => setArtPrompt(event.target.value)}
           placeholder="a friendly blue robot, flat cartoon, transparent background"
+          aria-label="art prompt"
           className={`mt-1.5 ${field}`}
         />
         <div className="mt-1.5 flex gap-1.5">
@@ -330,6 +333,7 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
             value={artName}
             onChange={(event) => setArtName(event.target.value)}
             placeholder="name (hero)"
+          aria-label="asset name"
             className={field}
           />
           <button
@@ -359,9 +363,11 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
           value={deckTitle}
           onChange={(event) => setDeckTitle(event.target.value)}
           placeholder="deck title"
+          aria-label="deck title"
           className={`mt-1.5 ${field}`}
         />
         <textarea
+          aria-label="deck markdown"
           value={deckBody}
           onChange={(event) => setDeckBody(event.target.value)}
           rows={4}
@@ -379,6 +385,7 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
             value={gameTitle}
             onChange={(event) => setGameTitle(event.target.value)}
             placeholder="game title"
+          aria-label="game title"
             className={field}
           />
           <button
