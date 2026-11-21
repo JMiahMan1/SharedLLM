@@ -1005,7 +1005,7 @@ export function BedGridEditor({
       </div>
       {/* A bed is where the valve and the soil probe actually are. */}
       <div className="mt-4">
-        <HomeHubBindingPanel targetKind="location" targetId={bed.id} canEdit={canEdit} />
+        <HomeHubBindingPanel key={bed.id} targetKind="location" targetId={bed.id} canEdit={canEdit} />
       </div>
     </section>
   );

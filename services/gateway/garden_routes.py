@@ -346,18 +346,30 @@ async def garden_harvest_ready(request: Request):
 
 
 @router.post("/locations/{loc_id}/water-all")
-async def garden_water_all(loc_id: str, request: Request):
+async def garden_water_all(
+    loc_id: str,
+    request: Request,
+    due_only: bool | None = None,
+    source: str | None = None,
+):
+    """Water a room, forwarding which plants to take and where it came from."""
     headers = await _verified_headers(request)
+    params: dict[str, str] = {}
+    if due_only is not None:
+        params["due_only"] = "true" if due_only else "false"
+    if source:
+        params["source"] = source
     return await _call(
-        "POST", f"/locations/{loc_id}/water-all", headers=headers
+        "POST", f"/locations/{loc_id}/water-all", params=params or None, headers=headers
     )
 
 
 @router.get("/plants/{plant_id}/logs")
-async def garden_plant_logs(plant_id: str, request: Request):
+async def garden_plant_logs(plant_id: str, request: Request, limit: int | None = None):
+    """A plant's care history, newest first (``limit`` forwarded when asked)."""
     headers = await _verified_headers(request)
     return await _call(
-        "GET", f"/plants/{plant_id}/logs", headers=headers
+        "GET", f"/plants/{plant_id}/logs", params={"limit": limit} if limit else None, headers=headers
     )
 
 
@@ -1285,11 +1297,20 @@ async def garden_list_plant_photos(plant_id: str, request: Request):
 
 @router.get("/plants/{plant_id}/photos/{photo_id}/thumb")
 async def garden_plant_photo_thumb(plant_id: str, photo_id: str, request: Request):
-    """The local thumbnail, streamed straight through (the UI loads these fast)."""
+    """The local thumbnail, streamed straight through (the UI loads these fast).
+
+    A browser ``<img>`` cannot send a Bearer header, so this also accepts the
+    signed media token the rest of the app uses for images (``?user=&mt=``) --
+    and, like those, a bad token is a 403 rather than a silent fallback.
+    """
+    from services.gateway import main as gateway
     from services.gateway.config import GARDEN_SVC
     from services.gateway.main import shared_http_client
 
-    headers = await _verified_headers(request)
+    media_ident = await gateway._resolve_identity_from_media_token(request)
+    headers = await _verified_headers(request) if media_ident is None else {
+        "X-User-Id": str(media_ident.get("user") if isinstance(media_ident, dict) else ""),
+    }
     merged = dict(_HEADERS)
     merged.update(headers)
     async with shared_http_client() as client, client.get(

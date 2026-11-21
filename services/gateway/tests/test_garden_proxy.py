@@ -216,6 +216,8 @@ def calls(monkeypatch):
         if path.startswith("/pantry-batches/") and method == "DELETE":
             return Response(status_code=204)
         # Phase 8: Home Hub hardware, bindings, valves and NFC/QR tags.
+        if path.endswith("/logs") and method == "GET":
+            return {"plant_id": path.split("/")[2], "count": 0, "logs": []}
         if path == "/hardware/discover" and method == "GET":
             return {
                 "available": True, "has_any_hardware": True,
@@ -1038,3 +1040,26 @@ def test_garden_hardware_needs_authentication(client):
     assert client.get("/api/garden/hardware/discover").status_code == 401
     assert client.get("/api/garden/bindings").status_code == 401
     assert client.get("/api/garden/tags/tag-bed1").status_code == 401
+
+
+# --------------------------------------------------------------------------- query forwarding
+
+def test_water_all_forwards_due_only_and_source(client, calls):
+    """The room button says "only what is due" and "a person did this"."""
+    resp = client.post(
+        "/api/garden/locations/loc-1/water-all",
+        headers=KID_HEADERS,
+        params={"due_only": "false", "source": "nfc_tag"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    forwarded = next(row for row in calls if row[1] == "/locations/loc-1/water-all")
+    assert forwarded[2] == {"due_only": "false", "source": "nfc_tag"}
+
+
+def test_a_plant_logs_limit_is_forwarded(client, calls):
+    resp = client.get("/api/garden/plants/p-1/logs", headers=KID_HEADERS, params={"limit": "10"})
+
+    assert resp.status_code == 200, resp.text
+    forwarded = next(row for row in calls if row[1] == "/plants/p-1/logs")
+    assert forwarded[2] == {"limit": 10}

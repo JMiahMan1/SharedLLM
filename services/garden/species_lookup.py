@@ -483,9 +483,15 @@ async def handle_species_lookup(
     body: dict[str, Any],
     current_user: str,
     is_admin: bool,
+    is_adult: bool = False,
 ) -> dict[str, Any]:
-    """POST /species/lookup: 3-tier unknown species lookup (adult/admin only)."""
-    if not is_admin:
+    """POST /species/lookup: 3-tier unknown species lookup (adult/admin only).
+
+    "Adult" is what ``main._require_admin_or_adult`` means -- mother, father,
+    adult_child, admin -- and the route decides it, so a parent no longer gets a
+    403 from here after the route let them in.
+    """
+    if not is_adult:
         raise HTTPException(status_code=403, detail="Adults and admins only: look up unknown species.")
 
     name = (body.get("name") or "").strip()
@@ -572,9 +578,10 @@ async def handle_species_custom(
     body: CustomSpeciesIn,
     current_user: str,
     is_admin: bool,
+    is_adult: bool = False,
 ) -> dict[str, Any]:
     """POST /species/custom: save a user-reviewed custom species (adult/admin only)."""
-    if not is_admin:
+    if not is_adult:
         raise HTTPException(status_code=403, detail="Adults and admins only: save custom species.")
 
     warnings: list[str] = []
@@ -609,9 +616,10 @@ async def handle_species_custom_delete(
     key: str,
     current_user: str,
     is_admin: bool,
+    is_adult: bool = False,
 ) -> dict[str, Any]:
     """DELETE /species/custom/{key}: remove a custom species (adult/admin only)."""
-    if not is_admin:
+    if not is_adult:
         raise HTTPException(status_code=403, detail="Adults and admins only: delete custom species.")
     row = session.exec(select(CustomSpecies).where(CustomSpecies.key == key)).first()
     if row is None:

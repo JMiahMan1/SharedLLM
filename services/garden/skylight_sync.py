@@ -8,7 +8,9 @@ Opt-in per plant/location. Best-effort: never fails the care-log request.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
 
 from sqlmodel import Session, select
 
@@ -30,12 +32,17 @@ def mirror_care_log(
     action: str = "water",
     performed_by: str | None = None,
 ) -> None:
-    """Mirror a care action to Skylight if the plant/location has opt-in sync.
+    """Mirror a *watering* to Skylight if the plant/location opted in.
 
-    Calls Execution's ``POST /api/integrations/skylight/chores/{chore_id}/complete``.
-    Degrades gracefully (one log line) when Skylight is unconfigured,
-    unreachable, or the plant/location has no Skylight chore id.
+    Only ``water``: the chore on the chart is the watering, so completing it for
+    a mist, a rotation or a pest check would tick off a job nobody did. The id
+    and kind are read here, while the row is still attached, and only primitives
+    travel into the async work -- the old code closed over the ORM object and hit
+    ``DetachedInstanceError`` once the request's session ended.
     """
+    if action != "water":
+        return
+
     target = None
     if plant_id:
         target = session.get(Plant, plant_id)
@@ -44,13 +51,13 @@ def mirror_care_log(
     if target is None or not should_sync(target):
         return
 
+    target_kind = target.__class__.__name__
+    target_id = target.id
     chore_id = getattr(target, "skylight_chore_id", None)
     if not chore_id:
         log.info(
             "[Garden] Skylight sync: %s %s has sync enabled but no skylight_chore_id; skipping mirror of %s",
-            target.__class__.__name__,
-            target.id if hasattr(target, "id") else target,
-            action,
+            target_kind, target_id, action,
         )
         return
 
@@ -60,14 +67,13 @@ def mirror_care_log(
     if not exec_url or not secret:
         log.info(
             "[Garden] Skylight sync: EXECUTION_SVC_URL or INTERNAL_SECRET not configured; cannot mirror %s for %s %s",
-            action, target.__class__.__name__, target.id,
+            action, target_kind, target_id,
         )
         return
 
     import aiohttp
-    import asyncio
 
-    async def _post_complete():
+    async def _post_complete() -> None:
         headers = {"X-Internal-Secret": secret}
         params = {"user": performed_by or ""}
         try:
@@ -83,27 +89,37 @@ def mirror_care_log(
                         body = await resp.text()
                         log.warning(
                             "[Garden] Skylight complete %s for %s %s failed: HTTP %s %s",
-                            chore_id, target.__class__.__name__, target.id,
-                            resp.status, body[:200],
+                            chore_id, target_kind, target_id, resp.status, body[:200],
                         )
                     else:
                         log.info(
                             "[Garden] Skylight sync: completed chore %s for %s %s (action=%s, by=%s)",
-                            chore_id, target.__class__.__name__, target.id,
-                            action, performed_by or "unknown",
+                            chore_id, target_kind, target_id, action, performed_by or "unknown",
                         )
         except Exception as e:
             log.warning(
                 "[Garden] Skylight sync: could not complete chore %s for %s %s: %s",
-                chore_id, target.__class__.__name__, target.id, e,
+                chore_id, target_kind, target_id, e,
             )
 
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # We're inside a sync FastAPI handler; schedule the coroutine.
-            asyncio.ensure_future(_post_complete())
-        else:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None:
+        # A running loop that is not ours to block on: let it finish in the
+        # background (this is the async-handler case).
+        loop.create_task(_post_complete())
+        return
+
+    # A plain ``def`` FastAPI handler runs in a worker thread with no loop, and
+    # ``asyncio.get_event_loop()`` there made a loop that never ran the task --
+    # which is why the mirror silently never happened for POST /plants/{id}/care.
+    def _run() -> None:
+        try:
             asyncio.run(_post_complete())
-    except Exception as e:
-        log.warning("[Garden] Skylight sync: could not schedule chore completion: %s", e)
+        except Exception as e:  # pragma: no cover - background best effort
+            log.warning("[Garden] Skylight sync: background completion failed: %s", e)
+
+    threading.Thread(target=_run, name=f"skylight-mirror-{target_id}", daemon=True).start()

@@ -630,8 +630,12 @@ def build_pantry_view(
         query = query.where(PantryBatch.qty_remaining > 0)
     batches = list(session.exec(query).all())
 
+    # Only jars that still hold something can be "use first": an empty one would
+    # wear the badge forever and point at nothing.
     oldest_by_label: dict[str, str] = {}
     for batch in sorted(batches, key=lambda b: (b.batch_date or "", b.created_at)):
+        if (batch.qty_remaining or 0) <= 0:
+            continue
         oldest_by_label.setdefault(batch.label.strip().lower(), batch.id)
 
     rows: list[dict] = []

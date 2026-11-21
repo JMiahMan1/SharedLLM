@@ -30,7 +30,17 @@ vi.mock('../context/AuthContext', async (importActual) => {
   };
 });
 
+// The photo journal signs its thumbnails with a media token, which fetches one
+// through `apiClient`; give it a token so the journal renders its grid.
+vi.mock('../lib/mediaToken', () => ({
+  useMediaToken: () => ({ user: 'mother', token: 'media-token' }),
+  currentMediaToken: () => ({ user: 'mother', token: 'media-token' }),
+  ensureMediaToken: async () => ({ user: 'mother', token: 'media-token' }),
+  resetMediaTokenForTests: () => undefined,
+}));
+
 vi.mock('../services/api', () => ({
+  apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
   api: {
     gardenToday: vi.fn(),
     gardenListPlants: vi.fn(),
@@ -1666,7 +1676,9 @@ describe('Garden photos, snap-to-add and the Plant Doctor (Phase 7)', () => {
 
     expect(await screen.findByText('Growth Journal')).toBeInTheDocument();
     const thumb = await screen.findByAltText(/progress photo from 2026-11-18/);
-    expect(thumb).toHaveAttribute('src', '/api/garden/plants/plant-1/photos/photo-1/thumb');
+    // The <img> cannot send a Bearer header, so the URL carries the token.
+    expect(thumb.getAttribute('src')).toContain('/api/garden/plants/plant-1/photos/photo-1/thumb');
+    expect(thumb.getAttribute('src')).toContain('mt=media-token');
     expect(screen.getByText('New leaf')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Delete photo from 2026-11-18/ }));

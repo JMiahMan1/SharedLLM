@@ -868,7 +868,9 @@ def pantry_goal_backcalc(
     if crop_refs:
         primary = crop_refs[0]
         others = crop_refs[1:]
-        primary_lbs = raw_lbs_needed * 0.7
+        # One crop provides the whole goal: the old 70/30 split left a third of
+        # the jars with no plants to fill them.
+        primary_lbs = raw_lbs_needed if not others else raw_lbs_needed * 0.7
         other_lbs = raw_lbs_needed * 0.3 / max(len(others), 1)
 
         for ref in crop_refs:

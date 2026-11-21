@@ -18,6 +18,7 @@ import {
   BedGridEditor, DualSizingPanel, PlansPanel, TimelinePanel, YardMapPanel, ZoneFrostPanel,
 } from '../components/garden/PlannerPanels';
 import { PantryTab } from '../components/garden/PantryPanels';
+import { invalidateGarden } from '../lib/gardenInvalidate';
 import { PhotoInput, PhotoJournalPanel, PlantDoctorModal } from '../components/garden/PhotoJournalPanel';
 import { HomeHubBindingPanel } from '../components/garden/HomeHubBindingPanel';
 import { TagScanCard } from '../components/garden/TagScanCard';
@@ -187,13 +188,15 @@ export default function Garden() {
                 </button>
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => setAddOpen(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 min-h-11 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-purple-500/25 shrink-0"
-            >
-              <Plus size={16} /> Add Plant
-            </button>
+            {isAdult && (
+              <button
+                type="button"
+                onClick={() => setAddOpen(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 min-h-11 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-purple-500/25 shrink-0"
+              >
+                <Plus size={16} /> Add Plant
+              </button>
+            )}
             {isParent && (
               <button
                 type="button"
@@ -229,7 +232,7 @@ export default function Garden() {
         )}
 
         <AddPlantModal
-          open={addOpen}
+          open={addOpen && isAdult}
           onClose={() => setAddOpen(false)}
           locations={locations}
         />
@@ -338,9 +341,8 @@ function TodayTab({
   const logCareMutation = useMutation({
     mutationFn: ({ plantId, action }: { plantId: string; action: string }) =>
       api.gardenLogCare(plantId, { action }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['garden-today'] });
-      queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
+    onSuccess: (_data, variables) => {
+      invalidateGarden(queryClient, { plantId: variables.plantId });
       toast.success('Care logged');
     },
     onError: () => toast.error('Failed to log care'),
@@ -348,8 +350,8 @@ function TodayTab({
 
   const snoozeMutation = useMutation({
     mutationFn: ({ plantId }: { plantId: string }) => api.gardenSnooze(plantId, { still_damp: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['garden-today'] });
+    onSuccess: (_data, variables) => {
+      invalidateGarden(queryClient, { plantId: variables.plantId });
       toast.success('Snoozed until tomorrow');
     },
     onError: () => toast.error('Failed to snooze'),
@@ -358,8 +360,7 @@ function TodayTab({
   const waterAllMutation = useMutation({
     mutationFn: (locationId: string) => api.gardenWaterAll(locationId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['garden-today'] });
-      queryClient.invalidateQueries({ queryKey: ['garden-plants'] });
+      invalidateGarden(queryClient);
       toast.success('Room watered');
     },
     onError: () => toast.error('Failed to water room'),
@@ -813,6 +814,7 @@ function PlannerTab({
 
       {activePlanId && openBed && (
         <BedGridEditor
+          key={openBed.id}
           planId={activePlanId}
           bed={openBed}
           canEdit={canEdit}

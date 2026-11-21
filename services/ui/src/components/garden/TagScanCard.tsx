@@ -49,8 +49,8 @@ export function TagScanCard({ tagId, onDismiss }: { tagId: string; onDismiss: ()
       <div className={cardClass} role="status">
         <div className="flex items-start justify-between gap-2">
           <p className="text-sm text-slate-200">
-            This tag is not linked to a plant or bed yet. An adult can link it from a plant&apos;s
-            hardware settings.
+            This tag is not linked to a plant or bed yet. A parent or admin can link it from a
+            plant&apos;s hardware settings.
           </p>
           <button type="button" onClick={onDismiss} aria-label="Dismiss tag" className="min-h-11 min-w-11 inline-flex items-center justify-center text-slate-400 hover:text-white">
             <X size={16} />

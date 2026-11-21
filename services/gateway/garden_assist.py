@@ -344,7 +344,15 @@ async def summarize(creds: Any, *, call: GardenCall = call_garden) -> dict:
         spoken += f" Pantry: {goal.get('item')} is {goal.get('qty_put_up')} of {goal.get('target_qty')} {goal.get('unit')}."
     frost = (weather or {}).get("frost_alerts") or []
     if frost:
-        spoken += f" Frost alert for {len(frost)} plant{'s' if len(frost) != 1 else ''}."
+        # One alert can cover several plants; say how many plants, not how many
+        # alerts ("Frost alert for 1 plant" when six are at risk reads wrong).
+        at_risk: set[str] = set()
+        for alert in frost:
+            names = (alert or {}).get("plants") or []
+            if names:
+                at_risk.update(str(name) for name in names)
+        count = len(at_risk) or len(frost)
+        spoken += f" Frost alert for {count} plant{'s' if count != 1 else ''}."
     rain_skipped = (weather or {}).get("rain_skipped") or []
     if rain_skipped:
         spoken += f" Rain skipped watering for {len(rain_skipped)}."
