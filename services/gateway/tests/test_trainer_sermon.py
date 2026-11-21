@@ -174,3 +174,63 @@ async def test_illustrating_edits_the_image_in_the_workspace(monkeypatch):
 async def test_illustrating_needs_an_image_and_a_prompt():
     with pytest.raises(sermon_mod.SermonError):
         await sermon_mod.illustrate("sermons", image_path="", prompt="x")
+
+
+async def test_a_draft_never_overwrites_an_existing_sermon(scripture, monkeypatch):
+    """Writes are create-only through the real workspace_api: a taken name gets -2."""
+    from services.gateway import workspace_api
+
+    files: dict[str, str] = {"sermons/the-god-who-works.md": "the preacher's own edited sermon"}
+    sent: list[dict] = []
+
+    async def fake_request(endpoint, payload, timeout=0.0, **kwargs):
+        assert endpoint == "/files/write"
+        sent.append(payload)
+        path = payload["relative_path"]
+        if payload["expected_sha256"] == "new" and path in files:
+            return 409, {"detail": f"File contents changed for {path}"}
+        files[path] = payload["content"]
+        return 200, {"status": "SUCCESS"}
+
+    monkeypatch.setattr(workspace_api, "request", fake_request)
+
+    async def fake_ask(prompt, max_tokens=0):
+        return OUTLINE if max_tokens == sermon_mod.OUTLINE_MAX_TOKENS else "A paragraph about the point."
+
+    drafted = await sermon_mod.compose_sermon("sermons", passage="Romans 8:28", ask=fake_ask)
+
+    assert drafted.path == "sermons/the-god-who-works-2.md"
+    assert files["sermons/the-god-who-works.md"] == "the preacher's own edited sermon"
+    assert all(payload["expected_sha256"] == "new" for payload in sent)
+
+
+async def test_an_execution_error_status_is_raised_not_returned(monkeypatch):
+    class _Resp:
+        status = 500
+
+        async def text(self):
+            return '{"detail": "bible service crashed"}'
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Session:
+        def __init__(self, **kwargs):
+            pass
+
+        def post(self, *args, **kwargs):
+            return _Resp()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(sermon_mod.aiohttp, "ClientSession", _Session)
+
+    with pytest.raises(sermon_mod.ExecutionError, match="500"):
+        await sermon_mod._execution_post("/execute/image_edit", {})

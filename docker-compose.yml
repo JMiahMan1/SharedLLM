@@ -358,6 +358,7 @@ services:
       - REDIS_URL=${BRIDGE_REDIS_URL}
       - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       - HOME=/home/sharedllm
+      - TRAINER_DATA_DIR=/app/data/trainer
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
       - ./data/app_updates:/app/data/app_updates
@@ -366,6 +367,9 @@ services:
       # PRIVATE_CHAT_DELETE_TALK_ROOM=1 in .env lets the move off Talk delete each old room (default: kept).
       # PRIVATE_CHAT_REMINDER_* in .env tune the reply reminders (docs/PRIVATE_CHAT_REMINDERS.md).
       - ./data/private_chat:/app/data/private_chat
+      # Jarvis Trainer: evaluation reports, datasets and the backlog (docs/JARVIS_TRAINER.md).
+      # The trainer refuses to run when this is not writable, instead of losing the report.
+      - ./data/trainer:/app/data/trainer
       - huggingface_cache:/home/sharedllm/.cache/huggingface
       - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
