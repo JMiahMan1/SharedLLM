@@ -792,3 +792,25 @@ class HomeHubBindingOut(SQLModel):
     runs_today: int = 0
     created_at: str
     updated_at: str
+
+
+class ValveRun(SQLModel, table=True):
+    """One guarded irrigation run -- the record the daily cap is counted from.
+
+    A bed's run waters every plant in it, so counting care rows would count a
+    single run once per plant (and never at all for an empty bed). One row per
+    run is what ``daily_max_runs`` means, whatever is planted where.
+    """
+
+    __tablename__ = "garden_valve_runs"
+
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
+    binding_id: str = Field(max_length=64, index=True)
+    valve_entity_id: str | None = Field(default=None, max_length=128)
+    performed_by: str | None = Field(default=None, max_length=128)
+    minutes: int = Field(default=5)
+    #: ``manual`` (someone tapped Run) or ``auto`` (the opt-in dry-soil trigger).
+    trigger: str = Field(default="manual", max_length=16)
+    started_at: str = Field(default_factory=utcnow)
+    ends_at: str | None = Field(default=None)
+    closed_at: str | None = Field(default=None)

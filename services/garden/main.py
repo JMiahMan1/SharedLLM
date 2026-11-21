@@ -194,6 +194,10 @@ async def lifespan(app: FastAPI):
     # the grow-light photoperiod, both disabled under pytest.
     valve_task = asyncio.create_task(hardware.valve_watchdog(_db, _family_list))
     grow_light_task = asyncio.create_task(hardware.grow_light_loop(_db))
+    # The opt-in dry-soil trigger; a no-op unless a binding is set to `auto`.
+    auto_valve_task = asyncio.create_task(
+        hardware.auto_valve_loop(_db, _family_list, _auto_water_bookkeeping)
+    )
     try:
         yield
     finally:
@@ -201,6 +205,7 @@ async def lifespan(app: FastAPI):
         weather_task.cancel()
         valve_task.cancel()
         grow_light_task.cancel()
+        auto_valve_task.cancel()
 
 
 def _resolve_seed_get(key: str) -> dict | None:
@@ -3400,6 +3405,56 @@ async def _binding_place(session: Session, binding: HomeHubBinding):
     return await _place(session, plant.location_id) if plant and plant.location_id else None
 
 
+def _bookkeep_valve_water(
+    session: Session,
+    binding: HomeHubBinding,
+    result: dict,
+    *,
+    performed_by: str,
+) -> dict:
+    """Record what a valve run actually watered, through the normal care path.
+
+    A tap on Run and the opt-in dry-soil trigger both land here, so a valve
+    watering looks exactly like a hand watering: one care log per plant, the due
+    date pushed forward, the Skylight chore mirrored.
+    """
+    minutes = int(result.get("minutes") or 0)
+    readings = result.get("readings")
+    if binding.target_kind == "plant":
+        plant = session.get(Plant, binding.target_id)
+        if plant is not None:
+            log_row, rule = _record_care(
+                session,
+                plant,
+                action="water",
+                source="homehub_valve",
+                performed_by=performed_by,
+                notes=f"irrigation valve: {minutes} min",
+                sensor_snapshot=readings,
+            )
+            result["care_log_id"] = log_row.id
+            result["next_due_at"] = rule.next_due_at if rule else None
+    else:
+        location = session.get(Location, binding.target_id)
+        watered = _water_location_plants(
+            session,
+            loc_id=binding.target_id,
+            location_name=location.name if location else binding.target_id,
+            performed_by=performed_by,
+            source="homehub_valve",
+            due_only=False,
+            notes_prefix="irrigation valve",
+            sensor_snapshot=readings,
+        )
+        result["watered_count"] = len(watered)
+    return result
+
+
+def _auto_water_bookkeeping(session: Session, binding: HomeHubBinding, result: dict) -> None:
+    """The background auto-water callback: the same bookkeeping, one implementation."""
+    _bookkeep_valve_water(session, binding, result, performed_by="jarvis-auto")
+
+
 @app.post("/bindings/{binding_id}/valve/run")
 async def run_binding_valve(
     binding_id: str,
@@ -3429,33 +3484,7 @@ async def run_binding_valve(
     except hardware.HardwareBlocked as exc:
         raise HTTPException(status_code=exc.status, detail=exc.reason) from None
 
-    # The run is a watering: same care log, same due date, same Skylight mirror.
-    if binding.target_kind == "plant":
-        plant = session.get(Plant, binding.target_id)
-        log_row, rule = _record_care(
-            session,
-            plant,
-            action="water",
-            source="homehub_valve",
-            performed_by=user,
-            notes=f"irrigation valve: {result['minutes']} min",
-            sensor_snapshot=result.get("readings"),
-        )
-        result["care_log_id"] = log_row.id
-        result["next_due_at"] = rule.next_due_at if rule else None
-    else:
-        watered = _water_location_plants(
-            session,
-            loc_id=binding.target_id,
-            location_name=location.name if location else binding.target_id,
-            performed_by=user,
-            source="homehub_valve",
-            due_only=False,
-            notes_prefix="irrigation valve",
-            sensor_snapshot=result.get("readings"),
-        )
-        result["watered_count"] = len(watered)
-    return result
+    return _bookkeep_valve_water(session, binding, result, performed_by=user)
 
 
 @app.post("/bindings/{binding_id}/valve/stop")

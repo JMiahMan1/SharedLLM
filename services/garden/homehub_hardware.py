@@ -35,9 +35,11 @@ from services.garden.models import (
     MAX_RUN_MINUTES_LIMIT,
     CareLog,
     CareRule,
+    GardenProfile,
     HomeHubBinding,
     Location,
     Plant,
+    ValveRun,
     utcnow,
 )
 
@@ -386,21 +388,31 @@ def valve_domain(entity_id: str | None) -> tuple[str, str, str] | None:
 
 
 def runs_today(session: Session, binding: HomeHubBinding, *, now: datetime | None = None) -> int:
-    """How many guarded runs this target has had today (UTC).
+    """How many guarded runs this binding has had today (UTC).
 
-    Counted from the care log -- the same rows a person can read -- rather than a
-    counter that could drift out of step with what actually happened.
+    Counted from ``garden_valve_runs`` -- one row per run -- because a bed's run
+    writes one care log per plant in it. Counting those would make a five-plant
+    bed burn its whole daily allowance in one watering, and an empty bed never
+    count at all.
     """
     day_start = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m-%dT00:00:00")
-    column = CareLog.plant_id if binding.target_kind == "plant" else CareLog.location_id
     rows = session.exec(
-        select(CareLog).where(
-            column == binding.target_id,
-            CareLog.source == "homehub_valve",
-            CareLog.created_at >= day_start,
+        select(ValveRun).where(
+            ValveRun.binding_id == binding.id,
+            ValveRun.started_at >= day_start,
         )
     ).all()
     return len(rows)
+
+
+def _close_open_runs(session: Session, binding_id: str, *, when: str | None = None) -> None:
+    """Stamp ``closed_at`` on every run of this binding that has not been closed."""
+    rows = session.exec(
+        select(ValveRun).where(ValveRun.binding_id == binding_id, ValveRun.closed_at.is_(None))
+    ).all()
+    for row in rows:
+        row.closed_at = when or utcnow()
+        session.add(row)
 
 
 def active_run(binding: HomeHubBinding) -> bool:
@@ -465,6 +477,7 @@ async def run_valve(
     override_rain: bool = False,
     profile: Any = None,
     location: Any = None,
+    trigger: str = "manual",
 ) -> dict[str, Any]:
     """Open the bound valve, guarded. Every refusal names its reason.
 
@@ -526,6 +539,19 @@ async def run_valve(
     binding.active_run_ends_at = (now + timedelta(minutes=requested)).isoformat()
     binding.updated_at = utcnow()
     session.add(binding)
+    # One run, one row: this is what ``daily_max_runs`` counts, so a bed with
+    # forty plants still gets two runs and an empty bed still gets two.
+    session.add(
+        ValveRun(
+            binding_id=binding.id,
+            valve_entity_id=binding.valve_entity_id,
+            performed_by=performed_by,
+            minutes=requested,
+            trigger=trigger,
+            started_at=binding.active_run_started_at,
+            ends_at=binding.active_run_ends_at,
+        )
+    )
     session.commit()
     session.refresh(binding)
     log.info(
@@ -551,6 +577,7 @@ async def stop_valve(session: Session, binding: HomeHubBinding) -> dict[str, Any
     ok = await close_valve(binding)
     if not ok:
         raise HardwareBlocked("Home Hub did not confirm the valve closed.", status=502)
+    _close_open_runs(session, binding.id)
     binding.active_run_started_at = None
     binding.active_run_ends_at = None
     binding.updated_at = utcnow()
@@ -734,6 +761,7 @@ async def check_valve_failsafe(
             if ends is not None and moment < ends:
                 continue
             if await close_valve(binding):
+                _close_open_runs(session, binding.id)
                 binding.active_run_started_at = None
                 binding.active_run_ends_at = None
                 binding.updated_at = utcnow()
@@ -867,3 +895,142 @@ async def resolve_tag(session: Session, tag_id: str, *, now: datetime | None = N
             }
         )
     return out
+
+
+# --------------------------------------------------------------------------- opt-in auto watering
+
+
+def target_place(session: Session, binding: HomeHubBinding) -> Any:
+    """The garden's own row for a binding's target (``None`` for a hub room).
+
+    Only used to ask the rain question: a bed Garden owns is the only place that
+    can be open to the sky.
+    """
+    if binding.target_kind == "location":
+        return session.get(Location, binding.target_id)
+    plant = session.get(Plant, binding.target_id)
+    return session.get(Location, plant.location_id) if plant and plant.location_id else None
+
+
+def target_name(session: Session, binding: HomeHubBinding) -> str | None:
+    """How a person would name this target (for a notice, never for storage)."""
+    if binding.target_kind == "location":
+        location = session.get(Location, binding.target_id)
+        return location.name if location else None
+    plant = session.get(Plant, binding.target_id)
+    return (plant.nickname or plant.species_ref) if plant else None
+
+
+async def _notify_auto_watered(
+    get_family: Callable[[], Any] | None,
+    *,
+    name: str | None,
+    minutes: int,
+    moisture_pct: float | None,
+) -> None:
+    """Tell a parent what Jarvis watered on its own, and why."""
+    who = name or "a garden bed"
+    soil = f" (soil {moisture_pct:g}%)" if moisture_pct is not None else ""
+    payload = notify.notice(
+        user="",
+        category="garden",
+        title=f"Auto-watered {who}",
+        body=f"Jarvis opened the valve for {minutes} min{soil} because the soil was dry.",
+        priority=2,
+        kind="garden_auto_water",
+        audience="parents",
+        url="/garden",
+    )
+    for member in await (get_family or _family)():
+        try:
+            await notify.send({**payload, "user": member})
+        except Exception as exc:
+            log.warning("[hardware] auto-water notice to %s failed: %s", member, exc)
+
+
+async def evaluate_auto_valves(
+    session_factory: Callable[[], Any],
+    get_family: Callable[[], Any] | None = None,
+    on_water: Callable[..., Any] | None = None,
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Opt-in dry-soil watering: the only path that opens a valve unattended.
+
+    It goes through exactly the same ``run_valve`` as a person tapping Run, so
+    the caps, the daily count, the rain interlock and the failsafe all apply
+    unchanged. A binding that is ``notify_only`` (the default), has no live
+    reading, or is blocked for any reason is simply left alone.
+    """
+    results: list[dict[str, Any]] = []
+    if not enabled():
+        return results
+    with Session(session_factory()) as session:
+        candidates = session.exec(
+            select(HomeHubBinding).where(
+                HomeHubBinding.valve_mode == "auto",
+                HomeHubBinding.moisture_override_enabled == True,  # noqa: E712
+                HomeHubBinding.valve_entity_id.is_not(None),
+                HomeHubBinding.moisture_entity_id.is_not(None),
+            )
+        ).all()
+        if not candidates:
+            return results
+        rows = await state_map()
+        profile = session.get(GardenProfile, "household")
+        for binding in candidates:
+            snapshot = snapshot_from(binding, rows)
+            verdict = moisture_verdict(binding, snapshot)
+            if not verdict.get("due"):
+                continue
+            name = target_name(session, binding)
+            try:
+                result = await run_valve(
+                    session,
+                    binding,
+                    performed_by="jarvis-auto",
+                    minutes=binding.max_run_minutes,
+                    override_rain=False,
+                    profile=profile,
+                    location=target_place(session, binding),
+                    trigger="auto",
+                )
+            except HardwareBlocked as exc:
+                log.info("[hardware] auto-water skipped for %s: %s", name, exc.reason)
+                results.append({"binding_id": binding.id, "ran": False, "reason": exc.reason})
+                continue
+            if on_water is not None:
+                payload = on_water(session, binding, result)
+                if asyncio.iscoroutine(payload):
+                    await payload
+            await _notify_auto_watered(
+                get_family,
+                name=name,
+                minutes=int(result["minutes"]),
+                moisture_pct=snapshot.get("moisture_pct"),
+            )
+            results.append({
+                "binding_id": binding.id,
+                "ran": True,
+                "minutes": result["minutes"],
+                "moisture_pct": snapshot.get("moisture_pct"),
+            })
+    return results
+
+
+async def auto_valve_loop(
+    session_factory: Callable[[], Any],
+    get_family: Callable[[], Any] | None = None,
+    on_water: Callable[..., Any] | None = None,
+    poll_s: int = 300,
+) -> None:
+    """Background loop: the opt-in dry-soil trigger (off under pytest)."""
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        log.info("[hardware] auto-water loop disabled under pytest")
+        return
+    while True:
+        try:
+            await evaluate_auto_valves(session_factory, get_family, on_water)
+        except Exception as exc:
+            log.warning("[hardware] auto-water tick failed: %s", exc)
+        await asyncio.sleep(poll_s)

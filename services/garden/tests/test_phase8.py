@@ -733,3 +733,224 @@ def test_a_child_cannot_delete_a_binding(client, hub):
     _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
 
     assert client.delete(f"/bindings/location/{bed['id']}", headers=CHILD).status_code == 403
+
+
+# --------------------------------------------------------------------------- one run, one count
+
+def test_a_bed_run_counts_once_however_many_plants_it_waters(client, hub):
+    bed = _bed(client)
+    for index in range(3):
+        _plant(client, nickname=f"Plant {index}", location_id=bed["id"])
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip", daily_max_runs=2)
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    first = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert first.status_code == 200, first.text
+    assert first.json()["runs_today"] == 1
+    assert first.json()["watered_count"] == 3
+    row = next(r for r in client.get("/bindings", headers=PARENT).json()["bindings"] if r["id"] == binding_id)
+    assert row["runs_today"] == 1
+
+    client.post(f"/bindings/{binding_id}/valve/stop", headers=PARENT)
+    second = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+    assert second.status_code == 200
+    assert second.json()["runs_today"] == 2
+
+    client.post(f"/bindings/{binding_id}/valve/stop", headers=PARENT)
+    third = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+    assert third.status_code == 409
+    assert "Daily max runs reached (2 of 2 today)" in third.json()["detail"]
+
+
+def test_an_empty_bed_still_counts_its_runs(client, hub):
+    bed = _bed(client, "Bed with nothing in it yet")
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip", daily_max_runs=1)
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    first = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert first.status_code == 200, first.text
+    assert first.json()["watered_count"] == 0
+    assert first.json()["runs_today"] == 1
+
+    client.post(f"/bindings/{binding_id}/valve/stop", headers=PARENT)
+    second = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert second.status_code == 409
+    assert "1 of 1 today" in second.json()["detail"]
+
+
+def test_each_run_leaves_one_closed_row(client, hub, session):
+    from sqlmodel import select as _select
+
+    from services.garden.models import ValveRun
+
+    bed = _bed(client)
+    _plant(client, location_id=bed["id"])
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"minutes": 2})
+    client.post(f"/bindings/{binding_id}/valve/stop", headers=PARENT)
+
+    session.expire_all()
+    runs = session.exec(_select(ValveRun).where(ValveRun.binding_id == binding_id)).all()
+    assert len(runs) == 1
+    assert runs[0].minutes == 2
+    assert runs[0].trigger == "manual"
+    assert runs[0].performed_by == "mother"
+    assert runs[0].closed_at is not None
+
+
+# --------------------------------------------------------------------------- opt-in auto watering
+
+def _auto(client, boundary, *, daily_max_runs=2, plants=1):
+    """A bed set to auto-water, with soil at 22% (below its 30% threshold)."""
+    bed = _bed(client)
+    for index in range(plants):
+        _plant(client, nickname=f"Plant {index}", location_id=bed["id"])
+    resp = _bind(
+        client, "location", bed["id"],
+        valve_entity_id="valve.bed1_drip",
+        moisture_entity_id="sensor.bed1_soil_moisture",
+        moisture_override_enabled=True,
+        valve_mode="auto",
+        daily_max_runs=daily_max_runs,
+        max_run_minutes=6,
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _run_auto(monkeypatch=None, bookkeeping=None):
+    import asyncio
+
+    import services.garden.main as main_module
+
+    return asyncio.run(
+        hardware.evaluate_auto_valves(
+            lambda: main_module.app.state.engine,
+            lambda: _parents(),
+            bookkeeping,
+        )
+    )
+
+
+async def _parents():
+    return []
+
+
+def test_auto_waters_a_dry_bed_and_logs_the_run(client, hub, session):
+    from sqlmodel import select as _select
+
+    from services.garden.models import CareLog, ValveRun
+
+    import services.garden.main as main_module
+
+    binding = _auto(client, None, plants=2)
+
+    # The real callback the lifespan passes, so the care logs are the real ones.
+    results = _run_auto(bookkeeping=main_module._auto_water_bookkeeping)
+
+    assert results == [{"binding_id": binding["id"], "ran": True, "minutes": 6, "moisture_pct": 22.0}]
+    assert hub.services() == ["valve/open_valve"]
+    session.expire_all()
+    runs = session.exec(_select(ValveRun).where(ValveRun.binding_id == binding["id"])).all()
+    assert [(row.trigger, row.performed_by, row.minutes) for row in runs] == [("auto", "jarvis-auto", 6)]
+    # Both plants in the bed got their care log, exactly like a tapped run.
+    assert len(session.exec(_select(CareLog).where(CareLog.source == "homehub_valve")).all()) == 2
+    row = next(r for r in client.get("/bindings", headers=PARENT).json()["bindings"] if r["id"] == binding["id"])
+    assert row["runs_today"] == 1
+
+
+def test_auto_does_nothing_for_notify_only(client, hub):
+    bed = _bed(client)
+    _bind(
+        client, "location", bed["id"],
+        valve_entity_id="valve.bed1_drip",
+        moisture_entity_id="sensor.bed1_soil_moisture",
+        moisture_override_enabled=True,
+    )
+
+    assert _run_auto() == []
+    assert hub.services() == []
+
+
+def test_auto_does_nothing_when_the_sensor_is_offline(client, hub, monkeypatch):
+    _auto(client, None)
+    dead = [dict(row) for row in HUB_STATES]
+    dead[0] = {**dead[0], "state": "unavailable"}
+    monkeypatch.setattr(hardware, "_call", Hub(states_rows=dead))
+    hardware.invalidate()
+
+    assert _run_auto(monkeypatch) == []
+    assert hub.services() == []
+
+
+def test_auto_does_nothing_when_the_soil_is_wet(client, hub, monkeypatch):
+    _auto(client, None)
+    wet = [dict(row) for row in HUB_STATES]
+    wet[0] = {**wet[0], "state": "71"}
+    monkeypatch.setattr(hardware, "_call", Hub(states_rows=wet))
+    hardware.invalidate()
+
+    assert _run_auto(monkeypatch) == []
+    assert hub.services() == []
+
+
+def test_auto_respects_the_daily_cap(client, hub):
+    binding = _auto(client, None, daily_max_runs=1)
+    first = _run_auto()
+    assert first[0]["ran"] is True
+    # Close it so the next evaluation is blocked by the cap, not by "already open".
+    assert client.post(f"/bindings/{binding['id']}/valve/stop", headers=PARENT).status_code == 200
+
+    second = _run_auto()
+
+    assert second[0]["ran"] is False
+    assert "Daily max runs reached" in second[0]["reason"]
+    assert hub.services().count("valve/open_valve") == 1
+
+
+def test_auto_respects_the_rain_interlock(client, hub, monkeypatch):
+    _auto(client, None)
+
+    async def raining(_profile=None):
+        return {"active": True, "known": True, "rain_in": 0.7, "threshold_in": 0.25}
+
+    monkeypatch.setattr(weather_care, "rain_state", raining)
+
+    results = _run_auto()
+
+    assert results[0]["ran"] is False
+    assert "rain interlock" in results[0]["reason"]
+    assert hub.services() == []
+
+
+def test_the_auto_notice_names_what_was_watered(client, hub, monkeypatch):
+    _auto(client, None)
+    alerts: list[dict] = []
+
+    async def capture(payload, **_kw):
+        alerts.append(payload)
+
+    monkeypatch.setattr(hardware.notify, "send", capture)
+
+    async def parents():
+        return ["mother"]
+
+    import asyncio
+
+    import services.garden.main as main_module
+
+    asyncio.run(
+        hardware.evaluate_auto_valves(
+            lambda: main_module.app.state.engine, parents, None
+        )
+    )
+
+    assert len(alerts) == 1
+    assert alerts[0]["title"].startswith("Auto-watered")
+    assert "soil 22%" in alerts[0]["body"]
+    assert alerts[0]["audience"] == "parents"
