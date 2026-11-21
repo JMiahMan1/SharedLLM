@@ -80,6 +80,19 @@ public sealed class UsageMeter
 
     public bool DueForFlush => Stopwatch.GetElapsedTime(_lastFlush) > TimeSpan.FromSeconds(FlushEverySeconds);
 
+    /// <summary>Today's local day (yyyy-MM-dd) and this PC's running total for it, for the offline limit.</summary>
+    public (string Day, long TotalMs) TodayTotal
+    {
+        get
+        {
+            lock (_lock)
+            {
+                RollOverIfNewDay();
+                return (_today.Day, _today.TotalMs);
+            }
+        }
+    }
+
     /// <summary>Whole minutes used today that the hub has not been told yet.</summary>
     public int PendingMinutes
     {

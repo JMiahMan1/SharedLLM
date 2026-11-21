@@ -24,7 +24,8 @@ public sealed class ApiClient : IDisposable
     public Task<HttpResponseMessage> GetStatusAsync() =>
         _http.GetAsync($"api/screen-time/{Uri.EscapeDataString(_config.Username)}/status?device_key={Uri.EscapeDataString(_config.DeviceKey)}");
 
-    public Task<HttpResponseMessage> ReportCapabilitiesAsync(bool lockCapable, bool trayRunning, string webFilterMode) =>
+    /// <summary><paramref name="trayRunning"/>: null while it is not known yet (just started), never a guess.</summary>
+    public Task<HttpResponseMessage> ReportCapabilitiesAsync(bool lockCapable, bool? trayRunning, string webFilterMode) =>
         _http.PostAsJsonAsync($"api/user-panel/devices/{Uri.EscapeDataString(_config.DeviceKey)}/capabilities", new
         {
             capabilities = new

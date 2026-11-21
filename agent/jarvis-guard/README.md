@@ -67,6 +67,18 @@ The installer signs in as the parent (that key is never written to disk),
 registers this PC as a Windows PC, assigns it to the child, mints a key that
 is scoped to this one device, and keeps only that scoped key in
 `%ProgramData%\Jarvis Guard\guard.config.json` (SYSTEM + Administrators only).
+
+`%ProgramData%` lets any user create a folder, and its creator owns it, so a
+child could make `Jarvis Guard` there first and keep it (read the key, plant
+`offline.codes.json` or a cached status). The installer never trusts the
+folder as it finds it: a link in its place is removed (never its target);
+Administrators take ownership; its ACL becomes SYSTEM + Administrators only
+with nothing inherited; and if anything inside is owned by someone else, is a
+link, or cannot be read by an administrator, everything in it is deleted and
+the installer says what it found. A fresh install (no guard task yet) empties
+it too. A reinstall over a folder that passes keeps its files (today's
+minutes, the offline-code verifiers and their lockout).
+
 The exe goes to `%ProgramFiles%\Jarvis Guard` (default ACL: everyone may run
 it, only administrators may change it). The child's own key and the parent's
 key are never stored.
@@ -107,9 +119,25 @@ tests/                xunit tests for JarvisGuard.Core (plain net10.0, any OS)
 - A parent's unlock uses the parent's own username and password, checked by
   identity (`POST /api/guard/parent-unlock`, five strikes → ten-minute wait),
   and every unlock notifies the other parents, exactly like a phone unlock.
-- The tray and the lock surface reach the agent over a named pipe
-  (`JarvisGuard`) with an Authenticated Users ACL. The pipe carries commands
-  and verdicts, never keys.
+- The tray and the lock surface reach the agent over the named pipe
+  `\\.\pipe\JarvisGuard`: one line of JSON each way per connection
+  (`PipeProtocol`), read with a size cap and a time limit on both ends. The
+  pipe is owned by SYSTEM; SYSTEM and Administrators have full control;
+  Authenticated Users may only read and write data (not create another
+  instance, change its permissions or take it over). The agent creates it
+  before anything else with `FirstPipeInstance`, so if another program holds
+  the name the agent stops, logs it and reports `guard_pipe_taken`; and it
+  always keeps a listening instance (the next is made before a client is
+  served), so the name is never free to take. The tray and the lock surface
+  send nothing until they have checked the pipe is owned by SYSTEM (and, where
+  Windows lets them read it, that the serving process runs as SYSTEM). The
+  pipe carries commands and verdicts, never the PC's key.
+- If the hub answers 401 or 403 the PC says so ("the hub turned this PC's
+  key down", `Source: "auth"`): that is a revoked or removed device, not a
+  network problem. It keeps enforcing the cached rules meanwhile.
+- A config that cannot be read (access denied) or is damaged is reported as
+  that, on the console, in `guard.log` and in `state.json`
+  (`Source: "config-error"`); only a missing file means "not set up".
 - Windows starts that bypass the guard (safe mode) are detected via the
   `SafeBoot\Option` registry key (and `SAFEBOOT_OPTION`) and reported as
   `boot_without_guard` through the existing tamper channel.
@@ -135,14 +163,31 @@ tests/                xunit tests for JarvisGuard.Core (plain net10.0, any OS)
   same as the phone. The answer carries the parents' offline-code verifiers,
   kept in `%ProgramData%\Jarvis Guard\offline.codes.json` (SYSTEM and
   Administrators only), so a parent's offline code works later with no
-  connection: five wrong codes wait ten minutes, a good one unlocks for ten
-  minutes and is reported (`offline_unlock`) once the hub answers.
-- Offline (hub unreachable): the last cached rules are re-evaluated on the
-  local clock in the hub's order: a parent's pause (on, or until a time)
-  locks; bedtime and school lock unless the last answer carried time a parent
-  gave (`granted_until`) that has not run out. The daily limit and "chores
-  first" are not enforced offline (fail open). With no cache at all it fails
-  open.
+  connection. Five wrong codes lock code entry for ten minutes, the next
+  five for twenty, then forty, up to a day; only a good code resets it, and
+  all of it is kept on disk by the SYSTEM agent, so closing the lock surface,
+  killing the tray or restarting resets nothing. A good code unlocks for ten
+  minutes. Both are reported, queued while offline and sent once the hub
+  answers (and kept until the hub says it stored them): `offline_unlock`
+  with whose code it was, and `offline_code_wrong` with how many.
+- A parent's pause set after an unlock on this PC (the rules' `paused_at`)
+  overrides that unlock at once and ends it. The pause the unlock was for
+  (older than the unlock) does not.
+- Offline (no answer, a refused key or a hub error): the last cached rules
+  are re-evaluated on the local clock in the hub's order: a parent's pause
+  (on, or until a time) locks; bedtime and school lock unless the last answer
+  carried time a parent gave (`granted_until`) that has not run out; then the
+  day's limit. The limit is counted from what the hub last said was left
+  less the minutes this PC has counted since (`limit.snapshot.json`); on a
+  new day with no answer yet, the cached rules' limit for that day against
+  this PC's own minutes (no bonus or earned time assumed). "Chores first" is
+  not enforced offline. With no cache at all only a known limit applies.
+- The tray reports to the agent every 30 seconds, even with nothing to
+  report. A signed-in child session whose tray has gone quiet for two
+  minutes (three after sign-in) means that session's minutes are not being
+  counted: the state says so (`usageUnknown`), the hub is told
+  (`trayRunning: false` and a `tray_missing` report the parents see), and
+  `trayRunning` goes back to true when the tray returns.
 - Usage is reported as the day's running total for this PC (kept in
   `usage.today.json`, so a restart carries on), because the hub keeps the
   largest reading per device per day. Within 15 minutes of the limit it is
@@ -178,3 +223,6 @@ Locally: `dotnet test tests` (any OS) and
 - No remote wipe, by design.
 - No offline grant tracking: an offline PC cannot honour a grant that has
   not been seen, like a phone that dies before syncing.
+- The parent's password typed on the child's PC is to be replaced by an
+  unlock a parent approves on their phone; the offline code stays as the
+  no-network fallback.

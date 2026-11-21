@@ -101,8 +101,9 @@ internal sealed class TimePanelForm : Form
             }
             foreach (var line in new[] { TimeText.ExtraLine(state), TimeText.NextLine(state) })
                 if (!string.IsNullOrEmpty(line)) flow.Controls.Add(Look.Label(line, 10.5f, Look.Muted));
-            if (state.Source == "offline")
-                flow.Controls.Add(Look.Label("Offline: these are the last numbers the hub sent.", 9.5f, Look.Muted));
+            // No hub, a refused key, minutes not counted: each says so in its own words.
+            foreach (var notice in TimeText.Notices(state))
+                flow.Controls.Add(Look.Label(notice, 9.5f, Look.Muted));
         }
 
         var canAsk = state is not null && (TimeText.Limited(state) || state.Locked || state.NextLockAt is not null);

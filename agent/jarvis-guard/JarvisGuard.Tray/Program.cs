@@ -72,16 +72,31 @@ internal sealed class TrayContext : ApplicationContext
     private async Task ReportUsageAsync()
     {
         if (_reporting) return;
+        // Sent every 30 s even with nothing used: an empty report is the
+        // tray's heartbeat, how the agent knows this session is being counted
+        // (no heartbeat: the agent marks the minutes unknown and tells the parents).
         var apps = _sampler.Drain();
-        if (apps.Count == 0) return;
         _reporting = true;
         try
         {
             var r = await PipeProtocol.SendAsync(Config.PipeName, new PipeProtocol.Request { Cmd = "usage", Apps = apps });
-            if (r?.Ok != true) _sampler.Restore(apps);
+            if (r?.Ok != true)
+            {
+                _sampler.Restore(apps);
+                // Said once per kind of failure (a squatted pipe, a stopped service), not every 30 s.
+                var error = r?.Error ?? "No answer from the Jarvis Guard service.";
+                if (error != _lastReportError)
+                {
+                    _lastReportError = error;
+                    _icon.ShowBalloonTip(10_000, "Jarvis Guard", error, ToolTipIcon.Warning);
+                }
+            }
+            else _lastReportError = null;
         }
         finally { _reporting = false; }
     }
+
+    private string? _lastReportError;
 
     /// <summary>The time panel (or, with a title, the 10/5-minute warning), one at a time.</summary>
     private void ShowPanel(string? warningTitle, string? warningText)
