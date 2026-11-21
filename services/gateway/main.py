@@ -156,6 +156,7 @@ from services.gateway.llm_providers import (
     OllamaProvider,
     extract_thinking_and_content,
     get_provider,
+    strip_thinking_blocks,
 )
 from services.gateway.location_query import parse_location_query
 from services.gateway.ma_allowlist import MA_COMMAND_ALLOWLIST
@@ -533,6 +534,7 @@ async def get_assistant_model():
         raise RuntimeError(f"No assistant model configured. Set assistant_model in Identity settings. Available: {available_models}")
     log.info(f"[get_assistant_model] active_provider={active} resolved_model={model}")
     return model
+
 
 
 async def get_coding_model():
@@ -21157,3 +21159,58 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
         with suppress(Exception):
             await websocket.close(code=1011, reason=f"Terminal service unavailable: {str(e)[:100]}")
 
+
+#: The most a raw internal completion may ask for.
+_RAW_COMPLETE_MAX_TOKENS = 4096
+
+
+@app.post("/api/internal/llm/complete")
+async def internal_llm_complete(request: Request):
+    """Internal: one plain model completion for a service, and nothing else.
+
+    ``/v1/chat/completions`` with the internal secret acts as the household:
+    fast paths (a plant drafted as "water monty" could water Monty), tools,
+    memory and the router persona all apply. A service that only needs text
+    drafted from its own prompt (Garden's species draft) calls this instead:
+    the assistant model, the caller's messages, no tools, no fast paths, no
+    history, no retrieval. ``{"messages": [...], "temperature"?, "max_tokens"?}``
+    -> ``{"content", "model"}``; 403 without the secret, 422 for a bad body,
+    502 when the model fails.
+    """
+    if not secret_matches(request.headers.get("X-Internal-Secret"), INTERNAL_SECRET):
+        raise HTTPException(status_code=403, detail="Internal services only")
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="The body is not valid JSON.") from None
+    messages = body.get("messages") if isinstance(body, dict) else None
+    if (
+        not isinstance(messages, list)
+        or not messages
+        or not all(
+            isinstance(m, dict) and m.get("role") in ("system", "user", "assistant") and isinstance(m.get("content"), str)
+            for m in messages
+        )
+    ):
+        raise HTTPException(status_code=422, detail="messages must be a list of {role, content}.")
+    try:
+        temperature = float(body.get("temperature", 0.3))
+        max_tokens = min(int(body.get("max_tokens", 1024)), _RAW_COMPLETE_MAX_TOKENS)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="temperature and max_tokens must be numbers.") from None
+    try:
+        settings = await get_llm_settings()
+        provider = await get_provider(settings)
+        model = await get_assistant_model()
+        text = await provider.generate(
+            model,
+            [{"role": m["role"], "content": m["content"]} for m in messages],
+            options={"temperature": temperature, "num_predict": max_tokens},
+        )
+    except Exception as exc:
+        log.warning("[internal complete] model call failed: %s: %s", type(exc).__name__, exc)
+        raise HTTPException(status_code=502, detail=f"The model did not answer ({type(exc).__name__}).") from exc
+    content = strip_thinking_blocks(text or "")
+    if not content:
+        raise HTTPException(status_code=502, detail="The model returned an empty answer.")
+    return {"content": content, "model": model}

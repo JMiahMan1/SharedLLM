@@ -762,52 +762,91 @@ def test_weather_zero_f_not_dropped(garden_client, monkeypatch):
     assert alerts[0]["min_temp_f"] == 0.0  # 0.0°F <= 15°F hardy extreme freeze threshold
 
 
-def test_draft_via_llm_parses_chat_completions(garden_client, monkeypatch):
-    """_draft_via_llm() must parse OpenAI /v1/chat/completions response format."""
-    import services.garden.species_lookup as sl
+def test_draft_via_llm_uses_the_raw_completion_route(garden_client, monkeypatch):
+    """The draft goes to the gateway's raw completion route, never chat: chat runs
+    as the household with fast paths and tools."""
+    import json as json_module
     from unittest.mock import patch
+
+    import services.garden.species_lookup as sl
 
     captured = {}
 
     class FakeResp:
-        def __init__(self, data):
+        def __init__(self, data, status=200):
             self._data = data
-            self.status = 200
+            self.status = status
         async def __aenter__(self):
             return self
         async def __aexit__(self, *a):
             return False
         async def json(self, content_type=None):
             return self._data
+        async def text(self):
+            return json_module.dumps(self._data)
 
     class FakeClient:
         def post(self, url, *, json=None, headers=None, timeout=None):
-            import json as json_module
             captured["url"] = str(url)
             captured["json"] = json
-            return FakeResp({
-                "choices": [{
-                    "message": {
-                        "content": json_module.dumps({
-                            "key": "test_plant",
-                            "category": "houseplant",
-                            "common_name": "Test Plant",
-                            "watering_interval_days": 7.0,
-                            "winter_multiplier": 1.0,
-                            "watering_method": "top_drain",
-                            "frost_tolerance": "hardy",
-                            "toxicity_level": "non_toxic",
-                            "source": "wiki_ai_draft",
-                        })
-                    }
-                }]
-            })
+            return FakeResp({"content": json_module.dumps({
+                "key": "test_plant", "category": "houseplant", "common_name": "Test Plant",
+                "watering_interval_days": 7.0, "winter_multiplier": 1.0, "watering_method": "top_drain",
+                "frost_tolerance": "hardy", "toxicity_level": "non_toxic", "source": "wiki_ai_draft",
+            })})
 
     with patch("services.common.http.get_client", return_value=FakeClient()):
-        monkeypatch.setattr(sl, "_fetch_json", lambda url: None)  # no Wikipedia
-
         result = asyncio.run(sl._draft_via_llm("Test Plant", "houseplant", None, []))
-    assert result is not None, f"Expected non-None result"
+    assert result is not None
     assert result["common_name"] == "Test Plant"
-    # Must have called /v1/chat/completions, not /api/llm/generate.
-    assert "/v1/chat/completions" in captured["url"]
+    assert captured["url"].endswith("/api/internal/llm/complete")
+    assert "chat/completions" not in captured["url"]
+
+
+def test_a_failed_draft_is_said_in_the_warnings(garden_client):
+    from unittest.mock import patch
+
+    import services.garden.species_lookup as sl
+
+    class Refused:
+        status = 502
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def text(self):
+            return "The model did not answer"
+
+    class FakeClient:
+        def post(self, *_a, **_k):
+            return Refused()
+
+    warnings: list[str] = []
+    with patch("services.common.http.get_client", return_value=FakeClient()):
+        assert asyncio.run(sl._draft_via_llm("Test Plant", "houseplant", None, warnings)) is None
+    assert any("HTTP 502" in w for w in warnings)
+
+
+def test_reviewed_by_is_the_person_saving(garden_client):
+    from sqlmodel import Session as _Session
+
+    from services.garden.models import CustomSpecies
+
+    client, engine = garden_client
+    resp = client.post("/species/custom", headers=PARENT_HEADERS, json={
+        "key": "reviewed_plant", "category": "houseplant", "common_name": "Reviewed Plant",
+        "watering_interval_days": 7, "reviewed_by": "somebody_else",
+    })
+
+    assert resp.status_code == 201, resp.text
+    with _Session(engine) as session:
+        row = session.exec(select(CustomSpecies).where(CustomSpecies.key == "reviewed_plant")).first()
+    assert row.reviewed_by == PARENT_HEADERS["X-User-Id"]
+
+
+def test_a_malformed_custom_species_is_a_422(garden_client):
+    client, _engine = garden_client
+
+    resp = client.post("/species/custom", headers=PARENT_HEADERS, json={"key": "x", "watering_interval_days": "lots"})
+
+    assert resp.status_code == 422

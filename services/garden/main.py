@@ -692,7 +692,10 @@ async def species_custom(
     body = await request.json()
     from services.garden.species_lookup import handle_species_custom, CustomSpeciesIn
 
-    validated = CustomSpeciesIn(**body)
+    try:
+        validated = CustomSpeciesIn.model_validate(body)
+    except ValueError as exc:  # pydantic's ValidationError is a ValueError
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     return await handle_species_custom(
         session, validated, _user(request), _is_admin(request),
         is_adult=_role(request) in ADULT_ROLES or _is_admin(request),
