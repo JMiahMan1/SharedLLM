@@ -89,12 +89,18 @@ def entity_matcher(entity_ids: list[str] | None = None, domains: list[str] | Non
 
 
 class SecretBox:
-    def __init__(self, key: str | None) -> None:
+    """Seals with ``FERNET_KEY``; during a rotation also opens what ``FERNET_KEY_PREVIOUS`` sealed.
+
+    ``previous`` is the raw ``FERNET_KEY_PREVIOUS`` value (comma separated); see
+    services/common/fernet_keys.py and scripts/rotate_fernet_key.sh.
+    """
+
+    def __init__(self, key: str | None, previous: str | None = None) -> None:
         self._fernet = None
         if key:
-            from cryptography.fernet import Fernet
+            from services.common.fernet_keys import KeyRing
 
-            self._fernet = Fernet(key.encode() if isinstance(key, str) else key)
+            self._fernet = KeyRing.from_values(key, previous)
 
     @property
     def enabled(self) -> bool:
@@ -124,10 +130,10 @@ def _load(cls: type, raw: str) -> Any:
 
 
 class Store:
-    def __init__(self, path: str, fernet_key: str | None = None) -> None:
+    def __init__(self, path: str, fernet_key: str | None = None, fernet_key_previous: str | None = None) -> None:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self.path = path
-        self.box = SecretBox(fernet_key)
+        self.box = SecretBox(fernet_key, fernet_key_previous)
         self._lock = threading.RLock()
         self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")

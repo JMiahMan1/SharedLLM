@@ -125,6 +125,7 @@ services:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LEGACY_ENV_PATH=/app/.env
       - FORCE_RESEED=${FORCE_RESEED:-false}
       - NETWORK_MODE=bridge
@@ -135,6 +136,10 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./.env:/app/.env:ro
       - ./prompts:/app/prompts:ro
+    # The sign-in reset asks the home hub (host network, HOMEHUB_URL from .env) to sign
+    # everyone out too (services/identity/sign_in_reset.py). Linux needs the mapping.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     dns:
       - 172.26.0.254
     networks:
@@ -174,6 +179,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=host
       - PIPER_TTS=${PIPER_TTS:-127.0.0.1:10200}
@@ -256,6 +262,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
@@ -314,6 +321,7 @@ services:
       - NETWORK_MODE=bridge
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
     depends_on:
       rag:
         condition: service_healthy
@@ -346,6 +354,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
@@ -406,6 +415,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
@@ -450,6 +460,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
@@ -496,6 +507,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - GEO_SVC_URL=${BRIDGE_GEO_SVC_URL}
@@ -545,6 +557,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
@@ -594,6 +607,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
@@ -682,6 +696,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - NETWORK_MODE=bridge
       - BIBLE_DATABASE_URL=${BIBLE_DATABASE_URL:-sqlite:////data/bible.db}
       - BLB_BASE_URL=${BLB_BASE_URL}
@@ -875,6 +890,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
@@ -929,6 +945,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - NETWORK_MODE=host
       - IDENTITY_SVC_URL=${HOST_IDENTITY_SVC_URL}
       - TELEMETRY_SVC_URL=${HOST_TELEMETRY_SVC_URL}
@@ -1228,6 +1245,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
+      - FERNET_KEY_PREVIOUS=${FERNET_KEY_PREVIOUS:-}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}

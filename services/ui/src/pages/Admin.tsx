@@ -82,6 +82,7 @@ import BibleAdminPanel from '../components/admin/BibleAdminPanel';
 import NetworkPanel from '../components/admin/NetworkPanel';
 import SystemStoragePanel from '../components/admin/SystemStoragePanel';
 import { confirmDialog } from '../components/ui/confirmDialog';
+import SignInResetPanel, { TestAccountBadge, UserSignInResetButton } from '../components/admin/SignInResetPanel';
 
 type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'storage' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
 
@@ -264,8 +265,9 @@ const Admin = () => {
     error: usersErrorObj,
     refetch: refetchUsers,
   } = useQuery<UserProfile[]>({
-    queryKey: ['users'],
-    queryFn: () => api.getUsers(),
+    // Test accounts too: an admin has to see (and tell apart) every account.
+    queryKey: ['users', 'include-test-accounts'],
+    queryFn: () => api.getUsers({ includeTestAccounts: true }),
   });
 
   const { data: discoveryData, refetch: refetchDiscoveredUsers, isFetching: isDiscovering } = useQuery<{ users: DiscoveredUser[]; warnings: string[]; errors: string[] }>({
@@ -815,6 +817,7 @@ const Admin = () => {
                             Seeded password
                           </span>
                         )}
+                        {user.is_test_account === true && <TestAccountBadge />}
                       </div>
                       <p className="mt-1 break-all text-xs text-slate-400">@{user.username}</p>
                       <p className="mt-2 text-[11px] text-slate-500 truncate">
@@ -852,6 +855,7 @@ const Admin = () => {
                       >
                         <Users size={16} />
                       </button>
+                      <UserSignInResetButton username={user.username} name={user.full_name || user.username} />
                       {!user.is_system_default && (
                         <button
                           onClick={async () => {
@@ -966,6 +970,8 @@ const Admin = () => {
               </div>
             </section>
           </div>
+
+          <SignInResetPanel />
 
           <RolesPanel users={users} />
 

@@ -42,6 +42,10 @@ def provider_user(row: dict[str, Any]) -> ProviderUser | None:
     """One identity account as a hub user; None for a row without an id or username."""
     if not isinstance(row, dict) or row.get("id") is None or not str(row.get("username") or "").strip():
         return None
+    if row.get("is_test_account"):
+        # An automated agent's test account is not a member of the household: never a hub user.
+        # Identity leaves it out of GET /api/users already; this holds if that ever changes.
+        return None
     username = str(row["username"]).strip().lower()
     family = str(row.get("family_role") or "other")
     return ProviderUser(

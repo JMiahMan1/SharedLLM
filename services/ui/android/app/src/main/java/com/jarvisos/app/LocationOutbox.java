@@ -263,19 +263,23 @@ final class LocationOutbox {
         String token = p.getString(TokenBridgePlugin.KEY_API_KEY, null);
         String server = p.getString(TokenBridgePlugin.KEY_SERVER_URL, null);
         if (isBlank(user) || isBlank(token) || isBlank(server)) return true;
-        Flushed result = flush(store, user, body -> send(server, token, user, body), FLUSH_LIMIT);
+        Flushed result = flush(store, user, body -> send(context, server, token, user, body), FLUSH_LIMIT);
         if (result != Flushed.EMPTY) Log.i(TAG, "flush: " + result);
         return result != Flushed.RETRY;
     }
 
-    /** Post one fix to the person's location route, or the older collection route. */
-    static Sent send(String serverUrl, String token, String user, JSONObject body) {
+    /**
+     * Post one fix to the person's location route, or the older collection
+     * route. A 401 forgets the key ({@link SignInReset}); the queue is kept
+     * for the next sign-in, which is the same person's.
+     */
+    static Sent send(Context context, String serverUrl, String token, String user, JSONObject body) {
         String base = serverUrl.endsWith("/") ? serverUrl.substring(0, serverUrl.length() - 1) : serverUrl;
         try {
-            int status = post(base + "/api/users/" + android.net.Uri.encode(user) + "/location", token, body);
+            int status = post(context, base + "/api/users/" + android.net.Uri.encode(user) + "/location", token, body);
             if (status == 404) {
                 // Older gateways expose only the collection route.
-                status = post(base + "/api/users/location", token, body);
+                status = post(context, base + "/api/users/location", token, body);
             }
             if (status < 200 || status >= 300) Log.w(TAG, "upload HTTP " + status);
             return classify(status);
@@ -286,7 +290,8 @@ final class LocationOutbox {
         }
     }
 
-    private static int post(String url, String token, JSONObject body) throws Exception {
+    /** POSTs one fix; a refusal of the key itself forgets it ({@link SignInReset}). */
+    private static int post(Context context, String url, String token, JSONObject body) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         try {
             conn.setRequestMethod("POST");
@@ -298,7 +303,7 @@ final class LocationOutbox {
             try (OutputStream os = conn.getOutputStream()) {
                 os.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
-            return conn.getResponseCode();
+            return SignInReset.check(context, conn, token);
         } finally {
             conn.disconnect();
         }

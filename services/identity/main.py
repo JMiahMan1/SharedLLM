@@ -49,7 +49,8 @@ from services.config import (
     INTERNAL_SECRET,
 )
 from services.identity import abuse_ch, audit, battery_alerts, push, roles, voice
-from services.identity.crypto import decrypt, digest_secret, encrypt
+from services.identity import sign_in_reset
+from services.identity.crypto import decrypt, digest_candidates, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
     DEVICE_KINDS,
@@ -261,6 +262,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR")
         _add_column("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR")
         _add_column("user", "malwarebazaar_key_enc", "ALTER TABLE user ADD COLUMN malwarebazaar_key_enc VARCHAR")
+        _add_column("user", "is_test_account", "ALTER TABLE user ADD COLUMN is_test_account BOOLEAN NOT NULL DEFAULT 0")
 
     if _table_exists("apikey"):
         _add_column("apikey", "key_hash", "ALTER TABLE apikey ADD COLUMN key_hash VARCHAR")
@@ -738,6 +740,8 @@ app.add_middleware(
 )
 
 app.include_router(info_router)
+# A key revoked by a sign-in reset is answered 401 {"code": "sign_in_reset"} (sign_in_reset.py).
+sign_in_reset.install_handler(app)
 
 # Dependencies
 
@@ -777,9 +781,17 @@ def _find_user_for_api_key(session: Session, key_value: str) -> User | None:
     if not key_value:
         return None
     key_hash = digest_secret(key_value)
+    # During a Fernet key rotation a key hashed under the previous key is still
+    # found (the hash is an HMAC keyed with FERNET_KEY) and re-hashed on this use.
+    candidates = digest_candidates(key_value)
 
-    api_key_obj = session.exec(select(APIKey).where(APIKey.key_hash == key_hash)).first() if key_hash else None
+    api_key_obj = session.exec(select(APIKey).where(APIKey.key_hash.in_(candidates))).first() if candidates else None  # type: ignore[union-attr]
     if api_key_obj:
+        if api_key_obj.key_hash != key_hash:
+            _store_generated_api_key(api_key_obj, key_value)
+            session.add(api_key_obj)
+            session.commit()
+            session.refresh(api_key_obj)
         log.info(f"[auth] API key lookup: matched by hash in APIKey table (user={api_key_obj.user.username})")
         return api_key_obj.user
 
@@ -793,9 +805,9 @@ def _find_user_for_api_key(session: Session, key_value: str) -> User | None:
         log.info(f"[auth] API key lookup: matched by value in APIKey table (user={api_key_obj.user.username})")
         return api_key_obj.user
 
-    user = session.exec(select(User).where(User.api_key_hash == key_hash)).first() if key_hash else None
+    user = session.exec(select(User).where(User.api_key_hash.in_(candidates))).first() if candidates else None  # type: ignore[union-attr]
     if user:
-        if not user.api_key_hash:
+        if user.api_key_hash != key_hash:
             _store_user_api_key(user, key_value)
             session.add(user)
             session.commit()
@@ -831,11 +843,18 @@ def _device_for_agent_key(session: Session, authorization: str | None) -> Device
     key_hash = digest_secret(key)
     if not key_hash:
         return None
+    candidates = digest_candidates(key)
     device = session.exec(
-        select(Device).where(Device.agent_key_hash == key_hash, Device.agent_key_hash != "")
+        select(Device).where(Device.agent_key_hash.in_(candidates), Device.agent_key_hash != "")  # type: ignore[attr-defined]
     ).first()
     if device is None or device.revoked:
         return None
+    if device.agent_key_hash != key_hash:
+        # Hashed under the previous Fernet key (a rotation is under way): re-hash it now.
+        device.agent_key_hash = key_hash
+        session.add(device)
+        session.commit()
+        session.refresh(device)
     return device
 
 
@@ -902,7 +921,7 @@ def require_admin_or_internal(
     token = authorization.split(" ")[1]
     user = _find_user_for_api_key(session, token)
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise sign_in_reset.refusal(session, token)
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
     return True
@@ -946,11 +965,29 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
             safe = User.model_validate(owner)
             safe.is_admin = False
             return safe
-    raise HTTPException(status_code=401, detail="Invalid API Key")
+    # Say why (code sign_in_reset or api_key_invalid): the apps clear the key only on these.
+    raise sign_in_reset.refusal(session, key)
 
 
 # Push topics, notification preferences, UnifiedPush (docs/PUSH.md)
 app.include_router(push.build_router(get_session, require_api_key, require_internal))
+
+
+def _require_admin_user(user: User = Depends(require_api_key)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    return user
+
+
+# Sign everyone out and reset keys; the automated agents' test account (sign_in_reset.py).
+# Registered before the /api/users/{username}/... routes so its fixed paths win.
+sign_in_reset_router = sign_in_reset.build_router(
+    get_session,
+    _require_admin_user,
+    lambda user, key: _store_user_api_key(user, key),
+    lambda *args, **kwargs: _audit(*args, **kwargs),
+)
+app.include_router(sign_in_reset_router)
 
 # Internal API
 
@@ -2084,6 +2121,9 @@ def update_user(username: str, body: UserUpdate, request: Request, session: Sess
         raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
     _check_abuse_ch_key(update_data)
+    sign_in_reset.refuse_test_account_privilege(
+        user, is_admin=update_data.get("is_admin"), is_system_default=update_data.get("is_system_default"),
+    )
     before = audit.snapshot(user)
     _apply_user_update(user, update_data, clear_fields)
     session.add(user)
@@ -2359,8 +2399,19 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     return {"status": "SUCCESS"}
 
 @app.get("/api/users", response_model=list[UserRead])
-def list_users(session: Session = Depends(get_session), _: bool = Depends(require_admin_or_internal)):
-    return [_user_read(session, u) for u in session.exec(select(User)).all()]
+def list_users(
+    include_test_accounts: bool = False,
+    session: Session = Depends(get_session),
+    _: bool = Depends(require_admin_or_internal),
+):
+    """Every account. Test accounts (automated agents) only with ``include_test_accounts=true``:
+    every service that reads this as the household roster (notices, calls, the hub's users,
+    the family pages) must never count or notify one."""
+    return [
+        _user_read(session, u)
+        for u in session.exec(select(User)).all()
+        if include_test_accounts or not u.is_test_account
+    ]
 
 
 # --- Roles (services/identity/roles.py) ---------------------------------------
@@ -2458,6 +2509,7 @@ def set_user_roles(username: str, body: UserRolesUpdate, request: Request, sessi
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     wanted = set(body.role_ids)
+    sign_in_reset.refuse_test_account_privilege(user, role_ids=wanted)
     known = set(session.exec(select(Role.id).where(Role.id.in_(wanted))).all()) if wanted else set()  # type: ignore[union-attr]
     if wanted - known:
         raise HTTPException(status_code=404, detail="Role not found")
@@ -2519,6 +2571,7 @@ def family_directory(session: Session = Depends(get_session), _caller: User = De
             "family_role": u.family_role or None,
         }
         for u in session.exec(select(User)).all()
+        if not u.is_test_account
     ]
 
 
@@ -2544,7 +2597,7 @@ def list_sharing_recipients(
     return [
         ShareRecipient(username=u.username, display_name=u.display_name or u.username)
         for u in people
-        if u.username != (caller.username or "").lower()
+        if u.username != (caller.username or "").lower() and not u.is_test_account
     ]
 
 # --- family roles and relationships ---------------------------------------
@@ -2618,7 +2671,7 @@ def list_family(
     raw admin flag beyond what a family panel needs.
     """
     _require_family_manager(caller, session)
-    people = session.exec(select(User)).all()
+    people = [u for u in session.exec(select(User)).all() if not u.is_test_account]
     people.sort(key=lambda u: (_FAMILY_ORDER.get(u.family_role or "other", 9), (u.display_name or u.username).lower()))
     return [_family_read(u) for u in people]
 
@@ -2651,6 +2704,7 @@ def update_family(
             raise HTTPException(status_code=403, detail="Only an admin can make someone a parent")
 
     next_role = body.family_role if body.family_role is not None else (target.family_role or "other")
+    sign_in_reset.refuse_test_account_privilege(target, family_role=next_role)
     if next_role == "father" and not target.is_admin:
         raise HTTPException(status_code=422, detail="Make this account an admin before marking it Father")
 
@@ -3213,12 +3267,13 @@ def internal_validate_api_key(
         raise HTTPException(status_code=400, detail="api_key is required")
     user = _find_user_for_api_key(session, api_key)
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise sign_in_reset.refusal(session, api_key)
     return {
         "user": user.username,
         "user_id": user.id or 0,
         "is_admin": bool(user.is_admin),
         "is_system_default": bool(user.is_system_default),
+        "is_test_account": bool(getattr(user, "is_test_account", False)),
         "family_role": getattr(user, "family_role", "other"),
     }
 
@@ -7172,7 +7227,7 @@ def internal_household(session: Session = Depends(get_session), _: None = Depend
     usernames = [
         user.username
         for user in session.exec(select(User)).all()
-        if not _is_system_default_user(user)
+        if not _is_system_default_user(user) and not getattr(user, "is_test_account", False)
     ]
     return {"status": "SUCCESS", "members": len(usernames), "usernames": usernames}
 
@@ -8796,7 +8851,7 @@ async def update_user_location(
             # Children and teens are not told about someone else's battery.
             family = [
                 u.username for u in session.exec(select(User)).all()
-                if not u.is_system_default and u.family_role not in roles.MINOR_FAMILY_ROLES
+                if not u.is_system_default and not u.is_test_account and u.family_role not in roles.MINOR_FAMILY_ROLES
                 and _location_visible_to(session, u, person.lower(), grants)
             ]
             low_battery = (person, (owner.display_name if owner else "") or person.title(), family,
@@ -9565,7 +9620,8 @@ def ingest_telemetry(
             owner_username = device.owner_username or caller.username
             owner = session.exec(select(User).where(User.username == owner_username)).first()
             family = [u.username for u in session.exec(select(User)).all()
-                      if not u.is_system_default and u.family_role not in roles.MINOR_FAMILY_ROLES]
+                      if not u.is_system_default and not u.is_test_account
+                      and u.family_role not in roles.MINOR_FAMILY_ROLES]
             label = device.label or f"{(owner.display_name if owner else owner_username.title())}'s watch"
             watch_alert = (device.device_key, label, announced_at, family, owner_username)
 

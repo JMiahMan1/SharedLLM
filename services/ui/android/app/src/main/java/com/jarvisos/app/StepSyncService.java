@@ -299,7 +299,8 @@ public class StepSyncService extends Service {
         try (OutputStream os = conn.getOutputStream()) {
             os.write(body.toString().getBytes(StandardCharsets.UTF_8));
         }
-        int status = conn.getResponseCode();
+        // A refused key pauses uploads until the next sign-in; the day's total goes then.
+        int status = SignInReset.check(this, conn, token);
         conn.disconnect();
         return status;
     }

@@ -256,6 +256,8 @@ class UserRead(BaseModel):
     display_name: str
     is_admin: bool
     is_system_default: bool
+    #: An automated agent's account (scripts/create_test_account.py), not a family member.
+    is_test_account: bool = False
     #: Whether the account has a password at all. An account without one is
     #: listed, appears in the family pages, and cannot sign in - which is worth
     #: showing rather than leaving as a mystery "invalid username or password".
