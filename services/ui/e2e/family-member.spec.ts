@@ -127,6 +127,7 @@ async function mockApi(page: Page, viewer: Viewer) {
     if (p === '/api/guard/requests') {
       return json({ requests: url.searchParams.get('status') === 'pending' ? [{ id: 3, username: 'sam', kind: 'app', target: 'com.mojang.minecraftpe', label: 'Minecraft', note: '', status: 'pending', until: null, decided_by: null, created_at: new Date().toISOString(), decided_at: null, vetting: REQUEST_VETTING }] : [] });
     }
+    if (p === '/api/guard/unlock-requests') return json({ requests: [] });
     if (p === '/api/guard/offline-code') return json({ set: viewer === 'dad', updated_at: null, can_set: true });
     if (member && p.endsWith('/status')) return json(status(member, viewer === 'dad'));
     if (p.startsWith('/api/usage/')) return json(usage(member || ''));

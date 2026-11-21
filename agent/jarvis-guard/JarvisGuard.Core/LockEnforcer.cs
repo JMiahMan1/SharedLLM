@@ -12,8 +12,8 @@ namespace JarvisGuard.Core;
 /// The old code signed out once per lock and never again, so a child who
 /// signed straight back in kept the PC for the rest of the lock.
 ///
-/// A parent's sign-in on the lock surface lifts the lock on this PC for the
-/// time the hub granted (<see cref="UnlockUntil"/>), whatever the hub's
+/// A parent's approval from their phone (or a parent's offline code) lifts the
+/// lock on this PC for the time granted (<see cref="UnlockUntil"/>), whatever the hub's
 /// status says meanwhile: the hub keeps reporting bedtime or the day's limit,
 /// and the old code signed the session out again on the next poll.
 /// </summary>
@@ -37,18 +37,45 @@ public sealed class LockEnforcer
     /// <summary>Until when a parent's unlock on this PC holds (null: none).</summary>
     public DateTimeOffset? UnlockUntil { get; private set; }
 
-    /// <summary>A parent signed in on the lock surface; the hub said until when.</summary>
-    public void ParentUnlocked(DateTimeOffset until)
+    /// <summary>When the current unlock started (null: none).</summary>
+    public DateTimeOffset? UnlockStartedAt { get; private set; }
+
+    /// <summary>
+    /// A parent unlocked this PC (online, or with an offline code) at
+    /// <paramref name="startedAt"/> (now when not given), until <paramref name="until"/>.
+    /// </summary>
+    public void ParentUnlocked(DateTimeOffset until, DateTimeOffset? startedAt = null)
     {
         UnlockUntil = until;
+        UnlockStartedAt = startedAt ?? DateTimeOffset.Now;
         _seenLocked.Clear();
         _signedOutThisLock = false;
     }
 
     public bool ParentUnlockActive(DateTimeOffset now) => UnlockUntil is { } u && now < u;
 
-    /// <summary>Whether this PC is locked now: the hub's (or the offline) verdict, less a parent's unlock.</summary>
-    public bool EffectiveLocked(bool locked, DateTimeOffset now) => locked && !ParentUnlockActive(now);
+    /// <summary>
+    /// Whether this PC is locked now: the hub's (or the offline) verdict, less
+    /// a parent's unlock on this PC.
+    ///
+    /// A parent's pause set after the unlock started (<paramref name="pausedAt"/>,
+    /// the rules' <c>paused_at</c>) overrides the unlock and ends it: a parent
+    /// who pauses the PC from their phone means now, whatever was unlocked
+    /// here earlier. A pause from before the unlock does not: that is the
+    /// pause the unlock was for (an online unlock lifts it on the hub too, an
+    /// offline code cannot, and the hub's next answer would otherwise re-lock
+    /// the PC the moment it is back online).
+    /// </summary>
+    public bool EffectiveLocked(bool locked, DateTimeOffset now, DateTimeOffset? pausedAt = null)
+    {
+        if (!locked) return false;
+        if (pausedAt is { } p && UnlockStartedAt is { } s && p > s && ParentUnlockActive(now))
+        {
+            UnlockUntil = null;
+            UnlockStartedAt = null;
+        }
+        return !ParentUnlockActive(now);
+    }
 
     /// <summary>
     /// The sessions to sign out now. <paramref name="sessions"/> are the

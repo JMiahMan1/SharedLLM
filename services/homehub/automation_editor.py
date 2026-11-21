@@ -261,6 +261,12 @@ class Tracer:
                                "summary": _summarise_step(step), "at": self.engine.clock.now().isoformat(),
                                "error": None})
 
+    def step_error(self, message: str) -> None:
+        """The step just recorded failed, though the run went on past it (``continue_on_error``)."""
+        trace = _current_trace.get()
+        if trace is not None and trace["steps"]:
+            trace["steps"][-1]["error"] = message
+
     def list(self, kind: str, item_id: str) -> list[dict[str, Any]]:
         key = (kind, item_id)
         if key in self._traces:

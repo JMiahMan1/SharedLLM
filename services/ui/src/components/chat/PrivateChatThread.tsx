@@ -74,7 +74,8 @@ interface PrivateChatThreadProps {
   onKeyAdopted?: () => void;
   /** Puts Beloved on the home screen (the Android app, a launcher that pins); absent elsewhere. */
   onAddBelovedToHome?: () => void;
-  onUnlockedChange: (unlocked: boolean) => void;
+  /** Whether this chat (by token) is unlocked: the panel keeps it per chat, so a switch never inherits another's. */
+  onUnlockedChange: (token: string, unlocked: boolean) => void;
   /** Refetch the thread after a send or a delete. */
   onChanged: () => void;
 }
@@ -146,14 +147,14 @@ export default function PrivateChatThread({
   }, [token]);
 
   // Gone from the screen is locked: the panel must not mark it read behind the lock.
-  useEffect(() => () => onUnlockedChange(false), [onUnlockedChange]);
+  useEffect(() => () => onUnlockedChange(token, false), [token, onUnlockedChange]);
 
   // Dropped decryptions on lock: nothing readable outlives the key.
   useEffect(() => {
-    onUnlockedChange(unlocked);
+    onUnlockedChange(token, unlocked);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- wiping what was decrypted when the key goes
     if (!unlocked) setOpened({});
-  }, [unlocked, onUnlockedChange]);
+  }, [token, unlocked, onUnlockedChange]);
 
   // No screenshots or recents thumbnail while the chat is on screen (Android).
   useEffect(() => {
@@ -462,7 +463,10 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
 
   // Reply reminders: whether the other parent's last messages ask something is decided here, from the text
   // this device holds, and only that one bit goes to the server, once per message (lib/privateChatReminders.ts).
+  // Sent (the server has it) and on their way: a message is only done once the server took it,
+  // so a failed hint is sent again on the next change to the thread instead of being lost.
   const flagged = useRef(new Set<number>());
+  const flagging = useRef(new Set<number>());
   useEffect(() => {
     if (storage !== 'store' || !pageVisible) return;
     const items = visible
@@ -473,11 +477,23 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
         text: reminderText(opened[String(m.id)], marks[Number(m.id)]?.edit?.text),
       }));
     const flag = replyFlag(items);
-    if (!flag?.expectsReply || flagged.current.has(flag.messageId)) return;
-    flagged.current.add(flag.messageId);
-    void api.flagPrivateChatExpectsReply(token, flag.messageId, true).catch(() => {
-      // Only the hint is lost: the reminder still comes, after the longer wait.
-    });
+    if (!flag?.expectsReply) return;
+    const id = flag.messageId;
+    if (flagged.current.has(id) || flagging.current.has(id)) return;
+    flagging.current.add(id);
+    api
+      .flagPrivateChatExpectsReply(token, id, true)
+      .then(
+        () => {
+          flagged.current.add(id);
+        },
+        (error: unknown) => {
+          toast.error(`Could not set the reply reminder (${errorText(error, 'no answer')}). It is tried again on the next change.`, {
+            id: `reply-hint-${id}`,
+          });
+        },
+      )
+      .finally(() => flagging.current.delete(id));
   }, [visible, opened, marks, myActorIds, storage, pageVisible, token]);
 
   const lastId = visible[visible.length - 1]?.id;
@@ -573,15 +589,21 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setPreviewLoading(wantedLink);
-      void api
-        .getPrivateLinkPreview(token, wantedLink, controller.signal)
-        .then((raw) => readLinkPreview(raw), () => null)
-        .then((made) => {
-          if (controller.signal.aborted) return;
-          // A failure just means no preview: the message goes without one.
-          setPreviews((known) => new Map(known).set(wantedLink, made && made.url === wantedLink ? made : null));
-          setPreviewLoading((now) => (now === wantedLink ? null : now));
-        });
+      const settle = (made: LinkPreview | null, problem?: string) => {
+        if (controller.signal.aborted) return;
+        // No preview: the message goes without one, and the writer is told why rather than left guessing.
+        if (problem) toast.error(`No preview for this link: ${problem}`, { id: `link-preview-${wantedLink}` });
+        setPreviews((known) => new Map(known).set(wantedLink, made));
+        setPreviewLoading((now) => (now === wantedLink ? null : now));
+      };
+      api.getPrivateLinkPreview(token, wantedLink, controller.signal).then(
+        (raw) => {
+          const made = readLinkPreview(raw);
+          if (made && made.url === wantedLink) settle(made);
+          else settle(null, 'the server sent a preview this app cannot read.');
+        },
+        (error: unknown) => settle(null, errorText(error, 'it could not be made.')),
+      );
     }, PREVIEW_DEBOUNCE_MS);
     return () => {
       window.clearTimeout(timer);
@@ -665,6 +687,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
         // A server from before previews refuses a message this size: send the words alone.
         if (!preview || !tooLarge(error)) throw error;
         await post({ t: 'text', text: body });
+        toast.error('Sent without the link preview: the server refused a message that size.');
       }
       setText('');
       setPreviewDropped(new Set());

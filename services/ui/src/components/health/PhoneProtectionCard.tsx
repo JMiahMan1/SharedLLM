@@ -26,6 +26,7 @@ export default function PhoneProtectionCard() {
   const android = Capacitor.getPlatform() === 'android';
   const [guard, setGuard] = useState<GuardStatus | null>(null);
   const [access, setAccess] = useState<ReportingAccess | null>(null);
+  const [callFilterError, setCallFilterError] = useState<string | null>(null);
 
   const { data: status } = useQuery({
     queryKey: ['screen-time', me],
@@ -59,11 +60,17 @@ export default function PhoneProtectionCard() {
   const callFilterReady = !guard.callFilterAvailable || Boolean(guard.callFilter);
   const allOn = guard.adminActive && guard.guardEnabled && filterReady && reportingOn && callFilterReady;
   // The role prompt is a dialog, so no visibilitychange: read the status again when it closes.
-  const askCallFilter = () =>
+  const askCallFilter = () => {
+    setCallFilterError(null);
     void Guard.allowCallFilter()
       .then(() => Guard.status())
       .then(setGuard)
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        const reason = err instanceof Error && err.message ? err.message : String(err || 'unknown error');
+        console.error('[phone-protection] call filter request failed', err);
+        setCallFilterError(`Android did not let Jarvis set up the call filter: ${reason}. Try again, or ask a parent to check Settings, Apps, Default apps, Phone app.`);
+      });
+  };
   const askComms = () => void Comms.requestAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
 
   return (
@@ -169,6 +176,11 @@ export default function PhoneProtectionCard() {
                       While this phone is locked, calls go only to a parent or 911, from the phone or a watch or car paired with it.
                       Android asks once: choose <b>Jarvis OS</b>, then <b>Set as default</b>.{guard.deviceOwner ? ' Until then a locked phone can call 911 only.' : ''}
                     </span>
+                    {callFilterError && (
+                      <span role="alert" className="block mt-1.5 leading-relaxed text-rose-300" data-testid="phone-protection-call-filter-error">
+                        {callFilterError}
+                      </span>
+                    )}
                   </>
                 )}
               </li>

@@ -348,3 +348,81 @@ async def test_the_runtime_records_through_the_writer_and_shutdown_flushes(tmp_p
     assert [json.loads(a[0]) for a in attrs] == [{"friendly_name": "Flag"}]
     db.close()
     store.close()
+
+
+def _same_again(state: str):
+    """A state event that changes nothing recorded (an unrecorded attribute or a refresh)."""
+    from services.homehub.core import State
+
+    return State("sensor.meter", state), State("sensor.meter", state)
+
+
+def test_a_dropped_row_is_not_taken_as_recorded(hub_store):
+    """A row the full queue dropped never reached history, so the same state is recorded when it comes again."""
+    hub, store = hub_store
+    from services.homehub.core import State
+
+    rec = Recorder(hub, store, max_queue=2)  # not started yet: the queue fills
+    first = State("sensor.meter", "1")
+    rec.handle(first, None)  # its restore state and its row fill the queue
+    second = State("sensor.meter", "2")
+    rec.handle(second, first)  # both dropped
+    assert rec.writer.dropped == 2
+    rec.writer.start()
+    assert rec.writer.sync()
+    new, old = _same_again("2")
+    rec.handle(new, old)
+    assert rec.writer.sync()
+    assert [r["state"] for r in history_rows(store, "sensor.meter")] == ["1", "2"]
+    rec.stop()
+
+
+def test_a_rolled_back_batch_is_not_taken_as_recorded(hub_store, monkeypatch):
+    hub, store = hub_store
+    from services.homehub.core import State
+
+    rec = recorder_for(hub, store, commit_interval=60.0)
+    real = store.write_history
+    calls = {"n": 0}
+
+    def fail_once(db, rows):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("disk I/O error")
+        return real(db, rows)
+
+    monkeypatch.setattr(store, "write_history", fail_once)
+    rec.handle(State("sensor.meter", "5"), None)
+    assert rec.writer.sync()
+    assert rec.writer.failed == 1 and history_rows(store, "sensor.meter") == []
+    new, old = _same_again("5")
+    rec.handle(new, old)  # the same state again: recorded this time, not skipped
+    assert rec.writer.sync()
+    assert [r["state"] for r in history_rows(store, "sensor.meter")] == ["5"]
+    new, old = _same_again("5")
+    rec.handle(new, old)  # and now that it is in history, an identical one is skipped as usual
+    assert rec.writer.sync()
+    assert len(history_rows(store, "sensor.meter")) == 1
+    rec.stop()
+
+
+def test_without_a_writer_thread_a_failed_write_is_not_taken_as_recorded(tmp_path, monkeypatch):
+    from services.homehub.core import State
+
+    store = Store(":memory:")
+    hub = Hub()
+    rec = Recorder(hub, store)
+    assert rec.writer is None
+    real = store.write_history
+
+    def broken(db, rows):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(store, "write_history", broken)
+    with pytest.raises(sqlite3.OperationalError):
+        rec.handle(State("sensor.meter", "7"), None)
+    monkeypatch.setattr(store, "write_history", real)
+    new, old = _same_again("7")
+    rec.handle(new, old)
+    assert [r["state"] for r in history_rows(store, "sensor.meter")] == ["7"]
+    store.close()

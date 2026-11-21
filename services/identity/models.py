@@ -742,6 +742,24 @@ class VoiceSignature(SQLModel, table=True):  # type: ignore
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class VoicePendingEnrolment(SQLModel, table=True):  # type: ignore
+    """Voice takes taught at a satellite for someone with no voice profile yet.
+
+    Nothing proves who spoke at a satellite, so these takes are held here,
+    apart from ``VoiceSignature``, until the person approves them from their
+    own signed-in app (``POST /api/users/me/voice/pending/{session}``). One
+    row per teaching session. A new table, made by ``create_all``.
+    """
+    __table_args__ = {"extend_existing": True}
+    session: str = Field(primary_key=True)
+    username: str = Field(index=True)
+    satellite: str | None = None
+    model: str
+    samples: str = "[]"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class UserAvatarImage(SQLModel, table=True):  # type: ignore
     """A user's uploaded profile picture, kept in the identity database."""
     __table_args__ = {"extend_existing": True}
@@ -870,6 +888,38 @@ class GuardRequest(SQLModel, table=True):  # type: ignore
     decided_at: str | None = None
 
 
+class GuardUnlockRequest(SQLModel, table=True):  # type: ignore
+    """A locked child's device asking a parent to unlock it for a while.
+
+    The device (a family PC with its device key, or the child's phone naming
+    its own registered key) asks; the request is bound to that ``device_key``.
+    Only a parent's own session answers it, from their phone or the web app,
+    and only that same device reads the answer. No password is ever typed on
+    the child's device.
+
+    status: pending | approved | denied | expired | superseded. A request
+    lives until ``expires_at`` (ten minutes) unanswered; a newer request from
+    the same device supersedes a pending one; an answer is final. An approval
+    fixes ``until`` when it is given, so reading it again never extends it.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True, foreign_key="user.username")
+    device_key: str = Field(index=True)
+    device_kind: str = ""  # windows-pc | phone | tablet, when the device is registered
+    lock_reason: str = ""  # why the device is locked: bedtime, limit, paused, school, chores
+    note: str = ""  # the child's own words
+    minutes_asked: int
+    status: str = Field(default="pending", index=True)
+    minutes_granted: int | None = None
+    until: str | None = None
+    decided_by: str | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    expires_at: str
+    decided_at: str | None = None
+    delivered_at: str | None = None  # when the device first read the answer
+
+
 class LinkedAccount(SQLModel, table=True):  # type: ignore
     """A member's own outside account, linked by them over OAuth (Phase 11:
     Spotify's recently played). Tokens are kept encrypted; ``cursor_ms`` is
@@ -903,10 +953,10 @@ class RecommendationLanes(SQLModel, table=True):  # type: ignore
 
 
 class GuardOfflineCode(SQLModel, table=True):  # type: ignore
-    """A parent's offline unlock code for their children's phones, kept only as
-    a PBKDF2-SHA256 verifier. The verifier reaches a child's phone only inside
-    a successful online parent unlock, so the phone can check the code later
-    with no connection.
+    """A parent's offline unlock code for their children's devices, kept only
+    as a PBKDF2-SHA256 verifier. The verifier reaches a child's phone or PC
+    only inside a parent's approved unlock request (read by that same device),
+    so the device can check the code later with no connection.
     """
     __table_args__ = {"extend_existing": True}
     username: str = Field(primary_key=True, foreign_key="user.username")

@@ -3378,8 +3378,13 @@ def _take_for(query: str) -> dict | None:
         return None
 
 
-async def _store_take(state: dict, take: dict, satellite: str) -> tuple[int, str]:
-    """Hand a take to Identity; (HTTP status, detail). 0 means Identity was unreachable."""
+async def _store_take(state: dict, take: dict, satellite: str) -> tuple[int, str, str]:
+    """Hand a take to Identity; (HTTP status, detail, outcome).
+
+    Status 0 means Identity was unreachable. ``outcome`` is Identity's
+    ``status``: ``STORED`` (it matched the person's existing profile) or
+    ``PENDING`` (no profile yet: held until the person approves it in the app).
+    """
     try:
         resp = await get_http_client().post(
             f"{IDENTITY_SVC}/api/voice/enroll",
@@ -3395,11 +3400,46 @@ async def _store_take(state: dict, take: dict, satellite: str) -> tuple[int, str
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
         body = await resp.json(content_type=None)
-        detail = body.get("detail") if isinstance(body, dict) else None
-        return resp.status, str(detail or "")
+        body = body if isinstance(body, dict) else {}
+        return resp.status, str(body.get("detail") or ""), str(body.get("status") or "")
     except Exception as e:
         log.warning(f"[VoiceTeaching] identity could not store the take: {type(e).__name__}: {e}")
-        return 0, str(e)
+        return 0, str(e), ""
+
+
+VOICE_APPROVAL_URL = "/identity"
+
+
+async def _ask_to_approve(state: dict, satellite: str) -> bool:
+    """Ask the satellite's owner, in their own app, to approve takes held for them.
+
+    True when the notice was taken. The takes stay held either way, and the
+    Vocal Signature panel lists them, so a lost notice loses nothing.
+    """
+    payload = _notify.notice(
+        state["username"], "home", "Approve your voice recordings?",
+        f"Someone taught Jarvis {state['got']} sentence{'s' if state['got'] != 1 else ''} as your voice at "
+        f"{satellite}. Approve only if it was you.",
+        url=VOICE_APPROVAL_URL,
+        tag=f"voice-pending:{state['session']}",
+        actions=[
+            _notify.callback_action("It was me", "voice_pending_decide", {"id": state["session"], "approve": True}),
+            _notify.callback_action("Not me", "voice_pending_decide", {"id": state["session"], "approve": False}),
+        ],
+    )
+    sent = await _notify.send(payload)
+    if not sent:
+        log.warning(f"[VoiceTeaching] approval notice to {state['username']} was not delivered")
+    return sent
+
+
+async def _ended_with_pending(state: dict, satellite: str) -> str:
+    """What to say when a session ends with takes awaiting the owner's approval."""
+    if await _ask_to_approve(state, satellite):
+        return (" Before I use them, please approve them in your Jarvis app: I've sent you a notice. "
+                "Until then I won't recognise you by voice.")
+    return (" Before I use them, please approve them in your Jarvis app under Identity, Vocal Signature. "
+            "I couldn't send you a notice just now. Until then I won't recognise you by voice.")
 
 
 def _say_this(index: int, lead: str) -> str:
@@ -3453,6 +3493,8 @@ async def _voice_teaching_reply(query: str, creds: ResolvedCredentials, satellit
     name = state.get("name") or state["username"]
     if _wants_voice_learning_stop(query):
         await asyncio.to_thread(_end_teaching, satellite)
+        if state["got"] and state.get("pending"):
+            return "Okay, I've stopped learning your voice." + await _ended_with_pending(state, satellite)
         kept = " The sentences you already said are kept." if state["got"] else ""
         return f"Okay, I've stopped learning your voice.{kept}"
     if _wants_voice_learning(query):
@@ -3464,17 +3506,23 @@ async def _voice_teaching_reply(query: str, creds: ResolvedCredentials, satellit
         status, detail = 0, "no take"
         retry_lead = "I didn't catch enough of your voice that time."
     else:
-        status, detail = await _store_take(state, take, satellite)
+        status, detail, outcome = await _store_take(state, take, satellite)
         retry_lead = (
             "That didn't sound like your earlier sentences. If someone else spoke, please try again yourself."
+            if status == 422 and state["got"] else
+            f"That didn't sound like the voice I already know for {name}. Only {name} can teach their voice here."
             if status == 422 else "I couldn't save that one."
         )
+        if status == 200 and outcome == "PENDING":
+            state["pending"] = True
     if status == 200:
         state["got"] += 1
         state["misses"] = 0
         log.info(f"[VoiceTeaching] {state['username']}: take {state['got']} of {voice_enroll.TAKES} at {satellite}")
         if state["got"] >= voice_enroll.TAKES:
             await asyncio.to_thread(_end_teaching, satellite)
+            if state.get("pending"):
+                return f"Thank you, {name}. I've recorded your sentences." + await _ended_with_pending(state, satellite)
             return (
                 f"Thank you, {name}. I've learned your voice from this satellite. "
                 "From now on, try asking me 'who am I' to check."
@@ -3486,6 +3534,11 @@ async def _voice_teaching_reply(query: str, creds: ResolvedCredentials, satellit
     log.info(f"[VoiceTeaching] {state['username']}: take not stored at {satellite} ({status} {detail})")
     if state["misses"] >= voice_enroll.MAX_MISSES:
         await asyncio.to_thread(_end_teaching, satellite)
+        if state["got"] and state.get("pending"):
+            return (
+                "I couldn't hear your voice clearly enough, so let's stop for now."
+                + await _ended_with_pending(state, satellite)
+            )
         kept = f" The {state['got']} I did hear are kept." if state["got"] else ""
         return (
             "I couldn't hear your voice clearly enough, so let's stop for now." + kept
@@ -8122,10 +8175,30 @@ _TAMPER_EVENTS = {
     "other_vpn": "is running another VPN in place of Jarvis's web filter",
     "boot_without_guard": "started without Jarvis's guard (safe mode, most likely)",
     "multi_user": "has a second user or guest, where Jarvis's guard is not set up",
+    # The family PC (agent/jarvis-guard).
+    "offline_code_wrong": "had wrong offline unlock codes typed in",
+    "tray_missing": "is running without Jarvis Guard's tray, so its screen time is not being counted",
+    "guard_pipe_taken": "has another program posing as Jarvis Guard, which stopped the guard from starting",
+}
+
+#: Events whose detail reads better inside the sentence than after it. The
+#: PC sends whose offline code it was ("parent-a") and how many wrong codes
+#: ("3 wrong codes"); a phone's offline_unlock has no detail and keeps the
+#: plain sentence.
+_TAMPER_WITH_DETAIL = {
+    "offline_unlock": "was unlocked with {detail}'s offline code",
+    "offline_code_wrong": "had {detail} typed in at its offline unlock",
 }
 
 #: Longest detail kept with a tamper report (an app's name, a DNS host, a count).
 _TAMPER_DETAIL_MAX = 80
+
+
+def _tamper_sentence(event: str, detail: str) -> str:
+    """What a tamper report says, after "<name>'s <device> ", ending in a full stop."""
+    if detail and event in _TAMPER_WITH_DETAIL:
+        return _TAMPER_WITH_DETAIL[event].format(detail=detail) + "."
+    return _TAMPER_EVENTS[event] + (f": {detail}." if detail else ".")
 
 
 @app.get("/api/recommendation-lanes/{username}")
@@ -8159,29 +8232,99 @@ async def delete_guard_offline_code(request: Request):
     return JSONResponse(status_code=status, content=body)
 
 
-@app.post("/api/guard/parent-unlock")
-async def guard_parent_unlock(request: Request):
-    """A parent's own login, typed on the child's phone, lifts the guard briefly.
+#: Why a device is locked, as words in "asks to unlock their PC ... at bedtime".
+_UNLOCK_REASON_WORDS = {
+    "bedtime": " at bedtime",
+    "limit": " after today's limit",
+    "paused": " while it is paused",
+    "school": " during school hours",
+    "chores": " before today's chores",
+}
 
-    Identity checks the login and that it is one of this child's parents; the
-    parents are told it happened, so an unlock is never silent.
-    """
-    status, body = await _identity_as_caller(request, "POST", "/api/guard/parent-unlock", json=await request.json())
-    if status == 200:
-        # A family PC unlocks with its device key, which identity accepted as
-        # the child it is assigned to but the strict key check below does not
-        # know: asking it 401'd every unlock on a PC after identity said yes.
-        device_creds = await _device_agent_key(request)
-        creds = None if device_creds else await _resolve_identity_from_request(request)
-        child = str((device_creds or {}).get("owner_username") or (creds or {}).get("user") or "")
-        device = (body or {}).get("device") or "device"
+
+def _unlock_tag(child: str) -> str:
+    """One notice per child's unlock request: a newer request or the answer replaces it on every parent's phone."""
+    return f"guard-unlock:{child}"
+
+
+def _unlock_actions(request_id: Any, minutes: Any) -> list[dict]:
+    """Approve for the minutes asked / Deny, answered from the notice (push callback ``guard_unlock_decide``)."""
+    return [
+        _notify.callback_action(f"Approve {minutes} min", "guard_unlock_decide", {"id": request_id, "approve": True, "minutes": minutes}),
+        _notify.callback_action("Deny", "guard_unlock_decide", {"id": request_id, "approve": False}),
+    ]
+
+
+@app.post("/api/guard/unlock-requests")
+async def guard_unlock_ask(request: Request):
+    """A locked child's device asks a parent to unlock it (no password on the
+    device). Identity binds the request to the asking device; both parents get
+    an actionable notice: Approve for the minutes asked, or Deny. A tap on the
+    notice opens the child's page, where the same request can be answered
+    with another length."""
+    status, body = await _identity_as_caller(request, "POST", "/api/guard/unlock-requests", json=await request.json())
+    if status == 200 and body.get("notify"):
+        asked = body.get("request") or {}
+        child = str(asked.get("username") or "")
+        name = str(body.get("display_name") or child)
+        device = str(asked.get("device") or "device")
+        minutes = asked.get("minutes_asked")
+        note = f": “{asked['note']}”" if asked.get("note") else ""
+        reason = _UNLOCK_REASON_WORDS.get(str(asked.get("lock_reason") or ""), "")
         await _screen_time_notice(
-            body.get("notify") or [],
-            f"{device[:1].upper() + device[1:]} protection unlocked",
-            f"{body.get('parent')} unlocked Jarvis's protection on {child}'s {device} for 10 minutes.",
-            "/fitness",
+            body["notify"],
+            f"Unlock {name}'s {device}?",
+            f"{name} asks to unlock their {device} for {minutes} minutes{reason}{note}. It expires in 10 minutes.",
+            f"/family/member/{child}",
+            actions=_unlock_actions(asked.get("id"), minutes) if asked.get("id") is not None else None,
+            tag=_unlock_tag(child),
         )
     return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
+
+
+@app.get("/api/guard/unlock-requests")
+async def guard_unlock_requests(request: Request, status: str = "pending"):
+    """A parent's open (or answered) unlock requests from their children's devices."""
+    code, body = await _identity_as_caller(request, "GET", "/api/guard/unlock-requests", params={"status": status})
+    return JSONResponse(status_code=code, content=body)
+
+
+@app.get("/api/guard/unlock-requests/{request_id}")
+async def guard_unlock_poll(request: Request, request_id: int, device_key: str = ""):
+    """The asking device polls its own request; identity answers only that device."""
+    params = {"device_key": device_key} if device_key else None
+    code, body = await _identity_as_caller(request, "GET", f"/api/guard/unlock-requests/{request_id}", params=params)
+    return JSONResponse(status_code=code, content=body)
+
+
+async def decide_unlock_request(request: Request, request_id: int, payload: dict) -> tuple[int, dict]:
+    """A parent answers an unlock request, as the caller (identity refuses a
+    device key and anyone who is not this child's parent). Every parent's
+    notice is replaced with the answer, so the other parent sees it was
+    handled and nobody taps a stale Approve. Shared by the route and the
+    notice's buttons (push callback ``guard_unlock_decide``)."""
+    status, body = await _identity_as_caller(request, "POST", f"/api/guard/unlock-requests/{request_id}", json=payload)
+    if status == 200:
+        decided = body.get("request") or {}
+        child = str(decided.get("username") or "")
+        name = str(body.get("display_name") or child)
+        device = str(decided.get("device") or "device")
+        by = str(decided.get("decided_by") or "A parent")
+        if decided.get("status") == "approved":
+            title = f"{name}'s {device} unlocked"
+            line = f"{by} unlocked {name}'s {device} for {decided.get('minutes_granted')} minutes."
+        else:
+            title = f"{name}'s {device} stays locked"
+            line = f"{by} said no to unlocking {name}'s {device}."
+        await _screen_time_notice(body.get("notify") or [], title, line, f"/family/member/{child}", tag=_unlock_tag(child))
+    return status, {k: v for k, v in (body or {}).items() if k != "notify"}
+
+
+@app.post("/api/guard/unlock-requests/{request_id}")
+async def guard_unlock_decide(request: Request, request_id: int):
+    """A parent approves (``{"approve": true, "minutes"?}``) or denies from the web app."""
+    status, body = await decide_unlock_request(request, request_id, await request.json())
+    return JSONResponse(status_code=status, content=body)
 
 
 @app.post("/api/guard/message")
@@ -8245,20 +8388,35 @@ async def guard_tamper(request: Request):
     # Identity keeps the report on a minor's record (the father's Devices
     # section lists them) and says who to tell. A grown member's report comes
     # back with an empty list and ``dropped`` set: nobody is told.
-    async with borrow_http_client() as client:
-        resp = await client.post(
-            f"{IDENTITY_SVC}/api/internal/guard/tamper/{child}",
-            json=report,
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-        )
-        info = await resp.json(content_type=None) if resp.status == 200 else {}
-    name = (info or {}).get("display_name") or child
+    #
+    # When identity did not keep it, this answers an error, never a success:
+    # the device keeps the report queued (the PC's offline unlock, its wrong
+    # codes, a missing tray) and sends it again, instead of dropping a report
+    # nobody stored and nobody was told about.
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC}/api/internal/guard/tamper/{child}",
+                json=report,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if resp.status != 200:
+                log.warning("[guard] tamper report %s for %s not kept: identity answered %s", event, child, resp.status)
+                raise HTTPException(status_code=502, detail=f"The report was not kept (identity answered {resp.status}). Send it again.")
+            info = await resp.json(content_type=None)
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        log.warning("[guard] tamper report %s for %s not kept: identity unreachable: %s", event, child, exc)
+        raise HTTPException(status_code=502, detail="The report was not kept (identity unreachable). Send it again.") from exc
+    if not isinstance(info, dict):
+        log.warning("[guard] tamper report %s for %s: identity's answer is not an object", event, child)
+        raise HTTPException(status_code=502, detail="The report was not kept (identity's answer was unreadable). Send it again.")
+    name = info.get("display_name") or child
     # The kind of the device that reported it, when identity knows it.
-    device = (info or {}).get("device") or "device"
+    device = info.get("device") or "device"
     await _screen_time_notice(
-        (info or {}).get("parents") or [],
+        info.get("parents") or [],
         f"{device[:1].upper() + device[1:]} protection changed",
-        f"{name}'s {device} {_TAMPER_EVENTS[event]}" + (f": {detail}." if detail else "."),
+        f"{name}'s {device} {_tamper_sentence(event, detail)}",
         f"/family/member/{child}",
     )
     answer: dict = {"status": "SUCCESS"}

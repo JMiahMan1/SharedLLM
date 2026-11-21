@@ -346,6 +346,30 @@ def test_each_person_can_turn_their_own_reminders_off(chat):
     assert _pass(chat, SENT + 7 * HOUR) == 1
 
 
+@pytest.mark.parametrize("damage", [b"{not json", b"[1, 2]", b"\xff\xfe"])
+def test_an_unreadable_state_file_fails_loudly_and_is_never_overwritten(chat, damage):
+    """A damaged file must not read as 'nothing chosen': that would turn a parent's 'off' back on."""
+    c = chat["client"]
+    assert c.put(f"{BASE}/reminders", json={"enabled": False}, headers=_as("sam")).status_code == 200
+    path = chat["root"] / "reminders" / f"{TOKEN}.json"
+    path.write_bytes(damage)
+    got = c.get(f"{BASE}/reminders", headers=_as("sam"))
+    assert got.status_code == 500 and "could not be read" in got.json()["detail"]
+    put = c.put(f"{BASE}/reminders", json={"enabled": True}, headers=_as("alex"))
+    assert put.status_code == 500 and "nothing was changed" in put.json()["detail"]
+    _message(chat, "alex", SENT)
+    _read(chat, "sam")
+    assert _pass(chat, SENT + HOUR) == 0
+    assert _pass(chat, SENT + 7 * HOUR) == 0  # skipped, not reminded as if reminders were on
+    assert chat["sent"] == []
+    assert path.read_bytes() == damage  # left for the owner to look at, never rewritten
+
+
+def test_a_missing_state_file_is_a_first_run_with_reminders_on(chat):
+    assert not (chat["root"] / "reminders" / f"{TOKEN}.json").exists()
+    assert chat["client"].get(f"{BASE}/reminders", headers=_as("sam")).json()["enabled"] is True
+
+
 def test_a_failed_delivery_is_tried_again(chat):
     _message(chat, "alex", SENT)
     _read(chat, "sam")

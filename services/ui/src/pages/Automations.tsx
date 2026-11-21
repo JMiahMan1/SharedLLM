@@ -190,7 +190,7 @@ function ItemRow({ item, canEdit, onOpen, onTraces, onRun, onEnabled, running }:
           {item.waiting_reason && (
             <span className="mt-1 block text-[11px] text-slate-400" data-testid="automation-waiting">
               <span className="mr-2 inline-flex items-center gap-1 rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-sky-200">
-                <Hourglass size={11} aria-hidden />Waiting for its device
+                <Hourglass size={11} aria-hidden />Device away
               </span>
               <span className="[overflow-wrap:anywhere]">{item.waiting_reason}</span>
             </span>
@@ -207,7 +207,7 @@ function ItemRow({ item, canEdit, onOpen, onTraces, onRun, onEnabled, running }:
         {item.kind !== 'scene' && (
           <button type="button" className={BUTTON} onClick={onTraces} aria-label={`Runs of ${name}`}><History size={14} /> Runs</button>
         )}
-        {canEdit && item.runnable && !item.waiting_reason && (
+        {canEdit && item.runnable && (
           <button type="button" className={BUTTON} onClick={onRun} disabled={running} aria-label={`Run ${name} now`}>
             {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} {item.kind === 'scene' ? 'Activate' : 'Run now'}
           </button>

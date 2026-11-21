@@ -85,6 +85,22 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    // A call to an API newer than minSdkVersion without a version check
+    // crashes the oldest phones (Android 9) with NoSuchMethodError, so NewApi
+    // fails the build (CI runs lintDebug, and the release build's lintVital
+    // checks fatal issues too). Every other lint finding stays a report.
+    lint {
+        fatal += 'NewApi'
+        abortOnError = true
+        warningsAsErrors = false
+        checkAllWarnings = false
+        checkReleaseBuilds = true
+        // Error by default, so they would fail lintDebug too; reported as
+        // warnings so only NewApi gates. UseAppTint is wrong for widget
+        // layouts (RemoteViews cannot use app:tint). MissingPermission flags
+        // calls already wrapped in try/catch (see the lint report).
+        warning += ['UseAppTint', 'MissingPermission']
+    }
 }
 
 repositories {

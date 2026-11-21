@@ -2,6 +2,7 @@ package com.jarvisos.app;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -30,8 +31,10 @@ final class GuardApi {
     static final String KEY_UNLOCKED_UNTIL = "guard_unlocked_until";
     static final String KEY_LAST_PAUSED_AT = "guard_last_paused_at";
     static final String KEY_SERVER_THEME_ID = "guard_server_theme_id";
-    /** The parents' offline-code verifiers, from the last online parent unlock. */
+    /** The parents' offline-code verifiers, from the last parent approval of an unlock request. */
     static final String KEY_OFFLINE_CODES = "guard_offline_codes";
+    /** This phone's unlock request still waiting for a parent (0: none). */
+    static final String KEY_UNLOCK_REQUEST_ID = "guard_unlock_request_id";
     static final String KEY_OFFLINE_FAILS = "guard_offline_fails";
     static final String KEY_OFFLINE_REPORT_DUE = "guard_offline_report_due";
     /** The user apps on the phone when the guard first ran: never held for approval. */
@@ -95,7 +98,7 @@ final class GuardApi {
         }
     }
 
-    /** Clear any active parent-unlock window so a new lock takes effect immediately. */
+    /** Clear any active unlock window a parent gave, so a new lock takes effect immediately. */
     static void clearUnlock(Context context) {
         prefs(context).edit().remove(KEY_UNLOCKED_UNTIL).apply();
         GuardService.onFreshLock(context);
@@ -463,34 +466,84 @@ final class GuardApi {
         return System.currentTimeMillis() < prefs(context).getLong(KEY_UNLOCKED_UNTIL, 0L);
     }
 
-    /** A parent's own login lifts the guard for the window the server grants. Returns an error to show, or null. */
-    static String parentUnlock(Context context, String username, String password) {
+    /**
+     * Ask both parents to unlock this phone for {@code minutes}: they answer
+     * Approve or Deny on their own phones, nothing is typed here. The hub binds
+     * the request to this phone's registered key. Returns an error to show, or
+     * null once the request is on its way ({@link #checkUnlockRequest} follows it).
+     */
+    static String askParentToUnlock(Context context, int minutes, String note) {
+        String key = TokenBridgePlugin.prefs(context).getString(TokenBridgePlugin.KEY_DEVICE_KEY, "");
+        if (key == null || key.isEmpty()) {
+            return "This " + DeviceNoun.of(context) + " is not registered with Jarvis yet, so a parent cannot unlock it from their phone. Use a parent's offline code.";
+        }
         try {
-            JSONObject body = new JSONObject();
-            body.put("username", username);
-            body.put("password", password);
-            HttpResult r = send(context, "POST", "/api/guard/parent-unlock", body.toString());
-            if (r == null) return "No connection to Jarvis. Try again when the " + DeviceNoun.of(context) + " is online.";
-            if (r.status == 200) {
-                long until = epochMs(new JSONObject(r.body).optString("until", ""));
-                long ms = until == 0L ? System.currentTimeMillis() + 10 * 60_000L : until;
-                JSONObject answer = new JSONObject(r.body);
-                SharedPreferences.Editor edit = prefs(context).edit().putLong(KEY_UNLOCKED_UNTIL, ms);
-                JSONArray codes = answer.optJSONArray("offline_codes");
-                if (codes != null) edit.putString(KEY_OFFLINE_CODES, codes.toString());
-                edit.apply();
+            JSONObject body = new JSONObject()
+                    .put("minutes", minutes)
+                    .put("device_key", key)
+                    .put("note", note == null ? "" : note.trim())
+                    .put("lock_reason", lastStatus(context).optString("reason", ""));
+            HttpResult r = send(context, "POST", "/api/guard/unlock-requests", body.toString());
+            if (r == null) return "No connection to Jarvis. Use a parent's offline code, or try again when the " + DeviceNoun.of(context) + " is online.";
+            if (r.status != 200) {
+                String detail = new JSONObject(r.body.isEmpty() ? "{}" : r.body).optString("detail", "");
+                return detail.isEmpty() ? "The request did not go. Try again in a minute." : detail;
+            }
+            long id = UnlockAnswer.createdId(new JSONObject(r.body));
+            prefs(context).edit().putLong(KEY_UNLOCK_REQUEST_ID, id).apply();
+            return null;
+        } catch (Exception e) {
+            return "The request did not go. Try again in a minute.";
+        }
+    }
+
+    /**
+     * How this phone's unlock request stands, from the hub; null while there
+     * is none or the hub did not answer. An approval (the hub's, for this
+     * phone's own request) unlocks the phone until the hub's {@code until} and
+     * keeps the parents' offline-code verifiers; any final answer ends the
+     * request. A parent's pause given afterwards still locks the phone again
+     * ({@link #refreshStatus}).
+     */
+    static UnlockAnswer checkUnlockRequest(Context context) {
+        SharedPreferences p = prefs(context);
+        long id = p.getLong(KEY_UNLOCK_REQUEST_ID, 0L);
+        if (id == 0L) return null;
+        try {
+            String key = TokenBridgePlugin.prefs(context).getString(TokenBridgePlugin.KEY_DEVICE_KEY, "");
+            String path = "/api/guard/unlock-requests/" + id + "?device_key=" + URLEncoder.encode(key == null ? "" : key, "UTF-8");
+            HttpResult r = send(context, "GET", path, null);
+            if (r == null) return null;
+            if (r.status == 404) {
+                p.edit().remove(KEY_UNLOCK_REQUEST_ID).apply();
+                return UnlockAnswer.parse(new JSONObject().put("request", new JSONObject().put("id", id).put("status", UnlockAnswer.EXPIRED)), id);
+            }
+            if (r.status != 200) return null;
+            UnlockAnswer answer;
+            try {
+                answer = UnlockAnswer.parse(new JSONObject(r.body), id);
+            } catch (IllegalArgumentException bad) {
+                // Never unlock on an answer that cannot be trusted; ask again.
+                Log.w("JarvisGuard", "unlock request " + id + ": " + bad.getMessage() + "; not unlocked");
+                p.edit().remove(KEY_UNLOCK_REQUEST_ID).apply();
                 return null;
             }
-            String detail = new JSONObject(r.body.isEmpty() ? "{}" : r.body).optString("detail", "");
-            return detail.isEmpty() ? "That did not work." : detail;
+            if (UnlockAnswer.PENDING.equals(answer.status)) return answer;
+            SharedPreferences.Editor edit = p.edit().remove(KEY_UNLOCK_REQUEST_ID);
+            if (UnlockAnswer.APPROVED.equals(answer.status)) {
+                edit.putLong(KEY_UNLOCKED_UNTIL, answer.untilMs);
+                if (answer.offlineCodes != null) edit.putString(KEY_OFFLINE_CODES, answer.offlineCodes.toString());
+            }
+            edit.apply();
+            return answer;
         } catch (Exception e) {
-            return "That did not work.";
+            return null;
         }
     }
 
     /**
      * A parent's offline code, typed with no connection. Five wrong codes wait
-     * ten minutes, like the online unlock. A good code lifts the guard for ten
+     * ten minutes. A good code lifts the guard for ten
      * minutes and the parents are told once the phone is back online.
      * Returns an error to show, or null.
      */
@@ -514,7 +567,7 @@ final class GuardApi {
             codes = new JSONArray();
         }
         if (codes.length() == 0) {
-            return "No offline code is set up on this " + DeviceNoun.of(context) + " yet. A parent signs in here once while online to set it up.";
+            return "No offline code is set up on this " + DeviceNoun.of(context) + " yet. It arrives the first time a parent approves an unlock from their phone while this one is online.";
         }
         for (int i = 0; i < codes.length(); i++) {
             JSONObject c = codes.optJSONObject(i);

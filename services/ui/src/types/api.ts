@@ -209,6 +209,16 @@ export interface VoiceStatus {
   consistency: number | null;
   model: string;
   updated_at: string | null;
+  /** Sentences taught at the user's voice satellite, held until they approve them. */
+  pending?: VoicePending[];
+}
+
+/** Satellite takes held for the user's approval (identity VoicePendingEnrolment). */
+export interface VoicePending {
+  id: string;
+  satellite: string | null;
+  samples: number;
+  created_at: string;
 }
 
 export interface VoiceCandidate {
@@ -786,6 +796,30 @@ export interface GuardRequest {
   decided_at: string | null;
   /** App vetting's verdict on an app request (a parent's view only; never on a child's own). */
   vetting?: RequestVetting;
+}
+
+/**
+ * A locked child's device asking a parent to unlock it (a family PC or the
+ * child's phone). A parent approves for some minutes or denies it from their
+ * own session; it expires unanswered after ten minutes, and a newer request
+ * from the same device supersedes it.
+ */
+export interface UnlockRequest {
+  id: number;
+  username: string;
+  /** "PC", "phone", "tablet" or "device". */
+  device: string;
+  /** Why the device is locked: bedtime, limit, paused, school, chores, or "". */
+  lock_reason: string;
+  note: string;
+  minutes_asked: number;
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'superseded';
+  minutes_granted: number | null;
+  until: string | null;
+  decided_by: string | null;
+  created_at: string;
+  expires_at: string;
+  decided_at: string | null;
 }
 
 /** Where an app's public Play lookup stands. */

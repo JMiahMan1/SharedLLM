@@ -136,8 +136,17 @@ _HOME_ACTION_MAX = 255
 async def home_notification_action(request: Request, params: dict, reply: str | None) -> dict:
     """Fire ``mobile_app_notification_action`` in the device hub with the button's action id, the
     notice's tag and, for a reply button, ``reply_text``, as the companion app does in Home
-    Assistant. ``params`` is ``{"action", "tag"?}`` (services/homehub/drivers/mobile_app.py)."""
+    Assistant. ``params`` is ``{"action", "tag"?, "exp", "sig"}`` (services/homehub/drivers/mobile_app.py).
+
+    The event can answer an automation (a lock's confirmation), so only the person the hub sent the
+    notice to may press its buttons, and only the buttons it carried: the hub signs each one for its
+    recipient (services/common/home_action_sign.py). Anything else is a 403.
+    """
+    import logging
+
+    from services.common import home_action_sign
     from services.gateway.phone_routes import _hub
+    from services.gateway.push_routes import _caller
 
     action = params.get("action")
     if not isinstance(action, str) or not action.strip() or len(action) > _HOME_ACTION_MAX:
@@ -148,6 +157,12 @@ async def home_notification_action(request: Request, params: dict, reply: str | 
         if not isinstance(tag, str) or len(tag) > _HOME_ACTION_MAX:
             raise HTTPException(status_code=422, detail="params.tag must be text")
         data["tag"] = tag
+    user = (await _caller(request))["user"]
+    refused = home_action_sign.verify(user, params)
+    if refused:
+        logging.getLogger("gateway.push_callbacks").warning(
+            "home_notification_action %r from %s refused: %s", action, user, refused)
+        raise HTTPException(status_code=403, detail=f"This notification button cannot be used: {refused}")
     if reply is not None:
         data["reply_text"] = reply
     status, _body = await _hub("POST", f"/api/events/{HOME_ACTION_EVENT}", json=data)
@@ -209,6 +224,31 @@ async def guard_decide(request: Request, params: dict, reply: str | None) -> dic
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="params.id is required") from None
     status, body = await decide_guard_request(request, request_id, {"approve": bool(params.get("approve"))})
+    if status != 200:
+        raise HTTPException(status_code=status, detail=body.get("detail") or "Could not answer")
+    return body
+
+
+@push_callback("guard_unlock_decide")
+async def guard_unlock_decide(request: Request, params: dict, reply: str | None) -> dict:
+    """A parent taps Approve (for the minutes asked) or Deny on a locked
+    device's unlock request, through the same path as
+    ``POST /api/guard/unlock-requests/{id}``, as the caller: ``params`` is
+    ``{"id", "approve", "minutes"?}``. Identity refuses anyone who is not
+    this child's parent, and any device key."""
+    from services.gateway.main import decide_unlock_request
+
+    try:
+        request_id = int(params.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="params.id is required") from None
+    approve = params.get("approve")
+    if not isinstance(approve, bool):
+        raise HTTPException(status_code=422, detail="params.approve must be true or false")
+    payload: dict = {"approve": approve}
+    if approve and params.get("minutes") is not None:
+        payload["minutes"] = params.get("minutes")
+    status, body = await decide_unlock_request(request, request_id, payload)
     if status != 200:
         raise HTTPException(status_code=status, detail=body.get("detail") or "Could not answer")
     return body
@@ -348,3 +388,25 @@ async def garden_snooze(request: Request, params: dict, reply: str | None) -> di
     if not plant_id:
         raise HTTPException(status_code=422, detail="params.plant_id or params.plant_ids is required")
     return await _garden_proxy(request, "POST", f"/plants/{garden_seg(plant_id)}/snooze", params=query)
+
+
+# Voice teaching (gateway _ask_to_approve sends these buttons)
+
+
+@push_callback("voice_pending_decide")
+async def voice_pending_decide(request: Request, params: dict, reply: str | None) -> dict:
+    """The owner of a voice satellite taps "It was me" / "Not me" on sentences
+    taught there as their voice: ``params`` is ``{"id", "approve"}``. Calls
+    identity as the caller, so only the person they were taught for can
+    approve them (anyone else gets identity's 404)."""
+    from services.gateway.main import _identity_as_caller
+
+    pending_id = str(params.get("id") or "").strip()
+    if not pending_id:
+        raise HTTPException(status_code=422, detail="params.id is required")
+    method = "POST" if params.get("approve") is True else "DELETE"
+    status, body = await _identity_as_caller(request, method, f"/api/users/me/voice/pending/{pending_id}")
+    if status != 200:
+        detail = body.get("detail") if isinstance(body, dict) else None
+        raise HTTPException(status_code=status, detail=detail or "Could not answer")
+    return body

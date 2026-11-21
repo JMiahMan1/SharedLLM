@@ -475,7 +475,12 @@ export default function PrivateGallery({
           vault={vault}
           items={slideshow.items}
           startIndex={slideshow.start}
-          onClose={() => setSlideshow(null)}
+          onClose={(last) => {
+            setSlideshow(null);
+            // Back on the grid where the show stopped: the picture last on screen, in view and focused,
+            // once the slideshow (and its full screen) is gone, or leaving it would take the focus back.
+            if (last) window.requestAnimationFrame(() => landOnTile(last.blob));
+          }}
         />
       )}
       {importing && (
@@ -505,6 +510,14 @@ const GAP = 4;
 const HOLD_MS = 450;
 
 /** The width of an element, kept up to date as the window or the phone turns. */
+/** Bring a picture's tile into view and focus it (after the slideshow closes on it). */
+function landOnTile(blob: string): void {
+  const tile = [...document.querySelectorAll<HTMLElement>('[data-testid="private-gallery-tile"]')].find((el) => el.dataset.blob === blob);
+  if (!tile) return;
+  tile.scrollIntoView?.({ block: 'center' });
+  tile.focus({ preventScroll: true });
+}
+
 function useWidth<T extends HTMLElement>(): [(node: T | null) => void, number] {
   const [node, setNode] = useState<T | null>(null);
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 360 : Math.min(window.innerWidth, 1200) - 16));
@@ -592,6 +605,7 @@ function Tile({
         selected ? 'scale-[0.92] rounded-xl ring-2 ring-rose-400' : ''
       }`}
       data-testid="private-gallery-tile"
+      data-blob={item.blob}
     >
       {!loaded && !failed && (
         <span

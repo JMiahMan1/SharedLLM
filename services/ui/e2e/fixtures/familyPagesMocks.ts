@@ -382,6 +382,8 @@ function memberAnswer(p: string, url: URL): unknown {
       target: 'com.example.blocks', label: 'Block Builder Adventure Deluxe Edition', note: '', status: 'pending', until: null,
       decided_by: null, created_at: iso(), decided_at: null, vetting: REQUEST_VETTING }] : [] };
   }
+  // A locked device asking to be unlocked: none waiting (guardian-unlock-requests.spec.ts shows one).
+  if (p === '/api/guard/unlock-requests') return { requests: [] };
   if (p === '/api/guard/offline-code') return { set: true, updated_at: null, can_set: true };
   // The Devices section compares each device's build with the APK on offer.
   if (p === '/api/app-updates/version') return { version: '1.0.0', git_sha: 'e2e', apk_available: true, apk_version_code: 100 };

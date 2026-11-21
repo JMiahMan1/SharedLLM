@@ -307,6 +307,20 @@ answer still applies and the child hears the answer. The two parents each get
 the notice with Approve and Disapprove (the recipients are identity's `notify`
 list, never hardcoded).
 
+`guard_unlock_decide` answers a locked child's device asking to be unlocked
+(a family PC or the child's phone, `POST /api/guard/unlock-requests`): it takes
+`{"id", "approve", "minutes"?}` and posts `POST /api/guard/unlock-requests/{id}`
+as the caller. The notice reads "Approve N min" (the minutes asked) and "Deny";
+both parents get it, tagged `guard-unlock:<child>`, and the answer replaces it
+on every parent's phone. Identity refuses a device key and anyone who is not
+the child's parent. A different length is chosen on the child's page in the app.
+
+`voice_pending_decide` answers the notice a satellite's owner gets when
+sentences were taught there as their voice before they had a voice profile
+(docs/VOICE_RECOGNITION.md): `{"id", "approve"}`. "It was me" posts and "Not
+me" deletes `/api/users/me/voice/pending/{id}` on identity as the caller, so
+only the person they were taught for can approve them.
+
 `raven_approve` and `raven_reject` follow Execute and Delete in Raven Ops:
 admins only, whatever the mission type (a mission's owner is not enough), and
 only while the mission is `pending`. Approve also refuses (409) a mission
@@ -412,7 +426,7 @@ All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
 | chat | gateway `chat_notify` | new family message, Jarvis answer (Reply, Open); tag per conversation |
 | call | gateway `proxy_talk_call` | somebody joined a family call: one notice per call, claimed by the first joiner for fifteen minutes; Open opens the calls tab |
 | family_presence | geo `_notify_presence` | arrivals and departures (Map) |
-| family_safety | identity `battery_alerts`, geo `safety`, gateway `family_safety` | low phone battery (below `LOW_BATTERY_PCT` and not charging; armed again only by charging or a reading of `LOW_BATTERY_PCT` + 5, and at most once a day per phone owner through `once`), arrived at or left a place marked important (school; admins choose the places), unusually long stop somewhere unknown, "On my way" (once per 5 min per person) and SOS (priority 5, once a minute per person; sooner is a 429 saying when) from the app; Find my phone from the watch (priority 5, rings the phone for a minute with a Stop action); a child's ask (new app, permission, blocked site) and a request for more screen time reach both parents with Approve and Disapprove buttons (`guard_decide`, `more_time_decide`) |
+| family_safety | identity `battery_alerts`, geo `safety`, gateway `family_safety` | low phone battery (below `LOW_BATTERY_PCT` and not charging; armed again only by charging or a reading of `LOW_BATTERY_PCT` + 5, and at most once a day per phone owner through `once`), arrived at or left a place marked important (school; admins choose the places), unusually long stop somewhere unknown, "On my way" (once per 5 min per person) and SOS (priority 5, once a minute per person; sooner is a 429 saying when) from the app; Find my phone from the watch (priority 5, rings the phone for a minute with a Stop action); a child's ask (new app, permission, blocked site) and a request for more screen time reach both parents with Approve and Disapprove buttons (`guard_decide`, `more_time_decide`); a locked device asking to be unlocked reaches both parents with Approve N min and Deny (`guard_unlock_decide`) |
 | leave_by | execution `leave_by` | time to leave for an event with a location (tag per event) |
 | calendar | execution `calendar_reminders` | event reminders, `reminder_minutes` before (calendar settings, default 30, 0 = off); all-day events at 8:00 on each of their days; in the person's `timezone` calendar setting, else the household's |
 | timers | automation / execution `notify_timer_done` | timer or alarm done, tag per timer (Stop, Snooze 5 min, +1 min: callbacks `timer_stop`, `timer_snooze`, `timer_add_minute`) |

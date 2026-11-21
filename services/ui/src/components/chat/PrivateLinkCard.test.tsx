@@ -50,6 +50,27 @@ describe('PrivateLinkCard', () => {
     expect(screen.getByTestId('private-link-card')).toHaveTextContent('example.org');
   });
 
+  it('the real host is always shown, whatever the page calls itself', () => {
+    const spoof: LinkPreview = { url: 'https://login-help.example.net/x', title: 'Sign in', site_name: 'Your Bank', kind: 'link' };
+    render(<PrivateLinkCard preview={spoof} own={false} />);
+    expect(screen.getByTestId('private-link-host')).toHaveTextContent('login-help.example.net');
+    expect(screen.getByTestId('private-link-site')).toHaveTextContent('Your Bank');
+  });
+
+  it('a site name that is just the host is not shown twice', () => {
+    render(<PrivateLinkCard preview={SONG} own={false} />);
+    expect(screen.getByTestId('private-link-host')).toHaveTextContent('cdn.example');
+    expect(screen.queryByTestId('private-link-site')).toBeNull();
+  });
+
+  it('a media file says which host it plays from', () => {
+    const elsewhere: LinkPreview = { url: 'https://news.example/watch', title: 'Clip', site_name: 'News', kind: 'video',
+      embed: { provider: 'file', src: 'https://media.example.org/c.mp4', mime: 'video/mp4' } };
+    render(<PrivateLinkCard preview={elsewhere} own={false} />);
+    expect(screen.getByTestId('private-link-host')).toHaveTextContent('news.example');
+    expect(screen.getByTestId('private-link-media-host')).toHaveTextContent('Plays from media.example.org');
+  });
+
   it('a YouTube video loads nothing from YouTube until play is tapped, then plays from the no-cookie host', () => {
     const onBubble = vi.fn();
     const { container } = render(<div onClick={onBubble}><PrivateLinkCard preview={YOUTUBE} own={false} /></div>);

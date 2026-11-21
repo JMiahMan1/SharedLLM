@@ -18,7 +18,7 @@ const SILENT_WAV = Buffer.from(
   'UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=', 'base64',
 ).toString('base64');
 
-async function open(page: Page, path: string) {
+async function open(page: Page, path: string, extra?: (page: Page) => Promise<void>) {
   await quietHotReload(page);
   const home = await mockHome(page, 'admin');
   await mockHealth(page);
@@ -39,6 +39,8 @@ async function open(page: Page, path: string) {
     if (p.startsWith('/api/settings/')) return route.fulfill({ json: { key: 'household_device_access', value: (body as { value: string }).value } });
     return route.fulfill({ json: { status: 'SUCCESS' } });
   });
+  // Registered last, so it answers before the mocks above.
+  if (extra) await extra(page);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(path);
@@ -81,6 +83,18 @@ test.describe('Voices on every form factor', () => {
     await select.selectOption('');
     await expect.poll(() => run.sent.filter((s) => s.path === '/api/users/me').length).toBe(2);
     expect(run.sent.filter((s) => s.path === '/api/users/me')[1].body).toEqual({ clear_fields: ['preferred_tts_voice'] });
+    expect(run.errors).toEqual([]);
+  });
+
+  test("Settings > Voice: the gateway's own FAILURE message is shown, not a generic one", async ({ page }, info) => {
+    const run = await open(page, '/settings', (p) => p.route(/\/api\/tts\/voices$/, (route) => route.fulfill({
+      json: { status: 'FAILURE', message: 'The speech engine has no voice files yet' },
+    })));
+    const panel = page.getByTestId('my-voice-panel');
+    const alert = panel.getByRole('alert');
+    await expect(alert).toContainText('The server did not send a list of voices: The speech engine has no voice files yet');
+    await expect(alert).toBeVisible();
+    expect(await look(page, info, 'my-voice-panel', 'my-voice-failure')).toEqual([]);
     expect(run.errors).toEqual([]);
   });
 

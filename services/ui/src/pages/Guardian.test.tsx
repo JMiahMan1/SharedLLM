@@ -38,6 +38,7 @@ vi.mock('../services/api', async (importOriginal) => {
       getGuardianJournal: vi.fn(),
       addGuardianJournal: vi.fn(),
       getGuardRequests: vi.fn(),
+      getUnlockRequests: vi.fn(async () => ({ requests: [] })),
       decideGuardRequest: vi.fn(),
       getScreenTimeRequests: vi.fn(),
       decideScreenTimeRequest: vi.fn(),

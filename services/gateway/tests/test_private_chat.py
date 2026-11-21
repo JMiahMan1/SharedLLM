@@ -95,6 +95,8 @@ def env(monkeypatch, tmp_path):
             return 200, {"status": "SUCCESS", "detail": {"conversation": state["conversation"]}}
         if action == "delete_conversation":
             return 200, {"status": "SUCCESS", "message": "Conversation deleted.", "detail": {"deleted": True}}
+        if action == "messages":
+            return 200, {"status": "SUCCESS", "detail": {"messages": [], "has_more": False}}
         return 200, {"status": "SUCCESS", "detail": {}}
 
     async def send_many(users, make, **kw):

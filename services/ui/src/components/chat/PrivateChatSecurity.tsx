@@ -74,6 +74,7 @@ export default function PrivateChatSecurity({
   const [preview, setPreview] = useState<{ available: boolean; enabled: boolean }>({ available: false, enabled: false });
   // Reply reminders: kept on the server per person, so the choice holds on every device.
   const [reminders, setReminders] = useState<PrivateChatReminders | null>(null);
+  const [remindersError, setRemindersError] = useState('');
   const [current, setCurrent] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -104,8 +105,10 @@ export default function PrivateChatSecurity({
       .then((value) => {
         if (live) setReminders(value);
       })
-      .catch(() => {
-        // An older server without reminders: the switch is simply not shown.
+      .catch((e: unknown) => {
+        // Only an older server without the route (404) hides the switch; anything else is said.
+        if (!live || (e as { response?: { status?: number } } | null)?.response?.status === 404) return;
+        setRemindersError(errorText(e, 'Could not load the reply reminder setting'));
       });
     return () => {
       live = false;
@@ -452,6 +455,11 @@ export default function PrivateChatSecurity({
             </span>
           </button>
         </div>
+        {remindersError && (
+          <p role="alert" className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-rose-200" data-testid="private-reminders-error">
+            Reply reminders could not be loaded: {remindersError}
+          </p>
+        )}
         {reminders?.available && (
           <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2" data-testid="private-reminders">
             <MessageCircleQuestionMark size={16} className="shrink-0 text-rose-200" aria-hidden />

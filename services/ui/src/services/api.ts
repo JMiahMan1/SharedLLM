@@ -76,6 +76,7 @@ import type {
   ScreenTimeRequest,
   ChoreCheck,
   GuardRequest,
+  UnlockRequest,
   SpotifyStatus,
   RecommendationLane,
   RecommendationLanes,
@@ -1383,6 +1384,18 @@ export const api = {
     return resp.data;
   },
 
+  /** Locked devices asking a parent to unlock them: the caller's children's (and their own). */
+  async getUnlockRequests(status: UnlockRequest['status'] = 'pending'): Promise<{ requests: UnlockRequest[] }> {
+    const resp = await apiClient.get('/api/guard/unlock-requests', { params: { status } });
+    return resp.data;
+  },
+
+  /** A parent answers an unlock request: approve for `minutes` (the minutes asked when left out), or deny. */
+  async decideUnlockRequest(id: number, body: { approve: boolean; minutes?: number }): Promise<{ request: UnlockRequest }> {
+    const resp = await apiClient.post(`/api/guard/unlock-requests/${id}`, body);
+    return resp.data;
+  },
+
   /** App vetting: a child's installed apps with their verdicts (their parents and admins only). */
   async getGuardianApps(username: string): Promise<GuardianApps> {
     const resp = await apiClient.get(`/api/guardian/apps/${encodeURIComponent(username)}`);
@@ -1759,6 +1772,18 @@ export const api = {
 
   async forgetMyVoice(): Promise<VoiceStatus> {
     const resp = await apiClient.delete('/api/users/me/voice');
+    return resp.data;
+  },
+
+  /** Approve sentences taught at your voice satellite: they join your profile. */
+  async approvePendingVoice(id: string): Promise<VoiceStatus & { added: number }> {
+    const resp = await apiClient.post(`/api/users/me/voice/pending/${encodeURIComponent(id)}`);
+    return resp.data;
+  },
+
+  /** Discard sentences taught at your voice satellite without using them. */
+  async discardPendingVoice(id: string): Promise<VoiceStatus> {
+    const resp = await apiClient.delete(`/api/users/me/voice/pending/${encodeURIComponent(id)}`);
     return resp.data;
   },
 

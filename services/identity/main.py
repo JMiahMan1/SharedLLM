@@ -69,6 +69,7 @@ from services.identity.models import (
     GuardianNote,
     GuardOfflineCode,
     GuardRequest,
+    GuardUnlockRequest,
     LinkedAccount,
     RavenMission,
     RecommendationLanes,
@@ -85,6 +86,7 @@ from services.identity.models import (
     UserWeatherSetting,
     UserWidget,
     UserWorkspaceSession,
+    VoicePendingEnrolment,
     VoiceSignature,
     WorkspaceChat,
     WorkspaceChatMessage,
@@ -1527,10 +1529,114 @@ def _voice_status(row: VoiceSignature | None) -> dict:
     }
 
 
+#: How long satellite takes wait for their owner's approval before they are dropped.
+VOICE_PENDING_DAYS = 7
+
+
+def _pending_enrolments(session: Session, username: str) -> list[VoicePendingEnrolment]:
+    """The person's satellite takes awaiting approval; expired ones are deleted."""
+    cutoff = datetime.now(UTC) - timedelta(days=VOICE_PENDING_DAYS)
+    live = []
+    for row in session.exec(select(VoicePendingEnrolment).where(VoicePendingEnrolment.username == username)).all():
+        created = row.created_at if row.created_at.tzinfo else row.created_at.replace(tzinfo=UTC)
+        if created < cutoff or row.model != voice.MODEL:
+            session.delete(row)
+            continue
+        live.append(row)
+    session.commit()
+    return live
+
+
+def _pending_read(row: VoicePendingEnrolment) -> dict:
+    return {
+        "id": row.session,
+        "satellite": row.satellite,
+        "samples": len(voice.load_samples(row.samples)),
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def _my_voice(session: Session, username: str) -> dict:
+    return {
+        **_voice_status(session.get(VoiceSignature, username)),
+        "pending": [_pending_read(r) for r in _pending_enrolments(session, username)],
+    }
+
+
 @app.get("/api/users/me/voice")
 def my_voice(user: User = Depends(require_api_key), session: Session = Depends(get_session)):
-    """How far the caller's voice enrollment has got."""
-    return _voice_status(session.get(VoiceSignature, user.username))
+    """How far the caller's voice enrollment has got, and satellite takes awaiting their approval."""
+    return _my_voice(session, user.username)
+
+
+@app.post("/api/users/me/voice/pending/{pending_id}")
+def approve_pending_voice(
+    pending_id: str,
+    request: Request,
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Approve satellite takes taught for the caller: they join the caller's profile.
+
+    Only the person they were taught for can approve them (anyone else gets a
+    404, as if there were nothing). Takes already in the profile are never
+    evicted to make room: if the caller enrolled elsewhere meanwhile, the
+    pending takes must sound like that profile and fill only free places.
+    """
+    live = {r.session: r for r in _pending_enrolments(session, user.username)}
+    row = live.get(pending_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such voice recording is waiting for you.")
+    pending = voice.load_samples(row.samples)
+    profile = session.get(VoiceSignature, user.username)
+    existing = voice.load_samples(profile.samples) if profile and profile.model == voice.MODEL else []
+    if existing and pending:
+        score = voice.cosine(voice.centroid(pending), voice.centroid(existing))
+        if score < voice.CONSISTENCY_FLOOR:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Those recordings do not sound like your voice profile (similarity {score:.2f}). "
+                    "Discard them, or erase your profile first if it was not you."
+                ),
+            )
+    added = pending[:max(0, voice.MAX_SAMPLES - len(existing))]
+    samples = existing + added
+    if profile is None:
+        profile = VoiceSignature(username=user.username, model=voice.MODEL)
+    profile.model = voice.MODEL
+    profile.samples = json.dumps(samples)
+    profile.updated_at = datetime.now(UTC)
+    session.add(profile)
+    user.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
+    session.add(user)
+    satellite = row.satellite
+    session.delete(row)
+    session.commit()
+    _audit(request, session, "user.voice_enroll", user.username, actor=user,
+           changes=[{"field": "voice_samples", "change": str(len(samples))}],
+           note=f"approved {len(added)} of {len(pending)} takes from {satellite or 'a voice satellite'}")
+    log.info(f"[voice] {user.username} approved {len(added)} satellite takes ({len(samples)} samples now)")
+    return {"status": "SUCCESS", "added": len(added), **_my_voice(session, user.username)}
+
+
+@app.delete("/api/users/me/voice/pending/{pending_id}")
+def discard_pending_voice(
+    pending_id: str,
+    request: Request,
+    user: User = Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Discard satellite takes taught for the caller without using them."""
+    row = session.get(VoicePendingEnrolment, pending_id)
+    if row is None or row.username != user.username:
+        raise HTTPException(status_code=404, detail="No such voice recording is waiting for you.")
+    satellite = row.satellite
+    session.delete(row)
+    session.commit()
+    _audit(request, session, "user.voice_pending_discard", user.username, actor=user,
+           note=f"discarded takes from {satellite or 'a voice satellite'}")
+    return {"status": "SUCCESS", **_my_voice(session, user.username)}
 
 
 @app.post("/api/users/me/enroll")
@@ -1586,12 +1692,16 @@ def forget_my_voice(request: Request, user: User = Depends(require_api_key), ses
     row = session.get(VoiceSignature, user.username)
     if row is not None:
         session.delete(row)
+    for pending in session.exec(
+        select(VoicePendingEnrolment).where(VoicePendingEnrolment.username == user.username)
+    ).all():
+        session.delete(pending)
     user.voice_fingerprint = None
     session.add(user)
     session.commit()
     _audit(request, session, "user.voice_forget", user.username, actor=user,
            changes=[{"field": "voice_samples", "change": "cleared"}])
-    return {"status": "SUCCESS", **_voice_status(None)}
+    return {"status": "SUCCESS", **_voice_status(None), "pending": []}
 
 
 @app.post("/api/users/me/voice/check")
@@ -1691,14 +1801,21 @@ class VoiceEnrollRequest(BaseModel):
 
 @app.post("/api/voice/enroll", dependencies=[Depends(require_internal)])
 def enroll_voice_from_satellite(request: Request, req: VoiceEnrollRequest, session: Session = Depends(get_session)):
-    """Add a take spoken at the person's own voice satellite (internal).
+    """A take spoken at the person's own voice satellite (internal).
 
     The gateway calls this during a teaching session it opened for the one
-    person the satellite is assigned to. Unlike ``/api/voice/learn`` the
-    person need not be recognised yet: a profile recorded on a phone or laptop
-    microphone, or none at all, is exactly what this fixes. A take is checked
-    against the earlier takes of the same session, so someone else stepping in
-    halfway is refused instead of averaged in.
+    person the satellite is assigned to. Nothing proves who is speaking at a
+    satellite, so a take is never simply added to that person's profile:
+
+    * The person has a voice profile: the session's first take must sound
+      like it (``CONSISTENCY_FLOOR``, the same check as every other take), and
+      each later take like the session's earlier ones. Those takes are the
+      person's and are stored (``STORED``).
+    * The person has none: the takes are held apart, in
+      ``VoicePendingEnrolment`` (``PENDING``), until the person approves them
+      from their own signed-in app. Nothing in a profile is touched or evicted.
+
+    Either way someone else stepping in halfway is refused (422).
     """
     if req.model != voice.MODEL:
         raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
@@ -1711,41 +1828,70 @@ def enroll_voice_from_satellite(request: Request, req: VoiceEnrollRequest, sessi
     user = session.exec(select(User).where(User.username == req.username)).first()
     if user is None:
         raise HTTPException(status_code=404, detail="No such person.")
-    row = session.get(VoiceSignature, req.username)
-    samples = voice.load_samples(row.samples) if row and row.model == voice.MODEL else []
-    this_session = [s for s in samples if s.get("session") == req.session]
-    if this_session:
-        score = voice.cosine(embedding, voice.centroid(this_session))
-        if score < voice.CONSISTENCY_FLOOR:
-            raise HTTPException(
-                status_code=422,
-                detail=f"That take does not sound like the earlier ones (similarity {score:.2f}).",
-            )
-    samples.append({
+    take = {
         "embedding": embedding,
         "speech_seconds": req.speech_seconds,
         "recorded_at": datetime.now(UTC).isoformat(),
         "source": "satellite",
         "session": req.session,
-    })
-    samples = samples[-voice.MAX_SAMPLES:]
-    if row is None:
-        row = VoiceSignature(username=req.username, model=voice.MODEL)
-    row.model = voice.MODEL
-    row.samples = json.dumps(samples)
-    row.updated_at = datetime.now(UTC)
-    session.add(row)
-    user.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
-    session.add(user)
+    }
+    pending = session.get(VoicePendingEnrolment, req.session)
+    if pending is not None and pending.username != req.username:
+        raise HTTPException(status_code=409, detail="That teaching session belongs to someone else.")
+    row = session.get(VoiceSignature, req.username)
+    samples = voice.load_samples(row.samples) if row and row.model == voice.MODEL else []
+
+    if row is not None and samples and pending is None:
+        this_session = [s for s in samples if s.get("session") == req.session]
+        reference, against = (this_session, "the earlier ones") if this_session else (samples, "your voice profile")
+        score = voice.cosine(embedding, voice.centroid(reference))
+        if score < voice.CONSISTENCY_FLOOR:
+            raise HTTPException(
+                status_code=422,
+                detail=f"That take does not sound like {against} (similarity {score:.2f}).",
+            )
+        samples = [*samples, take][-voice.MAX_SAMPLES:]
+        row.model = voice.MODEL
+        row.samples = json.dumps(samples)
+        row.updated_at = datetime.now(UTC)
+        session.add(row)
+        user.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
+        session.add(user)
+        session.commit()
+        _audit(request, session, "user.voice_enroll", req.username,
+               changes=[{"field": "voice_samples", "change": str(len(samples))}],
+               note=f"taught at {req.satellite or 'a voice satellite'}, matched the profile")
+        log.info(
+            f"[voice] {req.username} taught sample {len(samples)} at {req.satellite or 'a satellite'} "
+            f"({req.speech_seconds}s of speech)"
+        )
+        return {"status": "STORED", "speech_seconds": req.speech_seconds, **_voice_status(row)}
+
+    held = voice.load_samples(pending.samples) if pending else []
+    if held:
+        score = voice.cosine(embedding, voice.centroid(held))
+        if score < voice.CONSISTENCY_FLOOR:
+            raise HTTPException(
+                status_code=422,
+                detail=f"That take does not sound like the earlier ones (similarity {score:.2f}).",
+            )
+    held = [*held, take][-voice.MAX_SAMPLES:]
+    if pending is None:
+        pending = VoicePendingEnrolment(session=req.session, username=req.username,
+                                        satellite=req.satellite, model=voice.MODEL)
+    pending.samples = json.dumps(held)
+    pending.updated_at = datetime.now(UTC)
+    session.add(pending)
     session.commit()
-    _audit(request, session, "user.voice_enroll", req.username,
-           changes=[{"field": "voice_samples", "change": str(len(samples))}],
-           note=f"taught at {req.satellite or 'a voice satellite'}")
-    log.info(
-        f"[voice] {req.username} taught sample {len(samples)} at {req.satellite or 'a satellite'} "
-        f"({req.speech_seconds}s of speech)"
-    )
-    return {"status": "STORED", "speech_seconds": req.speech_seconds, **_voice_status(row)}
+    _audit(request, session, "user.voice_pending", req.username,
+           note=f"take {len(held)} held for approval, taught at {req.satellite or 'a voice satellite'}")
+    log.info(f"[voice] {req.username}: take {len(held)} at {req.satellite or 'a satellite'} held for approval")
+    return {
+        "status": "PENDING",
+        "speech_seconds": req.speech_seconds,
+        "pending": _pending_read(pending),
+        **_voice_status(row),
+    }
 
 
 @app.get("/api/internal/satellite-owner", dependencies=[Depends(require_internal)])
@@ -2195,6 +2341,9 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     if stale_voice:
         session.delete(stale_voice)
         session.commit()
+    for row in session.exec(select(VoicePendingEnrolment).where(VoicePendingEnrolment.username == user.username)).all():
+        session.delete(row)
+    session.commit()
     # Nor chores waiting on a parent's OK.
     for row in session.exec(select(ChoreCheck).where(ChoreCheck.username == user.username)).all():
         session.delete(row)
@@ -3102,7 +3251,7 @@ def add_device_ui(
 
 # Auth & Discovery
 
-# Sign-in failures, pruned to a window. In-process like _UNLOCK_FAILURES: this
+# Sign-in failures, pruned to a window. Kept in-process: this
 # is one household on one server, and a restart clearing the counters is
 # acceptable. Two keys are kept so neither a single username nor a single
 # source can be hammered.
@@ -6508,67 +6657,244 @@ def internal_recommendation_lanes(username: str, session: Session = Depends(get_
     return {"blocked": _blocked_lanes(session, username.strip().lower())}
 
 
-# Wrong parent logins typed on a child's phone, per child: five within ten
-# minutes lock the unlock screen for ten minutes, so a password cannot be
-# guessed at the speed of a kid's thumbs.
-_UNLOCK_FAILURES: dict[str, list[float]] = {}
-_UNLOCK_MAX_FAILURES = 5
-_UNLOCK_WINDOW_S = 600
-PARENT_UNLOCK_MINUTES = 10
+# --- asking a parent to unlock a locked device (a family PC or a child's phone) ---
+#
+# The child's device sends a request; both parents get an actionable notice
+# (Approve for N minutes / Deny) in their Jarvis app; the device polls its own
+# request and unlocks only on an approval read from here. No password is ever
+# typed on the child's device. docs/WINDOWS_LOCK_SCREEN.md.
+
+#: How long a request waits for a parent before it expires.
+UNLOCK_REQUEST_TTL = timedelta(minutes=10)
+#: The shortest and longest unlock a request may ask for, or a parent give.
+UNLOCK_MIN_MINUTES = 5
+UNLOCK_MAX_MINUTES = 240
+#: One device may ask at most once in this many seconds ...
+UNLOCK_REQUEST_GAP_S = 30
+#: ... and at most this many times an hour.
+UNLOCK_REQUESTS_PER_HOUR = 10
+UNLOCK_LOCK_REASONS = ("bedtime", "limit", "paused", "school", "chores", "")
 
 
-@app.post("/api/guard/parent-unlock")
-def guard_parent_unlock(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A parent signs in on their child's device to lift Jarvis's protection briefly.
+def _unlock_minutes(value: object, what: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or not UNLOCK_MIN_MINUTES <= value <= UNLOCK_MAX_MINUTES:
+        raise HTTPException(status_code=422, detail=f"{what} must be {UNLOCK_MIN_MINUTES} to {UNLOCK_MAX_MINUTES} minutes")
+    return value
 
-    The caller is the signed-in child (their API key), or a Windows PC holding
-    the device-scoped key its parent minted; in the latter case the caller
-    resolves as the member the device is assigned to (with the administrator
-    bit dropped). The parent's own username and password are checked, and
-    they must be one of this child's parents.
-    """
-    import time as _time
 
-    now = _time.monotonic()
-    subject = caller
-    device_key = str((body or {}).get("device_key") or "")
-    recent = [t for t in _UNLOCK_FAILURES.get(subject.username, []) if now - t < _UNLOCK_WINDOW_S]
-    _UNLOCK_FAILURES[subject.username] = recent
-    if len(recent) >= _UNLOCK_MAX_FAILURES:
-        raise HTTPException(status_code=429, detail="Too many tries. Wait ten minutes, then try again.")
-    username = str((body or {}).get("username") or "").strip().lower()
-    password = str((body or {}).get("password") or "")
-    parent = session.exec(select(User).where(User.username == username)).first() if username else None
-    ok = bool(
-        parent
-        and parent.password_hash
-        and verify_password(password, parent.password_hash)
-        and (_may_manage_screen_time(parent, subject) or _is_household_owner(parent, subject))
-    )
-    if not ok:
-        recent.append(now)
-        raise HTTPException(status_code=401, detail="That is not one of your parents' logins.")
-    _UNLOCK_FAILURES.pop(subject.username, None)
-    # If the device was paused by a parent, signing in on the lock screen also
-    # lifts the manual pause so the device does not immediately re-pause.
-    caller_rules = _screen_rules(session, subject.username)
-    if caller_rules.get("paused") or caller_rules.get("paused_until"):
-        caller_rules.pop("paused", None)
-        caller_rules.pop("paused_until", None)
-        caller_rules.pop("paused_at", None)
-        _save_screen_rules(session, subject.username, caller_rules, parent.username)
-        session.commit()
-    until = datetime.now(UTC) + timedelta(minutes=PARENT_UNLOCK_MINUTES)
-    parents = _parents_of(session, subject)
-    # Only after a real parent login: the device keeps these to check an
-    # offline code later. A child's own login never receives them.
-    offline = [
+def _unlock_request_read(r: GuardUnlockRequest) -> dict:
+    return {
+        "id": r.id, "username": r.username, "device": "PC" if r.device_kind == "windows-pc" else (r.device_kind or "device"),
+        "lock_reason": r.lock_reason, "note": r.note, "minutes_asked": r.minutes_asked, "status": r.status,
+        "minutes_granted": r.minutes_granted, "until": r.until, "decided_by": r.decided_by,
+        "created_at": r.created_at, "expires_at": r.expires_at, "decided_at": r.decided_at,
+    }
+
+
+def _expire_if_due(session: Session, r: GuardUnlockRequest, now: datetime) -> None:
+    """A pending request past its time is expired (the caller commits)."""
+    if r.status == "pending" and datetime.fromisoformat(r.expires_at) <= now:
+        r.status = "expired"
+        session.add(r)
+
+
+def _offline_verifiers(session: Session, parents: list[str]) -> list[dict]:
+    """The parents' offline-code verifiers (never a code), for a device a parent just unlocked."""
+    if not parents:
+        return []
+    return [
         {"parent": row.username, "salt": row.salt, "iterations": row.iterations, "hash": row.hash}
         for row in session.exec(select(GuardOfflineCode).where(GuardOfflineCode.username.in_(parents))).all()
-    ] if parents else []
+    ]
+
+
+def _asking_device(session: Session, caller: User, authorization: str | None, body: dict) -> Device:
+    """The device a request comes from: a PC's own device key, or the phone
+    the child names (it must be one of their own, registered and not revoked)."""
+    device = _device_for_agent_key(session, authorization)
+    if device is not None:
+        return device
+    key = str(body.get("device_key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=422, detail="device_key is required: the device that asks is the one a parent unlocks")
+    device = session.exec(select(Device).where(Device.device_key == key)).first()
+    if device is None or device.revoked or device.owner_username != caller.username:
+        raise HTTPException(status_code=403, detail="This device is not registered to you")
+    return device
+
+
+@app.post("/api/guard/unlock-requests")
+def ask_to_unlock(
+    body: dict,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
+):
+    """A locked child's device asks a parent to unlock it:
+    ``{"minutes", "note"?, "lock_reason"?, "device_key"?}``.
+
+    A family PC asks with its own device key; a phone with the child's key
+    and its registered ``device_key``. A newer request from the same device
+    supersedes one still waiting. A device asks at most once every
+    ``UNLOCK_REQUEST_GAP_S`` seconds and ``UNLOCK_REQUESTS_PER_HOUR`` times an hour.
+    """
+    body = body or {}
+    device = _asking_device(session, caller, authorization, body)
+    if (caller.family_role or "other") not in roles.MINOR_FAMILY_ROLES:
+        raise HTTPException(status_code=409, detail="Only a child's device asks a parent to unlock it")
+    parents = _parents_of(session, caller)
+    if not parents:
+        raise HTTPException(status_code=409, detail="There is no parent to ask")
+    minutes = _unlock_minutes(body.get("minutes"), "minutes")
+    lock_reason = str(body.get("lock_reason") or "")
+    if lock_reason not in UNLOCK_LOCK_REASONS:
+        lock_reason = ""
+    now = datetime.now(UTC)
+    recent = session.exec(
+        select(GuardUnlockRequest).where(
+            GuardUnlockRequest.device_key == device.device_key,
+            GuardUnlockRequest.created_at >= (now - timedelta(hours=1)).isoformat(),
+        )
+    ).all()
+    if any(datetime.fromisoformat(r.created_at) > now - timedelta(seconds=UNLOCK_REQUEST_GAP_S) for r in recent):
+        raise HTTPException(status_code=429, detail="You just asked. Wait a moment before asking again.")
+    if len(recent) >= UNLOCK_REQUESTS_PER_HOUR:
+        raise HTTPException(status_code=429, detail="Too many requests this hour. Message a parent instead.")
+    for waiting in session.exec(
+        select(GuardUnlockRequest).where(
+            GuardUnlockRequest.device_key == device.device_key, GuardUnlockRequest.status == "pending"
+        )
+    ).all():
+        waiting.status = "superseded"
+        session.add(waiting)
+    request = GuardUnlockRequest(
+        username=caller.username,
+        device_key=device.device_key,
+        device_kind=device.kind or "",
+        lock_reason=lock_reason,
+        note=" ".join(str(body.get("note") or "").split())[:200],
+        minutes_asked=minutes,
+        created_at=now.isoformat(),
+        expires_at=(now + UNLOCK_REQUEST_TTL).isoformat(),
+    )
+    session.add(request)
+    session.commit()
+    session.refresh(request)
     return {
-        "ok": True, "parent": parent.username, "until": until.isoformat(), "notify": parents, "offline_codes": offline,
-        "device": _device_word(session, subject.username, device_key),
+        "request": _unlock_request_read(request), "notify": parents,
+        "display_name": caller.display_name or caller.username,
+    }
+
+
+@app.get("/api/guard/unlock-requests")
+def list_unlock_requests(
+    status: str = "pending",
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
+):
+    """A parent's view: the unlock requests of the children they manage (and
+    the caller's own). A device reads only its own request, by id."""
+    if _device_for_agent_key(session, authorization) is not None:
+        raise HTTPException(status_code=403, detail="A device reads only its own request")
+    if status not in ("pending", "approved", "denied", "expired", "superseded"):
+        raise HTTPException(status_code=422, detail="status must be pending, approved, denied, expired or superseded")
+    now = datetime.now(UTC)
+    for r in session.exec(select(GuardUnlockRequest).where(GuardUnlockRequest.status == "pending")).all():
+        _expire_if_due(session, r, now)
+    session.commit()
+    rows = session.exec(select(GuardUnlockRequest).where(GuardUnlockRequest.status == status)).all()
+    return {"requests": [_unlock_request_read(r) for r in _visible_requests(session, caller, rows)]}
+
+
+@app.get("/api/guard/unlock-requests/{request_id}")
+def read_unlock_request(
+    request_id: int,
+    device_key: str = "",
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
+):
+    """The asking device polls its own request. Only that device: a PC by its
+    device key, a phone by the child's key and its own ``device_key``. Any
+    other caller gets 404, as if there were no such request.
+
+    An approval carries ``until`` (fixed when the parent answered) and the
+    parents' offline-code verifiers, so the device can still be unlocked with
+    a parent's offline code when it has no connection later.
+    """
+    request = session.get(GuardUnlockRequest, request_id)
+    device = _device_for_agent_key(session, authorization)
+    mine = request is not None and (
+        request.device_key == device.device_key if device is not None
+        else request.username == caller.username and device_key.strip() == request.device_key
+    )
+    if request is None or not mine:
+        raise HTTPException(status_code=404, detail="No such request")
+    now = datetime.now(UTC)
+    _expire_if_due(session, request, now)
+    answer: dict = {"request": _unlock_request_read(request)}
+    if request.status == "approved":
+        if request.delivered_at is None:
+            request.delivered_at = now.isoformat()
+            session.add(request)
+        subject = _screen_subject(session, request.username)
+        answer["offline_codes"] = _offline_verifiers(session, _parents_of(session, subject))
+    session.commit()
+    return answer
+
+
+@app.post("/api/guard/unlock-requests/{request_id}")
+def decide_unlock_request(
+    request_id: int,
+    body: dict,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
+):
+    """A parent answers from their own session: ``{"approve": bool, "minutes"?}``
+    (the minutes asked when not given). Never a device key, never the child.
+    An approval also lifts a parent's pause, as a parent's unlock always did;
+    a pause given after it locks the device again. The answer is final."""
+    if _device_for_agent_key(session, authorization) is not None:
+        raise HTTPException(status_code=403, detail="A device cannot answer an unlock request. A parent answers from their Jarvis app.")
+    request = session.get(GuardUnlockRequest, request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="No such request")
+    subject = _screen_subject(session, request.username)
+    if caller.username == subject.username or not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can answer")
+    now = datetime.now(UTC)
+    _expire_if_due(session, request, now)
+    if request.status != "pending":
+        session.commit()
+        detail = {
+            "expired": "This request has expired. The device can ask again.",
+            "superseded": "A newer request from this device replaced this one.",
+        }.get(request.status, "Already answered")
+        raise HTTPException(status_code=409, detail=detail)
+    approve = (body or {}).get("approve")
+    if not isinstance(approve, bool):
+        raise HTTPException(status_code=422, detail="approve must be true or false")
+    if approve:
+        minutes = (body or {}).get("minutes")
+        minutes = request.minutes_asked if minutes is None else _unlock_minutes(minutes, "minutes")
+        request.minutes_granted = minutes
+        request.until = (now + timedelta(minutes=minutes)).isoformat()
+        rules = _screen_rules(session, subject.username)
+        if rules.get("paused") or rules.get("paused_until"):
+            for key in ("paused", "paused_until", "paused_at"):
+                rules.pop(key, None)
+            _save_screen_rules(session, subject.username, rules, caller.username)
+    request.status = "approved" if approve else "denied"
+    request.decided_by = caller.username
+    request.decided_at = now.isoformat()
+    session.add(request)
+    session.commit()
+    return {
+        "request": _unlock_request_read(request),
+        "notify": _parents_of(session, subject),
+        "display_name": subject.display_name or subject.username,
     }
 
 
@@ -6591,7 +6917,8 @@ def get_offline_code(session: Session = Depends(get_session), caller: User = Dep
 def put_offline_code(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     """A parent sets their offline unlock code: 6 to 12 digits.
 
-    Phones learn the new code at the next online parent unlock on them.
+    A child's phone or PC learns the new code the next time a parent approves
+    an unlock request from it (the approval carries the verifiers).
     """
     if not _is_a_parent(session, caller):
         raise HTTPException(status_code=403, detail="Only a parent sets an offline unlock code")
@@ -8807,13 +9134,27 @@ def register_device(
 
 
 @app.post("/api/user-panel/devices/{device_key}/agent-key")
-def mint_device_agent_key(device_key: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+def mint_device_agent_key(
+    device_key: str,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
+):
     """Mint (or rotate) the device-scoped key the Windows agent stores on the PC.
 
     Admin only (the installer calls this once during elevated setup). The raw
     key is returned once and never stored -- only its hash is kept on the
     device row. Rotating invalidates the previous key immediately.
+
+    Only a person's own credential may mint. A PC's agent key authenticates as
+    the PC's owner (``require_api_key``), and a PC assigned to a parent would
+    otherwise pass ``_is_device_admin`` and mint keys for every other device.
     """
+    if _device_for_agent_key(session, authorization) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="A device agent key cannot mint device keys; sign in as a device manager to do this.",
+        )
     if not _is_device_admin(caller, session):
         raise HTTPException(status_code=403, detail="Admin only")
     device = session.exec(select(Device).where(Device.device_key == device_key)).first()
