@@ -348,3 +348,25 @@ async def garden_snooze(request: Request, params: dict, reply: str | None) -> di
         f"/plants/{plant_id}/snooze",
         params={"still_damp": "true", "postpone_days": postpone_days},
     )
+
+
+# Voice teaching (gateway _ask_to_approve sends these buttons)
+
+
+@push_callback("voice_pending_decide")
+async def voice_pending_decide(request: Request, params: dict, reply: str | None) -> dict:
+    """The owner of a voice satellite taps "It was me" / "Not me" on sentences
+    taught there as their voice: ``params`` is ``{"id", "approve"}``. Calls
+    identity as the caller, so only the person they were taught for can
+    approve them (anyone else gets identity's 404)."""
+    from services.gateway.main import _identity_as_caller
+
+    pending_id = str(params.get("id") or "").strip()
+    if not pending_id:
+        raise HTTPException(status_code=422, detail="params.id is required")
+    method = "POST" if params.get("approve") is True else "DELETE"
+    status, body = await _identity_as_caller(request, method, f"/api/users/me/voice/pending/{pending_id}")
+    if status != 200:
+        detail = body.get("detail") if isinstance(body, dict) else None
+        raise HTTPException(status_code=status, detail=detail or "Could not answer")
+    return body
