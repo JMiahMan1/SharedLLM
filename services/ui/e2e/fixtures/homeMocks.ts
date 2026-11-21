@@ -716,6 +716,21 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
       return json({ id: p.split('/')[4], label: 'Jam', method: 'water_bath_canning', qty_initial: 1, qty_remaining: 0, unit: 'pints', used_by: 'parent', qty_used: 1 });
     }
     if (p === '/api/garden/plans') return json({ count: 0, plans: [] });
+    // Phase 8: a house with no garden hardware -- the UI must show nothing.
+    if (p === '/api/garden/hardware/discover') {
+      return json({
+        available: false,
+        has_any_hardware: false,
+        moisture_sensors: [],
+        temperature_sensors: [],
+        humidity_sensors: [],
+        lux_sensors: [],
+        valves: [],
+        grow_lights: [],
+        tags: [],
+      });
+    }
+    if (p === '/api/garden/bindings') return json({ count: 0, bindings: [] });
     // Phase 7: the photo journal and Alpaca Vision (nothing is created here).
     if (p === '/api/garden/vision/identify') {
       return json({

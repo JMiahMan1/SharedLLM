@@ -392,6 +392,12 @@ import type {
   GardenDiagnoseResult,
   GardenPhotoList,
   GardenPhotoUploadResult,
+  GardenHardwareDiscovery,
+  GardenBindingList,
+  GardenHomeHubBinding,
+  GardenBindingIn,
+  GardenValveRun,
+  GardenTagScan,
 } from '../types/api';
 
 declare module 'axios' {
@@ -3152,6 +3158,57 @@ export const api = {
   /** Where a photo's cached thumbnail is served from (no Nextcloud round-trip). */
   gardenPlantPhotoThumbUrl(plantId: string, photoId: string): string {
     return `/api/garden/plants/${encodeURIComponent(plantId)}/photos/${encodeURIComponent(photoId)}/thumb`;
+  },
+
+  // --- Home Hub hardware (Phase 8) -----------------------------
+
+  /** What garden hardware Home Hub has; `has_any_hardware` gates the whole UI. */
+  async gardenHardwareDiscover(fresh = false): Promise<GardenHardwareDiscovery> {
+    const resp = await apiClient.get('/api/garden/hardware/discover', {
+      params: fresh ? { fresh: 'true' } : undefined,
+    });
+    return resp.data;
+  },
+
+  async gardenListBindings(params?: { plant_id?: string; location_id?: string }): Promise<GardenBindingList> {
+    const resp = await apiClient.get('/api/garden/bindings', { params });
+    return resp.data;
+  },
+
+  async gardenSaveBinding(
+    targetKind: 'plant' | 'location',
+    targetId: string,
+    body: GardenBindingIn,
+  ): Promise<GardenHomeHubBinding> {
+    const resp = await apiClient.put(
+      `/api/garden/bindings/${targetKind}/${encodeURIComponent(targetId)}`,
+      body,
+    );
+    return resp.data;
+  },
+
+  async gardenDeleteBinding(targetKind: 'plant' | 'location', targetId: string): Promise<void> {
+    await apiClient.delete(`/api/garden/bindings/${targetKind}/${encodeURIComponent(targetId)}`);
+  },
+
+  /** Open a bound valve; the Garden enforces the caps and the rain interlock. */
+  async gardenRunValve(bindingId: string, body?: { minutes?: number; override_rain?: boolean }): Promise<GardenValveRun> {
+    const resp = await apiClient.post(
+      `/api/garden/bindings/${encodeURIComponent(bindingId)}/valve/run`,
+      body ?? {},
+    );
+    return resp.data;
+  },
+
+  async gardenStopValve(bindingId: string): Promise<{ binding_id: string; stopped: boolean }> {
+    const resp = await apiClient.post(`/api/garden/bindings/${encodeURIComponent(bindingId)}/valve/stop`);
+    return resp.data;
+  },
+
+  /** Scan an NFC/QR tag: which plant or bed, and what it is owed. */
+  async gardenScanTag(tagId: string): Promise<GardenTagScan> {
+    const resp = await apiClient.get(`/api/garden/tags/${encodeURIComponent(tagId)}`);
+    return resp.data;
   },
 
   /** The family's Calibre library: search, by tag, or untagged. */

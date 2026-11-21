@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Plus, Sun, Droplets, Leaf, X, ChevronRight,
   ShieldAlert, RotateCw, Flower, User, Zap, Settings, Search,
@@ -19,6 +19,8 @@ import {
 } from '../components/garden/PlannerPanels';
 import { PantryTab } from '../components/garden/PantryPanels';
 import { PhotoInput, PhotoJournalPanel, PlantDoctorModal } from '../components/garden/PhotoJournalPanel';
+import { HomeHubBindingPanel } from '../components/garden/HomeHubBindingPanel';
+import { TagScanCard } from '../components/garden/TagScanCard';
 import type { GardenPlant, GardenTodayTask, GardenTodaySummary, GardenSpecies, GardenLocation, GardenWeatherSummary, GardenCustomSpeciesIn, GardenSkylightOptions, HarvestLogIn, HarvestReadyItem, GardenIdentifyResult } from '../types/api';
 
 /* ========================= Garden Page ========================= */
@@ -35,6 +37,9 @@ export default function Garden() {
   const [digestOpen, setDigestOpen] = useState(false);
   // Supplies the Pantry tab wants on the shopping list (opens the picker).
   const [pantrySupplies, setPantrySupplies] = useState<string[] | null>(null);
+  // A scanned NFC pot sticker or QR code lands here as `?tag=<tag_id>`.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tagId = searchParams.get('tag');
 
   const todayQuery = useQuery({
     queryKey: ['garden-today', mineOnly ? 'mine' : 'all'],
@@ -86,6 +91,16 @@ export default function Garden() {
   return (
     <div className="flex flex-col h-full w-full bg-slate-950 text-slate-200">
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
+        {tagId && (
+          <TagScanCard
+            tagId={tagId}
+            onDismiss={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete('tag');
+              setSearchParams(next, { replace: true });
+            }}
+          />
+        )}
         <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-3">
@@ -653,11 +668,23 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
           <span>Skylight{skylightName ? ` · ${skylightName}` : ''}</span>
         </div>
       )}
-      <div className="flex items-center gap-2 pt-3 border-t border-white/5">
+      <div className="flex items-center gap-2 pt-3 border-t border-white/5 flex-wrap">
         <Droplets size={14} className={overdue ? 'text-amber-400' : 'text-slate-400'} />
         <span className={`text-sm ${overdue ? 'text-amber-300' : 'text-slate-300'}`}>
           {nextCare ?? 'No care scheduled'}
         </span>
+        {typeof plant.live_moisture_pct === 'number' && (
+          <span
+            className={`ml-auto text-[11px] px-2 py-0.5 rounded-full border ${
+              plant.live_moisture_pct < 30
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-200'
+                : 'bg-sky-500/15 border-sky-500/30 text-sky-200'
+            }`}
+            title="Live soil moisture from Home Hub"
+          >
+            💧 {plant.live_moisture_pct}%
+          </span>
+        )}
       </div>
     </div>
   );
@@ -1502,6 +1529,8 @@ export function PlantDetail() {
           </button>
         </div>
       </div>
+
+      <HomeHubBindingPanel targetKind="plant" targetId={plant.id} canEdit={canEdit} />
 
       <PhotoJournalPanel plant={plant} canDeleteAny={canEdit} currentUser={user?.username ?? ''} />
 

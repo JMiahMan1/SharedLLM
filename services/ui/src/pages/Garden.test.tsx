@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, MemoryRouter, Route, Routes } from 'react-router-dom';
 import React from 'react';
 import Garden, { PlantDetail } from '../pages/Garden';
+import { HomeHubBindingPanel } from '../components/garden/HomeHubBindingPanel';
 import { api } from '../services/api';
 import { saveShoppingList } from '../lib/shoppingListStore';
 import type { GardenLocation, GardenPlant, GardenPlanOut, GardenSpecies } from '../types/api';
@@ -77,6 +78,13 @@ vi.mock('../services/api', () => ({
     gardenDeletePlantPhoto: vi.fn(),
     gardenPlantPhotoThumbUrl: (plantId: string, photoId: string) =>
       `/api/garden/plants/${plantId}/photos/${photoId}/thumb`,
+    gardenHardwareDiscover: vi.fn(),
+    gardenListBindings: vi.fn(),
+    gardenSaveBinding: vi.fn(),
+    gardenDeleteBinding: vi.fn(),
+    gardenRunValve: vi.fn(),
+    gardenStopValve: vi.fn(),
+    gardenScanTag: vi.fn(),
   },
 }));
 
@@ -104,8 +112,21 @@ const createWrapper = () => {
   );
 };
 
-// Planner defaults, set for every test; individual planner tests override them.
+// Phase 8 default: a house with no garden hardware, so nothing hardware-shaped
+// may appear in any test that does not ask for it.
 beforeEach(() => {
+  vi.mocked(api.gardenHardwareDiscover).mockResolvedValue({
+    available: false,
+    has_any_hardware: false,
+    moisture_sensors: [],
+    temperature_sensors: [],
+    humidity_sensors: [],
+    lux_sensors: [],
+    valves: [],
+    grow_lights: [],
+    tags: [],
+  });
+  vi.mocked(api.gardenListBindings).mockResolvedValue({ count: 0, bindings: [] });
   vi.mocked(api.getFamilyDirectory).mockResolvedValue([]);
   vi.mocked(api.gardenSkylightOptions).mockRejectedValue(new Error('no plant'));
   vi.mocked(api.gardenListPlans).mockResolvedValue({ count: 0, plans: [] });
@@ -1635,5 +1656,154 @@ describe('Garden photos, snap-to-add and the Plant Doctor (Phase 7)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Delete photo from 2026-11-18/ }));
     await waitFor(() => expect(vi.mocked(api.gardenDeletePlantPhoto)).toHaveBeenCalledWith('plant-1', 'photo-1'));
+  });
+});
+
+describe('Garden Home Hub hardware (Phase 8)', () => {
+  const plant = {
+    id: 'plant-1', category: 'vegetable', species_ref: 'tomato_roma',
+    location_id: 'bed-1', nickname: 'Roma Row', quantity: 1, area_sqft_used: null,
+    pot_size_in: null, pot_material: null, has_drainage: true, soil_mix: null,
+    window_direction: null, distance_from_window: null, planted_date: null,
+    last_repotted_date: null, planting_method: null, expected_harvest_start: null,
+    expected_harvest_end: null, status: 'active', assigned_to: null,
+    skylight_sync_enabled: false, skylight_chore_id: null, skylight_assignee: null,
+    next_due_at: '2026-11-22T09:00:00Z', notes: null, calibration_factor: 1,
+    last_harvested_at: null, regrowth_cooldown_days: null, created_at: '', updated_at: '',
+    species: null, live_moisture_pct: 22,
+  } as unknown as GardenPlant;
+
+  const binding = {
+    id: 'binding-1', target_kind: 'plant' as const, target_id: 'plant-1', target_name: 'Roma Row',
+    moisture_entity_id: 'sensor.bed1_soil_moisture', temperature_entity_id: null,
+    humidity_entity_id: null, lux_entity_id: null, grow_light_entity_id: null,
+    grow_light_on_time: null, grow_light_off_time: null, grow_light_enabled: false,
+    valve_entity_id: 'valve.bed1_drip', valve_mode: 'notify_only' as const,
+    moisture_override_enabled: true, moisture_threshold_pct: 30,
+    max_run_minutes: 5, daily_max_runs: 2, rain_interlock: true,
+    active_run_started_at: null, active_run_ends_at: null, nfc_tag_id: null,
+    readings: { moisture_pct: 22, bound: true },
+    runs_today: 1, created_at: '', updated_at: '',
+  };
+
+  const discovery = {
+    available: true, has_any_hardware: true,
+    moisture_sensors: [{ entity_id: 'sensor.bed1_soil_moisture', friendly_name: 'Bed 1 Soil Moisture', device_class: 'moisture', unit: '%', state: '22' }],
+    temperature_sensors: [], humidity_sensors: [], lux_sensors: [],
+    valves: [{ entity_id: 'valve.bed1_drip', friendly_name: 'Bed 1 Drip', device_class: null, unit: null, state: 'closed' }],
+    grow_lights: [], tags: [],
+  };
+
+  const renderDetail = () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(api.gardenGetPlant).mockResolvedValue(plant);
+    vi.mocked(api.gardenGetPlantLogs).mockResolvedValue({ plant_id: plant.id, count: 0, logs: [] });
+    vi.mocked(api.gardenListHarvests).mockResolvedValue({ harvests: [], count: 0 } as never);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.getFamilyDirectory).mockResolvedValue([]);
+    return render(
+      <MemoryRouter initialEntries={['/garden/plants/plant-1']}>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <Routes>
+              <Route path="/garden/plants/:id" element={<PlantDetail />} />
+            </Routes>
+          </AuthProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  };
+
+  it('shows no hardware interface at all in a house without any', async () => {
+    renderDetail();
+
+    expect(await screen.findByText('Growth Journal')).toBeInTheDocument();
+    expect(screen.queryByText(/Home Hub Hardware/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Run valve/i)).not.toBeInTheDocument();
+  });
+
+  it('shows live readings and the guarded valve controls when hardware exists', async () => {
+    vi.mocked(api.gardenHardwareDiscover).mockResolvedValue(discovery);
+    vi.mocked(api.gardenListBindings).mockResolvedValue({ count: 1, bindings: [binding] });
+    renderDetail();
+
+    expect(await screen.findByText(/Home Hub Hardware/)).toBeInTheDocument();
+    expect(screen.getByText('22%')).toBeInTheDocument();
+    expect(screen.getByText(/1 \/ 2 runs today/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Run valve/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Stop now/i })).toBeInTheDocument();
+    // The safety caps are visible, not hidden behind a tooltip.
+    expect(screen.getByLabelText(/Max run minutes/i)).toBeInTheDocument();
+  });
+
+  it('does not offer the valve or the editor to someone who may not use it', async () => {
+    vi.mocked(api.gardenHardwareDiscover).mockResolvedValue(discovery);
+    vi.mocked(api.gardenListBindings).mockResolvedValue({ count: 1, bindings: [binding] });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <HomeHubBindingPanel targetKind="plant" targetId="plant-1" canEdit={false} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(/Home Hub Hardware/)).toBeInTheDocument();
+    expect(screen.getByText('22%')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Run valve/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Edit hardware/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('Garden NFC/QR tag cards (Phase 8)', () => {
+  afterEach(() => {
+    window.history.pushState({}, '', '/');
+  });
+
+  const bedScan = {
+    matched: true,
+    tag_id: 'tag-bed1',
+    target_kind: 'location' as const,
+    target_id: 'bed-1',
+    target_name: 'Bed 1',
+    plant: null,
+    location: { id: 'bed-1', name: 'Bed 1', kind: 'raised_bed', plant_count: 3 },
+    readings: { moisture_pct: 22 },
+    moisture: { applies: true, due: true, reason: 'Soil moisture is 22% (below 30%)' },
+    next_due_at: null,
+    due_today: true,
+    actions: ['water', 'photo'],
+  };
+
+  it('opens the card for a scanned tag and waters that bed in one tap', async () => {
+    window.history.pushState({}, '', '/garden?tag=tag-bed1');
+    vi.mocked(api.gardenToday).mockResolvedValue({ date: '2026-11-20', due_count: 0, overdue_count: 0, by_room: {}, all: [] });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.gardenScanTag).mockResolvedValue(bedScan);
+    vi.mocked(api.gardenWaterAll).mockResolvedValue({
+      ok: true, location_id: 'bed-1', location_name: 'Bed 1', watered_count: 3, watered: [],
+    });
+
+    render(<Garden />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText('Scanned tag')).toBeInTheDocument();
+    expect(screen.getByText('Bed 1')).toBeInTheDocument();
+    expect(screen.getByText(/3 plants in this bed/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Water this bed/i }));
+
+    await waitFor(() => expect(vi.mocked(api.gardenWaterAll)).toHaveBeenCalledWith('bed-1'));
+  });
+
+  it('says plainly when a tag is not linked yet', async () => {
+    window.history.pushState({}, '', '/garden?tag=tag-unknown');
+    vi.mocked(api.gardenToday).mockResolvedValue({ date: '2026-11-20', due_count: 0, overdue_count: 0, by_room: {}, all: [] });
+    vi.mocked(api.gardenListPlants).mockResolvedValue([]);
+    vi.mocked(api.gardenListLocations).mockResolvedValue([]);
+    vi.mocked(api.gardenScanTag).mockRejectedValue(new Error('not linked'));
+
+    render(<Garden />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText(/not linked to a plant or bed yet/i)).toBeInTheDocument();
   });
 });

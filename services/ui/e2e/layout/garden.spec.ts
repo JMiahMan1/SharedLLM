@@ -106,6 +106,8 @@ const SAMPLE_PLANTS = [
     status: 'active',
     assigned_to: 'mother',
     skylight_sync_enabled: true,
+    // Phase 8: the live moisture pill, so its fit is audited on every phone.
+    live_moisture_pct: 22,
     pot_size_in: 10,
     pot_material: 'terracotta',
     has_drainage: true,
@@ -507,6 +509,47 @@ async function openGarden(page: Page, path = '/garden'): Promise<Run> {
       });
     }
     if (p === '/api/garden/plants/plant-monty/logs') return json({ logs: [] });
+    // Phase 8: this house HAS garden hardware, so the binding panel, its valve
+    // controls and the moisture pill are all laid out (and audited) here.
+    if (p === '/api/garden/hardware/discover') {
+      return json({
+        available: true,
+        has_any_hardware: true,
+        moisture_sensors: [{ entity_id: 'sensor.bed1_soil_moisture', friendly_name: 'Bed 1 Soil Moisture', device_class: 'moisture', unit: '%', state: '22' }],
+        temperature_sensors: [{ entity_id: 'sensor.bed1_temperature', friendly_name: 'Bed 1 Temperature', device_class: 'temperature', unit: '°F', state: '64' }],
+        humidity_sensors: [{ entity_id: 'sensor.bed1_humidity', friendly_name: 'Bed 1 Humidity', device_class: 'humidity', unit: '%', state: '51' }],
+        lux_sensors: [{ entity_id: 'sensor.bed1_light', friendly_name: 'Bed 1 Light', device_class: 'illuminance', unit: 'lx', state: '18400' }],
+        valves: [{ entity_id: 'valve.bed1_drip', friendly_name: 'Bed 1 Drip', device_class: null, unit: null, state: 'closed' }],
+        grow_lights: [{ entity_id: 'light.grow_shelf', friendly_name: 'Grow Shelf', device_class: null, unit: null, state: 'off' }],
+        tags: [{ tag_id: 'tag-bed1', name: 'Bed 1', last_scanned: null }],
+      });
+    }
+    if (p === '/api/garden/bindings') {
+      return json({
+        count: 1,
+        bindings: [{
+          id: 'binding-1', target_kind: 'plant', target_id: 'plant-monty', target_name: 'Monty',
+          moisture_entity_id: 'sensor.bed1_soil_moisture', temperature_entity_id: 'sensor.bed1_temperature',
+          humidity_entity_id: 'sensor.bed1_humidity', lux_entity_id: 'sensor.bed1_light',
+          grow_light_entity_id: 'light.grow_shelf', grow_light_on_time: '06:00', grow_light_off_time: '20:00',
+          grow_light_enabled: true, valve_entity_id: 'valve.bed1_drip', valve_mode: 'notify_only',
+          moisture_override_enabled: true, moisture_threshold_pct: 30, max_run_minutes: 5,
+          daily_max_runs: 2, rain_interlock: true, active_run_started_at: null,
+          active_run_ends_at: null, nfc_tag_id: 'tag-bed1',
+          readings: { moisture_pct: 22, temperature: 64, temperature_unit: '°F', humidity_pct: 51, lux: 18400, unavailable: [], bound: true },
+          runs_today: 1, created_at: '2026-11-20T00:00:00Z', updated_at: '2026-11-20T00:00:00Z',
+        }],
+      });
+    }
+    if (/^\/api\/garden\/tags\/[^/]+$/.test(p)) {
+      return json({
+        matched: true, tag_id: 'tag-bed1', target_kind: 'plant', target_id: 'plant-monty',
+        target_name: 'Monty',
+        plant: { id: 'plant-monty', nickname: 'Monty', species_ref: 'monstera_deliciosa', category: 'houseplant', location_id: null, status: 'active' },
+        location: null, readings: { moisture_pct: 22 }, moisture: { applies: true, due: true },
+        next_due_at: '2026-11-22T09:00:00Z', due_today: true, actions: ['water', 'photo'],
+      });
+    }
     // Phase 7: the growth journal, with one real thumbnail to lay out.
     if (p === '/api/garden/plants/plant-monty/photos') {
       if (method === 'POST') {

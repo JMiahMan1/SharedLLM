@@ -4816,6 +4816,8 @@ export interface PartyRoomSummary {
 export interface GardenPlant {
   id: string;
   category: string;
+  /** Live soil moisture from a bound Home Hub sensor (null when unbound). */
+  live_moisture_pct?: number | null;
   species_ref: string;
   location_id: string | null;
   nickname: string | null;
@@ -5522,6 +5524,129 @@ export interface GardenPhotoUploadResult {
   photo: GardenPlantPhoto;
   nextcloud_warning: string | null;
 }
+
+/* ---------- Home Hub hardware: sensors, valves, grow lights, tags (Phase 8) ---------- */
+
+export interface GardenHubEntity {
+  entity_id: string;
+  friendly_name: string | null;
+  device_class: string | null;
+  unit: string | null;
+  state: string | null;
+}
+
+export interface GardenHubTag {
+  tag_id: string;
+  name: string | null;
+  last_scanned: string | null;
+}
+
+export interface GardenHardwareDiscovery {
+  available: boolean;
+  has_any_hardware: boolean;
+  moisture_sensors: GardenHubEntity[];
+  temperature_sensors: GardenHubEntity[];
+  humidity_sensors: GardenHubEntity[];
+  lux_sensors: GardenHubEntity[];
+  valves: GardenHubEntity[];
+  grow_lights: GardenHubEntity[];
+  tags: GardenHubTag[];
+}
+
+export interface GardenBindingReadings {
+  moisture_pct?: number | null;
+  temperature?: number | null;
+  temperature_unit?: string | null;
+  humidity_pct?: number | null;
+  lux?: number | null;
+  unavailable?: string[];
+  bound?: boolean;
+}
+
+export type GardenValveMode = 'notify_only' | 'confirm' | 'auto';
+
+export interface GardenHomeHubBinding {
+  id: string;
+  target_kind: 'plant' | 'location';
+  target_id: string;
+  target_name: string | null;
+  moisture_entity_id: string | null;
+  temperature_entity_id: string | null;
+  humidity_entity_id: string | null;
+  lux_entity_id: string | null;
+  grow_light_entity_id: string | null;
+  grow_light_on_time: string | null;
+  grow_light_off_time: string | null;
+  grow_light_enabled: boolean;
+  valve_entity_id: string | null;
+  valve_mode: GardenValveMode;
+  moisture_override_enabled: boolean;
+  moisture_threshold_pct: number;
+  max_run_minutes: number;
+  daily_max_runs: number;
+  rain_interlock: boolean;
+  active_run_started_at: string | null;
+  active_run_ends_at: string | null;
+  nfc_tag_id: string | null;
+  readings: GardenBindingReadings;
+  runs_today: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GardenBindingList {
+  count: number;
+  bindings: GardenHomeHubBinding[];
+}
+
+export interface GardenBindingIn {
+  moisture_entity_id?: string | null;
+  temperature_entity_id?: string | null;
+  humidity_entity_id?: string | null;
+  lux_entity_id?: string | null;
+  grow_light_entity_id?: string | null;
+  grow_light_on_time?: string | null;
+  grow_light_off_time?: string | null;
+  grow_light_enabled?: boolean;
+  valve_entity_id?: string | null;
+  valve_mode?: GardenValveMode;
+  moisture_override_enabled?: boolean;
+  moisture_threshold_pct?: number;
+  max_run_minutes?: number;
+  daily_max_runs?: number;
+  rain_interlock?: boolean;
+  nfc_tag_id?: string | null;
+}
+
+export interface GardenValveRun {
+  binding_id: string;
+  valve_entity_id?: string;
+  minutes: number;
+  opened_at?: string;
+  closes_at?: string;
+  runs_today: number;
+  daily_max_runs: number;
+  watered_count?: number;
+  next_due_at?: string | null;
+  care_log_id?: string;
+}
+
+export interface GardenTagScan {
+  matched: boolean;
+  tag_id: string;
+  target_kind: 'plant' | 'location';
+  target_id: string;
+  target_name: string | null;
+  plant: { id: string; nickname: string | null; species_ref: string | null; category: string; location_id: string | null; status: string } | null;
+  location: { id: string; name: string; kind: string; plant_count: number } | null;
+  readings: GardenBindingReadings;
+  moisture: { applies?: boolean; due?: boolean; hold?: boolean; reason?: string | null; moisture_pct?: number | null };
+  next_due_at: string | null;
+  due_today: boolean;
+  actions: string[];
+}
+
+/* ---------- end Home Hub hardware (Phase 8) ---------- */
 
 /* ---------- end Photo journal, Plant ID & Plant Doctor (Phase 7) ---------- */
 
