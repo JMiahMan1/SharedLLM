@@ -511,6 +511,22 @@ async def _thumbnail_of(url: str | None) -> str | None:
     return await asyncio.to_thread(thumbnail, body)
 
 
+async def _public_embed(url: str | None) -> tuple[str, dict[str, str]] | None:
+    """The embed for a page's og:video / og:audio address, only when that address passes the same public check
+    as og:image. The receiver's phone loads it directly, so a page must not be able to point it at a private host."""
+    if not url:
+        return None
+    found = embed_for(url)
+    if not found:
+        return None
+    try:
+        await check_url(url)
+    except (Refused, FetchFailed) as exc:
+        log.info("[private-chat] page media address refused: %s (%s)", type(exc).__name__, exc)
+        return None
+    return found
+
+
 # --- The preview -------------------------------------------------------------------
 
 
@@ -560,15 +576,13 @@ async def build_preview(url: str) -> dict[str, Any] | None:
             kind, embed = found
     if not embed:
         for key in ("og:video:secure_url", "og:video:url", "og:video", "twitter:player:stream"):
-            target = _http_url(meta.get(key), final)
-            found = embed_for(target) if target else None
+            found = await _public_embed(_http_url(meta.get(key), final))
             if found and found[0] == "video":
                 kind, embed = found
                 break
     if not embed:
         for key in ("og:audio:secure_url", "og:audio:url", "og:audio"):
-            target = _http_url(meta.get(key), final)
-            found = embed_for(target) if target else None
+            found = await _public_embed(_http_url(meta.get(key), final))
             if found and found[0] == "audio":
                 kind, embed = found
                 break
