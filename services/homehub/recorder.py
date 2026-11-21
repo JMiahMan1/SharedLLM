@@ -163,6 +163,10 @@ class HistoryWriter:
         self.dropped = 0
         self.failed = 0
         self.batches = 0
+        #: Entities whose rows were in a batch that could not be committed. The recorder drains it
+        #: (``take_uncommitted``) so it does not skip the next identical state as already recorded.
+        self._uncommitted: set[str] = set()
+        self._uncommitted_lock = threading.Lock()
         self._last_drop_report = 0.0
         self._thread = threading.Thread(target=self._run, name="homehub-recorder", daemon=True)
         self._started = False
@@ -186,6 +190,14 @@ class HistoryWriter:
                 self._last_drop_report = now
                 log.warning("recorder queue is full (%d waiting): %d rows dropped so far", self.q.qsize(), self.dropped)
             return False
+
+    def take_uncommitted(self) -> set[str]:
+        """The entities whose rows were lost to a failed commit since the last call."""
+        if not self._uncommitted:
+            return set()
+        with self._uncommitted_lock:
+            out, self._uncommitted = self._uncommitted, set()
+        return out
 
     def sync(self, timeout: float = SYNC_TIMEOUT_S) -> bool:
         """Wait until what was queued before this call is committed. False if the writer did not answer."""
@@ -244,6 +256,8 @@ class HistoryWriter:
                 self.batches += 1
             except Exception:
                 self.failed += len(batch)
+                with self._uncommitted_lock:
+                    self._uncommitted.update(row[0] for row in batch)
                 log.exception("recorder could not commit %d rows", len(batch))
                 with contextlib.suppress(sqlite3.Error):
                     db.execute("ROLLBACK")
@@ -286,6 +300,11 @@ class HistoryWriter:
             log.exception("recorder writer stopped")
         finally:
             db.close()
+
+
+#: ``Recorder._last`` for an entity whose latest row was dropped or rolled back: it compares unequal to every
+#: real state, and (unlike a missing entry) stops the old-state shortcut assuming the old state was recorded.
+NOT_RECORDED = ("\x00not recorded", "")
 
 
 class Recorder:
@@ -387,6 +406,9 @@ class Recorder:
         if self._excluded(eid):
             self.excluded += 1
             return
+        if self.writer is not None:
+            for lost in self.writer.take_uncommitted():
+                self._last[lost] = NOT_RECORDED  # its last row never reached the database
         canonical = canonical_attrs(self.recorded_attributes(new))
         digest = attrs_hash(canonical)
         prev = self._last.get(eid)
@@ -395,15 +417,21 @@ class Recorder:
         if prev == (new.state, digest):
             self.skipped += 1
             return
-        self._last[eid] = (new.state, digest)
         row = (eid, new.state, canonical, digest, new.last_changed.timestamp(), new.last_updated.timestamp(),
                int(old is None or old.state != new.state))
-        self.recorded += 1
         if self.writer is not None:
-            self.writer.submit("row", row)
+            if not self.writer.submit("row", row):
+                # Dropped (the queue is full): it was never recorded, so the next identical state must be.
+                self._last[eid] = NOT_RECORDED
+                return
+            # Queued: a commit that fails later hands the entity back through take_uncommitted.
+            self._last[eid] = (new.state, digest)
         else:
+            self._last[eid] = NOT_RECORDED  # until it is written: a failed write must not count as recorded
             with self.store._lock:
                 self.store.write_history(self.store._db, [row])
+            self._last[eid] = (new.state, digest)
+        self.recorded += 1
 
     # -- jobs on the writer's connection ------------------------------------------
     async def run_job(self, fn: Callable[[sqlite3.Connection | None], Any]) -> Any:
