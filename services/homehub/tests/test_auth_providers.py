@@ -7,6 +7,7 @@ inactive). Every name, password and entity here is made up.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 
@@ -48,6 +49,8 @@ class FakeIdentity(JarvisIdentityProvider):
                                                              "protected_entity_ids": ["lock.front"],
                                                              "permitted_entity_ids": [], "all_unprotected": False}}
         self.down = False
+        #: Usernames whose device assignments identity fails to answer for.
+        self.access_fails: set[str] = set()
         self.locked: set[str] = set()
         self.logins: list[str] = []
 
@@ -66,6 +69,8 @@ class FakeIdentity(JarvisIdentityProvider):
                 return 401, {"detail": "Invalid username or password"}
             return 200, {"ok": True, "id": user["id"], "username": name}
         if path == "/api/internal/user-device-assignments":
+            if kw["params"]["username"] in self.access_fails:
+                return 503, None
             return 200, self.access.get(kw["params"]["username"], {"device_ids": [], "protected_entity_ids": [],
                                                                      "permitted_entity_ids": []})
         return 404, None
@@ -242,6 +247,27 @@ def test_admin_rights_follow_identity_on_the_next_request_not_the_login(env):
     sync(env)
     assert env["auth"].authenticate(token).is_admin is True  # same token, new right
     assert c.get("/hub/users", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+
+def test_a_demoted_admin_whose_limits_cannot_be_read_gets_nothing_not_everything(env, caplog):
+    sync(env)
+    assert users(env)["alex"]["entity_access"] is None  # an admin: no limits
+    alex = env["fake"].users[0]
+    alex["is_admin"], alex["family_role"] = False, "child"
+    env["fake"].access_fails.add("alex")
+    caplog.set_level(logging.WARNING)
+    sync(env)
+    access = users(env)["alex"]["entity_access"]
+    assert access == EntityAccess().snapshot()
+    assert not EntityAccess.from_snapshot(access).may_control("light.kitchen")
+    assert [r for r in caplog.records if r.levelno == logging.WARNING and "alex" in r.getMessage()]
+
+    # Once the limits are read, they apply.
+    env["fake"].access_fails.clear()
+    env["fake"].access["alex"] = {"device_ids": ["light.kitchen"], "protected_entity_ids": [],
+                                  "permitted_entity_ids": [], "all_unprotected": False}
+    sync(env)
+    assert users(env)["alex"]["entity_access"]["assigned"] == ["light.kitchen"]
 
 
 def test_identity_down_keeps_the_synced_users_and_their_sessions(env):

@@ -307,6 +307,12 @@ answer still applies and the child hears the answer. The two parents each get
 the notice with Approve and Disapprove (the recipients are identity's `notify`
 list, never hardcoded).
 
+`voice_pending_decide` answers the notice a satellite's owner gets when
+sentences were taught there as their voice before they had a voice profile
+(docs/VOICE_RECOGNITION.md): `{"id", "approve"}`. "It was me" posts and "Not
+me" deletes `/api/users/me/voice/pending/{id}` on identity as the caller, so
+only the person they were taught for can approve them.
+
 `raven_approve` and `raven_reject` follow Execute and Delete in Raven Ops:
 admins only, whatever the mission type (a mission's owner is not enough), and
 only while the mission is `pending`. Approve also refuses (409) a mission

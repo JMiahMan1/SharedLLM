@@ -205,13 +205,17 @@ class Runtime:
                 else:
                     log.debug("%s (%s) poll failed (%d in a row): %s", entry.domain, entry.title, failures, why)
                 if failures == POLL_FAILURES_UNAVAILABLE:
-                    ents = driver.entities
+                    # Entities a live push still keeps current are left as they are: a poll that fails says
+                    # nothing about them (a camera's motion sensor while its event push still arrives).
+                    spared = driver.push_fed_entities() if hasattr(driver, "push_fed_entities") else set()
+                    ents = [e for e in driver.entities if e.entity_id not in spared]
                     for e in ents:
                         st = self.hub.states.get(e.entity_id)
                         if st is not None and st.state != UNAVAILABLE:
                             held[e.entity_id] = (st.state, dict(st.attributes))
                     log.warning("%s (%s): %d polls failed in a row; its entities are unavailable until one "
-                                "succeeds", entry.domain, entry.title, failures)
+                                "succeeds%s", entry.domain, entry.title, failures,
+                                f" (except {len(spared)} its push keeps current)" if spared else "")
                     driver.mark_unavailable(ents)
                 if failures >= POLL_FAILURES_UNAVAILABLE:
                     # The entry says why (the Devices page lists it as needing attention) until a poll works.

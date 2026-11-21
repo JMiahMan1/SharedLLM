@@ -1,9 +1,10 @@
-"""An automation that calls a device's own action waits for that device instead of failing every run.
+"""A step that calls a device's own action while its device is away fails at that step, visibly.
 
 ESPHome nodes bring their user-defined actions with them (``esphome.<node>_<action>``) and take them away when
-they disconnect. An automation calling one while the node is away is waiting, not broken: its runs are skipped
-quietly, that is said once, and it resumes by itself when the node connects. A missing service that is not a
-device's (a typo, a core service that does not exist) still fails where everyone can see it.
+they disconnect; a phone brings ``notify.mobile_app_<phone>``. A missing one is checked when a run reaches the
+step, like Home Assistant: the steps before it ran, the run stops there with an error in its trace and a WARNING,
+a repair notice stays until the device is back, and ``continue_on_error`` lets the rest run. An action named
+only in a branch that is not taken costs nothing: the run is never skipped as a whole.
 """
 from __future__ import annotations
 
@@ -13,7 +14,8 @@ from typing import Any
 import pytest
 from aioesphomeapi import UserService, UserServiceArg, UserServiceArgType
 
-from services.homehub.automation import AutomationEngine, FakeClock
+from services.homehub.automation import DEVICE_REPAIR_PREFIX, AutomationEngine, FakeClock
+from services.homehub.automation_editor import Tracer
 from services.homehub.drivers.esphome import ESPHomeDriver
 from services.homehub.tests.conftest import make_hub
 from services.homehub.tests.test_automation import START, FakeStore, advance, auto, record, settle
@@ -21,9 +23,11 @@ from services.homehub.tests.test_automation import START, FakeStore, advance, au
 SET_WEATHER = UserService(name="set_weather", key=7, args=[UserServiceArg(name="summary",
                                                                           type=UserServiceArgType.STRING)])
 ACTION = "esphome.wall_screen_set_weather"
+MISSING = f"{ACTION} is not offered: its device is not connected"
 EVERY_MINUTE = [{"trigger": "time_pattern", "minutes": "/1"}]
-SYNC = auto(EVERY_MINUTE, [{"action": ACTION, "data": {"summary": "sunny"}}, {"action": "test.note"}],
-            id="screen_sync", alias="Screen sync")
+SYNC = auto(EVERY_MINUTE, [{"action": "test.before"}, {"action": ACTION, "data": {"summary": "sunny"}},
+                           {"action": "test.after"}], id="screen_sync", alias="Screen sync")
+REPAIR = f"persistent_notification.{DEVICE_REPAIR_PREFIX}automation_screen_sync"
 
 
 class FakeNode:
@@ -40,6 +44,7 @@ async def setup():
     drv = ESPHomeDriver(hub, entry)
     node = FakeNode()
     eng = AutomationEngine(hub, FakeStore(), clock=FakeClock(START))
+    eng.tracer = Tracer(eng)
     yield hub, drv, node, eng
     await eng.stop()
 
@@ -49,84 +54,91 @@ def connect(drv: ESPHomeDriver, node: FakeNode) -> None:
     drv._register_services("wall-screen", [SET_WEATHER])
 
 
-def disconnect(drv: ESPHomeDriver) -> None:
-    drv._client = None
-    drv._unregister_services()
-
-
 def status(eng: AutomationEngine, item_id: str) -> dict:
     return next(s for s in eng.status() if s["id"] == item_id)
 
 
-async def test_waits_silently_resumes_when_the_node_connects_and_waits_again(setup, caplog) -> None:
+def last_trace(eng: AutomationEngine, kind: str, item_id: str) -> dict:
+    return eng.tracer.list(kind, item_id)[0]
+
+
+async def test_a_run_reaching_a_missing_device_action_fails_there_visibly(setup, caplog) -> None:
     hub, drv, node, eng = setup
-    notes = record(hub, "test.note")
+    calls = record(hub, "test.before", "test.after")
     caplog.set_level(logging.INFO, logger="homehub.automation")
     await eng.load([SYNC], {}, [])
     await eng.start()
     await settle()
+    assert status(eng, "screen_sync")["waiting_reason"].startswith(f"needs {ACTION}, which no connected device")
 
+    await advance(eng, 60)
+    # The run started (never skipped), the step before ran, the run stopped at the device's action.
+    assert [c[0] for c in calls] == ["test.before"]
     st = status(eng, "screen_sync")
-    assert st["waiting_reason"] == f"needs {ACTION}, which no connected device offers"
-    assert st["enabled"] is True and st["last_error"] is None and st["unsupported_reason"] is None
-    assert hub.states.get("automation.screen_sync").attributes["waiting_reason"] == st["waiting_reason"]
+    assert st["last_triggered"] is not None
+    assert st["last_error"] == MISSING
+    trace = last_trace(eng, "automation", "screen_sync")
+    assert trace["result"] == "error" and trace["steps"][-1]["error"] == MISSING
+    assert [r for r in caplog.records if r.levelno == logging.WARNING and ACTION in r.getMessage()]
+    repair = hub.states.get(REPAIR)
+    assert repair is not None and repair.attributes["action"] == ACTION
+    assert repair.attributes["entity_id"] == "automation.screen_sync"
 
-    await advance(eng, 5 * 60)
-    assert notes == []  # skipped, not half-run
-    assert status(eng, "screen_sync")["last_error"] is None
-    assert status(eng, "screen_sync")["last_triggered"] is None
-    waits = [r for r in caplog.records if "waits for its device" in r.getMessage()]
-    assert len(waits) == 1 and waits[0].levelno == logging.INFO  # said once, not every run
-    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
-
+    # The device comes back: the repair notice goes, and the next run goes through.
     connect(drv, node)
     await settle()
+    assert hub.states.get(REPAIR) is None
     assert status(eng, "screen_sync")["waiting_reason"] is None
-    assert "waiting_reason" not in hub.states.get("automation.screen_sync").attributes
-    assert len([r for r in caplog.records if "runs resume" in r.getMessage()]) == 1
     await advance(eng, 60)
     assert node.executed == [("set_weather", {"summary": "sunny"})]
-    assert len(notes) == 1
+    assert [c[0] for c in calls] == ["test.before", "test.before", "test.after"]
+    assert status(eng, "screen_sync")["last_error"] is None
 
-    disconnect(drv)
-    await settle()
-    assert status(eng, "screen_sync")["waiting_reason"] == f"needs {ACTION}, which no connected device offers"
+
+async def test_an_action_in_a_branch_not_taken_never_skips_the_run(setup, caplog) -> None:
+    hub, _drv, _node, eng = setup
+    calls = record(hub, "test.note")
+    caplog.set_level(logging.INFO, logger="homehub.automation")
+    branchy = auto(EVERY_MINUTE, [
+        {"action": "test.note"},
+        {"if": [{"condition": "template", "value_template": "{{ false }}"}],
+         "then": [{"action": ACTION}, {"action": "notify.mobile_app_spare_phone", "data": {"message": "x"}}]},
+        {"action": "test.note"},
+    ], id="branchy")
+    await eng.load([branchy], {}, [])
+    await eng.start()
     await advance(eng, 3 * 60)
-    assert len(node.executed) == 1 and len(notes) == 1
-    assert len([r for r in caplog.records if "waits for its device" in r.getMessage()]) == 2
+    assert len(calls) == 6
+    assert status(eng, "branchy")["last_error"] is None
+    assert hub.states.get(f"persistent_notification.{DEVICE_REPAIR_PREFIX}automation_branchy") is None
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
-async def test_a_reload_does_not_announce_the_wait_again(setup, caplog) -> None:
-    _hub, _drv, _node, eng = setup
+async def test_a_step_allowed_to_fail_records_the_error_and_the_rest_runs(setup, caplog) -> None:
+    hub, _drv, _node, eng = setup
+    calls = record(hub, "test.note")
     caplog.set_level(logging.INFO, logger="homehub.automation")
-    await eng.load([SYNC], {}, [])
-    await eng.load([SYNC], {}, [])
-    assert status(eng, "screen_sync")["waiting_reason"]
-    assert len([r for r in caplog.records if "waits for its device" in r.getMessage()]) == 1
+    step = {"action": ACTION, "continue_on_error": True}
+    await eng.load([auto(EVERY_MINUTE, [step, {"action": "test.note"}], id="lenient")], {}, [])
+    await eng.start()
+    await advance(eng, 60)
+    assert len(calls) == 1
+    assert last_trace(eng, "automation", "lenient")["steps"][0]["error"] == MISSING
+    assert [r for r in caplog.records if r.levelno == logging.WARNING and ACTION in r.getMessage()]
+    assert hub.states.get(f"persistent_notification.{DEVICE_REPAIR_PREFIX}automation_lenient") is not None
 
 
-async def test_a_script_calling_a_missing_device_action_waits_too(setup) -> None:
+async def test_a_script_calling_a_missing_device_action_fails_and_says_why(setup) -> None:
     hub, drv, node, eng = setup
     await eng.load([], {"push_weather": {"sequence": [{"action": ACTION, "data": {"summary": "rain"}}]}}, [])
     await eng.start()
-    assert status(eng, "push_weather")["waiting_reason"]
-    assert await hub.call_service("script", "push_weather") == {"changed_states": [], "response": None}
+    await hub.call_service("script", "push_weather")
+    await settle()
+    assert status(eng, "push_weather")["last_error"] == MISSING
     connect(drv, node)
     await hub.call_service("script", "push_weather")
     await settle()
     assert node.executed == [("set_weather", {"summary": "rain"})]
-
-
-async def test_a_step_allowed_to_fail_does_not_hold_the_item_back(setup) -> None:
-    hub, _drv, _node, eng = setup
-    notes = record(hub, "test.note")
-    step = {"action": ACTION, "continue_on_error": True}
-    await eng.load([auto(EVERY_MINUTE, [step, {"action": "test.note"}], id="lenient")], {}, [])
-    await eng.start()
-    assert status(eng, "lenient")["waiting_reason"] is None
-    await advance(eng, 60)
-    assert len(notes) == 1
 
 
 async def test_an_unknown_core_service_still_fails_visibly(setup, caplog) -> None:

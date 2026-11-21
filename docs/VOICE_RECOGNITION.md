@@ -76,17 +76,30 @@ How it works (`services/common/voice_enroll.py`): the gateway opens a session
 for that satellite in Redis (five minutes, renewed with every sentence). While
 any session is open, the speech-to-text proxy keeps each command's signature
 for 20 seconds under its transcript; the gateway takes it from there and hands
-it to Identity (`POST /api/voice/enroll`), which adds it to the profile with
-`source: satellite`. Each take has to match the earlier takes of the same
-session, so someone else cutting in is refused. Three takes with too little
-speech in a row end the session.
+it to Identity (`POST /api/voice/enroll`). Each take has to match the earlier
+takes of the same session, so someone else cutting in is refused. Three takes
+with too little speech in a row end the session.
 
-Only the satellite's one assigned person is ever taught, never the household
-and never someone else. A satellite with nobody assigned, or shared by several
-people, says so and how to fix it. Someone the satellite already recognises as
-a *different* enrolled person gets the refresh above for their own profile.
-Anyone standing at the satellite can speak the sentences, so assign a satellite
-only to the person who uses it.
+Nothing proves who is speaking at a satellite, so a take never simply joins the
+owner's profile:
+
+- **The owner already has a voice profile:** the session's first take must
+  sound like it (the same `CONSISTENCY_FLOOR` every take is checked against),
+  then each take like the session's earlier ones. Those are stored in the
+  profile with `source: satellite`. A stranger at the owner's satellite is
+  refused at the first sentence.
+- **The owner has none:** the takes are held apart (`VoicePendingEnrolment`,
+  one row per session, kept seven days) and nothing is recognised from them.
+  When the session ends the owner gets a notice in their own app ("It was me" /
+  "Not me", the `voice_pending_decide` callback), and Identity, Vocal Signature
+  lists them with Approve and Discard. Only the owner, signed in, can approve
+  them (`POST /api/users/me/voice/pending/{id}`; `DELETE` discards). Approving
+  never evicts samples already in a profile: if the owner enrolled elsewhere
+  meanwhile, the takes must match it and only fill free places.
+
+A satellite with nobody assigned, or shared by several people, says so and how
+to fix it. Someone the satellite already recognises as a *different* enrolled
+person gets the refresh above for their own profile.
 
 ## Checking what happens
 

@@ -149,15 +149,26 @@ async def _confirmed(ctx, entity_id: str, friendly: str, req: LightControlReques
             state = str(current.get("state", "")).lower()
             friendly = spoken_name(entity_id, current.get("attributes", {}).get("friendly_name")) \
                 if current.get("attributes", {}).get("friendly_name") else friendly
-            if state == target:
-                level = _brightness_pct(current) if target == "on" else None
-                said = f"{friendly} is on at {level}%." if level is not None and req.brightness_pct is not None else f"{friendly} is {target}."
+            level = _brightness_pct(current) if state == "on" else None
+            wants_level = target == "on" and req.brightness_pct is not None
+            if state == target and (not wants_level or _level_reached(level, req.brightness_pct)):
+                said = f"{friendly} is on at {level}%." if wants_level else f"{friendly} is {target}."
                 return ExecutionResult(status="SUCCESS", message=said, service=sent.service,
                                        detail={**(sent.detail or {}), "confirmed": True, "state": state,
-                                               "name": friendly})
+                                               "name": friendly, **({"brightness_pct": level} if wants_level else {})})
         if time.monotonic() >= deadline:
             break
         await asyncio.sleep(CONFIRM_POLL_S)
+    if state == target == "on" and req.brightness_pct is not None:
+        # On, but not at the level asked for (an already-on light shows the old level until it moves).
+        level = _brightness_pct(current) if current else None
+        said = (f"I asked {friendly} to go to {req.brightness_pct}%, but it is at {level}%." if level is not None
+                else f"{friendly} is on, but I could not read its brightness to check it is at {req.brightness_pct}%.")
+        log.warning("[light] %s did not reach %s%% within %.0fs (at %s%%)", entity_id, req.brightness_pct,
+                    CONFIRM_WITHIN_S, level)
+        return ExecutionResult(status="PARTIAL", message=said, service=sent.service,
+                               detail={**(sent.detail or {}), "confirmed": False, "state": state, "name": friendly,
+                                       "brightness_pct": level})
     if state == "unavailable":
         said = f"I asked {friendly} to turn {target}, but it is not responding."
     elif state:
@@ -167,6 +178,14 @@ async def _confirmed(ctx, entity_id: str, friendly: str, req: LightControlReques
     log.warning("[light] %s did not show %s within %.0fs (state=%s)", entity_id, target, CONFIRM_WITHIN_S, state)
     return ExecutionResult(status="PARTIAL", message=said, service=sent.service,
                            detail={**(sent.detail or {}), "confirmed": False, "state": state, "name": friendly})
+
+
+#: How close (percentage points) a light's brightness must come to the level asked for to count as there.
+BRIGHTNESS_TOLERANCE_PCT = 2
+
+
+def _level_reached(level: int | None, wanted: int) -> bool:
+    return level is not None and abs(level - wanted) <= BRIGHTNESS_TOLERANCE_PCT
 
 
 def _brightness_pct(state: dict) -> int | None:
