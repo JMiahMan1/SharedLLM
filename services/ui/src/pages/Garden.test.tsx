@@ -12,11 +12,21 @@ import { saveShoppingList } from '../lib/shoppingListStore';
 import type { GardenLocation, GardenPlant, GardenPlanOut, GardenSpecies } from '../types/api';
 import { AuthProvider } from '../context/AuthContext';
 
+// The signed-in person is a parent by default; a test that needs another role
+// (an adult child sees hardware read-only) sets ``authUser.current`` first.
+const authUser = vi.hoisted(() => ({
+  current: { username: 'mother', is_admin: true, family_role: 'mother' } as {
+    username: string;
+    is_admin: boolean;
+    family_role: string;
+  },
+}));
+
 vi.mock('../context/AuthContext', async (importActual) => {
   const actual = await importActual<typeof import('../context/AuthContext')>();
   return {
     ...actual,
-    useAuth: () => ({ user: { username: 'mother', is_admin: true, family_role: 'mother' }, token: 'test' }),
+    useAuth: () => ({ user: authUser.current, token: 'test' }),
   };
 });
 
@@ -112,6 +122,10 @@ const createWrapper = () => {
     </BrowserRouter>
   );
 };
+
+beforeEach(() => {
+  authUser.current = { username: 'mother', is_admin: true, family_role: 'mother' };
+});
 
 // Phase 8 default: a house with no garden hardware, so nothing hardware-shaped
 // may appear in any test that does not ask for it.
@@ -1735,6 +1749,21 @@ describe('Garden Home Hub hardware (Phase 8)', () => {
     expect(screen.getByRole('button', { name: /Stop now/i })).toBeInTheDocument();
     // The safety caps are visible, not hidden behind a tooltip.
     expect(screen.getByLabelText(/Max run minutes/i)).toBeInTheDocument();
+  });
+
+  it('gives an adult child the readings but no valve or editor', async () => {
+    // `canEdit` is true for an adult child, `canAssign` is not -- and the server
+    // is the authority (``_require_parent_or_admin``), so this must follow it.
+    authUser.current = { username: 'kaleb', is_admin: false, family_role: 'adult_child' };
+    vi.mocked(api.gardenHardwareDiscover).mockResolvedValue(discovery);
+    vi.mocked(api.gardenListBindings).mockResolvedValue({ count: 1, bindings: [binding] });
+    renderDetail();
+
+    expect(await screen.findByText(/Home Hub Hardware/)).toBeInTheDocument();
+    expect(screen.getByText('22%')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Run valve/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Stop now/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Edit hardware/i)).not.toBeInTheDocument();
   });
 
   it('does not offer the valve or the editor to someone who may not use it', async () => {

@@ -1231,11 +1231,6 @@ export function PlantDetail() {
   // into view instead of leaving the person at the top of a long page.
   const [searchParams] = useSearchParams();
   const wantsJournal = searchParams.get('journal') === '1';
-  useEffect(() => {
-    if (!wantsJournal) return;
-    const node = document.getElementById('garden-journal');
-    node?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [wantsJournal]);
   const canEdit = Boolean(user?.is_admin || ['mother', 'father', 'adult_child'].includes(user?.family_role ?? ''));
   // Re-assigning care is a parent/admin decision (services/garden agrees); the
   // adult looking after the plant can still log care and link its chore.
@@ -1256,6 +1251,14 @@ export function PlantDetail() {
   });
 
   const plant = plantQuery.data;
+
+  useEffect(() => {
+    // Waits for the plant: arriving from a tag card, the page is still loading
+    // when the effect first runs, and there is no journal to scroll to yet.
+    if (!wantsJournal || !plant) return;
+    const node = document.getElementById('garden-journal');
+    node?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [wantsJournal, plant?.id]);
 
   const skylightQuery = useQuery({
     queryKey: ['garden-skylight-options', id],
@@ -1542,7 +1545,9 @@ export function PlantDetail() {
         </div>
       </div>
 
-      <HomeHubBindingPanel targetKind="plant" targetId={plant.id} canEdit={canEdit} />
+      {/* Bindings and valve runs are `_require_parent_or_admin` on the server, so an
+          adult child sees the readings and nothing they would get a 403 for. */}
+      <HomeHubBindingPanel targetKind="plant" targetId={plant.id} canEdit={canAssign} />
 
       <div id="garden-journal" className="scroll-mt-20">
         <PhotoJournalPanel plant={plant} canDeleteAny={canEdit} currentUser={user?.username ?? ''} />
