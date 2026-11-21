@@ -198,6 +198,12 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   // creation just made (before the inbox is fetched again). Its messages never go through Talk.
   const [startedPrivate, setStartedPrivate] = useState<ReadonlySet<string>>(() => new Set());
   const privateMessages = isPrivate || Boolean(privateInfo) || startedPrivate.has(activeToken);
+  // A locked private chat is the unlock sheet: nothing readable is on screen, so
+  // its sealed messages are not asked for and nothing long-polls them. Fetching
+  // here could not render anything, and a request per open would tell the server
+  // when the parents look at the chat without opening it.
+  const privateLocked = privateMessages && !privateUnlocked;
+
   const privateInfoError = !isPrivate
     ? undefined
     : privateStatus.isError
@@ -297,7 +303,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   // Hidden updates (reactions) count: the long poll starts past them, not on them.
   const newestId = newestMessageId(newestQuery);
   const liveFeed = useTalkLongPoll(
-    activeToken,
+    // No long poll on a locked private chat: the thread is the unlock sheet.
+    privateLocked ? '' : activeToken,
     newestId,
     () => void queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] }),
     asUser,
@@ -321,7 +328,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
       }
       return response;
     },
-    enabled: Boolean(activeToken),
+    // A locked private chat is not read before it is opened (see privateLocked).
+    enabled: Boolean(activeToken) && !privateLocked,
     // While "Show earlier" loads, keep this conversation's messages on screen
     // (never another conversation's).
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === activeToken ? previous : undefined),

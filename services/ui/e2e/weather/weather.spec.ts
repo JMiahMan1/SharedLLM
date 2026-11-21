@@ -15,6 +15,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { seedAuth } from '../fixtures/mediaMocks';
 import { shotPath } from '../fixtures/climateMocks';
+import { INTEGRATIONS_STATUS_PATH, integrationsStatus } from '../fixtures/serverCalls';
 
 type Scenario = 'ok' | 'error' | 'unset' | 'slow' | 'empty';
 type Size = 'small' | 'medium' | 'wide' | 'tall';
@@ -83,6 +84,9 @@ async function mockAll(page: Page, scenario: Scenario, size: Size = 'medium') {
     const p = new URL(req.url()).pathname;
     if (/\/api\/(health|info)\b/.test(p)) return route.fulfill({ json: { status: 'ok', version: 'e2e', git_sha: 'e2e' } });
     if (/\/api\/(config|calendar\/settings)\b/.test(p)) return route.fulfill({ json: { status: 'SUCCESS', settings: {}, config: {} } });
+    // Hub widgets (Climate, devices, energy) mount only when a home hub is reported on:
+    // an empty body here silently removed the Climate widget from the dashboard.
+    if (p === INTEGRATIONS_STATUS_PATH) return route.fulfill({ json: integrationsStatus() });
     if (/\/api\/telemetry\//.test(p)) return route.fulfill({ json: { notifications: [], jobs: [] } });
     return route.fulfill({ json: [] });
   };

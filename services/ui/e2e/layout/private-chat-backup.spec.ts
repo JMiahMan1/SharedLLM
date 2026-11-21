@@ -110,6 +110,8 @@ async function serve(page: Page, server: Server): Promise<void> {
     if (p === `/api/private-chat/chats/${TOKEN}/read`) return route.fulfill({ json: { status: 'SUCCESS', detail: { last_read: 1 } } });
     if (p === `/api/private-chat/chats/${TOKEN}/marks`) return route.fulfill({ json: { marks: [] } });
     if (p === `/api/private-chat/chats/${TOKEN}/gallery`) return route.fulfill({ json: { entries: [] } });
+    // The chat's reminders: the open (unlocked) thread asks once, and nothing is due.
+    if (p === `/api/private-chat/chats/${TOKEN}/reminders`) return route.fulfill({ json: { reminders: [] } });
     if (p === '/api/communication/talk/conversations') {
       const own = server.chats.length
         ? [{ token: TOKEN, display_name: 'Private chat', type: 2, private: true, last_message: 'Encrypted message', last_message_actor: 'Robin',

@@ -149,4 +149,5 @@ describe('RequestsCard with a verdict', () => {
     expect(verdict).toHaveTextContent('Ads · In-app purchases · Users Interact');
     expect(screen.getByTestId('request-verdict-5')).toHaveTextContent('Checking its Play listing and reviews');
   });
+
 });

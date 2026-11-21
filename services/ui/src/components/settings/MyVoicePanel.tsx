@@ -25,9 +25,14 @@ export default function MyVoicePanel() {
   useEffect(() => () => audio.current?.pause(), []);
 
   const data = voices.data;
-  const featured = data?.featured ?? [];
+  const featured = Array.isArray(data?.featured) ? data.featured : [];
+  // A gateway that answers with a FAILURE body, or a server too old to send the
+  // list, is not a voice list. Reading it as one threw "voices is not iterable"
+  // during render, which took the whole Settings page down (the route's error
+  // boundary replaced it). Say so in this card instead.
+  const unreadable = Boolean(data) && !Array.isArray(data?.voices);
   const jarvis = data?.default ? describeVoice(data.default, featured).name : null;
-  const groups = data ? voiceGroups(data.voices, featured) : [];
+  const groups = data && !unreadable ? voiceGroups(data.voices, featured) : [];
   const known = !chosen || groups.some((g) => g.voices.some((v) => v.id === chosen));
 
   const save = async (next: string) => {
@@ -77,8 +82,12 @@ export default function MyVoicePanel() {
           How Jarvis sounds when it talks to you, including on speakers assigned to you.
         </p>
       </div>
-      {voices.isError ? (
-        <p className="px-1 text-sm text-amber-300" role="alert">The voices could not be loaded. Check your connection and open Settings again.</p>
+      {voices.isError || unreadable ? (
+        <p className="px-1 text-sm text-amber-300" role="alert">
+          {unreadable
+            ? 'The server did not send a list of voices. Everything else on this page still works.'
+            : 'The voices could not be loaded. Check your connection and open Settings again.'}
+        </p>
       ) : (
         <div className="flex items-stretch gap-2">
           <label className="min-w-0 flex-1">
