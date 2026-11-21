@@ -1,0 +1,735 @@
+"""Phase 8: Home Hub sensors, guarded valves, grow lights and NFC/QR tags.
+
+Two rules run through every test here. A house with no garden hardware must see
+**nothing** (``has_any_hardware`` is what hides the UI), and a valve must never
+open outside its caps -- or, having opened, stay open past its timer.
+"""
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlmodel import Session, SQLModel
+
+from services import config
+from services.config import INTERNAL_SECRET  # noqa: E402
+from services.garden import homehub_hardware as hardware  # noqa: E402
+from services.garden import weather_care  # noqa: E402
+from services.garden.main import app  # noqa: E402
+from scripts.build_plants_seed import build_seed  # noqa: E402
+
+
+#: Home Hub's horses: a soil probe, a bed valve, a grow light and an NFC tag.
+HUB_STATES = [
+    {
+        "entity_id": "sensor.bed1_soil_moisture",
+        "state": "22",
+        "attributes": {"device_class": "moisture", "unit_of_measurement": "%", "friendly_name": "Bed 1 Soil Moisture"},
+    },
+    {
+        "entity_id": "sensor.bed1_temperature",
+        "state": "64.4",
+        "attributes": {"device_class": "temperature", "unit_of_measurement": "°F", "friendly_name": "Bed 1 Temperature"},
+    },
+    {
+        "entity_id": "sensor.bed1_humidity",
+        "state": "51",
+        "attributes": {"device_class": "humidity", "unit_of_measurement": "%", "friendly_name": "Bed 1 Humidity"},
+    },
+    {
+        "entity_id": "sensor.bed1_light",
+        "state": "18400",
+        "attributes": {"device_class": "illuminance", "unit_of_measurement": "lx", "friendly_name": "Bed 1 Light"},
+    },
+    {
+        "entity_id": "valve.bed1_drip",
+        "state": "closed",
+        "attributes": {"friendly_name": "Bed 1 Drip"},
+    },
+    {
+        "entity_id": "light.grow_shelf",
+        "state": "off",
+        "attributes": {"friendly_name": "Grow Shelf"},
+    },
+    {
+        "entity_id": "sensor.kitchen_temperature",
+        "state": "71",
+        "attributes": {"device_class": "temperature", "friendly_name": "Kitchen Temperature"},
+    },
+]
+
+HUB_TAGS = [{"tag_id": "tag-bed1", "name": "Bed 1", "last_scanned": None}]
+
+
+def _headers(user: str, role: str) -> dict[str, str]:
+    return {
+        "X-Internal-Secret": INTERNAL_SECRET,
+        "X-User-Id": user,
+        "X-User-Role": role,
+        "X-Is-Admin": "true" if role == "admin" else "false",
+        "X-Family-Manage": "true" if role in ("mother", "father") else "false",
+    }
+
+
+PARENT = _headers("mother", "mother")
+ADULT = _headers("kaleb", "adult_child")
+CHILD = _headers("noah", "child")
+
+
+class Hub:
+    """A fake Home Hub: states, tags and every service call it received."""
+
+    def __init__(self, *, states_rows=None, tags_rows=None, close_works=True, open_works=True):
+        self.states_rows = HUB_STATES if states_rows is None else states_rows
+        self.tags_rows = HUB_TAGS if tags_rows is None else tags_rows
+        self.close_works = close_works
+        self.open_works = open_works
+        self.calls: list[tuple[str, str, dict | None]] = []
+
+    async def __call__(self, method, path, *, body=None):
+        self.calls.append((method, path, body))
+        if method == "GET" and path == "/api/states":
+            return (200, self.states_rows)
+        if method == "GET" and path == "/hub/tags":
+            return (200, {"tags": self.tags_rows})
+        if method == "POST" and "/api/services/" in path:
+            if path.endswith("open_valve") or path.endswith("turn_on"):
+                return (200 if self.open_works else 500, None)
+            if path.endswith("close_valve") or path.endswith("turn_off"):
+                return (200 if self.close_works else 500, None)
+        return (404, None)
+
+    def services(self) -> list[str]:
+        return [path.split("/api/services/", 1)[1] for method, path, _ in self.calls if "/api/services/" in path]
+
+    def bodies(self) -> list[dict | None]:
+        return [body for _method, path, body in self.calls if "/api/services/" in path]
+
+
+@pytest.fixture()
+def seed_path(tmp_path):
+    path = tmp_path / "plants-seed.db"
+    build_seed(path)
+    return str(path)
+
+
+@pytest.fixture()
+def client(seed_path, tmp_path, monkeypatch):
+    import services.garden.main as main_module
+
+    main_module.app.state.engine = None
+    main_module._SEED = None
+    monkeypatch.setenv("GARDEN_DATABASE_URL", f"sqlite:///{tmp_path / 'garden.db'}")
+    monkeypatch.setenv("PLANT_SEED_PATH", seed_path)
+    monkeypatch.setenv("GARDEN_THUMB_DIR", str(tmp_path / "thumbs"))
+    engine = main_module._engine()
+    SQLModel.metadata.create_all(engine)
+    main_module.app.state.engine = engine
+    return TestClient(app)
+
+
+@pytest.fixture()
+def session(client):
+    import services.garden.main as main_module
+
+    with Session(main_module.app.state.engine) as db:
+        yield db
+
+
+@pytest.fixture()
+def hub(monkeypatch):
+    """A hub that is there, with one of everything. Tests may replace it."""
+    fake = Hub()
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test")
+    monkeypatch.setattr(hardware, "_call", fake)
+    hardware.invalidate()
+
+    async def no_rain(_profile=None):
+        return {"active": False, "known": True, "rain_in": 0.0, "threshold_in": 0.25}
+
+    monkeypatch.setattr(weather_care, "rain_state", no_rain)
+    return fake
+
+
+@pytest.fixture()
+def no_hub(monkeypatch):
+    """The ordinary case: a house with no hub at all."""
+    monkeypatch.setattr(config, "HOMEHUB_URL", "")
+    hardware.invalidate()
+
+
+def _bed(client, name="Bed 1", *, covered=False) -> dict:
+    resp = client.post(
+        "/locations",
+        headers=PARENT,
+        json={"name": name, "kind": "raised_bed", "covered": covered, "width_ft": 4, "length_ft": 8},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _plant(client, *, nickname="Monty", species_ref="tomato_roma", category="vegetable", location_id=None) -> dict:
+    body = {"nickname": nickname, "species_ref": species_ref, "category": category}
+    if location_id:
+        body["location_id"] = location_id
+    resp = client.post("/plants", headers=PARENT, json=body)
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _bind(client, kind, target, headers=PARENT, **fields):
+    return client.put(f"/bindings/{kind}/{target}", headers=headers, json=fields)
+
+
+# --------------------------------------------------------------------------- discovery
+
+def test_no_hub_means_no_hardware_and_no_ui(client, no_hub):
+    body = client.get("/hardware/discover", headers=CHILD).json()
+
+    assert body["available"] is False
+    assert body["has_any_hardware"] is False
+    assert body["moisture_sensors"] == [] and body["valves"] == [] and body["tags"] == []
+
+
+def test_an_unreachable_hub_is_not_an_error(client, no_hub, monkeypatch):
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test")
+
+    async def down(method, path, *, body=None):
+        return (0, None)
+
+    monkeypatch.setattr(hardware, "_call", down)
+    hardware.invalidate()
+
+    resp = client.get("/hardware/discover", headers=CHILD)
+
+    assert resp.status_code == 200
+    assert resp.json()["has_any_hardware"] is False
+
+
+def test_a_hub_with_only_other_devices_reports_no_garden_hardware(client, monkeypatch):
+    bare = Hub(states_rows=[
+        {"entity_id": "light.living_room", "state": "on", "attributes": {"friendly_name": "Living Room"}},
+        {"entity_id": "sensor.living_room_temperature", "state": "70", "attributes": {"device_class": "temperature"}},
+    ], tags_rows=[])
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test")
+    monkeypatch.setattr(hardware, "_call", bare)
+    hardware.invalidate()
+
+    body = client.get("/hardware/discover", headers=CHILD).json()
+
+    assert body["available"] is True
+    # The living-room light is a light, so it is a candidate; nothing else is.
+    assert body["moisture_sensors"] == [] and body["valves"] == [] and body["tags"] == []
+
+
+def test_every_garden_entity_is_found_and_classified(client, hub):
+    body = client.get("/hardware/discover", headers=CHILD).json()
+
+    assert body["has_any_hardware"] is True
+    assert [row["entity_id"] for row in body["moisture_sensors"]] == ["sensor.bed1_soil_moisture"]
+    assert [row["entity_id"] for row in body["valves"]] == ["valve.bed1_drip"]
+    assert [row["entity_id"] for row in body["grow_lights"]] == ["light.grow_shelf"]
+    assert [row["tag_id"] for row in body["tags"]] == ["tag-bed1"]
+    assert len(body["temperature_sensors"]) == 2
+    assert body["humidity_sensors"][0]["unit"] == "%"
+    assert body["lux_sensors"][0]["entity_id"] == "sensor.bed1_light"
+
+
+# --------------------------------------------------------------------------- bindings
+
+def test_a_binding_defaults_to_the_safe_choice(client, hub):
+    bed = _bed(client)
+
+    resp = _bind(client, "location", bed["id"], moisture_entity_id="sensor.bed1_soil_moisture", valve_entity_id="valve.bed1_drip")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["valve_mode"] == "notify_only"
+    assert body["max_run_minutes"] == 5
+    assert body["daily_max_runs"] == 2
+    assert body["rain_interlock"] is True
+    assert body["target_name"] == "Bed 1"
+    assert body["readings"]["moisture_pct"] == 22.0
+    assert body["runs_today"] == 0
+
+
+@pytest.mark.parametrize("fields", [
+    {"max_run_minutes": 0},
+    {"max_run_minutes": 31},
+    {"daily_max_runs": 0},
+    {"daily_max_runs": 5},
+    {"valve_mode": "always_on"},
+    {"moisture_threshold_pct": 2},
+    {"grow_light_on_time": "7am"},
+])
+def test_an_unsafe_binding_is_refused(client, hub, fields):
+    bed = _bed(client)
+
+    resp = _bind(client, "location", bed["id"], **fields)
+
+    assert resp.status_code == 400, resp.text
+    assert client.get("/bindings", headers=PARENT).json()["count"] == 0
+
+
+def test_a_grow_light_schedule_needs_its_times(client, hub):
+    bed = _bed(client)
+
+    resp = _bind(client, "location", bed["id"], grow_light_entity_id="light.grow_shelf", grow_light_enabled=True)
+
+    assert resp.status_code == 400
+    assert "on time" in resp.json()["detail"]
+
+
+def test_children_cannot_change_a_binding(client, hub):
+    bed = _bed(client)
+
+    assert _bind(client, "location", bed["id"], headers=CHILD, valve_entity_id="valve.bed1_drip").status_code == 403
+    assert _bind(client, "location", bed["id"], headers=ADULT, valve_entity_id="valve.bed1_drip").status_code == 403
+    assert _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip").status_code == 200
+
+
+def test_a_binding_must_point_at_something_real(client, hub):
+    assert _bind(client, "location", "nope", valve_entity_id="valve.bed1_drip").status_code == 404
+    assert _bind(client, "greenhouse", "nope", valve_entity_id="valve.bed1_drip").status_code == 400
+
+
+def test_one_tag_links_to_one_target(client, hub):
+    first = _bed(client, "Bed 1")
+    second = _bed(client, "Bed 2")
+    assert _bind(client, "location", first["id"], nfc_tag_id="tag-bed1").status_code == 200
+
+    resp = _bind(client, "location", second["id"], nfc_tag_id="tag-bed1")
+
+    assert resp.status_code == 409
+    assert "already linked" in resp.json()["detail"]
+
+
+# --------------------------------------------------------------------------- moisture override
+
+def _due_rule(session, plant_id: str, *, when: datetime) -> None:
+    from sqlmodel import select as _select
+
+    from services.garden.models import CareRule
+
+    rule = session.exec(
+        _select(CareRule).where(CareRule.plant_id == plant_id, CareRule.action == "water")
+    ).first()
+    assert rule is not None, "the plant should have a seeded watering rule"
+    rule.next_due_at = when.isoformat()
+    rule.snoozed_until = None
+    session.add(rule)
+    session.commit()
+
+
+def test_a_dry_reading_makes_a_plant_due_now(client, hub, session):
+    bed = _bed(client)
+    plant = _plant(client, location_id=bed["id"])
+    _due_rule(session, plant["id"], when=datetime.now(UTC) + timedelta(days=3))
+    _bind(client, "plant", plant["id"], moisture_entity_id="sensor.bed1_soil_moisture", moisture_override_enabled=True)
+
+    body = client.get("/today", headers=CHILD).json()
+
+    task = next(t for t in body["all"] if t["plant_id"] == plant["id"])
+    assert task["moisture_pct"] == 22.0
+    assert task["moisture_reason"] == "Soil moisture is 22% (below 30%)"
+
+
+def test_a_wet_reading_holds_off_a_due_plant(client, hub, session, monkeypatch):
+    bed = _bed(client)
+    plant = _plant(client, location_id=bed["id"])
+    _due_rule(session, plant["id"], when=datetime.now(UTC) - timedelta(days=1))
+    _bind(client, "plant", plant["id"], moisture_entity_id="sensor.bed1_soil_moisture", moisture_override_enabled=True)
+    wet = [dict(row) for row in HUB_STATES]
+    wet[0] = {**wet[0], "state": "78"}
+    monkeypatch.setattr(hardware, "_call", Hub(states_rows=wet))
+    hardware.invalidate()
+
+    body = client.get("/today", headers=CHILD).json()
+
+    assert all(t["plant_id"] != plant["id"] for t in body["all"])
+    held = next(h for h in body["held_by_moisture"] if h["plant_id"] == plant["id"])
+    assert held["reason"] == "Soil moisture is 78% — holding off"
+
+
+def test_an_offline_sensor_falls_back_to_the_schedule(client, hub, session, monkeypatch):
+    bed = _bed(client)
+    plant = _plant(client, location_id=bed["id"])
+    _due_rule(session, plant["id"], when=datetime.now(UTC) - timedelta(days=1))
+    _bind(client, "plant", plant["id"], moisture_entity_id="sensor.bed1_soil_moisture", moisture_override_enabled=True)
+    dead = [dict(row) for row in HUB_STATES]
+    dead[0] = {**dead[0], "state": "unavailable"}
+    monkeypatch.setattr(hardware, "_call", Hub(states_rows=dead))
+    hardware.invalidate()
+
+    task = next(
+        t for t in client.get("/today", headers=CHILD).json()["all"] if t["plant_id"] == plant["id"]
+    )
+
+    assert task["moisture_pct"] is None
+    assert task["moisture_offline"] is True
+
+
+def test_the_override_is_opt_in(client, hub, session, monkeypatch):
+    bed = _bed(client)
+    plant = _plant(client, location_id=bed["id"])
+    _due_rule(session, plant["id"], when=datetime.now(UTC) + timedelta(days=3))
+    _bind(client, "plant", plant["id"], moisture_entity_id="sensor.bed1_soil_moisture")
+
+    body = client.get("/today", headers=CHILD).json()
+
+    assert all(t["plant_id"] != plant["id"] for t in body["all"])
+    assert body["held_by_moisture"] == []
+
+
+def test_the_plant_card_carries_the_live_moisture(client, hub):
+    plant = _plant(client, nickname="Monty", species_ref="monstera_deliciosa", category="houseplant")
+    assert client.get("/plants", headers=CHILD).json()[0]["live_moisture_pct"] is None
+    _bind(client, "plant", plant["id"], moisture_entity_id="sensor.bed1_soil_moisture")
+
+    row = client.get("/plants", headers=CHILD).json()[0]
+
+    assert row["live_moisture_pct"] == 22.0
+
+
+# --------------------------------------------------------------------------- guarded valve runs
+
+def _binding_id(client, kind, target) -> str:
+    rows = client.get("/bindings", headers=PARENT).json()["bindings"]
+    return next(row["id"] for row in rows if row["target_kind"] == kind and row["target_id"] == target)
+
+
+def test_a_guarded_run_opens_the_valve_and_logs_a_watering(client, hub, session):
+    from sqlmodel import select as _select
+
+    from services.garden.models import CareLog
+
+    bed = _bed(client)
+    plant = _plant(client, nickname="Monty", location_id=bed["id"])
+    _bind(client, "plant", plant["id"], valve_entity_id="valve.bed1_drip", max_run_minutes=10)
+
+    resp = client.post(f"/bindings/{_binding_id(client, 'plant', plant['id'])}/valve/run", headers=PARENT, json={"minutes": 3})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["minutes"] == 3
+    assert body["runs_today"] == 1
+    assert body["closes_at"] > body["opened_at"]
+    assert hub.services() == ["valve/open_valve"]
+    assert hub.bodies() == [{"entity_id": "valve.bed1_drip"}]
+    logs = session.exec(_select(CareLog).where(CareLog.plant_id == plant["id"])).all()
+    assert [(row.action, row.source) for row in logs] == [("water", "homehub_valve")]
+    assert body["next_due_at"] is not None
+
+
+def test_a_run_is_refused_beyond_the_bindings_own_cap(client, hub):
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip", max_run_minutes=5)
+
+    resp = client.post(f"/bindings/{_binding_id(client, 'location', bed['id'])}/valve/run", headers=PARENT, json={"minutes": 30})
+
+    assert resp.status_code == 400
+    assert "capped at 5" in resp.json()["detail"]
+    assert hub.services() == []
+
+
+def test_the_daily_cap_is_counted_from_the_care_log(client, hub):
+    bed = _bed(client)
+    plant = _plant(client, location_id=bed["id"])
+    _bind(client, "plant", plant["id"], valve_entity_id="valve.bed1_drip", daily_max_runs=1)
+    binding_id = _binding_id(client, "plant", plant["id"])
+    assert client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"minutes": 2}).status_code == 200
+    assert client.post(f"/bindings/{binding_id}/valve/stop", headers=PARENT).status_code == 200
+
+    resp = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"minutes": 2})
+
+    assert resp.status_code == 409
+    assert "Daily max runs reached (1 of 1 today)" in resp.json()["detail"]
+
+
+def test_a_second_run_cannot_start_while_one_is_open(client, hub):
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    assert client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={}).status_code == 200
+
+    resp = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 409
+    assert "already in progress" in resp.json()["detail"]
+
+
+def test_the_rain_interlock_blocks_an_uncovered_bed(client, hub, monkeypatch):
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    async def raining(_profile=None):
+        return {"active": True, "known": True, "rain_in": 0.6, "threshold_in": 0.25}
+
+    monkeypatch.setattr(weather_care, "rain_state", raining)
+
+    resp = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 409
+    assert "rain interlock" in resp.json()["detail"]
+    assert hub.services() == []
+    # A parent may still choose to water through it.
+    override = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"override_rain": True})
+    assert override.status_code == 200
+
+
+def test_rain_cannot_reach_a_covered_bed(client, hub, monkeypatch):
+    bed = _bed(client, "Greenhouse", covered=True)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+
+    async def raining(_profile=None):
+        return {"active": True, "known": True, "rain_in": 0.6, "threshold_in": 0.25}
+
+    monkeypatch.setattr(weather_care, "rain_state", raining)
+
+    resp = client.post(f"/bindings/{_binding_id(client, 'location', bed['id'])}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 200
+
+
+def test_only_parents_and_admins_may_touch_a_valve(client, hub):
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    assert client.post(f"/bindings/{binding_id}/valve/run", headers=CHILD, json={}).status_code == 403
+    assert client.post(f"/bindings/{binding_id}/valve/run", headers=ADULT, json={}).status_code == 403
+    assert client.post(f"/bindings/{binding_id}/valve/stop", headers=CHILD).status_code == 403
+    assert hub.services() == []
+
+
+def test_stop_closes_the_valve_and_clears_the_run(client, hub):
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    resp = client.post(f"/bindings/{binding_id}/valve/stop", headers=PARENT)
+
+    assert resp.status_code == 200
+    assert hub.services()[-1] == "valve/close_valve"
+    row = next(r for r in client.get("/bindings", headers=PARENT).json()["bindings"] if r["id"] == binding_id)
+    assert row["active_run_started_at"] is None
+
+
+# --------------------------------------------------------------------------- failsafe watchdog
+
+def _rewind_timer(session, binding_id: str, *, minutes_ago: int = 2) -> None:
+    from services.garden.models import HomeHubBinding
+
+    session.expire_all()
+    binding = session.get(HomeHubBinding, binding_id)
+    binding.active_run_ends_at = (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat()
+    session.add(binding)
+    session.commit()
+
+
+def test_the_watchdog_closes_a_valve_past_its_timer(client, hub, session):
+    import asyncio
+
+    import services.garden.main as main_module
+
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"minutes": 1})
+    _rewind_timer(session, binding_id)
+
+    results = asyncio.run(hardware.check_valve_failsafe(lambda: main_module.app.state.engine))
+
+    assert results == [{"binding_id": binding_id, "closed": True}]
+    assert hub.services()[-1] == "valve/close_valve"
+    session.expire_all()
+    assert client.get("/bindings", headers=PARENT).json()["bindings"][0]["active_run_started_at"] is None
+
+
+def test_a_valve_that_will_not_close_shouts_for_a_parent(client, hub, monkeypatch, session):
+    import asyncio
+
+    import services.garden.main as main_module
+
+    # The same hub, but it will not confirm a close.
+    deaf = Hub(close_works=False)
+    monkeypatch.setattr(hardware, "_call", deaf)
+    hardware.invalidate()
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"minutes": 1})
+    _rewind_timer(session, binding_id)
+
+    alerts: list[dict] = []
+
+    async def capture(payload, **_kw):
+        alerts.append(payload)
+
+    monkeypatch.setattr(hardware.notify, "send", capture)
+
+    async def parents():
+        return ["mother", "father"]
+
+    results = asyncio.run(
+        hardware.check_valve_failsafe(lambda: main_module.app.state.engine, parents)
+    )
+
+    assert results == [{"binding_id": binding_id, "closed": False}]
+    assert [alert["user"] for alert in alerts] == ["mother", "father"]
+    assert alerts[0]["priority"] == 4
+    assert "could not confirm" in alerts[0]["body"]
+    # The run stays flagged, so the next tick tries again rather than forgetting it.
+    session.expire_all()
+    row = next(r for r in client.get("/bindings", headers=PARENT).json()["bindings"] if r["id"] == binding_id)
+    assert row["active_run_started_at"] is not None
+
+
+# --------------------------------------------------------------------------- grow lights
+
+def test_a_photoperiod_window_can_cross_midnight():
+    from services.garden.models import HomeHubBinding
+
+    binding = HomeHubBinding(
+        target_kind="plant", target_id="p-1", grow_light_enabled=True,
+        grow_light_entity_id="light.grow_shelf",
+        grow_light_on_time="18:00", grow_light_off_time="06:00",
+    )
+
+    assert hardware.grow_light_window(binding, datetime(2026, 11, 20, 23, 0)) is True
+    assert hardware.grow_light_window(binding, datetime(2026, 11, 20, 5, 59)) is True
+    assert hardware.grow_light_window(binding, datetime(2026, 11, 20, 12, 0)) is False
+
+
+def test_an_unscheduled_light_has_no_window():
+    from services.garden.models import HomeHubBinding
+
+    off = HomeHubBinding(target_kind="plant", target_id="p-1", grow_light_entity_id="light.x")
+    no_entity = HomeHubBinding(
+        target_kind="plant", target_id="p-1", grow_light_enabled=True,
+        grow_light_on_time="06:00", grow_light_off_time="20:00",
+    )
+
+    assert hardware.grow_light_window(off, datetime(2026, 11, 20, 12, 0)) is None
+    assert hardware.grow_light_window(no_entity, datetime(2026, 11, 20, 12, 0)) is None
+
+
+def test_a_light_is_turned_on_inside_its_window(client, hub):
+    import asyncio
+
+    import services.garden.main as main_module
+
+    bed = _bed(client)
+    _bind(
+        client, "location", bed["id"], grow_light_entity_id="light.grow_shelf",
+        grow_light_enabled=True, grow_light_on_time="06:00", grow_light_off_time="20:00",
+    )
+
+    actions = asyncio.run(
+        hardware.sync_grow_lights(
+            lambda: main_module.app.state.engine, now=datetime(2026, 11, 20, 12, 0)
+        )
+    )
+
+    assert [action["turned_on"] for action in actions] == [True]
+    assert hub.services() == ["light/turn_on"]
+
+
+def test_a_light_already_on_is_left_alone(client, hub, monkeypatch):
+    import asyncio
+
+    import services.garden.main as main_module
+
+    bed = _bed(client)
+    _bind(
+        client, "location", bed["id"], grow_light_entity_id="light.grow_shelf",
+        grow_light_enabled=True, grow_light_on_time="06:00", grow_light_off_time="20:00",
+    )
+    lit = [dict(row) for row in HUB_STATES]
+    lit[5] = {**lit[5], "state": "on"}
+    monkeypatch.setattr(hardware, "_call", Hub(states_rows=lit))
+    hardware.invalidate()
+
+    actions = asyncio.run(
+        hardware.sync_grow_lights(
+            lambda: main_module.app.state.engine, now=datetime(2026, 11, 20, 12, 0)
+        )
+    )
+
+    assert actions == []
+
+
+# --------------------------------------------------------------------------- NFC / QR tags
+
+def test_a_tag_scan_opens_the_bed_it_is_on(client, hub):
+    bed = _bed(client)
+    _plant(client, location_id=bed["id"])
+    _bind(
+        client, "location", bed["id"],
+        nfc_tag_id="tag-bed1", moisture_entity_id="sensor.bed1_soil_moisture",
+    )
+
+    body = client.get("/tags/tag-bed1", headers=CHILD).json()
+
+    assert body["matched"] is True
+    assert body["target_kind"] == "location"
+    assert body["target_name"] == "Bed 1"
+    assert body["location"]["plant_count"] == 1
+    assert body["readings"]["moisture_pct"] == 22.0
+    assert body["actions"] == ["water", "photo"]
+
+
+def test_a_tag_scan_on_a_plant_says_what_is_owed(client, hub, session):
+    plant = _plant(client, nickname="Monty")
+    _due_rule(session, plant["id"], when=datetime.now(UTC) - timedelta(days=2))
+    _bind(client, "plant", plant["id"], nfc_tag_id="tag-monty")
+
+    body = client.get("/tags/tag-monty", headers=CHILD).json()
+
+    assert body["target_kind"] == "plant"
+    assert body["plant"]["nickname"] == "Monty"
+    assert body["due_today"] is True
+    assert body["next_due_at"] is not None
+
+
+def test_an_unknown_tag_says_so_plainly(client, hub):
+    resp = client.get("/tags/tag-nope", headers=CHILD)
+
+    assert resp.status_code == 404
+    assert "not linked" in resp.json()["detail"]
+
+
+def test_a_tag_scan_needs_a_person(client, hub):
+    assert client.get("/tags/tag-bed1", headers={"X-Internal-Secret": INTERNAL_SECRET}).status_code == 401
+
+
+def test_removing_a_binding_forgets_its_tag(client, hub):
+    bed = _bed(client)
+    assert _bind(client, "location", bed["id"], nfc_tag_id="tag-bed1").status_code == 200
+
+    assert client.delete(f"/bindings/location/{bed['id']}", headers=PARENT).status_code == 204
+
+    assert client.get("/tags/tag-bed1", headers=CHILD).status_code == 404
+    assert client.get("/bindings", headers=PARENT).json()["count"] == 0
+
+
+def test_removing_a_binding_closes_an_open_valve_first(client, hub):
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    resp = client.delete(f"/bindings/location/{bed['id']}", headers=PARENT)
+
+    assert resp.status_code == 204
+    assert hub.services()[-1] == "valve/close_valve"
+
+
+def test_a_child_cannot_delete_a_binding(client, hub):
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+
+    assert client.delete(f"/bindings/location/{bed['id']}", headers=CHILD).status_code == 403

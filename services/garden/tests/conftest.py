@@ -12,10 +12,13 @@ from __future__ import annotations
 import pytest
 
 from services import config
-from services.garden import hub_rooms
+from services.garden import homehub_hardware, hub_rooms
 
 
 @pytest.fixture(autouse=True)
 def _no_home_hub(monkeypatch):
     monkeypatch.setattr(config, "HOMEHUB_URL", "")
     monkeypatch.setattr(hub_rooms, "_cache", None)
+    # Phase 8: same reason, for the hardware discovery caches.
+    monkeypatch.setattr(homehub_hardware, "_states_cache", None)
+    monkeypatch.setattr(homehub_hardware, "_tags_cache", None)

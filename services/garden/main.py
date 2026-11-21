@@ -62,6 +62,9 @@ from services.garden.models import (
     GardenProfileOut,
     HarvestLog,
     HarvestLogIn,
+    HomeHubBinding,
+    HomeHubBindingIn,
+    HomeHubBindingOut,
     HarvestLogOut,
     Location,
     LocationIn,
@@ -83,9 +86,12 @@ from services.garden.models import (
     PlantPhoto,
     PlantPhotoIn,
     PlantPhotoOut,
+    ValveRunIn,
+    VALVE_MODES,
     utcnow,
 )
 from services.garden.achievements import evaluate as evaluate_achievements
+from services.garden import homehub_hardware as hardware
 from services.garden import hub_rooms as rooms_hub
 from services.garden import preservation as pantry
 from services.garden import household
@@ -184,11 +190,17 @@ async def lifespan(app: FastAPI):
     digest_task = asyncio.create_task(digest_loop(_db, _family_list))
     # Start the weather-smart care poller (disabled under pytest).
     weather_task = asyncio.create_task(weather_poller(_db, _family_list, _resolve_seed_get))
+    # Phase 8: the valve failsafe (the one loop that must never be optional) and
+    # the grow-light photoperiod, both disabled under pytest.
+    valve_task = asyncio.create_task(hardware.valve_watchdog(_db, _family_list))
+    grow_light_task = asyncio.create_task(hardware.grow_light_loop(_db))
     try:
         yield
     finally:
         digest_task.cancel()
         weather_task.cancel()
+        valve_task.cancel()
+        grow_light_task.cancel()
 
 
 def _resolve_seed_get(key: str) -> dict | None:
@@ -302,8 +314,48 @@ def _next_due_at(session: Session, plant_id: str) -> str | None:
     return min(dues) if dues else None
 
 
-def _plant_out(row: Plant, species: dict | None = None, session: Session | None = None) -> dict:
+async def _moisture_map(session: Session) -> dict[tuple[str, str], dict]:
+    """Live moisture per bound target: ``{("plant", id): snapshot}``.
+
+    Empty (after one cheap query) unless something is actually bound, which is
+    what keeps a hardware-free garden exactly as fast as it was before Phase 8.
+    """
+    bindings = session.exec(
+        select(HomeHubBinding).where(HomeHubBinding.moisture_entity_id.is_not(None))
+    ).all()
+    if not bindings or not hardware.enabled():
+        return {}
+    try:
+        states = await hardware.state_map()
+    except Exception as e:  # a hub that is away means no pill, not a broken page
+        log.info("[Garden] live moisture unavailable: %s", e)
+        return {}
+    return {
+        (binding.target_kind, binding.target_id): hardware.snapshot_from(binding, states)
+        for binding in bindings
+    }
+
+
+def _plant_out(
+    row: Plant,
+    species: dict | None = None,
+    session: Session | None = None,
+    moistures: dict | None = None,
+) -> dict:
+    """A plant as the UI reads it, with a live moisture pill when one is bound.
+
+    ``moistures`` is fetched once per request (``_moisture_map``) so a page of
+    cards asks Home Hub once, and a household with no sensors does no work here.
+    """
     data = row.model_dump()
+    pct = None
+    if moistures:
+        snapshot = moistures.get(("plant", row.id))
+        if snapshot is None and row.location_id:
+            snapshot = moistures.get(("location", row.location_id))
+        if snapshot:
+            pct = snapshot.get("moisture_pct")
+    data["live_moisture_pct"] = pct
     if session is not None:
         # The plant's next care, so a card can say "Due today"/"Next care: …"
         # instead of a placeholder. Earliest rule wins: that is what is next.
@@ -1044,23 +1096,25 @@ def resolve_plant_target(
 
 
 @app.get("/plants/{plant_id}")
-def get_plant(plant_id: str, request: Request, session: Session = Depends(get_session)):
-    """One plant, with its species cues and next care date."""
+async def get_plant(plant_id: str, request: Request, session: Session = Depends(get_session)):
+    """One plant, with its species cues, next care date and live moisture."""
     _user(request)
     row = session.get(Plant, plant_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Plant not found")
-    return _plant_out(row, resolve_species(session, row.species_ref), session)
+    moistures = await _moisture_map(session)
+    return _plant_out(row, resolve_species(session, row.species_ref), session, moistures)
 
 
 @app.get("/plants")
-def list_plants(request: Request, session: Session = Depends(get_session)):
+async def list_plants(request: Request, session: Session = Depends(get_session)):
     _user(request)
     rows = session.exec(select(Plant).where(Plant.status == "active").order_by(Plant.updated_at.desc())).all()
+    moistures = await _moisture_map(session)
     out = []
     for row in rows:
         species = resolve_species(session, row.species_ref)
-        out.append(_plant_out(row, species, session))
+        out.append(_plant_out(row, species, session, moistures))
     return out
 
 
@@ -1229,6 +1283,27 @@ async def today(
         select(CareRule).where(CareRule.paused == False)  # noqa: E712
     ).all()
 
+    # Phase 8: a live soil reading may move a plant in or out of today's list.
+    # Fetched once (and only when something is bound) so the loop stays cheap.
+    moisture_bindings = session.exec(
+        select(HomeHubBinding).where(HomeHubBinding.moisture_override_enabled == True)  # noqa: E712
+    ).all()
+    moisture_states = await hardware.state_map() if moisture_bindings and hardware.enabled() else {}
+    moisture_by_target = {
+        (binding.target_kind, binding.target_id): binding for binding in moisture_bindings
+    }
+    held_tasks: list[dict] = []
+
+    def _verdict(plant: Plant, plant_location) -> dict:
+        """This plant's moisture verdict, from its own binding or its room's."""
+        binding = moisture_by_target.get(("plant", plant.id))
+        if binding is None and plant.location_id:
+            binding = moisture_by_target.get(("location", plant.location_id))
+        if binding is None:
+            return {"applies": False}
+        snapshot = hardware.snapshot_from(binding, moisture_states)
+        return hardware.moisture_verdict(binding, snapshot)
+
     due_tasks = []
     for rule in rules:
         plant = session.get(Plant, rule.plant_id)
@@ -1265,7 +1340,23 @@ async def today(
                 snooze_dt = None
             if snooze_dt and snooze_dt > now:
                 continue  # still snoozed, skip
-        if due_dt > now:
+        verdict = _verdict(plant, location)
+        sensor_due = bool(verdict.get("due"))
+        if due_dt > now and not sensor_due:
+            continue
+        if verdict.get("hold") and due_dt and due_dt <= now:
+            # The timer says water, the soil says no. Say why, do not nag.
+            held_tasks.append(
+                {
+                    "plant_id": plant.id,
+                    "nickname": plant.nickname,
+                    "location_name": location.name if location else None,
+                    "action": rule.action,
+                    "next_due_at": rule.next_due_at,
+                    "moisture_pct": verdict.get("moisture_pct"),
+                    "reason": verdict.get("reason"),
+                }
+            )
             continue
         species = resolve_species(session, plant.species_ref) if seed.present else None
         # Location already fetched above for assignment inheritance.
@@ -1318,6 +1409,9 @@ async def today(
                 "placement_warning": placement,
                 "calibration_factor": rule.calibration_factor,
                 "assigned_to": plant_assigned,
+                "moisture_pct": verdict.get("moisture_pct"),
+                "moisture_reason": verdict.get("reason"),
+                "moisture_offline": bool(verdict.get("offline")),
             }
         )
 
@@ -1403,6 +1497,7 @@ async def today(
         "all": due_tasks,
         "weather": weather_summary,
         "ready_to_harvest": _ready,
+        "held_by_moisture": held_tasks,
     }
 
 
@@ -1566,32 +1661,15 @@ def log_care(
     if plant.status != "active":
         raise HTTPException(status_code=409, detail="Plant is not active")
 
-    species = resolve_species(session, plant.species_ref)
-
-    # Write the care log.
-    log_row = CareLog(
-        plant_id=plant_id,
+    log_row, rule = _record_care(
+        session,
+        plant,
         action=body.action,
-        performed_by=body.performed_by or user,
         source=body.source,
+        performed_by=body.performed_by or user,
         notes=body.notes,
-        sensor_snapshot_json=json.dumps(body.sensor_snapshot) if body.sensor_snapshot else None,
+        sensor_snapshot=body.sensor_snapshot,
     )
-    session.add(log_row)
-    # Mirror to Skylight if the plant has opt-in sync enabled -- but never for a
-    # completion that came *from* Skylight: that chore is already done, and
-    # mirroring it back is how two systems loop.
-    if body.source != "skylight_chore":
-        mirror_care_log(session, plant_id=plant_id, action=body.action, performed_by=log_row.performed_by)
-
-    # Advance the matching care rule's next_due_at using compute_interval.
-    rule = _advance_care_rule(session, plant, body.action)
-
-    plant.updated_at = utcnow()
-    session.commit()
-    session.refresh(log_row)
-    if rule:
-        session.refresh(rule)
 
     return {
         "ok": True,
@@ -1659,28 +1737,67 @@ def snooze_plant(
     }
 
 
-# --------------------------------------------------------------------------- location batch watering
+# --------------------------------------------------------------------------- watering, one way
 
 
-@app.post("/locations/{loc_id}/water-all")
-async def water_all(
+def _record_care(
+    session: Session,
+    plant: Plant,
+    *,
+    action: str,
+    source: str,
+    performed_by: str | None,
+    notes: str | None = None,
+    sensor_snapshot: dict | None = None,
+) -> tuple[CareLog, CareRule | None]:
+    """Write one care log, mirror it to Skylight, and advance the next due date.
+
+    The single implementation behind a logged care action, a room watering and a
+    Home Hub valve run -- they differ only in ``action`` and ``source``.
+    """
+    log_row = CareLog(
+        plant_id=plant.id,
+        action=action,
+        performed_by=performed_by,
+        source=source,
+        notes=notes,
+        sensor_snapshot_json=json.dumps(sensor_snapshot) if sensor_snapshot else None,
+    )
+    session.add(log_row)
+    # Never mirror a completion that came *from* Skylight: that chore is already
+    # done, and reflecting it back is how two systems loop.
+    if source != "skylight_chore":
+        mirror_care_log(session, plant_id=plant.id, action=action, performed_by=performed_by)
+    rule = _advance_care_rule(session, plant, action)
+    plant.updated_at = utcnow()
+    session.commit()
+    session.refresh(log_row)
+    if rule:
+        session.refresh(rule)
+    return log_row, rule
+
+
+def _water_location_plants(
+    session: Session,
+    *,
     loc_id: str,
-    request: Request,
-    due_only: bool = Query(True, description="Only water due/overdue plants"),
-    source: str = Query("manual", description="Where this came from: manual, voice, push_action, nfc_tag"),
-    session: Session = Depends(get_session),
-):
-    """Batch-water all (due) plants in a room (Home Hub rooms included)."""
-    user = _user(request)
-    location = await _place(session, loc_id)
-    if location is None:
-        raise HTTPException(status_code=404, detail="Location not found")
+    location_name: str,
+    performed_by: str,
+    source: str,
+    due_only: bool = True,
+    notes_prefix: str = "batch water room",
+    sensor_snapshot: dict | None = None,
+) -> list[dict]:
+    """Water every (due) plant in a place, and return what was watered.
 
+    One implementation for the room button, a spoken "watered the living room"
+    and an irrigation valve run: same cadence advance, same Skylight mirror.
+    """
     now = datetime.now(UTC)
+    snapshot_json = json.dumps(sensor_snapshot) if sensor_snapshot else None
     plants = session.exec(
         select(Plant).where(Plant.location_id == loc_id, Plant.status == "active")
     ).all()
-
     watered = []
     for plant in plants:
         species = resolve_species(session, plant.species_ref)
@@ -1718,13 +1835,14 @@ async def water_all(
                 plant_id=plant.id,
                 location_id=loc_id,
                 action="water",
-                performed_by=user,
+                performed_by=performed_by,
                 source=source,
-                notes=f"batch water room: {location.name}",
+                notes=f"{notes_prefix}: {location_name}",
+                sensor_snapshot_json=snapshot_json,
             )
         )
         if source != "skylight_chore":
-            mirror_care_log(session, plant_id=plant.id, action="water", performed_by=user)
+            mirror_care_log(session, plant_id=plant.id, action="water", performed_by=performed_by)
         plant.updated_at = utcnow()
         common_name = species.get("common_name") if species else plant.species_ref
         watered.append(
@@ -1735,8 +1853,31 @@ async def water_all(
                 "next_due_at": rule.next_due_at if rule else None,
             }
         )
-
     session.commit()
+    return watered
+
+
+@app.post("/locations/{loc_id}/water-all")
+async def water_all(
+    loc_id: str,
+    request: Request,
+    due_only: bool = Query(True, description="Only water due/overdue plants"),
+    source: str = Query("manual", description="Where this came from: manual, voice, push_action, nfc_tag"),
+    session: Session = Depends(get_session),
+):
+    """Batch-water all (due) plants in a room (Home Hub rooms included)."""
+    user = _user(request)
+    location = await _place(session, loc_id)
+    if location is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+    watered = _water_location_plants(
+        session,
+        loc_id=loc_id,
+        location_name=location.name,
+        performed_by=user,
+        source=source,
+        due_only=due_only,
+    )
     return {
         "ok": True,
         "location_id": loc_id,
@@ -3059,3 +3200,286 @@ def delete_plant_photo(
     session.delete(row)
     session.commit()
     return JSONResponse(status_code=204, content=None)
+
+
+# --------------------------------------------------------------------------- Home Hub hardware (Phase 8)
+
+#: A wall-clock time the grow-light schedule accepts.
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _require_binding_target(session: Session, target_kind: str, target_id: str) -> None:
+    """A binding must point at a plant or a bed that exists."""
+    if target_kind not in ("plant", "location"):
+        raise HTTPException(status_code=400, detail="target_kind must be 'plant' or 'location'")
+    model = Plant if target_kind == "plant" else Location
+    if session.get(model, target_id) is None:
+        label = "Plant" if target_kind == "plant" else "Location"
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+
+
+def _validate_binding_fields(fields: dict) -> dict:
+    """Every safety cap, checked before anything is stored.
+
+    Refusing an impossible binding here means the valve runner never has to guess
+    what a ``max_run_minutes`` of 0 meant.
+    """
+    mode = fields.get("valve_mode")
+    if mode is not None and mode not in VALVE_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"valve_mode must be one of {', '.join(VALVE_MODES)}",
+        )
+    minutes = fields.get("max_run_minutes")
+    if minutes is not None and not 1 <= int(minutes) <= 30:
+        raise HTTPException(status_code=400, detail="max_run_minutes must be between 1 and 30")
+    runs = fields.get("daily_max_runs")
+    if runs is not None and not 1 <= int(runs) <= 4:
+        raise HTTPException(status_code=400, detail="daily_max_runs must be between 1 and 4")
+    threshold = fields.get("moisture_threshold_pct")
+    if threshold is not None and not 5.0 <= float(threshold) <= 80.0:
+        raise HTTPException(status_code=400, detail="moisture_threshold_pct must be between 5 and 80")
+    for key in ("grow_light_on_time", "grow_light_off_time"):
+        value = fields.get(key)
+        if value and not _HHMM.match(str(value)):
+            raise HTTPException(status_code=400, detail=f"{key} must be HH:MM")
+    return fields
+
+
+def _binding_target_name(session: Session, binding: HomeHubBinding) -> str | None:
+    if binding.target_kind == "plant":
+        plant = session.get(Plant, binding.target_id)
+        return (plant.nickname or plant.species_ref) if plant else None
+    location = session.get(Location, binding.target_id)
+    return location.name if location else None
+
+
+def _binding_out(
+    session: Session,
+    binding: HomeHubBinding,
+    *,
+    snapshot: dict | None = None,
+    runs: int | None = None,
+) -> dict:
+    """A binding as the UI reads it: the ids, the caps, the readings, the count."""
+    out = HomeHubBindingOut(**binding.model_dump())
+    out.target_name = _binding_target_name(session, binding)
+    out.readings = snapshot or {}
+    out.runs_today = hardware.runs_today(session, binding) if runs is None else runs
+    return out.model_dump()
+
+
+@app.get("/hardware/discover")
+async def discover_hardware(
+    request: Request,
+    fresh: bool = Query(False, description="Skip the short cache and ask Home Hub again"),
+):
+    """What garden hardware Home Hub has, and whether there is any at all."""
+    _user(request)
+    return await hardware.discover_hardware(fresh=fresh)
+
+
+@app.get("/bindings")
+async def list_bindings(
+    request: Request,
+    plant_id: str | None = Query(None),
+    location_id: str | None = Query(None),
+    session: Session = Depends(get_session),
+):
+    """Bindings, each with its live readings and today's valve runs.
+
+    A plant's bindings include its room's, so a card can show the moisture of the
+    bed the pot stands in without a second round-trip.
+    """
+    _user(request)
+    wanted: list[tuple[str, str]] = []
+    if plant_id:
+        wanted.append(("plant", plant_id))
+        plant = session.get(Plant, plant_id)
+        if plant is not None and plant.location_id:
+            wanted.append(("location", plant.location_id))
+    elif location_id:
+        wanted.append(("location", location_id))
+
+    rows = session.exec(select(HomeHubBinding).order_by(HomeHubBinding.created_at)).all()
+    if wanted:
+        rows = [row for row in rows if (row.target_kind, row.target_id) in wanted]
+        rows.sort(key=lambda row: wanted.index((row.target_kind, row.target_id)))
+
+    states = await hardware.state_map() if rows and hardware.enabled() else {}
+    return {
+        "count": len(rows),
+        "bindings": [
+            _binding_out(session, row, snapshot=hardware.snapshot_from(row, states))
+            for row in rows
+        ],
+    }
+
+
+@app.put("/bindings/{target_kind}/{target_id}")
+async def upsert_binding(
+    target_kind: str,
+    target_id: str,
+    body: HomeHubBindingIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Create or update a plant's or bed's hardware binding (parents/admins)."""
+    _require_parent_or_admin(request)
+    _require_binding_target(session, target_kind, target_id)
+    fields = _validate_binding_fields(body.model_dump(exclude_unset=True, exclude_none=True))
+
+    binding = session.exec(
+        select(HomeHubBinding).where(
+            HomeHubBinding.target_kind == target_kind, HomeHubBinding.target_id == target_id
+        )
+    ).first()
+    if binding is None:
+        binding = HomeHubBinding(target_kind=target_kind, target_id=target_id)
+    for key, value in fields.items():
+        setattr(binding, key, value)
+
+    if binding.grow_light_enabled and not (
+        binding.grow_light_entity_id and binding.grow_light_on_time and binding.grow_light_off_time
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="A grow-light schedule needs an entity, an on time and an off time",
+        )
+    if binding.nfc_tag_id:
+        clash = session.exec(
+            select(HomeHubBinding).where(
+                HomeHubBinding.nfc_tag_id == binding.nfc_tag_id,
+                HomeHubBinding.id != binding.id,
+            )
+        ).first()
+        if clash is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"That tag is already linked to {_binding_target_name(session, clash) or 'another target'}",
+            )
+
+    binding.updated_at = utcnow()
+    session.add(binding)
+    session.commit()
+    session.refresh(binding)
+    return _binding_out(session, binding, snapshot=await hardware.read_binding_snapshot(binding))
+
+
+@app.delete("/bindings/{target_kind}/{target_id}")
+async def delete_binding(
+    target_kind: str,
+    target_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Remove a binding -- closing a valve it left open first (parents/admins)."""
+    _require_parent_or_admin(request)
+    binding = session.exec(
+        select(HomeHubBinding).where(
+            HomeHubBinding.target_kind == target_kind, HomeHubBinding.target_id == target_id
+        )
+    ).first()
+    if binding is None:
+        raise HTTPException(status_code=404, detail="No binding for that target")
+    if hardware.active_run(binding):
+        try:
+            await hardware.stop_valve(session, binding)
+        except hardware.HardwareBlocked as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.reason) from None
+    session.delete(binding)
+    session.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
+async def _binding_place(session: Session, binding: HomeHubBinding):
+    """The place a binding waters: the bed itself, or the plant's bed."""
+    if binding.target_kind == "location":
+        return await _place(session, binding.target_id)
+    plant = session.get(Plant, binding.target_id)
+    return await _place(session, plant.location_id) if plant and plant.location_id else None
+
+
+@app.post("/bindings/{binding_id}/valve/run")
+async def run_binding_valve(
+    binding_id: str,
+    body: ValveRunIn,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Open a bound valve, guarded by every cap (parents/admins)."""
+    user = _user(request)
+    _require_parent_or_admin(request)
+    binding = session.get(HomeHubBinding, binding_id)
+    if binding is None:
+        raise HTTPException(status_code=404, detail="Binding not found")
+
+    profile = session.get(GardenProfile, "household")
+    location = await _binding_place(session, binding)
+    try:
+        result = await hardware.run_valve(
+            session,
+            binding,
+            performed_by=user,
+            minutes=body.minutes,
+            override_rain=body.override_rain,
+            profile=profile,
+            location=location,
+        )
+    except hardware.HardwareBlocked as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.reason) from None
+
+    # The run is a watering: same care log, same due date, same Skylight mirror.
+    if binding.target_kind == "plant":
+        plant = session.get(Plant, binding.target_id)
+        log_row, rule = _record_care(
+            session,
+            plant,
+            action="water",
+            source="homehub_valve",
+            performed_by=user,
+            notes=f"irrigation valve: {result['minutes']} min",
+            sensor_snapshot=result.get("readings"),
+        )
+        result["care_log_id"] = log_row.id
+        result["next_due_at"] = rule.next_due_at if rule else None
+    else:
+        watered = _water_location_plants(
+            session,
+            loc_id=binding.target_id,
+            location_name=location.name if location else binding.target_id,
+            performed_by=user,
+            source="homehub_valve",
+            due_only=False,
+            notes_prefix="irrigation valve",
+            sensor_snapshot=result.get("readings"),
+        )
+        result["watered_count"] = len(watered)
+    return result
+
+
+@app.post("/bindings/{binding_id}/valve/stop")
+async def stop_binding_valve(
+    binding_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Close a bound valve now (parents/admins)."""
+    _require_parent_or_admin(request)
+    binding = session.get(HomeHubBinding, binding_id)
+    if binding is None:
+        raise HTTPException(status_code=404, detail="Binding not found")
+    try:
+        return await hardware.stop_valve(session, binding)
+    except hardware.HardwareBlocked as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.reason) from None
+
+
+@app.get("/tags/{tag_id}")
+async def scan_tag(tag_id: str, request: Request, session: Session = Depends(get_session)):
+    """Scan an NFC/QR tag: which plant or bed is it, and what is owed (every role)."""
+    _user(request)
+    try:
+        return await hardware.resolve_tag(session, tag_id)
+    except hardware.HardwareBlocked as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.reason) from None

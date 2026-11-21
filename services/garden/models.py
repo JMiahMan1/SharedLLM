@@ -671,3 +671,124 @@ class PlanCellOut(SQLModel):
     notes: str | None
     created_at: str
     updated_at: str
+
+
+# --------------------------------------------------------------------------- Phase 8: Home Hub hardware
+
+#: ``valve_mode`` values. ``notify_only`` is the only default there will ever be:
+#: auto-watering is opt-in, per bed, and still capped below.
+VALVE_MODES = ("notify_only", "confirm", "auto")
+
+#: The caps. A request outside them is refused, and a run is clamped again.
+MAX_RUN_MINUTES_LIMIT = 30
+MAX_DAILY_RUNS_LIMIT = 4
+
+
+class HomeHubBinding(SQLModel, table=True):
+    """One plant's or bed's garden hardware, held as Home Hub ids only.
+
+    Home Hub owns entity ids, friendly names, areas and live states. Garden keeps
+    the ids it is bound to plus its own thresholds and opt-in automation flags,
+    so a rename in Home Hub never has to be copied here and a card never reads a
+    stale name.
+    """
+
+    __tablename__ = "garden_homehub_bindings"
+
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
+    #: ``plant`` or ``location`` -- one target per binding.
+    target_kind: str = Field(max_length=16)
+    target_id: str = Field(max_length=128, index=True)
+
+    moisture_entity_id: str | None = Field(default=None, max_length=128)
+    temperature_entity_id: str | None = Field(default=None, max_length=128)
+    humidity_entity_id: str | None = Field(default=None, max_length=128)
+    lux_entity_id: str | None = Field(default=None, max_length=128)
+
+    grow_light_entity_id: str | None = Field(default=None, max_length=128)
+    grow_light_on_time: str | None = Field(default=None, max_length=5)  # HH:MM
+    grow_light_off_time: str | None = Field(default=None, max_length=5)  # HH:MM
+    grow_light_enabled: bool = Field(default=False)
+
+    valve_entity_id: str | None = Field(default=None, max_length=128)
+    #: ``notify_only`` (default) | ``confirm`` | ``auto`` (explicit opt-in).
+    valve_mode: str = Field(default="notify_only", max_length=16)
+
+    #: Opt-in: let a live moisture reading override the schedule cadence.
+    moisture_override_enabled: bool = Field(default=False)
+    #: Below this, the plant is treated as needing water now.
+    moisture_threshold_pct: float = Field(default=30.0)
+
+    max_run_minutes: int = Field(default=5)
+    daily_max_runs: int = Field(default=2)
+    rain_interlock: bool = Field(default=True)
+
+    #: Set while a valve is open, so the watchdog can close it even after a
+    #: restart. Cleared by every successful close.
+    active_run_started_at: str | None = Field(default=None)
+    active_run_ends_at: str | None = Field(default=None)
+
+    nfc_tag_id: str | None = Field(default=None, max_length=128, index=True)
+
+    created_at: str = Field(default_factory=utcnow)
+    updated_at: str = Field(default_factory=utcnow)
+
+
+class HomeHubBindingIn(SQLModel):
+    """Create/update a binding for a plant or a bed (partial: send what changed)."""
+
+    moisture_entity_id: str | None = None
+    temperature_entity_id: str | None = None
+    humidity_entity_id: str | None = None
+    lux_entity_id: str | None = None
+    grow_light_entity_id: str | None = None
+    grow_light_on_time: str | None = None
+    grow_light_off_time: str | None = None
+    grow_light_enabled: bool | None = None
+    valve_entity_id: str | None = None
+    valve_mode: str | None = None
+    moisture_override_enabled: bool | None = None
+    moisture_threshold_pct: float | None = None
+    max_run_minutes: int | None = None
+    daily_max_runs: int | None = None
+    rain_interlock: bool | None = None
+    nfc_tag_id: str | None = None
+
+
+class ValveRunIn(SQLModel):
+    """A manual valve run: minutes are clamped to the binding's own cap."""
+
+    minutes: int | None = None
+    #: A parent may water through the rain interlock on purpose.
+    override_rain: bool = False
+
+
+class HomeHubBindingOut(SQLModel):
+    id: str
+    target_kind: str
+    target_id: str
+    target_name: str | None = None
+    moisture_entity_id: str | None
+    temperature_entity_id: str | None
+    humidity_entity_id: str | None
+    lux_entity_id: str | None
+    grow_light_entity_id: str | None
+    grow_light_on_time: str | None
+    grow_light_off_time: str | None
+    grow_light_enabled: bool
+    valve_entity_id: str | None
+    valve_mode: str
+    moisture_override_enabled: bool
+    moisture_threshold_pct: float
+    max_run_minutes: int
+    daily_max_runs: int
+    rain_interlock: bool
+    active_run_started_at: str | None
+    active_run_ends_at: str | None
+    nfc_tag_id: str | None
+    #: Live readings from Home Hub (all ``None`` when unbound or unavailable).
+    readings: dict[str, Any] = Field(default_factory=dict)
+    #: How many guarded runs this target has had today (UTC).
+    runs_today: int = 0
+    created_at: str
+    updated_at: str

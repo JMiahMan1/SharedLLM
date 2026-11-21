@@ -1,0 +1,869 @@
+"""Garden's view of Home Hub hardware: readings, guarded valves, grow lights, tags.
+
+Home Hub owns the devices. This module only ever holds **entity ids**: it asks the
+hub what exists (`/api/states`, `/hub/tags`), reads live states, and calls
+services. No friendly name, area or state is copied into Garden, so renaming a
+sensor in Home Hub cannot leave a stale label here.
+
+Everything degrades: with no ``HOMEHUB_URL``, a hub that is away, or a hub with
+no garden hardware, discovery reports ``has_any_hardware: False`` and the UI
+shows nothing at all -- that boolean is what keeps the Garden page clean in a
+house with no sensors.
+
+The irrigation valve is the one place where a bug could flood a bed, so it is
+guarded three times over: caps are validated on write, re-checked on run, and a
+watchdog closes the valve if it is still open past its timer -- and shouts if it
+cannot.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import time
+from datetime import UTC, datetime, timedelta
+from typing import Any, Callable
+
+import aiohttp
+from sqlmodel import Session, select
+
+from services import config
+from services.common import notify
+from services.garden.models import (
+    MAX_DAILY_RUNS_LIMIT,
+    MAX_RUN_MINUTES_LIMIT,
+    CareLog,
+    CareRule,
+    HomeHubBinding,
+    Location,
+    Plant,
+    utcnow,
+)
+
+log = logging.getLogger("garden.homehub_hardware")
+
+#: The hub answers in milliseconds on the LAN; a slow one must not stall a page.
+HUB_TIMEOUT_S = 5.0
+
+#: How long discovery is reused. A hub entity appearing shows up within seconds,
+#: and a page of cards does not ask the hub once per card.
+_CACHE_TTL_S = 15.0
+
+#: "Clearly moist": this far above the dry threshold, watering is held off.
+HOLD_BAND_PCT = 15.0
+
+#: How often the watchdog looks for a valve that should already be closed.
+WATCHDOG_S = 60
+
+#: How often grow-light schedules are reconciled.
+GROW_LIGHT_S = 300
+
+#: ``(read at, states)`` / ``(read at, tags)``; ``None`` until the first read.
+_states_cache: tuple[float, list[dict[str, Any]]] | None = None
+_tags_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+
+class HardwareBlocked(Exception):
+    """A valve (or a tag) request that must not proceed, with the reason to show."""
+
+    def __init__(self, reason: str, *, status: int = 409, detail: dict | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.status = status
+        self.detail = detail or {}
+
+
+def enabled() -> bool:
+    """Is there a hub to ask? (``HOMEHUB_URL``, resolved once at startup.)"""
+    return bool(config.HOMEHUB_URL)
+
+
+def invalidate() -> None:
+    """Forget the cached discovery: the next read asks the hub again."""
+    global _states_cache, _tags_cache
+    _states_cache = None
+    _tags_cache = None
+
+
+async def _call(method: str, path: str, *, body: dict[str, Any] | None = None) -> tuple[int, Any]:
+    """One request to the hub. ``(0, None)`` when it is off, unreachable or slow."""
+    if not enabled():
+        return (0, None)
+    url = f"{config.HOMEHUB_URL.rstrip('/')}{path}"
+    headers = {"X-Internal-Secret": config.INTERNAL_SECRET}
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=HUB_TIMEOUT_S)
+        ) as client, client.request(method, url, json=body, headers=headers) as resp:
+            try:
+                data = await resp.json(content_type=None)
+            except ValueError:
+                data = None
+            return (resp.status, data)
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+        log.warning("[hardware] Home Hub did not answer %s %s (%s)", method, path, exc)
+        return (0, None)
+
+
+async def states(*, fresh: bool = False) -> list[dict[str, Any]] | None:
+    """Every entity state from the hub, cached briefly. ``None`` when unavailable."""
+    global _states_cache
+    if not enabled():
+        return None
+    now = time.monotonic()
+    if not fresh and _states_cache is not None and now - _states_cache[0] < _CACHE_TTL_S:
+        return _states_cache[1]
+    status, data = await _call("GET", "/api/states")
+    if status != 200 or not isinstance(data, list):
+        return None
+    rows = [row for row in data if isinstance(row, dict) and row.get("entity_id")]
+    _states_cache = (time.monotonic(), rows)
+    return rows
+
+
+async def tags(*, fresh: bool = False) -> list[dict[str, Any]]:
+    """The hub's imported NFC/QR tags, cached briefly. ``[]`` when unavailable."""
+    global _tags_cache
+    if not enabled():
+        return []
+    now = time.monotonic()
+    if not fresh and _tags_cache is not None and now - _tags_cache[0] < _CACHE_TTL_S:
+        return _tags_cache[1]
+    status, data = await _call("GET", "/hub/tags")
+    if status != 200:
+        return []
+    rows = data.get("tags") if isinstance(data, dict) else data
+    rows = [row for row in (rows or []) if isinstance(row, dict)]
+    _tags_cache = (time.monotonic(), rows)
+    return rows
+
+
+def _attr(state: dict[str, Any], key: str) -> Any:
+    attrs = state.get("attributes") or {}
+    return attrs.get(key) if isinstance(attrs, dict) else None
+
+
+def _reading(state: dict[str, Any] | None) -> float | None:
+    """A numeric state, or ``None`` for unknown/unavailable/garbage."""
+    if not state:
+        return None
+    raw = state.get("state")
+    if raw in (None, "", "unknown", "unavailable", "None"):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _entity_row(row: dict[str, Any]) -> dict[str, Any]:
+    """One entity as the pickers need it: id, name, device class, unit."""
+    return {
+        "entity_id": row.get("entity_id"),
+        "friendly_name": _attr(row, "friendly_name") or row.get("entity_id"),
+        "device_class": _attr(row, "device_class"),
+        "unit": _attr(row, "unit_of_measurement"),
+        "state": row.get("state"),
+    }
+
+
+# --------------------------------------------------------------------------- discovery
+
+_MOISTURE_WORDS = ("moisture", "soil")
+_VALVE_WORDS = ("irrigation", "valve", "water", "drip", "sprinkler", "soaker")
+_GROW_LIGHT_WORDS = ("grow", "plant light", "plant_lamp", "growlight")
+
+
+def _named(row: dict[str, Any]) -> str:
+    """Everything Home Hub names an entity by, lowercased (id + friendly name)."""
+    name = _attr(row, "friendly_name") or ""
+    return f"{row.get('entity_id') or ''} {name}".lower()
+
+
+def classify(states_rows: list[dict[str, Any]], tag_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Sort the hub's entities into the garden's buckets.
+
+    A sensor is matched by its device class first (Home Hub's own vocabulary),
+    and by name only where Home Hub offers no class -- a ``switch`` named
+    "drip line" is a valve, and a ``light`` named "grow light" is a grow light.
+    """
+    moisture: list[dict] = []
+    temperature: list[dict] = []
+    humidity: list[dict] = []
+    lux: list[dict] = []
+    valves: list[dict] = []
+    grow_lights: list[dict] = []
+
+    for row in states_rows:
+        domain = (row.get("entity_id") or "").split(".", 1)[0]
+        device_class = _attr(row, "device_class")
+        named = _named(row)
+        unit = str(_attr(row, "unit_of_measurement") or "").lower()
+        if domain == "sensor":
+            if device_class == "moisture" or any(word in named for word in _MOISTURE_WORDS):
+                moisture.append(_entity_row(row))
+            if device_class == "temperature":
+                temperature.append(_entity_row(row))
+            if device_class == "humidity":
+                humidity.append(_entity_row(row))
+            if device_class == "illuminance" or unit in ("lx", "lux"):
+                lux.append(_entity_row(row))
+        elif domain == "valve":
+            valves.append(_entity_row(row))
+        elif domain == "switch":
+            if any(word in named for word in _VALVE_WORDS):
+                valves.append(_entity_row(row))
+            elif any(word in named for word in _GROW_LIGHT_WORDS):
+                grow_lights.append(_entity_row(row))
+        elif domain == "light":
+            grow_lights.append(_entity_row(row))
+
+    tags_out = [
+        {
+            "tag_id": str(row.get("tag_id") or row.get("id") or ""),
+            "name": row.get("name"),
+            "last_scanned": row.get("last_scanned"),
+        }
+        for row in tag_rows
+        if row.get("tag_id") or row.get("id")
+    ]
+    return {
+        "moisture_sensors": moisture,
+        "temperature_sensors": temperature,
+        "humidity_sensors": humidity,
+        "lux_sensors": lux,
+        "valves": valves,
+        "grow_lights": grow_lights,
+        "tags": tags_out,
+    }
+
+
+async def discover_hardware(*, fresh: bool = False) -> dict[str, Any]:
+    """What garden hardware the hub has. ``has_any_hardware`` drives the UI."""
+    empty = {
+        "available": False,
+        "has_any_hardware": False,
+        "moisture_sensors": [],
+        "temperature_sensors": [],
+        "humidity_sensors": [],
+        "lux_sensors": [],
+        "valves": [],
+        "grow_lights": [],
+        "tags": [],
+    }
+    if not enabled():
+        return empty
+    states_rows = await states(fresh=fresh)
+    if states_rows is None:
+        return empty
+    buckets = classify(states_rows, await tags(fresh=fresh))
+    has_any = any(buckets[key] for key in buckets)
+    return {"available": True, "has_any_hardware": has_any, **buckets}
+
+
+# --------------------------------------------------------------------------- live readings
+
+
+async def state_map() -> dict[str, dict[str, Any]]:
+    """Entity id -> state row, for reading a binding's sensors in one pass."""
+    return {row["entity_id"]: row for row in await states() or []}
+
+
+def _bound_entities(binding: HomeHubBinding | None) -> list[str]:
+    if binding is None:
+        return []
+    return [
+        entity
+        for entity in (
+            binding.moisture_entity_id,
+            binding.temperature_entity_id,
+            binding.humidity_entity_id,
+            binding.lux_entity_id,
+        )
+        if entity
+    ]
+
+
+def snapshot_from(binding: HomeHubBinding | None, rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """A binding's live numbers, from an already-fetched state map.
+
+    Each reading is independently ``None``: one unavailable sensor must not hide
+    the three that are reporting.
+    """
+    if binding is None:
+        return {"moisture_pct": None, "temperature": None, "temperature_unit": None,
+                "humidity_pct": None, "lux": None, "unavailable": [], "bound": False}
+
+    def pick(entity: str | None) -> tuple[float | None, dict[str, Any] | None]:
+        if not entity:
+            return (None, None)
+        row = rows.get(entity)
+        return (_reading(row), row)
+
+    moisture, _ = pick(binding.moisture_entity_id)
+    temperature, temp_row = pick(binding.temperature_entity_id)
+    humidity, _ = pick(binding.humidity_entity_id)
+    lux, _ = pick(binding.lux_entity_id)
+    unavailable = [
+        entity for entity in _bound_entities(binding)
+        if _reading(rows.get(entity)) is None
+    ]
+    return {
+        "moisture_pct": moisture,
+        "temperature": temperature,
+        "temperature_unit": _attr(temp_row, "unit_of_measurement") if temp_row else None,
+        "humidity_pct": humidity,
+        "lux": lux,
+        "unavailable": unavailable,
+        "bound": bool(_bound_entities(binding)),
+    }
+
+
+async def read_binding_snapshot(binding: HomeHubBinding | None) -> dict[str, Any]:
+    """A binding's live numbers, asking the hub. Never raises."""
+    if binding is None or not _bound_entities(binding):
+        return snapshot_from(None, {})
+    try:
+        rows = await state_map()
+    except Exception as exc:  # a hub that is away is not an error, just no numbers
+        log.info("[hardware] readings unavailable: %s", exc)
+        rows = {}
+    return snapshot_from(binding, rows)
+
+
+def moisture_verdict(binding: HomeHubBinding | None, snapshot: dict[str, Any]) -> dict[str, Any]:
+    """What a live moisture reading means for this plant's schedule.
+
+    Only an opt-in binding overrides the cadence, and only with a real number:
+    a sensor that is offline changes nothing and says so, so a dead battery can
+    never silently stop (or trigger) watering.
+    """
+    if binding is None or not binding.moisture_override_enabled or not binding.moisture_entity_id:
+        return {"applies": False}
+    pct = snapshot.get("moisture_pct")
+    if pct is None:
+        return {
+            "applies": False,
+            "offline": True,
+            "note": "The soil moisture sensor is not reporting; the normal schedule applies.",
+        }
+    threshold = float(binding.moisture_threshold_pct)
+    if pct < threshold:
+        return {
+            "applies": True,
+            "due": True,
+            "moisture_pct": pct,
+            "reason": f"Soil moisture is {pct:g}% (below {threshold:g}%)",
+        }
+    if pct >= threshold + HOLD_BAND_PCT:
+        return {
+            "applies": True,
+            "due": False,
+            "hold": True,
+            "moisture_pct": pct,
+            "reason": f"Soil moisture is {pct:g}% — holding off",
+        }
+    return {"applies": True, "due": False, "moisture_pct": pct, "reason": None}
+
+
+# --------------------------------------------------------------------------- guarded valves
+
+#: ``on`` states a valve can report (Home Hub uses different words per domain).
+_OPEN_STATES = ("on", "open", "opening", "closing")
+
+
+def valve_domain(entity_id: str | None) -> tuple[str, str, str] | None:
+    """``(domain, open_service, close_service)`` for a valve entity."""
+    if not entity_id:
+        return None
+    domain = entity_id.split(".", 1)[0]
+    if domain == "valve":
+        return ("valve", "open_valve", "close_valve")
+    if domain == "switch":
+        return ("switch", "turn_on", "turn_off")
+    return None
+
+
+def runs_today(session: Session, binding: HomeHubBinding, *, now: datetime | None = None) -> int:
+    """How many guarded runs this target has had today (UTC).
+
+    Counted from the care log -- the same rows a person can read -- rather than a
+    counter that could drift out of step with what actually happened.
+    """
+    day_start = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m-%dT00:00:00")
+    column = CareLog.plant_id if binding.target_kind == "plant" else CareLog.location_id
+    rows = session.exec(
+        select(CareLog).where(
+            column == binding.target_id,
+            CareLog.source == "homehub_valve",
+            CareLog.created_at >= day_start,
+        )
+    ).all()
+    return len(rows)
+
+
+def active_run(binding: HomeHubBinding) -> bool:
+    """Is a run still open (or overdue and not yet confirmed closed)?"""
+    return bool(binding.active_run_started_at)
+
+
+async def _service(entity_id: str, service: str) -> tuple[bool, Any]:
+    """Call one Home Hub service on one entity."""
+    domain = valve_domain(entity_id)
+    if domain is None:
+        return (False, "not a valve or switch")
+    hub_domain = domain[0]
+    status, data = await _call(
+        "POST", f"/api/services/{hub_domain}/{service}", body={"entity_id": entity_id}
+    )
+    return (status in (200, 201), data if status not in (200, 201) else None)
+
+
+async def valve_is_open(binding: HomeHubBinding) -> bool | None:
+    """Is the bound valve reporting itself open? ``None`` when unknown."""
+    if not binding.valve_entity_id:
+        return None
+    rows = await state_map()
+    row = rows.get(binding.valve_entity_id)
+    if not row:
+        return None
+    return str(row.get("state") or "").lower() in _OPEN_STATES
+
+
+async def open_valve(binding: HomeHubBinding) -> None:
+    """Open the bound valve. Raises ``HardwareBlocked`` if the hub refuses."""
+    domain = valve_domain(binding.valve_entity_id)
+    if domain is None:
+        raise HardwareBlocked("No irrigation valve is bound to this plant or bed.", status=400)
+    ok, detail = await _service(binding.valve_entity_id, domain[1])
+    if not ok:
+        raise HardwareBlocked(
+            "Home Hub did not open the valve.",
+            status=502,
+            detail={"hub_detail": detail},
+        )
+
+
+async def close_valve(binding: HomeHubBinding) -> bool:
+    """Close the bound valve. ``False`` when the hub could not be told."""
+    domain = valve_domain(binding.valve_entity_id)
+    if domain is None:
+        return False
+    ok, detail = await _service(binding.valve_entity_id, domain[2])
+    if not ok:
+        log.warning("[hardware] close failed for %s: %s", binding.valve_entity_id, detail)
+    return ok
+
+
+async def run_valve(
+    session: Session,
+    binding: HomeHubBinding,
+    *,
+    performed_by: str,
+    minutes: int | None = None,
+    override_rain: bool = False,
+    profile: Any = None,
+    location: Any = None,
+) -> dict[str, Any]:
+    """Open the bound valve, guarded. Every refusal names its reason.
+
+    The order is deliberate: the caps are checked before the hub is touched, the
+    daily count is read from the care log rather than a cached number, and the
+    rain interlock is only consulted for a place open to the sky.
+    """
+    if not binding.valve_entity_id:
+        raise HardwareBlocked("No irrigation valve is bound to this plant or bed.", status=400)
+    if not 1 <= int(binding.max_run_minutes) <= MAX_RUN_MINUTES_LIMIT:
+        raise HardwareBlocked(
+            f"max_run_minutes must be between 1 and {MAX_RUN_MINUTES_LIMIT}.", status=400
+        )
+    if not 1 <= int(binding.daily_max_runs) <= MAX_DAILY_RUNS_LIMIT:
+        raise HardwareBlocked(
+            f"daily_max_runs must be between 1 and {MAX_DAILY_RUNS_LIMIT}.", status=400
+        )
+    if active_run(binding):
+        raise HardwareBlocked(
+            "A valve run is already in progress for this plant or bed.",
+            status=409,
+            detail={"active_run_started_at": binding.active_run_started_at,
+                    "active_run_ends_at": binding.active_run_ends_at},
+        )
+    requested = int(minutes) if minutes is not None else int(binding.max_run_minutes)
+    if requested < 1:
+        raise HardwareBlocked("A valve run needs at least one minute.", status=400)
+    if requested > int(binding.max_run_minutes):
+        raise HardwareBlocked(
+            f"This valve is capped at {binding.max_run_minutes} minutes per run.",
+            status=400,
+            detail={"max_run_minutes": binding.max_run_minutes},
+        )
+
+    runs = runs_today(session, binding)
+    if runs >= int(binding.daily_max_runs):
+        raise HardwareBlocked(
+            f"Daily max runs reached ({runs} of {binding.daily_max_runs} today).",
+            status=409,
+            detail={"runs_today": runs, "daily_max_runs": binding.daily_max_runs},
+        )
+
+    from services.garden import weather_care  # local: weather pulls in the forecast client
+
+    if binding.rain_interlock and location is not None and weather_care.is_outdoor_uncovered(location):
+        rain = await weather_care.rain_state(profile)
+        if rain.get("active") and not override_rain:
+            raise HardwareBlocked(
+                f"Blocked by rain interlock: {rain.get('rain_in')} in of rain in the last/next hours.",
+                status=409,
+                detail=rain,
+            )
+
+    snapshot = await read_binding_snapshot(binding)
+    await open_valve(binding)
+
+    now = datetime.now(UTC)
+    binding.active_run_started_at = now.isoformat()
+    binding.active_run_ends_at = (now + timedelta(minutes=requested)).isoformat()
+    binding.updated_at = utcnow()
+    session.add(binding)
+    session.commit()
+    session.refresh(binding)
+    log.info(
+        "[hardware] valve %s opened for %s min by %s (%s)",
+        binding.valve_entity_id, requested, performed_by, binding.target_id,
+    )
+    return {
+        "binding_id": binding.id,
+        "valve_entity_id": binding.valve_entity_id,
+        "minutes": requested,
+        "opened_at": binding.active_run_started_at,
+        "closes_at": binding.active_run_ends_at,
+        "runs_today": runs + 1,
+        "daily_max_runs": binding.daily_max_runs,
+        "readings": snapshot,
+    }
+
+
+async def stop_valve(session: Session, binding: HomeHubBinding) -> dict[str, Any]:
+    """Close the valve now. Idempotent: a closed valve is already the goal."""
+    if not binding.valve_entity_id:
+        raise HardwareBlocked("No irrigation valve is bound to this plant or bed.", status=400)
+    ok = await close_valve(binding)
+    if not ok:
+        raise HardwareBlocked("Home Hub did not confirm the valve closed.", status=502)
+    binding.active_run_started_at = None
+    binding.active_run_ends_at = None
+    binding.updated_at = utcnow()
+    session.add(binding)
+    session.commit()
+    session.refresh(binding)
+    return {"binding_id": binding.id, "stopped": True}
+
+
+# --------------------------------------------------------------------------- grow lights
+
+
+def _hhmm(value: str | None) -> int | None:
+    """``'HH:MM'`` as minutes past midnight, or ``None`` when it is not a time."""
+    if not value or ":" not in value:
+        return None
+    try:
+        hours, minutes = (int(part) for part in value.split(":", 1))
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= hours <= 23 and 0 <= minutes <= 59):
+        return None
+    return hours * 60 + minutes
+
+
+def grow_light_window(binding: HomeHubBinding | None, local_now: datetime) -> bool | None:
+    """Should the light be on at ``local_now``? ``None`` when not scheduled.
+
+    A window may cross midnight (18:00-06:00 for seedlings in winter), which is
+    why the comparison is written out rather than a simple ``on <= now < off``.
+    """
+    if binding is None or not binding.grow_light_enabled or not binding.grow_light_entity_id:
+        return None
+    on = _hhmm(binding.grow_light_on_time)
+    off = _hhmm(binding.grow_light_off_time)
+    if on is None or off is None or on == off:
+        return None
+    minutes = local_now.hour * 60 + local_now.minute
+    if on < off:
+        return on <= minutes < off
+    return minutes >= on or minutes < off
+
+
+def local_now() -> datetime:
+    """The household's wall clock (``TZ``), so 06:00 means 06:00 at home."""
+    tz_name = os.getenv("TZ", "UTC")
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now(UTC)
+
+
+async def _toggle_light(entity_id: str, on: bool) -> bool:
+    domain = entity_id.split(".", 1)[0]
+    if domain not in ("light", "switch"):
+        return False
+    service = "turn_on" if on else "turn_off"
+    status, _ = await _call("POST", f"/api/services/{domain}/{service}", body={"entity_id": entity_id})
+    return status in (200, 201)
+
+
+async def sync_grow_lights(
+    session_factory: Callable[[], Any], *, now: datetime | None = None
+) -> list[dict[str, Any]]:
+    """Reconcile every scheduled grow light with its photoperiod window.
+
+    Only a *transition* is sent, so a light someone switched by hand is left
+    alone until the schedule genuinely changes its mind.
+    """
+    actions: list[dict[str, Any]] = []
+    if not enabled():
+        return actions
+    moment = now or local_now()
+    rows = await state_map()
+    with Session(session_factory()) as session:
+        scheduled = session.exec(
+            select(HomeHubBinding).where(HomeHubBinding.grow_light_enabled == True)  # noqa: E712
+        ).all()
+        for binding in scheduled:
+            desired = grow_light_window(binding, moment)
+            if desired is None:
+                continue
+            row = rows.get(binding.grow_light_entity_id or "")
+            if row is None:
+                continue
+            current = str(row.get("state") or "").lower() == "on"
+            if current == desired:
+                continue
+            if await _toggle_light(binding.grow_light_entity_id or "", desired):
+                actions.append(
+                    {
+                        "binding_id": binding.id,
+                        "entity_id": binding.grow_light_entity_id,
+                        "turned_on": desired,
+                    }
+                )
+    return actions
+
+
+async def grow_light_loop(
+    session_factory: Callable[[], Any], poll_s: int = GROW_LIGHT_S
+) -> None:
+    """Background loop: keep grow lights inside their window (off under pytest)."""
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        log.info("[hardware] grow-light loop disabled under pytest")
+        return
+    while True:
+        try:
+            await sync_grow_lights(session_factory)
+        except Exception as exc:
+            log.warning("[hardware] grow-light tick failed: %s", exc)
+        await asyncio.sleep(poll_s)
+
+
+# --------------------------------------------------------------------------- failsafe watchdog
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+async def _send_open_valve_alert(user: str, title: str, body: str, once_key: str) -> None:
+    """Tell a parent, urgently, that a valve may still be open."""
+    payload = notify.notice(
+        user=user,
+        category="garden",
+        title=title,
+        body=body,
+        priority=4,
+        tag=f"garden_valve:{once_key}",
+        once=once_key,
+        kind="garden_valve_failsafe",
+        audience="parents",
+        url="/garden",
+    )
+    try:
+        await notify.send(payload)
+    except Exception as exc:
+        log.warning("[hardware] valve alert to %s failed: %s", user, exc)
+
+
+async def _family() -> list[str]:
+    """Who to warn, via telemetry's notify helper (degrades to nobody)."""
+    try:
+        return await notify.family()
+    except Exception as exc:
+        log.warning("[hardware] could not list family members: %s", exc)
+        return []
+
+
+async def check_valve_failsafe(
+    session_factory: Callable[[], Any],
+    get_family: Callable[[], Any] | None = None,
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Close every valve whose timer has run out -- and shout if one will not close.
+
+    This is the last line of defence. It runs from a plain background loop, so it
+    keeps working even if the request that opened the valve died, and because the
+    open run is stored on the binding it also survives a restart.
+    """
+    results: list[dict[str, Any]] = []
+    if not enabled():
+        return results
+    moment = now or datetime.now(UTC)
+    with Session(session_factory()) as session:
+        open_runs = session.exec(
+            select(HomeHubBinding).where(HomeHubBinding.active_run_started_at.is_not(None))
+        ).all()
+        for binding in open_runs:
+            ends = _parse_iso(binding.active_run_ends_at)
+            if ends is not None and moment < ends:
+                continue
+            if await close_valve(binding):
+                binding.active_run_started_at = None
+                binding.active_run_ends_at = None
+                binding.updated_at = utcnow()
+                session.add(binding)
+                session.commit()
+                results.append({"binding_id": binding.id, "closed": True})
+                continue
+            # It will not close. Keep the flag (so the next tick retries) and ask a
+            # parent to go and look at the valve.
+            results.append({"binding_id": binding.id, "closed": False})
+            once = f"open-valve:{binding.id}:{binding.active_run_started_at or moment.isoformat()}"
+            for member in await (get_family or _family)():
+                await _send_open_valve_alert(
+                    member,
+                    "Irrigation valve may still be open",
+                    (
+                        f"Home Hub could not confirm that {binding.valve_entity_id} closed after its "
+                        f"{binding.max_run_minutes}-minute run. Check the valve now."
+                    ),
+                    once,
+                )
+    return results
+
+
+async def valve_watchdog(
+    session_factory: Callable[[], Any],
+    get_family: Callable[[], Any] | None = None,
+    poll_s: int = WATCHDOG_S,
+) -> None:
+    """Background loop: close valves past their timer (disabled under pytest)."""
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        log.info("[hardware] valve watchdog disabled under pytest")
+        return
+    while True:
+        try:
+            await check_valve_failsafe(session_factory, get_family)
+        except Exception as exc:  # a watchdog that dies is worse than a noisy one
+            log.warning("[hardware] valve watchdog tick failed: %s", exc)
+        await asyncio.sleep(poll_s)
+
+
+# --------------------------------------------------------------------------- NFC / QR tags
+
+
+def binding_for_tag(session: Session, tag_id: str) -> HomeHubBinding | None:
+    """The binding a scanned tag points at, if any."""
+    if not tag_id:
+        return None
+    return session.exec(
+        select(HomeHubBinding).where(HomeHubBinding.nfc_tag_id == tag_id)
+    ).first()
+
+
+def _next_due_at(session: Session, plant_id: str) -> str | None:
+    """The plant's soonest care, so a scan can say what is owed."""
+    rows = session.exec(select(CareRule).where(CareRule.plant_id == plant_id)).all()
+    stamps = [row.next_due_at for row in rows if row.next_due_at]
+    return min(stamps) if stamps else None
+
+
+async def resolve_tag(session: Session, tag_id: str, *, now: datetime | None = None) -> dict[str, Any]:
+    """A scanned tag as the card that opens it: what it is and what is owed.
+
+    Every role may scan -- putting a phone on a pot is not an edit. This never
+    changes anything: the actions it lists are what the person taps next.
+    """
+    binding = binding_for_tag(session, tag_id)
+    if binding is None:
+        raise HardwareBlocked(
+            "This tag is not linked to a plant or bed yet.",
+            status=404,
+            detail={"tag_id": tag_id},
+        )
+    moment = now or datetime.now(UTC)
+    readings = await read_binding_snapshot(binding)
+    verdict = moisture_verdict(binding, readings)
+    out: dict[str, Any] = {
+        "matched": True,
+        "tag_id": tag_id,
+        "target_kind": binding.target_kind,
+        "target_id": binding.target_id,
+        "target_name": None,
+        "plant": None,
+        "location": None,
+        "readings": readings,
+        "moisture": verdict,
+        "next_due_at": None,
+        "due_today": False,
+        "actions": ["water", "photo"],
+    }
+    if binding.target_kind == "plant":
+        plant = session.get(Plant, binding.target_id)
+        if plant is None:
+            raise HardwareBlocked("The plant this tag pointed at is gone.", status=404)
+        next_due = _next_due_at(session, plant.id)
+        due = False
+        if next_due:
+            parsed = _parse_iso(next_due)
+            due = bool(parsed and parsed <= moment)
+        out.update(
+            {
+                "target_name": plant.nickname or plant.species_ref,
+                "next_due_at": next_due,
+                "due_today": due or bool(verdict.get("due")),
+                "plant": {
+                    "id": plant.id,
+                    "nickname": plant.nickname,
+                    "species_ref": plant.species_ref,
+                    "category": plant.category,
+                    "location_id": plant.location_id,
+                    "status": plant.status,
+                },
+            }
+        )
+    else:
+        location = session.get(Location, binding.target_id)
+        if location is None:
+            raise HardwareBlocked("The bed this tag pointed at is gone.", status=404)
+        plants = session.exec(
+            select(Plant).where(Plant.location_id == location.id, Plant.status == "active")
+        ).all()
+        out.update(
+            {
+                "target_name": location.name,
+                "location": {
+                    "id": location.id,
+                    "name": location.name,
+                    "kind": location.kind,
+                    "plant_count": len(plants),
+                },
+            }
+        )
+    return out

@@ -316,6 +316,32 @@ async def _observed_and_forecast_rain_in(units: str = "imperial") -> float:
     return observed + upcoming
 
 
+def is_outdoor_uncovered(location: Location | None) -> bool:
+    """Is this place open to the sky? (The irrigation interlock asks this.)"""
+    return _is_outdoor_uncovered(location)
+
+
+async def rain_state(profile: GardenProfile | None = None) -> dict:
+    """Enough rain to skip watering, right now -- for the irrigation interlock.
+
+    Same source and same threshold as the rain-skip the day's plan already uses,
+    so a valve and a schedule can never disagree about whether it rained.
+    """
+    units = _units(profile)
+    threshold = _rain_threshold_in(profile)
+    try:
+        rain_in = await _observed_and_forecast_rain_in(units)
+    except Exception as e:
+        log.info("[Garden weather] rain state unavailable: %s", e)
+        return {"active": False, "known": False, "rain_in": None, "threshold_in": threshold}
+    return {
+        "active": rain_in >= threshold,
+        "known": True,
+        "rain_in": round(rain_in, 3),
+        "threshold_in": threshold,
+    }
+
+
 async def apply_rain_skip(session: Session, profile: GardenProfile | None,
                           units: str = "imperial") -> list[dict]:
     """Postpone watering for uncovered outdoor plants when rain meets the threshold.
