@@ -286,6 +286,7 @@ export interface TeacherSummary {
   scores: TeacherScore[];
   exports: TeacherExport[];
   scrub_version: string;
+  health?: TeacherHealth;
 }
 
 export interface TeacherTraceRow {
@@ -362,4 +363,63 @@ export function teacherTrend(scores: TeacherScore[] | null | undefined): {
         ? 'no change since the first run'
         : `${delta > 0 ? '+' : ''}${delta} points since the first run`;
   return { latest: passRateLabel(last), change, runs: rows.length };
+}
+
+/** The hands-off pipeline's health, as `GET /api/trainer/teacher/status` reports it. */
+export interface TeacherHealth {
+  last_pass_at: string | null;
+  sync: {
+    at: string;
+    ok: boolean;
+    command: string;
+    queue_length: number;
+    pending_sessions: number;
+    tasks: number;
+    sent: number;
+    error: string | null;
+    last_ok_at?: string | null;
+  } | null;
+  lessons: { at: string; written: number; failed: number; total: number } | null;
+  eval: { at?: string; pass_rate?: number; cases?: number; passed?: number; waiting?: { since: string; reasons: string[] } } | null;
+  snapshot: { at: string; train_rows: number; eval_rows: number; verified_total: number; file: string } | null;
+  failures: { part: string; label: string; reason: string; since: string }[];
+}
+
+function when(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleString() : 'never';
+}
+
+/** One line per part of the pipeline, for the Lab card. */
+export function healthRows(health: TeacherHealth | null | undefined): { label: string; value: string; failing: boolean }[] {
+  const failing = new Set((health?.failures ?? []).map((f) => f.part));
+  const sync = health?.sync;
+  const evaluation = health?.eval;
+  return [
+    {
+      label: 'Last sync from the Mac',
+      value: sync ? `${when(sync.at)} · ${sync.ok ? 'ok' : 'failed'} · ${sync.queue_length} queued` : 'never',
+      failing: failing.has('sync'),
+    },
+    {
+      label: 'Last lessons written',
+      value: health?.lessons ? `${when(health.lessons.at)} · ${health.lessons.written} new, ${health.lessons.total} in all` : 'never',
+      failing: failing.has('lessons'),
+    },
+    {
+      label: 'Last teacher evaluation',
+      value: evaluation?.at
+        ? `${when(evaluation.at)} · ${evaluation.passed ?? 0}/${evaluation.cases ?? 0} passed`
+        : evaluation?.waiting
+          ? `waiting for an idle card since ${when(evaluation.waiting.since)}`
+          : 'never',
+      failing: failing.has('eval'),
+    },
+    {
+      label: 'Last dataset snapshot',
+      value: health?.snapshot
+        ? `${when(health.snapshot.at)} · ${health.snapshot.train_rows} train / ${health.snapshot.eval_rows} eval rows`
+        : 'none yet',
+      failing: failing.has('snapshot'),
+    },
+  ];
 }

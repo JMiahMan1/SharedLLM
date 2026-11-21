@@ -49,6 +49,16 @@ const SUMMARY = {
   ],
   exports: [],
   scrub_version: '1',
+  health: {
+    last_pass_at: '2026-11-21T10:00:00Z',
+    sync: { at: '2026-11-21T09:30:00Z', ok: false, command: 'sync', queue_length: 2, pending_sessions: 0, tasks: 3, sent: 0,
+      error: 'the gateway answered 502' },
+    lessons: { at: '2026-11-21T10:00:00Z', written: 1, failed: 0, total: 4 },
+    eval: { at: '2026-11-21T10:00:00Z', cases: 10, passed: 5, pass_rate: 0.5 },
+    snapshot: null,
+    failures: [{ part: 'sync', label: 'Teacher sync from the Mac', reason: 'the last sync on the Mac failed: the gateway answered 502',
+      since: '2026-11-21T09:30:00Z' }],
+  },
 };
 
 async function mockTrainer(page: Page) {
@@ -114,6 +124,9 @@ test.describe('teacher traces in the Training tab', () => {
     const { errors } = await mockTrainer(page);
     const card = await openCard(page);
 
+    await expect(card.getByTestId('teacher-health')).toContainText('2 queued');
+    await expect(card.getByTestId('teacher-health')).toContainText('5/10 passed');
+    await expect(card.getByTestId('teacher-failures')).toContainText('the gateway answered 502');
     await expect(card.getByTestId('teacher-score')).toContainText('50%');
     await expect(card.getByTestId('teacher-trend')).toContainText('+20 points since the first run');
     await expect(card.getByTestId('teacher-scores').locator('li')).toHaveCount(2);

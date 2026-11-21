@@ -4,6 +4,7 @@ import {
   bucketBars,
   freeVramLabel,
   hardwareVerdict,
+  healthRows,
   outcomeTone,
   passRateLabel,
   proposalTone,
@@ -190,5 +191,37 @@ describe('teacher traces', () => {
       runs: 2,
     });
     expect(teacherTrend([score(0.5), score(0.5)]).change).toBe('no change since the first run');
+  });
+});
+
+describe('teacher pipeline health', () => {
+  it('lists every part, marks the failing ones, and says never when nothing ran', () => {
+    expect(healthRows(null).map((row) => row.value)).toEqual(['never', 'never', 'never', 'none yet']);
+
+    const rows = healthRows({
+      last_pass_at: '2026-11-21T10:00:00Z',
+      sync: {
+        at: '2026-11-21T09:30:00Z',
+        ok: false,
+        command: 'sync',
+        queue_length: 2,
+        pending_sessions: 0,
+        tasks: 3,
+        sent: 0,
+        error: 'the gateway answered 502',
+      },
+      lessons: { at: '2026-11-21T10:00:00Z', written: 1, failed: 0, total: 4 },
+      eval: { waiting: { since: '2026-11-21T10:00:00Z', reasons: ['busy'] } },
+      snapshot: null,
+      failures: [
+        { part: 'sync', label: 'Teacher sync from the Mac', reason: 'the gateway answered 502', since: '2026-11-21T09:30:00Z' },
+      ],
+    });
+
+    expect(rows[0].failing).toBe(true);
+    expect(rows[0].value).toContain('failed · 2 queued');
+    expect(rows[1].value).toContain('1 new, 4 in all');
+    expect(rows[2].value).toContain('waiting for an idle card');
+    expect(rows[3].failing).toBe(false);
   });
 });

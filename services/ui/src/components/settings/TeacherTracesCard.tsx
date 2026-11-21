@@ -4,6 +4,7 @@ import { Download, GraduationCap, Lightbulb } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { errorText } from '../../lib/errorText';
 import {
+  healthRows,
   outcomeTone,
   passRateLabel,
   scrubLabel,
@@ -84,6 +85,31 @@ export default function TeacherTracesCard() {
         <p className="mt-4 text-sm text-amber-300" data-testid="teacher-error">
           {errorText(summaryQuery.error, 'The teacher traces could not be read')}
         </p>
+      ) : null}
+
+      {summary?.health ? (
+        <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3" data-testid="teacher-health">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+            Runs on its own · last pass {summary.health.last_pass_at ? new Date(summary.health.last_pass_at).toLocaleString() : 'not yet'}
+          </p>
+          <ul className="mt-2 space-y-1">
+            {healthRows(summary.health).map((row) => (
+              <li key={row.label} className="flex flex-wrap justify-between gap-x-3 text-[11px]">
+                <span className="text-slate-400">{row.label}</span>
+                <span className={`min-w-0 break-words ${row.failing ? 'text-rose-300' : 'text-slate-200'}`}>{row.value}</span>
+              </li>
+            ))}
+          </ul>
+          {summary.health.failures.length ? (
+            <ul className="mt-2 space-y-1" data-testid="teacher-failures">
+              {summary.health.failures.map((failure) => (
+                <li key={failure.part} className="break-words rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-[11px] text-rose-300">
+                  {failure.label}: {failure.reason}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

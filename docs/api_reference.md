@@ -245,6 +245,9 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 - `POST /api/trainer/teacher/traces` `{traces: [...]}` (at most 200): import traces scrubbed by `scripts/collect_teacher_traces.py`; upserts by id; each trace is refused (with the reason, never the value) when scrubbed by another scrubber version, when a dropped stub carries content, or when the leak check still finds a secret. Admin, or an account named in `TRAINER_TEACHER_UPLOADERS`
 - `POST /api/trainer/teacher/lessons` `{limit, dry_run}`: write verified successes into `system_learnings` as `worked_example` lessons (deduplicated); returns `written`, `skipped` with reasons, `failed`; admin only
 - `POST /api/trainer/teacher/dataset` `{format: openai|sharegpt, eval_share, include_unverified}`: write train/eval JSONL with Raven's live system prompt (503 when Identity cannot supply it) and the teacher's steps mapped onto Raven's tools; admin only
+- `POST /api/trainer/teacher/heartbeat` `{command, ok, queue_length, pending_sessions, tasks, sent, error}`: the Mac reports a sync or flush; the error line is scrubbed again before it is stored. Admin, or an account named in `TRAINER_TEACHER_UPLOADERS`
+- `GET /api/trainer/teacher/status`: the hands-off pipeline (last sync with its queue length, last lesson write, last evaluation, last snapshot, current failures with their reasons); admin only
+- `GET /api/trainer/teacher/scrub-names`: the household name words (usernames, Nextcloud accounts, display names) from Identity's family directory, read with the caller's key, for the collector's scrubber. Admin, or an account named in `TRAINER_TEACHER_UPLOADERS`
 
 "Signed-in caller" routes return **401** without a valid API key (or the
 internal secret for service-to-service calls).

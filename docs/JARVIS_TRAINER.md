@@ -200,6 +200,9 @@ bounded like `POST /repair` (1-3).
 | `DELETE /api/trainer/teacher/traces/{id}` | admin | forget one trace |
 | `POST /api/trainer/teacher/lessons` | admin | write verified traces as worked-example lessons |
 | `POST /api/trainer/teacher/dataset` | admin | train/eval JSONL with Raven's prompt and tools |
+| `POST /api/trainer/teacher/heartbeat` | admin or `TRAINER_TEACHER_UPLOADERS` | the Mac reports a sync or flush (counts and an error line) |
+| `GET /api/trainer/teacher/status` | admin | last sync and queue, last lessons, eval, snapshot, failures |
+| `GET /api/trainer/teacher/scrub-names` | admin or `TRAINER_TEACHER_UPLOADERS` | household name words from the family directory, for the Mac scrubber |
 
 ### Teacher traces
 

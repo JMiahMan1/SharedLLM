@@ -73,10 +73,16 @@ user names, every secret-looking value in the local `.env` files, and the
 household names from a local file. A final leak check runs on the result; any
 hit drops the task instead.
 
-**Names are never in code.** They come from `~/.config/sharedllm/teacher-names.txt`
-(one per line, `#` comments; `--names-file` or `TEACHER_SCRUB_NAMES_FILE`). The
-run stops when the file is missing; `--no-names` is the explicit way to go
-without (the dry run below used it, since it prints no content).
+**Names are never in code.** Before every upload the collector fetches them from
+Identity's family directory through the gateway (`GET /api/trainer/teacher/scrub-names`,
+with the uploader key): usernames, Nextcloud accounts, display names and each
+word of them. They are cached in the state directory (`names.json`, mode 600).
+**Fail closed:** when they cannot be fetched and the cache is older than 24
+hours, nothing is scrubbed or sent, the sync state is not advanced, the
+heartbeat reports the failure, and the next run retries. A local file
+(`--names-file`, default `~/.config/sharedllm/teacher-names.txt` when it exists)
+adds more names; it is optional. A run with no names at all stops unless
+`--no-names` says so (only sensible for a counts-only dry run).
 
 The gateway runs the leak check again on every trace it receives and refuses a
 trace scrubbed by another scrubber version, a dropped trace that still carries
@@ -243,33 +249,69 @@ retries it; every failure is written to opencode's log (`service:
 trainer-sync`). Opt-in per project; see its README for installation. It is not
 installed by this change.
 
-## 8. Runbook
+## 8. Hands-off: what runs on its own
 
-1. **Names and exclusions (once).**
+**On the Mac.** A launchd agent (`tools/teacher-sync-launchd/`) runs every 30
+minutes, and once at login:
+
+1. `collect_teacher_traces.py sync --source all`: every opencode and Cline
+   session touched since the last run (with an hour of overlap), only the tasks
+   not sent before; names fetched from Identity first (fail closed); failed
+   uploads queued, scrubbed, mode 600;
+2. `collect_teacher_traces.py flush`: the queue;
+3. after each, a heartbeat to `POST /api/trainer/teacher/heartbeat` (counts and
+   an error line only).
+
+Output goes to `~/Library/Logs/sharedllm-teacher/sync.log`, rotated at 1 MiB
+with 5 kept. The opencode plugin is the per-session trigger; launchd is the
+catch-up that also covers Cline.
+
+**On the gateway.** The background worker runs a teacher pass every 30 minutes
+(`services/gateway/trainer/teacher_auto.py`) while `trainer_teacher_auto` is
+true (the default; `raven_suspended` pauses it):
+
+1. worked-example lessons for newly imported verified traces;
+2. the `teacher` bucket, every `trainer_teacher_eval_interval_hours` (24), and
+   only when Alpaca's readiness gate says the card is idle (a busy card is
+   "waiting", not a failure); each run is a report, so the trend draws itself;
+3. a fine-tuning snapshot once `trainer_teacher_snapshot_every` (100) new
+   verified traces have arrived since the last one, with an admin notice that
+   carries counts only;
+4. the Mac's heartbeat: a reported error, or no heartbeat for
+   `trainer_teacher_sync_stale_minutes` (180), is a failure.
+
+`GET /api/trainer/teacher/status` and the Lab card show the last sync (with its
+queue length), the last lesson write, the last evaluation, the last snapshot
+and any failure with its reason. A failure notifies the admins once when it
+starts (a notice telemetry did not accept is retried) and clears when the part
+recovers. The four settings are seeded by Identity on start (Admin, LLM &
+Settings). The Lab buttons remain for manual runs.
+
+## 9. Runbook
+
+Once:
+
+1. **An uploader key.** Use an admin's API key, or a dedicated account named in
+   the gateway's `TRAINER_TEACHER_UPLOADERS` (comma-separated usernames, server
+   `.env`, read at startup). Save it to a file and `chmod 600` it, e.g.
+   `~/.config/sharedllm/trainer-key`.
+2. **Install the agent.**
    ```bash
-   mkdir -p ~/.config/sharedllm && chmod 700 ~/.config/sharedllm
-   $EDITOR ~/.config/sharedllm/teacher-names.txt     # one household name per line
-   chmod 600 ~/.config/sharedllm/teacher-names.txt
-   # optional: sessions never to collect, one id per line
-   $EDITOR ~/.config/sharedllm/teacher-exclude.txt
+   tools/teacher-sync-launchd/install.sh --gateway https://<jarvis> \
+     --key-file ~/.config/sharedllm/trainer-key
    ```
-2. **Look first (counts only).**
-   ```bash
-   python scripts/collect_teacher_traces.py collect --since 2026-11-01 --dry-run
-   ```
-3. **A key.** Use an admin's API key, or a dedicated account named in the
-   gateway's `TRAINER_TEACHER_UPLOADERS` (comma-separated usernames, in the
-   server `.env`; read at startup). Put the key in a file, `chmod 600`.
-4. **Collect and post.**
-   ```bash
-   python scripts/collect_teacher_traces.py collect --since 2026-11-01 --upload \
-     --gateway https://<jarvis> --key-file ~/.config/sharedllm/trainer-key
-   ```
-   Or write a local file first and read it: `--out .tmp/teacher/traces.jsonl`.
-5. **In the app** (Admin, Lab, Training, Teacher traces): check the scrub
-   statuses, press **Write lessons**, run **Evaluate** with the `teacher` chip,
-   and **Export dataset** when there is enough verified work.
-6. **From a shell**, the same endpoints: `GET /api/trainer/teacher`,
-   `GET /api/trainer/teacher/traces?outcome=&status=`,
-   `POST /api/trainer/teacher/lessons`, `POST /api/trainer/teacher/dataset`.
-7. **Automatic**: install the opencode plugin (its README).
+   It is idempotent, prints what it installed, and refuses a key file others
+   can read. `uninstall.sh` removes it.
+
+That is all. Optional:
+
+- sessions never to collect, one id per line, in
+  `~/.config/sharedllm/teacher-exclude.txt`;
+- extra names in `~/.config/sharedllm/teacher-names.txt`;
+- look first, counts only:
+  `python scripts/collect_teacher_traces.py collect --since 2026-11-01 --dry-run --no-names`;
+- the opencode plugin for immediate per-session syncs (its README).
+
+Manual runs from a shell use the same endpoints: `GET /api/trainer/teacher`,
+`GET /api/trainer/teacher/status`, `GET /api/trainer/teacher/traces?outcome=&status=`,
+`POST /api/trainer/teacher/lessons`, `POST /api/trainer/teacher/dataset`.
