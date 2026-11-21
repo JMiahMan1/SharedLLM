@@ -295,6 +295,21 @@ def _require_parent_or_admin(request: Request) -> None:
         )
 
 
+def _require_admin_for_hub_rooms(request: Request) -> None:
+    """403 unless an admin: Home Hub's own area routes are admin-only.
+
+    Garden calls the hub with the stack's internal secret, which the hub treats
+    as an admin. Without this check any adult could add, rename or remove a house
+    room through Garden that the hub itself would refuse them.
+    """
+    if not _is_admin(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin can add, rename or remove a Home Hub room. Ask an admin, "
+            "or use Devices > Rooms & places as an admin.",
+        )
+
+
 def _is_minor_role(role: str) -> bool:
     return role in ("child", "teen")
 
@@ -843,6 +858,7 @@ async def create_location(
     """Add a place. An indoor room is added to Home Hub, where rooms live."""
     _require_admin_or_adult(request)
     if body.kind == "indoor_room" and rooms_hub.enabled():
+        _require_admin_for_hub_rooms(request)
         area = await rooms_hub.create_room(body.name)
         if area is None:
             raise HTTPException(
@@ -868,7 +884,7 @@ async def patch_location(
     if area is not None:
         # A room lives in Home Hub; a rename goes there, and Garden's own
         # columns (assignments, Skylight) mean nothing to the hub.
-        _require_admin_or_adult(request)
+        _require_admin_for_hub_rooms(request)
         fields_set = body.model_fields_set
         if "assigned_to" in fields_set or "skylight_sync_enabled" in fields_set:
             raise HTTPException(
@@ -890,11 +906,8 @@ async def patch_location(
     else:
         _require_admin_or_adult(request)
     fields = body.model_dump(exclude_unset=True)
-    # An explicit null on a required column is a mistake, not a request to clear
-    # it: quietly skipping it keeps the edit and the row honest.
-    for key in ("item", "unit", "method", "target_qty"):
-        if key in fields and fields[key] is None:
-            fields.pop(key)
+    if "name" in fields and not (fields["name"] or "").strip():
+        raise HTTPException(status_code=422, detail="A place needs a name.")
     for key, value in fields.items():
         setattr(row, key, value)
     row.updated_at = utcnow()
@@ -938,6 +951,7 @@ async def delete_location(
     _require_admin_or_adult(request)
     area = await rooms_hub.room(loc_id)
     if area is not None:
+        _require_admin_for_hub_rooms(request)
         plants = session.exec(select(Plant).where(Plant.location_id == loc_id)).all()
         if plants:
             raise HTTPException(
