@@ -27,7 +27,7 @@ def client():
 @pytest.fixture()
 def identity(monkeypatch):
     async def acting(_request):
-        return {"user": "kaleb", "is_admin": False, "family_role": "adult_child"}
+        return {"user": "alex", "is_admin": False, "family_role": "adult_child"}
 
     monkeypatch.setattr(gateway_main, "_acting_identity", acting)
     return acting
@@ -91,7 +91,7 @@ def test_the_same_vision_pipeline_is_used_with_the_plant_task(monkeypatch):
         "detail": {"full_text": "A split-leaf plant.", "plant": {"common_name": "Monstera", "confidence": "high"}},
     })
 
-    detail = asyncio.run(garden_vision.look(LEAF, task="plant_identify", creds={"user": "kaleb"}))
+    detail = asyncio.run(garden_vision.look(LEAF, task="plant_identify", creds={"user": "alex"}))
 
     assert detail["plant"]["common_name"] == "Monstera"
     assert sent[0]["json"]["task"] == "plant_identify"
@@ -104,7 +104,7 @@ def test_the_diagnosis_sends_its_context(monkeypatch):
     sent = _exec_fake(monkeypatch, {"status": "SUCCESS", "detail": {"diagnosis": {"summary": "Thirsty."}}})
 
     asyncio.run(
-        garden_vision.look(LEAF, task="plant_diagnose", creds={"user": "kaleb"}, context="Plant: Monty")
+        garden_vision.look(LEAF, task="plant_diagnose", creds={"user": "alex"}, context="Plant: Monty")
     )
 
     assert sent[0]["json"]["context"] == "Plant: Monty"
@@ -116,7 +116,7 @@ def test_an_unconfigured_vision_model_fails_loudly(monkeypatch):
     _exec_fake(monkeypatch, {"status": "FAILURE", "message": "OCR failed: vision_ocr_model not configured"})
 
     with pytest.raises(garden_vision.VisionUnavailable) as caught:
-        asyncio.run(garden_vision.look(LEAF, task="plant_identify", creds={"user": "kaleb"}))
+        asyncio.run(garden_vision.look(LEAF, task="plant_identify", creds={"user": "alex"}))
 
     assert "vision_ocr_model" in str(caught.value)
 
@@ -127,7 +127,7 @@ def test_a_vision_service_that_does_not_answer_is_admitted(monkeypatch):
     _exec_fake(monkeypatch, {}, raises=True)
 
     with pytest.raises(garden_vision.VisionUnavailable):
-        asyncio.run(garden_vision.look(LEAF, task="plant_identify", creds={"user": "kaleb"}))
+        asyncio.run(garden_vision.look(LEAF, task="plant_identify", creds={"user": "alex"}))
 
 
 def test_an_ordinary_vision_failure_is_not_a_configuration_error(monkeypatch):
@@ -136,7 +136,7 @@ def test_an_ordinary_vision_failure_is_not_a_configuration_error(monkeypatch):
     _exec_fake(monkeypatch, {"status": "FAILURE", "message": "the photo is too dark"})
 
     with pytest.raises(garden_vision.VisionFailed) as caught:
-        asyncio.run(garden_vision.look(LEAF, task="plant_identify", creds={"user": "kaleb"}))
+        asyncio.run(garden_vision.look(LEAF, task="plant_identify", creds={"user": "alex"}))
 
     assert not isinstance(caught.value, garden_vision.VisionUnavailable)
 
@@ -145,7 +145,7 @@ def test_an_empty_photo_never_reaches_the_model():
     import asyncio
 
     with pytest.raises(garden_vision.VisionFailed):
-        asyncio.run(garden_vision.look(b"", task="plant_identify", creds={"user": "kaleb"}))
+        asyncio.run(garden_vision.look(b"", task="plant_identify", creds={"user": "alex"}))
 
 
 # --------------------------------------------------------------------------- the routes
@@ -182,7 +182,7 @@ def garden(monkeypatch, identity):
             )
         if path == "/plants/p-monty/logs":
             return Response(
-                content=_json.dumps({"logs": [{"action": "water", "created_at": "2026-11-18T09:00:00+00:00", "performed_by": "kaleb"}]}),
+                content=_json.dumps({"logs": [{"action": "water", "created_at": "2026-11-18T09:00:00+00:00", "performed_by": "alex"}]}),
                 media_type="application/json",
             )
         if path == "/today":
@@ -196,7 +196,7 @@ def garden(monkeypatch, identity):
                     "thumb_path": "photo-1.jpg" if (json or {}).get("thumb_base64") else None,
                     "notes": (json or {}).get("notes"),
                     "ai_summary_json": (json or {}).get("ai_summary_json"),
-                    "taken_at": "2026-11-20T10:00:00+00:00", "taken_by": "kaleb",
+                    "taken_at": "2026-11-20T10:00:00+00:00", "taken_by": "alex",
                     "created_at": "2026-11-20T10:00:00+00:00",
                 }),
                 status_code=201,
@@ -252,7 +252,7 @@ def test_a_plant_missing_from_the_catalog_offers_a_draft(client, garden, monkeyp
 
 def test_identify_is_adults_only(client, garden, monkeypatch):
     async def child(_request):
-        return {"user": "noah", "is_admin": False, "family_role": "child"}
+        return {"user": "jamie", "is_admin": False, "family_role": "child"}
 
     monkeypatch.setattr(gateway_main, "_acting_identity", child)
 

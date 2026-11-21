@@ -73,8 +73,8 @@ def _headers(user: str, role: str) -> dict[str, str]:
 
 
 PARENT = _headers("mother", "mother")
-ADULT = _headers("kaleb", "adult_child")
-CHILD = _headers("noah", "child")
+ADULT = _headers("alex", "adult_child")
+CHILD = _headers("jamie", "child")
 
 
 class Hub:

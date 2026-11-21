@@ -10,7 +10,7 @@ import pytest
 
 from services.gateway import fast_garden
 
-CREDS = {"user": "noah", "family_role": "child", "is_admin": False}
+CREDS = {"user": "jamie", "family_role": "child", "is_admin": False}
 
 
 class World:
