@@ -74,3 +74,16 @@ locally or on the production server.
 - A server-side rebuild duplicates CI work, loads production CPU and disk for about
   20 minutes, and can drift from the pushed commit without anyone noticing. If CI is
   unavailable, say so and get agreement before building anywhere.
+
+## Git worktrees
+
+Do not leave stray `git worktree` directories behind in `~/Code/` (e.g., sibling
+`../SharedLLM-*` folders).
+
+- Prefer working in the primary checkout unless parallel isolation is genuinely needed.
+- If a temporary worktree is required, place it under `<workspace>/.tmp/worktrees/<name>`
+  rather than creating sibling directories in the parent folder (`~/Code/`).
+- Every task that creates a worktree owns its cleanup before finishing: verify all
+  changes are committed and merged/pushed, then run `git worktree remove <path>` and
+  `git worktree prune` (and delete any merged temporary local branch).
+- Never use raw `rm -rf` on a worktree without `git worktree remove` / `prune`.
