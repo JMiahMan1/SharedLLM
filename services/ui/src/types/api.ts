@@ -788,6 +788,30 @@ export interface GuardRequest {
   vetting?: RequestVetting;
 }
 
+/**
+ * A locked child's device asking a parent to unlock it (a family PC or the
+ * child's phone). A parent approves for some minutes or denies it from their
+ * own session; it expires unanswered after ten minutes, and a newer request
+ * from the same device supersedes it.
+ */
+export interface UnlockRequest {
+  id: number;
+  username: string;
+  /** "PC", "phone", "tablet" or "device". */
+  device: string;
+  /** Why the device is locked: bedtime, limit, paused, school, chores, or "". */
+  lock_reason: string;
+  note: string;
+  minutes_asked: number;
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'superseded';
+  minutes_granted: number | null;
+  until: string | null;
+  decided_by: string | null;
+  created_at: string;
+  expires_at: string;
+  decided_at: string | null;
+}
+
 /** Where an app's public Play lookup stands. */
 export type AppLookup = 'checking' | 'pending' | 'found' | 'not_on_play' | 'error' | 'off' | 'unavailable';
 export type AppReviewState = 'checking' | 'ready' | 'failed' | 'no_model' | 'not_needed';
