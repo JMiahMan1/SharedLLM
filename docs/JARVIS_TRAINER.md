@@ -194,6 +194,27 @@ bounded like `POST /repair` (1-3).
 | `POST /api/trainer/dream/validate` | admin | report a lesson's self-test |
 | `GET /api/trainer/backlog` | admin | the last cycle's proposals |
 | `POST /api/trainer/cycle` | admin | the whole pass in one call |
+| `GET /api/trainer/teacher` | admin | teacher traces: counts, scrub status, lessons, `teacher` bucket scores over time |
+| `GET /api/trainer/teacher/traces`, `/traces/{id}` | admin | trace summaries (`?outcome=&status=`), one scrubbed trace |
+| `POST /api/trainer/teacher/traces` | admin or `TRAINER_TEACHER_UPLOADERS` | import scrubbed traces (each re-checked for leaks) |
+| `DELETE /api/trainer/teacher/traces/{id}` | admin | forget one trace |
+| `POST /api/trainer/teacher/lessons` | admin | write verified traces as worked-example lessons |
+| `POST /api/trainer/teacher/dataset` | admin | train/eval JSONL with Raven's prompt and tools |
+| `POST /api/trainer/teacher/heartbeat` | admin or `TRAINER_TEACHER_UPLOADERS` | the Mac reports a sync or flush (counts and an error line) |
+| `GET /api/trainer/teacher/status` | admin | last sync and queue, last lessons, eval, snapshot, failures |
+| `GET /api/trainer/teacher/scrub-names` | admin or `TRAINER_TEACHER_UPLOADERS` | household name words from the family directory, for the Mac scrubber |
+
+### Teacher traces
+
+Strong cloud models doing agentic work on this repository are a fourth source
+of training material: their sessions are collected and scrubbed on the Mac
+(`scripts/collect_teacher_traces.py`, or the opencode plugin in
+`tools/opencode-trainer-sync/`), imported here, and used as worked-example
+lessons in `system_learnings`, as cases in the curriculum's `teacher` bucket
+(after the Workspace recipes), and as fine-tuning rows. A failed teacher case
+files a `teacher_gap` proposal. The whole pipeline, the scrubber's rules, the
+fine-tuning options for this hardware and the runbook are in
+`docs/TEACHER_TRACES.md`.
 
 ## 9. Working within the hardware
 

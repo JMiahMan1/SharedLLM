@@ -25,6 +25,7 @@ from services.gateway.trainer import alpaca, curriculum, facilitator, runner, se
 from services.gateway.trainer import catalog as catalog_mod
 from services.gateway.trainer import dream as dream_mod
 from services.gateway.trainer import sermon as sermon_mod
+from services.gateway.trainer import teacher as teacher_mod
 from services.gateway.trainer.llm import LocalModelUnavailable
 from services.gateway.workspace_api import WorkspaceError
 
@@ -379,3 +380,204 @@ async def run_cycle(request: Request, body: CycleRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except runner.TrainerStorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Teacher traces: what strong models did on this repository, scrubbed on the
+# machine that held the transcripts (scripts/collect_teacher_traces.py).
+# ---------------------------------------------------------------------------
+
+
+class TeacherUpload(BaseModel):
+    traces: list[dict[str, Any]] = Field(max_length=teacher_mod.MAX_TRACES_PER_UPLOAD)
+
+
+class TeacherLessonsRequest(BaseModel):
+    limit: int = Field(default=20, ge=1, le=200)
+    dry_run: bool = False
+
+
+class TeacherDatasetRequest(BaseModel):
+    format: str = Field(default="openai", pattern="^(openai|sharegpt)$")
+    eval_share: float = Field(default=0.1, ge=0.0, lt=1.0)
+    include_unverified: bool = False
+
+
+async def _uploader(request: Request) -> str:
+    """An admin, or one of the accounts named in ``TRAINER_TEACHER_UPLOADERS``."""
+    from services.gateway.main import _acting_identity
+
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user = str(ident.get("user") or "")
+    if ident.get("is_admin") or user in teacher_mod.UPLOADERS:
+        return user
+    raise HTTPException(
+        status_code=403,
+        detail="Only an admin, or an account listed in TRAINER_TEACHER_UPLOADERS, may post teacher traces",
+    )
+
+
+def _storage_error(exc: runner.TrainerStorageError) -> HTTPException:
+    return HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/teacher")
+async def teacher_summary(request: Request) -> dict[str, Any]:
+    """Imported traces, their scrub status, lessons written, and teacher-case scores over time."""
+    await _admin(request)
+    try:
+        return teacher_mod.summary()
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+
+
+@router.get("/teacher/traces")
+async def teacher_traces(
+    request: Request, limit: int = 100, outcome: str | None = None, status: str | None = None
+) -> dict[str, Any]:
+    """Trace summaries, newest first (goal, outcome, scrub status; never full steps)."""
+    await _admin(request)
+    try:
+        return {"traces": teacher_mod.list_traces(limit=max(1, min(limit, 500)), outcome=outcome, status=status)}
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+
+
+@router.get("/teacher/traces/{trace_id}")
+async def teacher_trace(trace_id: str, request: Request) -> dict[str, Any]:
+    """One scrubbed trace with its steps."""
+    await _admin(request)
+    try:
+        trace = teacher_mod.load_trace(trace_id)
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+    if trace is None:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return trace
+
+
+@router.delete("/teacher/traces/{trace_id}")
+async def delete_teacher_trace(trace_id: str, request: Request) -> dict[str, Any]:
+    """Forget one trace (its lesson, if written, stays in RAG for dreaming to judge)."""
+    await _admin(request)
+    try:
+        deleted = teacher_mod.delete_trace(trace_id)
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return {"deleted": trace_id}
+
+
+@router.post("/teacher/traces")
+async def upload_teacher_traces(request: Request, body: TeacherUpload) -> dict[str, Any]:
+    """Store scrubbed traces. Unsafe or stale ones are refused one by one, with the reason."""
+    user = await _uploader(request)
+    try:
+        return teacher_mod.import_traces(body.traces, uploader=user)
+    except teacher_mod.TeacherError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+
+
+@router.post("/teacher/lessons")
+async def teacher_lessons(request: Request, body: TeacherLessonsRequest) -> dict[str, Any]:
+    """Write verified traces into system_learnings as worked-example lessons."""
+    await _admin(request)
+    try:
+        return await teacher_mod.write_lessons(limit=body.limit, dry_run=body.dry_run)
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+
+
+@router.post("/teacher/dataset")
+async def teacher_dataset(request: Request, body: TeacherDatasetRequest) -> dict[str, Any]:
+    """Write train/eval JSONL for a LoRA trainer, with Raven's real system prompt."""
+    await _admin(request)
+    try:
+        system_prompt = await teacher_mod.raven_system_prompt()
+    except teacher_mod.TeacherError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    try:
+        return teacher_mod.export_finetune(
+            system_prompt,
+            fmt=body.format,
+            eval_share=body.eval_share,
+            include_unverified=body.include_unverified,
+        )
+    except teacher_mod.TeacherError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+
+
+class TeacherHeartbeat(BaseModel):
+    """What the Mac reports after each sync or flush: counts and an error line only."""
+
+    command: str = Field(default="sync", max_length=20)
+    ok: bool
+    queue_length: int = Field(default=0, ge=0)
+    pending_sessions: int = Field(default=0, ge=0)
+    tasks: int = Field(default=0, ge=0)
+    sent: int = Field(default=0, ge=0)
+    error: str | None = Field(default=None, max_length=1000)
+
+
+@router.post("/teacher/heartbeat")
+async def teacher_heartbeat(request: Request, body: TeacherHeartbeat) -> dict[str, Any]:
+    """Record the Mac's last sync, so a silent or failing collector is noticed."""
+    from services.gateway.trainer import teacher_auto
+
+    user = await _uploader(request)
+    try:
+        return teacher_auto.record_heartbeat(body.model_dump(), uploader=user)
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+
+
+@router.get("/teacher/status")
+async def teacher_status(request: Request) -> dict[str, Any]:
+    """Last sync, queue length, last lesson write, last eval, last snapshot, failures."""
+    from services.gateway.trainer import teacher_auto
+
+    await _admin(request)
+    try:
+        return teacher_auto.health()
+    except runner.TrainerStorageError as exc:
+        raise _storage_error(exc) from exc
+
+
+@router.get("/teacher/scrub-names")
+async def teacher_scrub_names(request: Request) -> dict[str, Any]:
+    """The household's names, for the Mac's scrubber to mask (uploader accounts only).
+
+    Read from Identity's family directory with the caller's own key, so the
+    collector never needs a hand-made names file. Only name words are returned.
+    """
+    import aiohttp
+
+    from services.gateway.config import IDENTITY_SVC
+    from services.gateway.http_client import shared_http_client
+
+    await _uploader(request)
+    auth = request.headers.get("Authorization")
+    if not auth:
+        raise HTTPException(status_code=400, detail="Send the uploader key as a bearer token")
+    try:
+        async with shared_http_client() as client, client.get(
+            f"{IDENTITY_SVC}/api/users/family-directory",
+            headers={"Authorization": auth},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        ) as resp:
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail=f"Identity answered {resp.status} for the family directory")
+            directory = await resp.json()
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        raise HTTPException(status_code=503, detail=f"Identity did not answer: {type(exc).__name__}") from exc
+    names = teacher_mod.household_name_words(directory)
+    if not names:
+        raise HTTPException(status_code=502, detail="The family directory listed no names")
+    return {"names": names}

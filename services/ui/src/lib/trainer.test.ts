@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   benchmarkLine,
+  failureKinds,
   bucketBars,
   freeVramLabel,
   hardwareVerdict,
+  healthRows,
+  outcomeTone,
   passRateLabel,
   proposalTone,
+  scrubLabel,
+  scrubTone,
   summariseCatalog,
+  teacherTrend,
   type TrainerBucketResult,
   type TrainerCatalog,
   type TrainerHardware,
@@ -136,6 +142,98 @@ describe('the training tab helpers', () => {
     expect(proposalTone('tool_doc')).toContain('amber');
     expect(proposalTone('lesson_validation')).toContain('indigo');
     expect(proposalTone('ui_gap')).toContain('cyan');
+    expect(proposalTone('teacher_gap')).toContain('amber');
     expect(proposalTone('something_else')).toContain('slate');
+  });
+});
+
+describe('teacher traces', () => {
+  const row = {
+    scrub_status: 'masked',
+    scrub_masked: 3,
+    scrub_dropped_steps: 1,
+    drop_reason: null,
+  };
+
+  it('says what the scrubber did to a kept trace', () => {
+    expect(scrubLabel(row)).toBe('masked · 3 masked · 1 step removed');
+    expect(scrubLabel({ ...row, scrub_status: 'clean', scrub_masked: 0, scrub_dropped_steps: 0 })).toBe('clean');
+  });
+
+  it('names the rule that dropped a trace, never its content', () => {
+    expect(scrubLabel({ ...row, scrub_status: 'dropped', drop_reason: 'session_touched_secrets' })).toBe(
+      'dropped: session touched secrets',
+    );
+    expect(scrubTone('dropped')).toContain('rose');
+    expect(scrubTone('clean')).toContain('emerald');
+  });
+
+  it('colours only a checked success green', () => {
+    expect(outcomeTone('success')).toContain('emerald');
+    expect(outcomeTone('failure')).toContain('rose');
+    expect(outcomeTone('unverified')).toContain('slate');
+  });
+
+  it('reports the local score and its change since the first run', () => {
+    const score = (pass_rate: number) => ({
+      report_id: `r${pass_rate}`,
+      started_at: '2026-11-01T00:00:00Z',
+      model: 'local',
+      cases: 10,
+      passed: pass_rate * 10,
+      pass_rate,
+    });
+
+    expect(teacherTrend([])).toEqual({ latest: '-', change: 'not evaluated yet', runs: 0 });
+    expect(teacherTrend([score(0.3)]).change).toBe('first run');
+    expect(teacherTrend([score(0.3), score(0.5)])).toEqual({
+      latest: '50%',
+      change: '+20 points since the first run',
+      runs: 2,
+    });
+    expect(teacherTrend([score(0.5), score(0.5)]).change).toBe('no change since the first run');
+  });
+});
+
+describe('teacher pipeline health', () => {
+  it('lists every part, marks the failing ones, and says never when nothing ran', () => {
+    expect(healthRows(null).map((row) => row.value)).toEqual(['never', 'never', 'never', 'none yet']);
+
+    const rows = healthRows({
+      last_pass_at: '2026-11-21T10:00:00Z',
+      sync: {
+        at: '2026-11-21T09:30:00Z',
+        ok: false,
+        command: 'sync',
+        queue_length: 2,
+        pending_sessions: 0,
+        tasks: 3,
+        sent: 0,
+        error: 'the gateway answered 502',
+      },
+      lessons: { at: '2026-11-21T10:00:00Z', written: 1, failed: 0, total: 4 },
+      eval: { waiting: { since: '2026-11-21T10:00:00Z', reasons: ['busy'] } },
+      snapshot: null,
+      failures: [
+        { part: 'sync', label: 'Teacher sync from the Mac', reason: 'the gateway answered 502', since: '2026-11-21T09:30:00Z' },
+      ],
+    });
+
+    expect(rows[0].failing).toBe(true);
+    expect(rows[0].value).toContain('failed · 2 queued');
+    expect(rows[1].value).toContain('1 new, 4 in all');
+    expect(rows[2].value).toContain('waiting for an idle card');
+    expect(rows[3].failing).toBe(false);
+  });
+});
+
+describe('failed missions', () => {
+  it('lists the kinds learned from, most frequent first, leaving outages out', () => {
+    expect(failureKinds({ infrastructure: 9, loop: 3, hallucinated_path: 3, wrong_tool: 1 })).toEqual([
+      { kind: 'hallucinated_path', label: 'hallucinated path', count: 3 },
+      { kind: 'loop', label: 'loop', count: 3 },
+      { kind: 'wrong_tool', label: 'wrong tool', count: 1 },
+    ]);
+    expect(failureKinds(undefined)).toEqual([]);
   });
 });

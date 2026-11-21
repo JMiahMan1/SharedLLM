@@ -1,0 +1,18 @@
+{
+  "name": "opencode-trainer-sync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "opencode plugin: send finished tasks to the Jarvis Trainer as scrubbed teacher traces",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./server": "./index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

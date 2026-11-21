@@ -13,8 +13,9 @@ import {
   summariseCatalog,
 } from '../../lib/trainer';
 import { api } from '../../services/api';
+import TeacherTracesCard from './TeacherTracesCard';
 
-const BUCKET_CHOICES = ['repair', 'writing', 'vision', 'workspace', 'memory', 'protocol', 'tools'];
+const BUCKET_CHOICES = ['repair', 'writing', 'vision', 'workspace', 'memory', 'protocol', 'tools', 'teacher', 'raven_failures'];
 
 /**
  * Training: what Jarvis can do, how the local model does on it, and what the
@@ -258,6 +259,8 @@ export default function TrainerPane() {
           ))}
         </ul>
       </section>
+
+      <TeacherTracesCard />
 
       <WrittenWorks />
     </div>

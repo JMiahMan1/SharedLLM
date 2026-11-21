@@ -242,10 +242,204 @@ export function passRateLabel(rate: number): string {
 /** How a proposal should look: failures first, then memory, then UI ideas. */
 export function proposalTone(kind: string): string {
   if (kind === 'model_unavailable') return 'border-rose-500/30 bg-rose-500/10 text-rose-300';
-  if (kind.startsWith('curriculum_') || kind === 'tool_doc') {
+  if (kind.startsWith('curriculum_') || kind === 'tool_doc' || kind === 'teacher_gap') {
     return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   }
   if (kind.startsWith('lesson_')) return 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300';
   if (kind === 'ui_gap') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
   return 'border-white/10 bg-white/5 text-slate-300';
+}
+
+// --- Teacher traces: what strong cloud models did on this repository --------
+
+export interface TeacherScore {
+  report_id: string;
+  started_at: string;
+  model: string;
+  cases: number;
+  passed: number;
+  pass_rate: number;
+}
+
+export interface TeacherExport {
+  format: string;
+  paths: Record<string, string>;
+  train_rows: number;
+  eval_rows: number;
+  skipped: Record<string, number>;
+  created_at: string;
+}
+
+export interface TeacherSummary {
+  traces: {
+    total: number;
+    by_status: Record<string, number>;
+    by_outcome: Record<string, number>;
+    by_source: Record<string, number>;
+    by_location: Record<string, number>;
+    by_model: Record<string, number>;
+    masked_values: number;
+    dropped_steps: number;
+  };
+  lessons: { written: number; last_written_at: string | null; eligible: number };
+  eval_cases: number;
+  scores: TeacherScore[];
+  exports: TeacherExport[];
+  scrub_version: string;
+  health?: TeacherHealth;
+  raven_failures?: RavenFailureSummary;
+}
+
+export interface TeacherTraceRow {
+  id: string;
+  source: string;
+  model: string;
+  model_location: string;
+  started_at: string | null;
+  imported_at: string | null;
+  goal: string;
+  outcome: string;
+  outcome_evidence: string[];
+  step_count: number;
+  tools: string[];
+  areas: string[];
+  scrub_status: string;
+  scrub_masked: number;
+  scrub_dropped_steps: number;
+  drop_reason: string | null;
+  lesson_id: string | null;
+  case_id: string | null;
+}
+
+export interface TeacherLessonsResult {
+  written: { id: string; lesson_id: string; rule: string }[];
+  skipped: { id: string; reason: string }[];
+  failed: { id: string; error: string }[];
+  dry_run: boolean;
+}
+
+/** How a trace's scrub status reads: dropped is a warning, masked is normal. */
+export function scrubTone(status: string): string {
+  if (status === 'dropped') return 'border-rose-500/30 bg-rose-500/10 text-rose-300';
+  if (status === 'masked') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+  if (status === 'clean') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  return 'border-white/10 bg-white/5 text-slate-300';
+}
+
+/** A dropped trace shows why, never what: the reason names a rule, not a value. */
+export function scrubLabel(
+  row: Pick<TeacherTraceRow, 'scrub_status' | 'scrub_masked' | 'scrub_dropped_steps' | 'drop_reason'>,
+): string {
+  if (row.scrub_status === 'dropped') return `dropped: ${(row.drop_reason || 'unknown').replace(/_/g, ' ')}`;
+  const parts = [row.scrub_status];
+  if (row.scrub_masked) parts.push(`${row.scrub_masked} masked`);
+  if (row.scrub_dropped_steps) {
+    parts.push(`${row.scrub_dropped_steps} step${row.scrub_dropped_steps === 1 ? '' : 's'} removed`);
+  }
+  return parts.join(' · ');
+}
+
+/** How an outcome reads: only a checked success is green. */
+export function outcomeTone(outcome: string): string {
+  if (outcome === 'success') return 'text-emerald-300';
+  if (outcome === 'failure') return 'text-rose-300';
+  return 'text-slate-400';
+}
+
+/** The local model's teacher-task score: latest, and the change since the first run. */
+export function teacherTrend(scores: TeacherScore[] | null | undefined): {
+  latest: string;
+  change: string;
+  runs: number;
+} {
+  const rows = scores ?? [];
+  if (!rows.length) return { latest: '-', change: 'not evaluated yet', runs: 0 };
+  const first = rows[0].pass_rate;
+  const last = rows[rows.length - 1].pass_rate;
+  const delta = Math.round((last - first) * 100);
+  const change =
+    rows.length < 2
+      ? 'first run'
+      : delta === 0
+        ? 'no change since the first run'
+        : `${delta > 0 ? '+' : ''}${delta} points since the first run`;
+  return { latest: passRateLabel(last), change, runs: rows.length };
+}
+
+/** The hands-off pipeline's health, as `GET /api/trainer/teacher/status` reports it. */
+export interface TeacherHealth {
+  last_pass_at: string | null;
+  sync: {
+    at: string;
+    ok: boolean;
+    command: string;
+    queue_length: number;
+    pending_sessions: number;
+    tasks: number;
+    sent: number;
+    error: string | null;
+    last_ok_at?: string | null;
+  } | null;
+  lessons: { at: string; written: number; failed: number; total: number } | null;
+  eval: { at?: string; pass_rate?: number; cases?: number; passed?: number; waiting?: { since: string; reasons: string[] } } | null;
+  snapshot: { at: string; train_rows: number; eval_rows: number; verified_total: number; file: string } | null;
+  failures: { part: string; label: string; reason: string; since: string }[];
+}
+
+function when(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleString() : 'never';
+}
+
+/** One line per part of the pipeline, for the Lab card. */
+export function healthRows(health: TeacherHealth | null | undefined): { label: string; value: string; failing: boolean }[] {
+  const failing = new Set((health?.failures ?? []).map((f) => f.part));
+  const sync = health?.sync;
+  const evaluation = health?.eval;
+  return [
+    {
+      label: 'Last sync from the Mac',
+      value: sync ? `${when(sync.at)} · ${sync.ok ? 'ok' : 'failed'} · ${sync.queue_length} queued` : 'never',
+      failing: failing.has('sync'),
+    },
+    {
+      label: 'Last lessons written',
+      value: health?.lessons ? `${when(health.lessons.at)} · ${health.lessons.written} new, ${health.lessons.total} in all` : 'never',
+      failing: failing.has('lessons'),
+    },
+    {
+      label: 'Last teacher evaluation',
+      value: evaluation?.at
+        ? `${when(evaluation.at)} · ${evaluation.passed ?? 0}/${evaluation.cases ?? 0} passed`
+        : evaluation?.waiting
+          ? `waiting for an idle card since ${when(evaluation.waiting.since)}`
+          : 'never',
+      failing: failing.has('eval'),
+    },
+    {
+      label: 'Last dataset snapshot',
+      value: health?.snapshot
+        ? `${when(health.snapshot.at)} · ${health.snapshot.train_rows} train / ${health.snapshot.eval_rows} eval rows`
+        : 'none yet',
+      failing: failing.has('snapshot'),
+    },
+  ];
+}
+
+/** Raven's own failed missions, as the trainer learns from them. */
+export interface RavenFailureSummary {
+  missions_examined: number;
+  by_kind: Record<string, number>;
+  learned_from: number;
+  infrastructure: number;
+  lessons: number;
+  cases: number;
+  scores: { report_id: string; started_at: string; cases: number; passed: number; pass_rate: number }[];
+}
+
+/** Failure kinds for the card, most frequent first; infrastructure is shown apart. */
+export function failureKinds(byKind: Record<string, number> | null | undefined): { kind: string; label: string; count: number }[] {
+  return Object.entries(byKind ?? {})
+    .filter(([kind]) => kind !== 'infrastructure')
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([kind, count]) => ({ kind, label: kind.replace(/_/g, ' '), count }));
 }

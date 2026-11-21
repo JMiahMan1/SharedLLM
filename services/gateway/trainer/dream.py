@@ -283,6 +283,22 @@ def proposals_from_failures(report: dict[str, Any] | None, *, limit: int = 6) ->
             )
         )
 
+    teacher_failed = list(((report.get("by_bucket") or {}).get("teacher") or {}).get("failed_ids") or [])
+    if teacher_failed:
+        # A teacher case failed: a strong model solved this exact task, so the
+        # worked example exists. The fix is to make sure Raven can retrieve it.
+        proposals.append(
+            _proposal(
+                "teacher_gap",
+                f"The local model missed {len(teacher_failed)} task(s) a teacher solved",
+                "The teacher's verified steps for these tasks are on record. Write them as "
+                "worked-example lessons so missions retrieve them, then re-run the teacher bucket.",
+                priority=7,
+                evidence=teacher_failed,
+                action="Run POST /api/trainer/teacher/lessons, then evaluate the teacher bucket again.",
+            )
+        )
+
     for bucket, stats in (report.get("by_bucket") or {}).items():
         failed = list(stats.get("failed_ids") or [])
         if not failed:
