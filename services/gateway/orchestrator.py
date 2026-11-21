@@ -1995,6 +1995,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{single_turn_guide}"
     if kmap:
         system += f"\n\n{kmap}"
+    before_workspace = len(system)
     if workspace_context.strip():
         system += (
             f"\n\nWorkspace:\n{workspace_context.strip()}\n"
@@ -2003,6 +2004,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             "here: say so plainly, name the file it would use, and suggest sending "
             "it to Raven as a mission."
         )
+    ws_chars = len(system) - before_workspace
     context_parts = [f"Current Date/Time: {now}", _speaker_line(creds)]
     if turn_note.strip():
         context_parts.append(turn_note.strip())
@@ -2019,10 +2021,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     budget = prompt_budget.record(
         budget_path,
         {
-            "system": len(system_prompt.strip()),
+            # The four fixed parts add up to the system message exactly (separators in "system").
+            "system": len(system) - len(single_turn_guide) - len(kmap) - ws_chars,
             "tool_guide": len(single_turn_guide),
             "knowledge_map": len(kmap),
-            "workspace": len(system) - len(system_prompt.strip()) - len(single_turn_guide) - len(kmap),
+            "workspace": ws_chars,
             "history": _history_chars(history),
             "question": len(question) - len(rag_context),
             **prefetch,

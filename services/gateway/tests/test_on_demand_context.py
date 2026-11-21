@@ -55,7 +55,7 @@ async def test_a_grounded_turn_gets_no_map(monkeypatch):
 
 
 async def test_every_request_records_its_prompt_by_section(monkeypatch):
-    _capture(monkeypatch, ['```json\n{"tool": "BibleRequest", "action": "votd"}\n```', "John 3:16."])
+    sent = _capture(monkeypatch, ['```json\n{"tool": "BibleRequest", "action": "votd"}\n```', "John 3:16."])
     monkeypatch.setattr(orchestrator, "_execute_single_tool", AsyncMock(return_value="VOTD: John 3:16"))
     await orchestrator._single_turn_inference(
         "verse of the day?", "m", "PERSONA", "", [{"role": "user", "content": "hi"}], CREDS,
@@ -64,7 +64,10 @@ async def test_every_request_records_its_prompt_by_section(monkeypatch):
     rec = prompt_budget.snapshot()["recent"][0]
     assert rec["path"] == "voice"
     s = rec["sections"]
-    assert s["system"] == len("PERSONA") and s["knowledge_map"] > 0 and s["tool_guide"] > 0
+    assert s["knowledge_map"] > 0 and s["tool_guide"] > 0 and "workspace" not in s
+    # The fixed sections add up to the system message the model was sent, exactly.
+    assert s["system"] + s["tool_guide"] + s["knowledge_map"] == len(sent[0][0]["content"])
+    assert len("PERSONA") <= s["system"] < len("PERSONA") + 40
     assert s["history"] == 2
     assert s["tool_results"] == len("VOTD: John 3:16")
     assert not any(k.startswith("prefetch") for k in s)
