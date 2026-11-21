@@ -100,7 +100,6 @@ def test_exec_blocking_recreates_stale_container(monkeypatch):
     old = FakeContainer("old-image")
     client = FakeClient(old, "new-image")
     _install(monkeypatch, client)
-    monkeypatch.setattr(ws, "_sandbox_credential_env", lambda: {})
     calls = {}
 
     class FakeExecResult:

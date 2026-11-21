@@ -66,59 +66,15 @@ SYSTEM_BLOCKLIST_COMMANDS = {
 
 
 def _identity_secrets_to_env(user_ctx) -> dict[str, str]:
-    """Map a user's Identity integration secrets (already decrypted inside
-    ``user_context``) to standard environment variable names. This is the
-    DEFAULT layer injected into every workspace sandbox command.
+    """The user's own integration credentials as environment variables.
 
-    Secrets are ALWAYS sourced from the Identity service (``user_context``) and
-    never from ``.env``/``os.environ``, so they reflect what the user actually
-    connected, and a missing integration simply yields no variable instead of
-    falling back to a server-side dotenv secret.
+    One implementation, shared with the workspace runtime's terminal:
+    ``services.workspace_sandbox.user_credential_env``. Secrets come only from
+    the Identity service (``user_context``), never ``.env``/``os.environ``.
     """
-    env: dict[str, str] = {}
-    if not user_ctx:
-        return env
-    uc = user_ctx
-    if hasattr(uc, "model_dump"):
-        uc = uc.model_dump()
-    elif hasattr(uc, "dict"):
-        uc = uc.dict()
-    if not isinstance(uc, dict):
-        return env
+    from services.workspace_sandbox import user_credential_env
 
-    def _get(k: str) -> str | None:
-        return uc.get(k) if isinstance(uc.get(k), str) and uc.get(k) else None
-
-    gh = _get("github_token")
-    if gh:
-        env["GITHUB_TOKEN"] = gh
-        env["GH_TOKEN"] = gh
-        env["GH_ENTERPRISE_TOKEN"] = gh
-    gt = _get("git_token")
-    if gt:
-        env["GIT_TOKEN"] = gt
-    gl = _get("gitlab_token")
-    if gl:
-        env["GITLAB_TOKEN"] = gl
-    nc = _get("nextcloud_pass")
-    if nc:
-        env["NEXTCLOUD_PASSWORD"] = nc
-        env["NEXTCLOUD_PASS"] = nc
-    ncu = _get("nextcloud_url")
-    if ncu:
-        env["NEXTCLOUD_URL"] = ncu
-    # Only the person's own Home Assistant login, and only while that integration is on: never
-    # the hub's own login (it can command the whole house and must not leave the stack).
-    from services.common.hub_login import own_login
-
-    ha_login = own_login(uc)
-    if ha_login:
-        env["HA_URL"], env["HA_TOKEN"] = ha_login
-        env["HOME_ASSISTANT_TOKEN"] = ha_login[1]
-    ak = _get("api_key")
-    if ak:
-        env["API_KEY"] = ak
-    return env
+    return user_credential_env(user_ctx)
 
 
 def build_sandbox_env(user_ctx, ws_env_overrides) -> dict[str, str]:
@@ -1175,7 +1131,7 @@ async def handle_workspace_lint(req) -> ExecutionResult:
             is_esphome_file = forced == "esphome"
             if not is_esphome_file:
                 try:
-                    with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+                    with open(abs_path, encoding="utf-8", errors="ignore") as f:
                         head = f.read(2048)
                         if "esphome:" in head or "esp32:" in head or "esp8266:" in head or "substitutions:" in head:
                             is_esphome_file = True

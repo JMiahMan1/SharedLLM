@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import pathlib
 
+import pytest
+
 from services.gateway.trainer import alpaca
 
 
@@ -84,15 +86,24 @@ def test_the_sharedllm_suite_is_averaged_from_its_tasks(tmp_path, monkeypatch):
     assert categories["librarian"]["score"] == 80.0
 
 
-def test_a_machine_with_no_results_reads_as_nothing_measured(tmp_path, monkeypatch):
+def test_a_machine_with_no_results_yet_reads_as_nothing_measured(tmp_path, monkeypatch):
     tree = _tree(tmp_path, monkeypatch)
-    assert not tree["general"].exists()
+    tree["general"].mkdir(parents=True)
 
     summary = alpaca.benchmark_summary()
 
     assert summary["total"] == 0
     assert summary["results"] == []
     assert summary["directories"]["general"].endswith("llm/models")
+    assert summary["missing_directories"] == [str(tree["shared"])]
+
+
+def test_results_that_were_never_mounted_are_an_error(tmp_path, monkeypatch):
+    tree = _tree(tmp_path, monkeypatch)
+    assert not tree["general"].exists()
+
+    with pytest.raises(alpaca.BenchmarksUnavailable):
+        alpaca.benchmark_summary()
 
 
 def test_the_weakest_categories_come_from_the_worst_run_of_the_general_suite(tmp_path, monkeypatch):

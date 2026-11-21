@@ -372,3 +372,33 @@ def test_the_scripture_protocol_lesson_points_at_bible_request():
     assert "{reference} ({version})" in lesson["rule"], "citations must name reference and version"
     assert "WebSearchRequest" in lesson["rule"], "the lesson must forbid quoting scripture from the web"
     assert lesson["rule"].index("FIRST") < lesson["rule"].index("WebSearchRequest")
+
+
+@pytest.mark.asyncio
+async def test_every_seeded_protocol_lesson_is_returned_even_past_25_newer_tagged_ones(tmp_path):
+    _install_fakes(tmp_path)
+    rag_main._seed_protocol_lessons()
+    # More newer protocol-tagged lessons than the gateway's old page of 25.
+    for i in range(30):
+        await _ingest("system_learnings", f"later lesson {i}", _lesson_meta(f"rule {i}", ["protocol"]))
+
+    body = await rag_main.list_protocol_lessons()
+    assert [item["id"] for item in body["items"]] == [lesson["id"] for lesson in rag_main._PROTOCOL_LESSONS]
+    # The oldest, most basic lessons are there (they used to drop out).
+    assert body["items"][0]["metadata"]["rule"] == rag_main._PROTOCOL_LESSONS[0]["rule"]
+
+
+@pytest.mark.asyncio
+async def test_a_missing_seeded_protocol_lesson_is_an_error(tmp_path):
+    from fastapi import HTTPException
+
+    conn = _install_fakes(tmp_path)
+    rag_main._seed_protocol_lessons()
+    first = rag_main._PROTOCOL_LESSONS[0]["id"]
+    conn.execute("DELETE FROM rag_items WHERE id = ?", (first,))
+    conn.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await rag_main.list_protocol_lessons()
+    assert exc.value.status_code == 500
+    assert first in exc.value.detail

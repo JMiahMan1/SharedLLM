@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normaliseApps } from './AppsCard';
+import { normaliseApps } from './appsNormalise';
 import { APPS } from '../../test/appVettingFixtures';
 import type { GuardianApps } from '../../types/api';
 

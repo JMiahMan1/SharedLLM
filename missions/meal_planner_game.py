@@ -12,10 +12,10 @@ The game runs in a Raven workspace and can be exposed via port forwarding for fa
 """
 
 import os
-import json
-import httpx
-import time
 import sys
+import time
+
+import httpx
 
 # Mission specification for Raven
 MISSION_SPEC = {
@@ -76,13 +76,22 @@ Build a "Pantry Chef" household recipe discovery game.
 }
 
 
+
+def _mission_user() -> str:
+    """The username (or id) that owns the mission, from MISSION_USER."""
+    user = os.getenv("MISSION_USER", "").strip()
+    if not user:
+        print("ERROR: MISSION_USER required (the user who owns the mission)")
+        sys.exit(1)
+    return user
+
 def dispatch_mission(gateway_url: str, internal_secret: str, mission: dict = MISSION_SPEC) -> dict:
     """Dispatch a mission to the Raven queue via gateway API."""
     headers = {
-        "X-Internal-Secret": internal_secret,
+        "X-Internal-Secret": internal_secret, "X-User-Id": _mission_user(),
         "Content-Type": "application/json"
     }
-    
+
     with httpx.Client(timeout=60.0) as client:
         resp = client.post(
             f"{gateway_url}/api/raven/missions",
@@ -95,9 +104,9 @@ def dispatch_mission(gateway_url: str, internal_secret: str, mission: dict = MIS
 
 def wait_for_mission(gateway_url: str, internal_secret: str, mission_id: int, timeout: int = 1800) -> dict:
     """Poll mission status until completion."""
-    headers = {"X-Internal-Secret": internal_secret}
+    headers = {"X-Internal-Secret": internal_secret, "X-User-Id": _mission_user()}
     deadline = time.time() + timeout
-    
+
     with httpx.Client(timeout=30.0) as client:
         while time.time() < deadline:
             resp = client.get(
@@ -111,33 +120,33 @@ def wait_for_mission(gateway_url: str, internal_secret: str, mission_id: int, ti
                 if status in ("completed", "failed", "dismissed"):
                     return mission
             time.sleep(15)
-    
+
     return {"status": "timeout", "mission_id": mission_id}
 
 
 def main():
     gateway_url = os.getenv("GATEWAY_URL", "http://ai.local:8080")
     internal_secret = os.getenv("INTERNAL_SECRET")
-    
+
     if not internal_secret:
         print("ERROR: INTERNAL_SECRET environment variable required")
         sys.exit(1)
-    
+
     print(f"Dispatching mission to {gateway_url}...")
     print(f"Mission: {MISSION_SPEC['slug']}")
     print()
-    
+
     result = dispatch_mission(gateway_url, internal_secret, MISSION_SPEC)
     mission_data = result.get("mission", {})
     mission_id = mission_data.get("id")
-    
+
     print(f"Mission dispatched: #{mission_id}")
     print(f"Track at: {gateway_url}/api/raven/missions/{mission_id}")
     print()
-    
+
     print("Waiting for completion...")
     final = wait_for_mission(gateway_url, internal_secret, mission_id)
-    
+
     print()
     print(f"Final status: {final.get('status')}")
     if final.get("status") == "completed":

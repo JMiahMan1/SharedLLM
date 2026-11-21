@@ -71,12 +71,24 @@ Buckets: `repair`, `writing`, `vision`, `workspace`, `memory`, `protocol`,
 - **Scored by checks only.** `must_include`, `must_not_include`, `must_match`,
   `must_not_match`, `max_chars`; the score is the fraction of checks that held,
   and the case passes only on a clean sheet.
+- **One model, checked once.** The run resolves its model before the first case
+  (`llm.resolve_model`): the request's `model` when given, else `choose_model`
+  over the host's inventory. A model that is not installed, a `trainer_model`
+  that names a picture model, or an inventory the host could not list stops the
+  run with a 503 before any case. No `num_ctx` is sent: the loaded model keeps
+  its own context instead of being reloaded at a smaller one.
+- **Unanswered is not wrong.** A case the host never answered (busy, down) is
+  an `infrastructure_error`: it is not a failed case, not part of the pass rate,
+  never exported, and never a curriculum proposal.
 - **Evidence kept.** Each report goes to `data/trainer/reports/<id>.json`
   (untracked) with every answer, the failed checks, the model and the timings.
+  The directory is the gateway's `./data/trainer` mount (`TRAINER_DATA_DIR`);
+  a run refuses to start when it is not writable, instead of losing the report.
   `list_reports` / `load_report` serve the Lab; report ids are validated so they
   cannot walk the tree.
 - **Training data.** `export_dataset` writes JSONL rows shaped as
-  `{"messages": [system, user, assistant], "meta": {...}}` — accepted rows only
+  `{"messages": [system, user, assistant], "meta": {...}}` (the case's own
+  system prompt; no system message when the case had none), accepted rows only
   by default, or every row (with `accepted: false`) for a later
   preference-tuning pass. `POST /api/trainer/reports/dataset`.
 
@@ -84,12 +96,18 @@ Buckets: `repair`, `writing`, `vision`, `workspace`, `memory`, `protocol`,
 
 The answer to "Jarvis should fix its own errors":
 
-1. read the file through the **Workspace API** (`/files/read`);
+1. read the **whole** file through the **Workspace API** (`/files/read`); a file
+   over `MAX_FILE_BYTES` (12 KB) is refused, never trimmed, because the model is
+   asked to write the complete file back;
 2. if no traceback was given, run the workspace's own gate (`/tests/pytest`)
-   first — a workspace that already passes is left alone;
-3. ask the local model for the **whole corrected file** in one fenced block;
+   first: a workspace that already passes is left alone, and a gate that could
+   not judge the code (pytest exit 2-5, or the runtime refusing the call) is an
+   `error`, not a failing test to repair;
+3. ask the local model for the **whole corrected file** in one fenced block (the
+   prompt is checked against its 24K-character budget and never trimmed);
 4. **guard it**: fenced block required, must differ from the failing file, must
-   compile, and must keep every top-level function and class;
+   compile, and must keep every function and class at any depth
+   (`Parser.feed`, not just `Parser`);
 5. write it back with `expected_sha256` (a concurrent edit is a conflict, not an
    overwrite);
 6. run the gate again. On failure, retry with the real test output as context;
@@ -110,7 +128,8 @@ the way a preacher does:
    prayer);
 3. one call per point, each 90–140 words, grounded on the passage;
 4. render markdown and save it through the Workspace API as
-   `sermons/<slug>.md`.
+   `sermons/<slug>.md`, create-only: an existing sermon is never replaced, the
+   draft goes to `<slug>-2.md` (and so on) instead.
 
 The file states plainly when scripture could not be fetched and that quotations
 must be checked before preaching. An unlabelled outline is kept as one section
@@ -139,7 +158,8 @@ adds the question dreaming does not ask: **what next?**
 
 | Evaluation says | Proposal |
 |---|---|
-| the model stopped answering | pull/load `coding_model` (10) |
+| the model stopped answering | install/load the trainer's model (10, never a lesson) |
+| the host was busy mid-run | try again when idle (5, never a lesson) |
 | a tool was not chosen from its own summary | document its trigger in `prompts/single_turn_tool_guide.md` (8) |
 | a bucket failed | add one protocol lesson for that mistake (3 + failures) |
 
@@ -150,7 +170,13 @@ and no screen is a door the app does not have. Internal tags (`tools`, `admin`,
 `cycle()` runs dream → evaluate → merge proposals → write the top three into
 RAG (`type: improvement_proposal`, confidence 0.35) → optionally a proven
 repair → save `data/trainer/backlog.json`. Every step is isolated: a RAG outage
-is recorded as an error and the rest of the pass still runs.
+is recorded as an error and the rest of the pass still runs. Infrastructure
+proposals (`hardware_busy`, `host_busy`, `model_unavailable`) stay in the
+backlog but are never written as lessons, and a lesson write RAG refuses (any
+4xx or 5xx) is reported in `errors`, not counted. Only one cycle runs at a time:
+the manual route answers 409 while the background loop (or another request)
+holds the cycle, and the loop skips its pass. A cycle's `repair.attempts` is
+bounded like `POST /repair` (1-3).
 
 ## 8. The endpoints
 
@@ -214,7 +240,10 @@ The gateway's worker runs the same bounded cycle on a timer when
 off, and `raven_suspended` pauses it too). Six cases, a 240 s budget, then it
 sleeps: see `docs/BACKGROUND_JOBS.md`, "Trainer cycle".
 
-From a shell, `scripts/train_jarvis.py` drives the same endpoints:
+From a shell, `scripts/train_jarvis.py` drives the same endpoints. It sends
+`INTERNAL_SECRET` with `X-User-Id`, the admin it acts as (`TRAINER_ADMIN_USER`,
+or `--admin-user`); the gateway refuses the secret on its own, and the script
+stops with that message when no admin user is set:
 
 ```bash
 python scripts/train_jarvis.py cycle --limit 6            # dream + evaluate + propose
@@ -247,21 +276,25 @@ silently inherit a stale environment value.
 
 **2. May I spend it now?** `readiness()` is conservative and it says why not:
 
-- free VRAM below 1.2 GB → not ready;
-- requests already queued → not ready;
-- no free slot reported while a model is loaded → not ready;
+- free VRAM unknown (no card read, or a card reporting 0 capacity) → not ready;
+- free VRAM below 1.2 GB (a full card included) → not ready;
+- requests running or queued → not ready;
+- a model loaded and its slots unknown, or all of them busy → not ready;
+- no model loaded and enough free memory → ready (an idle card);
 - host unreachable → **reachable: false**, which is *not* "busy".
 
 A pass that finds the host busy does not run the evaluation at all (dreaming is
-RAG-only and still runs) and files one `hardware_busy` proposal saying so. A
-host that is merely *unconfigured* (a dev machine, a bare llama.cpp server)
-never blocks a pass and never files a proposal — those are different facts.
+RAG-only and still runs) and files one `hardware_busy` proposal saying so. A host
+that could not be probed (unset `llm_local_url`, down) is not evaluated either,
+since unknown is not ready; that is recorded in `errors` and files no proposal.
 
 **3. Wait your turn.** Before every model call, `llm._admit()` asks
 `POST /api/queue/wait` for a free llama-server slot. A timeout becomes a loud
 `LocalModelUnavailable` ("The model host is busy with the household right now")
-instead of a mid-generation timeout; `unavailable` (no such endpoint) means the
-call proceeds as before. Two settings control it:
+instead of a mid-generation timeout. Only a 404/405 (`no_queue`: a plain
+llama.cpp server) lets the call proceed without a slot; any other failure (the
+host down, a 5xx, a timeout) refuses the call, because an unanswered question
+about the GPU is not permission to use it. Two settings control it:
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -284,7 +317,10 @@ results into lesson confidence through RAG's `/rag/benchmark/ingest-results`.
 
 Directories are overridable with `ALPACA_BENCHMARK_RESULTS_DIR` and
 `ALPACA_SHARED_BENCHMARK_RESULTS_DIR`; the default is the sibling checkout, the
-same one RAG's curriculum ingest already uses.
+same one RAG's curriculum ingest already uses. The gateway container has no such
+checkout, so when neither directory exists the endpoint answers 503 naming both
+variables (and a cycle records it in `errors`) instead of reporting "no weak
+categories". Mount the results into the gateway to use them.
 
 ## 12. Where the notes are
 

@@ -152,6 +152,7 @@ const COLLECTION_LABELS: Record<string, string> = {
   recommendation_lanes: 'Recommendations',
   screen_time_requests: 'Screen time requests',
   guard_requests: 'App requests',
+  unlock_requests: 'Unlock requests',
   chore_checks: 'Chores',
   guardian_notes_written: 'Journal notes you wrote',
   account_history: 'Account history',

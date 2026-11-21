@@ -20,6 +20,7 @@ import redis.asyncio as redis_asyncio
 import services.gateway.background_worker as bw
 from services.gateway import agent_loop, messaging
 from services.gateway.messaging import (
+    _CLAIM_JOB,
     PREEMPTED,
     PRIORITY_CRITICAL,
     PRIORITY_HIGH,
@@ -111,13 +112,33 @@ class FakeRedis:
         return "none"
 
     async def eval(self, script, numkeys, *args):
-        # Only the queue's compare-and-delete script is used.
+        if script == _CLAIM_JOB:
+            return self._claim(*args)
+        # Otherwise only the queue's compare-and-delete script is used.
         assert "redis.call('del'" in script
         key, expected = args[0], args[1]
         if self.strings.get(key) == expected:
             del self.strings[key]
             return 1
         return 0
+
+    def _claim(self, queue, processing, job_key, lease_key, job_id, read, new, ttl, lease, lease_ttl):
+        # Python twin of messaging._CLAIM_JOB (test_claim_job_lua runs the real script).
+        if job_id not in self.zsets.get(queue, {}):
+            return 0
+        current = self.strings.get(job_key)
+        if current is None:
+            if read == "":
+                self.zsets[queue].pop(job_id)
+                return -1
+            return 0
+        if current != read:
+            return 0
+        self.zsets[queue].pop(job_id)
+        self.strings[job_key], self.ttls[job_key] = new, int(ttl)
+        self.strings[lease_key], self.ttls[lease_key] = str(lease), int(lease_ttl)
+        self.lists.setdefault(processing, []).append(job_id)
+        return 1
 
     # lists
     async def rpush(self, key, *values):

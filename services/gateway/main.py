@@ -137,7 +137,6 @@ from services.gateway.config import (
     CONFIG,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
-    GARDEN_SVC,
     GEO_SVC,
     HEALTH_SVC,
     IDENTITY_SVC,
@@ -157,6 +156,7 @@ from services.gateway.llm_providers import (
     OllamaProvider,
     extract_thinking_and_content,
     get_provider,
+    strip_thinking_blocks,
 )
 from services.gateway.location_query import parse_location_query
 from services.gateway.ma_allowlist import MA_COMMAND_ALLOWLIST
@@ -534,6 +534,7 @@ async def get_assistant_model():
         raise RuntimeError(f"No assistant model configured. Set assistant_model in Identity settings. Available: {available_models}")
     log.info(f"[get_assistant_model] active_provider={active} resolved_model={model}")
     return model
+
 
 
 async def get_coding_model():
@@ -9201,24 +9202,10 @@ async def proxy_complete_skylight_chore(chore_id: str, request: Request):
 
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
+    # Execution tells Garden about the completion itself (every tick-off path
+    # goes through it), so a linked plant's watering follows the chore chart.
     async with shared_http_client() as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/complete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
-        if resp.status == 200:
-            try:
-                completed = await resp.json()
-            except Exception:  # non-JSON or a stub without content_type
-                completed = {}
-            if isinstance(completed, dict) and completed.get("status") == "SUCCESS":
-                # A plant's watering may be this chore: log it in Garden so the
-                # garden's own schedule follows the chore chart. Best-effort and
-                # short: a Garden problem must never fail a chore tick-off.
-                with suppress(Exception):
-                    await client.post(
-                        f"{GARDEN_SVC.rstrip('/')}/hooks/skylight-chore-completed",
-                        json={"chore_id": chore_id, "performed_by": creds.get("user") or ""},
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=5.0),
-                    )
     _forget_chores(creds.get("user") or None)  # the phone's "chores first" lock follows at once
     return await _proxy_json_response(resp)
 
@@ -13058,6 +13045,49 @@ async def _build_raven_system_prompt(query: str) -> str:
     )
 
 
+def _mission_owner_id(creds: dict) -> int:
+    """The numeric Identity id of the person who owns a new mission.
+
+    400 when ``creds`` is not a real user (the household, anonymous, or an
+    internal caller that named nobody): a mission must have an owner.
+    """
+    for key in ("user_id", "id"):
+        value = creds.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+    who = creds.get("user") or "this caller"
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"A Raven mission needs a real user as its owner, and '{who}' is not one. "
+            "Sign in with your own API key; internal callers must send X-User-Id."
+        ),
+    )
+
+
+async def _mission_creds_from_request(request: Request) -> Any:
+    """Credentials of the person acting on a mission (every /api/raven/missions route).
+
+    A user's API key is resolved as usual. An internal caller (the internal
+    secret, no API key) must name the person with ``X-User-Id`` (a username or a
+    numeric id); without it the request is a 400 here, instead of acting as the
+    household and failing at Identity with a 422.
+    """
+    if not _presented_api_key(request) and secret_matches(
+        request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET
+    ):
+        named = (request.headers.get("X-User-Id") or "").strip()
+        if not named:
+            raise HTTPException(status_code=400, detail="internal callers must send X-User-Id")
+        payload: dict[str, Any] = {"user_id": int(named)} if named.isdigit() else {"rag_user": named}
+        return await resolve_identity(payload)
+    return await _resolve_identity_from_request(request)
+
+
 async def _enqueue_user_mission(
     *,
     query: str,
@@ -13098,8 +13128,10 @@ async def _enqueue_user_mission(
         raise RuntimeError("No coding model configured. Mission cannot be dispatched.")
 
     # Identity returns the caller's numeric id as "id"; older payloads used
-    # "user_id". Accept both so a mission is never persisted ownerless.
-    owner_user = creds.get("user_id") or creds.get("id") or creds.get("user")
+    # "user_id". A mission is owned by a real person: the household and
+    # anonymous identities have no id, and their name ("household") sent as
+    # user_id was answered 422 by Identity after the request had been accepted.
+    owner_user = _mission_owner_id(creds)
 
     mission_payload = {
         "slug": slug,
@@ -13158,9 +13190,14 @@ async def _enqueue_user_mission(
 
 @app.post("/api/raven/missions")
 async def create_user_mission(body: UserMissionRequest, request: Request):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    if hasattr(creds, "model_dump"):
+        creds = creds.model_dump()
+    # Fail before the coding-model lookup and the prompt build: an ownerless
+    # mission is refused, not half-dispatched.
+    _mission_owner_id(creds)
 
     try:
         settings = await get_llm_settings()
@@ -13195,7 +13232,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
 
 @app.get("/api/raven/missions/{id_or_slug}")
 async def get_mission_details(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13246,7 +13283,7 @@ async def _signal_mission(mission_id, kind: str, value: str, *, clear: bool = Fa
 
 @app.post("/api/raven/missions/{id_or_slug}/kill")
 async def kill_mission(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13354,7 +13391,7 @@ async def cancel_mission(request: Request, id_or_slug: str):
 
 @app.post("/api/raven/missions/{id_or_slug}/pause")
 async def pause_mission(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13373,7 +13410,7 @@ async def pause_mission(request: Request, id_or_slug: str):
 
 @app.post("/api/raven/missions/{id_or_slug}/resume")
 async def resume_mission(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13395,7 +13432,7 @@ class MissionRefineRequest(BaseModel):
 
 @app.post("/api/raven/missions/{id_or_slug}/refine")
 async def refine_mission(request: Request, id_or_slug: str, body: MissionRefineRequest):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13468,7 +13505,7 @@ async def refine_mission(request: Request, id_or_slug: str, body: MissionRefineR
 
 @app.delete("/api/raven/missions/{id_or_slug}")
 async def delete_mission(request: Request, id_or_slug: str):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13486,7 +13523,7 @@ async def delete_mission(request: Request, id_or_slug: str):
 
 @app.get("/api/raven/missions")
 async def get_user_missions(request: Request):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -13564,7 +13601,7 @@ async def proxy_docker_exec(service_name: str, body: dict[str, Any], request: Re
 
 @app.get("/api/raven/missions/{id_or_slug}/logs")
 async def get_mission_logs(id_or_slug: str, request: Request):
-    creds = await _resolve_identity_from_request(request)
+    creds = await _mission_creds_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -21449,3 +21486,58 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
         with suppress(Exception):
             await websocket.close(code=1011, reason=f"Terminal service unavailable: {str(e)[:100]}")
 
+
+#: The most a raw internal completion may ask for.
+_RAW_COMPLETE_MAX_TOKENS = 4096
+
+
+@app.post("/api/internal/llm/complete")
+async def internal_llm_complete(request: Request):
+    """Internal: one plain model completion for a service, and nothing else.
+
+    ``/v1/chat/completions`` with the internal secret acts as the household:
+    fast paths (a plant drafted as "water monty" could water Monty), tools,
+    memory and the router persona all apply. A service that only needs text
+    drafted from its own prompt (Garden's species draft) calls this instead:
+    the assistant model, the caller's messages, no tools, no fast paths, no
+    history, no retrieval. ``{"messages": [...], "temperature"?, "max_tokens"?}``
+    -> ``{"content", "model"}``; 403 without the secret, 422 for a bad body,
+    502 when the model fails.
+    """
+    if not secret_matches(request.headers.get("X-Internal-Secret"), INTERNAL_SECRET):
+        raise HTTPException(status_code=403, detail="Internal services only")
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="The body is not valid JSON.") from None
+    messages = body.get("messages") if isinstance(body, dict) else None
+    if (
+        not isinstance(messages, list)
+        or not messages
+        or not all(
+            isinstance(m, dict) and m.get("role") in ("system", "user", "assistant") and isinstance(m.get("content"), str)
+            for m in messages
+        )
+    ):
+        raise HTTPException(status_code=422, detail="messages must be a list of {role, content}.")
+    try:
+        temperature = float(body.get("temperature", 0.3))
+        max_tokens = min(int(body.get("max_tokens", 1024)), _RAW_COMPLETE_MAX_TOKENS)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="temperature and max_tokens must be numbers.") from None
+    try:
+        settings = await get_llm_settings()
+        provider = await get_provider(settings)
+        model = await get_assistant_model()
+        text = await provider.generate(
+            model,
+            [{"role": m["role"], "content": m["content"]} for m in messages],
+            options={"temperature": temperature, "num_predict": max_tokens},
+        )
+    except Exception as exc:
+        log.warning("[internal complete] model call failed: %s: %s", type(exc).__name__, exc)
+        raise HTTPException(status_code=502, detail=f"The model did not answer ({type(exc).__name__}).") from exc
+    content = strip_thinking_blocks(text or "")
+    if not content:
+        raise HTTPException(status_code=502, detail="The model returned an empty answer.")
+    return {"content": content, "model": model}

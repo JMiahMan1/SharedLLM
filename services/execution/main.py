@@ -5105,11 +5105,38 @@ async def get_skylight_chores(
     return {"status": "SUCCESS", "chores": chores, "assignee_meta": assignee_meta}
 
 
+async def _tell_garden_about_chore(chore_id: str, user: str | None, *, done: bool) -> None:
+    """Report a chore tick (or un-tick) to Garden, whose plants may follow it.
+
+    Every completion in the stack goes through ``complete_skylight_chore`` (the
+    app via the gateway, Jarvis's chores handler), so this is the one place that
+    keeps a plant's watering in step with the chore chart. A Garden that does
+    not answer is logged, never raised: it must not fail the tick-off itself.
+    """
+    import aiohttp
+
+    from services.config import GARDEN_SVC_URL, INTERNAL_SECRET
+
+    hook = "skylight-chore-completed" if done else "skylight-chore-uncompleted"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.post(
+            f"{GARDEN_SVC_URL.rstrip('/')}/hooks/{hook}",
+            json={"chore_id": chore_id, "performed_by": user or ""},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        ) as resp:
+            if resp.status >= 400:
+                log.warning("Garden %s for chore %s answered HTTP %s: %s",
+                               hook, chore_id, resp.status, (await resp.text())[:200])
+    except Exception as exc:
+        log.warning("Garden %s for chore %s failed: %s: %s", hook, chore_id, type(exc).__name__, exc)
+
+
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete", dependencies=[Depends(require_internal)])
 async def complete_skylight_chore(
     chore_id: str,
     user: str | None = None,
-    x_internal_secret: str = Header(None)
+    x_internal_secret: str = Header(None),
+    origin: str | None = None,
 ):
     """Mark a Skylight chore as complete."""
     session = await _get_skylight_session(user)
@@ -5129,6 +5156,8 @@ async def complete_skylight_chore(
         session, "PUT", f"/chores/{series_id}/completions", body,
     )
     if result is not None:
+        if origin != "garden":  # Garden's own mirror: it already logged the watering
+            await _tell_garden_about_chore(chore_id, user, done=True)
         return {"status": "SUCCESS", "message": "Chore completed"}
     return {"status": "FAILURE", "message": "Failed to complete chore"}
 
@@ -5162,6 +5191,7 @@ async def uncomplete_skylight_chore(
         session, "PUT", f"/chores/{series_id}/completions", body,
     )
     if result is not None:
+        await _tell_garden_about_chore(chore_id, user, done=False)
         return {"status": "SUCCESS", "message": "Chore uncompleted"}
     return {"status": "FAILURE", "message": "Failed to uncomplete chore"}
 

@@ -200,6 +200,31 @@ def _mounts_path(container: Any, host_path: str) -> bool | None:
     return any(os.path.normpath(str(m.get("Destination") or "")) == want for m in mounts if isinstance(m, dict))
 
 
+#: Environment names that hold a credential. None of them may be in a sandbox's
+#: create-time environment (see ensure_workspace_container).
+_CREDENTIAL_ENV_KEYS = frozenset({
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GIT_TOKEN",
+    "GITLAB_TOKEN",
+    "NEXTCLOUD_PASSWORD",
+    "NEXTCLOUD_PASS",
+    "NEXTCLOUD_URL",
+    "HA_TOKEN",
+    "HOME_ASSISTANT_TOKEN",
+    "HA_URL",
+    "API_KEY",
+})
+
+
+def _container_credential_keys(container: Any) -> list[str]:
+    """Credential names set in ``container``'s create-time environment."""
+    env = ((getattr(container, "attrs", None) or {}).get("Config") or {}).get("Env") or []
+    names = {str(item).split("=", 1)[0] for item in env if isinstance(item, str)}
+    return sorted(names & _CREDENTIAL_ENV_KEYS)
+
+
 def _get_or_recreate(client: Any, cname: str, img: str, host_path: str | None = None) -> Any | None:
     """Return the running container for ``cname``, recreating it when its image
     is stale.
@@ -231,6 +256,19 @@ def _get_or_recreate(client: Any, cname: str, img: str, host_path: str | None = 
         except Exception as e:
             log.warning(f"[Sandbox] Could not recreate {cname} for its new path: {e}")
             return c
+    # A sandbox made before credentials moved to per-exec carries the service's
+    # tokens in its create-time environment, which every exec and terminal in it
+    # inherits whoever runs it. It must not be reused.
+    leaked = _container_credential_keys(c)
+    if leaked:
+        log.warning(f"[Sandbox] {cname} was created with credentials in its environment ({', '.join(leaked)}); recreating it")
+        try:
+            c.remove(force=True)
+        except Exception as e:
+            raise RuntimeError(
+                f"sandbox {cname} carries credentials in its environment and could not be removed: {e}"
+            ) from e
+        return None
     current_id = _current_image_id(client, img)
     if current_id is not None and getattr(c.image, "id", None) != current_id:
         log.info(f"[Sandbox] Image changed for {cname}; recreating from {img}")
@@ -266,33 +304,11 @@ def ensure_workspace_network(workspace_id: str) -> None:
         )
 
 
-# Integration credentials the sandbox must inherit so `gh`/`git`/etc. inside the
-# container can authenticate as the owning user. Sourced from the execution
-# service's environment (which holds the resolved integration tokens) and passed
-# into every sandbox container at creation time. Without these, git push / gh
-# Integration credentials the sandbox must inherit so `gh`/`git`/etc. inside the
-# container can authenticate as the owning user. Sourced from the execution
-# service's environment (which holds the resolved integration tokens) and passed
-# into every sandbox container at creation time. Without these, git push / gh
-# commands inside the sandbox fail with rc=128 / "not logged in".
-_SANDBOX_CRED_ENV_KEYS = (
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-    "GH_ENTERPRISE_TOKEN",
-    "GIT_TOKEN",
-    "GITLAB_TOKEN",
-    "NEXTCLOUD_PASSWORD",
-    "NEXTCLOUD_PASS",
-    "NEXTCLOUD_URL",
-    "HA_TOKEN",
-    "HOME_ASSISTANT_TOKEN",
-    "HA_URL",
-)
-
 # Non-secret environment keys copied into sandbox execs. The sandbox runs
 # arbitrary repo code, so the service's full environment (INTERNAL_SECRET,
-# FERNET_KEY, cloud keys, ...) must never be passed through wholesale;
-# only this baseline plus the scoped _SANDBOX_CRED_ENV_KEYS overlay.
+# FERNET_KEY, cloud keys, ...) must never be passed through wholesale; only this
+# baseline plus the calling user's own credentials (user_credential_env), which
+# the caller passes per exec.
 #
 # HOME is deliberately NOT here: it is set per exec to the *sandbox user's* real
 # home (see _home_for_uid). A caller used to pass HOME=/home/sharedllm, which
@@ -321,52 +337,61 @@ _SANDBOX_FALLBACK_HOME = "/tmp"
 _HOME_CACHE: dict[tuple[str, int], str] = {}
 
 
-#: Home Assistant's keys: passed to a sandbox only while that integration is on.
-_SANDBOX_HA_ENV_KEYS = frozenset({"HA_TOKEN", "HOME_ASSISTANT_TOKEN", "HA_URL"})
+def user_credential_env(user_ctx: Any) -> dict[str, str]:
+    """The calling user's own integration credentials, as environment variables.
 
-
-def _home_assistant_on() -> bool:
-    from services import config
-
-    return config.home_assistant_enabled()
-
-
-def _sandbox_credential_env() -> dict[str, str]:
-    """Collect integration credentials from the host env to inject into sandboxes.
-
-    No Home Assistant login or address while that integration is off. While it is on,
-    the address is the one resolved at startup (``services.config.HA_URL``, redirected
-    away from a retired host), not the raw environment.
+    ``user_ctx`` is the Identity service's resolved context for the person the
+    command runs for (``/api/resolve``: already decrypted, and already carrying
+    whatever fallback Identity applies). Nothing here reads ``os.environ``: the
+    service's own tokens belong to the owner, and a sandbox that inherited them
+    let any user push, call Nextcloud or command the house as the owner. A user
+    without an integration simply gets no variable.
     """
-    env = {
-        k: os.environ[k]
-        for k in _SANDBOX_CRED_ENV_KEYS
-        if k not in _SANDBOX_HA_ENV_KEYS and os.environ.get(k)
-    }
-    if _home_assistant_on():
-        from services import config
+    env: dict[str, str] = {}
+    if not user_ctx:
+        return env
+    uc = user_ctx
+    if hasattr(uc, "model_dump"):
+        uc = uc.model_dump()
+    elif hasattr(uc, "dict"):
+        uc = uc.dict()
+    if not isinstance(uc, dict):
+        return env
 
-        for k in ("HA_TOKEN", "HOME_ASSISTANT_TOKEN"):
-            if os.environ.get(k):
-                env[k] = os.environ[k]
-        if config.HA_URL and ("HA_TOKEN" in env or "HOME_ASSISTANT_TOKEN" in env):
-            env["HA_URL"] = str(config.HA_URL)
+    def _get(k: str) -> str | None:
+        v = uc.get(k)
+        return v if isinstance(v, str) and v else None
+
+    gh = _get("github_token")
+    if gh:
+        env["GITHUB_TOKEN"] = gh
+        env["GH_TOKEN"] = gh
+        env["GH_ENTERPRISE_TOKEN"] = gh
+    gt = _get("git_token")
+    if gt:
+        env["GIT_TOKEN"] = gt
+    gl = _get("gitlab_token")
+    if gl:
+        env["GITLAB_TOKEN"] = gl
+    nc = _get("nextcloud_pass")
+    if nc:
+        env["NEXTCLOUD_PASSWORD"] = nc
+        env["NEXTCLOUD_PASS"] = nc
+    ncu = _get("nextcloud_url")
+    if ncu:
+        env["NEXTCLOUD_URL"] = ncu
+    # Only the person's own Home Assistant login, and only while that integration is on:
+    # never the hub's own login (it can command the whole house and must not leave the stack).
+    from services.common.hub_login import own_login
+
+    ha_login = own_login(uc)
+    if ha_login:
+        env["HA_URL"], env["HA_TOKEN"] = ha_login
+        env["HOME_ASSISTANT_TOKEN"] = ha_login[1]
+    ak = _get("api_key")
+    if ak:
+        env["API_KEY"] = ak
     return env
-
-
-def _sandbox_credential_env_with_user(user_context: dict[str, Any]) -> dict[str, str]:
-    """Collect integration credentials from the host env and merge with user context."""
-    # Start with host environment credentials
-    cred_env = _sandbox_credential_env()
-    # Overlay with user context if present (Identity service already decrypted)
-    if isinstance(user_context, dict):
-        keys = ["GH_TOKEN", "GITHUB_TOKEN", "GIT_TOKEN", "GITLAB_TOKEN"]
-        if _home_assistant_on():
-            keys.append("HA_TOKEN")
-        for key in keys:
-            if user_context.get(key):
-                cred_env[key] = str(user_context[key])
-    return cred_env
 
 
 def ensure_workspace_container(
@@ -376,17 +401,17 @@ def ensure_workspace_container(
     image: str | None = None,
     uid: int = SANDBOX_UID,
     gid: int = SANDBOX_GID,
-    env: dict[str, str] | None = None,
 ) -> Any:
     """Create/start the dedicated sandbox container for ``workspace_id``.
 
     Only ``host_path`` is mounted (read-write) at ``/workspace``; the container
     cannot see any other workspace or host directory.
 
-    The container inherits the user's integration credentials (GitHub token,
-    etc.) from ``env`` (or, when not supplied, from the execution service's
-    environment) so that `gh`/`git push` and other integration CLIs inside the
-    sandbox can authenticate.
+    The container is created with no credentials at all. A container outlives
+    any one request and is shared by everyone who works in the workspace, so a
+    token in its create-time environment would reach every later exec and every
+    terminal, whoever opened it. Credentials are passed per exec instead, from
+    the calling user's own context (``user_credential_env``).
     """
     client = _get_client()
     if client is None:
@@ -399,15 +424,11 @@ def ensure_workspace_container(
         if c.status != "running":
             c.start()
         return c
-    # Merge inherited integration credentials so the sandbox can authenticate.
-    cred_env = _sandbox_credential_env()
-    if env:
-        cred_env.update({k: str(v) for k, v in env.items()})
     # The container's own HOME: an interactive terminal (and any exec that names
     # no environment) inherits it, so bash does not try to read /root/.bashrc as
     # a non-root user. It is set from the image's own passwd entry, never guessed.
     container_home = _image_home_for_uid(img, uid, client) or _SANDBOX_FALLBACK_HOME
-    cred_env.setdefault("HOME", container_home)
+    container_env = {"HOME": container_home}
     # The SOURCE must be the real Docker-host path (e.g. /home/<user>/workspaces/...),
     # not the container-internal /workspaces/... path, or the daemon would bind an
     # unrelated empty host directory. The TARGET stays host_path so the agent's
@@ -421,7 +442,7 @@ def ensure_workspace_container(
         user=f"{uid}:{gid}",
         network=_network_name(workspace_id),
         working_dir=host_path,
-        environment=cred_env or None,
+        environment=container_env,
         # Mount the workspace at its IDENTICAL absolute path inside the container.
         # Only this directory is visible; the agent cannot reach any other
         # workspace or host path. The trailing ",z" applies the shared SELinux
@@ -450,7 +471,7 @@ def ensure_workspace_container(
 
 
 def _configure_git_credentials(container: Any) -> None:
-    """Install a git credential helper that authenticates with the inherited
+    """Install a git credential helper that authenticates with the per-exec
     ``GH_TOKEN``/``GITHUB_TOKEN`` so raw ``git push``/``git ls-remote`` over HTTPS
     work inside the sandbox (not just the ``gh`` CLI). Without this, ``git`` over
     HTTPS cannot read the token from ``GH_TOKEN`` and fails with
@@ -538,12 +559,10 @@ def _build_exec_cmd(cmd: str | list[str], shell: bool) -> list[str]:
 
 
 def _sandbox_exec_env(env: dict[str, str] | None) -> dict[str, str]:
-    """The environment a workspace command runs with: the non-secret baseline,
-    the integration credentials (so `gh` and git pushes authenticate even when
-    the caller passed none) and the caller's own variables."""
+    """The environment a workspace command runs with: the non-secret baseline
+    and the caller's own variables (which carry the calling user's credentials,
+    if any). Never the service's own credentials."""
     full_env = {k: os.environ[k] for k in _SANDBOX_BASE_ENV_KEYS if k in os.environ}
-    for _k, _v in _sandbox_credential_env().items():
-        full_env.setdefault(_k, _v)
     if env:
         full_env.update({k: str(v) for k, v in env.items()})
     return full_env
@@ -589,13 +608,15 @@ def _home_for_uid(container: Any, uid: int) -> str:
     because it is world-writable.
 
     One exec per (container, uid): the answer cannot change while the container
-    lives, and a lookup per command would double the round trips.
+    lives, and a lookup per command would double the round trips. Only an answer
+    is cached: a lookup that failed (docker hiccup, container still starting)
+    falls back to ``/tmp`` for this call and is asked again next time, instead of
+    pinning every later command in that container to ``/tmp``.
     """
     key = (getattr(container, "id", "") or getattr(container, "name", ""), int(uid))
     cached = _HOME_CACHE.get(key)
     if cached:
         return cached
-    home = ""
     try:
         probe = container.exec_run(
             ["sh", "-c", f"getent passwd {int(uid)} | cut -d: -f6"],
@@ -603,14 +624,16 @@ def _home_for_uid(container: Any, uid: int) -> str:
             stdout=True,
             stderr=False,
         )
-        out = probe.output if isinstance(probe.output, bytes) else b""
-        candidate = out.decode(errors="replace").strip()
-        if candidate.startswith("/"):
-            home = candidate
-    except Exception as exc:  # no getent, no permission, docker hiccup
-        log.debug("[Sandbox] could not read the home for uid %s: %s", uid, exc)
-    if not home:
-        home = _SANDBOX_FALLBACK_HOME
+    except Exception as exc:  # docker hiccup: not an answer, do not cache it
+        log.warning("[Sandbox] could not read the home for uid %s: %s", uid, exc)
+        return _SANDBOX_FALLBACK_HOME
+    if getattr(probe, "exit_code", 0) != 0:
+        log.warning("[Sandbox] home lookup for uid %s exited %s", uid, getattr(probe, "exit_code", None))
+        return _SANDBOX_FALLBACK_HOME
+    out = probe.output if isinstance(probe.output, bytes) else b""
+    candidate = out.decode(errors="replace").strip()
+    # The lookup ran: no passwd entry is a real answer, and /tmp is the home then.
+    home = candidate if candidate.startswith("/") else _SANDBOX_FALLBACK_HOME
     _HOME_CACHE[key] = home
     return home
 
@@ -618,21 +641,17 @@ def _home_for_uid(container: Any, uid: int) -> str:
 def build_exec_env(
     *,
     home: str,
-    cred_env: dict[str, str] | None = None,
     extra: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """The environment one sandbox exec gets.
 
-    Only the documented baseline plus credentials plus the caller's own keys.
-    ``HOME`` is always the last word: a caller that names a path the sandbox user
-    cannot write (``/home/sharedllm`` in a ``raven``-based image) is exactly the
-    bug this prevents.
+    Only the documented baseline plus the caller's own keys, which is where the
+    calling user's credentials come in (``user_credential_env``); the service's
+    own credentials never do. ``HOME`` is always the last word: a caller that
+    names a path the sandbox user cannot write (``/home/sharedllm`` in a
+    ``raven``-based image) is exactly the bug this prevents.
     """
-    env = {k: os.environ[k] for k in _SANDBOX_BASE_ENV_KEYS if k in os.environ}
-    for key, value in (cred_env or {}).items():
-        env.setdefault(str(key), str(value))
-    if extra:
-        env.update({str(k): str(v) for k, v in extra.items()})
+    env = _sandbox_exec_env(extra)
     env["HOME"] = home or _SANDBOX_FALLBACK_HOME
     return env
 
@@ -672,7 +691,6 @@ def _exec_blocking(
 
     full_env = build_exec_env(
         home=_home_for_uid(c, uid),
-        cred_env=_sandbox_credential_env(),
         extra=env,
     )
 
@@ -706,8 +724,12 @@ async def _host_exec(
     The environment is the same one a sandbox exec gets. It used to be the
     service's whole environment, which handed INTERNAL_SECRET, FERNET_KEY and
     every other service secret to whatever the command was.
+
+    HOME is the service user's own: the command runs as that user on the host,
+    and without one pip, npm and git fail before they start.
     """
     run_env = _sandbox_exec_env(env)
+    run_env.setdefault("HOME", os.environ.get("HOME") or _SANDBOX_FALLBACK_HOME)
     try:
         rc, out, err = await run_process(cmd, cwd=cwd, env=run_env, shell=shell, timeout=timeout)
         if rc is None:
@@ -834,7 +856,6 @@ async def run_workspace_terminal(
     # HOME the sandbox user can actually write to.
     full_env = build_exec_env(
         home=_home_for_uid(c, uid),
-        cred_env=_sandbox_credential_env(),
         extra=env,
     )
 

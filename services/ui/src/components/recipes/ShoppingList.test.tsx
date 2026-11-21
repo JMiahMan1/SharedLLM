@@ -74,6 +74,9 @@ describe('ShoppingList garden badge single-toggle', () => {
           species_ref: 'basil_sweet',
           culinary_aliases: ['basil'],
           in_cooldown: false,
+          cooldown_until: null,
+          pinching_bolting_notes: null,
+          herb_preservation_tips: null,
         },
       ],
     });
@@ -117,6 +120,9 @@ describe('ShoppingList garden badge single-toggle', () => {
           species_ref: 'basil_sweet',
           culinary_aliases: ['basil'],
           in_cooldown: false,
+          cooldown_until: null,
+          pinching_bolting_notes: null,
+          herb_preservation_tips: null,
         },
       ],
     });

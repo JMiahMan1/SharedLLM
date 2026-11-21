@@ -17,8 +17,8 @@ const buttonClass =
   'inline-flex items-center justify-center gap-1.5 px-3 py-1.5 min-h-11 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 text-xs transition-colors disabled:opacity-50';
 
 /** Units and methods the pantry understands (the catalog is the source of truth). */
-export const PANTRY_UNITS = ['quarts', 'pints', 'half_pints', 'lbs', 'bags', 'jars', 'bunches'];
-export const PANTRY_METHODS = [
+const PANTRY_UNITS = ['quarts', 'pints', 'half_pints', 'lbs', 'bags', 'jars', 'bunches'];
+const PANTRY_METHODS = [
   'water_bath_canning', 'pressure_canning', 'freezing', 'dehydrating',
   'fermenting', 'cold_storage', 'oil_herb_cubes',
 ];
@@ -27,7 +27,7 @@ function methodName(method: string) {
   return method.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function dayLabel(days: number) {
+function dayLabel(days: number) {
   if (days < 0) return `${Math.abs(days)} days overdue`;
   if (days === 0) return 'Ready today';
   if (days === 1) return 'Ready tomorrow';

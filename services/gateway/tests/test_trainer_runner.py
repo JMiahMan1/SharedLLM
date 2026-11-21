@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import pathlib
 
+import pytest
+
 from services.gateway.trainer import curriculum, runner
 from services.gateway.trainer.llm import LocalModelUnavailable
 
@@ -138,6 +140,109 @@ def test_the_dataset_keeps_only_accepted_rows_by_default(tmp_path: pathlib.Path)
 
     assert accepted["rows"] == 1 and everything["rows"] == 2
     rows = [json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()]
-    assert rows[0]["messages"][1] == {"role": "user", "content": "p1"}
-    assert rows[0]["messages"][2] == {"role": "assistant", "content": "good"}
+    # No system prompt on the case: no (empty) system message in the row.
+    assert rows[0]["messages"][0] == {"role": "user", "content": "p1"}
+    assert rows[0]["messages"][1] == {"role": "assistant", "content": "good"}
     assert rows[0]["meta"]["accepted"] is True
+
+
+async def test_exported_rows_carry_the_system_prompt_the_model_saw(tmp_path: pathlib.Path):
+    case = curriculum.Case(
+        id="sys-1", bucket="writing", title="t", prompt="Say hi", system="You are Jarvis.",
+        checks={"must_include": ["hi"]},
+    )
+
+    async def fake(case):
+        return "hi there"
+
+    report = await runner.run_curriculum([case], complete_fn=fake, report_dir=tmp_path)
+    rows = runner.training_rows(report)
+
+    assert rows[0]["messages"][0] == {"role": "system", "content": "You are Jarvis."}
+    assert all(message["content"] for message in rows[0]["messages"]), "no empty message is exported"
+
+
+async def test_unanswered_cases_are_errors_not_curriculum_failures(tmp_path: pathlib.Path):
+    from services.gateway.trainer import llm
+
+    cases = [_case(must_include=["x"]) for _ in range(3)]
+
+    async def busy(case):
+        raise llm.LocalModelBusy("no free slot")
+
+    report = await runner.run_curriculum(cases, complete_fn=busy, report_dir=tmp_path)
+
+    assert report["stopped_reason"] == "host_busy"
+    assert report["totals"]["infrastructure_errors"] == 3
+    bucket = next(iter(report["by_bucket"].values()))
+    assert bucket["failed_ids"] == [] and len(bucket["error_ids"]) == 3
+    assert runner.training_rows(report, accepted_only=False) == []
+
+
+async def test_the_run_asks_one_resolved_model_for_every_case(tmp_path: pathlib.Path, monkeypatch):
+    """The eval request's model reaches every completion; nothing is resolved per case."""
+    from services.gateway import orchestrator
+    from services.gateway.trainer import llm
+
+    resolved: list[str | None] = []
+    asked: list[str | None] = []
+
+    async def fake_settings():
+        return {"llm_local_url": "http://llm-host:11434"}
+
+    async def fake_resolve(settings, requested=None):
+        resolved.append(requested)
+        return "coder:14b"
+
+    async def fake_complete(prompt, *, system=None, model=None, max_tokens=320, **kwargs):
+        asked.append(model)
+        return llm.Completion(text="x", model=model or "", elapsed_s=0.0, prompt_chars=len(prompt))
+
+    monkeypatch.setattr(orchestrator, "get_llm_settings", fake_settings)
+    monkeypatch.setattr(llm, "resolve_model", fake_resolve)
+    monkeypatch.setattr(llm, "complete", fake_complete)
+
+    report = await runner.run_curriculum(
+        [_case(must_include=["x"]) for _ in range(3)], model="coder", report_dir=tmp_path
+    )
+
+    assert resolved == ["coder"]
+    assert asked == ["coder:14b"] * 3
+    assert report["model"] == "coder:14b"
+
+
+async def test_a_model_that_cannot_be_resolved_stops_the_run_before_any_case(tmp_path, monkeypatch):
+    from services.gateway import orchestrator
+    from services.gateway.trainer import llm
+
+    async def fake_settings():
+        return {"llm_local_url": "http://llm-host:11434", "trainer_model": "flux-image:q8"}
+
+    monkeypatch.setattr(orchestrator, "get_llm_settings", fake_settings)
+
+    with pytest.raises(llm.LocalModelUnavailable, match="picture model"):
+        await runner.run_curriculum([_case(must_include=["x"])], report_dir=tmp_path)
+    assert list(tmp_path.glob("*.json")) == []
+
+
+async def test_an_unwritable_report_directory_refuses_the_run(tmp_path: pathlib.Path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x", encoding="utf-8")
+    called: list[str] = []
+
+    async def fake(case):
+        called.append(case.id)
+        return "x"
+
+    with pytest.raises(runner.TrainerStorageError):
+        await runner.run_curriculum([_case(must_include=["x"])], complete_fn=fake, report_dir=blocker / "r")
+    assert called == [], "no model time is spent on a run that cannot be kept"
+
+
+def test_a_corrupt_report_is_an_error_not_a_missing_one(tmp_path: pathlib.Path):
+    (tmp_path / "eval-bad.json").write_text("{nope", encoding="utf-8")
+
+    with pytest.raises(runner.TrainerStorageError):
+        runner.load_report("eval-bad", report_dir=tmp_path)
+    listed = runner.list_reports(report_dir=tmp_path)
+    assert listed[0]["id"] == "eval-bad" and "unreadable" in listed[0]["error"]

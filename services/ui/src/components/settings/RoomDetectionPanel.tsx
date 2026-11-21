@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Bluetooth } from 'lucide-react';
 import BleBeacon, { type BeaconStatus, type BeaconTxPower } from '../../plugins/bleBeacon';
+import { beaconStateLine } from './beaconState';
 
 const POWERS: { level: BeaconTxPower; label: string }[] = [
   { level: 'ultra_low', label: 'Lowest' },
@@ -9,24 +10,6 @@ const POWERS: { level: BeaconTxPower; label: string }[] = [
   { level: 'medium', label: 'Medium' },
   { level: 'high', label: 'High' },
 ];
-
-/** One line saying what the beacon is doing. Never quiet about a failure. */
-export function beaconStateLine(s: BeaconStatus): string {
-  switch (s.state) {
-    case 'advertising':
-      return 'On: the house can tell which room this phone is in.';
-    case 'starting':
-      return 'Starting...';
-    case 'bluetooth_off':
-      return 'Waiting for Bluetooth: it starts again when Bluetooth is back on.';
-    case 'disabled':
-      return 'Off: the house does not know which room this phone is in.';
-    case 'unavailable':
-      return `Room detection unavailable: ${s.reason || 'the phone did not say why'}`;
-    default:
-      return `Room detection unavailable: unknown state ${String(s.state)}`;
-  }
-}
 
 /**
  * Room detection (Android only): this phone sends a small Bluetooth signal

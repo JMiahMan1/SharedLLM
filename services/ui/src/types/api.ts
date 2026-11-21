@@ -4994,7 +4994,11 @@ export interface GardenNoticeTest {
 
 export interface GardenProfile {
   user_id: string;
-  family_size: number;
+  /** The override when set, else Identity's household roster; null when Identity is unavailable. */
+  family_size: number | null;
+  family_size_override?: number | null;
+  family_size_source?: 'override' | 'identity' | 'unavailable';
+  family_size_detail?: string;
   hardiness_zone: string | null;
   zone_source: string;
   last_spring_frost_mmdd: string | null;
@@ -5192,6 +5196,21 @@ export interface RecipeMatch {
   servings: number | null;
 }
 
+/** One placement from the bed auto-arranger (col -1 means it did not fit). */
+export interface GardenPlacement {
+  col: number;
+  row: number;
+  species_ref?: string | null;
+}
+
+/** One companion, antagonist, rotation or shading alert for a plan. */
+export interface GardenPlanCheck {
+  bed_id?: string;
+  cell_id?: string;
+  kind?: string;
+  message?: string;
+}
+
 export interface RecipeMatchesResponse {
   ready_ingredients: HarvestReadyItem[];
   matches: RecipeMatch[];
@@ -5303,13 +5322,13 @@ export interface PantryGoalCalcResponse {
   total_raw_lbs_needed: number;
   total_plant_count: number;
   total_sqft: number;
-  crops: any[];
+  crops: unknown[];
 }
 
 export interface PlannerSizingResponse {
   mode: string;
   family_size: number;
-  crops: any[];
+  crops: unknown[];
   total_sqft: number;
   total_plants: number;
 }
@@ -5321,7 +5340,7 @@ export interface PlanTimelineResponse {
   year: number;
   spring_frost_mmdd: string | null;
   first_fall_frost_mmdd: string | null;
-  timeline: any[];
+  timeline: unknown[];
 }
 /* ---------- end Garden Planner (Phase 5) ---------- */
 

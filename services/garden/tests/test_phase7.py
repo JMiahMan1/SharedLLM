@@ -36,8 +36,8 @@ def _headers(user: str, role: str) -> dict[str, str]:
 
 
 PARENT = _headers("mother", "mother")
-ADULT = _headers("kaleb", "adult_child")
-CHILD = _headers("noah", "child")
+ADULT = _headers("alex", "adult_child")
+CHILD = _headers("jamie", "child")
 
 
 @pytest.fixture()
@@ -104,7 +104,7 @@ def test_a_child_may_add_a_progress_photo(client):
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["kind"] == "progress"
-    assert body["taken_by"] == "noah"
+    assert body["taken_by"] == "jamie"
     assert body["notes"] == "New leaf!"
     assert body["thumb_path"].endswith(".jpg")
 
@@ -296,14 +296,14 @@ def test_resolution_needs_a_person(client):
 
 
 def test_resolution_carries_what_a_caller_needs_to_speak(client):
-    plant = _plant(client, nickname="Monty", assigned_to="noah")
+    plant = _plant(client, nickname="Monty", assigned_to="jamie")
 
     row = client.get("/plants/resolve", headers=CHILD, params={"q": "monty"}).json()["plants"][0]
 
     assert row["plant_id"] == plant["id"]
     assert "Monstera" in row["common_name"]
     assert row["category"] == "houseplant"
-    assert row["assigned_to"] == "noah"
+    assert row["assigned_to"] == "jamie"
 
 
 def test_batch_watering_records_where_it_came_from(client, session):

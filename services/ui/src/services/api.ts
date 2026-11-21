@@ -428,6 +428,11 @@ import type {
   GardenBindingIn,
   GardenValveRun,
   GardenTagScan,
+  GardenPlacement,
+  GardenPlanCheck,
+  HarvestLogOut,
+  HarvestReadyItem,
+  RecipeMatch,
 } from '../types/api';
 
 declare module 'axios' {
@@ -2942,7 +2947,7 @@ export const api = {
     return resp.data;
   },
 
-  async gardenNoticesTest(body: {} = {}): Promise<GardenNoticeTest> {
+  async gardenNoticesTest(body: Record<string, never> = {}): Promise<GardenNoticeTest> {
     const resp = await apiClient.post('/api/garden/notices/test', body);
     return resp.data;
   },
@@ -2987,7 +2992,7 @@ export const api = {
     quantity: number;
     unit: string;
     disposition: string;
-    plant: any;
+    plant: unknown;
   }> {
     const resp = await apiClient.post(`/api/garden/plants/${encodeURIComponent(plantId)}/harvest`, body);
     return resp.data;
@@ -3000,8 +3005,8 @@ export const api = {
   }): Promise<{
     count: number;
     filters: { plant_id?: string | null; days?: number | null; disposition?: string | null };
-    harvests: any[];
-    totals: any[];
+    harvests: HarvestLogOut[];
+    totals: unknown[];
   }> {
     const resp = await apiClient.get('/api/garden/harvests', { params });
     return resp.data;
@@ -3013,7 +3018,7 @@ export const api = {
 
   async gardenHarvestReady(): Promise<{
     count: number;
-    ready: any[];
+    ready: HarvestReadyItem[];
   }> {
     const resp = await apiClient.get('/api/garden/harvest/ready');
     return resp.data;
@@ -3022,8 +3027,8 @@ export const api = {
   // --- Recipe matches & draft (Phase 4) ----------------
 
   async gardenRecipeMatches(): Promise<{
-    ready_ingredients: any[];
-    matches: any[];
+    ready_ingredients: HarvestReadyItem[];
+    matches: RecipeMatch[];
   }> {
     const resp = await apiClient.get('/api/garden/recipes/matches');
     return resp.data;
@@ -3137,8 +3142,8 @@ export const api = {
   async gardenAutoArrange(planId: string, bedId: string, body?: { species_refs?: string[]; apply?: boolean }): Promise<{
     plan_id: string;
     bed_id: string;
-    placements: any[];
-    checks?: any[];
+    placements: GardenPlacement[];
+    checks?: GardenPlanCheck[];
     warning_count?: number;
     applied?: boolean;
   }> {
@@ -3148,7 +3153,7 @@ export const api = {
 
   async gardenPlanChecks(planId: string): Promise<{
     plan_id: string;
-    checks: any[];
+    checks: GardenPlanCheck[];
     warning_count: number;
   }> {
     const resp = await apiClient.get(`/api/garden/plans/${encodeURIComponent(planId)}/checks`);
@@ -5273,19 +5278,23 @@ export const api = {
     return resp.data;
   },
 
-  async studioBuildDeck(workspaceId: string, markdown: string, title = ''): Promise<StudioBuilt> {
-    const resp = await apiClient.post('/api/studio/deck', { workspace_id: workspaceId, markdown, title });
+  /** `replace` overwrites an existing deck of the same title; without it that is a 409. */
+  async studioBuildDeck(workspaceId: string, markdown: string, title = '', replace = false): Promise<StudioBuilt> {
+    const resp = await apiClient.post('/api/studio/deck', { workspace_id: workspaceId, markdown, title, replace });
     return resp.data;
   },
 
+  /** `replace` overwrites an existing game of the same title; without it that is a 409. */
   async studioScaffoldGame(
     workspaceId: string,
     title: string,
     sprites?: Record<string, string>,
+    replace = false,
   ): Promise<StudioBuilt> {
     const resp = await apiClient.post('/api/studio/game', {
       workspace_id: workspaceId,
       title,
+      replace,
       ...(sprites ? { sprites } : {}),
     });
     return resp.data;

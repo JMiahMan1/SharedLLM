@@ -162,12 +162,18 @@ def test_species_list_category(client):
 # --------------------------------------------------------------------------- profile
 
 
-def test_profile_get_creates_default(client):
+def test_profile_get_reads_the_household_size_from_identity(client, monkeypatch):
+    from services.garden import household
+
+    async def roster():
+        return 5
+
+    monkeypatch.setattr(household, "size", roster)
     resp = client.get("/profile", headers=ADMIN_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["user_id"] == "household"
-    assert data["family_size"] == 7
+    assert (data["family_size"], data["family_size_source"]) == (5, "identity")
 
 
 def test_profile_put_admin(client):

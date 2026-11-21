@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useEffect } from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -113,7 +114,12 @@ class FakeStream {
 
 let calls: ReturnType<typeof useCall> | null = null;
 function Grab() {
-  calls = useCall();
+  const current = useCall();
+  // Hand the hook's value to the test from an effect: writing a module
+  // variable during render is a side effect React may repeat or skip.
+  useEffect(() => {
+    calls = current;
+  });
   return null;
 }
 

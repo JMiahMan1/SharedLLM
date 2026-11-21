@@ -29,8 +29,26 @@ DEFAULT_TIMEOUT_S = 60.0
 MAX_LESSONS_PER_CYCLE = 3
 
 
-class RagUnavailable(RuntimeError):
-    """The RAG service did not answer."""
+class RagError(RuntimeError):
+    """A RAG call did not succeed (any non-2xx answer, or no answer at all)."""
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class RagUnavailable(RagError):
+    """The RAG service did not answer, or answered with a 5xx."""
+
+
+class RagRejected(RagError):
+    """RAG answered 4xx: the request itself was refused (bad payload, auth)."""
+
+
+#: Proposal kinds that describe the machine, not the model's knowledge. They are
+#: shown in the backlog but never written into ``system_learnings``: a lesson
+#: saying "the GPU was busy" would teach every later mission something false.
+INFRASTRUCTURE_KINDS = frozenset({"hardware_busy", "host_busy", "model_unavailable"})
 
 
 async def request(
@@ -41,21 +59,35 @@ async def request(
     body: dict[str, Any] | None = None,
     timeout: float = DEFAULT_TIMEOUT_S,
 ) -> dict[str, Any]:
-    """Call the RAG service (the one seam tests replace)."""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as client, client.request(
-        method,
-        f"{RAG_SVC}{path}",
-        params=params,
-        json=body,
-        headers={"X-Internal-Secret": INTERNAL_SECRET},
-    ) as resp:
-        try:
-            data = await resp.json(content_type=None)
-        except Exception:
-            data = {"status": "ERROR", "message": (await resp.text())[:500]}
-        if resp.status >= 500:
-            raise RagUnavailable(f"RAG {path} answered {resp.status}")
-        return data if isinstance(data, dict) else {"detail": data}
+    """Call the RAG service (the one seam tests replace).
+
+    Only a 2xx is a result. A 4xx raises :class:`RagRejected` (it used to be
+    returned as if it were data, so a refused lesson write counted as written),
+    a 5xx or a connection failure raises :class:`RagUnavailable`.
+    """
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as client, client.request(
+            method,
+            f"{RAG_SVC}{path}",
+            params=params,
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        ) as resp:
+            text = await resp.text()
+            status = resp.status
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        raise RagUnavailable(f"RAG {path} did not answer: {type(exc).__name__}: {exc}") from exc
+    try:
+        data: Any = json.loads(text) if text.strip() else {}
+    except ValueError:
+        data = {"message": text[:500]}
+    if status >= 400:
+        detail = data.get("detail") or data.get("message") if isinstance(data, dict) else data
+        cls = RagUnavailable if status >= 500 else RagRejected
+        raise cls(f"RAG {path} answered {status}: {str(detail)[:300]}", status=status)
+    return data if isinstance(data, dict) else {"detail": data}
 
 
 async def dream(user_id: str = "default", *, compact_at: int = 600, summary_len: int = 400) -> dict[str, Any]:
@@ -114,6 +146,7 @@ def _proposal(
         "priority": priority,
         "evidence": evidence[:8],
         "action": action,
+        "infrastructure": kind in INFRASTRUCTURE_KINDS,
     }
 
 
@@ -202,23 +235,37 @@ def proposals_from_failures(report: dict[str, Any] | None, *, limit: int = 6) ->
     proposals: list[dict[str, Any]] = []
     cases = [case for case in report.get("cases") or [] if isinstance(case, dict)]
 
-    if report.get("stopped_reason") == "model_unavailable":
-        last_error = next((str(case.get("error")) for case in reversed(cases) if case.get("error")), "")
+    last_error = next((str(case.get("error")) for case in reversed(cases) if case.get("error")), "")
+    if report.get("stopped_reason") == "host_busy":
+        proposals.append(
+            _proposal(
+                "host_busy",
+                "The model host was busy: the run stopped",
+                "The household kept the GPU (no free slot in time), so the run stopped "
+                "early. Nothing about the model's knowledge was measured.",
+                priority=5,
+                evidence=[last_error] if last_error else [],
+                action="Nothing to fix; run the evaluation again when the host is idle.",
+            )
+        )
+    elif report.get("stopped_reason") == "model_unavailable":
         proposals.append(
             _proposal(
                 "model_unavailable",
                 "The local model stopped answering",
-                "The run stopped because the model failed repeatedly. Check that the model "
-                "named by coding_model is pulled and loaded before training again.",
+                "The run stopped because the model host failed repeatedly. Check that the "
+                "trainer's model is installed and loaded before training again.",
                 priority=10,
                 evidence=[last_error] if last_error else [],
-                action="Pull or load the configured local model, then re-run the evaluation.",
+                action="Install or load the configured local model, then re-run the evaluation.",
             )
         )
 
     undocumented: dict[str, list[str]] = {}
     for case in cases:
         if case.get("passed") or case.get("source") != "catalog:tool_registry":
+            continue
+        if case.get("infrastructure_error"):
             continue
         match = _TOOL_TITLE.search(str(case.get("title") or ""))
         if match:
@@ -311,19 +358,34 @@ def lesson_payload(proposal: dict[str, Any], *, user_id: str = "default") -> dic
     }
 
 
+def is_lesson_worthy(proposal: dict[str, Any]) -> bool:
+    """Only a proposal about the model's knowledge may become a lesson."""
+    return not proposal.get("infrastructure") and proposal.get("kind") not in INFRASTRUCTURE_KINDS
+
+
 async def ingest_proposals(
     proposals: list[dict[str, Any]],
     *,
     user_id: str = "default",
     limit: int = MAX_LESSONS_PER_CYCLE,
-) -> list[str]:
-    """Write the top proposals into RAG so the next dream can consolidate them."""
+) -> dict[str, Any]:
+    """Write the top lesson-worthy proposals into RAG.
+
+    Infrastructure proposals (a busy or broken host) are never written: they are
+    facts about the machine on one afternoon, not rules for the model. Returns
+    ``{"written": [lesson ids], "failed": [{"proposal", "error"}]}``: a refused
+    write (any RAG 4xx or 5xx) is reported to the caller, not counted as written.
+    """
     written: list[str] = []
-    for proposal in proposals[: max(0, limit)]:
+    failed: list[dict[str, str]] = []
+    worthy = [proposal for proposal in proposals if is_lesson_worthy(proposal)]
+    for proposal in worthy[: max(0, limit)]:
         payload = lesson_payload(proposal, user_id=user_id)
         try:
             await request("POST", "/rag/ingest", body=payload, timeout=30.0)
-            written.append(str(payload["metadata"]["id"]))
-        except Exception as exc:  # a failed write must not sink the cycle
+        except RagError as exc:
             log.warning("[trainer.dream] could not ingest %s: %s", proposal["id"], exc)
-    return written
+            failed.append({"proposal": str(proposal["id"]), "error": str(exc)})
+            continue
+        written.append(str(payload["metadata"]["id"]))
+    return {"written": written, "failed": failed}

@@ -127,25 +127,19 @@ def test_a_workspace_never_gets_the_hubs_own_login(ha_on):
 def test_the_sandbox_gets_no_ha_env_while_ha_is_off(ha_off, monkeypatch):
     from services import workspace_sandbox as ws
 
-    for key in ws._SANDBOX_CRED_ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HA_TOKEN", "made-up-env-token")
     monkeypatch.setenv("HA_URL", "http://retired.example.test:8123")
-    monkeypatch.setenv("GH_TOKEN", "made-up-gh")
-    env = ws._sandbox_credential_env()
-    assert env == {"GH_TOKEN": "made-up-gh"}
-    assert "HA_TOKEN" not in ws._sandbox_credential_env_with_user({"HA_TOKEN": "made-up-user-token"})
+    env = ws.user_credential_env({"user": "alex", **OWN})
+    assert "HA_TOKEN" not in env and "HA_URL" not in env
 
 
-def test_the_sandbox_gets_the_startup_ha_address_while_ha_is_on(ha_on, monkeypatch):
+def test_the_sandbox_never_takes_ha_from_the_service_environment(ha_on, monkeypatch):
     from services import workspace_sandbox as ws
 
-    for key in ws._SANDBOX_CRED_ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HA_TOKEN", "made-up-env-token")
     monkeypatch.setenv("HA_URL", "http://retired.example.test:8123")
-    env = ws._sandbox_credential_env()
-    assert env == {"HA_TOKEN": "made-up-env-token", "HA_URL": "http://ha.example.test:8123"}
+    assert ws.user_credential_env({"user": "alex"}) == {}
+    assert "made-up-env-token" not in ws.build_exec_env(home="/tmp").values()
 
 
 def test_ha_config_uses_no_stored_ha_login_while_ha_is_off(ha_off, monkeypatch):

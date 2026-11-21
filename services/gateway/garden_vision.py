@@ -260,10 +260,14 @@ async def upload_photo(
             "warning": reason or "The photo was not stored in Nextcloud.",
         }
     detail = body.get("detail") or {}
+    # Execution answers SUCCESS even when only the thumbnail was kept, and says
+    # so in ``detail.warning`` (Nextcloud) and ``detail.thumbnail_warning``
+    # (resizing): both reach the person, never just one.
+    warnings = [str(w) for w in (detail.get("warning"), detail.get("thumbnail_warning")) if w]
     return {
         "nextcloud_path": detail.get("path"),
         "thumb_base64": detail.get("thumbnail_base64"),
-        "warning": detail.get("thumbnail_warning"),
+        "warning": " ".join(warnings) or None,
     }
 
 

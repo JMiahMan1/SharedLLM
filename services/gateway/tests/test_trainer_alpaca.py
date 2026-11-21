@@ -7,6 +7,8 @@ one rule that matters on a shared GPU: a busy host is reported, not retried.
 """
 from __future__ import annotations
 
+import pytest
+
 from services.gateway.trainer import alpaca
 
 
@@ -49,7 +51,14 @@ def test_a_gpu_error_is_not_read_as_free_memory():
     system = alpaca.clean_system({"gpu_info": {"error": "unavailable"}})
 
     assert system["gpus"] == []
-    assert system["free_vram_mb"] == 0
+    assert system["free_vram_mb"] is None, "no card read is unknown, not 0 MB free"
+
+
+def test_a_card_reporting_zero_capacity_is_unknown_not_full():
+    """A failed nvidia-smi read reports 0 total: that is not a measurement."""
+    system = alpaca.clean_system({"gpu_info": [{"name": "?", "total_mb": 0, "free_mb": 0}]})
+
+    assert system["free_vram_mb"] is None
 
 
 def test_runtime_reports_loaded_models_and_queue_depth():
@@ -79,7 +88,7 @@ def test_slots_accept_both_the_aggregate_and_the_per_model_shape():
 def test_readiness_blocks_on_low_vram_and_on_a_queue():
     blocked = alpaca.readiness(
         {"free_vram_mb": 400, "total_vram_mb": 12288},
-        {"queued_requests": 2},
+        {"queued_requests": 2, "loaded_models": []},
         {"total": 4, "available": 0, "status": "ok"},
     )
     assert blocked["ready"] is False
@@ -210,15 +219,36 @@ async def test_probe_combines_system_runtime_slots_models_and_lora(monkeypatch):
     assert answer["lora"]["total"] == 1
 
 
-async def test_waiting_for_a_slot_never_blocks_a_plain_llama_server(monkeypatch):
+@pytest.mark.parametrize("status", [404, 405])
+async def test_waiting_for_a_slot_never_blocks_a_plain_llama_server(monkeypatch, status):
     async def no_queue(url, body, *, timeout=6.0):
-        raise ConnectionError("404")
+        raise alpaca.AlpacaUnavailable(f"{url} answered {status}", status=status)
 
     monkeypatch.setattr(alpaca, "post_json", no_queue)
 
     answer = await alpaca.wait_for_slot({"llm_local_url": "http://plain:8080"}, timeout=1)
 
-    assert answer["status"] == "unavailable", "a host with no queue endpoint must not refuse to train"
+    assert answer["status"] == "no_queue", "a host with no queue endpoint must not refuse to train"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        alpaca.AlpacaUnavailable("http://h/api/queue/wait answered 500", status=500),
+        alpaca.AlpacaUnavailable("http://h/api/queue/wait answered 401", status=401),
+        ConnectionError("connection refused"),
+        TimeoutError("slow"),
+    ],
+)
+async def test_any_other_queue_failure_is_unavailable_not_permission(monkeypatch, error):
+    async def broken(url, body, *, timeout=6.0):
+        raise error
+
+    monkeypatch.setattr(alpaca, "post_json", broken)
+
+    answer = await alpaca.wait_for_slot({"llm_local_url": "http://llm:11434"}, timeout=1)
+
+    assert answer["status"] == "unavailable"
 
 
 async def test_waiting_for_a_slot_returns_the_verdict(monkeypatch):
@@ -233,3 +263,68 @@ async def test_waiting_for_a_slot_returns_the_verdict(monkeypatch):
 
     monkeypatch.setattr(alpaca, "post_json", timeout)
     assert (await alpaca.wait_for_slot({"llm_local_url": "http://llm:11434"}))["status"] == "timeout"
+
+
+GOOD_SYSTEM = {"free_vram_mb": 6000, "total_vram_mb": 12288}
+
+
+def test_unknown_free_memory_is_not_ready():
+    verdict = alpaca.readiness({"free_vram_mb": None}, {"loaded_models": []}, None)
+
+    assert verdict["ready"] is False
+    assert any("unknown" in reason for reason in verdict["reasons"])
+
+
+def test_a_full_card_is_not_ready():
+    verdict = alpaca.readiness({"free_vram_mb": 0, "total_vram_mb": 8192}, {"loaded_models": []}, None)
+
+    assert verdict["ready"] is False
+    assert any("only 0 MB" in reason for reason in verdict["reasons"])
+
+
+def test_an_idle_card_with_no_model_loaded_is_ready():
+    """No model loaded: no slots to count, and nobody to step aside for."""
+    verdict = alpaca.readiness(
+        GOOD_SYSTEM,
+        {"loaded_models": [], "active_requests": 0, "queued_requests": 0},
+        {"total": 0, "available": 0, "status": "no_model", "message": "no model loaded"},
+    )
+
+    assert verdict["ready"] is True, verdict["reasons"]
+
+
+def test_busy_slots_and_running_requests_are_not_ready():
+    loaded = {"loaded_models": [{"model": "qwen3:8b"}], "active_requests": 0, "queued_requests": 0}
+
+    all_busy = alpaca.readiness(GOOD_SYSTEM, loaded, {"total": 2, "available": 0, "status": "ok"})
+    assert all_busy["ready"] is False and any("busy" in r for r in all_busy["reasons"])
+
+    running = alpaca.readiness(
+        GOOD_SYSTEM, {**loaded, "active_requests": 1}, {"total": 2, "available": 1, "status": "ok"}
+    )
+    assert running["ready"] is False and any("running" in r for r in running["reasons"])
+
+
+def test_a_loaded_model_with_unknown_slots_or_runtime_is_not_ready():
+    loaded = {"loaded_models": [{"model": "qwen3:8b"}]}
+
+    assert alpaca.readiness(GOOD_SYSTEM, loaded, None)["ready"] is False
+    assert alpaca.readiness(GOOD_SYSTEM, None, {"total": 2, "available": 2})["ready"] is False
+
+
+def test_a_failed_slots_probe_is_unknown_not_zero():
+    assert alpaca.summarise_slots(None) is None
+
+
+def test_a_preferred_image_model_is_never_chosen():
+    models = [{"name": "flux-image:q8"}, {"name": "qwen3:8b"}]
+
+    assert alpaca.choose_model({"trainer_model": "flux-image:q8"}, models) == "qwen3:8b"
+
+
+def test_no_results_directory_at_all_is_an_error_not_an_empty_report(tmp_path, monkeypatch):
+    monkeypatch.setenv("ALPACA_BENCHMARK_RESULTS_DIR", str(tmp_path / "missing-a"))
+    monkeypatch.setenv("ALPACA_SHARED_BENCHMARK_RESULTS_DIR", str(tmp_path / "missing-b"))
+
+    with pytest.raises(alpaca.BenchmarksUnavailable, match="ALPACA_BENCHMARK_RESULTS_DIR"):
+        alpaca.benchmark_summary()

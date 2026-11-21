@@ -15,6 +15,8 @@ import logging
 import re
 from typing import Any
 
+import aiohttp
+
 from services.gateway import garden_assist
 from services.gateway.garden_assist import GardenCall, call_garden
 
@@ -33,64 +35,112 @@ _UNITS = {
     "kilogram": "kg", "kilograms": "kg", "kg": "kg",
 }
 
+#: A whole question about the day's care. Each alternative must match the whole
+#: (normalised) sentence: "which herbs need full sun" asks about a plant, not
+#: about what is due, and goes to the model.
 _SUMMARY_RE = re.compile(
-    r"\b(?:what|which|any)\b[^.?!]*\b(?:plants?|garden|herbs?)\b[^.?!]*"
-    r"\b(?:water|watering|care|chores|need|due|harvest)\b"
-    r"|\bwhat\s+needs\s+(?:water|watering|care)\b"
-    r"|\bgarden\s+(?:chores|status|summary|today)\b"
-    # "anything due" is Jarvis's own language -- ours only with the garden named.
-    r"|\banything\s+(?:due|need\s+care)\b[^.?!]*\b(?:plants?|garden|herbs?)\b"
-    r"|\b(?:plants?|garden|herbs?)\b[^.?!]*\banything\s+(?:due|need\s+care)\b"
+    r"^(?:"
+    r"(?:what|which)(?:\s+(?:of\s+)?(?:the\s+|my\s+|our\s+)?(?:plants?|herbs?|garden))?"
+    r"\s+(?:needs?|need)\s+(?:water|watering|care|tending|attention|to\s+be\s+watered)"
+    r"|(?:what|which)\s+(?:of\s+)?(?:the\s+|my\s+|our\s+)?(?:plants?|herbs?)\s+(?:is|are)\s+(?:due|overdue|thirsty)"
+    r"|(?:do|does)\s+(?:any\s+(?:of\s+)?)?(?:the\s+|my\s+|our\s+)?(?:plants?|herbs?|garden)"
+    r"\s+needs?\s+(?:water|watering|care|anything)"
+    r"|(?:is|are)\s+(?:there\s+)?anything\s+(?:due|that\s+needs\s+(?:water|watering|care))\s+(?:in|for)\s+the\s+garden"
+    r"|does\s+anything\s+in\s+the\s+garden\s+need\s+(?:water|watering|care)"
+    r"|(?:what(?:'s|\s+is)\s+)?(?:the\s+)?garden\s+(?:chores|status|summary|report)"
+    r"|any\s+garden\s+chores"
+    r"|what(?:'s|\s+is)\s+due\s+in\s+the\s+garden"
+    r")(?:\s+(?:today|now|right\s+now|this\s+week|in\s+the\s+garden))*$"
 )
 
-#: Care verbs, most specific first. Group 1 (when present) is the target.
-_CARE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bmark\s+(?:the\s+)?(.+?)\s+(?:as\s+)?watered\b"), "water"),
-    (re.compile(r"\b(?:i|we)?\s*(?:just\s+)?watered\s+(?:the\s+|all\s+the\s+|all\s+)?(.+)$"), "water"),
-    (re.compile(r"\b(?:i|we)?\s*water\s+(?:the\s+|all\s+the\s+|all\s+)?(.+)$"), "water"),
-    (re.compile(r"\b(?:i|we)?\s*(?:just\s+)?fertilized\s+(?:the\s+)?(.+)$"), "fertilize"),
-    (re.compile(r"\b(?:i|we)?\s*(?:just\s+)?misted\s+(?:the\s+)?(.+)$"), "mist"),
-    (re.compile(r"\b(?:i|we)?\s*(?:just\s+)?pruned\s+(?:the\s+)?(.+)$"), "prune_pinch"),
-    (re.compile(r"\b(?:i|we)?\s*(?:just\s+)?pinched\s+(?:back\s+)?(?:the\s+)?(.+)$"), "prune_pinch"),
+#: Anything a care report may open with before its verb ("okay, I just watered").
+_OPENER = (
+    r"^(?:(?:ok(?:ay)?|so|yes|yeah|hey\s+jarvis|jarvis)[,\s]+)?"
+    r"(?:(?:i|we)(?:'ve|\s+have)?\s+)?(?:just\s+|already\s+|also\s+)?"
 )
 
-_SNOOZE_RE = re.compile(r"\bsnooze\s+(?:the\s+)?(.+?)(?:\s+(?:until|till|for)\s+(.+))?$")
-_STILL_DAMP_RE = re.compile(r"^(.+?)\s*(?:is|looks|seems)?\s*(?:still\s+damp|still\s+wet)\b")
+#: Care verbs, anchored at the start of the sentence. Group ``t`` is the target,
+#: which must be the whole rest of the sentence (time words are refused and
+#: trailing courtesies stripped). The flag says the verb is a past-tense report.
+_CARE_PATTERNS: tuple[tuple[re.Pattern[str], str, bool], ...] = (
+    (re.compile(_OPENER + r"mark(?:ed)?\s+(?P<t>.+?)\s+(?:as\s+)?watered$"), "water", True),
+    (re.compile(_OPENER + r"watered\s+(?P<t>.+)$"), "water", True),
+    (re.compile(_OPENER + r"water\s+(?P<t>.+)$"), "water", False),
+    (re.compile(_OPENER + r"(?:fertilized|fed)\s+(?P<t>.+)$"), "fertilize", True),
+    (re.compile(_OPENER + r"misted\s+(?P<t>.+)$"), "mist", True),
+    (re.compile(_OPENER + r"pruned\s+(?P<t>.+)$"), "prune_pinch", True),
+    (re.compile(_OPENER + r"pinched\s+(?:back\s+)?(?P<t>.+)$"), "prune_pinch", True),
+)
+
+_SNOOZE_RE = re.compile(
+    r"^snooze\s+(?!(?:for|until|till|me|it|this|that)\b)(?:the\s+)?(?P<t>.+?)"
+    r"(?:\s+(?:until|till|for)\s+(?P<when>.+))?$"
+)
+_STILL_DAMP_RE = re.compile(
+    r"^(?P<t>.+?)\s+(?:is\s+|are\s+|looks\s+|seems\s+|feels\s+)?still\s+(?:damp|wet|moist)$"
+)
 
 _HARVEST_RE = re.compile(
-    r"\b(?:log|logged|record|add|i\s+picked|picked|harvested)\s+"
-    r"(\d+(?:\.\d+)?)\s*"
-    r"(pounds?|lbs?|ounces?|oz|bunches?|quarts?|pints?|cups?|pieces?|grams?|kilograms?|kg|g)?\s*"
-    r"(?:of\s+)?(.+)$"
+    r"^(?:(?:i|we)\s+)?(?:just\s+)?"
+    r"(?P<verb>log|logged|record|recorded|add|added|picked|harvested)\s+"
+    r"(?P<qty>\d+(?:\.\d+)?)\s*"
+    r"(?P<unit>pounds?|lbs?|ounces?|oz|bunches?|quarts?|pints?|cups?|pieces?|grams?|kilograms?|kg|g)?\s*"
+    r"(?:of\s+)?(?P<t>.+)$"
 )
 
-_TRAILING_NOISE = re.compile(r"\b(?:today|please|now|thanks|thank\s+you|for\s+me)\b")
-_LEADING_NOISE = re.compile(r"^(?:the|all|all\s+the|my|our|a|an)\s+")
-
+#: Courtesies and "now" words that may trail a report without changing it.
+_TRAILING_NOISE = re.compile(
+    r"(?:\s+(?:today|just\s+now|right\s+now|now|please|for\s+me|thanks|thank\s+you|already|too|as\s+well))+$"
+)
+#: Past-tense reports may also say when today it happened.
+_TRAILING_PAST = re.compile(r"(?:\s+(?:this\s+(?:morning|afternoon|evening)|earlier(?:\s+today)?))+$")
+_LEADING_NOISE = re.compile(r"^(?:the|all|all\s+the|all\s+of\s+the|my|our|a|an)\s+")
+#: "the living room plants" / "the kitchen herbs" name a room.
+_COLLECTIVE_SUFFIX = re.compile(r"\s+(?:plants?|pots?|herbs|houseplants|beds?)$")
+#: "the plants in the bedroom" names a room too.
+_COLLECTIVE_PREFIX = re.compile(r"^(?:plants?|pots?|herbs|houseplants)\s+(?:in|on)\s+(?:the\s+)?")
 
 #: Words that make a phrase a question, not a report of something done.
 _QUESTION_START = re.compile(
-    r"^(?:when|how|should|shall|do|does|did|can|could|would|will|what|which|why|is|are|was|were)\b"
+    r"^(?:when|how|should|shall|do|does|did|can|could|would|will|what|which|why|who|where|"
+    r"is|are|was|were|any|has|have)\b"
 )
 
-#: "snooze the alarm" is Jarvis's own timer, not a plant.
+#: A report never denies itself: "don't water Monty" is an instruction to Jarvis.
+_NEGATION = re.compile(
+    r"\b(?:don'?t|do\s+not|didn'?t|did\s+not|doesn'?t|does\s+not|never|not|no|"
+    r"can'?t|cannot|won'?t|shouldn'?t|haven'?t|hasn'?t|isn'?t|wasn'?t|aren'?t|stop|skip)\b"
+)
+
+#: Reminders and scheduling belong to Jarvis's own tools.
+_SCHEDULING = re.compile(r"\b(?:remind|reminds|reminder|reminders|schedule|scheduled|set)\b")
+
+#: A time that is not "now": logging it now would record the wrong moment.
+_TIME_WORDS = re.compile(
+    r"\b(?:tomorrow|tonight|later|next|every|each|daily|weekly|yesterday|o'?clock|noon|midnight|"
+    r"a\.?m\.?|p\.?m\.?|seconds?|minutes?|mins?|hours?|hrs?|weekend|"
+    r"mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?)\b"
+    r"|\bat\s+\d|\bin\s+(?:a|an|\d+|one|two|three|four|five|ten)\s+(?:minute|hour|day|week)s?\b"
+)
+
+#: "snooze the alarm" is Jarvis's own timer, not a plant. Matched on word boundaries
+#: ("snapdragon" is not "nap", "calla lily" is not "call", "outdoor" is not "door").
 _NOT_A_PLANT = (
     "alarm", "timer", "reminder", "notification", "clock", "wake", "alarm clock",
     "meeting", "calendar", "nap", "music", "radio", "podcast", "volume", "light",
     "lights", "fan", "tv", "television", "call", "message", "email", "door", "lock",
 )
+_NOT_A_PLANT_RE = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in _NOT_A_PLANT) + r")\b")
 
 #: Shopping and cooking talk is never a harvest.
-_NOT_A_HARVEST = ("shopping list", "grocery", "groceries", "cart", "recipe", "store", "market")
+_NOT_A_HARVEST = re.compile(r"\b(?:shopping|list|grocery|groceries|cart|recipe|store|market|order|buy)\b")
+#: What makes a bare "add 2 pounds of tomatoes" a harvest.
+_HARVEST_CONTEXT = re.compile(r"\b(?:harvest|harvested|picked|from\s+the\s+garden|from\s+the\s+beds?)\b")
+#: Words a harvest target never contains ("herbs to the list" is not a crop).
+_HARVEST_TARGET_BAD = re.compile(r"\b(?:to|for|into|in|on|at|with)\b")
 
-#: What makes a bare "add 2 pounds of tomatoes" a garden sentence.
-_GARDEN_CONTEXT = (
-    "garden", "harvest", "harvested", "crop", "produce", "plant", "plants", "herb",
-    "herbs", "vegetable", "vegetables", "fruit", "fruits", "bed", "beds", "greenhouse",
-)
-
-#: Verbs that only mean harvesting when the rest of the sentence is about a garden.
-_HARVEST_VERBS = ("harvest", "harvested", "pick", "picked", "picking")
+#: Said when the Garden service cannot be reached: never a guess, never a crash.
+UNAVAILABLE = "The garden is unavailable right now, so I couldn't check or log that."
 
 
 def is_question(text: str) -> bool:
@@ -103,94 +153,123 @@ def is_question(text: str) -> bool:
 
 def names_something_else(text: str) -> bool:
     """Does the phrase name a non-plant thing (an alarm, a timer, a light)?"""
-    lowered = (text or "").lower()
-    return any(word in lowered for word in _NOT_A_PLANT)
+    return bool(_NOT_A_PLANT_RE.search((text or "").lower()))
+
+
+def _normalise(text: str) -> str:
+    """Lower case, one space, no closing punctuation."""
+    value = re.sub(r"\s+", " ", (text or "").strip().lower())
+    return value.strip(" .!?,;:")
+
+
+def _refused(lowered: str) -> bool:
+    """A sentence that may talk about plants but is never a care report."""
+    return bool(_NEGATION.search(lowered) or _SCHEDULING.search(lowered))
 
 
 def _clean(text: str) -> str:
     """A phrase reduced to the name inside it."""
-    value = (text or "").strip().strip(".!?,;:")
-    value = _TRAILING_NOISE.sub(" ", value.lower())
-    value = re.sub(r"\s+", " ", value).strip()
+    value = _normalise(text)
     previous = None
     while previous != value:
         previous = value
+        value = _TRAILING_NOISE.sub("", value).strip()
         value = _LEADING_NOISE.sub("", value).strip()
-    return re.sub(r"\s+(?:plants?|pots?)$", "", value).strip()
+        value = _COLLECTIVE_PREFIX.sub("", value).strip()
+    return _COLLECTIVE_SUFFIX.sub("", value).strip()
 
 
 def parse_summary(text: str) -> bool:
     """Is this a question about what needs care today?"""
-    return bool(_SUMMARY_RE.search(text or ""))
+    return bool(_SUMMARY_RE.match(_normalise(text)))
 
 
 def parse_harvest(text: str) -> dict | None:
     """``{"quantity", "unit", "target"}`` from "log 3 pounds of tomatoes harvested"."""
-    lowered = (text or "").lower()
-    if any(word in lowered for word in _NOT_A_HARVEST):
+    lowered = _normalise(text)
+    if _NOT_A_HARVEST.search(lowered) or _refused(lowered) or _TIME_WORDS.search(lowered):
         return None  # "add 2 pounds of chicken to my shopping list"
-    match = _HARVEST_RE.search(lowered)
+    match = _HARVEST_RE.match(lowered)
     if not match:
         return None
-    # A bare "add 3 pounds of tomatoes" is only ours when the sentence, or the
-    # verb, is about a garden: the shopping list has first claim otherwise.
-    if not any(word in lowered for word in _HARVEST_VERBS + _GARDEN_CONTEXT):
+    # "add/log/record 3 pounds of tomatoes" is only ours when the sentence says
+    # it was picked: the shopping list and the food log have first claim otherwise.
+    if match.group("verb") not in ("picked", "harvested") and not _HARVEST_CONTEXT.search(lowered):
         return None
-    quantity = float(match.group(1))
-    unit = _UNITS.get((match.group(2) or "lb").strip(), "lb")
-    target = _clean(re.sub(r"\b(?:harvested|picked|today|now)\b", " ", match.group(3) or ""))
-    if not target:
+    raw = re.sub(r"\s+(?:that\s+(?:i|we)\s+)?(?:harvested|picked)(?:\s+(?:today|just\s+now))?$", "", match.group("t"))
+    raw = re.sub(r"\s+from\s+the\s+(?:garden|beds?)$", "", raw)
+    target = _clean(raw)
+    if not target or _HARVEST_TARGET_BAD.search(target):
         return None
+    quantity = float(match.group("qty"))
+    unit = _UNITS.get((match.group("unit") or "lb").strip(), "lb")
     return {"quantity": quantity, "unit": unit, "target": target}
+
+
+_COUNT_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7}
+
+
+def _snooze_days(when: str) -> float | None:
+    """Days from "tomorrow" / "3 days" / "a week"; None when no time was said.
+
+    Raises ``ValueError`` for a time that is not in days ("10 minutes", "6 pm"):
+    plants are snoozed by the day, so that sentence is someone else's.
+    """
+    when = when.strip()
+    if not when:
+        return None
+    if when == "tomorrow":
+        return 1.0
+    match = re.fullmatch(r"(\d+|a|an|one|two|three|four|five|six|seven)\s+(days?|weeks?)", when)
+    if not match:
+        raise ValueError(when)
+    count = float(_COUNT_WORDS.get(match.group(1)) or match.group(1))
+    return count * (7 if match.group(2).startswith("week") else 1)
 
 
 def parse_snooze(text: str) -> dict | None:
     """``{"target", "postpone_days"}`` for "snooze Fernie until tomorrow" / "Monty is still damp"."""
-    lowered = (text or "").lower().strip().strip(".!?")
-    if names_something_else(lowered):
+    lowered = _normalise(text)
+    if names_something_else(lowered) or _refused(lowered):
         return None  # "snooze the alarm for 10 minutes" is Jarvis's own timer
-    match = _STILL_DAMP_RE.search(lowered)
+    match = _STILL_DAMP_RE.match(lowered)
     if match:
-        target = _clean(match.group(1))
+        target = _clean(match.group("t"))
         return {"target": target, "postpone_days": 1.0} if target else None
-    match = _SNOOZE_RE.search(lowered)
+    match = _SNOOZE_RE.match(lowered)
     if not match:
         return None
-    target = _clean(match.group(1))
-    if not target or _is_other_thing(target):
+    try:
+        days = _snooze_days(match.group("when") or "")
+    except ValueError:
+        return None  # "snooze Monty for 10 minutes": not a plant's day
+    target = _clean(match.group("t"))
+    if not target or _TIME_WORDS.search(target):
         return None
-    days: float | None = None
-    when = (match.group(2) or "").lower()
-    if "tomorrow" in when:
-        days = 1.0
-    elif "day" in when:
-        number = re.search(r"(\d+)", when)
-        if number:
-            days = float(number.group(1))
     return {"target": target, "postpone_days": days}
 
 
-def _is_other_thing(target: str) -> bool:
-    """A whole target that is a device or an appointment, not a plant."""
-    cleaned = target.strip().lower()
-    return any(
-        cleaned == word or cleaned.startswith(f"{word} ") or cleaned.endswith(f" {word}")
-        for word in _NOT_A_PLANT
-    )
-
-
 def parse_care(text: str) -> dict | None:
-    """``{"action", "target"}`` for a watering / fertilizing / misting phrase."""
-    lowered = (text or "").lower().strip().strip(".!?")
-    for pattern, action in _CARE_PATTERNS:
-        match = pattern.search(lowered)
+    """``{"action", "target"}`` for a watering / fertilizing / misting report.
+
+    The verb must open the sentence, nothing may negate it, schedule it or put it
+    at another time, and what follows the verb must be the whole target.
+    """
+    lowered = _normalise(text)
+    if _refused(lowered) or names_something_else(lowered):
+        return None
+    for pattern, action, past in _CARE_PATTERNS:
+        match = pattern.match(lowered)
         if not match:
             continue
-        target = _clean(match.group(1) or "")
-        if not target:
-            continue
+        raw = match.group("t")
+        if past:
+            raw = _TRAILING_PAST.sub("", raw)
+        if _TIME_WORDS.search(raw):
+            return None  # "water Monty tomorrow" is a plan, not a report
+        target = _clean(raw)
         # "water the plants" alone names no one: not a command we can act on.
-        if target in ("plants", "plant", "garden", "everything", "everything else"):
+        if not target or target in ("plants", "plant", "garden", "everything", "everything else", "herbs", "them", "it"):
             return None
         return {"action": action, "target": target}
     return None
@@ -202,22 +281,38 @@ async def try_handle(
     *,
     call: GardenCall = call_garden,
 ) -> str | None:
-    """Answer a garden utterance, or None when it is not one."""
+    """Answer a garden utterance, or None when it is not one.
+
+    Only a sentence the parsers accept *and* the Garden resolves to a plant or
+    room by its whole name is answered here. Anything else (no match, a name the
+    garden does not know) goes back to the normal chat path. An unreachable
+    Garden is said plainly instead of failing the chat turn.
+    """
     text = (query or "").strip()
     if not text or len(text) > 300:
         return None
+    try:
+        return await _handle(text, creds, call)
+    except (aiohttp.ClientError, TimeoutError, OSError, RuntimeError) as exc:
+        log.warning("[FastPath] garden unavailable: %s: %s", type(exc).__name__, exc)
+        return UNAVAILABLE
+
+
+async def _handle(text: str, creds: Any, call: GardenCall) -> str | None:
     lowered = text.lower()
 
-    # 1. "What needs water today?" -- a question, so answer with the day's care.
-    if parse_summary(lowered):
+    # Questions first: a question never logs care. Only a whole "what needs
+    # care today?" question is ours; "which herbs need full sun?" is the model's.
+    if is_question(text):
+        if not parse_summary(lowered):
+            return None
+        answer = await garden_assist.summarize(creds, call=call)
+        if answer.get("status") == "error":
+            return str(answer.get("message") or UNAVAILABLE)
+        return str(answer.get("message") or "")
+    if parse_summary(lowered):  # "garden status", "garden chores today"
         answer = await garden_assist.summarize(creds, call=call)
         return str(answer.get("message") or "")
-
-    # A question (".ends with ?", "when should I water Monty?") is answered by
-    # the model: logging a watering because someone asked *when* is the one bug
-    # this matcher must never have again.
-    if is_question(text):
-        return None
 
     # 2. "Log 3 pounds of tomatoes harvested" -- a number plus a crop.
     harvest = parse_harvest(lowered)
@@ -227,24 +322,26 @@ async def try_handle(
             harvest["target"],
             quantity=harvest["quantity"],
             unit=harvest["unit"],
+            whole_phrase=True,
             call=call,
         )
         log.info("[FastPath] garden harvest '%s' -> %s", harvest["target"], answer.get("status"))
-        return str(answer.get("message") or "")
+        return _spoken(answer)
 
     # 3. "Snooze Fernie until tomorrow" / "Monty is still damp".
     snooze = parse_snooze(lowered)
-    if snooze is not None and _names_a_plant(lowered, snooze["target"]):
+    if snooze is not None:
         answer = await garden_assist.log_care(
             creds,
             snooze["target"],
             still_damp=True,
             source="voice",
             postpone_days=snooze["postpone_days"],
+            whole_phrase=True,
             call=call,
         )
         log.info("[FastPath] garden snooze '%s' -> %s", snooze["target"], answer.get("status"))
-        return str(answer.get("message") or "")
+        return _spoken(answer)
 
     # 4. "I watered Monty" / "watered all the living room plants".
     care = parse_care(lowered)
@@ -254,24 +351,23 @@ async def try_handle(
             care["target"],
             action=care["action"],
             source="voice",
+            whole_phrase=True,
             call=call,
         )
         log.info("[FastPath] garden care '%s' (%s) -> %s", care["target"], care["action"], answer.get("status"))
-        if answer.get("status") == "not_found" and not _mentions_garden(lowered):
-            # "water the basil" is ours even when no basil exists yet -- but a
-            # sentence that never mentioned the garden falls through to Jarvis
-            # instead of answering "I couldn't find a plant called ...".
-            return None
-        return str(answer.get("message") or "")
+        return _spoken(answer)
 
     return None
 
 
-def _mentions_garden(text: str) -> bool:
-    """Did the phrase itself say it was about the garden?"""
-    return any(word in (text or "") for word in (*_GARDEN_CONTEXT, "pot", "pots"))
+def _spoken(answer: dict) -> str | None:
+    """The answer to say, or None to hand the sentence back to the chat path.
 
-
-def _names_a_plant(text: str, target: str) -> bool:
-    """A snooze needs a real phrase on both sides ("snooze the timer" is not ours)."""
-    return len(target) >= 2 and ("snooze" in text or "still damp" in text or "still wet" in text)
+    A name the garden does not know ("my hair is still wet", "water Audrey") is
+    not ours: the model answers it instead of "I couldn't find a plant ...".
+    """
+    if answer.get("status") == "not_found":
+        return None
+    if answer.get("status") == "unavailable":
+        return UNAVAILABLE
+    return str(answer.get("message") or "")

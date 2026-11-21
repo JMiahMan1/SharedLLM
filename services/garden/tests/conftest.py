@@ -22,3 +22,15 @@ def _no_home_hub(monkeypatch):
     # Phase 8: same reason, for the hardware discovery caches.
     monkeypatch.setattr(homehub_hardware, "_states_cache", None)
     monkeypatch.setattr(homehub_hardware, "_tags_cache", None)
+
+
+@pytest.fixture(autouse=True)
+def _household_zone(monkeypatch):
+    """Garden counts by the household's day and refuses to guess a zone, so the
+    tests name one. UTC keeps existing date arithmetic stable; tests about the
+    zone itself set their own."""
+    from services.common import household_tz
+
+    household_tz.reset_cache()
+    monkeypatch.setenv("TZ", "UTC")
+    monkeypatch.delenv("TIMEZONE", raising=False)

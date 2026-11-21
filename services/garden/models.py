@@ -12,8 +12,6 @@ from uuid import uuid4
 
 from sqlmodel import Field, SQLModel
 
-from services.garden.household import LAST_RESORT as LAST_RESORT_FAMILY_SIZE
-
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -25,9 +23,14 @@ class GardenProfile(SQLModel, table=True):
     __tablename__ = "garden_profile"
 
     user_id: str = Field(primary_key=True, default="household")
-    #: The household roster (Identity) is the source; this only covers a row
-    #: created before Identity can be asked.
-    family_size: int = Field(default=LAST_RESORT_FAMILY_SIZE)
+    #: Legacy column, no longer read: it used to hold the roster count copied
+    #: from Identity (or a fallback of 7) on the first read, which went stale.
+    #: ``migrate_family_size`` moves an explicit value into
+    #: ``family_size_override`` once and sets this to 0. SQLite cannot drop or
+    #: relax a NOT NULL column in place, so it stays, always 0.
+    family_size: int = Field(default=0)
+    #: A family size a person set on purpose. ``None`` = ask Identity's roster.
+    family_size_override: int | None = Field(default=None)
     hardiness_zone: str | None = Field(default=None)
     zone_source: str = Field(default="manual")
     last_spring_frost_mmdd: str | None = Field(default=None)
@@ -282,9 +285,13 @@ class LocationIn(SQLModel):
 
 
 class GardenProfileIn(SQLModel):
-    """Create/update request for garden profile."""
+    """Create/update request for garden profile.
 
-    family_size: int | None = None
+    ``family_size`` is an explicit override; sending ``null`` clears it so the
+    planner follows Identity's household roster again.
+    """
+
+    family_size: int | None = Field(default=None, ge=1)
     hardiness_zone: str | None = None
     zone_source: str | None = None
     last_spring_frost_mmdd: str | None = None
@@ -358,7 +365,12 @@ class LocationOut(SQLModel):
 
 class GardenProfileOut(SQLModel):
     user_id: str
-    family_size: int
+    #: The size the planner uses: the override, else Identity's roster, else
+    #: ``None`` when Identity could not be asked (``family_size_source`` says which).
+    family_size: int | None = None
+    family_size_override: int | None = None
+    #: ``override`` | ``identity`` | ``unavailable``
+    family_size_source: str = "identity"
     hardiness_zone: str | None
     zone_source: str
     last_spring_frost_mmdd: str | None
@@ -624,7 +636,9 @@ class GardenPlan(SQLModel, table=True):
     name: str = Field(max_length=120)  # e.g., "Spring/Summer 2027"
     season: str = Field(max_length=32)  # spring_summer | fall | winter
     year: int = Field(default=0)
-    family_size: int = Field(default=LAST_RESORT_FAMILY_SIZE, ge=1)
+    #: The household size this plan was made for (an explicit value, else the
+    #: roster from Identity at the time); a plan keeps the size it was drawn for.
+    family_size: int = Field(ge=1)
     mode: str = Field(max_length=32)  # fresh_only | fresh_plus_preserving | pantry_goals
     status: str = Field(max_length=32, default="draft")  # draft | active | archived
     created_at: str = Field(default_factory=utcnow)
