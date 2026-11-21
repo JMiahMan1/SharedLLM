@@ -471,6 +471,12 @@ def test_garden_rejects_spoofed_admin_header(client, calls):
         for _, _, _, _, h in calls
         if h
     )
+    # Must NOT forward the spoofed admin header.
+    assert not any(
+        h.get("X-Is-Admin") == "true"
+        for _, _, _, _, h in calls
+        if h
+    )
 
 
 # --------------------------------------------------------------------------- Phase 5 routes
@@ -763,6 +769,135 @@ def test_garden_callback_rejects_spoofed_admin(client, calls):
     # Forwarded headers must reflect kid identity, not spoofed admin.
     assert any(
         h.get("X-User-Id") == "child" and h.get("X-User-Role") == "child"
+        for _, _, _, _, h in calls
+        if h
+    )
+    # Must NOT forward the spoofed admin header.
+    assert not any(
+        h.get("X-Is-Admin") == "true"
+        for _, _, _, _, h in calls
+        if h
+    )
+
+
+# --------------------------------------------------------------------------- Phase 3 routes
+# Restored: these were deleted with the Phase 5 commit (af087043f) while the
+# routes stayed, which left species lookup, custom species, the weather hook and
+# the harvest routes untested at the gateway.
+
+
+def test_garden_species_lookup_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/species/lookup",
+        headers=ADMIN_HEADERS,
+        json={"name": "Rare Plant X"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["draft"] is True
+    assert data["source"] == "wiki_ai_draft"
+    assert data["species"]["common_name"] == "Rare Plant X"
+    assert any(m == "POST" and p == "/species/lookup" for m, p, _, _, _ in calls)
+
+
+def test_garden_species_custom_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/species/custom",
+        headers=ADMIN_HEADERS,
+        json={"common_name": "Thai Holy Basil", "category": "herb"},
+    )
+    assert resp.status_code in (200, 201), resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["key"] == "thai_holy_basil"
+    assert any(m == "POST" and p == "/species/custom" for m, p, _, _, _ in calls)
+
+
+def test_garden_species_custom_delete_proxy(client, calls):
+    resp = client.delete(
+        "/api/garden/species/custom/thai_holy_basil", headers=ADMIN_HEADERS
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True
+    assert any(
+        m == "DELETE" and p == "/species/custom/thai_holy_basil"
+        for m, p, _, _, _ in calls
+    )
+
+
+def test_garden_hooks_weather_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/hooks/weather",
+        headers=ADMIN_HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["evaluated"] is True
+    assert any(m == "POST" and p == "/hooks/weather" for m, p, _, _, _ in calls)
+
+
+# --------------------------------------------------------------------------- Phase 4 routes
+
+
+def test_garden_harvest_proxy(client, calls):
+    resp = client.post(
+        "/api/garden/plants/plant-1/harvest",
+        headers=ADMIN_HEADERS,
+        json={"quantity": 2.0, "unit": "bunch", "disposition": "fresh"},
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["harvest_id"] == "harvest-1"
+    assert any(m == "POST" and p == "/plants/plant-1/harvest" for m, p, _, _, _ in calls)
+
+
+def test_garden_harvests_proxy(client, calls):
+    resp = client.get("/api/garden/harvests", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["count"] == 2
+    assert len(data["harvests"]) == 2
+    assert data["totals"][0]["total_quantity"] == 3.0
+    assert any(m == "GET" and p == "/harvests" for m, p, _, _, _ in calls)
+
+
+def test_garden_delete_harvest_proxy(client, calls):
+    resp = client.delete("/api/garden/harvests/harvest-1", headers=ADMIN_HEADERS)
+    assert resp.status_code == 204, resp.text
+    assert any(m == "DELETE" and p == "/harvests/harvest-1" for m, p, _, _, _ in calls)
+
+
+def test_garden_harvest_ready_proxy(client, calls):
+    resp = client.get("/api/garden/harvest/ready", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["ready"][0]["common_name"] == "Sweet Basil"
+    assert "basil" in data["ready"][0]["culinary_aliases"]
+    assert any(m == "GET" and p == "/harvest/ready" for m, p, _, _, _ in calls)
+
+
+def test_garden_proxy_rejects_spoofed_admin_on_harvest(client, calls):
+    """A kid with spoofed admin headers can log a harvest (all roles allowed),
+    and the forwarded headers carry the kid's identity, never the spoof."""
+    resp = client.post(
+        "/api/garden/plants/plant-1/harvest",
+        headers={
+            "Authorization": "Bearer kid-key",
+            "X-Is-Admin": "true",  # spoofed
+            "X-User-Id": "mother",  # spoofed
+        },
+        json={"quantity": 1.0, "unit": "bunch", "disposition": "fresh"},
+    )
+    assert resp.status_code == 201
+    assert any(
+        h.get("X-User-Id") == "child" and h.get("X-User-Role") == "child"
+        for _, _, _, _, h in calls
+        if h
+    )
+    # Must NOT forward the spoofed admin header on a harvest.
+    assert not any(
+        h.get("X-Is-Admin") == "true"
         for _, _, _, _, h in calls
         if h
     )

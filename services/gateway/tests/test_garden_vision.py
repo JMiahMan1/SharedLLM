@@ -29,8 +29,27 @@ def identity(monkeypatch):
     async def acting(_request):
         return {"user": "alex", "is_admin": False, "family_role": "adult_child"}
 
+    async def resolved(_request, as_user=None):
+        return {"user": "alex", "nextcloud_user": "alex", "nextcloud_url": "https://cloud.example"}
+
     monkeypatch.setattr(gateway_main, "_acting_identity", acting)
+    monkeypatch.setattr(gateway_main, "_resolve_acting_identity", resolved)
     return acting
+
+
+def test_an_identity_failure_is_a_503_not_an_empty_caller(client, identity, monkeypatch):
+    async def identity_down(_request, as_user=None):
+        raise ConnectionError("identity is down")
+
+    monkeypatch.setattr(gateway_main, "_resolve_acting_identity", identity_down)
+
+    resp = client.post(
+        "/api/garden/plants/p-monty/photos",
+        files={"image": ("growth.jpg", LEAF, "image/jpeg")},
+    )
+
+    assert resp.status_code == 503
+    assert "Identity" in resp.json()["detail"]
 
 
 class _Resp:
@@ -313,14 +332,56 @@ def test_the_plant_doctor_saves_the_diagnosis_on_the_timeline(client, garden, mo
     assert garden["posted"][0]["nextcloud_path"].startswith("Garden/Photos/p-monty/")
 
 
-def test_a_progress_photo_keeps_working_when_nextcloud_is_not_configured(client, garden, monkeypatch):
-    async def no_nextcloud(_raw, *, creds, plant_id, thumbnail_max_px=480):
-        return {
-            "nextcloud_path": None, "thumb_base64": None,
-            "warning": "No Nextcloud account is connected, so the photo was not stored.",
-        }
+def _execution_answers(monkeypatch, answer: dict):
+    """Execution's /execute/photo_upload, at the HTTP seam: the real
+    ``upload_photo`` reads exactly what execution sends (handlers/storage.py)."""
+    from contextlib import asynccontextmanager
 
-    monkeypatch.setattr(garden_vision, "upload_photo", no_nextcloud)
+    import services.gateway.main as gateway_main
+
+    real_client = gateway_main.shared_http_client
+
+    class _Resp:
+        status = 200
+
+        async def json(self, content_type=None):
+            return answer
+
+    class _Client:
+        def __init__(self, inner):
+            self.inner = inner
+
+        @asynccontextmanager
+        async def post(self, url, **kw):
+            if url.endswith("/execute/photo_upload"):
+                yield _Resp()
+                return
+            async with self.inner.post(url, **kw) as resp:
+                yield resp
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+    @asynccontextmanager
+    async def client():
+        async with real_client() as inner:
+            yield _Client(inner)
+
+    monkeypatch.setattr(gateway_main, "shared_http_client", client)
+
+
+def test_a_progress_photo_keeps_working_when_nextcloud_is_not_configured(client, garden, monkeypatch):
+    # Execution's real answer when no Nextcloud is connected: SUCCESS, a
+    # thumbnail, and the reason in detail.warning.
+    _execution_answers(monkeypatch, {
+        "status": "SUCCESS",
+        "message": "The photo was received but Nextcloud is not connected, so only the thumbnail was kept.",
+        "detail": {
+            "path": None, "name": None, "size": 10,
+            "warning": "No Nextcloud account is connected, so the full photo was not stored.",
+            "thumbnail_base64": "dGh1bWI=", "thumbnail_bytes": 5,
+        },
+    })
 
     resp = client.post(
         "/api/garden/plants/p-monty/photos",
@@ -409,3 +470,21 @@ def test_a_summary_keeps_the_fields_worth_showing(client, garden, monkeypatch):
 
     assert "overwatering" in garden_vision.as_summary_json(summary)
     assert "urgency" in garden_vision.as_summary_json(summary)
+
+
+def test_both_storage_warnings_reach_the_person(monkeypatch):
+    import asyncio
+
+    _execution_answers(monkeypatch, {
+        "status": "SUCCESS",
+        "detail": {
+            "path": None,
+            "warning": "The full photo was not stored in Nextcloud.",
+            "thumbnail_warning": "The photo could not be resized; no thumbnail was made.",
+        },
+    })
+
+    stored = asyncio.run(garden_vision.upload_photo(LEAF, creds={"user": "parent_one"}, plant_id="p-1"))
+
+    assert "not stored in Nextcloud" in stored["warning"]
+    assert "could not be resized" in stored["warning"]

@@ -1112,9 +1112,16 @@ async def _acting(request: Request) -> dict:
     trimmed = dict(await gateway._acting_identity(request) or {})
     try:
         full = gateway._identity_cred_dict(await gateway._resolve_acting_identity(request))
-    except Exception as exc:  # an identity service hiccup must not lose the caller
-        log.info("[garden] full identity unavailable: %s", exc)
-        full = {}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Without the full identity the photo would be stored with no Nextcloud
+        # account and the person told nothing about why: say it instead.
+        log.warning("[garden] resolving the caller's identity failed: %s: %s", type(exc).__name__, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Your account details could not be read from Identity just now. Try again shortly.",
+        ) from exc
     return {**full, **trimmed}
 
 
