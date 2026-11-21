@@ -79,7 +79,7 @@ POST /api/studio/preview/stop {"workspace_id": "arcade"}
 
 Stopping kills the recorded PID and closes **every** port the workspace published,
 so a preview never leaks a listener. If the process already died, the ports are
-still closed and the answer says the process was gone (`"process": "gone"`) —
+still closed and the answer says the process was gone (`"process": "gone"`), 
 that is not an error. A kill that fails, a port list that cannot be read, or a
 forward that will not close **is** an error naming it (after every other port has
 been tried). Starting a preview stops any earlier one first, and its answer says
@@ -198,7 +198,7 @@ detected project's test step — and return one verdict:
 
 The order matters: a broken shell is reported as a shell problem and the check
 stops there (`program` and `tests` are `null`): nothing else is run or blamed. The
-probe file is removed even when it fails — a probe is not a deliverable.
+probe file is removed even when it fails, a probe is not a deliverable.
 
 `ok` needs proof: a one-line program that ran, or tests that ran and passed. A
 stack with no probe (`"skipped": true`) and no test step is "nothing proved code
@@ -283,9 +283,9 @@ the model as a failure.
 - `services/gateway/studio/media.py` — image generation and narration into `assets/`
 - `services/gateway/studio/deck.py`, `templates.py` — the deck and game documents
 - `services/gateway/studio/works.py` — writing decks and games (with their READMEs)
-- `services/gateway/studio/actions.py` — every action once: request model, handler, error to status
-- `services/gateway/studio/routes.py` — `/api/studio/*` (thin: authenticate, run the action)
-- `services/gateway/studio/tools.py` — the same actions as model tools
+- `services/gateway/studio/actions.py`: every action once: request model, handler, error to status
+- `services/gateway/studio/routes.py`: `/api/studio/*` (thin: authenticate, run the action)
+- `services/gateway/studio/tools.py`: the same actions as model tools
 - `services/gateway/workspace_api.py` — the one client for files, raw bytes, ports and tests
 - `services/workspace_sandbox.py` — the sandbox environment (`build_exec_env`, `_home_for_uid`)
 - `services/ui/src/components/workspace/WorkspaceStudio.tsx` — the panel in
