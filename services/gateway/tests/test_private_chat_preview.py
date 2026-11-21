@@ -286,6 +286,24 @@ def test_og_video_and_og_audio_point_at_playable_files(pv):
     assert audio["kind"] == "audio" and audio["embed"] == {"provider": "file", "src": "https://media.example/e.mp3", "mime": "audio/mpeg"}
 
 
+@pytest.mark.parametrize("meta", [
+    '<meta property="og:video" content="http://lan.example/cam.mp4">',
+    '<meta property="og:video:secure_url" content="https://ten.example/v.webm">',
+    '<meta property="og:video" content="http://127.0.0.1/v.mp4">',
+    '<meta property="og:video" content="http://[::1]/v.mp4">',
+    '<meta property="og:video" content="http://nas.local/v.mp4">',
+    '<meta property="og:audio" content="http://metadata.example/a.mp3">',
+    '<meta property="og:audio:url" content="http://192.168.1.9/a.mp3">',
+    '<meta property="og:audio" content="https://media.example:8443/a.mp3">',
+])
+def test_og_video_and_og_audio_on_a_private_host_are_dropped_like_og_image(pv, meta):
+    pv["http"].get("https://news.example/sneaky", body=_page('<meta property="og:title" content="Sneaky">' + meta),
+                   headers={"Content-Type": "text/html"})
+    body = _ask(pv, "https://news.example/sneaky").json()
+    assert body["title"] == "Sneaky"
+    assert body["kind"] == "link" and body["embed"] is None
+
+
 def test_an_og_video_that_is_an_arbitrary_player_page_stays_a_link(pv):
     pv["http"].get("https://news.example/player", body=_page(
         '<meta property="og:title" content="Somewhere"><meta property="og:video" content="https://news.example/embed/9">'),

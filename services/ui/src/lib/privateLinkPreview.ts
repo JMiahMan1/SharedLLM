@@ -57,6 +57,34 @@ export function webAddress(value: unknown): string | null {
   }
 }
 
+const IPV4_LITERAL = /^\d{1,3}(\.\d{1,3}){3}$/;
+const LOCAL_SUFFIXES = ['.localhost', '.local', '.internal', '.lan', '.home.arpa', '.intranet', '.corp', '.private'];
+
+/**
+ * Whether a hostname (as `new URL(...).hostname` gives it) names a public site a
+ * player may load from. Refused: every IP literal (the URL parser has already
+ * turned `127.1`, `0x7f.1` and `2130706433` into dotted IPv4, so this covers 10/8,
+ * 172.16/12, 192.168/16, 127/8, 169.254/16, 100.64/10, 0/8 and the rest, and IPv6
+ * arrives bracketed), `localhost`, the local-only suffixes and single-label
+ * names (a LAN machine's bare name). A sealed message comes from another device,
+ * which could be running anything, so this does not trust the server's check.
+ */
+export function isPublicWebHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (!host || host.startsWith('[') || host.includes(':')) return false;
+  if (IPV4_LITERAL.test(host)) return false;
+  if (host === 'localhost' || LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix))) return false;
+  if (!host.includes('.')) return false;
+  return true;
+}
+
+/** An http(s) address on a public host (`isPublicWebHost`), or null. */
+export function publicWebAddress(value: unknown): string | null {
+  const address = webAddress(value);
+  if (!address) return null;
+  return isPublicWebHost(new URL(address).hostname) ? address : null;
+}
+
 const ELLIPSIS = String.fromCharCode(0x2026);
 
 function text(value: unknown, max: number): string | undefined {
@@ -100,7 +128,8 @@ function embed(value: unknown, kind: LinkPreviewKind): LinkPreviewEmbed | undefi
     return { provider: 'vimeo', id: raw.id, ...(typeof raw.hash === 'string' && VIMEO_HASH.test(raw.hash) ? { hash: raw.hash } : {}) };
   }
   if (raw.provider === 'file' && typeof raw.mime === 'string') {
-    const src = webAddress(raw.src);
+    // The receiver's device loads this itself when play is tapped: never from a private or local host.
+    const src = publicWebAddress(raw.src);
     const types = kind === 'video' ? PREVIEW_VIDEO_TYPES : kind === 'audio' ? PREVIEW_AUDIO_TYPES : null;
     if (src && types?.has(raw.mime)) return { provider: 'file', src, mime: raw.mime };
   }

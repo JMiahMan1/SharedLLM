@@ -77,9 +77,32 @@ public static class TimeText
         if (s.Locked) text = $"Locked: {ReasonTitle(s.Reason).ToLowerInvariant()}";
         else if (Limited(s)) text = $"Screen time: {Minutes(s.RemainingMinutes)} left · used {Minutes(s.UsedMinutes)}";
         else text = $"Screen time: used {Minutes(s.UsedMinutes)} today";
-        text += "\nManaged by the family hub";
+        text += s.Source switch
+        {
+            HubReach.Auth => "\nThe hub turned this PC's key down",
+            HubReach.Offline => "\nOffline",
+            HubReach.HubError => "\nThe hub had a problem",
+            "config-error" => "\nJarvis Guard is not set up right",
+            _ => "\nManaged by the family hub",
+        };
         return text.Length > 127 ? text[..127] : text;
     }
+
+    /// <summary>
+    /// The lines that say something is wrong (no hub, a refused key, minutes
+    /// not being counted), for the time panel; empty when all is well.
+    /// </summary>
+    public static IReadOnlyList<string> Notices(GuardState s)
+    {
+        var lines = new List<string>();
+        var problem = !string.IsNullOrWhiteSpace(s.Problem) ? s.Problem! : HubReach.Describe(s.Source);
+        if (problem.Length > 0) lines.Add(problem);
+        if (s.UsageUnknown) lines.Add(UsageUnknownLine);
+        return lines;
+    }
+
+    public const string UsageUnknownLine =
+        "Screen time is not being counted: the Jarvis Guard tray is not running in a signed-in account. The parents have been told.";
 
     public static string ReasonTitle(string? reason) => reason switch
     {

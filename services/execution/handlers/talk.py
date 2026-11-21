@@ -1069,8 +1069,13 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to load messages.", service="talk_messages")
             detail: dict[str, Any] = _feed(data)
             messages = detail["messages"]
+            raw = [item for item in (data or []) if isinstance(item, dict)]
+            # Whether Talk has older messages than this page. Counted on the raw page, before the
+            # hidden updates (reactions) are taken out: a full page of which some were reactions
+            # still means there is more, and the app cannot tell that from the visible count.
+            detail["has_more"] = len(raw) >= req.limit
             if req.export:
-                detail.update({"export": True, "raw": [item for item in (data or []) if isinstance(item, dict)]})
+                detail.update({"export": True, "raw": raw})
             return ExecutionResult(
                 status="SUCCESS",
                 message=f"Loaded {len(messages)} message(s).",

@@ -10,8 +10,10 @@ import { deriveKey, makeVerifier, PBKDF2_ITERATIONS, randomBytes, sealMessage, t
 import type { PrivateChatReminders } from './privateChatModel';
 
 const getPrivateChat = vi.fn();
+/** What an older server without the reminders route answers. */
+const notFound = () => Object.assign(new Error('Request failed with status code 404'), { response: { status: 404, data: { detail: 'Not Found' } } });
 const getPrivateChatReminders = vi.fn(async (): Promise<PrivateChatReminders> => {
-  throw new Error('no reminders here');
+  throw notFound();
 });
 const setPrivateChatReminders = vi.fn();
 const flagPrivateChatExpectsReply = vi.fn(async () => ({}));
@@ -69,7 +71,7 @@ afterEach(() => {
   getPrivateChat.mockReset();
   getPrivateChatReminders.mockReset();
   getPrivateChatReminders.mockImplementation(async (): Promise<PrivateChatReminders> => {
-    throw new Error('no reminders here');
+    throw notFound();
   });
   setPrivateChatReminders.mockReset();
   flagPrivateChatExpectsReply.mockClear();
@@ -165,6 +167,24 @@ describe('private chat: reply reminders', () => {
   it('an older server without reminders, or one with them off, shows no switch', async () => {
     render(wrap(<PrivateChatSecurity token="roomP" partnerName="Robin" onChanged={() => undefined} onClose={() => undefined} />));
     expect(await screen.findByTestId('private-change-password-open')).toBeTruthy();
+    expect(screen.queryByTestId('private-reminders')).toBeNull();
+  });
+
+  it('an older server (404) shows nothing, but any other failure to load the setting is said', async () => {
+    render(wrap(<PrivateChatSecurity token="roomP" partnerName="Robin" onChanged={() => undefined} onClose={() => undefined} />));
+    expect(await screen.findByTestId('private-change-password-open')).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId('private-reminders-error')).toBeNull();
+  });
+
+  it('a server error loading the reminders is shown instead of hiding the switch', async () => {
+    getPrivateChatReminders.mockImplementation(async () => {
+      throw Object.assign(new Error('Request failed with status code 502'), { response: { status: 502, data: { detail: 'The reminder store is down.' } } });
+    });
+    render(wrap(<PrivateChatSecurity token="roomP" partnerName="Robin" onChanged={() => undefined} onClose={() => undefined} />));
+    const error = await screen.findByTestId('private-reminders-error');
+    expect(error.textContent).toContain('The reminder store is down.');
+    expect(error.getAttribute('role')).toBe('alert');
     expect(screen.queryByTestId('private-reminders')).toBeNull();
   });
 

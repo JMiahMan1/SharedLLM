@@ -876,12 +876,18 @@ def _talk_response(status_code: int, result: dict[str, Any], what: str) -> dict[
     return {**result, "source": "talk"}
 
 
-async def _talk_history(request: Request, token: str, limit: int) -> list[dict[str, Any]]:
+async def _talk_history(request: Request, token: str, limit: int) -> tuple[list[dict[str, Any]], bool]:
+    """A page of the chat's Talk history, and whether Talk has older messages than it."""
     status_code, result = await private_chat._talk(request, {"action": "messages", "token": token, "limit": min(limit, TALK_PAGE)})
     if status_code != 200 or result.get("status") != "SUCCESS":
         raise HTTPException(status_code=502, detail=result.get("message") or "Could not load the messages.")
     detail = result.get("detail") if isinstance(result.get("detail"), dict) else {}
-    return [m for m in detail.get("messages") or [] if isinstance(m, dict)]
+    has_more = detail.get("has_more")
+    if not isinstance(has_more, bool):
+        # Execution counts it on Talk's raw page (reactions included); the visible count cannot stand in for it.
+        log.error("[private-chat] %s: execution's message page did not say whether there is more", token)
+        raise HTTPException(status_code=502, detail="The chat service did not say whether there are earlier messages.")
+    return [m for m in detail.get("messages") or [] if isinstance(m, dict)], has_more
 
 
 @router.get("/chats/{token}/messages")
@@ -891,7 +897,8 @@ async def list_messages(token: str, request: Request, limit: int = 50, before: s
     limit = max(1, min(int(limit), MAX_PAGE))
     before_id, after_id = _int(before, "before", low=1), _int(after, "after")
     if not is_store_chat(chat):
-        return _ok(await _talk_history(request, token, limit), "talk")
+        messages, has_more = await _talk_history(request, token, limit)
+        return _ok(messages, "talk", has_more=has_more)
     store = get_store()
     migration = chat.get("migration") if isinstance(chat.get("migration"), dict) else {}
     try:
@@ -908,14 +915,16 @@ async def list_messages(token: str, request: Request, limit: int = 50, before: s
         # The Talk room still has everything that was moved: show that rather than an empty or shorter history.
         log.error("[private-chat] %s: the message store is unreadable (%s); reading the moved history from Talk", token, exc)
         floor = int(migration.get("talk_max_id") or 0)
-        older = await _talk_history(request, token, limit)
+        older, talk_has_more = await _talk_history(request, token, limit)
         try:
             newer = [public(r, token, people) for r in await asyncio.to_thread(store.page, token, limit, after=floor)]
         except StoreUnreadable:
             newer = []
         merged = [m for m in older if isinstance(m.get("id"), int) and m["id"] <= floor] + newer
-        return _ok(merged[-limit:], "talk")
-    return _ok([public(r, token, people) for r in records], "store",
+        return _ok(merged[-limit:], "talk", has_more=talk_has_more or len(merged) > limit)
+    # Older records than the first one on this page are what "Show earlier" would fetch.
+    oldest = records[0]["id"] if records else (before_id or (after_id + 1 if after_id is not None else 0))
+    return _ok([public(r, token, people) for r in records], "store", has_more=bool(ids) and ids[0] < oldest,
                last_read=markers.get(user, 0), last_common_read=_common_read(chat, markers))
 
 

@@ -24,7 +24,8 @@ public sealed class ApiClient : IDisposable
     public Task<HttpResponseMessage> GetStatusAsync() =>
         _http.GetAsync($"api/screen-time/{Uri.EscapeDataString(_config.Username)}/status?device_key={Uri.EscapeDataString(_config.DeviceKey)}");
 
-    public Task<HttpResponseMessage> ReportCapabilitiesAsync(bool lockCapable, bool trayRunning, string webFilterMode) =>
+    /// <summary><paramref name="trayRunning"/>: null while it is not known yet (just started), never a guess.</summary>
+    public Task<HttpResponseMessage> ReportCapabilitiesAsync(bool lockCapable, bool? trayRunning, string webFilterMode) =>
         _http.PostAsJsonAsync($"api/user-panel/devices/{Uri.EscapeDataString(_config.DeviceKey)}/capabilities", new
         {
             capabilities = new
@@ -44,15 +45,22 @@ public sealed class ApiClient : IDisposable
     public Task<HttpResponseMessage> PostTamperAsync(string eventName, string detail) =>
         _http.PostAsJsonAsync("api/guard/tamper", new { @event = eventName, device_key = _config.DeviceKey, detail });
 
-    /// <summary>A parent's own login, typed on the child's PC, lifts the guard for ten minutes.</summary>
-    public Task<HttpResponseMessage> ParentUnlockAsync(string parentUsername, string parentPassword) =>
-        _http.PostAsJsonAsync("api/guard/parent-unlock", new
+    /// <summary>
+    /// Ask both parents to unlock this PC for <paramref name="minutes"/> (they
+    /// answer on their phones). The hub binds the request to this PC's device
+    /// key; no password is ever sent from the PC.
+    /// </summary>
+    public Task<HttpResponseMessage> AskUnlockAsync(int minutes, string? note, string? lockReason) =>
+        _http.PostAsJsonAsync("api/guard/unlock-requests", new
         {
-            username = parentUsername,
-            password = parentPassword,
-            device = "windows-pc",
-            device_key = _config.DeviceKey,
+            minutes,
+            note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
+            lock_reason = lockReason ?? "",
         });
+
+    /// <summary>This PC's own unlock request: still waiting, or a parent's answer (the hub answers only this PC).</summary>
+    public Task<HttpResponseMessage> GetUnlockRequestAsync(long id) =>
+        _http.GetAsync($"api/guard/unlock-requests/{id}");
 
     /// <summary>"Ask for more time": a request a parent answers from their phone (Grant / Not today).</summary>
     public Task<HttpResponseMessage> AskMoreTimeAsync(int minutes, string? note) =>

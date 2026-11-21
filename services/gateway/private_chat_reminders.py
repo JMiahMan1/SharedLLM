@@ -157,6 +157,11 @@ _lock = threading.Lock()
 # --- State (one small JSON file per chat, no content) ----------------------------
 
 
+class ReminderStateUnreadable(Exception):
+    """The chat's reminder file exists but cannot be read or parsed. Never treated as empty: writing over it
+    would silently undo a parent's choice (reminders turned off) along with everything else in it."""
+
+
 def _path(token: str) -> Path:
     from services.gateway import private_chat
 
@@ -174,15 +179,18 @@ def load(token: str) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text())
     except FileNotFoundError:
-        return _empty()
+        return _empty()  # first use of this chat: nothing chosen yet
     except (OSError, ValueError) as exc:
-        log.warning("[private-chat] %s: reminder state unreadable (%s); starting it again", token, type(exc).__name__)
-        return _empty()
+        log.error("[private-chat] %s: reminder state %s unreadable (%s: %s); leaving it untouched",
+                  token, path, type(exc).__name__, exc)
+        raise ReminderStateUnreadable(f"{path}: {type(exc).__name__}: {exc}") from exc
+    if not isinstance(data, dict):
+        log.error("[private-chat] %s: reminder state %s is not a JSON object; leaving it untouched", token, path)
+        raise ReminderStateUnreadable(f"{path}: not a JSON object")
     state = _empty()
-    if isinstance(data, dict):
-        for key in state:
-            if isinstance(data.get(key), dict):
-                state[key] = data[key]
+    for key in state:
+        if isinstance(data.get(key), dict):
+            state[key] = data[key]
     return state
 
 
@@ -390,32 +398,47 @@ async def check_once(client: aiohttp.ClientSession, *, identity: str, telemetry:
             continue
         mid = int(latest.get("id") or 0)
         at = time.time() if now is None else now
-        for recipient in members:
-            if recipient == latest.get("by"):
-                continue
-            if markers.get(recipient, 0) >= mid:
-                await asyncio.to_thread(_note_read, token, recipient, mid, at)
-            state = await asyncio.to_thread(load, token)
-            decision = decide(recipient=recipient, latest=latest, read_upto=markers.get(recipient, 0),
-                              state=state, now=at, tz=tz)
-            if not decision.due:
-                continue
-            if not await asyncio.to_thread(_claim, token, recipient, mid, at, tz, DAILY_MAX):
-                continue
-            sender = people.get(str(latest.get("by"))) or {"username": latest.get("by")}
-            url = f"/family?chat={token}"
-            payload = notify.notice(
-                recipient, "chat", "Private chat", reminder_text(private_chat._display(sender), decision.question),
-                url=url, priority=3, tag=f"private-reminder:{token}", kind=KIND, replace=True,
-                actions=[notify.view_action(url)],
-                data={"token": token, "private": True, "reminder": True},
-            )
-            if await notify.send(payload, client=client, telemetry=telemetry, secret=secret):
-                sent += 1
-                log.info("[private-chat] %s: reminded %s about message %s%s", token, recipient, mid,
-                         " (asked something)" if decision.question else "")
-            else:
-                await asyncio.to_thread(_release, token, recipient, mid, at)
+        try:
+            sent += await _remind_members(client, token, members, latest, markers, people, mid, at, tz,
+                                          telemetry=telemetry, secret=secret)
+        except ReminderStateUnreadable as exc:
+            log.error("[private-chat] reminders: skipped %s, its reminder state is unreadable (%s)", token, exc)
+    return sent
+
+
+async def _remind_members(client: aiohttp.ClientSession, token: str, members: list[str], latest: dict[str, Any],
+                          markers: dict[str, int], people: dict[str, dict[str, Any]], mid: int, at: float,
+                          tz: ZoneInfo, *, telemetry: str, secret: str) -> int:
+    """Send the reminders due in one chat; raises ReminderStateUnreadable without writing anything."""
+    from services.gateway import private_chat
+
+    sent = 0
+    for recipient in members:
+        if recipient == latest.get("by"):
+            continue
+        if markers.get(recipient, 0) >= mid:
+            await asyncio.to_thread(_note_read, token, recipient, mid, at)
+        state = await asyncio.to_thread(load, token)
+        decision = decide(recipient=recipient, latest=latest, read_upto=markers.get(recipient, 0),
+                          state=state, now=at, tz=tz)
+        if not decision.due:
+            continue
+        if not await asyncio.to_thread(_claim, token, recipient, mid, at, tz, DAILY_MAX):
+            continue
+        sender = people.get(str(latest.get("by"))) or {"username": latest.get("by")}
+        url = f"/family?chat={token}"
+        payload = notify.notice(
+            recipient, "chat", "Private chat", reminder_text(private_chat._display(sender), decision.question),
+            url=url, priority=3, tag=f"private-reminder:{token}", kind=KIND, replace=True,
+            actions=[notify.view_action(url)],
+            data={"token": token, "private": True, "reminder": True},
+        )
+        if await notify.send(payload, client=client, telemetry=telemetry, secret=secret):
+            sent += 1
+            log.info("[private-chat] %s: reminded %s about message %s%s", token, recipient, mid,
+                     " (asked something)" if decision.question else "")
+        else:
+            await asyncio.to_thread(_release, token, recipient, mid, at)
     return sent
 
 
@@ -430,6 +453,14 @@ async def _body(request: Request) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise HTTPException(status_code=422, detail="A JSON body is required.")
     return body
+
+
+def _unreadable(exc: ReminderStateUnreadable) -> HTTPException:
+    return HTTPException(
+        status_code=500,
+        detail="The reminder settings for this chat could not be read (the file under PRIVATE_CHAT_DIR/reminders "
+               "is damaged or unreadable), so nothing was changed. Fix or remove that file.",
+    )
 
 
 def _public(state: dict[str, Any], user: str) -> dict[str, Any]:
@@ -449,7 +480,11 @@ async def get_reminders(token: str, request: Request):
     from services.gateway import private_chat
 
     user, _chat, _people = await private_chat._member_chat(request, token)
-    return _public(await asyncio.to_thread(load, token), user)
+    try:
+        state = await asyncio.to_thread(load, token)
+    except ReminderStateUnreadable as exc:
+        raise _unreadable(exc) from exc
+    return _public(state, user)
 
 
 @router.put("/chats/{token}/reminders")
@@ -468,6 +503,8 @@ async def put_reminders(token: str, request: Request):
 
     try:
         state = await asyncio.to_thread(_update, token, change)
+    except ReminderStateUnreadable as exc:
+        raise _unreadable(exc) from exc
     except OSError as exc:
         log.error("[private-chat] %s: could not save the reminder setting: %s", token, type(exc).__name__)
         raise HTTPException(status_code=500, detail="Could not save the setting (PRIVATE_CHAT_DIR not writable).") from exc
@@ -509,7 +546,10 @@ async def expects_reply(token: str, request: Request):
         else:
             state["expects"].pop(user, None)
 
-    await asyncio.to_thread(_update, token, change)
+    try:
+        await asyncio.to_thread(_update, token, change)
+    except ReminderStateUnreadable as exc:
+        raise _unreadable(exc) from exc
     return {"message_id": mid, "expects_reply": flag}
 
 

@@ -109,7 +109,7 @@ public class GuardService extends AccessibilityService {
     /**
      * Layer 2: whether Android's lock screen has already been put up for the
      * screen-time lock in force, so it goes up once per lock and not every refresh
-     * (which would re-lock the child away from the parent-unlock screen).
+     * (which would re-lock the child away from the screen where they ask a parent).
      */
     private volatile boolean hardLocked = false;
     /**

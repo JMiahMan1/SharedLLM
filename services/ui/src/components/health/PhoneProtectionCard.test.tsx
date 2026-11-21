@@ -110,6 +110,21 @@ describe('PhoneProtectionCard', () => {
     await vi.waitFor(() => expect(vi.mocked(Guard.status).mock.calls.length).toBeGreaterThan(1));
   });
 
+  it('says so when asking for the call filter fails, instead of doing nothing', async () => {
+    vi.mocked(Guard.allowCallFilter).mockRejectedValue(new Error('role not available'));
+    vi.mocked(Guard.status).mockResolvedValue({
+      adminActive: true, deviceOwner: true, guardEnabled: true, callFilterAvailable: true, callFilter: false,
+    });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderCard();
+    const step = await screen.findByTestId('phone-protection-call-filter');
+    fireEvent.click(step.querySelector('button')!);
+    const alert = await screen.findByTestId('phone-protection-call-filter-error');
+    expect(alert).toHaveAttribute('role', 'alert');
+    expect(alert).toHaveTextContent('role not available');
+    quiet.mockRestore();
+  });
+
   it('is fully on once the call filter is held', async () => {
     vi.mocked(Guard.status).mockResolvedValue({
       adminActive: true, deviceOwner: true, guardEnabled: true, callFilterAvailable: true, callFilter: true,

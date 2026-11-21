@@ -8,8 +8,9 @@ namespace JarvisGuard.Overlay;
 /// The lock surface a locked child sees: why the PC is locked, until when, and
 /// the countdown to the sign-out, with the same ways out as the phone's lock
 /// screen, all on this screen: ask for more time, message a parent, see and
-/// tick off today's chores, and a parent's sign-in (or a parent's offline code
-/// when the hub cannot be reached).
+/// tick off today's chores, and ask a parent to unlock it, which the parents
+/// approve or deny on their own phones (or a parent's offline code when the
+/// hub cannot be reached). No password is ever typed here.
 ///
 /// It does not keep anyone out by itself (the agent signs the session out);
 /// it makes sure the child is never locked by a machine that will not say why.
@@ -45,8 +46,11 @@ public sealed class LockForm : Form
     private readonly FlowLayoutPanel _sheet;
     private readonly Label _status;
     private readonly System.Windows.Forms.Timer _refresh = new() { Interval = 1000 };
+    /// <summary>Asks the agent how an unlock request stands while it waits for a parent.</summary>
+    private readonly System.Windows.Forms.Timer _unlockPoll = new() { Interval = 3000 };
     private bool _allowingClose;
     private bool _busy;
+    private bool _polling;
     private int _columnWidth;
     private string? _lastReason;
 
@@ -72,7 +76,7 @@ public sealed class LockForm : Form
         _actions.Controls.Add(MakeButton("Ask for more time", primary: true, (_, _) => ShowAsk()));
         _actions.Controls.Add(MakeButton("Message a parent", primary: false, (_, _) => ShowMessage()));
         _actions.Controls.Add(MakeButton("Chores", primary: false, (_, _) => _ = ShowChoresAsync()));
-        _actions.Controls.Add(MakeButton("A parent can unlock", primary: false, (_, _) => ShowUnlock(offline: false)));
+        _actions.Controls.Add(MakeButton("Ask a parent to unlock", primary: false, (_, _) => ShowUnlock(offline: false)));
 
         _sheet = new FlowLayoutPanel
         {
@@ -90,7 +94,8 @@ public sealed class LockForm : Form
         _column.SizeChanged += (_, _) => Center();
         _refresh.Tick += (_, _) => RefreshState();
         _refresh.Start();
-        Shown += (_, _) => { Relayout(); RefreshState(); };
+        _unlockPoll.Tick += async (_, _) => await PollUnlockAsync();
+        Shown +=(_, _) => { Relayout(); RefreshState(); };
 
         FormClosing += (_, args) =>
         {
@@ -184,6 +189,9 @@ public sealed class LockForm : Form
     /// <summary>Open one sheet under the buttons, replacing whatever was there.</summary>
     private void OpenSheet(string heading, params Control[] controls)
     {
+        // Another sheet's lines would be talked over by the request's; the
+        // agent still follows a waiting request and unlocks on an approval.
+        _unlockPoll.Stop();
         _sheet.SuspendLayout();
         var old = _sheet.Controls.Cast<Control>().ToList();
         _sheet.Controls.Clear();
@@ -207,16 +215,16 @@ public sealed class LockForm : Form
 
     // ---- the sheets -----------------------------------------------------
 
-    private void ShowAsk()
+    /// <summary>A row of minute buttons, <paramref name="initial"/> chosen; a tap calls <paramref name="pick"/> and highlights it.</summary>
+    private FlowLayoutPanel MinuteChoices(int[] options, int initial, Action<int> pick)
     {
-        var chosen = 30;
         var choices = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = Pad(0, 0, 0, 4) };
-        foreach (var m in AskMinutes)
+        foreach (var m in options)
         {
             var minutes = m;
-            var b = MakeButton($"{m} minutes", primary: m == chosen, (sender, _) =>
+            var b = MakeButton($"{m} minutes", primary: m == initial, (sender, _) =>
             {
-                chosen = minutes;
+                pick(minutes);
                 foreach (Button other in choices.Controls)
                 {
                     var on = other == sender;
@@ -227,6 +235,13 @@ public sealed class LockForm : Form
             });
             choices.Controls.Add(b);
         }
+        return choices;
+    }
+
+    private void ShowAsk()
+    {
+        var chosen = 30;
+        var choices = MinuteChoices(AskMinutes, chosen, m => chosen = m);
         var note = MakeBox("Why? (optional)");
         note.MaxLength = 200;
         var send = MakeButton("Send to a parent", primary: true, async (_, _) =>
@@ -307,31 +322,60 @@ public sealed class LockForm : Form
                 code.Text = "";
                 if (r?.Ok == true) CloseUnlocked();
             });
-            var back = MakeButton("Use a parent's sign-in instead", primary: false, (_, _) => ShowUnlock(offline: false));
-            var note = MakeLabel("For when the PC has no connection. The parents are told once it is back online.",
+            var back = MakeButton("Ask a parent instead", primary: false, (_, _) => ShowUnlock(offline: false));
+            var note = MakeLabel("For when the PC has no connection. A parent sees their code in the Jarvis app. The parents are told once the PC is back online.",
                 11, FontStyle.Regular, Muted, bottom: 8);
             OpenSheet("A parent's offline code", code, go, back, note);
             return;
         }
-        var user = MakeBox("Parent's username");
-        var password = MakeBox("Parent's password", secret: true);
-        var unlock = MakeButton("Unlock", primary: true, async (_, _) =>
+        // No password is typed here: the parents answer on their own phones,
+        // and the agent unlocks only on the hub's answer for this PC.
+        var chosen = UnlockRequest.MinuteChoices[1];
+        var choices = MinuteChoices(UnlockRequest.MinuteChoices, chosen, m => chosen = m);
+        var why = MakeBox("Why? (optional)");
+        why.MaxLength = 200;
+        var ask = MakeButton("Ask my parents", primary: true, async (_, _) =>
         {
-            if (string.IsNullOrWhiteSpace(user.Text) || password.Text.Length == 0)
-            {
-                Say("Enter the parent's username and password.");
-                return;
-            }
-            var r = await Send(new PipeProtocol.Request
-            {
-                Cmd = "parent-unlock", ParentUsername = user.Text.Trim(), ParentPassword = password.Text,
-            }, timeoutMs: 20000);
-            password.Text = "";
-            if (r?.Ok == true) CloseUnlocked();
+            var r = await Send(new PipeProtocol.Request { Cmd = "unlock-request", Minutes = chosen, Note = why.Text });
+            if (r?.Ok != true) return;
+            Say(r.Info ?? UnlockRequest.Describe(UnlockRequest.Pending), good: true);
+            _unlockPoll.Start();
         });
         var offlineLink = MakeButton("No connection? Use an offline code", primary: false, (_, _) => ShowUnlock(offline: true));
-        var told = MakeLabel("The unlock lasts ten minutes and the other parents are told.", 11, FontStyle.Regular, Muted, bottom: 8);
-        OpenSheet("A parent signs in", user, password, unlock, offlineLink, told);
+        var told = MakeLabel("Both parents get it on their phones. A request waits ten minutes.", 11, FontStyle.Regular, Muted, bottom: 8);
+        OpenSheet("Ask a parent to unlock", choices, why, ask, offlineLink, told);
+    }
+
+    /// <summary>
+    /// While a request waits, ask the agent how it stands (it asks the hub).
+    /// An approval closes the lock surface; a "no", an expiry or a newer
+    /// request is said here and the polling stops.
+    /// </summary>
+    private async Task PollUnlockAsync()
+    {
+        if (_polling || _busy) return;
+        _polling = true;
+        try
+        {
+            var r = await PipeProtocol.SendAsync(Config.PipeName, new PipeProtocol.Request { Cmd = "unlock-status" }, 8000);
+            if (r is not { Ok: true }) return; // a passing hiccup: the next tick asks again
+            switch (r.UnlockStatus)
+            {
+                case UnlockRequest.Pending:
+                    if (!string.IsNullOrEmpty(r.Info)) Say(r.Info, good: true);
+                    break;
+                case UnlockRequest.Approved:
+                    _unlockPoll.Stop();
+                    if (!string.IsNullOrEmpty(r.Info)) Say(r.Info, good: r.UntilMinutes > 0);
+                    if (r.UntilMinutes > 0) CloseUnlocked();
+                    break;
+                default:
+                    _unlockPoll.Stop();
+                    if (!string.IsNullOrEmpty(r.Info)) Say(r.Info);
+                    break;
+            }
+        }
+        finally { _polling = false; }
     }
 
     // ---- talking to the guard -------------------------------------------

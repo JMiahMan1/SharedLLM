@@ -245,7 +245,7 @@ final class GuardScreenView {
         boolean chores = "chores".equals(reason);
         // The child's one clear next step, as the big button.
         if (tamper) {
-            Button signIn = primaryButton(context, pal, "Parent sign in");
+            Button signIn = primaryButton(context, pal, "Ask a parent to unlock");
             signIn.setOnClickListener(v -> sheet.show(parentCard(context, pal, sheet, host)));
             actions.addView(signIn, fullWidth(context, 0));
         } else if (appOff && pkg != null && !pkg.isEmpty()) {
@@ -300,7 +300,7 @@ final class GuardScreenView {
             quiet.addView(jarvis, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         }
         if (!tamper) {
-            Button parentButton = quietButton(context, pal, "Parent unlock", R.drawable.mi_key);
+            Button parentButton = quietButton(context, pal, "Ask a parent", R.drawable.mi_key);
             parentButton.setOnClickListener(v -> sheet.show(parentCard(context, pal, sheet, host)));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             if (quiet.getChildCount() > 0) lp.leftMargin = dp(context, 10);
@@ -540,81 +540,109 @@ final class GuardScreenView {
         return view;
     }
 
-    /** "Parent unlock": a parent's own login, or their offline code when there is no connection. */
+    /**
+     * "Ask a parent to unlock": both parents get Approve / Deny on their own
+     * phones and this screen unlocks on the hub's approval; nothing is typed
+     * here. A parent's offline code is the way in when there is no connection.
+     */
     private static View parentCard(Context context, Palette pal, Sheet sheet, Host host) {
         LinearLayout card = sheetPanel(context, pal);
-        card.addView(cardHeader(context, pal, R.drawable.mi_key, pal.brand, "Parent unlock"));
+        card.addView(cardHeader(context, pal, R.drawable.mi_key, pal.brand, "Ask a parent to unlock"));
 
-        EditText user = field(context, pal, "Parent's username");
-        user.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL);
-        user.setImeOptions(EditorInfo.IME_ACTION_NEXT);
-        addFullWidth(card, user, 0);
+        TextView howLong = text(context, "For how long?", 14, pal.textSecondary);
+        howLong.setGravity(Gravity.START);
+        addFullWidth(card, howLong, 0);
+        final int[] chosen = {UnlockAnswer.MINUTE_CHOICES[1]};
+        LinearLayout choices = new LinearLayout(context);
+        choices.setOrientation(LinearLayout.HORIZONTAL);
+        java.util.List<Button> choiceButtons = new java.util.ArrayList<>();
+        for (int minutes : UnlockAnswer.MINUTE_CHOICES) {
+            Button b = ghostButton(context, pal, minutes + " min");
+            b.setAlpha(minutes == chosen[0] ? 1f : 0.55f);
+            b.setOnClickListener(v -> {
+                chosen[0] = minutes;
+                for (Button other : choiceButtons) other.setAlpha(other == v ? 1f : 0.55f);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            if (!choiceButtons.isEmpty()) lp.leftMargin = dp(context, 8);
+            choices.addView(b, lp);
+            choiceButtons.add(b);
+        }
+        addFullWidth(card, choices, 8);
 
-        EditText pass = field(context, pal, "Parent's password");
-        pass.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        pass.setTypeface(Typeface.DEFAULT);
-        pass.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        pass.setPadding(dp(context, 14), dp(context, 13), dp(context, 64), dp(context, 13));
-        FrameLayout passWrap = new FrameLayout(context);
-        passWrap.addView(pass, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
-        TextView showHide = smallToggle(context, pal, "Show");
-        FrameLayout.LayoutParams toggleLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.END | Gravity.CENTER_VERTICAL);
-        toggleLp.rightMargin = dp(context, 6);
-        passWrap.addView(showHide, toggleLp);
-        showHide.setOnClickListener(v -> {
-            boolean hidden = pass.getInputType()
-                    == (InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-            pass.setInputType(InputType.TYPE_CLASS_TEXT | (hidden
-                    ? InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD : InputType.TYPE_TEXT_VARIATION_PASSWORD));
-            // Changing the input type switches Android to a typewriter font; keep the screen's own.
-            pass.setTypeface(Typeface.DEFAULT);
-            showHide.setText(hidden ? "Hide" : "Show");
-            pass.setSelection(pass.getText().length());
-        });
-        addFullWidth(card, passWrap, 10);
+        EditText why = field(context, pal, "Why? (optional)");
+        why.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        why.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        addFullWidth(card, why, 10);
 
         TextView error = text(context, "", 13, pal.error);
         error.setGravity(Gravity.START);
         error.setPadding(dp(context, 2), dp(context, 8), dp(context, 2), 0);
         hideWhenEmpty(error);
+        TextView waiting = text(context, "", 13, pal.textSecondary);
+        waiting.setGravity(Gravity.START);
+        waiting.setPadding(dp(context, 2), dp(context, 8), dp(context, 2), 0);
+        hideWhenEmpty(waiting);
 
         Handler main = new Handler(Looper.getMainLooper());
-        Button unlock = primaryButton(context, pal, "Unlock");
-        unlock.setOnClickListener(v -> {
-            unlock.setEnabled(false);
-            unlock.setText("Checking…");
-            error.setText("");
-            String u = user.getText().toString().trim();
-            String p = pass.getText().toString();
+        Button ask = primaryButton(context, pal, "Ask my parents");
+        // While a request waits, ask the hub how it stands; stops once the sheet is gone.
+        Runnable[] poll = new Runnable[1];
+        poll[0] = () -> {
+            if (!card.isAttachedToWindow()) return;
             new Thread(() -> {
-                String problem = GuardApi.parentUnlock(context, u, p);
+                UnlockAnswer answer = GuardApi.checkUnlockRequest(context);
                 main.post(() -> {
-                    unlock.setEnabled(true);
-                    unlock.setText("Unlock");
-                    pass.setText("");
-                    if (problem == null) {
+                    if (!card.isAttachedToWindow()) return;
+                    if (answer == null || UnlockAnswer.PENDING.equals(answer.status)) {
+                        main.postDelayed(poll[0], 4000);
+                        return;
+                    }
+                    ask.setEnabled(true);
+                    ask.setText("Ask my parents");
+                    if (UnlockAnswer.APPROVED.equals(answer.status) && GuardApi.isUnlocked(context)) {
                         sheet.hide();
                         host.onUnlocked();
+                    } else if (UnlockAnswer.APPROVED.equals(answer.status)) {
+                        waiting.setText("");
+                        error.setText("A parent said yes, but the time they gave has already run out. Ask again.");
                     } else {
-                        error.setText(problem);
+                        waiting.setText("");
+                        error.setText(UnlockAnswer.describe(answer.status, answer.decidedBy));
                     }
                 });
             }).start();
+        };
+        ask.setOnClickListener(v -> {
+            ask.setEnabled(false);
+            ask.setText("Asking…");
+            error.setText("");
+            String note = why.getText().toString().trim();
+            int minutes = chosen[0];
+            new Thread(() -> {
+                String problem = GuardApi.askParentToUnlock(context, minutes, note);
+                main.post(() -> {
+                    if (problem != null) {
+                        ask.setEnabled(true);
+                        ask.setText("Ask my parents");
+                        error.setText(problem);
+                        return;
+                    }
+                    ask.setText("Waiting for a parent…");
+                    waiting.setText(UnlockAnswer.describe(UnlockAnswer.PENDING, null));
+                    main.postDelayed(poll[0], 3000);
+                });
+            }).start();
         });
-        pass.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_DONE) {
-                unlock.performClick();
-                return true;
-            }
-            return false;
-        });
+        card.addView(waiting);
         card.addView(error);
-        addFullWidth(card, unlock, 12);
+        addFullWidth(card, ask, 12);
+        TextView told = text(context, "Both parents get it on their phones. A request waits ten minutes.", 12, pal.textSecondary);
+        told.setGravity(Gravity.START);
+        told.setPadding(dp(context, 2), dp(context, 8), dp(context, 2), 0);
+        card.addView(told);
 
-        // No connection: a parent's offline code works instead of their login.
+        // No connection: a parent's offline code, which they see in the Jarvis app.
         card.addView(divider(context, pal, "NO CONNECTION?", 16));
         LinearLayout codeRow = new LinearLayout(context);
         codeRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1322,19 +1350,6 @@ final class GuardScreenView {
             button.setTextColor(pal.textSecondary);
             button.setTypeface(Typeface.DEFAULT);
         }
-    }
-
-    private static TextView smallToggle(Context context, Palette pal, String label) {
-        TextView toggle = new TextView(context);
-        toggle.setText(label);
-        toggle.setTextSize(13);
-        toggle.setTypeface(Typeface.DEFAULT_BOLD);
-        toggle.setTextColor(pal.brand);
-        toggle.setGravity(Gravity.CENTER);
-        toggle.setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8));
-        toggle.setClickable(true);
-        toggle.setFocusable(true);
-        return toggle;
     }
 
     private static TextView title(Context context, Palette pal, String value) {

@@ -41,18 +41,53 @@ internal static class Program
         // (see install.ps1) so it needs no service-control plumbing in .NET itself.
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-        var config = Config.Load();
-        if (config is null)
+        var loaded = Config.Load();
+        if (loaded.Config is null)
         {
-            Console.Error.WriteLine($"No Jarvis Guard configuration at {Config.ConfigPath}. Run install.ps1 as an administrator.");
-            return 2;
+            // Only a missing file is "not set up"; access denied or a damaged
+            // file is its own error. Either way the reason goes to the console,
+            // the log and the state file the tray and the lock surface read.
+            var error = loaded.Error ?? $"No usable configuration at {Config.ConfigPath}.";
+            Console.Error.WriteLine(error);
+            GuardService.Log($"not starting: {error}");
+            PublishConfigError(error);
+            return loaded.Missing ? 2 : 3;
         }
+        var config = loaded.Config;
 
         Console.WriteLine($"Jarvis Guard agent {config.Version} starting for '{config.Username}' (hub {config.HubUrl}).");
         Directory.CreateDirectory(Config.Root);
 
         var service = new GuardService(config);
-        await service.RunAsync();
+        try
+        {
+            await service.RunAsync();
+        }
+        catch (Exception ex)
+        {
+            // A failure to start guarding (for example another program holding
+            // the pipe) ends the process loudly; the scheduled task restarts it.
+            GuardService.Log($"stopped: {ex}");
+            Console.Error.WriteLine($"Jarvis Guard stopped: {ex.Message}");
+            return 4;
+        }
         return 0;
+    }
+
+    private static void PublishConfigError(string error)
+    {
+        try
+        {
+            Config.WriteState(new GuardState
+            {
+                Source = "config-error",
+                Problem = $"Jarvis Guard is not guarding this PC: {error}",
+                AsOfUtc = DateTime.UtcNow.ToString("O"),
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Could not publish the error to {Config.StatePath}: {ex.Message}");
+        }
     }
 }
