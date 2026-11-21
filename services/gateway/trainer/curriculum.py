@@ -34,6 +34,7 @@ BUCKETS = (
     "protocol",
     "tools",
     "knowledge",
+    "teacher",
 )
 
 DEFAULT_SYSTEM = (
@@ -405,17 +406,26 @@ def derive_curriculum(
     *,
     buckets: list[str] | tuple[str, ...] | None = None,
     limit: int | None = None,
+    include_teacher: bool = True,
 ) -> list[Case]:
     """Every case the trainer can run, filtered and capped.
 
     Order is deliberate: the household's own work first (so a short run always
     covers sermons, repairs and image edits), then the Workspace recipes, then
-    the tool and service questions.
+    the tasks strong teacher models solved on this repository (imported traces,
+    see :mod:`services.gateway.trainer.teacher`), then the tool and service
+    questions.
     """
     catalog = cat if cat is not None else catalog_mod.build_catalog()
+    teacher: list[Case] = []
+    if include_teacher and (not buckets or "teacher" in buckets):
+        from services.gateway.trainer import teacher as teacher_mod
+
+        teacher = teacher_mod.teacher_cases()
     cases = [
         *_seed_cases(),
         *workspace_cases(catalog),
+        *teacher,
         *tool_cases(catalog),
         *service_cases(catalog),
     ]

@@ -20,6 +20,11 @@ workspaces and UI improvements. The pieces are deliberately small:
 * :mod:`dream`        -- RAG dreaming plus the improvement proposals it implies.
 * :mod:`facilitator`  -- the cycle that ties dreaming, evaluation, lessons and
                          the improvement backlog together.
+* :mod:`teacher`      -- traces of strong cloud models' work on this repository:
+                         stored, turned into worked-example lessons, ``teacher``
+                         eval cases and fine-tuning rows (``teacher_traces``
+                         normalises them, ``teacher_scrub`` removes secrets,
+                         ``teacher_routing`` says which work may go to a teacher).
 * :mod:`routes`       -- ``/api/trainer`` for the Lab's Training tab.
 """
 
@@ -34,4 +39,8 @@ __all__ = [
     "runner",
     "selffix",
     "sermon",
+    "teacher",
+    "teacher_routing",
+    "teacher_scrub",
+    "teacher_traces",
 ]
