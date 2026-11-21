@@ -3377,8 +3377,13 @@ def _take_for(query: str) -> dict | None:
         return None
 
 
-async def _store_take(state: dict, take: dict, satellite: str) -> tuple[int, str]:
-    """Hand a take to Identity; (HTTP status, detail). 0 means Identity was unreachable."""
+async def _store_take(state: dict, take: dict, satellite: str) -> tuple[int, str, str]:
+    """Hand a take to Identity; (HTTP status, detail, outcome).
+
+    Status 0 means Identity was unreachable. ``outcome`` is Identity's
+    ``status``: ``STORED`` (it matched the person's existing profile) or
+    ``PENDING`` (no profile yet: held until the person approves it in the app).
+    """
     try:
         resp = await get_http_client().post(
             f"{IDENTITY_SVC}/api/voice/enroll",
@@ -3394,11 +3399,46 @@ async def _store_take(state: dict, take: dict, satellite: str) -> tuple[int, str
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
         body = await resp.json(content_type=None)
-        detail = body.get("detail") if isinstance(body, dict) else None
-        return resp.status, str(detail or "")
+        body = body if isinstance(body, dict) else {}
+        return resp.status, str(body.get("detail") or ""), str(body.get("status") or "")
     except Exception as e:
         log.warning(f"[VoiceTeaching] identity could not store the take: {type(e).__name__}: {e}")
-        return 0, str(e)
+        return 0, str(e), ""
+
+
+VOICE_APPROVAL_URL = "/identity"
+
+
+async def _ask_to_approve(state: dict, satellite: str) -> bool:
+    """Ask the satellite's owner, in their own app, to approve takes held for them.
+
+    True when the notice was taken. The takes stay held either way, and the
+    Vocal Signature panel lists them, so a lost notice loses nothing.
+    """
+    payload = _notify.notice(
+        state["username"], "home", "Approve your voice recordings?",
+        f"Someone taught Jarvis {state['got']} sentence{'s' if state['got'] != 1 else ''} as your voice at "
+        f"{satellite}. Approve only if it was you.",
+        url=VOICE_APPROVAL_URL,
+        tag=f"voice-pending:{state['session']}",
+        actions=[
+            _notify.callback_action("It was me", "voice_pending_decide", {"id": state["session"], "approve": True}),
+            _notify.callback_action("Not me", "voice_pending_decide", {"id": state["session"], "approve": False}),
+        ],
+    )
+    sent = await _notify.send(payload)
+    if not sent:
+        log.warning(f"[VoiceTeaching] approval notice to {state['username']} was not delivered")
+    return sent
+
+
+async def _ended_with_pending(state: dict, satellite: str) -> str:
+    """What to say when a session ends with takes awaiting the owner's approval."""
+    if await _ask_to_approve(state, satellite):
+        return (" Before I use them, please approve them in your Jarvis app: I've sent you a notice. "
+                "Until then I won't recognise you by voice.")
+    return (" Before I use them, please approve them in your Jarvis app under Identity, Vocal Signature. "
+            "I couldn't send you a notice just now. Until then I won't recognise you by voice.")
 
 
 def _say_this(index: int, lead: str) -> str:
@@ -3452,6 +3492,8 @@ async def _voice_teaching_reply(query: str, creds: ResolvedCredentials, satellit
     name = state.get("name") or state["username"]
     if _wants_voice_learning_stop(query):
         await asyncio.to_thread(_end_teaching, satellite)
+        if state["got"] and state.get("pending"):
+            return "Okay, I've stopped learning your voice." + await _ended_with_pending(state, satellite)
         kept = " The sentences you already said are kept." if state["got"] else ""
         return f"Okay, I've stopped learning your voice.{kept}"
     if _wants_voice_learning(query):
@@ -3463,17 +3505,23 @@ async def _voice_teaching_reply(query: str, creds: ResolvedCredentials, satellit
         status, detail = 0, "no take"
         retry_lead = "I didn't catch enough of your voice that time."
     else:
-        status, detail = await _store_take(state, take, satellite)
+        status, detail, outcome = await _store_take(state, take, satellite)
         retry_lead = (
             "That didn't sound like your earlier sentences. If someone else spoke, please try again yourself."
+            if status == 422 and state["got"] else
+            f"That didn't sound like the voice I already know for {name}. Only {name} can teach their voice here."
             if status == 422 else "I couldn't save that one."
         )
+        if status == 200 and outcome == "PENDING":
+            state["pending"] = True
     if status == 200:
         state["got"] += 1
         state["misses"] = 0
         log.info(f"[VoiceTeaching] {state['username']}: take {state['got']} of {voice_enroll.TAKES} at {satellite}")
         if state["got"] >= voice_enroll.TAKES:
             await asyncio.to_thread(_end_teaching, satellite)
+            if state.get("pending"):
+                return f"Thank you, {name}. I've recorded your sentences." + await _ended_with_pending(state, satellite)
             return (
                 f"Thank you, {name}. I've learned your voice from this satellite. "
                 "From now on, try asking me 'who am I' to check."
@@ -3485,6 +3533,11 @@ async def _voice_teaching_reply(query: str, creds: ResolvedCredentials, satellit
     log.info(f"[VoiceTeaching] {state['username']}: take not stored at {satellite} ({status} {detail})")
     if state["misses"] >= voice_enroll.MAX_MISSES:
         await asyncio.to_thread(_end_teaching, satellite)
+        if state["got"] and state.get("pending"):
+            return (
+                "I couldn't hear your voice clearly enough, so let's stop for now."
+                + await _ended_with_pending(state, satellite)
+            )
         kept = f" The {state['got']} I did hear are kept." if state["got"] else ""
         return (
             "I couldn't hear your voice clearly enough, so let's stop for now." + kept

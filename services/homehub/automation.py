@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import heapq
 import itertools
 import logging
@@ -51,6 +52,17 @@ from services.homehub.core import (
 )
 
 log = logging.getLogger("homehub.automation")
+
+
+class DeviceActionMissing(ServiceNotFound):
+    """A step calls a device's own action (``drivers.DEVICE_ACTIONS``) while no connected device offers it."""
+
+
+#: The item whose run is executing, so a failing step can name it in its repair notice.
+_current_item: contextvars.ContextVar[Any] = contextvars.ContextVar("homehub_automation_item", default=None)
+
+#: Repair notices for a device action a run could not reach: ``persistent_notification.<prefix><item>``.
+DEVICE_REPAIR_PREFIX = "homehub_device_action_"
 
 MAX_SLEEP = 30.0
 MODES = ("single", "restart", "queued", "parallel")
@@ -454,8 +466,8 @@ class Item:
     calls_scripts: set[str] = field(default_factory=set)
     #: Services its actions name literally (templates are only known at run time), as ``domain.service``.
     calls_services: set[str] = field(default_factory=set)
-    #: Set while it calls a device's own action that no connected device offers: its runs are skipped
-    #: quietly until the device comes back (not an error, and not unsupported: nothing is wrong with it).
+    #: Set while it names a device's own action that no connected device offers. Informational only:
+    #: its runs still start, and a run that reaches that step fails there visibly (``_call_service``).
     waiting_reason: str | None = None
 
     @property
@@ -962,12 +974,13 @@ class AutomationEngine:
             except Exception:
                 log.exception("trigger of %s could not attach", item.entity_id)
 
-    # -- waiting for a device's own action ---------------------------------------------
+    # -- a device's own action that is away --------------------------------------------
     def _missing_device_actions(self, item: Item) -> list[str]:
-        """The device actions ``item`` calls that no connected device offers right now.
+        """The device actions ``item`` names that no connected device offers right now.
 
-        Only names a driver declares as a device's own (``Hub.is_device_action``): any other missing service
-        is a typo or something the hub does not have, and still fails the run where everyone can see it.
+        Only names a driver declares as a device's own (``Hub.is_device_action``). This is shown in the
+        item's status; it never stops a run: the step is checked when a run reaches it, so a call in a
+        branch that is not taken costs nothing, and one that is taken fails visibly.
         """
         is_device_action = getattr(self.hub, "is_device_action", None)
         if is_device_action is None:
@@ -980,19 +993,44 @@ class AutomationEngine:
         return missing
 
     def _refresh_waiting(self, item: Item, *, publish: bool = True) -> bool:
-        """Re-check whether ``item`` waits for a device; logs and publishes only a change. True while waiting."""
+        """Re-check which device actions ``item`` names that are away; logs and publishes only a change.
+
+        True while one is away. Runs are never skipped for it.
+        """
         missing = self._missing_device_actions(item) if item.runnable else []
-        reason = (f"needs {', '.join(missing)}, which no connected device offers" if missing else None)
+        reason = (f"needs {', '.join(missing)}, which no connected device offers: a run that reaches it "
+                  "fails at that step" if missing else None)
         if reason != item.waiting_reason:
             if reason:
-                log.info("%s waits for its device: %s; its runs are skipped until the device connects",
-                         item.entity_id, reason)
+                log.info("%s: %s", item.entity_id, reason)
             else:
-                log.info("%s: its device's actions are offered again; runs resume", item.entity_id)
+                log.info("%s: its device's actions are offered again", item.entity_id)
+                self._clear_device_repair(item)
             item.waiting_reason = reason
             if publish:
                 self._publish(item)
         return reason is not None
+
+    def _device_repair_id(self, item: Item) -> str:
+        return "persistent_notification." + DEVICE_REPAIR_PREFIX + re.sub(r"[^a-z0-9_]+", "_",
+                                                                           f"{item.kind}_{item.id}".lower())
+
+    def _raise_device_repair(self, item: Item | None, action: str) -> None:
+        """A repair notice that stays until the device's action is offered again."""
+        if item is None:
+            return
+        name = self._friendly(item.entity_id, item.alias)
+        self.hub.states.set(self._device_repair_id(item), "notifying", {
+            "title": f"{name} could not reach a device",
+            "message": (f"A run of {item.entity_id} stopped at {action}: no connected device offers it. "
+                        "Connect the device, or change the step."),
+            "entity_id": item.entity_id,
+            "action": action,
+        })
+
+    def _clear_device_repair(self, item: Item) -> None:
+        if self.hub.states.get(self._device_repair_id(item)) is not None:
+            self.hub.states.remove(self._device_repair_id(item))
 
     def _watch_services(self) -> None:
         """Follow devices' actions coming and going, so a waiting item resumes (or waits again) on its own."""
@@ -1028,8 +1066,6 @@ class AutomationEngine:
     async def _handle_trigger(self, item: Item, trig_vars: dict[str, Any], *, skip_condition: bool = False,
                               extra: dict[str, Any] | None = None) -> asyncio.Task | None:
         """Check the conditions and start a run; returns the run, or None when none started."""
-        if self._refresh_waiting(item):
-            return None  # its device is away: skipped quietly, said once when it started waiting
         variables: dict[str, Any] = {"this": templating.wrap_state(self.hub, self.hub.states.get(item.entity_id)),
                                      "trigger": trig_vars}
         variables.update(self._render_variables(item.trigger_variables, variables))
@@ -1058,8 +1094,6 @@ class AutomationEngine:
             log.log(level, "%s: " + message, item.entity_id, *args)
 
     async def _start_run(self, item: Item, variables: dict[str, Any]) -> asyncio.Task | None:
-        if self._refresh_waiting(item):
-            return None
         if item.mode == "restart":
             async with item.start_lock:
                 await self._stop_for_restart(item)
@@ -1117,6 +1151,13 @@ class AutomationEngine:
         return await self._execute_inner(item, variables)
 
     async def _execute_inner(self, item: Item, variables: dict[str, Any]) -> Any:
+        token = _current_item.set(item)
+        try:
+            return await self._execute_steps(item, variables)
+        finally:
+            _current_item.reset(token)
+
+    async def _execute_steps(self, item: Item, variables: dict[str, Any]) -> Any:
         try:
             await self.run_sequence(item.actions, variables)
         except _StopScript as stop:
@@ -1170,7 +1211,10 @@ class AutomationEngine:
                 raise
             except Exception as exc:
                 if step.get("continue_on_error"):
-                    log.info("continuing past a failed step: %s", exc)
+                    if self.tracer is not None:
+                        self.tracer.step_error(str(exc) or type(exc).__name__)
+                    log.log(logging.WARNING if isinstance(exc, DeviceActionMissing) else logging.INFO,
+                            "continuing past a failed step: %s", exc)
                     continue
                 raise
 
@@ -1238,6 +1282,12 @@ class AutomationEngine:
         if "." not in action:
             raise ServiceNotFound(f"invalid service {action!r}")
         domain, service = action.split(".", 1)
+        is_device_action = getattr(self.hub, "is_device_action", None)
+        if ((domain, service) not in self.hub.services and is_device_action is not None
+                and is_device_action(domain, service)):
+            item = _current_item.get()
+            self._raise_device_repair(item, action)
+            raise DeviceActionMissing(f"{action} is not offered: its device is not connected")
         data = dict(self.render(step.get("data") or {}, v) or {})
         data.update(self.render(step.get("data_template") or {}, v) or {})
         target = self.render(step.get("target") or {}, v) or {}

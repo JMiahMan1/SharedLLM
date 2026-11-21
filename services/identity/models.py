@@ -742,6 +742,24 @@ class VoiceSignature(SQLModel, table=True):  # type: ignore
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class VoicePendingEnrolment(SQLModel, table=True):  # type: ignore
+    """Voice takes taught at a satellite for someone with no voice profile yet.
+
+    Nothing proves who spoke at a satellite, so these takes are held here,
+    apart from ``VoiceSignature``, until the person approves them from their
+    own signed-in app (``POST /api/users/me/voice/pending/{session}``). One
+    row per teaching session. A new table, made by ``create_all``.
+    """
+    __table_args__ = {"extend_existing": True}
+    session: str = Field(primary_key=True)
+    username: str = Field(index=True)
+    satellite: str | None = None
+    model: str
+    samples: str = "[]"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class UserAvatarImage(SQLModel, table=True):  # type: ignore
     """A user's uploaded profile picture, kept in the identity database."""
     __table_args__ = {"extend_existing": True}

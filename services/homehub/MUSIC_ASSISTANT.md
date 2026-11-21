@@ -88,12 +88,12 @@ Read-only inspection of the copy (secrets not printed):
    to connect to and fails to load.
 2. **`providers["hass_players--abcd1234"]`** (domain `hass_players`) exposes 7 HA entities as MA players and
    depends on the plugin above:
-   for example `media_player.attic_tv`, `media_player.den_tv_cast`, `media_player.guest_room_tv`,
-   `media_player.upstairs_roku`, `media_player.study_speaker`, `media_player.attic_tv_dlna`,
-   `media_player.den_speaker`.
-   Six of them have a native MA player already (Chromecast ids, a DLNA `uuid:...` for the attic TV,
+   for example `media_player.example_tv`, `media_player.example_tv_cast`, `media_player.second_tv`,
+   `media_player.example_roku`, `media_player.example_cast_speaker`, `media_player.example_tv_dlna`,
+   `media_player.example_speaker`.
+   Six of them have a native MA player already (Chromecast ids, a DLNA `uuid:...` for a TV,
    a `ROKU_...` id from the Roku Media Assistant provider, the `up...` universal players).
-   **`media_player.den_speaker` (an ESPHome voice speaker) has no other route.**
+   **`media_player.example_speaker` (an ESPHome voice speaker) has no other route.**
 3. **`core.players.values.announce_tts_engine = "hass--abcd5678/tts.google_en_com"`**: HA's Google TTS,
    used only when MA itself speaks text. Jarvis sends announcement URLs, so nothing breaks, but MA logs an
    error if the engine is ever used. Clear it or pick another engine (Settings > Core > Players).
@@ -156,5 +156,5 @@ curl -s http://192.0.2.205:8095/info          # server_version 2.10.9, homeassis
 docker logs music-assistant 2>&1 | grep -iE "error|hass|webserver" | head
 ```
 
-In homehub: `media_player.den_speaker` and the other MA entities leave `unavailable`, and
+In homehub: `media_player.example_speaker` and the other MA entities leave `unavailable`, and
 `music_assistant.search` with `{"name": "test", "limit": 1}` returns results.

@@ -24,8 +24,8 @@ export interface AutomationItem {
   runnable: boolean;
   unsupported_reason: string | null;
   /**
-   * Set while it calls a device's own action (an ESPHome node's, a phone's) that no connected device offers:
-   * the hub skips its runs quietly until the device comes back. Not an error, and nothing to fix.
+   * Set while it names a device's own action (an ESPHome node's, a phone's) that no connected device offers.
+   * For information: runs still start, and one that reaches that step fails there with an error.
    */
   waiting_reason?: string | null;
   warnings: string[];

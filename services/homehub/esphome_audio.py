@@ -263,18 +263,24 @@ class FFmpegProxy:
         self._slots = None
 
     # -- ffmpeg -------------------------------------------------------------------------
-    @contextlib.asynccontextmanager
-    async def _slot(self) -> AsyncIterator[None]:
+    async def _acquire_slot(self) -> asyncio.Semaphore:
+        """Take one of ``max_procs`` places; returns the semaphore to release (synchronously) when done."""
         if self._slots is None:
             self._slots = asyncio.Semaphore(self.max_procs)
+        slots = self._slots
         try:
-            await asyncio.wait_for(self._slots.acquire(), SLOT_WAIT_S)
+            await asyncio.wait_for(slots.acquire(), SLOT_WAIT_S)
         except TimeoutError as exc:
             raise ProxyError(503, f"too many audio conversions at once ({self.max_procs})") from exc
+        return slots
+
+    @contextlib.asynccontextmanager
+    async def _slot(self) -> AsyncIterator[None]:
+        slots = await self._acquire_slot()
         try:
             yield
         finally:
-            self._slots.release()
+            slots.release()
 
     async def _spawn(self, args: list[str], *, stdin: Any) -> Any:
         try:
@@ -323,18 +329,20 @@ class FFmpegProxy:
             with contextlib.suppress(OSError):
                 os.unlink(path)
 
-    async def open_stream(self, conv: Conversion) -> AsyncIterator[bytes]:
+    async def open_stream(self, conv: Conversion) -> AudioStream:
         """Start converting ``conv``'s URL; returns the converted bytes as they come.
 
         The first chunk is read before returning, so a source that cannot be read is an error status,
-        not an empty 200. Fetching the same token again stops this conversion (as HA does).
+        not an empty 200. Fetching the same token again stops this conversion (as HA does). The stream
+        holds a conversion place and an ffmpeg process from here on: serve it with :func:`stream_response`,
+        which closes it whatever happens to the request, even one cancelled before its first chunk.
         """
         if conv.source_url is None:
             raise ProxyError(404, "Not found")
         _kill(conv.proc)
-        slot = self._slot()
-        await slot.__aenter__()
+        slots = await self._acquire_slot()
         proc = None
+        drain = None
         try:
             proc = await self._spawn(
                 ["-protocol_whitelist", "http,https,tcp,tls,crypto", "-i", conv.source_url, *conv.fmt.ffmpeg_output_args(),
@@ -351,33 +359,109 @@ class FFmpegProxy:
                             b"".join(errors).decode(errors="replace").strip()[-300:])
                 raise ProxyError(502, "the source audio could not be read")
         except BaseException:
-            if proc is not None:
-                _kill(proc)
-                self._running.discard(proc)
-                if conv.proc is proc:
-                    conv.proc = None
-            await slot.__aexit__(None, None, None)
+            AudioStream(self, conv, proc, slots, drain, b"").close_now()
             raise
+        return AudioStream(self, conv, proc, slots, drain, first)
 
-        async def body() -> AsyncIterator[bytes]:
+
+class AudioStream:
+    """One running conversion's output, as an async iterator, that always gives back what it holds.
+
+    Its ffmpeg process and conversion place are released exactly once, by whichever comes first: the end of
+    the output, ``aclose()`` (a response body closed), an error or cancellation while reading, or
+    :func:`stream_response` finishing the request in any way. The release is synchronous, so a cancelled
+    task cannot interrupt it halfway.
+    """
+
+    def __init__(self, proxy: FFmpegProxy, conv: Conversion, proc: Any, slots: asyncio.Semaphore,
+                 drain: asyncio.Future | None, first: bytes) -> None:
+        self._proxy = proxy
+        self._conv = conv
+        self._proc = proc
+        self._slots = slots
+        self._drain = drain
+        self._first: bytes | None = first or None
+        self._reaping: asyncio.Task | None = None
+        self.closed = False
+
+    def __aiter__(self) -> AudioStream:
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self.closed:
+            raise StopAsyncIteration
+        if self._first is not None:
+            chunk, self._first = self._first, None
+            return chunk
+        try:
+            chunk = await self._proc.stdout.read(CHUNK)
+        except BaseException:
+            self.close_now()
+            raise
+        if not chunk:
+            self.close_now()
+            raise StopAsyncIteration
+        return chunk
+
+    async def aclose(self) -> None:
+        """Close, then wait (briefly) for ffmpeg to exit."""
+        self.close_now()
+        if self._reaping is not None:
+            await asyncio.shield(self._reaping)
+
+    def close_now(self) -> None:
+        """Kill ffmpeg, stop reading its errors and give the place back; once, and without awaiting."""
+        if self.closed:
+            return
+        self.closed = True
+        proc = self._proc
+        if proc is not None:
+            _kill(proc)
+            self._proxy._running.discard(proc)
+            if self._conv.proc is proc:
+                self._conv.proc = None
+            self._reaping = _reap(proc)
+        if self._drain is not None:
+            self._drain.cancel()
+        self._slots.release()
+
+
+def stream_response(stream: AudioStream, media_type: str, headers: dict[str, str]) -> Any:
+    """A streaming response that closes ``stream`` when the request ends, however it ends."""
+    from starlette.responses import StreamingResponse
+
+    class _Closing(StreamingResponse):
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
             try:
-                yield first
-                while True:
-                    chunk = await proc.stdout.read(CHUNK)
-                    if not chunk:
-                        break
-                    yield chunk
+                await super().__call__(scope, receive, send)
             finally:
-                _kill(proc)
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(proc.wait(), 2.0)
-                drain.cancel()
-                self._running.discard(proc)
-                if conv.proc is proc:
-                    conv.proc = None
-                await slot.__aexit__(None, None, None)
+                stream.close_now()
 
-        return body()
+    return _Closing(stream, media_type=media_type, headers=headers)
+
+
+#: Exit waits for killed ffmpeg processes, so they are reaped rather than left as zombies.
+_REAPING: set[asyncio.Task] = set()
+
+
+def _reap(proc: Any) -> asyncio.Task | None:
+    """Wait for a killed process in the background; the task, or None when there is nothing to wait for."""
+    if proc.returncode is not None:
+        return None
+    try:
+        task = asyncio.get_running_loop().create_task(_wait_exit(proc))
+    except RuntimeError:  # no running loop: the hub is shutting down and takes the process with it
+        return None
+    _REAPING.add(task)
+    task.add_done_callback(_REAPING.discard)
+    return task
+
+
+async def _wait_exit(proc: Any) -> None:
+    try:
+        await asyncio.wait_for(proc.wait(), 2.0)
+    except TimeoutError:
+        log.warning("ffmpeg (pid %s) did not exit within 2 s of being killed", getattr(proc, "pid", "?"))
 
 
 async def _drain(stream: Any, into: list[bytes]) -> None:

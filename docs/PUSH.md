@@ -315,6 +315,12 @@ both parents get it, tagged `guard-unlock:<child>`, and the answer replaces it
 on every parent's phone. Identity refuses a device key and anyone who is not
 the child's parent. A different length is chosen on the child's page in the app.
 
+`voice_pending_decide` answers the notice a satellite's owner gets when
+sentences were taught there as their voice before they had a voice profile
+(docs/VOICE_RECOGNITION.md): `{"id", "approve"}`. "It was me" posts and "Not
+me" deletes `/api/users/me/voice/pending/{id}` on identity as the caller, so
+only the person they were taught for can approve them.
+
 `raven_approve` and `raven_reject` follow Execute and Delete in Raven Ops:
 admins only, whatever the mission type (a mission's owner is not enough), and
 only while the mission is `pending`. Approve also refuses (409) a mission

@@ -74,10 +74,9 @@ Not every registered device is an Android phone:
 
 A USB factory flash (`esptool write-flash 0x0`) erases the API encryption key Jarvis provisioned, while the `esphome_devices` entry — address plus `noise_psk` — survives. The next connection then sends a Noise key to a device that answers in **plaintext**, and `aioesphomeapi` refuses to downgrade (`EncryptionPlaintextAPIError`, which Jarvis surfaced as "…using a plain text protocol").
 
-Two behaviours exist for it:
+Jarvis never downgrades. Every control-path call (`list`, `call`, `configure_jarvis`, `ota`, alerts) fails with a clear error and the stored key is kept: a plaintext answer at a paired device's address is either a reflashed device or a different device, and Jarvis cannot tell which. Falling back would talk to it unauthenticated, and a later key sync would hand it a freshly minted API key in the clear. `configure_jarvis` also refuses any device with no stored key, before minting one.
 
-- **Automatic:** `esphome_client._open()` recognises *that exact error* on the control path (`list`, `call`, `configure_jarvis`, `ota`), retries **once** without the key, and drops the dead key from `esphome_devices` (matched by host, so the entry is not duplicated). The next *Sync Jarvis key & URL* or **Add device** provisions a fresh key. The downgrade is deliberately limited to this path — plaintext sessions are unauthenticated, so it must not happen silently anywhere else.
-- **Manual:** **Remove from Jarvis** (`forget`), which needs no connection at all — the usual reason to use it is a device that is asleep or unreachable. Re-add it to pair from scratch.
+The way out is **Remove from Jarvis** (`forget`, admin only), which needs no connection at all (the usual reason to use it is a device that is asleep or unreachable), then **Add device** to pair it from scratch with a new key.
 
 An OTA update keeps the key, so it never hits this; only a USB flash does.
 

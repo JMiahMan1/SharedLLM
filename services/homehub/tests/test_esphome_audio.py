@@ -428,3 +428,51 @@ def test_execution_can_ask_the_hub_for_a_proxy_url():
     assert direct.json() == {"url": body["url"], "proxied": False}
     bad = client.post("/hub/esphome/audio_url", json={**body, "device": "../x"}, headers={"X-Internal-Secret": "s"})
     assert bad.status_code == 400
+
+
+@needs_ffmpeg
+async def test_a_stream_never_read_still_gives_back_its_ffmpeg_and_its_place(source, monkeypatch):
+    """open_stream holds a place and an ffmpeg before the body is iterated: closing before the first chunk,
+    or a request cancelled before its response sends anything, must release both."""
+    _Source.endless = True
+    proxy = esphome_audio.PROXY
+    monkeypatch.setattr(proxy, "max_procs", 1)
+    monkeypatch.setattr(esphome_audio, "SLOT_WAIT_S", 0.2)
+    proxy._slots = None
+    fmt = AudioFormat("flac", 48000, 1, 2)
+
+    def new_conv():
+        return proxy.lookup("entry1", proxy.create("entry1", source, fmt, HUB).rsplit("/", 1)[1])
+
+    # Closed before anyone read it.
+    conv = new_conv()
+    stream = await proxy.open_stream(conv)
+    proc = conv.proc
+    await stream.aclose()
+    assert proc.returncode is not None and proxy.running() == 0 and conv.proc is None
+    await stream.aclose()  # twice is harmless: the place is given back once
+
+    # The response is cancelled before it sends a byte (the node hung up as the request started).
+    conv = new_conv()
+    stream = await proxy.open_stream(conv)
+    proc = conv.proc
+    response = esphome_audio.stream_response(stream, fmt.content_type, {})
+
+    async def send(_message):
+        raise asyncio.CancelledError
+
+    async def receive():
+        await asyncio.sleep(3600)
+        return {"type": "http.disconnect"}
+
+    with pytest.raises(asyncio.CancelledError):
+        await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+    assert stream.closed and proxy.running() == 0 and conv.proc is None
+    await asyncio.wait_for(proc.wait(), 5)
+
+    # The one place is free again: a new stream starts instead of a 503.
+    conv = new_conv()
+    stream = await proxy.open_stream(conv)
+    assert proxy.running() == 1
+    await stream.aclose()
+    assert proxy.running() == 0
