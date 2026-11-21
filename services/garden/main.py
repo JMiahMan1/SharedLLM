@@ -97,7 +97,9 @@ from services.garden.achievements import evaluate as evaluate_achievements
 from services.garden import homehub_hardware as hardware
 from services.garden import hub_rooms as rooms_hub
 from services.garden import preservation as pantry
-from services.garden import household
+from services.common import household_tz
+from services.garden import clock, household, weather_care
+from services.garden.models import MAX_DAILY_RUNS_LIMIT, MAX_RUN_MINUTES_LIMIT
 from services.garden.notices import collect_due_tasks, build_digest, digest_loop, send_digest_to_member
 from services.garden.skylight_sync import mirror_care_log
 from services.garden.species_lookup import (
@@ -188,6 +190,13 @@ async def lifespan(app: FastAPI):
     added = add_missing_columns(engine, SQLModel.metadata)
     if added:
         log.info("[Garden] added missing column(s): %s", ", ".join(added))
+    migrate_family_size(engine)
+    # The household zone, logged once with its source. Unset is not fatal here:
+    # every route that needs "today" answers 503 with how to set it.
+    await household_tz.startup("garden")
+    # The home latitude (for which months are winter) comes with the forecast.
+    if await weather_care._fetch_forecast() is None:
+        log.warning("[Garden] no forecast at startup: winter slow-down waits for the weather location")
     log.info("[Garden] ready db=%s seed=%s", _database_url(), _seed().path)
     # Start the quiet morning digest loop (disabled under pytest).
     digest_task = asyncio.create_task(digest_loop(_db, _family_list))
@@ -209,6 +218,43 @@ async def lifespan(app: FastAPI):
         valve_task.cancel()
         grow_light_task.cancel()
         auto_valve_task.cancel()
+
+
+def migrate_family_size(engine) -> str | None:
+    """Stop treating a copied roster count as the household's chosen size.
+
+    ``garden_profile.family_size`` used to be filled on the first read with
+    Identity's roster (or a fallback of 7) and then read forever, so the planner
+    kept planting for the family as it was that day. Only an explicit override
+    is stored now (``family_size_override``).
+
+    A profile that was never edited (``updated_at == created_at``) can only have
+    the copied number, so it is dropped. An edited profile may have had its size
+    set on purpose, and nothing recorded which fields an edit touched, so that
+    value is kept as an explicit override and logged: the owner can clear it on
+    the planner page (or ``PUT /profile {"family_size": null}``). Runs once; the
+    legacy column is 0 afterwards. Returns what it did, for the log and tests.
+    """
+    with Session(engine) as session:
+        profile = session.get(GardenProfile, "household")
+        if profile is None or not profile.family_size:
+            return None
+        legacy = int(profile.family_size)
+        if profile.family_size_override is None and profile.updated_at != profile.created_at:
+            profile.family_size_override = legacy
+            outcome = "kept"
+            log.warning(
+                "[Garden] kept the stored family size %s as an explicit override: the profile was "
+                "edited, so it may have been chosen on purpose. Clear it to follow Identity's roster.",
+                legacy,
+            )
+        else:
+            outcome = "dropped"
+            log.info("[Garden] dropped the copied family size %s; the roster comes from Identity now", legacy)
+        profile.family_size = 0
+        session.add(profile)
+        session.commit()
+        return outcome
 
 
 def _resolve_seed_get(key: str) -> dict | None:
@@ -252,6 +298,18 @@ async def require_internal_secret_middleware(request: Request, call_next):
 app.include_router(info_router)
 
 
+@app.exception_handler(household_tz.HouseholdTimeZoneError)
+async def _no_household_zone(_request: Request, exc: household_tz.HouseholdTimeZoneError):
+    """Garden counts by the household's day; without a zone it says so, never UTC."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(household.HouseholdUnavailable)
+async def _household_unavailable(_request: Request, exc: household.HouseholdUnavailable):
+    """No family size and no Identity: say so, never plan for a made-up number."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
 def _user(request: Request) -> str:
     """The acting username, forwarded by the gateway after authentication."""
     user = (request.headers.get("X-User-Id") or "").strip().lower()
@@ -293,6 +351,64 @@ def _require_parent_or_admin(request: Request) -> None:
             status_code=403,
             detail="Parents and admins only: assign plants/locations, toggle Skylight sync, manage garden assignments.",
         )
+
+
+#: Set only by the gateway's Skylight chore routes (``garden_routes``), which
+#: apply the chore chart's eligibility rules before linking a chore to a plant.
+SKYLIGHT_LINK_HEADER = "X-Garden-Skylight-Link"
+
+
+def _require_admin_for_hub_rooms(request: Request) -> None:
+    """403 unless an admin: Home Hub's own area routes are admin-only.
+
+    Garden calls the hub with the stack's internal secret, which the hub treats
+    as an admin. Without this check any adult could add, rename or remove a house
+    room through Garden that the hub itself would refuse them.
+    """
+    if not _is_admin(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin can add, rename or remove a Home Hub room. Ask an admin, "
+            "or use Devices > Rooms & places as an admin.",
+        )
+
+
+#: Where a care log may say it came from when a caller sends it. The service's
+#: own paths stamp ``homehub_valve`` and ``skylight_chore`` themselves; a caller
+#: cannot claim them.
+CARE_SOURCES = frozenset({"manual", "voice", "push_action", "nfc_tag"})
+
+
+def _care_source(source: str | None) -> str:
+    """A caller's ``source``, checked against :data:`CARE_SOURCES` (422 otherwise)."""
+    value = (source or "manual").strip().lower()
+    if value not in CARE_SOURCES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"source must be one of: {', '.join(sorted(CARE_SOURCES))}.",
+        )
+    return value
+
+
+async def _on_behalf_of(request: Request, claimed: str | None) -> str:
+    """Who did it: the signed-in person, or someone a parent or admin names.
+
+    A body may say someone else did the watering or the picking (a parent
+    logging for a child). Only a parent or an admin may, and only for someone
+    in the household roster (Identity); everyone else is recorded as themselves.
+    """
+    user = _user(request)
+    name = (claimed or "").strip().lower()
+    if not name or name == user:
+        return user
+    if _role(request) not in PARENT_ROLES and not _is_admin(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a parent or an admin may log this for someone else.",
+        )
+    if name not in await household.usernames():
+        raise HTTPException(status_code=422, detail=f"{name} is not in the household.")
+    return name
 
 
 def _is_minor_role(role: str) -> bool:
@@ -400,7 +516,8 @@ def _plant_out(
 
 
 def _today_iso() -> str:
-    return datetime.now(UTC).date().isoformat()
+    """The household's date (``clock``), never the UTC one."""
+    return clock.today_iso()
 
 
 def _validate_iso_date(name: str, value: str) -> None:
@@ -579,7 +696,10 @@ async def species_custom(
     body = await request.json()
     from services.garden.species_lookup import handle_species_custom, CustomSpeciesIn
 
-    validated = CustomSpeciesIn(**body)
+    try:
+        validated = CustomSpeciesIn.model_validate(body)
+    except ValueError as exc:  # pydantic's ValidationError is a ValueError
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     return await handle_species_custom(
         session, validated, _user(request), _is_admin(request),
         is_adult=_role(request) in ADULT_ROLES or _is_admin(request),
@@ -621,8 +741,13 @@ async def hooks_weather(request: Request):
 # --------------------------------------------------------------------------- Skylight chore completion
 
 
-def _advance_care_rule(session: Session, plant: Plant, action: str) -> CareRule | None:
+def _advance_care_rule(
+    session: Session, plant: Plant, action: str, *, since: datetime | None = None
+) -> CareRule | None:
     """Push a plant's next due date forward as if that care had just been logged.
+
+    ``since`` is when the care happened (default now): an undone Skylight tick
+    reschedules from the watering before it.
 
     The same arithmetic every care path uses (``compute_interval`` with the
     plant's pot/window/soil, the rule's winter multiplier and the calibration
@@ -644,8 +769,9 @@ def _advance_care_rule(session: Session, plant: Plant, action: str) -> CareRule 
         distance_from_window=plant.distance_from_window,
         season_winter=_is_winter(),
         calibration_factor=rule.calibration_factor or 1.0,
+        action=action,
     )
-    rule.next_due_at = (datetime.now(UTC) + timedelta(days=result.next_due_offset_days)).isoformat()
+    rule.next_due_at = ((since or datetime.now(UTC)) + timedelta(days=result.next_due_offset_days)).isoformat()
     rule.updated_at = utcnow()
     rule.snoozed_until = None  # care happened; any snooze is spent
     session.add(rule)
@@ -656,45 +782,34 @@ def _advance_care_rule(session: Session, plant: Plant, action: str) -> CareRule 
 async def hooks_skylight_chore_completed(request: Request, session: Session = Depends(get_session)):
     """Internal: a linked Skylight chore was ticked off -- log the watering here.
 
-    The gateway calls this the moment Execution reports the chore complete
-    (``POST /api/integrations/skylight/chores/{chore_id}/complete``), so the
-    garden's schedule follows the chore chart. It never mirrors back to
-    Skylight: the chore is already done, and a loop is how two systems keep
-    re-completing each other.
+    Execution calls this whenever it completes a chore in Skylight
+    (``complete_skylight_chore``, the one path every tick-off takes: the app,
+    Jarvis, the chores handler), so the garden's schedule follows the chore
+    chart. It never mirrors back to Skylight: the chore is already done, and a
+    loop is how two systems keep re-completing each other (a completion that
+    Garden itself mirrored is not reported back, see ``origin=garden``).
+
+    Skylight has no push of its own: a chore ticked on the Skylight display or
+    in Skylight's app reaches Garden only when it next goes through Execution.
 
     ``chore_id`` may be a dated instance (``52409380-2026-11-20``) or the series
     id; the plant stores the series id, so both are matched. Idempotent per
-    plant per UTC day -- phones retry, and the same completion can be reported
-    twice.
+    plant per household day -- phones retry, and the same completion can be
+    reported twice.
     """
-    secret = request.headers.get("X-Internal-Secret")
-    if not _verify_internal_secret(secret):
-        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
-    try:
-        body = await request.json()
-    except ValueError:
-        body = {}
-    chore_id = str((body or {}).get("chore_id") or "").strip()
-    if not chore_id:
-        raise HTTPException(status_code=422, detail="chore_id is required")
-    performed_by = (body or {}).get("performed_by") or None
-    base_id = chore_id.split("-")[0]
-
-    linked = session.exec(
-        select(Plant).where(Plant.skylight_sync_enabled == True)  # noqa: E712
-    ).all()
-    matches = [plant for plant in linked if plant.skylight_chore_id in (chore_id, base_id)]
+    matches, performed_by = await _chore_hook_plants(request, session)
     if not matches:
         return {"ok": True, "matched": 0, "logged": 0, "skipped_duplicate": 0}
 
-    today = datetime.now(UTC).date().isoformat()
+    day_start, day_end = clock.day_bounds_utc()
     logged = skipped = 0
     for plant in matches:
         already = session.exec(
             select(CareLog).where(
                 CareLog.plant_id == plant.id,
                 CareLog.source == "skylight_chore",
-                CareLog.created_at.like(f"{today}%"),
+                CareLog.created_at >= day_start,
+                CareLog.created_at < day_end,
             )
         ).first()
         if already is not None:
@@ -717,22 +832,102 @@ async def hooks_skylight_chore_completed(request: Request, session: Session = De
     return {"ok": True, "matched": len(matches), "logged": logged, "skipped_duplicate": skipped}
 
 
+async def _chore_hook_plants(request: Request, session: Session) -> tuple[list[Plant], str | None]:
+    """The plants a Skylight chore hook names, and who did it (internal secret only)."""
+    if not _verify_internal_secret(request.headers.get("X-Internal-Secret")):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="The body is not valid JSON.") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be a JSON object.")
+    chore_id = str(body.get("chore_id") or "").strip()
+    if not chore_id:
+        raise HTTPException(status_code=422, detail="chore_id is required")
+    base_id = chore_id.split("-")[0]
+    linked = session.exec(
+        select(Plant).where(Plant.skylight_sync_enabled == True)  # noqa: E712
+    ).all()
+    matches = [plant for plant in linked if plant.skylight_chore_id in (chore_id, base_id)]
+    return matches, (str(body.get("performed_by") or "").strip().lower() or None)
+
+
+@app.post("/hooks/skylight-chore-uncompleted")
+async def hooks_skylight_chore_uncompleted(request: Request, session: Session = Depends(get_session)):
+    """Internal: a linked chore was un-ticked -- undo the watering it logged today.
+
+    Removes today's ``skylight_chore`` watering for each linked plant and
+    reschedules from the watering before it (or from now when there is none),
+    so a mistaken tick in Skylight does not leave a plant marked watered.
+    """
+    matches, _who = await _chore_hook_plants(request, session)
+    day_start, day_end = clock.day_bounds_utc()
+    undone = 0
+    for plant in matches:
+        rows = session.exec(
+            select(CareLog).where(
+                CareLog.plant_id == plant.id,
+                CareLog.source == "skylight_chore",
+                CareLog.created_at >= day_start,
+                CareLog.created_at < day_end,
+            )
+        ).all()
+        if not rows:
+            continue
+        for row in rows:
+            session.delete(row)
+        session.flush()
+        previous = session.exec(
+            select(CareLog)
+            .where(CareLog.plant_id == plant.id, CareLog.action == "water")
+            .order_by(CareLog.created_at.desc())
+        ).first()
+        since = datetime.fromisoformat(previous.created_at) if previous else datetime.now(UTC)
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=UTC)
+        _advance_care_rule(session, plant, "water", since=since)
+        plant.updated_at = utcnow()
+        session.add(plant)
+        undone += 1
+    session.commit()
+    return {"ok": True, "matched": len(matches), "undone": undone}
+
+
 # --------------------------------------------------------------------------- profile
+
+
+def _family_override(session: Session) -> int | None:
+    """The family size a person set on the profile, if any."""
+    profile = session.get(GardenProfile, "household")
+    return profile.family_size_override if profile else None
+
+
+async def _profile_out(profile: GardenProfile | None) -> dict:
+    """The profile as the UI reads it, with the family size resolved now.
+
+    The size is the explicit override when a person set one, otherwise Identity's
+    roster read at this moment; ``None`` with ``family_size_source="unavailable"``
+    when Identity cannot be asked (the rest of the profile still answers).
+    """
+    data = GardenProfileOut.model_validate(profile or GardenProfile()).model_dump()
+    override = profile.family_size_override if profile else None
+    data["family_size_override"] = override
+    if override:
+        data.update(family_size=override, family_size_source="override")
+        return data
+    members = await household.size()
+    data.update(family_size=members, family_size_source="identity" if members else "unavailable")
+    if members is None:
+        data["family_size_detail"] = household.UNAVAILABLE_DETAIL
+    return data
 
 
 @app.get("/profile")
 async def get_profile(request: Request, session: Session = Depends(get_session)):
+    """The household's garden profile. Reading it never stores anything."""
     _user(request)
-    profile = session.get(GardenProfile, "household")
-    if profile is None:
-        # The family size is Identity's roster, not a number of our own.
-        profile = GardenProfile(
-            user_id="household", family_size=await household.size_or_last_resort()
-        )
-        session.add(profile)
-        session.commit()
-        session.refresh(profile)
-    return GardenProfileOut.model_validate(profile).model_dump()
+    return await _profile_out(session.get(GardenProfile, "household"))
 
 
 @app.put("/profile")
@@ -742,17 +937,18 @@ async def put_profile(
     _require_admin_or_adult(request)
     profile = session.get(GardenProfile, "household")
     if profile is None:
-        profile = GardenProfile(
-            user_id="household", family_size=await household.size_or_last_resort()
-        )
+        profile = GardenProfile(user_id="household")
         session.add(profile)
     changes = body.model_dump(exclude_unset=True)
+    if "family_size" in changes:
+        # A size typed on purpose is an override; null hands it back to Identity.
+        profile.family_size_override = changes.pop("family_size")
     for key, value in changes.items():
         setattr(profile, key, value)
     profile.updated_at = utcnow()
     session.commit()
     session.refresh(profile)
-    return GardenProfileOut.model_validate(profile).model_dump()
+    return await _profile_out(profile)
 
 
 # --------------------------------------------------------------------------- locations
@@ -843,6 +1039,7 @@ async def create_location(
     """Add a place. An indoor room is added to Home Hub, where rooms live."""
     _require_admin_or_adult(request)
     if body.kind == "indoor_room" and rooms_hub.enabled():
+        _require_admin_for_hub_rooms(request)
         area = await rooms_hub.create_room(body.name)
         if area is None:
             raise HTTPException(
@@ -868,7 +1065,7 @@ async def patch_location(
     if area is not None:
         # A room lives in Home Hub; a rename goes there, and Garden's own
         # columns (assignments, Skylight) mean nothing to the hub.
-        _require_admin_or_adult(request)
+        _require_admin_for_hub_rooms(request)
         fields_set = body.model_fields_set
         if "assigned_to" in fields_set or "skylight_sync_enabled" in fields_set:
             raise HTTPException(
@@ -890,11 +1087,8 @@ async def patch_location(
     else:
         _require_admin_or_adult(request)
     fields = body.model_dump(exclude_unset=True)
-    # An explicit null on a required column is a mistake, not a request to clear
-    # it: quietly skipping it keeps the edit and the row honest.
-    for key in ("item", "unit", "method", "target_qty"):
-        if key in fields and fields[key] is None:
-            fields.pop(key)
+    if "name" in fields and not (fields["name"] or "").strip():
+        raise HTTPException(status_code=422, detail="A place needs a name.")
     for key, value in fields.items():
         setattr(row, key, value)
     row.updated_at = utcnow()
@@ -938,6 +1132,7 @@ async def delete_location(
     _require_admin_or_adult(request)
     area = await rooms_hub.room(loc_id)
     if area is not None:
+        _require_admin_for_hub_rooms(request)
         plants = session.exec(select(Plant).where(Plant.location_id == loc_id)).all()
         if plants:
             raise HTTPException(
@@ -1047,6 +1242,14 @@ def assign_plant(
         _require_parent_or_admin(request)
     if fields_set - {"assigned_to"} - SKYLIGHT_ASSIGNMENT_FIELDS:
         _require_admin_or_adult(request)
+    if fields_set & SKYLIGHT_ASSIGNMENT_FIELDS and request.headers.get(SKYLIGHT_LINK_HEADER) != "chore-link":
+        # The chore link has rules (who a chore may go to, that the person is on
+        # the chart, that the chore exists) which only the gateway's Skylight
+        # chore routes apply. Anything else setting these fields bypassed them.
+        raise HTTPException(
+            status_code=403,
+            detail="A Skylight chore is linked through the plant's Skylight chore option, not set directly.",
+        )
     if fields_set & SKYLIGHT_ASSIGNMENT_FIELDS and "assigned_to" not in fields_set:
         # Skylight linkage: a parent/admin, or the adult_child this plant is
         # assigned to (narrower than "any adult" on purpose).
@@ -1080,6 +1283,7 @@ def assign_plant(
 def resolve_plant_target(
     request: Request,
     q: str = Query(..., description="A personal name, species or room, as spoken or typed"),
+    whole: bool = Query(False, description="Match only names the whole phrase makes up (voice)"),
     session: Session = Depends(get_session),
 ):
     """Match a spoken name to a plant, its species, or a room (Tier 1 & 2 helpers).
@@ -1103,10 +1307,10 @@ def resolve_plant_target(
     for row in rows:
         species = species_of(row)
         ranks = [
-            _match_rank(needle, row.nickname),
-            _match_rank(needle, (species or {}).get("common_name")),
-            _match_rank(needle, (species or {}).get("scientific_name")),
-            _match_rank(needle, row.species_ref.replace("_", " ")),
+            _match_rank(needle, row.nickname, whole=whole),
+            _match_rank(needle, (species or {}).get("common_name"), whole=whole),
+            _match_rank(needle, (species or {}).get("scientific_name"), whole=whole),
+            _match_rank(needle, row.species_ref.replace("_", " "), whole=whole),
         ]
         found = [r for r in ranks if r is not None]
         if found:
@@ -1124,9 +1328,12 @@ def resolve_plant_target(
         }
 
     room_hits = sorted(
-        (rank, loc_names[loc.id], loc)
-        for loc in loc_rows
-        if (rank := _match_rank(needle, loc.name)) is not None
+        (
+            (rank, loc_names[loc.id], loc)
+            for loc in loc_rows
+            if (rank := _match_rank(needle, loc.name, whole=whole)) is not None
+        ),
+        key=lambda hit: (hit[0], hit[1]),
     )
     if room_hits:
         top_rank = room_hits[0][0]
@@ -1238,10 +1445,27 @@ async def create_plant(
     return _plant_out(row, species_full, session)
 
 
+_warned_no_latitude = False
+
+
 def _is_winter() -> bool:
-    """Northern hemisphere winter: Nov-Feb (inclusive)."""
-    month = datetime.now(UTC).month
-    return month in (11, 12, 1, 2)
+    """Winter at home: the hemisphere comes from the household's location.
+
+    The latitude is the weather location's (``weather_care.home_latitude``).
+    Before it is known no seasonal slow-down is applied, and that is logged
+    once with what to set, rather than assuming the northern hemisphere.
+    """
+    global _warned_no_latitude
+    winter = clock.is_winter(weather_care.home_latitude())
+    if winter is None:
+        if not _warned_no_latitude:
+            log.warning(
+                "[Garden] the home latitude is not known yet (no weather location), so no winter "
+                "slow-down is applied to care intervals. Set the weather location to fix this."
+            )
+            _warned_no_latitude = True
+        return False
+    return winter
 
 
 def _compute_next_due(rule: dict, species: dict, plant: Plant | None = None) -> str | None:
@@ -1269,6 +1493,7 @@ def _compute_next_due(rule: dict, species: dict, plant: Plant | None = None) -> 
         distance_from_window=plant.distance_from_window if plant else None,
         season_winter=season_winter,
         calibration_factor=cal,
+        action=str(rule.get("action") or "water"),
     )
     due = datetime.now(UTC) + timedelta(days=result.next_due_offset_days)
     return due.isoformat()
@@ -1583,7 +1808,7 @@ def get_streaks(
     with at least one care log) and longest streak per user, plus earned
     garden achievements and points."""
     user = _user(request)
-    now = datetime.now(UTC).date()
+    now = clock.today()
 
     # All care logs for this user, ordered by date.
     logs = session.exec(
@@ -1596,8 +1821,7 @@ def get_streaks(
     logged_dates: set = set()
     for log in logs:
         try:
-            d = datetime.fromisoformat(log.created_at).date()
-            logged_dates.add(d)
+            logged_dates.add(clock.local_date(log.created_at))
         except (ValueError, TypeError):
             continue
 
@@ -1609,9 +1833,10 @@ def get_streaks(
             "total_logs": 0,
         }
     else:
-        # Current streak: count backwards from today.
+        # Current streak: count backwards from today -- or from yesterday while
+        # today's care is still to come, so a streak does not read 0 each morning.
         current_streak = 0
-        d = now
+        d = now if now in logged_dates else now - timedelta(days=1)
         while d in logged_dates:
             current_streak += 1
             d -= timedelta(days=1)
@@ -1634,10 +1859,13 @@ def get_streaks(
             "total_logs": len(logs),
         }
 
-    # Count active plants for this user.
-    plants_total = len(
-        session.exec(select(Plant).where(Plant.status == "active")).all()
-    )
+    # Achievements are this person's: the plants they have cared for, not every
+    # plant in the house (a child was "Plant Parent" the day a parent added ten).
+    plants_total = len({
+        row.plant_id
+        for row in session.exec(select(CareLog).where(CareLog.performed_by == user)).all()
+        if row.plant_id
+    })
 
     # Count harvests for this user (Phase 4: first_harvest achievement).
     harvests_total = len(
@@ -1656,7 +1884,7 @@ def get_streaks(
         room_water_total=len(
             session.exec(select(CareLog).where(CareLog.performed_by == user, CareLog.notes.like("%batch water room%"))).all()
         ),
-        pantry_batches_total=len(session.exec(select(PantryBatch)).all()),
+        pantry_batches_total=len(session.exec(select(PantryBatch).where(PantryBatch.logged_by == user)).all()),
     )
 
     return {**streaks, **ach}
@@ -1717,14 +1945,15 @@ async def test_notice(
 
 
 @app.post("/plants/{plant_id}/care")
-def log_care(
+async def log_care(
     plant_id: str,
     body: CareLogIn,
     request: Request,
     session: Session = Depends(get_session),
 ):
     """Log a care action: advances next_due_at and writes care_logs."""
-    user = _user(request)
+    source = _care_source(body.source)
+    performed_by = await _on_behalf_of(request, body.performed_by)
     plant = session.get(Plant, plant_id)
     if plant is None:
         raise HTTPException(status_code=404, detail="Plant not found")
@@ -1735,8 +1964,8 @@ def log_care(
         session,
         plant,
         action=body.action,
-        source=body.source,
-        performed_by=body.performed_by or user,
+        source=source,
+        performed_by=performed_by,
         notes=body.notes,
         sensor_snapshot=body.sensor_snapshot,
     )
@@ -1937,6 +2166,7 @@ async def water_all(
 ):
     """Batch-water all (due) plants in a room (Home Hub rooms included)."""
     user = _user(request)
+    source = _care_source(source)
     location = await _place(session, loc_id)
     if location is None:
         raise HTTPException(status_code=404, detail="Location not found")
@@ -2013,7 +2243,7 @@ async def log_harvest(
     regrowth_cooldown_days, and pushes a yield metric to weather_client
     best-effort (never fails the request if weather is unavailable).
     """
-    user = _user(request)
+    harvested_by = await _on_behalf_of(request, body.harvested_by)
     plant = session.get(Plant, plant_id)
     if plant is None:
         raise HTTPException(status_code=404, detail="Plant not found")
@@ -2035,7 +2265,7 @@ async def log_harvest(
     row = HarvestLog(
         plant_id=plant_id,
         harvested_at=body.harvested_at or utcnow(),
-        harvested_by=body.harvested_by or user,
+        harvested_by=harvested_by,
         quantity=body.quantity,
         unit=body.unit,
         disposition=body.disposition,
@@ -2391,12 +2621,7 @@ async def profile_detect_zone(request: Request, session: Session = Depends(get_s
     profile = session.exec(select(GardenProfile)).first()
     if not profile:
         # Auto-initialize default profile row if none exists yet.
-        profile = GardenProfile(
-            user_id="household",
-            # The household roster (Identity), not a number of our own.
-            family_size=await household.size_or_last_resort(),
-            zone_source="manual",
-        )
+        profile = GardenProfile(user_id="household", zone_source="manual")
         session.add(profile)
         session.commit()
         session.refresh(profile)
@@ -2630,8 +2855,9 @@ async def create_plan(
         name=body.name,
         season=body.season,
         year=body.year or datetime.now(UTC).year,
-        # An explicit size wins; otherwise the household roster (Identity).
-        family_size=body.family_size or await household.size_or_last_resort(),
+        # An explicit size wins, then the profile's override, then Identity's
+        # roster; with none of them answering this is a 503, never a guess.
+        family_size=body.family_size or await household.family_size(_family_override(session)),
         mode=body.mode or "fresh_only",
         status=body.status or "draft",
     )
@@ -2944,10 +3170,7 @@ async def planner_sizing(
 ):
     """Simple mode sizing calculator: plant counts & sq ft per crop."""
     _user(request)
-    profile = session.exec(select(GardenProfile)).first()
-    fs = family_size or (
-        profile.family_size if profile else await household.size_or_last_resort()
-    )
+    fs = family_size or await household.family_size(_family_override(session))
     refs = [c.strip() for c in species_refs.split(",") if c.strip()] if species_refs else []
     results = simple_sizing(session, fs, mode, refs)
     return {
@@ -3090,7 +3313,7 @@ def use_pantry_batch(
     session.commit()
     session.refresh(row)
     data = PantryBatchOut.model_validate(row).model_dump()
-    data.update(pantry.batch_flags(row, today=datetime.now(UTC).date()))
+    data.update(pantry.batch_flags(row, today=clock.today()))
     data["method_label"] = pantry.method_label(row.method)
     data["used_by"] = user
     data["qty_used"] = used
@@ -3151,11 +3374,16 @@ def _singular(word: str) -> str:
     return word
 
 
-def _match_rank(needle: str, candidate: str | None) -> int | None:
+def _match_rank(needle: str, candidate: str | None, *, whole: bool = False) -> int | None:
     """0 exact, 1 prefix, 2 substring, None when it does not match at all.
 
     Spoken plurals match (\"tomatoes\" finds Roma Tomato), and a phrase that
     *contains* the candidate matches too (\"kitchen herbs\" finds the Kitchen).
+
+    ``whole`` is the voice fast path's mode: every word of the phrase must be part
+    of the name, matched as whole words. "bedroom" finds the Bedroom and
+    "tomatoes" finds Roma Tomato, but "the plants in the bedroom at 6" finds
+    nothing, and "hair" does not find a Maidenhair Fern.
     """
     if not needle or not candidate:
         return None
@@ -3164,6 +3392,16 @@ def _match_rank(needle: str, candidate: str | None) -> int | None:
         return None
     words = needle.split()
     forms = {needle, " ".join([*words[:-1], _singular(words[-1])])} if words else {needle}
+    if whole:
+        padded = f" {value} "
+        for form in forms:
+            if value == form:
+                return 0
+            if padded.startswith(f" {form} "):
+                return 1
+            if f" {form} " in padded:
+                return 2
+        return None
     for form in forms:
         if value == form:
             return 0
@@ -3358,11 +3596,15 @@ def _validate_binding_fields(fields: dict) -> dict:
             detail=f"valve_mode must be one of {', '.join(VALVE_MODES)}",
         )
     minutes = fields.get("max_run_minutes")
-    if minutes is not None and not 1 <= int(minutes) <= 30:
-        raise HTTPException(status_code=400, detail="max_run_minutes must be between 1 and 30")
+    if minutes is not None and not 1 <= int(minutes) <= MAX_RUN_MINUTES_LIMIT:
+        raise HTTPException(
+            status_code=400, detail=f"max_run_minutes must be between 1 and {MAX_RUN_MINUTES_LIMIT}"
+        )
     runs = fields.get("daily_max_runs")
-    if runs is not None and not 1 <= int(runs) <= 4:
-        raise HTTPException(status_code=400, detail="daily_max_runs must be between 1 and 4")
+    if runs is not None and not 1 <= int(runs) <= MAX_DAILY_RUNS_LIMIT:
+        raise HTTPException(
+            status_code=400, detail=f"daily_max_runs must be between 1 and {MAX_DAILY_RUNS_LIMIT}"
+        )
     threshold = fields.get("moisture_threshold_pct")
     if threshold is not None and not 5.0 <= float(threshold) <= 80.0:
         raise HTTPException(status_code=400, detail="moisture_threshold_pct must be between 5 and 80")
@@ -3371,6 +3613,39 @@ def _validate_binding_fields(fields: dict) -> dict:
         if value and not _HHMM.match(str(value)):
             raise HTTPException(status_code=400, detail=f"{key} must be HH:MM")
     return fields
+
+
+#: Which discovered bucket each bound entity must come from.
+_BINDING_BUCKETS = {
+    "valve_entity_id": ("valves", "a valve (valve.*, or a switch named for watering)"),
+    "grow_light_entity_id": ("grow_lights", "a grow light (a light or switch named for growing)"),
+    "moisture_entity_id": ("moisture_sensors", "a soil moisture sensor"),
+    "temperature_entity_id": ("temperature_sensors", "a temperature sensor"),
+    "humidity_entity_id": ("humidity_sensors", "a humidity sensor"),
+    "lux_entity_id": ("lux_sensors", "a light-level sensor"),
+}
+
+
+async def _check_bound_entities(fields: dict) -> None:
+    """Every entity being bound must be one Home Hub reports as that kind.
+
+    A light bound as a valve would be "opened" for 30 minutes; a temperature
+    sensor bound as moisture would trigger the dry-soil watering. With the hub
+    unreachable nothing can be checked, so nothing new is bound (503).
+    """
+    wanted = {key: value for key, value in fields.items() if key in _BINDING_BUCKETS and value}
+    if not wanted:
+        return
+    found = await hardware.discover_hardware(fresh=True)
+    if not found.get("available"):
+        raise HTTPException(
+            status_code=503,
+            detail="Home Hub is not answering, so the device cannot be checked. Try again shortly.",
+        )
+    for key, entity_id in wanted.items():
+        bucket, what = _BINDING_BUCKETS[key]
+        if entity_id not in {row.get("entity_id") for row in found.get(bucket) or []}:
+            raise HTTPException(status_code=400, detail=f"{entity_id} is not {what} in Home Hub.")
 
 
 def _binding_target_name(session: Session, binding: HomeHubBinding) -> str | None:
@@ -3459,6 +3734,7 @@ async def upsert_binding(
     # to unbind.
     raw_fields = body.model_dump(exclude_unset=True)
     fields = _validate_binding_fields(_normalize_clears(raw_fields))
+    await _check_bound_entities(fields)
 
     binding = session.exec(
         select(HomeHubBinding).where(

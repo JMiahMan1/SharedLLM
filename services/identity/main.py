@@ -7166,12 +7166,13 @@ def internal_household(session: Session = Depends(get_session), _: None = Depend
     went stale the moment a member was added or removed.
 
     The stack's own default admin account is not a person to feed, so it is
-    left out; everyone else in the roster counts.
+    left out by the same rule as everywhere else (``_is_system_default_user``:
+    the flag, the legacy id 1 or the username "default"); everyone else counts.
     """
     usernames = [
         user.username
         for user in session.exec(select(User)).all()
-        if not getattr(user, "is_system_default", False)
+        if not _is_system_default_user(user)
     ]
     return {"status": "SUCCESS", "members": len(usernames), "usernames": usernames}
 

@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 from sqlmodel import Session, select
 
-from services.garden.models import CareLog, CareRule, Plant
+from services.garden import clock
+from services.garden.models import CareLog
 
 log = logging.getLogger("garden.achievements")
 
@@ -49,6 +50,19 @@ def _rule_matches(rule: dict, ctx: dict) -> bool:
     return False
 
 
+def longest_run(days: set) -> int:
+    """The longest run of consecutive days in ``days`` (0 for none)."""
+    best = 0
+    for day in days:
+        if day - timedelta(days=1) in days:
+            continue  # not the start of a run
+        length = 1
+        while day + timedelta(days=length) in days:
+            length += 1
+        best = max(best, length)
+    return best
+
+
 def evaluate(
     session: Session,
     user: str,
@@ -73,14 +87,12 @@ def evaluate(
     logged_dates: set = set()
     for log in logs:
         try:
-            logged_dates.add(datetime.fromisoformat(log.created_at).date())
+            logged_dates.add(clock.local_date(log.created_at))
         except (ValueError, TypeError):
             continue
-    water_streak = 0
-    d = datetime.now(UTC).date()
-    while d in logged_dates:
-        water_streak += 1
-        d -= timedelta(days=1)
+    # A streak award is earned by the longest run of household days ever
+    # watered, so "Week of Watering" does not vanish after one missed day.
+    water_streak = longest_run(logged_dates)
 
     ctx = {
         "plants_total": plants_total,

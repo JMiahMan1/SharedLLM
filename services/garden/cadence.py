@@ -114,9 +114,13 @@ def pot_size_bucket(diameter_in: float | None) -> str:
 
 
 def _window_factor(direction: str | None, distance_ft: float | None) -> float:
-    """Combined window-direction × distance-from-window multiplier."""
-    direction_key = (direction or "n").lower()
-    direction_mult = WINDOW_DIRECTION_FACTOR.get(direction_key, 1.0)
+    """Combined window-direction × distance-from-window multiplier.
+
+    No direction means no window is known (an outdoor bed, or a plant nobody
+    placed yet): that is neutral, never "north", which lengthened every outdoor
+    bed's watering interval by 15%.
+    """
+    direction_mult = WINDOW_DIRECTION_FACTOR.get(direction.lower(), 1.0) if direction else 1.0
     distance_mult = 1.0
     if distance_ft is not None:
         for (lo, hi), mult in DISTANCE_FROM_WINDOW_FACTOR.items():
@@ -137,6 +141,7 @@ def compute_interval(
     distance_from_window: float | None = None,
     season_winter: bool = False,
     calibration_factor: float = 1.0,
+    action: str = "water",
 ) -> CadenceResult:
     """Compute the effective watering interval in days.
 
@@ -147,18 +152,25 @@ def compute_interval(
     Every factor multiplies the base interval: a larger number means
     water less often because the pot holds moisture longer or the season
     slows drying.
+
+    The pot, soil, window and calibration factors describe how fast *soil
+    dries*, so they apply to ``action == "water"`` only. Rotating, repotting,
+    fertilizing or checking for pests keeps its own interval (the season still
+    applies: growth slows in winter).
     """
     if base_interval_days <= 0:
         raise ValueError("base_interval_days must be positive")
     if winter_multiplier < 1.0:
         raise ValueError("winter_multiplier must be >= 1.0")
 
-    pot_mult = POT_MATERIAL_FACTOR.get((pot_material or "ceramic").lower(), 1.0)
-    size_mult = POT_SIZE_FACTOR[pot_size_bucket(pot_size_in)]
-    soil_mult = SOIL_MIX_FACTOR.get((soil_mix or "standard_potting").lower(), 1.0)
-    window_mult = _window_factor(window_direction, distance_from_window)
-
-    cal = max(CALIBRATION_MIN, min(CALIBRATION_MAX, calibration_factor or 1.0))
+    if action == "water":
+        pot_mult = POT_MATERIAL_FACTOR.get((pot_material or "ceramic").lower(), 1.0)
+        size_mult = POT_SIZE_FACTOR[pot_size_bucket(pot_size_in)]
+        soil_mult = SOIL_MIX_FACTOR.get((soil_mix or "standard_potting").lower(), 1.0)
+        window_mult = _window_factor(window_direction, distance_from_window)
+        cal = max(CALIBRATION_MIN, min(CALIBRATION_MAX, calibration_factor or 1.0))
+    else:
+        pot_mult = size_mult = soil_mult = window_mult = cal = 1.0
 
     active_interval = (
         base_interval_days

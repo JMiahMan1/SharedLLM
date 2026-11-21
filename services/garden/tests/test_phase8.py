@@ -73,8 +73,12 @@ def _headers(user: str, role: str) -> dict[str, str]:
 
 
 PARENT = _headers("mother", "mother")
-ADULT = _headers("kaleb", "adult_child")
-CHILD = _headers("noah", "child")
+ADULT = _headers("alex", "adult_child")
+CHILD = _headers("jamie", "child")
+
+
+#: The real function, kept before the ``hub`` fixture replaces it with a stub.
+_REAL_RAIN_STATE = weather_care.rain_state
 
 
 class Hub:
@@ -479,6 +483,49 @@ def test_the_rain_interlock_blocks_an_uncovered_bed(client, hub, monkeypatch):
     assert override.status_code == 200
 
 
+def test_unknown_rain_does_not_water_blind(client, hub, monkeypatch):
+    """No forecast: the interlock refuses and says so; a person may override."""
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    async def no_forecast(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(weather_care, "rain_state", _REAL_RAIN_STATE)
+    monkeypatch.setattr(weather_care, "_fetch_forecast", no_forecast)
+
+    resp = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 409
+    assert "cannot tell whether it rained" in resp.json()["detail"]
+    assert hub.services() == []
+    override = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"override_rain": True})
+    assert override.status_code == 200
+
+
+def test_the_interlock_and_today_convert_rain_the_same_way(monkeypatch):
+    """Millimetres from the weather data are converted by the data's units."""
+    import asyncio
+
+    metric = {"units": {"system": "metric"}, "hourly": [{"rain": 10.0}] + [{"rain": 0.0}] * 11}
+
+    async def forecast():
+        return metric
+
+    async def day(_date):
+        return {"rain": 2.54}  # millimetres, like the forecast
+
+    monkeypatch.setattr(weather_care, "_fetch_forecast", forecast)
+    monkeypatch.setattr(weather_care, "_fetch_day", day)
+
+    rain_in = asyncio.run(weather_care._observed_and_forecast_rain_in())
+    state = asyncio.run(_REAL_RAIN_STATE(None))
+
+    assert round(rain_in, 3) == round((10.0 + 2.54) / 25.4, 3)
+    assert state["known"] is True and state["rain_in"] == round(rain_in, 3)
+
+
 def test_rain_cannot_reach_a_covered_bed(client, hub, monkeypatch):
     bed = _bed(client, "Greenhouse", covered=True)
     _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
@@ -588,6 +635,164 @@ def test_a_valve_that_will_not_close_shouts_for_a_parent(client, hub, monkeypatc
     assert row["active_run_started_at"] is not None
 
 
+class ValveHub(Hub):
+    """A hub whose valve really changes state, and can be made to misbehave."""
+
+    def __init__(self, *, open_raises=None, open_status=200, stays_open=False, **kw):
+        super().__init__(**kw)
+        self.valve_state = "closed"
+        self.open_raises = open_raises
+        self.open_status = open_status
+        self.stays_open = stays_open
+        self.runs_seen_at_open: list[int] = []
+
+    async def __call__(self, method, path, *, body=None):
+        if method == "GET" and path == "/api/states":
+            self.calls.append((method, path, body))
+            rows = [dict(row) for row in self.states_rows]
+            for row in rows:
+                if row["entity_id"] == "valve.bed1_drip":
+                    row["state"] = self.valve_state
+            return (200, rows)
+        if method == "POST" and path.endswith("open_valve"):
+            self.calls.append((method, path, body))
+            self.runs_seen_at_open.append(self._runs())
+            # Whatever the hub answers, the valve did open (the dangerous case).
+            self.valve_state = "open"
+            if self.open_raises is not None:
+                raise self.open_raises
+            return (self.open_status, None)
+        if method == "POST" and path.endswith("close_valve"):
+            self.calls.append((method, path, body))
+            if not self.stays_open:
+                self.valve_state = "closed"
+            return (200, None)
+        return await super().__call__(method, path, body=body)
+
+    @staticmethod
+    def _runs() -> int:
+        from sqlmodel import select as _select
+
+        import services.garden.main as main_module
+        from services.garden.models import ValveRun
+
+        with Session(main_module.app.state.engine) as db:
+            return len(db.exec(_select(ValveRun)).all())
+
+
+def _valve_hub(monkeypatch, **kw) -> ValveHub:
+    fake = ValveHub(**kw)
+    monkeypatch.setattr(hardware, "_call", fake)
+    monkeypatch.setattr(hardware, "CLOSE_CONFIRM_DELAYS_S", (0.0, 0.0))
+    hardware.invalidate()
+    return fake
+
+
+def _run_rows(session) -> list:
+    from sqlmodel import select as _select
+
+    from services.garden.models import ValveRun
+
+    session.expire_all()
+    return session.exec(_select(ValveRun)).all()
+
+
+def _binding_row(client, binding_id) -> dict:
+    return next(r for r in client.get("/bindings", headers=PARENT).json()["bindings"] if r["id"] == binding_id)
+
+
+def test_the_run_is_recorded_before_the_valve_is_opened(client, hub, monkeypatch):
+    fake = _valve_hub(monkeypatch)
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+
+    resp = client.post(f"/bindings/{_binding_id(client, 'location', bed['id'])}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 200, resp.text
+    assert fake.runs_seen_at_open == [1]
+
+
+def test_an_open_that_times_out_is_closed_and_kept(client, hub, monkeypatch, session):
+    fake = _valve_hub(monkeypatch, open_raises=TimeoutError("hub too slow"))
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    resp = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 502, resp.text
+    assert "sent a close and the valve reports closed" in resp.json()["detail"]
+    assert fake.services() == ["valve/open_valve", "valve/close_valve"]
+    assert fake.valve_state == "closed"
+    rows = _run_rows(session)
+    assert len(rows) == 1 and rows[0].closed_at is not None
+    assert _binding_row(client, binding_id)["active_run_started_at"] is None
+
+
+def test_a_refused_open_that_opened_anyway_stays_with_the_watchdog(client, hub, monkeypatch, session):
+    fake = _valve_hub(monkeypatch, open_status=500, stays_open=True)
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+
+    resp = client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    assert resp.status_code == 502
+    assert "not confirmed: check the valve" in resp.json()["detail"]
+    assert fake.services() == ["valve/open_valve", "valve/close_valve"]
+    rows = _run_rows(session)
+    assert len(rows) == 1 and rows[0].closed_at is None
+    binding = _binding_row(client, binding_id)
+    assert binding["active_run_started_at"] is not None
+    # Due now, so the very next watchdog tick retries the close.
+    assert binding["active_run_ends_at"] <= datetime.now(UTC).isoformat()
+
+
+def test_a_close_the_valve_does_not_obey_is_not_closed(client, hub, monkeypatch):
+    fake = _valve_hub(monkeypatch, stays_open=True)
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    assert client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={}).status_code == 200
+
+    resp = client.post(f"/bindings/{binding_id}/valve/stop", headers=PARENT)
+
+    assert resp.status_code == 502
+    assert fake.valve_state == "open"
+    assert _binding_row(client, binding_id)["active_run_started_at"] is not None
+
+
+def test_an_open_valve_alert_with_no_family_goes_to_the_admins(client, hub, monkeypatch, session, caplog):
+    import asyncio
+    import logging
+
+    import services.garden.main as main_module
+
+    _valve_hub(monkeypatch, stays_open=True)
+    bed = _bed(client)
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={"minutes": 1})
+    _rewind_timer(session, binding_id)
+    alerts: list[dict] = []
+
+    async def capture(payload, **_kw):
+        alerts.append(payload)
+        return True
+
+    monkeypatch.setattr(hardware.notify, "send", capture)
+
+    async def identity_down():
+        return []
+
+    with caplog.at_level(logging.ERROR, logger="garden.homehub_hardware"):
+        asyncio.run(hardware.check_valve_failsafe(lambda: main_module.app.state.engine, identity_down))
+
+    assert [alert["user"] for alert in alerts] == ["@admins"]
+    assert alerts[0]["category"] == "admin"
+    assert any("no family list" in record.getMessage() for record in caplog.records)
+
+
 # --------------------------------------------------------------------------- grow lights
 
 def test_a_photoperiod_window_can_cross_midnight():
@@ -660,6 +865,64 @@ def test_a_light_already_on_is_left_alone(client, hub, monkeypatch):
     )
 
     assert actions == []
+
+
+def test_a_hand_switched_light_is_left_until_the_window_changes(client, hub, monkeypatch):
+    import asyncio
+
+    import services.garden.main as main_module
+
+    bed = _bed(client)
+    _bind(
+        client, "location", bed["id"], grow_light_entity_id="light.grow_shelf",
+        grow_light_enabled=True, grow_light_on_time="06:00", grow_light_off_time="20:00",
+    )
+
+    def tick(hour, state):
+        rows = [dict(row) for row in HUB_STATES]
+        rows[5] = {**rows[5], "state": state}
+        fake = Hub(states_rows=rows)
+        monkeypatch.setattr(hardware, "_call", fake)
+        hardware.invalidate()
+        asyncio.run(hardware.sync_grow_lights(
+            lambda: main_module.app.state.engine, now=datetime(2026, 11, 20, hour, 0)
+        ))
+        return fake.services()
+
+    assert tick(12, "off") == ["light/turn_on"]  # first look: brought to the schedule
+    assert tick(13, "off") == []  # someone switched it off by hand: left alone
+    assert tick(21, "off") == []  # the window closed and it is already off
+    assert tick(22, "on") == []  # switched on by hand at night: left alone
+    assert tick(7, "on") == []  # the window opened and it is already on
+
+
+def test_a_binding_must_name_the_right_kind_of_device(client, hub):
+    bed = _bed(client)
+
+    as_valve = client.put(f"/bindings/location/{bed['id']}", headers=PARENT,
+                          json={"valve_entity_id": "light.grow_shelf"})
+    as_moisture = client.put(f"/bindings/location/{bed['id']}", headers=PARENT,
+                             json={"moisture_entity_id": "sensor.kitchen_temperature"})
+    unknown = client.put(f"/bindings/location/{bed['id']}", headers=PARENT,
+                         json={"grow_light_entity_id": "light.nowhere"})
+
+    assert as_valve.status_code == 400 and "is not a valve" in as_valve.json()["detail"]
+    assert as_moisture.status_code == 400
+    assert unknown.status_code == 400
+
+
+def test_binding_needs_the_hub_to_check_the_device(client, hub, monkeypatch):
+    async def away(*_a, **_k):
+        return (0, None)
+
+    monkeypatch.setattr(hardware, "_call", away)
+    hardware.invalidate()
+    bed = _bed(client)
+
+    resp = client.put(f"/bindings/location/{bed['id']}", headers=PARENT,
+                      json={"valve_entity_id": "valve.bed1_drip"})
+
+    assert resp.status_code == 503
 
 
 # --------------------------------------------------------------------------- NFC / QR tags

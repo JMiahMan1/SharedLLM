@@ -207,19 +207,25 @@ async def _draft_via_llm(name: str, category: str | None, wiki_summary: str | No
 
         client = get_client()
         gateway = getattr(config, "GATEWAY_INTERNAL_URL", None) or os.getenv("GATEWAY_URL") or "http://gateway:11435"
-        async with client.post(f"{gateway.rstrip('/')}/v1/chat/completions",
+        # The gateway's raw completion route: the model and these messages only.
+        # /v1/chat/completions would run them as the household, with fast paths
+        # and tools (a plant drafted as "water monty" could water Monty).
+        async with client.post(f"{gateway.rstrip('/')}/api/internal/llm/complete",
                                json=body,
                                headers={"X-Internal-Secret": config.INTERNAL_SECRET},
                                timeout=_LOOKUP_TIMEOUT) as resp:
             if resp.status != 200:
-                log.info("[Garden lookup] LLM draft HTTP %s", resp.status)
+                detail = (await resp.text())[:200]
+                log.warning("[Garden lookup] LLM draft HTTP %s: %s", resp.status, detail)
+                warnings.append(f"The AI draft failed (HTTP {resp.status}).")
                 return None
             data = await resp.json(content_type=None)
     except Exception as e:
-        log.info("[Garden lookup] LLM draft unavailable: %s", e)
+        log.warning("[Garden lookup] LLM draft unavailable: %s", e)
+        warnings.append(f"The AI draft was unavailable ({type(e).__name__}).")
         return None
 
-    text = data.get("choices", [{}])[0].get("message", {}).get("content") or data.get("text") or ""
+    text = (data or {}).get("content") or ""
     if not text:
         return None
     try:
@@ -491,7 +497,7 @@ async def handle_species_lookup(
     adult_child, admin -- and the route decides it, so a parent no longer gets a
     403 from here after the route let them in.
     """
-    if not is_adult:
+    if not (is_adult or is_admin):
         raise HTTPException(status_code=403, detail="Adults and admins only: look up unknown species.")
 
     name = (body.get("name") or "").strip()
@@ -580,12 +586,20 @@ async def handle_species_custom(
     is_admin: bool,
     is_adult: bool = False,
 ) -> dict[str, Any]:
-    """POST /species/custom: save a user-reviewed custom species (adult/admin only)."""
-    if not is_adult:
+    """POST /species/custom: save a user-reviewed custom species (adult/admin only).
+
+    ``reviewed_by`` is the person saving it, never a name from the body: the
+    review is what makes an AI draft safe to keep, so it must name who did it.
+    """
+    if not (is_adult or is_admin):
         raise HTTPException(status_code=403, detail="Adults and admins only: save custom species.")
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     warnings: list[str] = []
     data = _validate_custom(body, warnings)
+    data["reviewed_by"] = current_user
+    data["reviewed_at"] = utcnow()
 
     key = data["key"]
     existing = session.exec(select(CustomSpecies).where(CustomSpecies.key == key)).first()
@@ -595,6 +609,7 @@ async def handle_species_custom(
             if field == "key":
                 continue
             setattr(existing, field, value)
+        existing.reviewed_by = current_user
         existing.reviewed_at = now
         existing.updated_at = now
         session.add(existing)
@@ -619,7 +634,7 @@ async def handle_species_custom_delete(
     is_adult: bool = False,
 ) -> dict[str, Any]:
     """DELETE /species/custom/{key}: remove a custom species (adult/admin only)."""
-    if not is_adult:
+    if not (is_adult or is_admin):
         raise HTTPException(status_code=403, detail="Adults and admins only: delete custom species.")
     row = session.exec(select(CustomSpecies).where(CustomSpecies.key == key)).first()
     if row is None:

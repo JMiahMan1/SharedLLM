@@ -109,6 +109,100 @@ def _make_plant(garden_client, headers, species_ref="monstera_deliciosa", locati
 # --------------------------------------------------------------------------- heat_factor (cadence)
 
 
+def _rain_bed_plant(garden_client):
+    from services.garden.models import CareRule
+
+    client, engine = garden_client
+    loc = _make_location(garden_client, PARENT_HEADERS, name="Rain Bed", kind="raised_bed", covered=False)
+    plant = _make_plant(garden_client, PARENT_HEADERS, species_ref="basil_sweet",
+                        location_id=loc["id"], category="herb", nickname="Rain Basil")
+    with Session(engine) as session:
+        rule = session.exec(select(CareRule).where(CareRule.plant_id == plant["id"],
+                                                   CareRule.action == "water")).first()
+        rule.rain_skip_enabled = True
+        session.add(rule)
+        session.commit()
+    return plant
+
+
+def test_rain_never_brings_a_later_due_date_earlier(garden_client):
+    from datetime import UTC, datetime, timedelta
+
+    from services.garden import weather_care as wc
+    from services.garden.models import CareRule
+
+    _client, engine = garden_client
+    plant = _rain_bed_plant(garden_client)
+    later = (datetime.now(UTC) + timedelta(days=4)).isoformat()
+    with Session(engine) as session:
+        rule = session.exec(select(CareRule).where(CareRule.plant_id == plant["id"],
+                                                   CareRule.action == "water")).first()
+        rule.next_due_at = later
+        session.add(rule)
+        session.commit()
+
+    with patch("services.garden.weather_care._observed_and_forecast_rain_in", return_value=0.5), \
+            Session(engine) as session:
+        skipped = asyncio.run(wc.apply_rain_skip(session, session.get(GardenProfile, "household")))
+
+    assert skipped and skipped[0]["next_due_at"] == later
+
+
+def test_reading_today_never_applies_a_rain_skip(garden_client, monkeypatch):
+    from services.garden import weather_care as wc
+    from services.garden.models import CareLog
+
+    client, engine = garden_client
+    plant = _rain_bed_plant(garden_client)
+
+    async def wet_forecast():
+        return {"units": {"system": "imperial"}, "hourly": [{"rain": 1.0}], "current": {"label": "Rain"}}
+
+    monkeypatch.setattr(wc, "_fetch_forecast", wet_forecast)
+    with patch("services.garden.weather_care._observed_and_forecast_rain_in", return_value=1.0):
+        resp = client.get("/today", headers=PARENT_HEADERS)
+
+    assert resp.status_code == 200, resp.text
+    with Session(engine) as session:
+        logs = session.exec(select(CareLog).where(CareLog.plant_id == plant["id"],
+                                                  CareLog.action == "rain_skip")).all()
+    assert logs == []
+
+    # The poller applies it, and the next /today reports it without writing.
+    with patch("services.garden.weather_care._observed_and_forecast_rain_in", return_value=1.0), \
+            Session(engine) as session:
+        asyncio.run(wc.build_weather_summary(session, None, apply_skips=True))
+    weather = client.get("/today", headers=PARENT_HEADERS).json()["weather"]
+    assert [row["plant_id"] for row in weather["rain_skipped"]] == [plant["id"]]
+
+
+def test_a_heatwave_brings_outdoor_watering_forward_once(garden_client):
+    from datetime import UTC, datetime, timedelta
+
+    from services.garden import weather_care as wc
+    from services.garden.models import CareRule
+
+    _client, engine = garden_client
+    plant = _rain_bed_plant(garden_client)
+    with Session(engine) as session:
+        rule = session.exec(select(CareRule).where(CareRule.plant_id == plant["id"],
+                                                   CareRule.action == "water")).first()
+        rule.interval_days = 4.0
+        rule.next_due_at = (datetime.now(UTC) + timedelta(days=4)).isoformat()
+        session.add(rule)
+        session.commit()
+
+        boosted = wc.apply_heat_boost(session, 0.75)
+        again = wc.apply_heat_boost(session, 0.75)
+
+        session.refresh(rule)
+        due = datetime.fromisoformat(rule.next_due_at)
+    assert [row["plant_id"] for row in boosted] == [plant["id"]]
+    assert again == []  # once a day
+    # 4 days x 0.75 = 3 days from the last watering: one day sooner.
+    assert timedelta(days=2, hours=23) < due - datetime.now(UTC) < timedelta(days=3, hours=1)
+
+
 def test_heat_factor_returns_075_in_heatwave():
     assert heat_factor(95.0, dry=True) == 0.75
     assert heat_factor(90.0, dry=True) == 0.75
@@ -668,52 +762,91 @@ def test_weather_zero_f_not_dropped(garden_client, monkeypatch):
     assert alerts[0]["min_temp_f"] == 0.0  # 0.0°F <= 15°F hardy extreme freeze threshold
 
 
-def test_draft_via_llm_parses_chat_completions(garden_client, monkeypatch):
-    """_draft_via_llm() must parse OpenAI /v1/chat/completions response format."""
-    import services.garden.species_lookup as sl
+def test_draft_via_llm_uses_the_raw_completion_route(garden_client, monkeypatch):
+    """The draft goes to the gateway's raw completion route, never chat: chat runs
+    as the household with fast paths and tools."""
+    import json as json_module
     from unittest.mock import patch
+
+    import services.garden.species_lookup as sl
 
     captured = {}
 
     class FakeResp:
-        def __init__(self, data):
+        def __init__(self, data, status=200):
             self._data = data
-            self.status = 200
+            self.status = status
         async def __aenter__(self):
             return self
         async def __aexit__(self, *a):
             return False
         async def json(self, content_type=None):
             return self._data
+        async def text(self):
+            return json_module.dumps(self._data)
 
     class FakeClient:
         def post(self, url, *, json=None, headers=None, timeout=None):
-            import json as json_module
             captured["url"] = str(url)
             captured["json"] = json
-            return FakeResp({
-                "choices": [{
-                    "message": {
-                        "content": json_module.dumps({
-                            "key": "test_plant",
-                            "category": "houseplant",
-                            "common_name": "Test Plant",
-                            "watering_interval_days": 7.0,
-                            "winter_multiplier": 1.0,
-                            "watering_method": "top_drain",
-                            "frost_tolerance": "hardy",
-                            "toxicity_level": "non_toxic",
-                            "source": "wiki_ai_draft",
-                        })
-                    }
-                }]
-            })
+            return FakeResp({"content": json_module.dumps({
+                "key": "test_plant", "category": "houseplant", "common_name": "Test Plant",
+                "watering_interval_days": 7.0, "winter_multiplier": 1.0, "watering_method": "top_drain",
+                "frost_tolerance": "hardy", "toxicity_level": "non_toxic", "source": "wiki_ai_draft",
+            })})
 
     with patch("services.common.http.get_client", return_value=FakeClient()):
-        monkeypatch.setattr(sl, "_fetch_json", lambda url: None)  # no Wikipedia
-
         result = asyncio.run(sl._draft_via_llm("Test Plant", "houseplant", None, []))
-    assert result is not None, f"Expected non-None result"
+    assert result is not None
     assert result["common_name"] == "Test Plant"
-    # Must have called /v1/chat/completions, not /api/llm/generate.
-    assert "/v1/chat/completions" in captured["url"]
+    assert captured["url"].endswith("/api/internal/llm/complete")
+    assert "chat/completions" not in captured["url"]
+
+
+def test_a_failed_draft_is_said_in_the_warnings(garden_client):
+    from unittest.mock import patch
+
+    import services.garden.species_lookup as sl
+
+    class Refused:
+        status = 502
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def text(self):
+            return "The model did not answer"
+
+    class FakeClient:
+        def post(self, *_a, **_k):
+            return Refused()
+
+    warnings: list[str] = []
+    with patch("services.common.http.get_client", return_value=FakeClient()):
+        assert asyncio.run(sl._draft_via_llm("Test Plant", "houseplant", None, warnings)) is None
+    assert any("HTTP 502" in w for w in warnings)
+
+
+def test_reviewed_by_is_the_person_saving(garden_client):
+    from sqlmodel import Session as _Session
+
+    from services.garden.models import CustomSpecies
+
+    client, engine = garden_client
+    resp = client.post("/species/custom", headers=PARENT_HEADERS, json={
+        "key": "reviewed_plant", "category": "houseplant", "common_name": "Reviewed Plant",
+        "watering_interval_days": 7, "reviewed_by": "somebody_else",
+    })
+
+    assert resp.status_code == 201, resp.text
+    with _Session(engine) as session:
+        row = session.exec(select(CustomSpecies).where(CustomSpecies.key == "reviewed_plant")).first()
+    assert row.reviewed_by == PARENT_HEADERS["X-User-Id"]
+
+
+def test_a_malformed_custom_species_is_a_422(garden_client):
+    client, _engine = garden_client
+
+    resp = client.post("/species/custom", headers=PARENT_HEADERS, json={"key": "x", "watering_interval_days": "lots"})
+
+    assert resp.status_code == 422

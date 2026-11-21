@@ -312,3 +312,44 @@ def test_children_cannot_add_a_room(client, hub):
     resp = client.post("/locations", headers=KID_HEADERS, json={"name": "Play Room", "kind": "indoor_room"})
     assert resp.status_code == 403
     assert "POST" not in hub.methods()
+
+
+#: A parent who is not an admin: Home Hub's own area routes would refuse them.
+PARENT_HEADERS = {
+    "X-Internal-Secret": INTERNAL_SECRET,
+    "X-User-Id": "parent_one",
+    "X-User-Role": "father",
+    "X-Is-Admin": "false",
+    "X-Family-Manage": "true",
+}
+
+
+def test_a_non_admin_cannot_rename_a_hub_room(client, hub):
+    resp = client.patch("/locations/living_room", headers=PARENT_HEADERS, json={"name": "Den"})
+
+    assert resp.status_code == 403
+    assert "admin" in resp.json()["detail"]
+    assert "PATCH" not in hub.methods()
+
+
+def test_a_non_admin_cannot_remove_a_hub_room(client, hub):
+    resp = client.delete("/locations/living_room", headers=PARENT_HEADERS)
+
+    assert resp.status_code == 403
+    assert "DELETE" not in hub.methods()
+
+
+def test_a_non_admin_cannot_add_a_hub_room(client, hub):
+    resp = client.post("/locations", headers=PARENT_HEADERS, json={"name": "Loft", "kind": "indoor_room"})
+
+    assert resp.status_code == 403
+    assert "POST" not in hub.methods()
+
+
+def test_a_non_admin_still_manages_garden_beds(client, hub):
+    resp = client.post("/locations", headers=PARENT_HEADERS, json={"name": "East Bed", "kind": "raised_bed"})
+    assert resp.status_code == 201, resp.text
+
+    renamed = client.patch(f"/locations/{resp.json()['id']}", headers=PARENT_HEADERS, json={"name": "East Bed 2"})
+    assert renamed.status_code == 200
+    assert client.delete(f"/locations/{resp.json()['id']}", headers=PARENT_HEADERS).status_code == 204

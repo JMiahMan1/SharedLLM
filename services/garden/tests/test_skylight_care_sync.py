@@ -34,8 +34,8 @@ def _headers(user: str, role: str) -> dict[str, str]:
 
 HOOK = {"X-Internal-Secret": INTERNAL_SECRET}
 PARENT = _headers("mother", "mother")
-ADULT = _headers("kaleb", "adult_child")
-CHILD = _headers("noah", "child")
+ADULT = _headers("alex", "adult_child")
+CHILD = _headers("jamie", "child")
 
 
 @pytest.fixture()
@@ -67,7 +67,7 @@ def session(client):
         yield db
 
 
-def _plant(client, assigned_to: str | None = "kaleb", nickname: str = "Monty") -> dict:
+def _plant(client, assigned_to: str | None = "alex", nickname: str = "Monty") -> dict:
     resp = client.post("/plants", headers=PARENT, json={
         "category": "houseplant",
         "species_ref": "monstera_deliciosa",
@@ -78,49 +78,66 @@ def _plant(client, assigned_to: str | None = "kaleb", nickname: str = "Monty") -
     return resp.json()
 
 
+#: What the gateway's Skylight chore routes send: only they may set these fields.
+LINK = {"X-Garden-Skylight-Link": "chore-link"}
+
+
 # --------------------------------------------------------------------------- who may link
 
-def test_the_plants_adult_can_link_its_skylight_chore(client):
-    plant = _plant(client, assigned_to="kaleb")
+@pytest.mark.parametrize("who", ("PARENT", "ADULT"))
+def test_skylight_fields_need_the_chore_route(client, who):
+    """Set directly, they skip the chart's rules (who may be given a chore, that it exists)."""
+    plant = _plant(client, assigned_to="alex")
 
-    resp = client.patch(f"/plants/{plant['id']}/assign", headers=ADULT, json={
+    resp = client.patch(f"/plants/{plant['id']}/assign", headers=globals()[who], json={
+        "skylight_sync_enabled": True, "skylight_chore_id": "999", "skylight_assignee": "pat",
+    })
+
+    assert resp.status_code == 403
+    assert "Skylight chore" in resp.json()["detail"]
+
+
+def test_the_plants_adult_can_link_its_skylight_chore(client):
+    plant = _plant(client, assigned_to="alex")
+
+    resp = client.patch(f"/plants/{plant['id']}/assign", headers={**ADULT, **LINK}, json={
         "skylight_sync_enabled": True,
         "skylight_chore_id": "52409380",
-        "skylight_assignee": "kaleb",
+        "skylight_assignee": "alex",
     })
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["skylight_sync_enabled"] is True
     assert body["skylight_chore_id"] == "52409380"
-    assert body["skylight_assignee"] == "kaleb"
+    assert body["skylight_assignee"] == "alex"
 
 
 def test_the_adult_cannot_hand_the_plant_to_someone_else(client):
-    plant = _plant(client, assigned_to="kaleb")
+    plant = _plant(client, assigned_to="alex")
 
     resp = client.patch(
-        f"/plants/{plant['id']}/assign", headers=ADULT, json={"assigned_to": "noah"}
+        f"/plants/{plant['id']}/assign", headers=ADULT, json={"assigned_to": "jamie"}
     )
 
     assert resp.status_code == 403
 
 
 def test_an_adult_not_assigned_this_plant_cannot_link_it(client):
-    plant = _plant(client, assigned_to="gracie")
+    plant = _plant(client, assigned_to="riley")
 
     resp = client.patch(
-        f"/plants/{plant['id']}/assign", headers=ADULT, json={"skylight_sync_enabled": True}
+        f"/plants/{plant['id']}/assign", headers={**ADULT, **LINK}, json={"skylight_sync_enabled": True}
     )
 
     assert resp.status_code == 403
 
 
 def test_a_child_cannot_link_a_chore(client):
-    plant = _plant(client, assigned_to="noah")
+    plant = _plant(client, assigned_to="jamie")
 
     resp = client.patch(
-        f"/plants/{plant['id']}/assign", headers=CHILD, json={"skylight_sync_enabled": True}
+        f"/plants/{plant['id']}/assign", headers={**CHILD, **LINK}, json={"skylight_sync_enabled": True}
     )
 
     assert resp.status_code == 403
@@ -130,7 +147,7 @@ def test_a_parent_may_link_any_plant(client):
     plant = _plant(client, assigned_to=None)
 
     resp = client.patch(
-        f"/plants/{plant['id']}/assign", headers=PARENT, json={"skylight_sync_enabled": True}
+        f"/plants/{plant['id']}/assign", headers={**PARENT, **LINK}, json={"skylight_sync_enabled": True}
     )
 
     assert resp.status_code == 200
@@ -138,23 +155,23 @@ def test_a_parent_may_link_any_plant(client):
 
 def test_plant_out_reports_the_real_next_care_date_and_the_chore(client):
     plant = _plant(client)
-    client.patch(f"/plants/{plant['id']}/assign", headers=PARENT, json={
-        "skylight_sync_enabled": True, "skylight_chore_id": "52409380", "skylight_assignee": "kaleb",
+    client.patch(f"/plants/{plant['id']}/assign", headers={**PARENT, **LINK}, json={
+        "skylight_sync_enabled": True, "skylight_chore_id": "52409380", "skylight_assignee": "alex",
     })
 
     body = client.get(f"/plants/{plant['id']}", headers=PARENT).json()
 
     assert body["next_due_at"], "a plant with a water rule has a next care date"
     assert body["skylight_chore_id"] == "52409380"
-    assert body["skylight_assignee"] == "kaleb"
+    assert body["skylight_assignee"] == "alex"
 
 
 # --------------------------------------------------------------------------- the completion hook
 
 def _linked_plant(client, chore_id: str = "52409380") -> dict:
-    plant = _plant(client, assigned_to="kaleb")
-    resp = client.patch(f"/plants/{plant['id']}/assign", headers=PARENT, json={
-        "skylight_sync_enabled": True, "skylight_chore_id": chore_id, "skylight_assignee": "kaleb",
+    plant = _plant(client, assigned_to="alex")
+    resp = client.patch(f"/plants/{plant['id']}/assign", headers={**PARENT, **LINK}, json={
+        "skylight_sync_enabled": True, "skylight_chore_id": chore_id, "skylight_assignee": "alex",
     })
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -179,14 +196,14 @@ def test_ticking_the_chore_off_logs_the_watering_and_moves_the_schedule(
     session.commit()
 
     resp = client.post("/hooks/skylight-chore-completed", headers=HOOK, json={
-        "chore_id": "52409380-2026-11-20", "performed_by": "kaleb",
+        "chore_id": "52409380-2026-11-20", "performed_by": "alex",
     })
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["logged"] == 1
     logs = session.exec(select(CareLog).where(CareLog.plant_id == plant["id"])).all()
     assert [(row.action, row.source, row.performed_by) for row in logs] == [
-        ("water", "skylight_chore", "kaleb")
+        ("water", "skylight_chore", "alex")
     ]
     session.refresh(rule)
     assert rule.next_due_at and rule.next_due_at > datetime.now(UTC).isoformat()[:10]
@@ -196,7 +213,7 @@ def test_ticking_the_chore_off_logs_the_watering_and_moves_the_schedule(
 
 def test_the_same_completion_twice_logs_once(client, session):
     plant = _linked_plant(client)
-    payload = {"chore_id": "52409380-2026-11-20", "performed_by": "kaleb"}
+    payload = {"chore_id": "52409380-2026-11-20", "performed_by": "alex"}
 
     first = client.post("/hooks/skylight-chore-completed", headers=HOOK, json=payload).json()
     second = client.post("/hooks/skylight-chore-completed", headers=HOOK, json=payload).json()
@@ -242,21 +259,21 @@ def test_logging_care_here_still_mirrors_to_skylight(client, monkeypatch):
 
 def test_a_parent_may_add_a_plant_for_another_adult(client):
     resp = client.post("/plants", headers=PARENT, json={
-        "category": "houseplant", "species_ref": "monstera_deliciosa", "assigned_to": "gracie",
+        "category": "houseplant", "species_ref": "monstera_deliciosa", "assigned_to": "riley",
     })
 
     assert resp.status_code == 201, resp.text
-    assert resp.json()["assigned_to"] == "gracie"
+    assert resp.json()["assigned_to"] == "riley"
 
 
 def test_an_adult_may_add_a_plant_only_for_themselves(client):
     mine = client.post("/plants", headers=ADULT, json={
-        "category": "houseplant", "species_ref": "monstera_deliciosa", "assigned_to": "kaleb",
+        "category": "houseplant", "species_ref": "monstera_deliciosa", "assigned_to": "alex",
     })
     assert mine.status_code == 201, mine.text
 
     theirs = client.post("/plants", headers=ADULT, json={
-        "category": "houseplant", "species_ref": "monstera_deliciosa", "assigned_to": "noah",
+        "category": "houseplant", "species_ref": "monstera_deliciosa", "assigned_to": "jamie",
     })
     assert theirs.status_code == 403
     assert "parents and admins" in theirs.json()["detail"]
@@ -286,7 +303,7 @@ def test_only_a_watering_completes_the_chore(client, session, monkeypatch):
     )
 
     for action in ("mist", "rotate", "fertilize", "check_pests"):
-        mirror_care_log(session, plant_id=row.id, action=action, performed_by="kaleb")
+        mirror_care_log(session, plant_id=row.id, action=action, performed_by="alex")
 
     assert scheduled == []
 
@@ -309,7 +326,7 @@ def test_a_watering_from_a_sync_handler_actually_posts(client, session, monkeypa
 
     monkeypatch.setattr(sync.threading, "Thread", _Thread)
 
-    sync.mirror_care_log(session, plant_id=row.id, action="water", performed_by="kaleb")
+    sync.mirror_care_log(session, plant_id=row.id, action="water", performed_by="alex")
 
     assert len(started) == 1
     assert started[0]["daemon"] is True
@@ -326,15 +343,65 @@ def test_a_watering_inside_a_running_loop_is_scheduled_not_blocked(client, sessi
     row = session.get(Plant, plant["id"])
     created: list[object] = []
 
+    class _Task:
+        def __init__(self):
+            self.callbacks = []
+
+        def add_done_callback(self, callback):
+            self.callbacks.append(callback)
+
+    task = _Task()
+
     class _Loop:
         def create_task(self, coro):
             created.append(coro)
             coro.close()
-            return None
+            return task
 
     monkeypatch.setattr(sync.asyncio, "get_running_loop", lambda: _Loop())
 
-    sync.mirror_care_log(session, plant_id=row.id, action="water", performed_by="kaleb")
+    sync.mirror_care_log(session, plant_id=row.id, action="water", performed_by="alex")
 
     assert len(created) == 1
     assert asyncio.iscoroutine(created[0])
+    # Held until done, then let go.
+    assert task in sync._pending
+    for callback in task.callbacks:
+        callback(task)
+    assert task not in sync._pending
+
+
+def test_undoing_the_chore_undoes_todays_watering(client, session):
+    from datetime import UTC, datetime, timedelta
+
+    plant = _linked_plant(client)
+    earlier = (datetime.now(UTC) - timedelta(days=3)).isoformat()
+    session.add(CareLog(plant_id=plant["id"], action="water", performed_by="alex", source="manual",
+                        created_at=earlier))
+    session.commit()
+    hook = {"X-Internal-Secret": INTERNAL_SECRET}
+    client.post("/hooks/skylight-chore-completed", headers=hook, json={"chore_id": "52409380", "performed_by": "alex"})
+    session.expire_all()
+    after_tick = session.exec(
+        select(CareRule).where(CareRule.plant_id == plant["id"], CareRule.action == "water")
+    ).first().next_due_at
+
+    resp = client.post("/hooks/skylight-chore-uncompleted", headers=hook, json={"chore_id": "52409380-2026-11-20"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["undone"] == 1
+    session.expire_all()
+    sources = [row.source for row in session.exec(select(CareLog).where(CareLog.plant_id == plant["id"])).all()]
+    assert "skylight_chore" not in sources
+    rule = session.exec(select(CareRule).where(CareRule.plant_id == plant["id"], CareRule.action == "water")).first()
+    # Rescheduled from the watering three days ago, not from now.
+    moved = datetime.fromisoformat(after_tick) - datetime.fromisoformat(rule.next_due_at)
+    assert timedelta(days=2, hours=23) < moved < timedelta(days=3, hours=1)
+
+
+def test_the_hooks_refuse_a_malformed_body(client):
+    hook = {"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"}
+
+    assert client.post("/hooks/skylight-chore-completed", headers=hook, content=b"{nope").status_code == 422
+    assert client.post("/hooks/skylight-chore-uncompleted", headers={"X-Internal-Secret": "wrong"},
+                       json={"chore_id": "1"}).status_code == 403

@@ -88,7 +88,7 @@ async def test_ocr_success_returns_extracted_text(tmpdir, monkeypatch):
 
     monkeypatch.setattr(ocr_mod, "_resolve_workspace_info", fake_resolve)
 
-    async def fake_ocr(path, user_context=None, proxy_url=None, model=None, task="general"):
+    async def fake_ocr(path, user_context=None, proxy_url=None, model=None, task="general", context=None):
         return {"full_text": "MESANAZ.ORG", "headline": "Sunday Worship", "subtext": "", "badge": ""}
 
     monkeypatch.setattr(ocr_mod.vision_ocr, "vision_ocr_screenshot", fake_ocr)
@@ -103,7 +103,7 @@ async def test_ocr_success_returns_extracted_text(tmpdir, monkeypatch):
 async def test_ocr_inline_image_needs_no_workspace_and_leaves_no_file(monkeypatch):
     seen: dict = {}
 
-    async def fake_ocr(path, user_context=None, proxy_url=None, model=None, task="general"):
+    async def fake_ocr(path, user_context=None, proxy_url=None, model=None, task="general", context=None):
         seen["path"], seen["task"] = path, task
         assert Path(path).read_bytes() == b"label-bytes"
         return {"full_text": "Calories 120", "headline": "", "subtext": "", "badge": ""}
@@ -123,7 +123,7 @@ async def test_ocr_inline_accepts_a_real_photo_and_leaves_no_file(monkeypatch):
     image = (_RECIPE_PHOTOS / "sugar-cookies-card.png").read_bytes()
     seen: dict = {}
 
-    async def fake_ocr(path, user_context=None, proxy_url=None, model=None, task="general"):
+    async def fake_ocr(path, user_context=None, proxy_url=None, model=None, task="general", context=None):
         from PIL import Image
 
         seen["path"], seen["task"] = path, task

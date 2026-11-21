@@ -30,6 +30,7 @@ from sqlmodel import Session, select
 
 from services import config
 from services.common import notify
+from services.garden import clock
 from services.garden.models import (
     MAX_DAILY_RUNS_LIMIT,
     MAX_RUN_MINUTES_LIMIT,
@@ -64,6 +65,10 @@ GROW_LIGHT_S = 300
 #: ``(read at, states)`` / ``(read at, tags)``; ``None`` until the first read.
 _states_cache: tuple[float, list[dict[str, Any]]] | None = None
 _tags_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+
+#: Telemetry's address for every admin (``services/telemetry/notices.py``).
+ADMINS = "@admins"
 
 
 class HardwareBlocked(Exception):
@@ -389,18 +394,19 @@ def valve_domain(entity_id: str | None) -> tuple[str, str, str] | None:
 
 
 def runs_today(session: Session, binding: HomeHubBinding, *, now: datetime | None = None) -> int:
-    """How many guarded runs this binding has had today (UTC).
+    """How many guarded runs this binding has had today (the household's day).
 
     Counted from ``garden_valve_runs`` -- one row per run -- because a bed's run
     writes one care log per plant in it. Counting those would make a five-plant
     bed burn its whole daily allowance in one watering, and an empty bed never
     count at all.
     """
-    day_start = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m-%dT00:00:00")
+    day_start, day_end = clock.day_bounds_utc(clock.today(now))
     rows = session.exec(
         select(ValveRun).where(
             ValveRun.binding_id == binding.id,
             ValveRun.started_at >= day_start,
+            ValveRun.started_at < day_end,
         )
     ).all()
     return len(rows)
@@ -458,15 +464,47 @@ async def open_valve(binding: HomeHubBinding) -> None:
         )
 
 
+#: Seconds to wait before each re-read of a valve after closing it. A valve may
+#: report "closing" for a moment; three reads over ~3 s settle it.
+CLOSE_CONFIRM_DELAYS_S: tuple[float, ...] = (0.0, 1.0, 2.0)
+
+
 async def close_valve(binding: HomeHubBinding) -> bool:
-    """Close the bound valve. ``False`` when the hub could not be told."""
+    """Close the bound valve and confirm it. ``False`` unless it no longer reads open.
+
+    The hub accepting the close is not enough: the valve's own state is read
+    back (fresh, not from the cache). A valve still reporting open after the
+    confirmation reads counts as not closed, so the watchdog keeps it and warns.
+    A valve with no state row at all is taken at the hub's word, with a warning.
+    """
     domain = valve_domain(binding.valve_entity_id)
     if domain is None:
         return False
-    ok, detail = await _service(binding.valve_entity_id, domain[2])
+    try:
+        ok, detail = await _service(binding.valve_entity_id, domain[2])
+    except Exception as exc:  # a timeout must not leave the caller thinking it closed
+        log.error("[hardware] close of %s raised %s: %s", binding.valve_entity_id, type(exc).__name__, exc)
+        return False
     if not ok:
         log.warning("[hardware] close failed for %s: %s", binding.valve_entity_id, detail)
-    return ok
+        return False
+    state = None
+    for delay in CLOSE_CONFIRM_DELAYS_S:
+        if delay:
+            await asyncio.sleep(delay)
+        rows = await states(fresh=True)
+        row = {r["entity_id"]: r for r in rows or []}.get(binding.valve_entity_id)
+        if row is None:
+            log.warning(
+                "[hardware] %s closed by the hub, but its state could not be read back",
+                binding.valve_entity_id,
+            )
+            return True
+        state = str(row.get("state") or "").lower()
+        if state not in _OPEN_STATES:
+            return True
+    log.error("[hardware] %s still reports %r after the hub accepted a close", binding.valve_entity_id, state)
+    return False
 
 
 async def run_valve(
@@ -525,6 +563,15 @@ async def run_valve(
 
     if binding.rain_interlock and location is not None and weather_care.is_outdoor_uncovered(location):
         rain = await weather_care.rain_state(profile)
+        if not rain.get("known") and not override_rain:
+            # No forecast means nobody knows whether it rained: say so, and let a
+            # person decide (override_rain) rather than water blind.
+            raise HardwareBlocked(
+                "The rain interlock cannot tell whether it rained (weather is unavailable). "
+                "Run it again with the rain override to water anyway.",
+                status=409,
+                detail=rain,
+            )
         if rain.get("active") and not override_rain:
             raise HardwareBlocked(
                 f"Blocked by rain interlock: {rain.get('rain_in')} in of rain in the last/next hours.",
@@ -533,8 +580,11 @@ async def run_valve(
             )
 
     snapshot = await read_binding_snapshot(binding)
-    await open_valve(binding)
 
+    # The run is recorded *before* the hub is asked to open. An open that times
+    # out may still have opened the valve, and a commit that fails after a
+    # successful open would leave a running valve nobody knows about; recorded
+    # first, the watchdog always knows to close it.
     now = datetime.now(UTC)
     binding.active_run_started_at = now.isoformat()
     binding.active_run_ends_at = (now + timedelta(minutes=requested)).isoformat()
@@ -542,19 +592,36 @@ async def run_valve(
     session.add(binding)
     # One run, one row: this is what ``daily_max_runs`` counts, so a bed with
     # forty plants still gets two runs and an empty bed still gets two.
-    session.add(
-        ValveRun(
-            binding_id=binding.id,
-            valve_entity_id=binding.valve_entity_id,
-            performed_by=performed_by,
-            minutes=requested,
-            trigger=trigger,
-            started_at=binding.active_run_started_at,
-            ends_at=binding.active_run_ends_at,
-        )
+    run = ValveRun(
+        binding_id=binding.id,
+        valve_entity_id=binding.valve_entity_id,
+        performed_by=performed_by,
+        minutes=requested,
+        trigger=trigger,
+        started_at=binding.active_run_started_at,
+        ends_at=binding.active_run_ends_at,
     )
+    session.add(run)
     session.commit()
     session.refresh(binding)
+
+    try:
+        await open_valve(binding)
+    except asyncio.CancelledError:
+        # No awaiting here: make the run due now so the watchdog closes it next tick.
+        binding.active_run_ends_at = datetime.now(UTC).isoformat()
+        session.add(binding)
+        session.commit()
+        raise
+    except Exception as exc:
+        closed = await _after_failed_open(session, binding, exc)
+        first = exc.reason if isinstance(exc, HardwareBlocked) else "Home Hub did not answer when asked to open the valve."
+        raise HardwareBlocked(
+            f"{first} Garden sent a close"
+            + (" and the valve reports closed." if closed else ", which was not confirmed: check the valve."),
+            status=exc.status if isinstance(exc, HardwareBlocked) else 502,
+            detail={"error": type(exc).__name__, "close_confirmed": closed},
+        ) from exc
     log.info(
         "[hardware] valve %s opened for %s min by %s (%s)",
         binding.valve_entity_id, requested, performed_by, binding.target_id,
@@ -569,6 +636,34 @@ async def run_valve(
         "daily_max_runs": binding.daily_max_runs,
         "readings": snapshot,
     }
+
+
+async def _after_failed_open(session: Session, binding: HomeHubBinding, exc: Exception) -> bool:
+    """An open that failed may still have opened the valve: close it, keep the run.
+
+    The ``ValveRun`` row stays (it happened, as far as anyone can tell, and it
+    counts toward the day's cap). With the close confirmed the run is stamped
+    closed; otherwise it stays open and due now, so the watchdog retries the
+    close on its next tick and warns the household if it still will not close.
+    Returns whether the close was confirmed.
+    """
+    log.error(
+        "[hardware] opening %s failed (%s: %s); sending a close",
+        binding.valve_entity_id, type(exc).__name__, getattr(exc, "reason", exc),
+    )
+    closed = await close_valve(binding)
+    if closed:
+        _close_open_runs(session, binding.id)
+        binding.active_run_started_at = None
+        binding.active_run_ends_at = None
+    else:
+        binding.active_run_ends_at = datetime.now(UTC).isoformat()
+        log.error("[hardware] %s may be open after a failed open; the watchdog keeps it", binding.valve_entity_id)
+    binding.updated_at = utcnow()
+    session.add(binding)
+    session.commit()
+    session.refresh(binding)
+    return closed
 
 
 async def stop_valve(session: Session, binding: HomeHubBinding) -> dict[str, Any]:
@@ -623,14 +718,12 @@ def grow_light_window(binding: HomeHubBinding | None, local_now: datetime) -> bo
 
 
 def local_now() -> datetime:
-    """The household's wall clock (``TZ``), so 06:00 means 06:00 at home."""
-    tz_name = os.getenv("TZ", "UTC")
-    try:
-        from zoneinfo import ZoneInfo
+    """The household's wall clock, so 06:00 means 06:00 at home.
 
-        return datetime.now(ZoneInfo(tz_name))
-    except Exception:
-        return datetime.now(UTC)
+    The household zone (``clock``); an unset or invalid one raises
+    ``HouseholdTimeZoneError`` instead of switching lights on UTC's clock.
+    """
+    return clock.now()
 
 
 async def _toggle_light(entity_id: str, on: bool) -> bool:
@@ -642,13 +735,20 @@ async def _toggle_light(entity_id: str, on: bool) -> bool:
     return status in (200, 201)
 
 
+#: The schedule's last answer per binding (and window), to tell a transition
+#: from a light someone switched by hand.
+_last_desired: dict[str, bool] = {}
+
+
 async def sync_grow_lights(
     session_factory: Callable[[], Any], *, now: datetime | None = None
 ) -> list[dict[str, Any]]:
     """Reconcile every scheduled grow light with its photoperiod window.
 
-    Only a *transition* is sent, so a light someone switched by hand is left
-    alone until the schedule genuinely changes its mind.
+    Only a *transition* of the schedule is sent: a light someone switched by
+    hand stays as they left it until the window next opens or closes. The first
+    look at a binding (after a start, or a new schedule) has no transition to
+    wait for, so it brings the light to the schedule once.
     """
     actions: list[dict[str, Any]] = []
     if not enabled():
@@ -663,6 +763,11 @@ async def sync_grow_lights(
             desired = grow_light_window(binding, moment)
             if desired is None:
                 continue
+            key = f"{binding.id}:{binding.grow_light_on_time}-{binding.grow_light_off_time}"
+            previous = _last_desired.get(key)
+            _last_desired[key] = desired
+            if previous is not None and previous == desired:
+                continue  # no transition: leave a hand-switched light alone
             row = rows.get(binding.grow_light_entity_id or "")
             if row is None:
                 continue
@@ -774,17 +879,52 @@ async def check_valve_failsafe(
             # parent to go and look at the valve.
             results.append({"binding_id": binding.id, "closed": False})
             once = f"open-valve:{binding.id}:{binding.active_run_started_at or moment.isoformat()}"
-            for member in await (get_family or _family)():
-                await _send_open_valve_alert(
-                    member,
-                    "Irrigation valve may still be open",
-                    (
-                        f"Home Hub could not confirm that {binding.valve_entity_id} closed after its "
-                        f"{binding.max_run_minutes}-minute run. Check the valve now."
-                    ),
-                    once,
-                )
+            await alert_valve_may_be_open(
+                "Irrigation valve may still be open",
+                (
+                    f"Home Hub could not confirm that {binding.valve_entity_id} closed after its "
+                    f"{binding.max_run_minutes}-minute run. Check the valve now."
+                ),
+                once,
+                get_family or _family,
+            )
     return results
+
+
+async def alert_valve_may_be_open(
+    title: str, body: str, once: str, get_family: Callable[[], Any]
+) -> None:
+    """Warn the household that a valve may be open; never silently nobody.
+
+    The family list comes from Identity. If it cannot be read, or is empty, that
+    is logged as an error and the alert goes to ``@admins`` instead: telemetry
+    resolves that address itself, so the warning cannot vanish because one
+    lookup failed.
+    """
+    members: list[str] = []
+    try:
+        members = list(await get_family() or [])
+    except Exception as exc:
+        log.error("[hardware] listing the family for an open-valve alert failed: %s", exc)
+    if members:
+        for member in members:
+            await _send_open_valve_alert(member, title, body, once)
+        return
+    log.error("[hardware] no family list for an open-valve alert (%s); alerting admins instead", once)
+    payload = notify.notice(
+        user=ADMINS,
+        category="admin",
+        title=title,
+        body=body,
+        priority=5,
+        tag=f"garden_valve:{once}",
+        once=once,
+        kind="garden_valve_failsafe",
+        url="/garden",
+    )
+    if not await notify.send(payload):
+        log.error("[hardware] the admin open-valve alert was not delivered either: %s", body)
+
 
 
 async def valve_watchdog(

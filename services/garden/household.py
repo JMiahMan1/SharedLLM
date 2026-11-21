@@ -1,18 +1,17 @@
 """How many people the household has -- asked of Identity, never guessed.
 
 The planner sizes a garden by "how many are we feeding", and that number is the
-household roster, which Identity owns (``GET /api/internal/household``). Garden
-used to write ``7`` at every place it needed a family size, so adding a member
-left the planner planting for the old family and nothing said so.
+household roster, which Identity owns (``GET /api/internal/household``, which
+leaves out the stack's own system account). Garden keeps no copy of it: the
+profile stores only an explicit override a person typed
+(``GardenProfile.family_size_override``), and everything else asks Identity.
 
-Like the Home Hub rooms client, this degrades instead of raising: with Identity
-unreachable :func:`size` returns ``None`` and the caller uses
-:data:`LAST_RESORT` -- one documented number in one place, rather than a literal
-repeated at four call sites.
+There is no fallback number. With Identity unreachable and no override,
+:func:`size_or_raise` raises :class:`HouseholdUnavailable` and the route answers
+503 saying so, instead of planting for a family size someone made up.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 
@@ -22,9 +21,6 @@ from services import config
 
 log = logging.getLogger("garden.household")
 
-#: What to plan for when Identity cannot be reached. A fallback, not the source.
-LAST_RESORT = 7
-
 #: Identity answers in milliseconds on the compose network.
 TIMEOUT_S = 3.0
 
@@ -32,8 +28,18 @@ TIMEOUT_S = 3.0
 #: keeps a page of planner calls to one request without hiding that.
 _CACHE_TTL_S = 300.0
 
-#: ``(read at, members)``; ``None`` until the first successful read.
-_cache: tuple[float, int] | None = None
+#: ``(read at, members, usernames)``; ``None`` until the first successful read.
+_cache: tuple[float, int, tuple[str, ...]] | None = None
+
+#: What a person reads when the size cannot be known.
+UNAVAILABLE_DETAIL = (
+    "The household size comes from Identity, which did not answer. "
+    "Try again shortly, or set a family size on the garden profile."
+)
+
+
+class HouseholdUnavailable(RuntimeError):
+    """Identity could not say how many people are in the household."""
 
 
 def invalidate() -> None:
@@ -43,11 +49,31 @@ def invalidate() -> None:
 
 
 async def size() -> int | None:
-    """How many people are in the household, or ``None`` when Identity is away."""
+    """How many people are in the household, or ``None`` when Identity cannot say."""
+    roster = await _roster()
+    return roster[1] if roster else None
+
+
+async def usernames() -> set[str]:
+    """Everyone in the household (Identity usernames, lower case).
+
+    Raises :class:`HouseholdUnavailable` when Identity cannot say: a check that
+    someone is in the household must not pass because the list was empty.
+    """
+    roster = await _roster()
+    if roster is None:
+        raise HouseholdUnavailable(
+            "Identity did not answer, so Garden cannot check who is in the household. Try again shortly."
+        )
+    return set(roster[2])
+
+
+async def _roster() -> tuple[float, int, tuple[str, ...]] | None:
+    """Identity's roster, cached briefly; ``None`` when it cannot be read."""
     global _cache
     now = time.monotonic()
     if _cache is not None and now - _cache[0] < _CACHE_TTL_S:
-        return _cache[1]
+        return _cache
     url = f"{config.IDENTITY_SVC_URL.rstrip('/')}/api/internal/household"
     try:
         async with aiohttp.ClientSession(
@@ -56,22 +82,35 @@ async def size() -> int | None:
             url, headers={"X-Internal-Secret": config.INTERNAL_SECRET}
         ) as resp:
             if resp.status != 200:
-                log.info("[household] Identity answered %s; using %s", resp.status, LAST_RESORT)
+                log.warning("[household] Identity answered HTTP %s for the roster", resp.status)
                 return None
             data = await resp.json(content_type=None)
-    except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
-        log.info("[household] Identity did not answer (%s); using %s", exc, LAST_RESORT)
+    except (TimeoutError, aiohttp.ClientError, OSError) as exc:
+        log.warning("[household] Identity did not answer for the roster: %s", exc)
         return None
     try:
         members = int((data or {}).get("members") or 0)
     except (TypeError, ValueError):
+        log.warning("[household] Identity's roster had no usable member count: %r", data)
         return None
     if members < 1:
+        log.warning("[household] Identity reports an empty household")
         return None
-    _cache = (now, members)
+    names = tuple(str(name).strip().lower() for name in (data or {}).get("usernames") or [] if name)
+    _cache = (now, members, names)
+    return _cache
+
+
+async def size_or_raise() -> int:
+    """The household's size from Identity; :class:`HouseholdUnavailable` otherwise."""
+    members = await size()
+    if members is None:
+        raise HouseholdUnavailable(UNAVAILABLE_DETAIL)
     return members
 
 
-async def size_or_last_resort() -> int:
-    """The household's size, or :data:`LAST_RESORT` when it cannot be read."""
-    return await size() or LAST_RESORT
+async def family_size(override: int | None) -> int:
+    """An explicit override if a person set one, else Identity's roster (or raise)."""
+    if override:
+        return int(override)
+    return await size_or_raise()

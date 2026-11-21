@@ -13,8 +13,10 @@ caller to read out, and a missing plant is said plainly.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, Awaitable, Callable
+from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -24,6 +26,35 @@ log = logging.getLogger("gateway.garden_assist")
 GardenCall = Callable[..., Awaitable[dict]]
 
 _TIMEOUT = aiohttp.ClientTimeout(total=20)
+
+
+def seg(value: Any) -> str:
+    """One URL path segment from a caller's value, percent-encoded entirely.
+
+    Plant, room, harvest and plan ids reach Garden paths from client input (a
+    push button's params, a route's path parameter). Encoded with ``safe=""`` a
+    ``/``, ``?`` or ``#`` cannot add a segment, a query or a fragment, so
+    "../hooks/weather#" stays one (unknown) id instead of reaching the weather
+    hook with the internal secret.
+    """
+    text = str(value if value is not None else "")
+    if not text or text in (".", ".."):
+        raise ValueError(f"not a usable id: {text!r}")
+    return quote(text, safe="")
+
+
+def checked_path(path: str) -> str:
+    """Refuse a Garden path that could leave its route: ``..``, ``?``, ``#``, ``\\``.
+
+    Every Garden call carries ``X-Internal-Secret``; a path built from client
+    input must never reach a different route than the one the code named.
+    Queries go in ``params``, never in the path.
+    """
+    if not path.startswith("/") or any(bad in path for bad in ("?", "#", "\\")):
+        raise ValueError(f"refusing Garden path {path!r}")
+    if any(part in (".", "..") for part in path.split("/")):
+        raise ValueError(f"refusing Garden path {path!r}")
+    return path
 
 
 def garden_headers(creds: Any) -> dict[str, str]:
@@ -57,7 +88,7 @@ async def call_garden(
 
     async with shared_http_client() as client, client.request(
         method,
-        f"{GARDEN_SVC.rstrip('/')}{path}",
+        f"{GARDEN_SVC.rstrip('/')}{checked_path(path)}",
         params=params,
         json=json,
         headers=garden_headers(creds),
@@ -76,14 +107,28 @@ async def call_garden(
 
 
 def due_phrase(next_due_at: str | None) -> str:
-    """``"today"``, ``"in 3 days"``, ``"2 days ago"`` -- from a due timestamp."""
+    """``"today"``, ``"in 3 days"``, ``"2 days ago"`` -- from a due timestamp.
+
+    Days are the household's (``services/common/household_tz``): in UTC an
+    evening due time read as "tomorrow". Without a configured zone this says
+    so instead of counting in UTC.
+    """
     if not next_due_at:
         return ""
     try:
         when = datetime.fromisoformat(str(next_due_at).replace("Z", "+00:00"))
     except ValueError:
         return ""
-    days = (when.date() - datetime.now(UTC).date()).days
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    from services.common import household_tz
+
+    try:
+        zone = household_tz.zoneinfo()
+    except household_tz.HouseholdTimeZoneError as exc:
+        log.error("[Garden] cannot say when care is due: %s", exc)
+        return "at a time I can't name (the household time zone is not set)"
+    days = (when.astimezone(zone).date() - datetime.now(zone).date()).days
     if days == 0:
         return "today"
     if days == 1:
@@ -98,9 +143,45 @@ def plant_label(plant: dict) -> str:
     return str(plant.get("nickname") or plant.get("common_name") or plant.get("species_ref") or "that plant")
 
 
-async def resolve_target(creds: Any, target: str, *, call: GardenCall = call_garden) -> dict:
-    """``GET /plants/resolve`` for a spoken or typed name."""
-    return await call("GET", "/plants/resolve", creds=creds, params={"q": target})
+async def resolve_target(
+    creds: Any,
+    target: str,
+    *,
+    whole_phrase: bool = False,
+    call: GardenCall = call_garden,
+) -> dict:
+    """``GET /plants/resolve`` for a spoken or typed name.
+
+    ``whole_phrase`` asks the Garden to match only names the phrase is wholly
+    made of ("bedroom", "monstera"), never a name buried inside a longer phrase
+    ("the bedroom at 6"): voice sentences must not reach a plant by accident.
+    """
+    params = {"q": target}
+    if whole_phrase:
+        params["whole"] = "true"
+    return await call("GET", "/plants/resolve", creds=creds, params=params)
+
+
+#: Said when the Garden cannot be reached.
+UNAVAILABLE_MESSAGE = "I couldn't reach the garden just now."
+
+
+async def _resolve_or_report(
+    creds: Any, target: str, *, whole_phrase: bool, call: GardenCall
+) -> tuple[dict, dict | None]:
+    """``(resolved, None)`` or ``({}, failure answer)``; a failure is never a match."""
+    try:
+        resolved = await resolve_target(creds, target, whole_phrase=whole_phrase, call=call)
+    except Exception as exc:
+        log.warning("[Garden] resolve '%s' failed: %s: %s", target, type(exc).__name__, exc)
+        return {}, {"status": "unavailable", "message": UNAVAILABLE_MESSAGE}
+    if resolved.get("__error__"):
+        log.warning("[Garden] resolve '%s' answered %s: %s", target, resolved.get("__status__"), resolved["__error__"])
+        return {}, {"status": "error", "message": f"The garden said: {resolved['__error__']}"}
+    if resolved.get("match_type") not in ("plant", "location", "ambiguous", "none"):
+        log.error("[Garden] resolve '%s' gave no match_type: %r", target, resolved)
+        return {}, {"status": "error", "message": "The garden gave an answer I could not read."}
+    return resolved, None
 
 
 def _names(plants: list[dict]) -> str:
@@ -130,18 +211,17 @@ async def log_care(
     still_damp: bool = False,
     source: str = "voice",
     postpone_days: float | None = None,
+    whole_phrase: bool = False,
     call: GardenCall = call_garden,
 ) -> dict:
     """Water / fertilize / mist / snooze whatever ``target`` names.
 
     Returns ``{"status", "message", ...}`` where status is one of ``logged``,
-    ``snoozed``, ``ambiguous``, ``not_found`` or ``error``.
+    ``snoozed``, ``ambiguous``, ``not_found``, ``unavailable`` or ``error``.
     """
-    try:
-        resolved = await resolve_target(creds, target, call=call)
-    except Exception as exc:
-        log.warning("[Garden] resolve '%s' failed: %s", target, type(exc).__name__)
-        return {"status": "error", "message": "I couldn't reach the garden just now."}
+    resolved, failure = await _resolve_or_report(creds, target, whole_phrase=whole_phrase, call=call)
+    if failure is not None:
+        return failure
 
     match = resolved.get("match_type")
     if match == "none":
@@ -162,7 +242,7 @@ async def log_care(
             }
         answer = await call(
             "POST",
-            f"/locations/{location.get('location_id')}/water-all",
+            f"/locations/{seg(location.get('location_id'))}/water-all",
             creds=creds,
             params={"source": source},
         )
@@ -186,7 +266,7 @@ async def log_care(
         params = {"still_damp": "true"}
         if postpone_days is not None:
             params["postpone_days"] = str(postpone_days)
-        answer = await call("POST", f"/plants/{plant_id}/snooze", creds=creds, params=params)
+        answer = await call("POST", f"/plants/{seg(plant_id)}/snooze", creds=creds, params=params)
         if answer.get("__error__"):
             return {"status": "error", "message": f"The garden said: {answer['__error__']}"}
         when = due_phrase(answer.get("next_due_at"))
@@ -199,7 +279,7 @@ async def log_care(
 
     answer = await call(
         "POST",
-        f"/plants/{plant_id}/care",
+        f"/plants/{seg(plant_id)}/care",
         creds=creds,
         json={"action": action, "source": source},
     )
@@ -233,14 +313,13 @@ async def log_harvest(
     unit: str = "lb",
     disposition: str = "fresh",
     notes: str | None = None,
+    whole_phrase: bool = False,
     call: GardenCall = call_garden,
 ) -> dict:
     """Record a harvest against whatever ``target`` names (open to every role)."""
-    try:
-        resolved = await resolve_target(creds, target, call=call)
-    except Exception as exc:
-        log.warning("[Garden] resolve '%s' failed: %s", target, type(exc).__name__)
-        return {"status": "error", "message": "I couldn't reach the garden just now."}
+    resolved, failure = await _resolve_or_report(creds, target, whole_phrase=whole_phrase, call=call)
+    if failure is not None:
+        return failure
 
     match = resolved.get("match_type")
     if match == "none":
@@ -261,7 +340,7 @@ async def log_harvest(
     label = plant_label(plant)
     answer = await call(
         "POST",
-        f"/plants/{plant.get('plant_id')}/harvest",
+        f"/plants/{seg(plant.get('plant_id'))}/harvest",
         creds=creds,
         json={
             "quantity": quantity,
@@ -283,10 +362,31 @@ async def log_harvest(
 
 
 async def summarize(creds: Any, *, call: GardenCall = call_garden) -> dict:
-    """Today's care, harvest-ready plants and pantry progress, in one answer."""
-    today = await call("GET", "/today", creds=creds)
-    ready = await call("GET", "/harvest/ready", creds=creds)
-    pantry = await call("GET", "/pantry-batches", creds=creds)
+    """Today's care, harvest-ready plants and pantry progress, in one answer.
+
+    A failed read is never summarised as "nothing needs care": the answer says
+    which part could not be read (``status`` ``error``), or that the garden is
+    unreachable (``status`` ``unavailable``).
+    """
+    try:
+        today = await call("GET", "/today", creds=creds)
+        ready = await call("GET", "/harvest/ready", creds=creds)
+        pantry = await call("GET", "/pantry-batches", creds=creds)
+    except Exception as exc:
+        log.warning("[Garden] summary failed: %s: %s", type(exc).__name__, exc)
+        return {"status": "unavailable", "message": UNAVAILABLE_MESSAGE}
+    failed = [
+        (label, answer)
+        for label, answer in (("today's care", today), ("the harvest list", ready), ("the pantry", pantry))
+        if answer.get("__error__")
+    ]
+    if failed:
+        label, answer = failed[0]
+        log.warning("[Garden] summary: %s answered %s: %s", label, answer.get("__status__"), answer["__error__"])
+        return {
+            "status": "error",
+            "message": f"I couldn't read {label} from the garden: {answer['__error__']}",
+        }
 
     due = int(today.get("due_count") or 0)
     overdue = int(today.get("overdue_count") or 0)

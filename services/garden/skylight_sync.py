@@ -19,6 +19,9 @@ from services.garden.models import Plant, Location
 
 log = logging.getLogger("garden.skylight_sync")
 
+#: Mirror tasks still running, held so they are not garbage collected mid-flight.
+_pending: set = set()
+
 
 def should_sync(obj: Plant | Location) -> bool:
     """True if this plant/location has Skylight sync enabled."""
@@ -75,7 +78,9 @@ def mirror_care_log(
 
     async def _post_complete() -> None:
         headers = {"X-Internal-Secret": secret}
-        params = {"user": performed_by or ""}
+        # origin=garden: Execution must not report this completion back to
+        # Garden's hook, which would log the same watering a second time.
+        params = {"user": performed_by or "", "origin": "garden"}
         try:
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=10.0)
@@ -109,8 +114,12 @@ def mirror_care_log(
 
     if loop is not None:
         # A running loop that is not ours to block on: let it finish in the
-        # background (this is the async-handler case).
-        loop.create_task(_post_complete())
+        # background (this is the async-handler case). The loop keeps only a
+        # weak reference to a task, so one nobody holds can be collected before
+        # it runs: keep it until it is done.
+        task = loop.create_task(_post_complete())
+        _pending.add(task)
+        task.add_done_callback(_pending.discard)
         return
 
     # A plain ``def`` FastAPI handler runs in a worker thread with no loop, and

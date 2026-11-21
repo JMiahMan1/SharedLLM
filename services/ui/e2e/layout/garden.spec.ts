@@ -244,11 +244,11 @@ async function openGarden(page: Page, path = '/garden'): Promise<Run> {
     }
     if (p === '/api/users/family-directory') {
       return json([
-        { username: 'mother', display_name: 'Michele', nextcloud_user: null, avatar: null, family_role: 'mother' },
-        { username: 'father', display_name: 'Jeremiah', nextcloud_user: null, avatar: null, family_role: 'father' },
-        { username: 'kaleb', display_name: 'Kaleb', nextcloud_user: null, avatar: null, family_role: 'adult_child' },
-        { username: 'gracie', display_name: 'Gracie', nextcloud_user: null, avatar: null, family_role: 'teen' },
-        { username: 'noah', display_name: 'Noah', nextcloud_user: null, avatar: null, family_role: 'child' },
+        { username: 'mother', display_name: 'Pat', nextcloud_user: null, avatar: null, family_role: 'mother' },
+        { username: 'father', display_name: 'Sam', nextcloud_user: null, avatar: null, family_role: 'father' },
+        { username: 'alex', display_name: 'Alex', nextcloud_user: null, avatar: null, family_role: 'adult_child' },
+        { username: 'riley', display_name: 'Riley', nextcloud_user: null, avatar: null, family_role: 'teen' },
+        { username: 'jamie', display_name: 'Jamie', nextcloud_user: null, avatar: null, family_role: 'child' },
       ]);
     }
     if (/^\/api\/garden\/plants\/[^/]+\/skylight-options$/.test(p)) {
@@ -256,8 +256,8 @@ async function openGarden(page: Page, path = '/garden'): Promise<Run> {
         can_assign_skylight: true,
         skylight_configured: true,
         eligible_assignees: [
-          { username: 'mother', display_name: 'Michele', family_role: 'mother', skylight_name: 'Michele', is_self: true },
-          { username: 'noah', display_name: 'Noah', family_role: 'child', skylight_name: 'Noah', is_self: false },
+          { username: 'mother', display_name: 'Pat', family_role: 'mother', skylight_name: 'Pat', is_self: true },
+          { username: 'jamie', display_name: 'Jamie', family_role: 'child', skylight_name: 'Jamie', is_self: false },
         ],
         current_chore_id: null,
         current_assignee: null,

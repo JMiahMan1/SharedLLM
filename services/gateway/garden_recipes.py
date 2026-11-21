@@ -8,7 +8,7 @@ credentials never reach ``services/garden``.
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 import os
 import re
@@ -17,18 +17,16 @@ from typing import Any
 import aiohttp
 from fastapi import HTTPException, Request
 
-from services.gateway.config import GARDEN_SVC, INTERNAL_SECRET
 from services.gateway import cookbook
+from services.gateway.config import GARDEN_SVC, INTERNAL_SECRET
 from services.gateway.main import shared_http_client
 
 log = logging.getLogger("garden_recipes")
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
 
-#: Servings for a drafted recipe when the garden profile cannot be read at all.
-#: The family size itself is Identity's roster, which the garden carries on its
-#: profile (``GET /api/garden/profile``); this only covers garden being away.
-_FALLBACK_SERVINGS = 7
+#: How many cookbook recipes are read at once when matching produce.
+_READ_CONCURRENCY = 8
 
 
 def _garden_headers(caller: Any) -> dict[str, str]:
@@ -131,16 +129,23 @@ async def recipe_matches(run: Any, caller: Any) -> dict:
 
     recipe_notes = (listed.get("detail") or {}).get("notes", []) or []
     matches: list[dict] = []
+    paths = [note.get("path", "") for note in recipe_notes if cookbook.is_recipe_path(note.get("path", ""))]
+    if not ready_ingredients or not paths:
+        # Nothing is ready to match: reading every recipe would answer nothing.
+        return {"ready_ingredients": ready_ingredients, "matches": []}
 
-    for note in recipe_notes:
-        path = note.get("path", "")
-        if not cookbook.is_recipe_path(path):
-            continue
-        try:
-            read = await cookbook.read_recipe(run, caller, path)
-        except Exception:
-            continue
-        if read.get("status") != "SUCCESS":
+    gate = asyncio.Semaphore(_READ_CONCURRENCY)
+
+    async def read_one(path: str) -> tuple[str, dict | None]:
+        async with gate:
+            try:
+                return path, await cookbook.read_recipe(run, caller, path)
+            except Exception as exc:
+                log.warning("[GardenRecipes] could not read recipe %s: %s", path, exc)
+                return path, None
+
+    for path, read in await asyncio.gather(*(read_one(path) for path in paths)):
+        if read is None or read.get("status") != "SUCCESS":
             continue
         body = read.get("message", "")
         if not body:
@@ -205,6 +210,39 @@ async def recipe_matches(run: Any, caller: Any) -> dict:
 
 # ── Recipe drafting ──────────────────────────────────────────────────────
 
+async def _household_servings(garden_hdrs: dict[str, str]) -> int:
+    """The household size from the garden profile, or a 503 that says why not."""
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{GARDEN_SVC.rstrip('/')}/profile",
+                headers=garden_hdrs,
+                timeout=_TIMEOUT,
+            )
+            status = resp.status
+            profile = await resp.json(content_type=None) if status == 200 else None
+    except (aiohttp.ClientError, TimeoutError, OSError) as exc:
+        log.warning("[GardenRecipes] the garden profile could not be read: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="The garden is unavailable, so the household size is unknown. Say how many servings.",
+        ) from None
+    if status != 200 or not isinstance(profile, dict):
+        log.warning("[GardenRecipes] the garden profile answered HTTP %s", status)
+        raise HTTPException(
+            status_code=503,
+            detail=f"The garden profile could not be read (HTTP {status}). Say how many servings.",
+        )
+    size = profile.get("family_size")
+    if not size:
+        raise HTTPException(
+            status_code=503,
+            detail=profile.get("family_size_detail")
+            or "The household size is unknown right now. Say how many servings.",
+        )
+    return int(size)
+
+
 async def recipe_draft(
     run: Any,
     caller: Any,
@@ -218,24 +256,19 @@ async def recipe_draft(
     to ready garden produce.  Returns markdown in Nextcloud Notes format
     for user review -- NOT saved to the cookbook.
     """
-    # Resolve servings from garden_profile.family_size (the household roster).
+    # Servings: the caller's number, else the household size the garden profile
+    # resolves (an explicit override, else Identity's roster). There is no
+    # fallback: a recipe for a made-up family is worse than a clear error.
     garden_hdrs = _garden_headers(caller)
     servings = body.get("servings")
     if servings is None:
-        try:
-            async with shared_http_client() as client:
-                resp = await client.get(
-                    f"{GARDEN_SVC.rstrip('/')}/profile",
-                    headers=garden_hdrs,
-                    timeout=_TIMEOUT,
-                )
-                if resp.status == 200:
-                    profile = await resp.json(content_type=None)
-                    servings = int(profile.get("family_size") or _FALLBACK_SERVINGS)
-        except Exception:
-            pass
-    if not servings or servings < 1:
-        servings = _FALLBACK_SERVINGS
+        servings = await _household_servings(garden_hdrs)
+    try:
+        servings = int(servings)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="servings must be a whole number") from None
+    if servings < 1:
+        raise HTTPException(status_code=422, detail="servings must be at least 1")
 
     # Resolve ingredients: from body or ready garden produce.
     ingredients = body.get("ingredients") or []

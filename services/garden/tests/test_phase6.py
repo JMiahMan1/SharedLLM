@@ -31,8 +31,8 @@ def _headers(user: str, role: str) -> dict[str, str]:
 
 
 PARENT = _headers("mother", "mother")
-ADULT = _headers("kaleb", "adult_child")
-CHILD = _headers("noah", "child")
+ADULT = _headers("alex", "adult_child")
+CHILD = _headers("jamie", "child")
 
 TODAY = date(2026, 11, 20)
 
@@ -354,7 +354,7 @@ def test_a_child_may_not_log_a_batch(client):
 def test_an_adult_may_log_a_batch(client):
     batch = _batch(client, headers=ADULT)
 
-    assert batch["logged_by"] == "kaleb"
+    assert batch["logged_by"] == "alex"
 
 
 def test_a_bad_date_is_refused_with_a_clear_message(client):
@@ -374,7 +374,7 @@ def test_everyone_may_take_a_jar_out_including_children(client):
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["qty_remaining"] == 5.0
-    assert resp.json()["used_by"] == "noah"
+    assert resp.json()["used_by"] == "jamie"
 
 
 def test_using_the_last_jar_clamps_at_zero(client):
