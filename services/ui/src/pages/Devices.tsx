@@ -306,6 +306,9 @@ function EsphomeDeviceSection({
   const [notifyTitle, setNotifyTitle] = useState('');
   const [notifyMsg, setNotifyMsg] = useState('');
   const [otaPassword, setOtaPassword] = useState('');
+  // Two-step confirm for "Remove from Jarvis": it detaches the device from the
+  // household's Jarvis, so it asks in place rather than using window.confirm.
+  const [confirmForget, setConfirmForget] = useState(false);
 
   const probe = useMutation({
     mutationFn: () => api.esphomeList(target),
@@ -346,6 +349,25 @@ function EsphomeDeviceSection({
       toast.success(res.message || `Synced Jarvis URL and API key to ${device.label || target}`);
     },
     onError: (e: Error) => toast.error(e.message || 'Could not sync Jarvis credentials to this device'),
+  });
+
+  // The escape hatch for a stale entry: a device reflashed over USB keeps an
+  // address and a key here that no longer work, and every call then fails the
+  // handshake with a "plaintext" complaint. This forgets Jarvis's side only --
+  // the device keeps running, its Wi-Fi and its settings -- so the next Add
+  // device pairs it from scratch.
+  const forgetDevice = useMutation({
+    mutationFn: () => api.forgetEsphomeDevice(target),
+    onSuccess: (res) => {
+      if (res.status === 'FAILURE') {
+        toast.error(res.message || 'Could not remove this device from Jarvis');
+        return;
+      }
+      toast.success(res.message || 'Removed from Jarvis. Use Add device to pair it again.');
+      queryClient.invalidateQueries({ queryKey: ['companion-devices'] });
+      onRefresh();
+    },
+    onError: (e: Error) => toast.error(e.message || 'Could not remove this device from Jarvis'),
   });
 
   const triggerEntity = useMutation({
@@ -881,6 +903,47 @@ function EsphomeDeviceSection({
             {syncJarvis.isPending ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Sync Jarvis key &amp; URL
           </button>
         )}
+        {isAdmin && (confirmForget ? (
+          <span
+            className="inline-flex flex-wrap items-center gap-1.5"
+            data-testid={`mdm-esphome-forget-confirmbox-${device.device_key}`}
+          >
+            <span className="text-xs text-rose-200">
+              Forget its address, key and owner here? The {deviceNoun(device.kind)} keeps running.
+            </span>
+            <button
+              type="button"
+              disabled={forgetDevice.isPending}
+              onClick={() => {
+                setConfirmForget(false);
+                forgetDevice.mutate();
+              }}
+              className={`glass-button px-3 text-xs bg-rose-600/30 text-rose-100 border-rose-400/30 ${TOUCH}`}
+              data-testid={`mdm-esphome-forget-yes-${device.device_key}`}
+            >
+              {forgetDevice.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Remove
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmForget(false)}
+              className={`glass-button px-2 text-xs ${TOUCH}`}
+              data-testid={`mdm-esphome-forget-no-${device.device_key}`}
+            >
+              Keep
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            disabled={forgetDevice.isPending}
+            onClick={() => setConfirmForget(true)}
+            className={`glass-button px-3 text-xs text-rose-300 ${TOUCH}`}
+            data-testid={`mdm-esphome-forget-${device.device_key}`}
+            title="Forget this device in Jarvis, e.g. after it was reflashed and its stored key went stale"
+          >
+            <Trash2 size={14} /> Remove from Jarvis
+          </button>
+        ))}
         <button
           type="button"
           onClick={onOpenDetails}

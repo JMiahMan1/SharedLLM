@@ -226,7 +226,11 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
                   </p>
                 )}
                 {!discover.isError && found && found.length === 0 && !discover.isPending && (
-                  <p className="text-sm text-slate-400">No new devices found. Enter its address below.</p>
+                  <p className="text-sm text-slate-400">
+                    No new devices answered. A watch or assistant only shows up while it is awake
+                    and on Wi-Fi — put it on the charger so it stays up, then search again, or type
+                    its address below.
+                  </p>
                 )}
                 {found?.map((d) => (
                   <button

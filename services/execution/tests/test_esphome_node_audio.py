@@ -89,7 +89,7 @@ async def test_an_alarm_on_the_node_plays_the_converted_url(hub, monkeypatch):
     async def get_device(name):
         return {"name": name}
 
-    async def with_connection(cfg, op):
+    async def with_connection(cfg, op, name=None):
         return await op(Node())
 
     monkeypatch.setattr(esphome_client, "get_device", get_device)

@@ -331,6 +331,22 @@ describe('Devices page', () => {
         params: null,
       }),
     );
+
+    // Remove from Jarvis: the escape hatch after a USB reflash leaves the
+    // stored key stale. Two steps in place, because it detaches the device.
+    fireEvent.click(screen.getByTestId('mdm-esphome-forget-esphome:744dbd2c9728'));
+    expect(esphomeCalls).toHaveLength(3);   // opening the confirm sends nothing
+    expect(screen.getByTestId('mdm-esphome-forget-confirmbox-esphome:744dbd2c9728'))
+      .toHaveTextContent('keeps running');
+
+    fireEvent.click(screen.getByTestId('mdm-esphome-forget-no-esphome:744dbd2c9728'));
+    expect(esphomeCalls).toHaveLength(3);   // "Keep" backs out
+
+    fireEvent.click(screen.getByTestId('mdm-esphome-forget-esphome:744dbd2c9728'));
+    fireEvent.click(screen.getByTestId('mdm-esphome-forget-yes-esphome:744dbd2c9728'));
+    await waitFor(() =>
+      expect(esphomeCalls[3]).toEqual({ action: 'forget', device: 'Jarvis Watch' }),
+    );
   });
 
   it('monitors live telemetry, controls smart screens/speakers/watches, and pushes OTA firmware', async () => {

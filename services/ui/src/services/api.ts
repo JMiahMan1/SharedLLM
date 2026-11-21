@@ -5635,6 +5635,14 @@ export const api = {
     return resp.data;
   },
 
+  /** Forget a device in Jarvis (admin). The device keeps running; its stored
+   * address, key and owner are dropped so it can be paired again -- the escape
+   * hatch after a USB reflash leaves the stored key stale. */
+  async forgetEsphomeDevice(device: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/esphome', { action: 'forget', device });
+    return resp.data;
+  },
+
   async esphomeCommand(device: string, entity: string, params?: Record<string, unknown>): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/execute/esphome', {
       action: 'call',

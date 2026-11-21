@@ -17,7 +17,7 @@ one source of truth for devices, screen rules and the family list. The page is
 | Device kind / label / owner update | `PATCH /api/user-panel/devices/{key}` | admin |
 | App-update push | `POST /api/mdm/devices/update` | admin |
 | A phone's own queued notices | `POST /api/mdm/devices/notices/ack` | the device's owner |
-| Direct ESPHome management | `POST /execute/esphome` (`list`, `call`, `configure_jarvis`, `ota`) | authenticated / admin |
+| Direct ESPHome management | `POST /execute/esphome` (`list`, `call`, `configure_jarvis`, `ota`, `forget`) | authenticated / admin |
 | ESPHome OTA firmware upload | `POST /api/mdm/esphome/{device}/ota` | admin |
 | Shared School and Library folders | `GET/POST/DELETE /api/mdm/files*` | admin |
 | A child's own folders | `GET /api/mdm/files/for-me` | any member |
@@ -67,7 +67,19 @@ Not every registered device is an Android phone:
        - Smart screen / wall panel quick actions (when the screen exposes `show_page`, `set_rotation`, or `show_dlg`, e.g. `esphome-waveshare7` / `cyd`): page switcher (`Home`, `Now Playing`, `Lights`, `Settings`, `Weather`, `Intercom`), orientation (`0°` / `180°`), and dialog trigger (`Drop-In`, `Broadcast`, `Close`).
      - **Remote OTA firmware update** (`POST /api/mdm/esphome/{device}/ota` -> `POST /execute/esphome` `action: "ota"`): uploads a compiled `.bin` (or `.bin.gz` / `.ota`) image and streams it directly to the node using ESPHome's native TCP OTA v1/v2 binary wire protocol on port `3232` (with gzip compression and optional MD5/SHA256 password authentication), falling back to the ESPHome `web_server` `POST /update` multipart endpoint on port `80` when TCP `3232` is closed. Every OTA flash is recorded in `audit.json` under `esphome_ota`.
      - **Sync Jarvis key & URL** (`POST /execute/esphome` `action: "configure_jarvis"`) to re-provision the Jarvis endpoint URL and a fresh device API key over the encrypted Noise channel.
+     - **Remove from Jarvis** (`POST /execute/esphome` `action: "forget"`, admin only): drops the device's `esphome_devices` entry — address, stored key and owner — without contacting it. The device keeps running with its Wi-Fi and settings; **Add device** pairs it again. This is the escape hatch for the case below, and it is deliberately two-step in the UI because it detaches the device from everyone's view.
      - **Battery, steps & history** (`DeviceDetailSheet`) to inspect 24-hour battery discharge, watch step counts, and recent telemetry events.
+
+### When a device's stored key goes stale
+
+A USB factory flash (`esptool write-flash 0x0`) erases the API encryption key Jarvis provisioned, while the `esphome_devices` entry — address plus `noise_psk` — survives. The next connection then sends a Noise key to a device that answers in **plaintext**, and `aioesphomeapi` refuses to downgrade (`EncryptionPlaintextAPIError`, which Jarvis surfaced as "…using a plain text protocol").
+
+Two behaviours exist for it:
+
+- **Automatic:** `esphome_client._open()` recognises *that exact error* on the control path (`list`, `call`, `configure_jarvis`, `ota`), retries **once** without the key, and drops the dead key from `esphome_devices` (matched by host, so the entry is not duplicated). The next *Sync Jarvis key & URL* or **Add device** provisions a fresh key. The downgrade is deliberately limited to this path — plaintext sessions are unauthenticated, so it must not happen silently anywhere else.
+- **Manual:** **Remove from Jarvis** (`forget`), which needs no connection at all — the usual reason to use it is a device that is asleep or unreachable. Re-add it to pair from scratch.
+
+An OTA update keeps the key, so it never hits this; only a USB flash does.
 
 ### Multi-User Access Control & Device Assignment
 

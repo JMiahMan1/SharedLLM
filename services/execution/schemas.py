@@ -306,7 +306,7 @@ class EsphomeRequest(BaseRequest):
     Devices are configured in Identity GlobalSetting 'esphome_devices'.
     """
     user_context: UserContext
-    action: Literal["list", "call", "configure_jarvis", "ota"]
+    action: Literal["list", "call", "configure_jarvis", "ota", "forget"]
     device: str = Field(..., description="Device name from esphome_devices setting")
     entity: str | None = Field(None, description="Entity name/object_id on the device")
     params: dict | None = Field(None, description="Command parameters (state, brightness_pct, mode, ...)")

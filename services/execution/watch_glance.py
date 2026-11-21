@@ -95,7 +95,7 @@ async def push_glances() -> None:
                 return True
 
             try:
-                if await esphome_client._with_connection({**d, "port": d.get("port") or 6053}, op):
+                if await esphome_client._with_connection({**d, "port": d.get("port") or 6053}, op, name):
                     _last_pushed[name] = line
                     log.info(f"[glance] {name}: {line or '(cleared)'}")
             except Exception as e:

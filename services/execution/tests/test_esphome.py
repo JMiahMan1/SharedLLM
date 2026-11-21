@@ -194,6 +194,156 @@ def test_route_wired_via_testclient(one_device):
     instance.light_command.assert_called_once_with(3, state=True, brightness=None, rgb=None)
 
 
+# forget / stale-key recovery
+#
+# A device reflashed over USB loses the API key Jarvis gave it while keeping its
+# esphome_devices entry, so the stored key is stale and every call fails the
+# handshake. These are the two ways out: a forget action that needs no device
+# online, and a plaintext fallback that drops the dead key.
+
+@pytest.mark.asyncio
+async def test_forget_device_removes_the_entry_and_flags_the_stale_key(one_device):
+    from services.execution.esphome_client import forget_device
+
+    raw = [
+        {"name": "office-light", "host": "192.0.2.87", "noise_psk": "psk-key-abc", "owner": "alex"},
+        {"name": "jarvis-watch", "host": "192.0.2.90", "noise_psk": None},
+    ]
+    written = {}
+
+    async def fake_list():
+        return [dict(d) for d in raw]
+
+    async def fake_write(devices):
+        written["devices"] = devices
+
+    with patch.object(one_device, "_device_list", fake_list), \
+         patch.object(one_device, "_write_device_list", fake_write):
+        data = await forget_device("office-light")
+
+    assert data == {"name": "office-light", "host": "192.0.2.87", "owner": "alex", "had_key": True}
+    assert [d["name"] for d in written["devices"]] == ["jarvis-watch"]
+
+
+@pytest.mark.asyncio
+async def test_forget_device_does_not_contact_the_device(one_device):
+    """The usual reason to forget is a key mismatch, on a device that may be asleep."""
+    from services.execution.esphome_client import forget_device
+
+    async def fake_list():
+        return [{"name": "office-light", "host": "192.0.2.87", "noise_psk": "psk"}]
+
+    async def fake_write(_devices):
+        return None
+
+    api_cls = MagicMock()
+    with patch.object(one_device, "_device_list", fake_list), \
+         patch.object(one_device, "_write_device_list", fake_write), \
+         patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
+        await forget_device("office-light")
+    api_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_forget_unknown_device_lists_what_it_knows(one_device):
+    from services.execution.esphome_client import forget_device
+
+    async def fake_list():
+        return [{"name": "office-light", "host": "192.0.2.87"}]
+
+    with patch.object(one_device, "_device_list", fake_list), \
+         patch.object(one_device, "get_devices", AsyncMock(return_value={})), \
+         pytest.raises(one_device.EsphomeConfigError) as exc:
+        await forget_device("kitchen-plug")
+    assert "known: office-light" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_forget_is_admin_only(one_device):
+    from services.execution.handlers.esphome import handle_esphome
+    from services.execution.schemas import EsphomeRequest, UserContext
+
+    forget = AsyncMock()
+    with patch.object(one_device, "forget_device", forget):
+        result = await handle_esphome(EsphomeRequest(
+            user_context=UserContext(user="alex", api_key="sk-user"),
+            action="forget", device="office-light",
+        ))
+    assert result.status == "FAILURE"
+    assert "administrator" in result.message
+    forget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_forget_says_whether_the_key_was_stale_and_what_to_do_next(one_device):
+    from services.execution.handlers.esphome import handle_esphome
+    from services.execution.schemas import EsphomeRequest, UserContext
+
+    forget = AsyncMock(return_value={"name": "office-light", "host": "192.0.2.87",
+                                     "owner": None, "had_key": True})
+    with patch.object(one_device, "forget_device", forget):
+        result = await handle_esphome(EsphomeRequest(
+            user_context=UserContext(user="alex", is_admin=True),
+            action="forget", device="office-light",
+        ))
+    assert result.status == "SUCCESS"
+    assert "removed from Jarvis" in result.message
+    assert "stale" in result.message
+    assert "Add device" in result.message       # names the next step
+    assert result.detail["had_key"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_reflashed_device_falls_back_to_plaintext_and_drops_the_dead_key(one_device):
+    """Stored key -> plaintext handshake -> retry without it, and stop storing it."""
+    from services.execution.esphome_client import list_entities
+
+    entities = [aioesphomeapi.LightInfo(key=1, name="Office Light", object_id="office_light")]
+    info = MagicMock(friendly_name="Office Light", mac_address="02:00:00:00:00:01",
+                     esphome_version="2026.9.0", model="esp32")
+    info.name = "office-light"
+    seen_psks, saved = [], {}
+
+    def make(host, port, password, noise_psk=None):
+        seen_psks.append(noise_psk)
+        inst = MagicMock()
+        inst.disconnect = AsyncMock()
+        if noise_psk:
+            inst.connect = AsyncMock(side_effect=aioesphomeapi.EncryptionPlaintextAPIError("plaintext"))
+        else:
+            inst.connect = AsyncMock()
+            inst.device_info_and_list_entities = AsyncMock(return_value=(info, entities, []))
+        return inst
+
+    async def fake_save(name, entry):
+        saved[name] = entry
+
+    cfg = {"host": "192.0.2.87", "port": 6053, "noise_psk": "psk-key-abc"}
+    with patch.object(one_device.aioesphomeapi, "APIClient", MagicMock(side_effect=make)), \
+         patch.object(one_device, "get_devices", AsyncMock(return_value={"office-light": cfg})), \
+         patch.object(one_device, "_save_device", fake_save):
+        data = await list_entities("office-light")
+
+    assert data["device"]["name"] == "Office Light"
+    assert seen_psks == ["psk-key-abc", None]           # tried the key, then plaintext
+    assert saved["office-light"]["noise_psk"] is None    # and stopped storing the dead one
+    assert saved["office-light"]["host"] == "192.0.2.87"  # rest of the entry untouched
+
+
+@pytest.mark.asyncio
+async def test_a_dead_key_without_the_fallback_still_explains_itself(one_device):
+    """Connecting on the plain path must not silently downgrade."""
+    from services.execution.esphome_client import _connect
+
+    inst = MagicMock()
+    inst.connect = AsyncMock(side_effect=aioesphomeapi.EncryptionPlaintextAPIError("plaintext"))
+    with patch.object(one_device.aioesphomeapi, "APIClient", MagicMock(return_value=inst)), \
+         pytest.raises(one_device.EsphomeConfigError) as exc:
+        await _connect("192.0.2.87", 6053, "psk-key-abc")
+    assert "plaintext" in str(exc.value)
+    assert "reflashed" in str(exc.value)
+
+
 # configure_jarvis: Jarvis hands a device its own endpoint
 def _configure_service(args=("url", "api_key")):
     return aioesphomeapi.UserService(

@@ -318,14 +318,61 @@ def _match_entity(entities: list, wanted: str):
     return None
 
 
-async def _with_connection(cfg: dict, coro_factory):
-    """Open a connection, run coro_factory(client), always disconnect."""
-    client = await _connect(cfg["host"], cfg["port"], cfg.get("noise_psk"))
+async def _with_connection(cfg: dict, coro_factory, name: str | None = None):
+    """Open a connection, run coro_factory(client), always disconnect.
+
+    A device that has been reflashed over USB loses the API key Jarvis gave it
+    but keeps its `esphome_devices` entry, so the stored key is stale and the
+    handshake fails with EncryptionPlaintextAPIError. Rather than dead-ending
+    there, fall back to plaintext once *and* forget the stale key, so the next
+    configure_jarvis / pairing can provision a fresh one. That is a deliberate
+    downgrade on this path only: plaintext sessions are unauthenticated, so it
+    is acceptable for "get back in touch with a device we already trust by
+    address" and not for anything else.
+    """
+    client, downgraded = await _open(cfg["host"], cfg["port"], cfg.get("noise_psk"))
     try:
+        if downgraded:
+            await _forget_stale_key(cfg, name)
         return await coro_factory(client)
     finally:
         with contextlib.suppress(Exception):
             await client.disconnect()
+
+
+async def _open(host: str, port: int, psk: str | None) -> tuple:
+    """Connect, downgrading to plaintext once if a stored key is no longer valid.
+
+    Returns (client, downgraded).
+    """
+    try:
+        return await _connect(host, port, psk), False
+    except EsphomeConfigError as e:
+        stale = isinstance(e.__cause__, aioesphomeapi.EncryptionPlaintextAPIError)
+        if not (stale and psk):
+            raise
+        log.warning(
+            "[esphome] %s holds a key Jarvis stored but the device answers in plaintext "
+            "(reflashed since pairing); dropping the stale key", host
+        )
+        return await _connect(host, port, None), True
+
+
+async def _forget_stale_key(cfg: dict, name: str | None) -> None:
+    """Remove a key that no longer works, so every later call stops paying for it."""
+    if not name:
+        return
+    current = await get_devices(force_refresh=True)
+    # Match on host, not on the caller's spelling: the same device can arrive
+    # here as "jarvis-watch", "Jarvis Watch" or a device_key, and upserting
+    # under the wrong name would leave the stale entry behind and add a ghost.
+    canonical = next((k for k, v in current.items() if v.get("host") == cfg.get("host")), None)
+    entry = current.get(canonical) if canonical else None
+    if not entry or not entry.get("noise_psk"):
+        return
+    await _save_device(canonical, {**entry, "noise_psk": None})
+
+
 
 
 _STATE_SETTLE_SECONDS = 0.35
@@ -556,7 +603,7 @@ async def list_entities(device_name: str) -> dict:
         }
         return device, out, svc_out
 
-    device, entities, services = await _with_connection(cfg, op)
+    device, entities, services = await _with_connection(cfg, op, device_name)
     has_speaker = any(e.get("domain") in ("media_player", "siren") for e in entities)
     return {
         "device": device,
@@ -839,7 +886,7 @@ async def call_entity(
             return {"domain": domain, "name": getattr(entity, "name", ""), "params": params}
         return op
 
-    result = await _with_connection(cfg, build_op())
+    result = await _with_connection(cfg, build_op(), device_name)
     return result
 
 
@@ -994,7 +1041,7 @@ async def trigger_device_alert(
             "triggered": triggered,
         }
 
-    return await _with_connection(cfg, op)
+    return await _with_connection(cfg, op, device_name)
 
 
 async def stop_device_alert(device_name: str) -> dict:
@@ -1037,7 +1084,7 @@ async def stop_device_alert(device_name: str) -> dict:
 
         return {"device": device_name, "stopped": stopped}
 
-    return await _with_connection(cfg, op)
+    return await _with_connection(cfg, op, device_name)
 
 
 
@@ -1125,7 +1172,7 @@ async def push_jarvis_endpoint(device_name: str, url: str, mint_key) -> dict:
             )
         return {"device": device_name, "url": url}
 
-    return await _with_connection(cfg, op)
+    return await _with_connection(cfg, op, device_name)
 
 
 # Companion pairing
@@ -1153,6 +1200,16 @@ async def _connect(host: str, port: int, psk: str | None = None):
         raise EsphomeConfigError(
             "This device already has an encryption key (from its YAML, or it is paired with "
             "someone). Unpair it on the device, or enter its key in Admin → Hardware."
+        ) from e
+    except aioesphomeapi.EncryptionPlaintextAPIError as e:
+        # Jarvis sent a key, the device answered in plaintext: the device was
+        # reflashed and lost the key Jarvis gave it. `_open` uses __cause__ to
+        # recognise this and retries once without the key.
+        raise EsphomeConfigError(
+            "Jarvis has an encryption key stored for this device but it is answering in "
+            "plaintext, which means it was reflashed since it was paired. Send it Jarvis's "
+            "details again (Sync Jarvis key & URL) to give it a new key, or remove it from "
+            "Jarvis and add it again."
         ) from e
     return client
 
@@ -1267,6 +1324,39 @@ async def _save_device(name: str, entry: dict) -> None:
 
 async def _remove_device(name: str) -> None:
     await _write_device_list(_without(await _device_list(), name))
+
+
+async def forget_device(name: str) -> dict:
+    """Remove a device from Jarvis's own registry, without touching the device.
+
+    This is the way out of a stale entry. The device keeps its firmware, its
+    settings and its Wi-Fi; Jarvis forgets the address, the stored key and the
+    owner, and the next Add device pairs it from scratch. Deliberately does not
+    contact the device: the usual reason to reach for this is a device whose
+    key no longer matches, which may well be asleep or off the network.
+
+    Accepts the stored name, or a slug/friendly label/device_key that resolves
+    to one (the UI passes whatever it has).
+    """
+    raw = await _device_list()
+    entry = next((d for d in raw if str(d.get("name", "")).lower() == str(name).lower()), None)
+    if entry is None:
+        cfg = _resolve_device_cfg(await get_devices(), name)
+        if cfg is None:
+            known = ", ".join(sorted(str(d.get("name", "?")) for d in raw)) or "none"
+            raise EsphomeConfigError(f"'{name}' is not in Jarvis's device list (known: {known}).")
+        entry = next((d for d in raw if str(d.get("host", "")) == str(cfg.get("host", ""))), None)
+    if entry is None:
+        raise EsphomeConfigError(f"'{name}' is not in Jarvis's device list.")
+    await _write_device_list(_without(raw, str(entry.get("name", ""))))
+    log.info(f"[esphome] forgot '{entry.get('name')}' ({entry.get('host')})")
+    return {
+        "name": entry.get("name"),
+        "host": entry.get("host"),
+        "owner": entry.get("owner"),
+        "had_key": bool(entry.get("noise_psk")),
+    }
+
 
 
 async def _claim(body: dict) -> dict:

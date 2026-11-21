@@ -87,6 +87,30 @@ async def handle_esphome(req: EsphomeRequest) -> ExecutionResult:
                 detail=data,
             )
 
+        if req.action == "forget":
+            # The way out of a stale entry: a device that was reflashed keeps
+            # an address and a key here that no longer work, and nothing else
+            # in the UI can clear them. Admin only, because it silently removes
+            # a device from everyone's view, and it touches no device -- the
+            # watch keeps running, it just has to be added again.
+            if not is_admin:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="Only an administrator can remove a device from Jarvis.",
+                    service=service,
+                )
+            data = await esphome_client.forget_device(req.device)
+            return ExecutionResult(
+                status="SUCCESS",
+                message=(
+                    f"'{data['name']}' removed from Jarvis"
+                    + (" (its stored key was stale)" if data.get("had_key") else "")
+                    + ". It is still running: use Add device to pair it again."
+                ),
+                service=service,
+                detail=data,
+            )
+
         if req.action == "ota":
             if not is_admin:
                 return ExecutionResult(
