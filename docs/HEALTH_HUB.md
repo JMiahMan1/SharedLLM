@@ -905,9 +905,11 @@ point.
       **Layer 1 built (2026-10-24, needs a device check):** on a minor's phone
       (`status.protected`), `GuardAdminReceiver` (device admin: no plain uninstall) and
       `GuardService` (Accessibility) cover Jarvis's uninstall dialog, its App info /
-      device-admin / Accessibility pages with `GuardScreenActivity`, which takes a parent's own
-      Jarvis login (`POST /api/guard/parent-unlock`: only this child's parents, five wrong tries
-      then a ten-minute wait, 10-minute window, both parents told; the window also lifts any
+      device-admin / Accessibility pages with `GuardScreenActivity`, where the child asks a parent
+      to unlock (`POST /api/guard/unlock-requests` with the phone's registered key; both parents
+      get Approve N min / Deny in their Jarvis app, only a parent's own session answers, the
+      phone reads only its own request and unlocks until the hub's `until`; requests expire
+      after ten minutes; no password is typed on the child's phone; the window also lifts any
       screen-time lock). Each covered uninstall attempt is reported as `uninstall_attempt`. The
       same service enforces
       screen time (4b): while `locked` it covers the whole screen - the home screen included -
@@ -936,8 +938,8 @@ point.
       sideloaded app). Needs APK 437 or later on the phone. **Offline parent code (2026-10-24,
       APK after 437):** a parent sets 6-12 digits (`PUT /api/guard/offline-code`, shown under the
       child's controls); identity keeps only a PBKDF2-SHA256 verifier (`GuardOfflineCode`), which
-      reaches a child's phone only inside a successful online parent unlock (never through the
-      child's own reads). With no connection the guard screen takes the code, checks it on the
+      reaches a child's phone or PC only with a parent's approval of an unlock request from that
+      device (never through the child's own reads). With no connection the guard screen takes the code, checks it on the
       phone (`OfflineCode`, five wrong tries then ten minutes), lifts the guard for ten minutes
       and reports `offline_unlock` to both parents once the phone is online again. Safe mode and
       factory reset still get around Layer 1; a start in safe mode (or any start in which the
@@ -973,8 +975,8 @@ point.
       screen-time lock (a parent's Pause / Lock now, bedtime, school, the day's limit) is then a
       **real OS lock**: `lockNow()` puts Android's own lock screen up once when a lock starts,
       while the cover activity pinned with lock-task (kiosk) mode still shows why and offers the
-      parent login or the offline code. The always-allowed apps (calls, texts, Jarvis) still open
-      after the child unlocks, so a call is not blocked and the parent-unlock screen stays
+      ask-a-parent unlock or the offline code. The always-allowed apps (calls, texts, Jarvis) still open
+      after the child unlocks, so a call is not blocked and the ask-a-parent screen stays
       reachable. On a phone that is not a device owner every device-owner call is skipped and the
       full-screen Accessibility overlay (Layer 1) is the whole of the lock, so the lock still
       covers the home screen and cannot be left with Home or Back. When the server says a phone is no longer a minor's

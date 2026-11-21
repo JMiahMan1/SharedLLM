@@ -211,6 +211,31 @@ async def guard_decide(request: Request, params: dict, reply: str | None) -> dic
     return body
 
 
+@push_callback("guard_unlock_decide")
+async def guard_unlock_decide(request: Request, params: dict, reply: str | None) -> dict:
+    """A parent taps Approve (for the minutes asked) or Deny on a locked
+    device's unlock request, through the same path as
+    ``POST /api/guard/unlock-requests/{id}``, as the caller: ``params`` is
+    ``{"id", "approve", "minutes"?}``. Identity refuses anyone who is not
+    this child's parent, and any device key."""
+    from services.gateway.main import decide_unlock_request
+
+    try:
+        request_id = int(params.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="params.id is required") from None
+    approve = params.get("approve")
+    if not isinstance(approve, bool):
+        raise HTTPException(status_code=422, detail="params.approve must be true or false")
+    payload: dict = {"approve": approve}
+    if approve and params.get("minutes") is not None:
+        payload["minutes"] = params.get("minutes")
+    status, body = await decide_unlock_request(request, request_id, payload)
+    if status != 200:
+        raise HTTPException(status_code=status, detail=body.get("detail") or "Could not answer")
+    return body
+
+
 @push_callback("more_time_decide")
 async def more_time_decide(request: Request, params: dict, reply: str | None) -> dict:
     """A parent taps Approve / Disapprove on a request for more screen time,

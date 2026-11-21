@@ -135,46 +135,6 @@ def test_internal_status_read(family):
     assert body["rules"]["daily_limit_min"] == 60 and body["managed"] is True
 
 
-def _with_passwords(family):
-    from services.identity.seed import hash_password
-
-    with Session(main.engine) as s:
-        for name in ("dad", "mom", "sib", "grown"):
-            u = s.get(User, name) or next(x for x in s.query(User).all() if x.username == name)
-            u.password_hash = hash_password(f"{name}-pass")
-            s.add(u)
-        s.commit()
-    main._UNLOCK_FAILURES.clear()
-
-
-def test_a_parent_login_unlocks_their_childs_phone(family):
-    _with_passwords(family)
-    r = family("kid").post("/api/guard/parent-unlock", json={"username": "Mom", "password": "mom-pass"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["parent"] == "mom" and body["until"] and set(body["notify"]) == {"dad", "mom"}
-    assert family("kid").get("/api/screen-time/kid/rules").json()["protected"] is True
-    assert family("grown").get("/api/screen-time/grown/rules").json()["protected"] is False
-
-
-def test_only_this_childs_parents_with_the_right_password_unlock(family):
-    _with_passwords(family)
-    kid = family("kid")
-    assert kid.post("/api/guard/parent-unlock", json={"username": "mom", "password": "wrong"}).status_code == 401
-    assert kid.post("/api/guard/parent-unlock", json={"username": "sib", "password": "sib-pass"}).status_code == 401
-    assert kid.post("/api/guard/parent-unlock", json={"username": "grown", "password": "grown-pass"}).status_code == 401
-
-
-def test_guessing_locks_the_unlock_screen(family):
-    _with_passwords(family)
-    kid = family("kid")
-    for _ in range(5):
-        assert kid.post("/api/guard/parent-unlock", json={"username": "mom", "password": "guess"}).status_code == 401
-    # Even the right password waits now.
-    assert kid.post("/api/guard/parent-unlock", json={"username": "mom", "password": "mom-pass"}).status_code == 429
-    main._UNLOCK_FAILURES.clear()
-
-
 def test_a_parent_blocks_a_lane_and_the_child_sees_it_off(family):
     assert family("kid").get("/api/recommendation-lanes/kid").json()["lanes"]["game"] is True
     r = family("mom").put("/api/recommendation-lanes/kid", json={"lanes": {"game": False}})
@@ -221,29 +181,6 @@ def test_a_parent_blocks_and_limits_apps(family):
     assert rules["app_limits"] == {"com.google.android.youtube": 45}
     assert family("mom").put("/api/screen-time/kid/rules", json={"blocked_apps": ["not a package"]}).status_code == 422
     assert family("mom").put("/api/screen-time/kid/rules", json={"app_limits": {"com.x.y": 2000}}).status_code == 422
-
-
-def test_a_parents_offline_code_reaches_the_phone_only_through_a_parent_login(family):
-    import hashlib
-
-    _with_passwords(family)
-    assert family("mom").get("/api/guard/offline-code").json() == {"set": False, "updated_at": None, "can_set": True}
-    assert family("mom").put("/api/guard/offline-code", json={"code": "12ab"}).status_code == 422
-    assert family("mom").put("/api/guard/offline-code", json={"code": "48291735"}).status_code == 200
-    # A child cannot set one, and never sees a verifier through its own reads.
-    assert family("kid").put("/api/guard/offline-code", json={"code": "111111"}).status_code == 403
-    assert "offline" not in str(family("kid").get("/api/screen-time/kid/rules").json())
-
-    body = family("kid").post("/api/guard/parent-unlock", json={"username": "dad", "password": "dad-pass"}).json()
-    [code] = body["offline_codes"]
-    assert code["parent"] == "mom"
-    digest = hashlib.pbkdf2_hmac("sha256", b"48291735", bytes.fromhex(code["salt"]), code["iterations"])
-    assert digest.hex() == code["hash"]
-    assert "48291735" not in str(body)
-
-    assert family("mom").delete("/api/guard/offline-code").json() == {"set": False}
-    again = family("kid").post("/api/guard/parent-unlock", json={"username": "dad", "password": "dad-pass"}).json()
-    assert again["offline_codes"] == []
 
 
 def test_a_parent_sets_the_web_filter(family):

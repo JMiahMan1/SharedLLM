@@ -8178,29 +8178,99 @@ async def delete_guard_offline_code(request: Request):
     return JSONResponse(status_code=status, content=body)
 
 
-@app.post("/api/guard/parent-unlock")
-async def guard_parent_unlock(request: Request):
-    """A parent's own login, typed on the child's phone, lifts the guard briefly.
+#: Why a device is locked, as words in "asks to unlock their PC ... at bedtime".
+_UNLOCK_REASON_WORDS = {
+    "bedtime": " at bedtime",
+    "limit": " after today's limit",
+    "paused": " while it is paused",
+    "school": " during school hours",
+    "chores": " before today's chores",
+}
 
-    Identity checks the login and that it is one of this child's parents; the
-    parents are told it happened, so an unlock is never silent.
-    """
-    status, body = await _identity_as_caller(request, "POST", "/api/guard/parent-unlock", json=await request.json())
-    if status == 200:
-        # A family PC unlocks with its device key, which identity accepted as
-        # the child it is assigned to but the strict key check below does not
-        # know: asking it 401'd every unlock on a PC after identity said yes.
-        device_creds = await _device_agent_key(request)
-        creds = None if device_creds else await _resolve_identity_from_request(request)
-        child = str((device_creds or {}).get("owner_username") or (creds or {}).get("user") or "")
-        device = (body or {}).get("device") or "device"
+
+def _unlock_tag(child: str) -> str:
+    """One notice per child's unlock request: a newer request or the answer replaces it on every parent's phone."""
+    return f"guard-unlock:{child}"
+
+
+def _unlock_actions(request_id: Any, minutes: Any) -> list[dict]:
+    """Approve for the minutes asked / Deny, answered from the notice (push callback ``guard_unlock_decide``)."""
+    return [
+        _notify.callback_action(f"Approve {minutes} min", "guard_unlock_decide", {"id": request_id, "approve": True, "minutes": minutes}),
+        _notify.callback_action("Deny", "guard_unlock_decide", {"id": request_id, "approve": False}),
+    ]
+
+
+@app.post("/api/guard/unlock-requests")
+async def guard_unlock_ask(request: Request):
+    """A locked child's device asks a parent to unlock it (no password on the
+    device). Identity binds the request to the asking device; both parents get
+    an actionable notice: Approve for the minutes asked, or Deny. A tap on the
+    notice opens the child's page, where the same request can be answered
+    with another length."""
+    status, body = await _identity_as_caller(request, "POST", "/api/guard/unlock-requests", json=await request.json())
+    if status == 200 and body.get("notify"):
+        asked = body.get("request") or {}
+        child = str(asked.get("username") or "")
+        name = str(body.get("display_name") or child)
+        device = str(asked.get("device") or "device")
+        minutes = asked.get("minutes_asked")
+        note = f": “{asked['note']}”" if asked.get("note") else ""
+        reason = _UNLOCK_REASON_WORDS.get(str(asked.get("lock_reason") or ""), "")
         await _screen_time_notice(
-            body.get("notify") or [],
-            f"{device[:1].upper() + device[1:]} protection unlocked",
-            f"{body.get('parent')} unlocked Jarvis's protection on {child}'s {device} for 10 minutes.",
-            "/fitness",
+            body["notify"],
+            f"Unlock {name}'s {device}?",
+            f"{name} asks to unlock their {device} for {minutes} minutes{reason}{note}. It expires in 10 minutes.",
+            f"/family/member/{child}",
+            actions=_unlock_actions(asked.get("id"), minutes) if asked.get("id") is not None else None,
+            tag=_unlock_tag(child),
         )
     return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
+
+
+@app.get("/api/guard/unlock-requests")
+async def guard_unlock_requests(request: Request, status: str = "pending"):
+    """A parent's open (or answered) unlock requests from their children's devices."""
+    code, body = await _identity_as_caller(request, "GET", "/api/guard/unlock-requests", params={"status": status})
+    return JSONResponse(status_code=code, content=body)
+
+
+@app.get("/api/guard/unlock-requests/{request_id}")
+async def guard_unlock_poll(request: Request, request_id: int, device_key: str = ""):
+    """The asking device polls its own request; identity answers only that device."""
+    params = {"device_key": device_key} if device_key else None
+    code, body = await _identity_as_caller(request, "GET", f"/api/guard/unlock-requests/{request_id}", params=params)
+    return JSONResponse(status_code=code, content=body)
+
+
+async def decide_unlock_request(request: Request, request_id: int, payload: dict) -> tuple[int, dict]:
+    """A parent answers an unlock request, as the caller (identity refuses a
+    device key and anyone who is not this child's parent). Every parent's
+    notice is replaced with the answer, so the other parent sees it was
+    handled and nobody taps a stale Approve. Shared by the route and the
+    notice's buttons (push callback ``guard_unlock_decide``)."""
+    status, body = await _identity_as_caller(request, "POST", f"/api/guard/unlock-requests/{request_id}", json=payload)
+    if status == 200:
+        decided = body.get("request") or {}
+        child = str(decided.get("username") or "")
+        name = str(body.get("display_name") or child)
+        device = str(decided.get("device") or "device")
+        by = str(decided.get("decided_by") or "A parent")
+        if decided.get("status") == "approved":
+            title = f"{name}'s {device} unlocked"
+            line = f"{by} unlocked {name}'s {device} for {decided.get('minutes_granted')} minutes."
+        else:
+            title = f"{name}'s {device} stays locked"
+            line = f"{by} said no to unlocking {name}'s {device}."
+        await _screen_time_notice(body.get("notify") or [], title, line, f"/family/member/{child}", tag=_unlock_tag(child))
+    return status, {k: v for k, v in (body or {}).items() if k != "notify"}
+
+
+@app.post("/api/guard/unlock-requests/{request_id}")
+async def guard_unlock_decide(request: Request, request_id: int):
+    """A parent approves (``{"approve": true, "minutes"?}``) or denies from the web app."""
+    status, body = await decide_unlock_request(request, request_id, await request.json())
+    return JSONResponse(status_code=status, content=body)
 
 
 @app.post("/api/guard/message")
