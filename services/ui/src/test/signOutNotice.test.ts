@@ -15,6 +15,7 @@ import {
   SIGNOUT_REASON_KEY,
   carriedKey,
   clearSignOutReason,
+  isKeyRefusal,
   isSignInReset,
   readSignOutMessage,
   readSignOutReason,
@@ -33,6 +34,8 @@ function axiosErrorWith(status: number, data: unknown, auth?: string): AxiosErro
   } as never);
 }
 
+const REFUSED_BODY = { detail: 'Invalid API Key', code: 'api_key_invalid' };
+
 describe('sign-out notice helper', () => {
   afterEach(() => localStorage.clear());
 
@@ -46,7 +49,16 @@ describe('sign-out notice helper', () => {
 
   it('picks the reason for a refused key', () => {
     expect(signOutReasonFor(axiosErrorWith(401, RESET_BODY))).toBe('sign_in_reset');
-    expect(signOutReasonFor(axiosErrorWith(401, { detail: 'Invalid API key' }))).toBe('session_ended');
+    expect(signOutReasonFor(axiosErrorWith(401, REFUSED_BODY))).toBe('session_ended');
+  });
+
+  it('treats only the servers\' own key refusals as a refused key', () => {
+    expect(isKeyRefusal(axiosErrorWith(401, RESET_BODY))).toBe(true);
+    expect(isKeyRefusal(axiosErrorWith(401, REFUSED_BODY))).toBe(true);
+    // An upstream service's 401 passed through by a route, or a bare 401: not about our key.
+    expect(isKeyRefusal(axiosErrorWith(401, { detail: 'Upstream said no' }))).toBe(false);
+    expect(isKeyRefusal(axiosErrorWith(401, { detail: 'x', code: 'something_else' }))).toBe(false);
+    expect(isKeyRefusal(axiosErrorWith(403, REFUSED_BODY))).toBe(false);
   });
 
   it('knows whether the request carried a key', () => {
@@ -88,10 +100,18 @@ describe('api client 401 handling', () => {
   });
 
   it('records a plain refused key as a session that ended', async () => {
-    server.use(http.get('/api/chores', () => HttpResponse.json({ detail: 'Invalid API key' }, { status: 401 })));
+    server.use(http.get('/api/chores', () => HttpResponse.json(REFUSED_BODY, { status: 401 })));
     await expect(apiClient.get('/api/chores')).rejects.toBeTruthy();
     expect(localStorage.getItem('jarvis_api_key')).toBeNull();
     expect(readSignOutReason()).toBe('session_ended');
+  });
+
+  it('an upstream 401 passed through by a route keeps the key and records nothing', async () => {
+    server.use(http.get('/api/chores', () => HttpResponse.json({ detail: 'Upstream refused the login' }, { status: 401 })));
+    await expect(apiClient.get('/api/chores')).rejects.toBeTruthy();
+    expect(localStorage.getItem('jarvis_api_key')).toBe('fake-key-123');
+    expect(localStorage.getItem('jarvis_user')).not.toBeNull();
+    expect(readSignOutReason()).toBeNull();
   });
 
   it('a 503 is not a sign-out', async () => {

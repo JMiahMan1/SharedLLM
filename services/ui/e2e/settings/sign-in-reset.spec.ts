@@ -78,7 +78,7 @@ test.describe('sign-in reset', () => {
   test('any other refused key says the session ended', async ({ page }) => {
     await seedOnce(page, ADMIN);
     await catchAll(page);
-    await page.route('**/api/users/me', (route) => route.fulfill({ status: 401, json: { detail: 'Invalid API key' } }));
+    await page.route('**/api/users/me', (route) => route.fulfill({ status: 401, json: { detail: 'Invalid API Key', code: 'api_key_invalid' } }));
 
     await page.goto('/');
     await expect(page).toHaveURL(/\/login$/);

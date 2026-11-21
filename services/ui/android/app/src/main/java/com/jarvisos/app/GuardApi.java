@@ -1013,8 +1013,6 @@ final class GuardApi {
                 }
             }
             int status = conn.getResponseCode();
-            // A reset key is forgotten; the guard keeps enforcing its last known status.
-            SignInReset.check(context, status, token);
             InputStream in = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
             String body = "";
             if (in != null) {
@@ -1025,6 +1023,8 @@ final class GuardApi {
                     body = out.toString("UTF-8");
                 }
             }
+            // A refused key is forgotten; the guard keeps enforcing its last known status.
+            SignInReset.check(context, status, body, token);
             return new HttpResult(status, body);
         } finally {
             conn.disconnect();

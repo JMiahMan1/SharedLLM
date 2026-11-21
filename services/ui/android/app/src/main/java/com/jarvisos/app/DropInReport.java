@@ -57,7 +57,7 @@ final class DropInReport {
                 try (OutputStream out = conn.getOutputStream()) {
                     out.write(body.toString().getBytes(StandardCharsets.UTF_8));
                 }
-                SignInReset.check(app, conn.getResponseCode(), token);
+                SignInReset.check(app, conn, token);
             } catch (Exception e) {
                 Log.w(TAG, "could not report " + event + ": " + e.getMessage());
             } finally {

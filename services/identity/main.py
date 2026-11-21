@@ -921,9 +921,7 @@ def require_admin_or_internal(
     token = authorization.split(" ")[1]
     user = _find_user_for_api_key(session, token)
     if not user:
-        if sign_in_reset.was_reset(session, token):
-            raise sign_in_reset.SignInWasReset()
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise sign_in_reset.refusal(session, token)
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
     return True
@@ -967,10 +965,8 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
             safe = User.model_validate(owner)
             safe.is_admin = False
             return safe
-    if sign_in_reset.was_reset(session, key):
-        # Tell the app why, so it clears the key and shows its sign-in screen.
-        raise sign_in_reset.SignInWasReset()
-    raise HTTPException(status_code=401, detail="Invalid API Key")
+    # Say why (code sign_in_reset or api_key_invalid): the apps clear the key only on these.
+    raise sign_in_reset.refusal(session, key)
 
 
 # Push topics, notification preferences, UnifiedPush (docs/PUSH.md)
@@ -3271,9 +3267,7 @@ def internal_validate_api_key(
         raise HTTPException(status_code=400, detail="api_key is required")
     user = _find_user_for_api_key(session, api_key)
     if not user:
-        if sign_in_reset.was_reset(session, api_key):
-            raise sign_in_reset.SignInWasReset()
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise sign_in_reset.refusal(session, api_key)
     return {
         "user": user.username,
         "user_id": user.id or 0,

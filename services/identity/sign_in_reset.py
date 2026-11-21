@@ -65,8 +65,18 @@ HOW = {
 }
 
 
+#: Identity's own refusal of a presented key (unknown or revoked some other way). The apps sign
+#: out only on this code or ``sign_in_reset``, never on any other 401.
+API_KEY_INVALID_CODE = "api_key_invalid"
+API_KEY_INVALID_MESSAGE = "Invalid API Key"
+
+
 class SignInWasReset(Exception):
     """Raised by an auth check when the presented key was revoked by a sign-in reset."""
+
+
+class ApiKeyRefused(Exception):
+    """Raised by an auth check when the presented key is not any account's key."""
 
 
 def install_handler(app: FastAPI) -> None:
@@ -79,6 +89,19 @@ def install_handler(app: FastAPI) -> None:
             content={"detail": SIGN_IN_RESET_MESSAGE, "code": SIGN_IN_RESET_CODE},
             headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
         )
+
+    @app.exception_handler(ApiKeyRefused)
+    async def _refused(_request: Request, _exc: ApiKeyRefused) -> JSONResponse:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": API_KEY_INVALID_MESSAGE, "code": API_KEY_INVALID_CODE},
+            headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+        )
+
+
+def refusal(session: Session, key: str | None) -> Exception:
+    """The 401 for a presented key no account holds: the reset's, or the plain refusal."""
+    return SignInWasReset() if was_reset(session, key) else ApiKeyRefused()
 
 
 def was_reset(session: Session, key: str | None) -> bool:

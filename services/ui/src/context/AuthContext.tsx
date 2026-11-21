@@ -3,13 +3,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
-import axios from 'axios';
 import { storageGet, storageSet, storageRemove, storageInit, mirrorNativeCredentials } from '../lib/storage';
 import { registerThisDevice } from '../lib/deviceRegistration';
 import { sharePushKey } from '../lib/push';
 import { mirrorIdentity } from '../lib/locationTracking';
 import { lockAll } from '../lib/privateChatSession';
-import { clearSignOutReason, recordSignOutReason, signOutMessage, signOutReasonFor, type SignOutReason } from '../lib/signOutNotice';
+import { clearSignOutReason, isKeyRefusal, recordSignOutReason, signOutMessage, signOutReasonFor, type SignOutReason } from '../lib/signOutNotice';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -37,10 +36,13 @@ function retryDelay(attempt: number): number {
   return RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)];
 }
 
-/** The server said no to the stored key: the only reason to sign someone out at start. */
+/**
+ * The server refused the stored key itself (code sign_in_reset or
+ * api_key_invalid): the only reason to sign someone out. Any other 401 or 403
+ * says nothing about the key.
+ */
 function isSignInRefused(error: unknown): boolean {
-  const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-  return status === 401 || status === 403;
+  return isKeyRefusal(error);
 }
 
 function parseStoredUser(raw: string | null): UserProfile | null {
@@ -223,7 +225,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       putMe(profile);
       await storageSet('jarvis_user', JSON.stringify(profile));
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
+      if (isKeyRefusal(error)) {
         void logout(signOutReasonFor(error));
       }
     }

@@ -276,13 +276,12 @@ final class LocationOutbox {
     static Sent send(Context context, String serverUrl, String token, String user, JSONObject body) {
         String base = serverUrl.endsWith("/") ? serverUrl.substring(0, serverUrl.length() - 1) : serverUrl;
         try {
-            int status = post(base + "/api/users/" + android.net.Uri.encode(user) + "/location", token, body);
+            int status = post(context, base + "/api/users/" + android.net.Uri.encode(user) + "/location", token, body);
             if (status == 404) {
                 // Older gateways expose only the collection route.
-                status = post(base + "/api/users/location", token, body);
+                status = post(context, base + "/api/users/location", token, body);
             }
             if (status < 200 || status >= 300) Log.w(TAG, "upload HTTP " + status);
-            SignInReset.check(context, status, token);
             return classify(status);
         } catch (Exception e) {
             // No network, a timeout, a dropped connection.
@@ -291,7 +290,8 @@ final class LocationOutbox {
         }
     }
 
-    private static int post(String url, String token, JSONObject body) throws Exception {
+    /** POSTs one fix; a refusal of the key itself forgets it ({@link SignInReset}). */
+    private static int post(Context context, String url, String token, JSONObject body) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         try {
             conn.setRequestMethod("POST");
@@ -303,7 +303,7 @@ final class LocationOutbox {
             try (OutputStream os = conn.getOutputStream()) {
                 os.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
-            return conn.getResponseCode();
+            return SignInReset.check(context, conn, token);
         } finally {
             conn.disconnect();
         }

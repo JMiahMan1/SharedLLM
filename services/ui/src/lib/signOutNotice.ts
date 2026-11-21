@@ -14,6 +14,16 @@ export const SIGNOUT_REASON_KEY = 'jarvis_signout_reason';
 /** The 401 body code identity and the gateway send for a key an admin reset. */
 export const SIGN_IN_RESET_CODE = 'sign_in_reset';
 
+/** The 401 body code identity and the gateway send when they refuse the presented key itself. */
+export const API_KEY_INVALID_CODE = 'api_key_invalid';
+
+/**
+ * The only codes that mean the device's own key was refused. Any other 401 (a
+ * route passing an upstream service's 401 through, a call made without a key)
+ * says nothing about the stored key and must never sign anyone out.
+ */
+const KEY_REFUSAL_CODES: ReadonlySet<string> = new Set([SIGN_IN_RESET_CODE, API_KEY_INVALID_CODE]);
+
 export type SignOutReason = 'sign_in_reset' | 'session_ended';
 
 export const SIGN_IN_RESET_MESSAGE = 'Your sign-in was reset, please sign in again';
@@ -36,6 +46,13 @@ export function isSignInReset(error: unknown): boolean {
   if (statusOf(error) !== 401) return false;
   const body = bodyOf(error) as { code?: unknown } | null | undefined;
   return body?.code === SIGN_IN_RESET_CODE;
+}
+
+/** A 401 in which identity or the gateway refused the presented key itself. */
+export function isKeyRefusal(error: unknown): boolean {
+  if (statusOf(error) !== 401) return false;
+  const code = (bodyOf(error) as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' && KEY_REFUSAL_CODES.has(code);
 }
 
 /** Whether a request carried a key (an Authorization header). */

@@ -90,12 +90,23 @@ describe('AuthContext after a refused key', () => {
     expect(readSignOutReason()).toBe('sign_in_reset');
   });
 
-  it('any other 401 at start reads as a session that ended', async () => {
-    vi.spyOn(api, 'getMe').mockRejectedValue(httpError(401, { detail: 'Invalid API key' }));
+  it('a refused key at start reads as a session that ended', async () => {
+    vi.spyOn(api, 'getMe').mockRejectedValue(httpError(401, { detail: 'Invalid API Key', code: 'api_key_invalid' }));
     renderAuth(<Probe />);
     await waitFor(() => expect(screen.getByTestId('init-error')).toHaveTextContent(SESSION_ENDED_MESSAGE));
     expect(storageRemove).toHaveBeenCalledWith('jarvis_api_key');
     expect(readSignOutReason()).toBe('session_ended');
+  });
+
+  it('a 401 without a refusal code at start is retried, never a sign-out', async () => {
+    const getMe = vi.spyOn(api, 'getMe')
+      .mockRejectedValueOnce(httpError(401, { detail: 'Upstream refused the login' }))
+      .mockResolvedValue({ username: 'parent', role: 'user', is_admin: false } as never);
+    renderAuth(<Probe />);
+    await waitFor(() => expect(getMe.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 4000 });
+    await waitFor(() => expect(screen.getByTestId('who')).toHaveTextContent('parent'));
+    expect(storageRemove).not.toHaveBeenCalledWith('jarvis_api_key');
+    expect(readSignOutReason()).toBeNull();
   });
 
   it('a 503 at start is retried, never a sign-out', async () => {

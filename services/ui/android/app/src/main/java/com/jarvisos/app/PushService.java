@@ -184,22 +184,22 @@ public class PushService extends Service {
                 current = conn;
                 int status = conn.getResponseCode();
                 if (status == 401 || status == 403) {
-                    // A rejected key is not a blip: this stream cannot come back
-                    // until somebody signs in again. Retrying every five minutes
-                    // held a foreground service and a dead credential for as long
-                    // as the app was never opened, so clear the mirrored key and
-                    // stop. The WebView clears its own copy on the next 401.
-                    Log.w(TAG, "not authorised (" + status + "); stopping");
-                    PushNotifier.clearAll(this);
-                    if (SignInReset.isRejection(status)) {
+                    if (SignInReset.isKeyRefusal(status, SignInReset.errorBody(conn))) {
+                        // The server refused the key itself: this stream cannot come back
+                        // until somebody signs in again, so forget the key and stop. The
+                        // WebView clears its own copy on its next refused request.
+                        Log.w(TAG, "the server refused the key; stopping");
+                        PushNotifier.clearAll(this);
                         // After clearAll, so the sign-in notice it posts stays on screen.
                         SignInReset.keyRejected(this, token);
-                    } else {
-                        p.edit().remove(TokenBridgePlugin.KEY_API_KEY).apply();
+                        running = false;
+                        stopSelf();
+                        return;
                     }
-                    running = false;
-                    stopSelf();
-                    return;
+                    // A 403, or a 401 that is not a refusal of our key: keep the key, try later.
+                    Log.w(TAG, "not authorised (" + status + "), key not refused; retrying in 5 min");
+                    sleep(UNAUTHORISED_WAIT_MS);
+                    continue;
                 }
                 if (PushFallback.streamUnavailable(status)) {
                     startPolling(p, status);
@@ -293,13 +293,13 @@ public class PushService extends Service {
             conn.setRequestProperty("Accept", "application/json");
             current = conn;
             int status = conn.getResponseCode();
-            if (SignInReset.isRejection(status)) {
-                // The key was reset: forget it, and the loop stops on finding no key.
-                Log.w(TAG, "long poll not authorised (401); stopping");
+            if (status == 401 && SignInReset.isKeyRefusal(status, SignInReset.errorBody(conn))) {
+                // The key was refused: forget it, and the loop stops on finding no key.
+                Log.w(TAG, "long poll: the server refused the key; stopping");
                 SignInReset.keyRejected(this, token);
                 return backoffMs;
             }
-            if (status == 403) {
+            if (status == 401 || status == 403) {
                 Log.w(TAG, "not authorised (" + status + "); retrying in 5 min");
                 sleep(UNAUTHORISED_WAIT_MS);
                 return backoffMs;

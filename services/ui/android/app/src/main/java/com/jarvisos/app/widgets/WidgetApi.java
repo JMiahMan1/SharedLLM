@@ -207,7 +207,6 @@ public final class WidgetApi {
                 }
             }
             int code = conn.getResponseCode();
-            if (context != null) SignInReset.check(context, code, key);
             InputStream is = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
             if (is == null) {
                 throw new IllegalStateException("HTTP " + code);
@@ -217,6 +216,8 @@ public final class WidgetApi {
                 String line;
                 while ((line = br.readLine()) != null) sb.append(line);
             }
+            // A refusal of the key itself forgets it (SignInReset); any other 401 does not.
+            if (context != null) SignInReset.check(context, code, sb.toString(), key);
             if (code >= 400) {
                 throw new IllegalStateException("HTTP " + code + ": " + sb);
             }

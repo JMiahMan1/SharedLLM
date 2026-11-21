@@ -16,14 +16,20 @@ import org.junit.Test;
 public class SignInResetTest {
 
     @Test
-    public void onlyA401IsARejection() {
-        assertTrue(SignInReset.isRejection(401));
-        assertFalse(SignInReset.isRejection(403));
-        assertFalse(SignInReset.isRejection(200));
-        assertFalse(SignInReset.isRejection(404));
-        assertFalse(SignInReset.isRejection(500));
-        assertFalse(SignInReset.isRejection(503));
-        assertFalse(SignInReset.isRejection(0));
+    public void onlyTheServersOwnRefusalOfTheKeyCounts() {
+        String reset = "{\"detail\": \"Your sign-in was reset, please sign in again.\", \"code\": \"sign_in_reset\"}";
+        String invalid = "{\"detail\":\"Invalid API Key\",\"code\":\"api_key_invalid\"}";
+        assertTrue(SignInReset.isKeyRefusal(401, reset));
+        assertTrue(SignInReset.isKeyRefusal(401, invalid));
+        // A route passing an upstream service's 401 through says nothing about this phone's key.
+        assertFalse(SignInReset.isKeyRefusal(401, "{\"detail\": \"Upstream refused the login\"}"));
+        assertFalse(SignInReset.isKeyRefusal(401, "{\"code\": \"something_else\"}"));
+        assertFalse(SignInReset.isKeyRefusal(401, ""));
+        assertFalse(SignInReset.isKeyRefusal(401, null));
+        // The code only counts on a 401.
+        assertFalse(SignInReset.isKeyRefusal(403, invalid));
+        assertFalse(SignInReset.isKeyRefusal(200, reset));
+        assertFalse(SignInReset.isKeyRefusal(500, invalid));
     }
 
     @Test

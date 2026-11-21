@@ -157,8 +157,16 @@ def test_reset_everyone_revokes_every_key_and_says_why(client, session):
     assert len(events) == 1
 
 
-def test_an_unknown_key_is_still_a_plain_401(client):
+def test_an_unknown_key_is_refused_with_a_stable_code(client):
     resp = _me(client, "fake-never-issued-key")
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "Invalid API Key", "code": "api_key_invalid"}
+    gate = client.get("/api/internal/validate-api-key", headers={"X-Api-Key": "fake-never-issued-key"})
+    assert gate.json()["code"] == "api_key_invalid"
+
+
+def test_no_key_is_a_plain_401(client):
+    resp = client.get("/api/users/me")
     assert resp.status_code == 401
     assert "code" not in resp.json()
 

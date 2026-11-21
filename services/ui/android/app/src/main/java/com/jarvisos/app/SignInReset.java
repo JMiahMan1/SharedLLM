@@ -7,8 +7,12 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.regex.Pattern;
 
 /**
  * What the background senders do when the server answers 401 to the stored key.
@@ -19,11 +23,13 @@ import java.security.MessageDigest;
  * on every refresh. None of them could ever succeed again, and nothing told
  * the person why their phone had gone quiet.
  *
- * Here the first 401 forgets the mirrored key, so every reader finds no key
+ * Here the first refusal forgets the mirrored key, so every reader finds no key
  * and pauses (queued fixes, activity rows and health readings stay where they
  * are, for the next sign-in to send), and one notice asks the person to sign
- * in again. Only a 401 counts: a 403 is a key that works but may not do that
- * one thing, and a 5xx or a network error says nothing about the key.
+ * in again. Only a 401 whose body carries identity's or the gateway's own
+ * refusal code counts ("sign_in_reset" or "api_key_invalid"): some gateway
+ * routes pass an upstream service's 401 through, and that says nothing about
+ * this phone's key. A 403, a 5xx or a network error never counts either.
  *
  * The key is forgotten only while it is still the stored one, so a sign-in
  * that happened while the request was in flight is never undone. The notice
@@ -38,23 +44,52 @@ public final class SignInReset {
     static final String MESSAGE = "Your sign-in was reset. Open Jarvis to sign in again.";
     private static final int NOTIFICATION_ID = 0x10C3;
     private static final Object LOCK = new Object();
+    /** The 401 codes identity and the gateway send when they refuse the presented key itself. */
+    private static final Pattern REFUSAL_CODE =
+            Pattern.compile("\"code\"\\s*:\\s*\"(sign_in_reset|api_key_invalid)\"");
+    /** More than any refusal body; an upstream page is never read whole. */
+    private static final int MAX_BODY_BYTES = 8192;
 
     private SignInReset() {}
 
-    /** Whether an HTTP status means the key itself was refused. */
-    public static boolean isRejection(int status) {
-        return status == 401;
+    /** Whether a response is the server refusing the key itself (a 401 with a refusal code). */
+    public static boolean isKeyRefusal(int status, String body) {
+        return status == 401 && body != null && REFUSAL_CODE.matcher(body).find();
     }
 
     /**
-     * The server answered {@code status} to a request sent with {@code key}.
-     * Anything but a 401 is ignored, so callers can pass every status.
+     * The server answered {@code status} with {@code body} to a request sent with {@code key}.
+     * Only a refusal of the key acts, so callers can pass every response.
      */
-    public static void check(Context context, int status, String key) {
-        if (isRejection(status)) keyRejected(context, key);
+    public static void check(Context context, int status, String body, String key) {
+        if (isKeyRefusal(status, body)) keyRejected(context, key);
     }
 
-    /** The server refused {@code key} with a 401: forget it and say so once. */
+    /**
+     * For a caller that does not read the response itself: its status, and on a 401 the
+     * error body is read (and so consumed) to see whether the key was refused.
+     */
+    public static int check(Context context, HttpURLConnection conn, String key) throws java.io.IOException {
+        int status = conn.getResponseCode();
+        if (status == 401) check(context, status, errorBody(conn), key);
+        return status;
+    }
+
+    /** The error body of a response, at most a few kB, or "" when there is none. */
+    public static String errorBody(HttpURLConnection conn) {
+        try (InputStream in = conn.getErrorStream()) {
+            if (in == null) return "";
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[1024];
+            int n;
+            while (out.size() < MAX_BODY_BYTES && (n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return out.toString("UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** The server refused {@code key} itself: forget it and say so once. */
     public static void keyRejected(Context context, String key) {
         if (context == null || key == null || key.isEmpty()) return;
         Context app = context.getApplicationContext() != null ? context.getApplicationContext() : context;

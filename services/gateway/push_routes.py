@@ -55,9 +55,10 @@ async def _caller(request: Request) -> dict[str, Any]:
     gateway._strict_key_was_reset.set(False)
     ident = await gateway._resolve_strict_identity(key) if key else None
     if not ident:
-        if gateway._strict_key_was_reset.get():
-            raise gateway.SignInWasReset()
-        raise HTTPException(status_code=401, detail="Authentication required")
+        if not key:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        # The key it sent was refused: say so, so the phone clears it (and only then).
+        raise gateway.SignInWasReset() if gateway._strict_key_was_reset.get() else gateway.ApiKeyRefused()
     if not bearer:
         request.scope["headers"] = [
             *[(k, v) for k, v in request.scope["headers"] if k != b"authorization"],

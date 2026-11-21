@@ -908,9 +908,21 @@ SIGN_IN_RESET_CODE = "sign_in_reset"
 SIGN_IN_RESET_MESSAGE = "Your sign-in was reset, please sign in again."
 
 
+#: The gateway's own refusal of the key a request presented (unknown or revoked). The apps
+#: sign out ONLY on this code or ``sign_in_reset``: a 401 an upstream service answered and a
+#: route passed through says nothing about the phone's own key.
+API_KEY_INVALID_CODE = "api_key_invalid"
+API_KEY_INVALID_MESSAGE = "Invalid API Key"
+
+
 class SignInWasReset(HTTPException):
     def __init__(self) -> None:
         super().__init__(status_code=401, detail=SIGN_IN_RESET_MESSAGE)
+
+
+class ApiKeyRefused(HTTPException):
+    def __init__(self) -> None:
+        super().__init__(status_code=401, detail=API_KEY_INVALID_MESSAGE)
 
 
 @app.exception_handler(SignInWasReset)
@@ -920,6 +932,28 @@ async def sign_in_reset_handler(_request: Request, _exc: SignInWasReset):
         content={"detail": SIGN_IN_RESET_MESSAGE, "code": SIGN_IN_RESET_CODE},
         headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
     )
+
+
+@app.exception_handler(ApiKeyRefused)
+async def api_key_refused_handler(_request: Request, _exc: ApiKeyRefused):
+    return JSONResponse(
+        status_code=401,
+        content={"detail": API_KEY_INVALID_MESSAGE, "code": API_KEY_INVALID_CODE},
+        headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+    )
+
+
+def _key_refusal(request: Request, detail: str = "Authentication required") -> HTTPException:
+    """The 401 for a request no verified identity stands behind.
+
+    When it presented a key, say that the key itself was refused (``sign_in_reset`` or
+    ``api_key_invalid``), so the app clears it; with no key it is a plain 401.
+    """
+    if _strict_key_was_reset.get():
+        return SignInWasReset()
+    if _presented_api_key(request):
+        return ApiKeyRefused()
+    return HTTPException(status_code=401, detail=detail)
 
 
 @app.exception_handler(Exception)
@@ -2443,9 +2477,7 @@ async def _require_identity_from_request(request: Request, body: dict | None = N
     _strict_key_was_reset.set(False)
     ident = await _resolve_strict_identity(api_key)
     if not ident:
-        if _strict_key_was_reset.get():
-            raise SignInWasReset()
-        raise HTTPException(status_code=401, detail="Invalid API Key")
+        raise _key_refusal(request)
     # The key is proven real, so the permissive resolve can no longer fall back:
     # it will find this key's owner and return that user's credentials. It is the
     # *allow anonymous* resolver on purpose -- going back through
@@ -2602,17 +2634,19 @@ async def _caller_is_admin(request: Request) -> bool:
 
 async def _require_authenticated(request: Request) -> str:
     """401 unless the caller is authenticated; returns their username."""
+    _strict_key_was_reset.set(False)
     ident = await _acting_identity(request)
     if not ident:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise _key_refusal(request)
     return ident["user"]
 
 
 async def _require_admin(request: Request) -> str:
     """403 unless the caller is an authenticated administrator; returns their username."""
+    _strict_key_was_reset.set(False)
     ident = await _acting_identity(request)
     if not ident:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise _key_refusal(request)
     if not ident.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
     return ident["user"]

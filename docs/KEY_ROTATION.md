@@ -31,6 +31,11 @@ on the server). It needs the word `RESET` typed to confirm. Code:
 | Windows PC agent keys (Jarvis Guard) | Cleared; each PC is listed for re-enrolment. |
 | Home hub logins | Identity asks the hub (`POST /hub/auth/sign-out-everyone`) to revoke every companion-app login and every person's long-lived token. Service tokens (Music Assistant) are kept and named. Needs `HOMEHUB_URL` in identity's environment; otherwise the report says so and `scripts/reset_sign_ins.sh --hub-only` does it. |
 | A device that still has an old key | Gets `401 {"detail": "Your sign-in was reset, please sign in again.", "code": "sign_in_reset"}` from identity and the gateway. The web UI and the Android app clear the stored key (and the native copy the background services read) and show their sign-in screen with that message. |
+| A device whose key is unknown for another reason | Gets `401 {"detail": "Invalid API Key", "code": "api_key_invalid"}` from identity's and the gateway's own key checks; the apps sign out saying the session ended. |
+
+The apps sign out **only** on those two codes. Any other 401 (a gateway route passing an
+upstream service's 401 through, a request sent without a key) never clears the stored key, so
+a family phone is never signed out by someone else's login failing.
 
 The report (also kept as the setting `security_last_sign_in_reset`, no secrets, shown in
 Admin > Security after the admin signs back in) lists:

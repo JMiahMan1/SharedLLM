@@ -12,7 +12,7 @@ import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
 } from '../lib/weather';
 import { storageGetSync, storageSet } from '../lib/storage';
-import { carriedKey, recordSignOutReason, signOutReasonFor } from '../lib/signOutNotice';
+import { carriedKey, isKeyRefusal, recordSignOutReason, signOutReasonFor } from '../lib/signOutNotice';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { MessageMark, PrivateChatInfo, PrivateChatReminders, PrivateChatStatus } from '../components/chat/privateChatModel';
@@ -1026,12 +1026,15 @@ apiClient.interceptors.response.use(
       // before AuthProvider resolves) are allowed to 401 without tearing down
       // the session; otherwise the app bounces to /login on every start.
       const isOptional = error.config?.skipAuthRedirect === true;
-      if (!isLoginRequest && !isOptional) {
+      // Only identity's or the gateway's own refusal of the key this request
+      // carried signs the device out (code sign_in_reset or api_key_invalid).
+      // A route that passes an upstream service's 401 through says nothing
+      // about our key, and must not sign the family out at random.
+      if (!isLoginRequest && !isOptional && carriedKey(error) && isKeyRefusal(error)) {
         isLoggingOut = true;
         // Say why on the login page: a reset sign-in reads differently from a
-        // key that simply stopped working. Only a request that carried the
-        // stored key was a refusal of it.
-        if (carriedKey(error)) recordSignOutReason(signOutReasonFor(error));
+        // key that simply stopped working.
+        recordSignOutReason(signOutReasonFor(error));
         const { storageRemove } = await import('../lib/storage');
         // storageRemove also clears the native TokenBridge copy, so the
         // background services stop sending the refused key.
