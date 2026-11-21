@@ -31,6 +31,10 @@ import type {
   TrainerModels,
   TrainerReport,
   TrainerReportSummary,
+  TeacherExport,
+  TeacherLessonsResult,
+  TeacherSummary,
+  TeacherTraceRow,
 } from '../lib/trainer';
 import type {
   StlEdit,
@@ -5114,6 +5118,29 @@ export const api = {
   /** Alpaca's own benchmark results: the model's report card, weakest first. */
   async trainerBenchmarks(): Promise<TrainerBenchmarks> {
     const resp = await apiClient.get('/api/trainer/benchmarks', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** Teacher traces: imported, scrubbed, and how the local model does on their tasks. */
+  async teacherSummary(): Promise<TeacherSummary> {
+    const resp = await apiClient.get('/api/trainer/teacher');
+    return resp.data;
+  },
+
+  async teacherTraces(params: { limit?: number; outcome?: string; status?: string } = {}): Promise<TeacherTraceRow[]> {
+    const resp = await apiClient.get('/api/trainer/teacher/traces', { params });
+    return resp.data?.traces ?? [];
+  },
+
+  async writeTeacherLessons(body: { limit?: number; dry_run?: boolean } = {}): Promise<TeacherLessonsResult> {
+    const resp = await apiClient.post('/api/trainer/teacher/lessons', body, { timeout: 300_000 });
+    return resp.data;
+  },
+
+  async exportTeacherDataset(
+    body: { format?: 'openai' | 'sharegpt'; eval_share?: number; include_unverified?: boolean } = {},
+  ): Promise<TeacherExport> {
+    const resp = await apiClient.post('/api/trainer/teacher/dataset', body, { timeout: 120_000 });
     return resp.data;
   },
 

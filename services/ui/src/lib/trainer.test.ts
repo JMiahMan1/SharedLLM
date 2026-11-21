@@ -4,9 +4,13 @@ import {
   bucketBars,
   freeVramLabel,
   hardwareVerdict,
+  outcomeTone,
   passRateLabel,
   proposalTone,
+  scrubLabel,
+  scrubTone,
   summariseCatalog,
+  teacherTrend,
   type TrainerBucketResult,
   type TrainerCatalog,
   type TrainerHardware,
@@ -136,6 +140,55 @@ describe('the training tab helpers', () => {
     expect(proposalTone('tool_doc')).toContain('amber');
     expect(proposalTone('lesson_validation')).toContain('indigo');
     expect(proposalTone('ui_gap')).toContain('cyan');
+    expect(proposalTone('teacher_gap')).toContain('amber');
     expect(proposalTone('something_else')).toContain('slate');
+  });
+});
+
+describe('teacher traces', () => {
+  const row = {
+    scrub_status: 'masked',
+    scrub_masked: 3,
+    scrub_dropped_steps: 1,
+    drop_reason: null,
+  };
+
+  it('says what the scrubber did to a kept trace', () => {
+    expect(scrubLabel(row)).toBe('masked · 3 masked · 1 step removed');
+    expect(scrubLabel({ ...row, scrub_status: 'clean', scrub_masked: 0, scrub_dropped_steps: 0 })).toBe('clean');
+  });
+
+  it('names the rule that dropped a trace, never its content', () => {
+    expect(scrubLabel({ ...row, scrub_status: 'dropped', drop_reason: 'session_touched_secrets' })).toBe(
+      'dropped: session touched secrets',
+    );
+    expect(scrubTone('dropped')).toContain('rose');
+    expect(scrubTone('clean')).toContain('emerald');
+  });
+
+  it('colours only a checked success green', () => {
+    expect(outcomeTone('success')).toContain('emerald');
+    expect(outcomeTone('failure')).toContain('rose');
+    expect(outcomeTone('unverified')).toContain('slate');
+  });
+
+  it('reports the local score and its change since the first run', () => {
+    const score = (pass_rate: number) => ({
+      report_id: `r${pass_rate}`,
+      started_at: '2026-11-01T00:00:00Z',
+      model: 'local',
+      cases: 10,
+      passed: pass_rate * 10,
+      pass_rate,
+    });
+
+    expect(teacherTrend([])).toEqual({ latest: '-', change: 'not evaluated yet', runs: 0 });
+    expect(teacherTrend([score(0.3)]).change).toBe('first run');
+    expect(teacherTrend([score(0.3), score(0.5)])).toEqual({
+      latest: '50%',
+      change: '+20 points since the first run',
+      runs: 2,
+    });
+    expect(teacherTrend([score(0.5), score(0.5)]).change).toBe('no change since the first run');
   });
 });
