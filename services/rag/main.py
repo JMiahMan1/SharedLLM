@@ -484,6 +484,24 @@ _PROTOCOL_LESSONS: list[dict] = [
         "tags": ["protocol", "programming", "git"],
     },
     {
+        "id": "lesson-proto-studio",
+        "topic": "Workspace protocol: run, preview and make things with the studio",
+        "rule": "In a workspace never guess a build or test command: GET /api/studio/profile names the stack (python, node-vite, node-next, go, rust, java, dotnet, static) and its exact install/test/build/lint/serve steps; POST /api/studio/run runs one in the sandbox and returns the exit code and output. POST /api/studio/preview starts the dev server, publishes its port and returns a URL (POST /api/studio/preview/stop closes it). For media use POST /api/studio/assets/image (prompt, name) or /api/studio/assets/narration (text, name), which write into assets/; for written work POST /api/studio/deck (Markdown, '---' between slides) or /api/studio/game.",
+        "tags": ["protocol", "workspace", "studio", "coding", "media"],
+    },
+    {
+        "id": "lesson-proto-studio-verify",
+        "topic": "Workspace protocol: prove the workspace works, and edit 3D models",
+        "rule": "Before blaming your own code for a workspace failure call POST /api/studio/diagnose {workspace_id}: it runs safe probes (identity, HOME writability, the working directory, /bin/bash, python3, git) and returns each one's output plus a hint naming the cause. POST /api/studio/verify {workspace_id} goes further: it writes a one-line program, runs it, deletes it, then runs the project's test step, and returns one verdict -- so 'it works' is proven, not assumed.",
+        "tags": ["protocol", "workspace", "studio", "shell", "testing"],
+    },
+    {
+        "id": "lesson-proto-studio-3d",
+        "topic": "Workspace protocol: reading and editing STL models",
+        "rule": "STL files are read and edited in the gateway, not by guessing: POST /api/studio/stl/inspect {workspace_id, path} returns triangles, size, volume, area, whether the mesh is watertight and every warning (open surface, inside-out winding, no-area facets, unit guess). POST /api/studio/stl/transform {workspace_id, path, scale (number or [x,y,z]), rotate [x,y,z] degrees, translate [x,y,z], fit (longest side), center, format binary|ascii, out_path} writes a NEW file (default <name>_edited.stl) and returns the measurements before and after -- quote both. GET /api/studio/stl/preview returns an indexed mesh for drawing. STL is unitless: say which unit you assumed (mm unless the model is metres across).",
+        "tags": ["protocol", "workspace", "studio", "3d", "stl"],
+    },
+    {
         "id": "lesson-proto-typesetting",
         "topic": "Raven scenario: typesetting",
         "rule": "Typesetting: convert Markdown to PDF/HTML/DOCX with pandoc (e.g. `pandoc report.md -o report.pdf --pdf-engine=pdflatex`); pdflatex is available for LaTeX/math-heavy documents.",

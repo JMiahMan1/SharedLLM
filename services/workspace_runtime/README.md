@@ -105,6 +105,7 @@ Each workspace entry can currently define:
 - `POST /files/move`
 - `POST /workflow/write-sync-commit`
 - `POST /tests/pytest`
+- `POST /ports/expose` (publish a sandbox port through a TCP forward), `GET /ports/list/{workspace_id}`, `POST /ports/unexpose` (stop forwarding one)
 
 ## Storage modes (git, Nextcloud, or both)
 

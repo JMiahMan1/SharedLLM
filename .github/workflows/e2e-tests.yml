@@ -1,5 +1,10 @@
 name: SharedLLM E2E Pipeline
 
+# One run per branch, newest wins: a superseded push must not hold a runner.
+concurrency:
+  group: e2e-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ main, master, microservices ]
@@ -127,7 +132,8 @@ jobs:
 
   integration-tests:
     runs-on: ubuntu-latest
-    needs: [lint, unit-tests]
+    # No `needs:`: the contract and integration tests have nothing to wait for,
+    # and a lint nit must not hold the 8-minute stack for 2 minutes first.
     steps:
       - uses: actions/checkout@v4
 

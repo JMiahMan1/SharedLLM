@@ -114,6 +114,8 @@ from services.gateway import (
 )
 from services.gateway import beloved as beloved_routes
 from services.gateway import client_origin
+from services.gateway.trainer import routes as trainer_routes
+from services.gateway.studio import routes as studio_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -870,6 +872,8 @@ app.include_router(push_routes.router)
 app.include_router(network_routes.router)
 app.include_router(weather_routes.router)
 app.include_router(garden_routes.router)
+app.include_router(trainer_routes.router)  # Jarvis Trainer: catalogue, curriculum, eval, self-repair, sermons
+app.include_router(studio_routes.router)  # Workspace Studio: profile, run, preview, assets, deck, game
 app.include_router(calls.router)
 app.include_router(drawing.router)
 app.include_router(mdm.router)

@@ -1,5 +1,12 @@
 name: SOA Microservices CI
 
+# One run per branch, newest wins. A push used to leave the previous run
+# finishing its 24 minutes while the new one queued behind it, so the answer
+# people waited for was about code that had already been replaced.
+concurrency:
+  group: soa-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ main, master, microservices ]
@@ -19,9 +26,12 @@ on:
       - '.github/workflows/soa_tests.yml'
 
 jobs:
-  test:
+  # Static gate, on its own runner: it used to run first inside the single job,
+  # so every test waited for pip to install eight service requirement sets
+  # before anyone learned there was a syntax error.
+  lint:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -32,19 +42,13 @@ jobs:
         python-version: "3.11"
         cache: 'pip'
 
-    # No `env:` block on purpose.
-    #
-    # conftest.py's _TEST_ENV_DEFAULTS is now the single source of truth for
-    # every env var services/config.py reads, so a developer's .env and a CI
-    # runner see identical values. This workflow used to export 27 of them
-    # itself, which meant CI and local runs exercised *different* configuration
-    # and could not fail the same way. Anything a service genuinely needs at
-    # runtime belongs in conftest, not here.
-
+    # No `env:` block on purpose: conftest.py's _TEST_ENV_DEFAULTS is the single
+    # source of truth for every value services/config.py reads, so a developer's
+    # .env and a CI runner see identical configuration.
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-mock pytest-asyncio respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
+        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
         # Heavy ML packages (fastembed models, torch) are not installed here:
         # the tests mock them, so only the API contracts are needed.
 
@@ -58,50 +62,82 @@ jobs:
         pip install -r services/health/requirements.txt
         pip install -r services/automation/requirements.txt
         pip install -r services/telemetry/requirements.txt
-        pip install -r services/homehub/requirements.txt pytest-asyncio
-        # RAG has huge deps (Torch), so we mock it for CI unit tests
-        # The tests are designed to bypass heavy ML loads via mocker.
+        pip install -r services/homehub/requirements.txt
+        # RAG has huge deps (Torch), so we mock it for CI unit tests.
 
-    - name: Lint (ruff + full-suite collection fast-fail)
+    - name: Ruff (syntax and undefined names)
+      run: ruff check --select E9,F63,F7,F82 services/gateway services/garden services/execution
+
+    # pytest --collect-only imports every test module (and thus the whole service
+    # import graph) without running a test, so a broken import fails here in a
+    # minute instead of mid-collection in the shards below.
+    - name: Import every test module
+      run: pytest --collect-only -q
+
+  # Six shards, all at once. pytest-split distributes by measured duration, so
+  # each shard finishes at about the same time as the others.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    # No `env:` block on purpose: conftest.py's _TEST_ENV_DEFAULTS is the single
+    # source of truth for every value services/config.py reads, so a developer's
+    # .env and a CI runner see identical configuration.
+    - name: Install dependencies
       run: |
-        # Fast static gate that runs BEFORE the heavier pytest run.
-        # ruff catches syntax errors and undefined names within a file.
-        # pytest --collect-only imports every test module in the suite (and thus
-        # the whole service import graph) without executing tests, surfacing
-        # ImportError / missing re-export breakage immediately instead of
-        # mid-collection in the test step. This used to be hardcoded to 13 named
-        # files, so a broken import in any of the other ~90 test modules was
-        # invisible until someone ran the suite locally.
-        ruff check --select E9,F63,F7,F82 services/gateway
-        pytest --collect-only -q
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
+        # Heavy ML packages (fastembed models, torch) are not installed here:
+        # the tests mock them, so only the API contracts are needed.
 
-    - name: Run Pytest
+    - name: Install service dependencies
+      run: |
+        pip install -r services/identity/requirements.txt
+        pip install -r services/execution/requirements.txt
+        pip install -r services/gateway/requirements.txt
+        pip install -r services/storage/requirements.txt
+        pip install -r services/bible/requirements.txt
+        pip install -r services/health/requirements.txt
+        pip install -r services/automation/requirements.txt
+        pip install -r services/telemetry/requirements.txt
+        pip install -r services/homehub/requirements.txt
+        # RAG has huge deps (Torch), so we mock it for CI unit tests.
+
+    - name: Run Pytest (shard ${{ matrix.shard }} of 6)
       env:
         # Opt in to tests/integration (conftest.py skips it otherwise). Safe
-        # here: a CI runner has no .env, no SERVER_IP and no route to a
-        # deployed stack, so those tests run only their hermetic parts (the
-        # schema contracts) and skip the rest, exactly as before the guard.
+        # here: a runner has no .env, no SERVER_IP and no route to a deployed
+        # stack, so those tests run only their hermetic parts.
         SHAREDLLM_RUN_LIVE: "1"
       run: |
-        # The whole suite, not a 13-file sample. Excludes only the markers that
-        # genuinely need live infrastructure: local_only (live Home Assistant /
-        # Nextcloud) and server_only (a running service mesh).
-        pytest \
-          -m "not local_only and not server_only" \
-          --junitxml=pytest-report.xml \
-          --cov=services/ \
-          --cov-report=xml
+        # Excludes only the markers that genuinely need live infrastructure:
+        # local_only (live Home Assistant / Nextcloud) and server_only (a
+        # running service mesh).
+        pytest           -m "not local_only and not server_only"           --splits 6 --group ${{ matrix.shard }}           --junitxml=pytest-report-${{ matrix.shard }}.xml           --cov=services/           --cov-report=xml:coverage-${{ matrix.shard }}.xml
 
     - name: Upload Coverage Report
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: coverage-report
-        path: coverage.xml
+        name: coverage-report-${{ matrix.shard }}
+        path: coverage-${{ matrix.shard }}.xml
 
     - name: Upload Test Results
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: pytest-results
-        path: pytest-report.xml
+        name: pytest-results-${{ matrix.shard }}
+        path: pytest-report-${{ matrix.shard }}.xml

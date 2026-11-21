@@ -440,6 +440,10 @@ class WorkspaceExposePortRequest(WorkspaceRef):
     host_port: int | None = None
 
 
+class WorkspaceUnexposePortRequest(WorkspaceRef):
+    host_port: int
+
+
 class PytestRequest(WorkspaceRef):
     targets: list[str] = Field(default_factory=list)
     timeout_seconds: int = Field(default=DEFAULT_PYTEST_TIMEOUT_SECONDS, ge=1, le=900)
@@ -2355,6 +2359,21 @@ def expose_workspace_port_endpoint(req: WorkspaceExposePortRequest, x_internal_s
     return expose_workspace_port(workspace["id"], req.container_port, req.host_port)
 
 
+@app.post("/ports/unexpose")
+@app.post("/workspaces/ports/unexpose")
+def unexpose_workspace_port_endpoint(req: WorkspaceUnexposePortRequest, x_internal_secret: str | None = Header(default=None)):
+    """Stop forwarding one published workspace port (a preview server was stopped).
+
+    Resolving the workspace first keeps the same access rules as exposing it: a
+    caller who could not open the forward cannot close somebody else's.
+    """
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    from services.workspace_sandbox import unexpose_workspace_port
+    removed = unexpose_workspace_port(workspace["id"], req.host_port)
+    return {"status": "SUCCESS", "removed": removed, "host_port": req.host_port}
+
+
 @app.get("/ports/list/{workspace_id}")
 @app.get("/workspaces/ports/{workspace_id}")
 def list_workspace_ports_endpoint(workspace_id: str, x_internal_secret: str | None = Header(default=None)):
@@ -3220,10 +3239,19 @@ def _open_terminal_exec(workspace_id: str, host_path: str) -> tuple[Any, str, An
         except Exception as e:
             raise _TerminalSetupError("Container unavailable") from e
         try:
+            from services.workspace_sandbox import _home_for_uid, build_exec_env
+
+            # A real HOME, from the sandbox's own passwd entry: bash reads
+            # $HOME/.bashrc before the first prompt, and a home the user cannot
+            # write (or /root, as a non-root user) made the shell open with
+            # permission errors and no history. TERM is what makes xterm work.
+            terminal_env = build_exec_env(home=_home_for_uid(container, SANDBOX_UID))
+            terminal_env["TERM"] = "xterm-256color"
+            terminal_env.setdefault("LANG", "C.UTF-8")
             exec_id = docker_client.api.exec_create(
                 cname,
                 cmd=["/bin/bash", "-i"],
-                environment={"TERM": "xterm-256color"},
+                environment=terminal_env,
                 user=f"{SANDBOX_UID}:{SANDBOX_GID}",
                 workdir=host_path,
                 tty=True,

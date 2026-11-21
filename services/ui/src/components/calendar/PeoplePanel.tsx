@@ -103,11 +103,14 @@ const PeoplePanel = ({ people, discovered, onSave, onClose }: Props) => {
                   className="h-11 w-11 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0 sm:h-7 sm:w-7"
                   aria-label={`${p.name} color`}
                 />
+                {/* min-w-0: an input's intrinsic width is ~20 characters and a flex item
+                    refuses to shrink below it, so the row overflowed its card on a 360px
+                    phone (the name box ran past the right edge). */}
                 <input
                   type="text"
                   value={p.name}
                   onChange={(e) => rename(p.id, e.target.value)}
-                  className="flex-1 rounded-lg border px-2 py-1 text-sm font-bold outline-none"
+                  className="min-w-0 flex-1 rounded-lg border px-2 py-1 text-sm font-bold outline-none"
                   style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}
                   aria-label="Person name"
                   placeholder="Person name"

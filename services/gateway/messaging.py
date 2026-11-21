@@ -447,13 +447,16 @@ class InferenceJobQueue:
     # The registry is per process and every call comes from the worker's event
     # loop; the threading lock only guards the dicts, never an await.
 
-    async def register_raven_mission(self, mission_id: int | str, pause_event: asyncio.Event) -> None:
+    async def register_raven_mission(self, mission_id: int | str, pause_event: asyncio.Event | None = None) -> None:
         """Track the running Raven mission so a high-priority job can pause it.
 
         ``pause_event`` is owned by the mission: set means "pause at the next
         checkpoint". Call this only while holding TIER3_LOCK, so the mission
         registered is the one actually running and not one waiting its turn.
         """
+        if pause_event is None:
+            # A caller with no event of its own still gets one, so preemption can pause it.
+            pause_event = asyncio.Event()
         key = str(mission_id)
         with _registry_lock:
             _raven_missions[key] = pause_event
