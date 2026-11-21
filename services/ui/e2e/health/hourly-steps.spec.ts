@@ -283,7 +283,8 @@ test.describe('admin bonus stars on a phone', () => {
   test('needs a recipient and the grant form is thumb-sized', async ({ page }) => {
     await seedAuth(page);
     await mockHealth(page);
-    await page.route('**/api/users', async (route) =>
+    // Admin asks for the test accounts too (?include_test_accounts=true), so match the path, not the whole URL.
+    await page.route((url) => url.pathname === '/api/users', async (route) =>
       route.fulfill({
         json: [
           { id: 1, username: 'alex', full_name: 'Alex', is_admin: true, is_system_default: false },

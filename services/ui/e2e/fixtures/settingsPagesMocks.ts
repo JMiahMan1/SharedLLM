@@ -269,6 +269,8 @@ const GET: Record<string, unknown> = {
   ],
   // Admin: users and devices
   '/api/users/roles': ROLES,
+  // The Security panel's last sign-in reset: none has been done.
+  '/api/users/security/sign-in-reset/last': null,
   '/api/entities': { entities: ENTITIES },
   '/api/entity-protection': [{ entity_id: 'switch.barn_pump', permitted_usernames: ['parent', 'robin'], granted_by: 'parent',
     granted_at: iso(-60 * 24), note: `Only for chores ${LONG_WORD}` }],

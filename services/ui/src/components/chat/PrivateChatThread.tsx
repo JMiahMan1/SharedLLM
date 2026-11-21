@@ -511,13 +511,17 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   const played = useRef(new Set<string>());
   const [queue, setQueue] = useState<Array<PendingAnimation & { local?: boolean }>>([]);
   const [playing, setPlaying] = useState<(PendingAnimation & { local?: boolean }) | null>(null);
+  // Asked again when the thread changes, not only when the marks do: the marks can answer before the
+  // messages (they are fetched once the chat is unlocked), and a reaction whose bubble was not on screen
+  // yet must play when it arrives. An unchanged marks refetch keeps the same data, so it never re-asks.
+  const shownCount = visible.length;
   useEffect(() => {
     if (!pageVisible) return;
     const fresh = pendingAnimations(marks, played.current);
     if (!fresh.length) return;
     for (const item of fresh) played.current.add(item.id);
     setQueue((current) => [...current, ...fresh]);
-  }, [marks, pageVisible]);
+  }, [marks, pageVisible, lastId, shownCount]);
 
   const firstShownId = Number(visible.find((m) => typeof m.id === 'number')?.id ?? 0);
   const markReactionSeen = useCallback(
