@@ -15,6 +15,8 @@ import { noSave, usePrivatePicture } from './usePrivatePicture';
 
 const HIDE_CONTROLS_MS = 2600;
 const FADE_MS = 900;
+/** How long a clip that cannot play keeps its note on screen before the show moves on. */
+const FAILED_VIDEO_NOTE_MS = 3500;
 const SWIPE_PX = 50;
 
 /** The viewer's own slideshow settings, remembered on this device (never anything about the pictures). */
@@ -94,6 +96,7 @@ function Slide({
   onReady,
   onVideoEnd,
   onVideoProgress,
+  onVideoFailed,
 }: {
   token: string;
   vault: PrivateVault;
@@ -105,12 +108,24 @@ function Slide({
   onReady: () => void;
   onVideoEnd: () => void;
   onVideoProgress: (fraction: number) => void;
+  /** A clip that cannot play (not decrypted, refused, unplayable): why, so the show can say so and move on. */
+  onVideoFailed: (reason: string) => void;
 }) {
   const { url, failed } = usePrivatePicture(token, item.blob, item.mime, vault);
   const clip = usePrivateVideo(token, current && item.video ? item.video : null, vault);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [playError, setPlayError] = useState('');
   const ready = Boolean(item.video ? clip.url : loaded) || failed || Boolean(clip.failed);
+  const videoProblem = !item.video
+    ? ''
+    : clip.failed
+      ? `This video could not be decrypted (${clip.failed}).`
+      : playError;
+
+  useEffect(() => {
+    if (current && videoProblem) onVideoFailed(videoProblem);
+  }, [current, videoProblem, onVideoFailed]);
 
   useEffect(() => {
     if (current && ready) onReady();
@@ -120,10 +135,17 @@ function Slide({
     const video = videoRef.current;
     if (!video || !current) return;
     if (playing) {
-      video.play().catch(() => {
+      // A pause or the slide going away interrupts a play() still starting: that is not a failure.
+      const interrupted = (error: unknown) => error instanceof DOMException && error.name === 'AbortError';
+      video.play().catch((first: unknown) => {
+        if (interrupted(first)) return;
         // Sound before a tap can be refused: play muted rather than not at all.
         video.muted = true;
-        void video.play().catch(() => {});
+        video.play().catch((second: unknown) => {
+          if (interrupted(second)) return;
+          const why = second instanceof Error && second.message ? second.message : String(second);
+          setPlayError(`This video would not play (${why}).`);
+        });
       });
     } else {
       video.pause();
@@ -172,6 +194,10 @@ function Slide({
           disableRemotePlayback
           {...noSave}
           onEnded={onVideoEnd}
+          onError={(event) => {
+            const code = event.currentTarget.error?.code;
+            setPlayError(`This video could not be played${code ? ` (media error ${code})` : ''}.`);
+          }}
           onTimeUpdate={(event) => {
             const v = event.currentTarget;
             if (v.duration > 0) onVideoProgress(v.currentTime / v.duration);
@@ -194,6 +220,16 @@ function Slide({
         <p className="relative text-sm text-slate-400">This picture could not be opened.</p>
       ) : (
         <Loader2 size={28} className="relative animate-spin text-white/70" />
+      )}
+      {current && videoProblem && (
+        <p
+          className="absolute bottom-24 max-w-[90%] rounded-2xl bg-black/70 px-3 py-2 text-center text-sm text-white"
+          role="alert"
+          data-testid="private-slideshow-video-failed"
+        >
+          {videoProblem}
+          {playing ? ' Skipping to the next one.' : ''}
+        </p>
       )}
       {item.video && current && !clip.url && !clip.failed && url && (
         <span className="absolute bottom-24 rounded-full bg-black/60 px-3 py-1 text-xs text-white" role="status">
@@ -243,6 +279,8 @@ export default function PrivateSlideshow({
   const [fullscreen, setFullscreen] = useState(false);
   const [readyBlob, setReadyBlob] = useState('');
   const [videoProgress, setVideoProgress] = useState(0);
+  // The clip on screen that cannot play: the show says why on the slide, then moves on.
+  const [videoFailed, setVideoFailed] = useState<{ blob: string; reason: string } | null>(null);
 
   // The order, and where in it we are. Shuffling keeps the picture on screen and reorders the rest.
   const [anchor, setAnchor] = useState(startIndex);
@@ -268,6 +306,7 @@ export default function PrivateSlideshow({
       setPrevious(item ?? null);
       setPosition(next);
       setVideoProgress(0);
+      setVideoFailed(null);
       setEnded(false);
     },
     [position, order.length, settings.loop, item],
@@ -282,6 +321,7 @@ export default function PrivateSlideshow({
 
   const ready = Boolean(item) && readyBlob === item?.blob;
   const markReady = useCallback(() => setReadyBlob(item?.blob ?? ''), [item?.blob]);
+  const markVideoFailed = useCallback((reason: string) => setVideoFailed({ blob: item?.blob ?? '', reason }), [item?.blob]);
 
   // A photo stays up for the chosen time once it is on screen; a clip advances when it ends.
   useEffect(() => {
@@ -289,6 +329,14 @@ export default function PrivateSlideshow({
     const timer = window.setTimeout(() => goTo(1), settings.interval * 1000);
     return () => window.clearTimeout(timer);
   }, [playing, ready, item, settings.interval, goTo]);
+
+  // A clip that cannot play would hold the show forever (it never ends): leave its note up a moment, then go on.
+  const failedHere = Boolean(item && videoFailed?.blob === item.blob);
+  useEffect(() => {
+    if (!playing || !failedHere) return undefined;
+    const timer = window.setTimeout(() => goTo(1), FAILED_VIDEO_NOTE_MS);
+    return () => window.clearTimeout(timer);
+  }, [playing, failedHere, goTo]);
 
   useWakeLock(playing && !ended);
 
@@ -416,6 +464,7 @@ export default function PrivateSlideshow({
             onReady={() => {}}
             onVideoEnd={() => {}}
             onVideoProgress={() => {}}
+            onVideoFailed={() => {}}
           />
         )}
         <Slide
@@ -430,6 +479,7 @@ export default function PrivateSlideshow({
           onReady={markReady}
           onVideoEnd={() => playing && goTo(1)}
           onVideoProgress={setVideoProgress}
+          onVideoFailed={markVideoFailed}
         />
         {upcoming && upcoming.blob !== item.blob && <Upcoming token={token} vault={vault} item={upcoming} />}
       </div>
