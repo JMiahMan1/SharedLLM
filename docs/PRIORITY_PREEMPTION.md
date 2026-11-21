@@ -36,7 +36,7 @@ Jobs don't need explicit priority - it's inferred from payload content:
 - Any query with `voice_context: true`
 
 # Critical priority indicators:
-- "sos", "emergency", "help me", "urgent"
+- "sos", "emergency", "urgent" (whole words only)
 
 # Low priority (Raven missions):
 - Any job with `_mission_id` in payload
@@ -70,19 +70,26 @@ Replaces FIFO list with sorted set for priority ordering:
 
 ### 5. Preemption Mechanism
 
-When a high-priority job arrives while a Raven mission is running:
+When a HIGH or CRITICAL Tier 2 job runs while a Raven mission holds TIER3_LOCK:
 
 ```
-1. High-priority job enqueued with HIGH/CRITICAL priority
-2. Worker claims job, checks for running Raven mission
-3. If Raven mission running AND priority > NORMAL:
-   a. Set Redis key: `raven:mission:pause:{mission_id}` = "PREEMPTED"
-   b. Publish "PREEMPTED" on same channel
-4. Raven mission's agent loop receives pause signal
-5. Mission saves checkpoint, yields TIER3_LOCK
-6. High-priority job runs immediately
-7. After completion, Raven mission resumes from checkpoint
+1. The worker, once it holds TIER3_LOCK for a mission, creates an asyncio.Event
+   for it and calls register_raven_mission(mission_id, pause_event).
+2. An urgent Tier 2 job calls request_preemption(job_id, priority) before it
+   waits for a TIER2_SEMAPHORE slot. That sets the mission's event and writes
+   raven:mission:pause:{mission_id} = "PREEMPTED" (SET NX, so a user's own
+   "PAUSED" is never overwritten) and publishes it.
+3. The agent loop checks at the top of every iteration (_await_mission_resume):
+   the event or the Redis flag pauses it until both are clear (or a KILL).
+4. When the urgent job ends, release_preemption(job_id) clears the event and
+   deletes the flag only if it still says "PREEMPTED", then publishes RESUMED.
+   With several urgent jobs the mission resumes after the last one.
+5. unregister_raven_mission runs when the mission releases TIER3_LOCK.
 ```
+
+Only Tier 2 jobs preempt: a Tier 3 job would wait for the lock the paused
+mission holds. A mission pauses between steps, so an LLM call already in
+flight finishes first.
 
 ### 6. Key Components
 
@@ -218,7 +225,7 @@ LIVE_E2E=1 GH_TOKEN=xxx pytest tests/integration/test_integration_raven_user_cas
 
 4. **No persistence across restarts**: If gateway restarts, paused mission state is in Redis (survives) but worker needs to re-register.
 
-5. **Race condition window**: Small window between claiming job and registering mission. Mitigated by checking before execution.
+5. **Per process**: the event registry lives in the gateway process that runs the mission; another process can still pause it through the Redis flag.
 
 ## Future Improvements
 

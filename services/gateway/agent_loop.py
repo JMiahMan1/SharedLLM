@@ -2032,32 +2032,63 @@ async def _is_kill_flag_set(mission_id: int) -> bool:
 PAUSE_POLL_SECONDS = 5.0
 
 
+async def _mission_pause_requested(mission_id: int, pause_key: str) -> bool:
+    """Whether the mission should hold at this checkpoint.
+
+    Two signals, either one pauses: the in-process event the worker registered
+    for this mission (set by a high-priority job, see
+    ``InferenceJobQueue.request_preemption``), and the Redis pause flag (a
+    user's pause from the API, or a preemption from this or another process).
+    The event still works when Redis does not answer.
+    """
+    from services.gateway.messaging import mission_pause_event
+
+    event = mission_pause_event(mission_id)
+    if event is not None and event.is_set():
+        return True
+    try:
+        return await _redis_flag_active(pause_key)
+    except Exception as e:
+        log.warning(f"[AgentLoop] Could not read the pause flag of mission {mission_id}: {e}")
+        return False
+
+
 async def _await_mission_resume(
     mission_id: int,
     stream_event: Callable[[str, str], Awaitable[Any]],
 ) -> bool:
-    """Block until a mission is resumed (or killed) via Redis pub/sub.
+    """Block until a mission is resumed (or killed).
 
     Returns ``True`` if a KILL arrived while paused (caller should terminate),
     ``False`` once the mission is resumed (or was never actually paused).
 
-    Uses subscribe-then-recheck to avoid a lost-wakeup race: the pause key is
-    re-read *after* subscribing, so a RESUME published before subscribe is
-    observed, and any signal published after subscribe is delivered by listen().
+    Uses subscribe-then-recheck to avoid a lost-wakeup race: the pause signals
+    are re-read *after* subscribing, so a RESUME published before subscribe is
+    observed, and any signal published after subscribe is delivered.
 
     ``stream_event`` is passed in (it is a closure nested inside AgentLoop).
     """
+    from services.gateway.messaging import mission_pause_event
+
     pause_key = f"raven:mission:pause:{mission_id}"
     kill_key = f"raven:mission:kill:{mission_id}"
-    if not await _redis_flag_active(pause_key):
+    if not await _mission_pause_requested(mission_id, pause_key):
         return False
 
-    r_ps = redis.from_url(REDIS_URL, decode_responses=True)
-    pubsub = r_ps.pubsub()
-    await pubsub.subscribe(pause_key, kill_key)
+    r_ps = None
+    pubsub = None
     try:
+        try:
+            r_ps = redis.from_url(REDIS_URL, decode_responses=True)
+            pubsub = r_ps.pubsub()
+            await pubsub.subscribe(pause_key, kill_key)
+        except Exception as e:
+            # A preemption from this process pauses through its event alone,
+            # so a Redis outage must not turn into "never paused".
+            log.warning(f"[AgentLoop] No pub/sub for mission {mission_id}; polling instead: {e}")
+            pubsub = None
         # Re-check after subscribe to avoid lost-wakeup race
-        if not await _redis_flag_active(pause_key):
+        if not await _mission_pause_requested(mission_id, pause_key):
             return False
         log.warning(f"[AgentLoop] MISSION PAUSED for {mission_id}. Waiting for resume signal.")
         await stream_event("system", "Mission paused, waiting for LLM access to become available.")
@@ -2065,14 +2096,25 @@ async def _await_mission_resume(
         # nothing published, and listen() then never returned, holding the one
         # worker every chat reply waits on. A missing key counts as resumed.
         while True:
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=PAUSE_POLL_SECONDS)
+            message = None
+            if pubsub is not None:
+                with contextlib.suppress(Exception):
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=PAUSE_POLL_SECONDS)
+            else:
+                await asyncio.sleep(PAUSE_POLL_SECONDS)
+            killed = False
             if message and (message.get("channel") == kill_key or message.get("data") == "KILL"):
                 killed = True
             elif message and message.get("data") == "RESUMED":
-                break
+                # A resume lifts the flag; only a preemption still running in
+                # this process (its event) keeps the mission waiting.
+                event = mission_pause_event(mission_id)
+                if event is None or not event.is_set():
+                    break
             else:
-                killed = await _redis_flag_active(kill_key)
-                if not killed and not await _redis_flag_active(pause_key):
+                with contextlib.suppress(Exception):
+                    killed = await _redis_flag_active(kill_key)
+                if not killed and not await _mission_pause_requested(mission_id, pause_key):
                     break
             if killed:
                 log.warning(f"[AgentLoop] MISSION KILL SIGNAL RECEIVED while paused for {mission_id}. Terminating.")
@@ -2082,12 +2124,14 @@ async def _await_mission_resume(
         await stream_event("system", "Mission resumed.")
         return False
     finally:
-        with contextlib.suppress(Exception):
-            await pubsub.unsubscribe(pause_key, kill_key)
-        with contextlib.suppress(Exception):
-            await pubsub.close()
-        with contextlib.suppress(Exception):
-            await r_ps.close()
+        if pubsub is not None:
+            with contextlib.suppress(Exception):
+                await pubsub.unsubscribe(pause_key, kill_key)
+            with contextlib.suppress(Exception):
+                await pubsub.close()
+        if r_ps is not None:
+            with contextlib.suppress(Exception):
+                await r_ps.close()
 
 # Phrases that indicate the model believes the mission is genuinely done. When a
 # no-tool text reply contains one of these AND the mission has already produced
@@ -2110,12 +2154,39 @@ COMPLETION_INDICATORS = [
 ]
 
 
+#: How a mission's result starts when it was stopped before finishing its work:
+#: a kill or cancel, the worker's time limit, or every inference retry failing.
+#: Such a result is a failure however long it is.
+MISSION_STOPPED_PREFIXES = (
+    "mission terminated",
+    "mission aborted",
+    "mission stopped",
+    "system error:",
+)
+
+
+def mission_stopped_early(result: str | None) -> bool:
+    """True when ``result`` says the mission was stopped, not that it finished."""
+    return str(result or "").strip().lower().startswith(MISSION_STOPPED_PREFIXES)
+
+
+def is_batch_placeholder(result: str | None) -> bool:
+    """The loop's internal "[batch] <tool>" marker, which is not an answer."""
+    text = str(result or "").strip()
+    return text.startswith("[batch] ") and "\n" not in text
+
+
 def should_persist_learning(result: str) -> bool:
     """
     Prevent meaningless results from being added to RAG.
     We don't want the LLM to learn that reading a file or failing a tool call is success.
     """
     if not result or result.strip() in ("None", "", "null"):
+        return False
+    # "SYSTEM ERROR: Inference failed..." and "MISSION TERMINATED: ..." used to
+    # pass every check below, so missions whose model was down were stored as
+    # completed (and their lesson as a success).
+    if mission_stopped_early(result) or is_batch_placeholder(result):
         return False
     result_lower = result.lower().strip()
 
@@ -2203,6 +2274,13 @@ def should_persist_learning(result: str) -> bool:
     return True
 
 
+def _mentions_workspace(query: str, workspace_id: str) -> bool:
+    """Whether ``query`` names ``workspace_id`` as a whole word (any case)."""
+    if len(workspace_id) < 3:
+        return False
+    return re.search(rf"(?<![\w-]){re.escape(workspace_id)}(?![\w-])", query, re.IGNORECASE) is not None
+
+
 async def resolve_mission_workspace(
     user_id: str,
     assigned_workspace_id: str | None = None,
@@ -2237,24 +2315,35 @@ async def resolve_mission_workspace(
             log.warning(f"[workspace] resolve {wid} failed: {e}")
         return None
 
+    async def _create_one(wid: str) -> dict | None:
+        """Create (or adopt) a local workspace owned by the mission's user.
+
+        This used to call /workspaces/bootstrap, which refuses to create a
+        workspace without a repo_url, so it failed with 400 every time.
+        POST /workspaces is the call WorkspaceCreateRequest makes: idempotent,
+        and it needs no repository.
+        """
+        try:
+            async with shared_http_client() as client:
+                res = await client.post(
+                    f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+                    json={"id": wid, "display_name": wid, "scope": "user", "owner_user": user_id},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=20.0),
+                )
+                if res.status == 200:
+                    return (await res.json()).get("workspace")
+                log.warning(f"[workspace] create {wid} answered HTTP {res.status}")
+        except Exception as e:
+            log.warning(f"[workspace] create {wid} failed: {e}")
+        return None
+
     if assigned_workspace_id:
         ws = await _resolve_one(assigned_workspace_id)
         if ws:
             return ws
-        # Not found; try to bootstrap it (creates the repo only if requested).
-        try:
-            async with shared_http_client() as client:
-                boot = await client.post(
-                    f"{WORKSPACE_RUNTIME_SVC}/workspaces/bootstrap",
-                    json={"workspace_id": assigned_workspace_id, "rag_user": user_id, "create_if_missing": True},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=aiohttp.ClientTimeout(total=20.0),
-                )
-                if boot.status == 200:
-                    return (await boot.json()).get("workspace")
-        except Exception as e:
-            log.warning(f"[workspace] bootstrap {assigned_workspace_id} failed: {e}")
-        return None
+        # Not found; create it as a plain local workspace (no repository).
+        return await _create_one(assigned_workspace_id)
 
     # No assigned_workspace_id explicitly passed. Check if mission query mentions an existing workspace or requests a specific workspace ID.
     if query:
@@ -2271,7 +2360,9 @@ async def resolve_mission_workspace(
                     for item in all_ws:
                         if isinstance(item, dict):
                             wid = item.get("id")
-                            if wid and wid != "default" and wid in query:
+                            # Whole id only: a substring test sent any query
+                            # saying "sermons" into the shared Sermon workspace.
+                            if wid and wid != "default" and _mentions_workspace(query, str(wid)):
                                 log.info(f"[workspace] Auto-detected existing workspace '{wid}' referenced in mission query")
                                 return item
         except Exception as e:
@@ -2286,21 +2377,14 @@ async def resolve_mission_workspace(
                 if ws:
                     log.info(f"[workspace] Auto-detected workspace '{cand}' from query regex match")
                     return ws
-                try:
-                    async with shared_http_client() as client:
-                        boot = await client.post(
-                            f"{WORKSPACE_RUNTIME_SVC}/workspaces/bootstrap",
-                            json={"workspace_id": cand, "rag_user": user_id, "create_if_missing": True},
-                            headers={"X-Internal-Secret": INTERNAL_SECRET},
-                            timeout=aiohttp.ClientTimeout(total=20.0),
-                        )
-                        if boot.status == 200:
-                            ws = (await boot.json()).get("workspace")
-                            if ws:
-                                log.info(f"[workspace] Auto-bootstrapped workspace '{cand}' from query regex match")
-                                return ws
-                except Exception as e:
-                    log.warning(f"[workspace] Auto-bootstrap candidate '{cand}' failed: {e}")
+                # Create one only when the query names it as a workspace
+                # ("workspace raven-x"); any other raven-word is not a request.
+                if not re.search(rf"workspace\W+{re.escape(cand)}\b", query, re.IGNORECASE):
+                    continue
+                ws = await _create_one(cand)
+                if ws:
+                    log.info(f"[workspace] Created workspace '{cand}' named in the mission query")
+                    return ws
 
     # No assigned workspace. System-maintenance missions (fixing SharedLLM's own
     # code/logs) run in the user's Default Workspace. Everything else (building or
@@ -5277,7 +5361,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         # Last-resort: if summarization still produced nothing (e.g. context
         # exhaustion even on the summary call), synthesize a plain-text result
         # from the action log so the user always receives a final answer.
-        if not ans or ans.strip() in ("", "None", "null", "{}", "[]"):
+        if not ans or ans.strip() in ("", "None", "null", "{}", "[]") or is_batch_placeholder(ans):
             _steps = [ln.split(": ", 1)[-1].split(" ->")[0][:120] for ln in action_log[-10:] if ": " in ln]
             ans = (
                 f"Mission completed. {successful_tool_calls} tool call(s) executed across "

@@ -1,9 +1,10 @@
 import asyncio
 import json
 import logging
+import re
+import threading
 import time
 import uuid
-from dataclasses import dataclass, field
 from typing import Any
 
 import redis.asyncio as redis
@@ -32,9 +33,21 @@ PRIORITY_NAMES = {
 TIER2_SEMAPHORE = asyncio.Semaphore(3)
 TIER3_LOCK = asyncio.Lock()
 
-# Preemption state
-_current_raven_mission: int | None = None
-_preemption_lock = asyncio.Lock()
+# Preemption state (see InferenceJobQueue.register_raven_mission). Keyed by the
+# mission id as a string; the value is the mission's pause event.
+_raven_missions: dict[str, asyncio.Event] = {}
+#: Job ids currently holding each mission paused.
+_preemptors: dict[str, set[str]] = {}
+_registry_lock = threading.Lock()
+
+#: What preemption writes to ``raven:mission:pause:<id>`` (a user pause writes PAUSED).
+PREEMPTED = "PREEMPTED"
+#: Backstop for a gateway that dies mid-preemption: the flag then lapses.
+PREEMPTION_FLAG_TTL_SECONDS = 3600
+#: Delete KEYS[1] only while it still holds ARGV[1].
+_DELETE_IF_EQUALS = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
+)
 
 
 class JobStatus:
@@ -60,6 +73,7 @@ class InferenceJobQueue:
         self.DEFAULT_TTL_SECONDS = 3600
         self.LEASE_TTL_SECONDS = 120
         self.MAX_ATTEMPTS = 3
+        self._queue_type_checked = False
 
     async def connect(self):
         if not self._redis:
@@ -90,8 +104,23 @@ class InferenceJobQueue:
             log.warning(f"[RavenWorker] Could not check the {name} lease: {e}")
             return True
 
-    async def enqueue_job(self, user_id: str, payload: dict[str, Any], priority: int = PRIORITY_NORMAL, tier: str = "tier2") -> str:
-        """Adds a job to the priority queue."""
+    async def enqueue_job(
+        self,
+        user_id: str,
+        payload: dict[str, Any],
+        priority: int | None = None,
+        tier: str | None = None,
+    ) -> str:
+        """Adds a job to the priority queue.
+
+        ``priority`` and ``tier`` default to what the payload implies
+        (``infer_priority_from_payload``): no caller passes them, and a fixed
+        NORMAL default made every job equal, so nothing could ever preempt.
+        """
+        if priority is None:
+            priority = infer_priority_from_payload(payload)
+        if tier is None:
+            tier = infer_tier_from_payload(payload)
         if not self._redis:
             await self.connect()
 
@@ -133,6 +162,8 @@ class InferenceJobQueue:
             await self.connect()
 
         assert self._redis is not None
+        if not self._queue_type_checked:
+            await self._migrate_fifo_queue()
 
         # Get highest priority job (lowest score = highest priority)
         job_ids = await self._redis.zrange(self.QUEUE_KEY, 0, 0)  # type: ignore[misc]
@@ -164,6 +195,32 @@ class InferenceJobQueue:
         await self.heartbeat_job(job_id)
         return job
 
+    async def _migrate_fifo_queue(self) -> None:
+        """Move jobs left in the old FIFO list into the priority set.
+
+        The queue used to be a Redis list under the same key. A gateway
+        upgraded while jobs were queued would otherwise hit WRONGTYPE on every
+        claim and never run anything again.
+        """
+        assert self._redis is not None
+        try:
+            if await self._redis.type(self.QUEUE_KEY) != "list":  # type: ignore[misc]
+                self._queue_type_checked = True
+                return
+            job_ids = await self._redis.lrange(self.QUEUE_KEY, 0, -1)  # type: ignore[misc]
+            await self._redis.delete(self.QUEUE_KEY)  # type: ignore[misc]
+            for job_id in job_ids:
+                raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[misc]
+                job = json.loads(raw) if raw else {}
+                priority = job.get("priority", infer_priority_from_payload(job.get("payload") or {}))
+                score = -priority * 1_000_000_000 + job.get("created_at", time.time())
+                await self._redis.zadd(self.QUEUE_KEY, {job_id: score})  # type: ignore[misc]
+            log.warning(f"Moved {len(job_ids)} job(s) from the old FIFO queue into the priority queue.")
+            self._queue_type_checked = True
+        except Exception as e:
+            log.warning(f"Could not check the job queue's type: {e}")
+            self._queue_type_checked = True
+
     async def pop_job(self) -> dict[str, Any] | None:
         """Backward-compatible alias."""
         return await self.claim_job()
@@ -173,6 +230,10 @@ class InferenceJobQueue:
             await self.connect()
         assert self._redis is not None
         await self._redis.set(f"{self.LEASE_PREFIX}{job_id}", str(time.time()), ex=self.LEASE_TTL_SECONDS)  # type: ignore[misc]
+        # Keep the job record alive as long as the job is: a mission may run
+        # two hours, and a record that expired after one made the orphan
+        # reaper fail the mission while it was still running.
+        await self._redis.expire(f"{self.JOB_PREFIX}{job_id}", self.DEFAULT_TTL_SECONDS)  # type: ignore[misc]
 
     async def complete_job(self, job_id: str, result: Any):
         if not self._redis:
@@ -368,54 +429,152 @@ class InferenceJobQueue:
             log.warning(f"Failed to publish status for job {job_id}: {e}")
 
     # --- Preemption Support ---
+    #
+    # One Raven mission runs at a time (TIER3_LOCK) and can hold the model for
+    # hours. A HIGH or CRITICAL Tier 2 job (a voice command, a light switch)
+    # pauses it at its next checkpoint and lets it go on once the job is done:
+    #
+    # 1. The worker creates an ``asyncio.Event`` per mission and registers it
+    #    here once it holds TIER3_LOCK (``register_raven_mission``).
+    # 2. ``request_preemption`` sets that event (the in-process signal the agent
+    #    loop reads at every checkpoint, see ``mission_pause_event``) and writes
+    #    ``PREEMPTED`` to ``raven:mission:pause:<id>`` for any other reader.
+    # 3. ``release_preemption`` runs when the preempting job ends; once no
+    #    preempting job is left it clears the event and removes the Redis key,
+    #    but only if it still says ``PREEMPTED``: a user's own pause (``PAUSED``)
+    #    is theirs to lift.
+    #
+    # The registry is per process and every call comes from the worker's event
+    # loop; the threading lock only guards the dicts, never an await.
 
-    async def request_preemption(self, preempting_job_id: str, priority: int) -> bool:
+    async def register_raven_mission(self, mission_id: int | str, pause_event: asyncio.Event) -> None:
+        """Track the running Raven mission so a high-priority job can pause it.
+
+        ``pause_event`` is owned by the mission: set means "pause at the next
+        checkpoint". Call this only while holding TIER3_LOCK, so the mission
+        registered is the one actually running and not one waiting its turn.
         """
-        Request preemption of current Raven mission.
-        Returns True if preemption granted (mission paused).
+        key = str(mission_id)
+        with _registry_lock:
+            _raven_missions[key] = pause_event
+            preemptors = _preemptors.setdefault(key, set())
+            # A preemption that arrived for an earlier run of a reused id ended
+            # with that run; never start a fresh mission paused.
+            preemptors.clear()
+        pause_event.clear()
+
+    async def unregister_raven_mission(self, mission_id: int | str) -> None:
+        """Forget a finished mission and lift any preemption still pending on it."""
+        key = str(mission_id)
+        with _registry_lock:
+            event = _raven_missions.pop(key, None)
+            had_preemptors = bool(_preemptors.pop(key, None))
+        if event is not None:
+            event.clear()
+        if had_preemptors:
+            await self._clear_preempted_flag(key)
+
+    async def get_current_raven_mission(self) -> str | None:
+        """The id of the Raven mission running in this process, if any."""
+        with _registry_lock:
+            return next(iter(_raven_missions), None)
+
+    async def request_preemption(self, preempting_job_id: str, priority: int) -> str | None:
+        """Pause the running Raven mission for a HIGH/CRITICAL job.
+
+        Returns the paused mission's id, or None when there was nothing to
+        pause or the job is not urgent enough. Every successful call must be
+        matched by ``release_preemption(preempting_job_id)``.
         """
-        async with _preemption_lock:
-            global _current_raven_mission
+        if priority <= PRIORITY_NORMAL:
+            return None
+        with _registry_lock:
+            if not _raven_missions:
+                return None
+            mission_id, event = next(iter(_raven_missions.items()))
+            _preemptors.setdefault(mission_id, set()).add(preempting_job_id)
+        event.set()
 
-            if _current_raven_mission is None:
-                return False  # No Raven mission running
+        pause_key = f"raven:mission:pause:{mission_id}"
+        try:
+            if not self._redis:
+                await self.connect()
+            assert self._redis is not None
+            # NX: never overwrite a user's own PAUSED with PREEMPTED, or the
+            # release would resume a mission the user meant to keep paused.
+            await self._redis.set(pause_key, PREEMPTED, ex=PREEMPTION_FLAG_TTL_SECONDS, nx=True)  # type: ignore[misc]
+            await self._redis.publish(pause_key, PREEMPTED)
+        except Exception as e:
+            # The in-process event already pauses the mission; the Redis flag
+            # only informs other readers.
+            log.warning(f"[Preemption] Could not write the pause flag of mission {mission_id}: {e}")
+        log.warning(
+            f"[Preemption] Mission {mission_id} paused for job {preempting_job_id} "
+            f"(priority {PRIORITY_NAMES.get(priority, priority)})"
+        )
+        return mission_id
 
-            if priority <= PRIORITY_NORMAL:
-                return False  # Only high/critical priority can preempt
+    async def release_preemption(self, preempting_job_id: str) -> str | None:
+        """Undo ``request_preemption`` for one job; resume the mission when no
+        preempting job is left. Returns the resumed mission's id, if any."""
+        resumed: str | None = None
+        with _registry_lock:
+            for mission_id, jobs in _preemptors.items():
+                if preempting_job_id in jobs:
+                    jobs.discard(preempting_job_id)
+                    if not jobs:
+                        resumed = mission_id
+                    else:
+                        return None
+                    break
+            event = _raven_missions.get(resumed) if resumed else None
+        if resumed is None:
+            return None
+        if event is not None:
+            event.clear()
+        await self._clear_preempted_flag(resumed)
+        log.info(f"[Preemption] Mission {resumed} resumed after job {preempting_job_id}")
+        return resumed
 
-            # Signal the running mission to pause
-            pause_key = f"raven:mission:pause:{_current_raven_mission}"
-            try:
-                r = redis.from_url(self.redis_url, decode_responses=True)
-                await r.set(pause_key, "PREEMPTED", ex=3600)
-                await r.publish(pause_key, "PREEMPTED")
-                await r.close()
-                log.warning(f"[Preemption] Mission {_current_raven_mission} preempted by job {preempting_job_id} (priority {PRIORITY_NAMES.get(priority, priority)})")
-                return True
-            except Exception as e:
-                log.error(f"[Preemption] Failed to pause mission {_current_raven_mission}: {e}")
-                return False
+    async def _clear_preempted_flag(self, mission_id: str) -> None:
+        """Remove the pause flag only if preemption wrote it, then say RESUMED."""
+        pause_key = f"raven:mission:pause:{mission_id}"
+        try:
+            if not self._redis:
+                await self.connect()
+            assert self._redis is not None
+            removed = await self._redis.eval(_DELETE_IF_EQUALS, 1, pause_key, PREEMPTED)  # type: ignore[misc]
+            if removed:
+                await self._redis.publish(pause_key, "RESUMED")
+        except Exception as e:
+            log.warning(f"[Preemption] Could not clear the pause flag of mission {mission_id}: {e}")
 
-    async def register_raven_mission(self, mission_id: int, pause_event: asyncio.Event):
-        """Register the currently running Raven mission for preemption tracking."""
-        global _current_raven_mission
-        async with _preemption_lock:
-            _current_raven_mission = mission_id
 
-    async def unregister_raven_mission(self, mission_id: int):
-        """Unregister a completed/failed Raven mission."""
-        global _current_raven_mission
-        async with _preemption_lock:
-            if _current_raven_mission == mission_id:
-                _current_raven_mission = None
+def mission_pause_event(mission_id: int | str | None) -> asyncio.Event | None:
+    """The pause event of a mission running in this process (None otherwise).
 
-    async def get_current_raven_mission(self) -> int | None:
-        """Get the currently running Raven mission ID."""
-        global _current_raven_mission
-        return _current_raven_mission
+    The agent loop reads it at every checkpoint alongside the Redis pause flag.
+    """
+    if mission_id is None:
+        return None
+    with _registry_lock:
+        return _raven_missions.get(str(mission_id))
 
 
 # Helper functions for priority inference
+
+#: Words that make a request CRITICAL. Whole words only: a substring test made
+#: "help me write an essay" an emergency and "SOS" match inside other words.
+_CRITICAL_RE = re.compile(r"\b(?:sos|emergency|urgent)\b")
+#: Household control and quick questions; whole words for the same reason
+#: ("lock" in "block", "arm" in "warm", "play" in "display").
+_HIGH_RE = re.compile(
+    r"\b(?:turn on|turn off|toggle|set (?:the )?temperature|lock|unlock|open (?:the )?garage|"
+    r"close (?:the )?garage|arm|disarm|pause|resume|play|stop|volume|brightness|thermostat|"
+    r"lights?|what is the weather|what time|timer|alarm)\b"
+)
+
+
 def infer_priority_from_payload(payload: dict[str, Any]) -> int:
     """
     Infer job priority from payload content.
@@ -425,27 +584,21 @@ def infer_priority_from_payload(payload: dict[str, Any]) -> int:
     """
     # Explicit priority in payload
     if "priority" in payload:
-        return int(payload["priority"])
+        try:
+            return int(payload["priority"])
+        except (TypeError, ValueError):
+            log.warning(f"Ignoring a job priority that is not a number: {payload['priority']!r}")
 
     # Raven missions are low priority (long-running)
     if payload.get("_mission_id"):
         return PRIORITY_LOW
 
-    # Check for fast-path indicators
     query = str(payload.get("query", "")).lower()
-    
-    # Critical: SOS, emergency
-    if any(kw in query for kw in ["sos", "emergency", "help me", "urgent"]):
+
+    if _CRITICAL_RE.search(query):
         return PRIORITY_CRITICAL
-    
-    # High: voice commands, home automation, quick control
-    high_priority_keywords = [
-        "turn on", "turn off", "toggle", "set temperature", "lock", "unlock",
-        "open garage", "close garage", "arm", "disarm", "pause", "resume",
-        "play", "stop", "volume", "brightness", "thermostat", "lights",
-        "what is the weather", "what time", "timer", "alarm"
-    ]
-    if any(kw in query for kw in high_priority_keywords):
+
+    if _HIGH_RE.search(query):
         return PRIORITY_HIGH
 
     # High: voice context (short queries from voice satellites)
@@ -461,7 +614,7 @@ def infer_tier_from_payload(payload: dict[str, Any]) -> str:
     # Raven missions go to tier3
     if payload.get("_mission_id"):
         return "tier3"
-    
+
     # Autonomous/Raven intent goes to tier3
     query = str(payload.get("query", "")).lower()
     coding_keywords = [
@@ -472,6 +625,6 @@ def infer_tier_from_payload(payload: dict[str, Any]) -> str:
     ]
     if any(kw in query for kw in coding_keywords):
         return "tier3"
-    
+
     # Everything else goes to tier2 (Librarian)
     return "tier2"
