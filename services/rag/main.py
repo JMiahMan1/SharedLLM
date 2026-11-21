@@ -484,6 +484,12 @@ _PROTOCOL_LESSONS: list[dict] = [
         "tags": ["protocol", "programming", "git"],
     },
     {
+        "id": "lesson-proto-studio",
+        "topic": "Workspace protocol: run, preview and make things with the studio",
+        "rule": "In a workspace never guess a build or test command: GET /api/studio/profile names the stack (python, node-vite, node-next, go, rust, java, dotnet, static) and its exact install/test/build/lint/serve steps; POST /api/studio/run runs one in the sandbox and returns the exit code and output. POST /api/studio/preview starts the dev server, publishes its port and returns a URL (POST /api/studio/preview/stop closes it). For media use POST /api/studio/assets/image (prompt, name) or /api/studio/assets/narration (text, name), which write into assets/; for written work POST /api/studio/deck (Markdown, '---' between slides) or /api/studio/game.",
+        "tags": ["protocol", "workspace", "studio", "coding", "media"],
+    },
+    {
         "id": "lesson-proto-typesetting",
         "topic": "Raven scenario: typesetting",
         "rule": "Typesetting: convert Markdown to PDF/HTML/DOCX with pandoc (e.g. `pandoc report.md -o report.pdf --pdf-engine=pdflatex`); pdflatex is available for LaTeX/math-heavy documents.",
