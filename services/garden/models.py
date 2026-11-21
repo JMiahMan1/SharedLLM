@@ -61,6 +61,7 @@ class Location(SQLModel, table=True):
     draft_notes: str | None = Field(default=None)
     assigned_to: str | None = Field(default=None)
     skylight_sync_enabled: bool = Field(default=False)
+    skylight_chore_id: str | None = Field(default=None, max_length=128)
     created_at: str = Field(default_factory=utcnow)
     updated_at: str = Field(default_factory=utcnow)
 
@@ -164,6 +165,9 @@ class CustomSpecies(SQLModel, table=True):
     __tablename__ = "custom_species"
 
     key: str = Field(primary_key=True, max_length=120)  # e.g. "thai_holy_basil"
+    #: Set on every save; without it editing an existing species was an UPDATE
+    #: against a column the table did not have.
+    updated_at: str = Field(default_factory=utcnow)
     category: str = Field(max_length=32)  # houseplant | herb | vegetable | fruit | flower
     common_name: str = Field(max_length=120)
     scientific_name: str | None = Field(default=None, max_length=120)
@@ -246,6 +250,14 @@ class PlantIn(SQLModel):
     planted_date: str | None = None
     assigned_to: str | None = None
     skylight_sync_enabled: bool | None = None
+    #: Fields the plant's own page edits (PATCH used to ignore them silently).
+    notes: str | None = None
+    status: str | None = None  # active | archived
+    expected_harvest_start: str | None = None
+    expected_harvest_end: str | None = None
+    last_repotted_date: str | None = None
+    planting_method: str | None = None
+    regrowth_cooldown_days: int | None = None
 
 
 class LocationIn(SQLModel):
@@ -339,6 +351,7 @@ class LocationOut(SQLModel):
     draft_notes: str | None
     assigned_to: str | None
     skylight_sync_enabled: bool
+    skylight_chore_id: str | None = None
     created_at: str
     updated_at: str
 
@@ -447,6 +460,18 @@ class PantryGoalIn(SQLModel):
     target_qty: float = Field(default=0.0, ge=0)
     unit: str = Field(max_length=32)
     method: str = Field(max_length=32)
+    season_year: int | None = None
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PantryGoalPatch(SQLModel):
+    """A partial pantry-goal edit (the same reason as ``GardenPlanPatch``)."""
+
+    item: str | None = None
+    crop_refs_json: str | None = None
+    target_qty: float | None = Field(default=None, ge=0)
+    unit: str | None = Field(default=None, max_length=32)
+    method: str | None = Field(default=None, max_length=32)
     season_year: int | None = None
     notes: str | None = Field(default=None, max_length=1000)
 
@@ -609,6 +634,17 @@ class GardenPlan(SQLModel, table=True):
 class GardenPlanIn(SQLModel):
     name: str
     season: str
+    year: int | None = None
+    family_size: int | None = Field(default=None, ge=1)
+    mode: str | None = None
+    status: str | None = None
+
+
+class GardenPlanPatch(SQLModel):
+    """A partial plan edit: "Activate" sends only ``{status: "active"}``."""
+
+    name: str | None = None
+    season: str | None = None
     year: int | None = None
     family_size: int | None = Field(default=None, ge=1)
     mode: str | None = None

@@ -57,6 +57,7 @@ from services.garden.models import (
     GardenPlan,
     GardenPlanIn,
     GardenPlanOut,
+    GardenPlanPatch,
     GardenProfile,
     GardenProfileIn,
     GardenProfileOut,
@@ -77,6 +78,7 @@ from services.garden.models import (
     PantryGoal,
     PantryGoalIn,
     PantryGoalOut,
+    PantryGoalPatch,
     PlanCell,
     PlanCellIn,
     PlanCellOut,
@@ -86,6 +88,7 @@ from services.garden.models import (
     PlantPhoto,
     PlantPhotoIn,
     PlantPhotoOut,
+    ValveRun,
     ValveRunIn,
     VALVE_MODES,
     utcnow,
@@ -559,7 +562,11 @@ async def species_lookup(
     body = await request.json()
     from services.garden.species_lookup import handle_species_lookup
 
-    return await handle_species_lookup(session, body, _user(request), _is_admin(request))
+    _require_admin_or_adult(request)
+    return await handle_species_lookup(
+        session, body, _user(request), _is_admin(request),
+        is_adult=_role(request) in ADULT_ROLES or _is_admin(request),
+    )
 
 
 @app.post("/species/custom", status_code=201)
@@ -573,7 +580,10 @@ async def species_custom(
     from services.garden.species_lookup import handle_species_custom, CustomSpeciesIn
 
     validated = CustomSpeciesIn(**body)
-    return await handle_species_custom(session, validated, _user(request), _is_admin(request))
+    return await handle_species_custom(
+        session, validated, _user(request), _is_admin(request),
+        is_adult=_role(request) in ADULT_ROLES or _is_admin(request),
+    )
 
 
 @app.delete("/species/custom/{key}")
@@ -586,7 +596,10 @@ async def species_custom_delete(
     _require_admin_or_adult(request)
     from services.garden.species_lookup import handle_species_custom_delete
 
-    return await handle_species_custom_delete(session, key, _user(request), _is_admin(request))
+    return await handle_species_custom_delete(
+        session, key, _user(request), _is_admin(request),
+        is_adult=_role(request) in ADULT_ROLES or _is_admin(request),
+    )
 
 
 # --------------------------------------------------------------------------- internal weather webhook (Phase 3)
@@ -876,12 +889,46 @@ async def patch_location(
         _require_parent_or_admin(request)
     else:
         _require_admin_or_adult(request)
-    for key, value in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    # An explicit null on a required column is a mistake, not a request to clear
+    # it: quietly skipping it keeps the edit and the row honest.
+    for key in ("item", "unit", "method", "target_qty"):
+        if key in fields and fields[key] is None:
+            fields.pop(key)
+    for key, value in fields.items():
         setattr(row, key, value)
     row.updated_at = utcnow()
     session.commit()
     session.refresh(row)
     return LocationOut.model_validate(row).model_dump()
+
+
+async def _cleanup_deleted_target(
+    session: Session, *, target_kind: str, target_id: str
+) -> None:
+    """Stop a deleted target's hardware, then remove what pointed at it.
+
+    Without this a deleted bed could keep an auto-valve or a grow light running
+    (the binding outlived its plant) and its rows would linger as orphans.
+    """
+    from sqlmodel import delete as _delete
+
+    bindings = session.exec(
+        select(HomeHubBinding).where(
+            HomeHubBinding.target_kind == target_kind,
+            HomeHubBinding.target_id == target_id,
+        )
+    ).all()
+    for binding in bindings:
+        if hardware.active_run(binding):
+            try:
+                await hardware.stop_valve(session, binding)
+            except hardware.HardwareBlocked as exc:
+                # The valve will not confirm. Keep going: the failsafe watchdog
+                # is already shouting about it, and the rows must not survive.
+                log.warning("[Garden] could not close %s before deleting: %s", binding.valve_entity_id, exc.reason)
+        session.exec(_delete(ValveRun).where(ValveRun.binding_id == binding.id))
+        session.delete(binding)
 
 
 @app.delete("/locations/{loc_id}", status_code=204)
@@ -910,6 +957,9 @@ async def delete_location(
             status_code=409,
             detail=f"Cannot delete location: {len(plants)} plant(s) still assigned. Move or archive them first.",
         )
+    await _cleanup_deleted_target(session, target_kind="location", target_id=loc_id)
+    for log_row in session.exec(select(CareLog).where(CareLog.location_id == loc_id)).all():
+        session.delete(log_row)
     session.delete(row)
     session.commit()
     return JSONResponse(status_code=204, content=None)
@@ -1249,13 +1299,22 @@ def patch_plant(
 
 
 @app.delete("/plants/{plant_id}", status_code=204)
-def delete_plant(
+async def delete_plant(
     plant_id: str, request: Request, session: Session = Depends(get_session)
 ):
     _require_admin_or_adult(request)
     row = session.get(Plant, plant_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Plant not found")
+    await _cleanup_deleted_target(session, target_kind="plant", target_id=plant_id)
+    for photo in session.exec(select(PlantPhoto).where(PlantPhoto.plant_id == plant_id)).all():
+        if photo.thumb_path:
+            with suppress(OSError):
+                (_thumbs_dir() / photo.thumb_path).unlink()
+        session.delete(photo)
+    for model in (CareRule, CareLog, HarvestLog, PlanCell):
+        for child in session.exec(select(model).where(model.plant_id == plant_id)).all():
+            session.delete(child)
     session.delete(row)
     session.commit()
     return JSONResponse(status_code=204, content=None)
@@ -1299,8 +1358,14 @@ async def today(
     }
     held_tasks: list[dict] = []
 
-    def _verdict(plant: Plant, plant_location) -> dict:
-        """This plant's moisture verdict, from its own binding or its room's."""
+    def _verdict(plant: Plant, plant_location, action: str) -> dict:
+        """This plant's moisture verdict, from its own binding or its room's.
+
+        Only watering: a dry pot says nothing about fertilizing, and holding
+        back a mist because the soil is damp would be nonsense.
+        """
+        if action != "water":
+            return {"applies": False}
         binding = moisture_by_target.get(("plant", plant.id))
         if binding is None and plant.location_id:
             binding = moisture_by_target.get(("location", plant.location_id))
@@ -1345,7 +1410,7 @@ async def today(
                 snooze_dt = None
             if snooze_dt and snooze_dt > now:
                 continue  # still snoozed, skip
-        verdict = _verdict(plant, location)
+        verdict = _verdict(plant, location, rule.action)
         sensor_due = bool(verdict.get("due"))
         if due_dt > now and not sensor_due:
             continue
@@ -1591,7 +1656,7 @@ def get_streaks(
         room_water_total=len(
             session.exec(select(CareLog).where(CareLog.performed_by == user, CareLog.notes.like("%batch water room%"))).all()
         ),
-        pantry_batches_total=0,  # Phase 6: pantry
+        pantry_batches_total=len(session.exec(select(PantryBatch)).all()),
     )
 
     return {**streaks, **ach}
@@ -2221,6 +2286,14 @@ def list_care_rules(
     }
 
 
+def _validate_care_rule(body: CareRuleIn) -> None:
+    """A cadence that cannot work is refused, not stored."""
+    if body.interval_days is not None and body.interval_days <= 0:
+        raise HTTPException(status_code=422, detail="interval_days must be greater than zero")
+    if body.winter_multiplier is not None and body.winter_multiplier < 1.0:
+        raise HTTPException(status_code=422, detail="winter_multiplier cannot be below 1.0")
+
+
 @app.post("/plants/{plant_id}/care-rules", status_code=201)
 def create_care_rule(
     plant_id: str,
@@ -2232,15 +2305,16 @@ def create_care_rule(
     plant = session.get(Plant, plant_id)
     if plant is None:
         raise HTTPException(status_code=404, detail="Plant not found")
+    _validate_care_rule(body)
     row = CareRule(
         plant_id=plant_id,
         action=body.action,
         interval_days=body.interval_days,
         winter_multiplier=body.winter_multiplier,
-        rain_skip_enabled=body.rain_skip_enabled,
+        rain_skip_enabled=True if body.rain_skip_enabled is None else body.rain_skip_enabled,
         next_due_at=_compute_next_due(
             {"interval_days": body.interval_days, "winter_multiplier": body.winter_multiplier or 1.0},
-            {},
+            plant.model_dump(),
         ),
     )
     session.add(row)
@@ -2267,8 +2341,24 @@ def patch_care_rule(
     rule = session.get(CareRule, rule_id)
     if rule is None or rule.plant_id != plant_id:
         raise HTTPException(status_code=404, detail="Care rule not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    if fields.get("plant_id") not in (None, plant_id):
+        raise HTTPException(status_code=400, detail="A care rule cannot be moved to another plant")
+    fields.pop("plant_id", None)
+    _validate_care_rule(body)
+    for key, value in fields.items():
         setattr(rule, key, value)
+    if "interval_days" in fields or "winter_multiplier" in fields:
+        # A changed cadence must move the next date with it, or the plant keeps
+        # the old schedule it was created with.
+        plant = session.get(Plant, plant_id)
+        rule.next_due_at = _compute_next_due(
+            {
+                "interval_days": rule.interval_days,
+                "winter_multiplier": rule.winter_multiplier or 1.0,
+            },
+            plant.model_dump() if plant else {},
+        )
     rule.updated_at = utcnow()
     session.commit()
     session.refresh(rule)
@@ -2297,7 +2387,7 @@ async def profile_detect_zone(request: Request, session: Session = Depends(get_s
     Degrades gracefully with a clear message when geo/weather is unconfigured.
     Never hardcodes coordinates.
     """
-    _user(request)
+    _require_admin_or_adult(request)
     profile = session.exec(select(GardenProfile)).first()
     if not profile:
         # Auto-initialize default profile row if none exists yet.
@@ -2432,7 +2522,7 @@ def create_pantry_goal(
 @app.patch("/pantry-goals/{goal_id}")
 def patch_pantry_goal(
     goal_id: str,
-    body: PantryGoalIn,
+    body: PantryGoalPatch,
     request: Request,
     session: Session = Depends(get_session),
 ):
@@ -2441,7 +2531,12 @@ def patch_pantry_goal(
     row = session.get(PantryGoal, goal_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Pantry goal not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    # An explicit null on a required column is a mistake, not "clear it".
+    for key in ("item", "unit", "method", "target_qty"):
+        if key in fields and fields[key] is None:
+            fields.pop(key)
+    for key, value in fields.items():
         setattr(row, key, value)
     row.updated_at = utcnow()
     session.commit()
@@ -2581,7 +2676,7 @@ def get_plan(
 @app.patch("/plans/{plan_id}")
 def patch_plan(
     plan_id: str,
-    body: GardenPlanIn,
+    body: GardenPlanPatch,
     request: Request,
     session: Session = Depends(get_session),
 ):
@@ -2590,7 +2685,11 @@ def patch_plan(
     plan = session.get(GardenPlan, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    for key in ("name", "season", "year", "mode", "status", "family_size"):
+        if key in fields and fields[key] is None:
+            fields.pop(key)
+    for key, value in fields.items():
         setattr(plan, key, value)
     plan.updated_at = utcnow()
     session.commit()
@@ -3156,7 +3255,9 @@ def create_plant_photo(
             raise HTTPException(status_code=400, detail="The thumbnail must be a JPEG or PNG image.")
         folder = _thumbs_dir()
         folder.mkdir(parents=True, exist_ok=True)
-        name = f"{row.id}.jpg"
+        # The extension has to match the bytes: the thumb route sets the
+        # Content-Type from it, and a PNG labelled .jpg is a corrupt image.
+        name = f"{row.id}.png" if raw.startswith(b"\x89PNG") else f"{row.id}.jpg"
         (folder / name).write_bytes(raw)
         row.thumb_path = name
 
@@ -3221,6 +3322,27 @@ def _require_binding_target(session: Session, target_kind: str, target_id: str) 
     if session.get(model, target_id) is None:
         label = "Plant" if target_kind == "plant" else "Location"
         raise HTTPException(status_code=404, detail=f"{label} not found")
+
+
+#: Binding columns that may be cleared (everything but the numbers/booleans).
+_CLEARABLE_BINDING_FIELDS = (
+    "moisture_entity_id", "temperature_entity_id", "humidity_entity_id",
+    "lux_entity_id", "grow_light_entity_id", "grow_light_on_time",
+    "grow_light_off_time", "valve_entity_id", "nfc_tag_id",
+)
+
+
+def _normalize_clears(fields: dict) -> dict:
+    """Turn "" into None on the fields that can be unbound.
+
+    The pickers send an empty string for "not bound"; storing "" would look like
+    a binding to an entity called nothing.
+    """
+    out = dict(fields)
+    for key in _CLEARABLE_BINDING_FIELDS:
+        if key in out and out[key] == "":
+            out[key] = None
+    return out
 
 
 def _validate_binding_fields(fields: dict) -> dict:
@@ -3332,7 +3454,11 @@ async def upsert_binding(
     """Create or update a plant's or bed's hardware binding (parents/admins)."""
     _require_parent_or_admin(request)
     _require_binding_target(session, target_kind, target_id)
-    fields = _validate_binding_fields(body.model_dump(exclude_unset=True, exclude_none=True))
+    # ``exclude_unset`` only: a field sent as "" or null is a request to clear
+    # it. ``exclude_none`` made an individual sensor, valve or tag impossible
+    # to unbind.
+    raw_fields = body.model_dump(exclude_unset=True)
+    fields = _validate_binding_fields(_normalize_clears(raw_fields))
 
     binding = session.exec(
         select(HomeHubBinding).where(

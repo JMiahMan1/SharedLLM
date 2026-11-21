@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { AlertTriangle, Camera, HeartPulse, Trash2, X } from 'lucide-react';
 import { api } from '../../services/api';
+import { useMediaToken } from '../../lib/mediaToken';
+import { getServerOrigin } from '../../lib/serverUrl';
 import type { GardenDiagnosis, GardenPlant, GardenPlantPhoto } from '../../types/api';
 
 const cardClass = 'rounded-xl border border-white/10 bg-white/5 p-4';
@@ -46,6 +48,26 @@ export function PhotoInput({
     </label>
   );
 }
+
+/** What a saved Plant Doctor photo concluded, in one line and one action. */
+function diagnosisSummary(photo: GardenPlantPhoto): { issue: string; action: string } | null {
+  if (!photo.ai_summary_json) return null;
+  try {
+    const parsed = JSON.parse(photo.ai_summary_json) as {
+      summary?: string;
+      confidence?: string;
+      likely_causes?: { cause?: string }[];
+      recovery_steps?: string[];
+    };
+    const issue = parsed.summary || parsed.likely_causes?.[0]?.cause || '';
+    if (!issue) return null;
+    const action = parsed.recovery_steps?.[0] || '';
+    return { issue, action };
+  } catch {
+    return null;
+  }
+}
+
 
 function DiagnosisBody({ diagnosis }: { diagnosis: GardenDiagnosis }) {
   return (
@@ -174,7 +196,17 @@ export function PhotoJournalPanel({
   currentUser: string;
 }) {
   const queryClient = useQueryClient();
+  const mediaToken = useMediaToken();
   const [pending, setPending] = useState(false);
+
+  // A plain <a href>/<img> cannot carry the Bearer header the API uses, so the
+  // thumbnail is fetched with the same signed media token as every other image.
+  const thumbUrl = (photoId: string): string | null => {
+    if (!mediaToken) return null;
+    const path = api.gardenPlantPhotoThumbUrl(plant.id, photoId);
+    const base = getServerOrigin().replace(/\/+$/, '');
+    return `${base}${path}?user=${encodeURIComponent(mediaToken.user)}&mt=${encodeURIComponent(mediaToken.token)}`;
+  };
 
   const photosQuery = useQuery({
     queryKey: ['garden-photos', plant.id],
@@ -228,11 +260,13 @@ export function PhotoJournalPanel({
         <ul className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {photos.map((photo) => {
             const mine = (photo.taken_by || '').toLowerCase() === currentUser.toLowerCase();
+            const src = photo.thumb_path ? thumbUrl(photo.id) : null;
+            const diagnosis = photo.kind === 'diagnosis' ? diagnosisSummary(photo) : null;
             return (
               <li key={photo.id} className="rounded-lg border border-white/10 bg-slate-950/40 p-2">
-                {photo.thumb_path ? (
+                {src ? (
                   <img
-                    src={api.gardenPlantPhotoThumbUrl(plant.id, photo.id)}
+                    src={src}
                     alt={`${photo.kind} photo from ${photo.taken_at.slice(0, 10)}`}
                     className="w-full h-28 object-cover rounded-md bg-slate-800"
                     loading="lazy"
@@ -247,6 +281,14 @@ export function PhotoJournalPanel({
                   {photo.taken_by ? ` · ${photo.taken_by}` : ''}
                   {photo.kind === 'diagnosis' ? ' · diagnosis' : ''}
                 </p>
+                {diagnosis && (
+                  <div className="mt-1 rounded bg-sky-500/10 border border-sky-500/20 p-1.5">
+                    <p className="text-[10px] text-sky-200">{diagnosis.issue}</p>
+                    {diagnosis.action && (
+                      <p className="text-[10px] text-slate-300">Next: {diagnosis.action}</p>
+                    )}
+                  </div>
+                )}
                 {photo.notes && <p className="text-[10px] text-slate-300">{photo.notes}</p>}
                 {(canDeleteAny || mine) && (
                   <button

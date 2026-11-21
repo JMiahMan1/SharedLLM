@@ -267,3 +267,74 @@ def test_a_child_cannot_add_a_plant(client):
         "category": "houseplant", "species_ref": "monstera_deliciosa",
     })
     assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------- what gets mirrored, and how
+
+def test_only_a_watering_completes_the_chore(client, session, monkeypatch):
+    """A mist or a rotation is not the Skylight chore and must not tick it off."""
+    from services.garden.skylight_sync import mirror_care_log
+    from services.garden.models import Plant
+
+    plant = _linked_plant(client)
+    row = session.get(Plant, plant["id"])
+    scheduled: list[str] = []
+    monkeypatch.setattr(
+        "services.garden.skylight_sync.threading.Thread",
+        lambda *a, **k: type("T", (), {"start": lambda self: scheduled.append("started")})(),
+        raising=False,
+    )
+
+    for action in ("mist", "rotate", "fertilize", "check_pests"):
+        mirror_care_log(session, plant_id=row.id, action=action, performed_by="kaleb")
+
+    assert scheduled == []
+
+
+def test_a_watering_from_a_sync_handler_actually_posts(client, session, monkeypatch):
+    """The old code made a loop that never ran, so this never happened at all."""
+    import services.garden.skylight_sync as sync
+    from services.garden.models import Plant
+
+    plant = _linked_plant(client)
+    row = session.get(Plant, plant["id"])
+    started: list[dict] = []
+
+    class _Thread:
+        def __init__(self, target=None, name=None, daemon=None):
+            started.append({"name": name, "daemon": daemon, "target": target})
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(sync.threading, "Thread", _Thread)
+
+    sync.mirror_care_log(session, plant_id=row.id, action="water", performed_by="kaleb")
+
+    assert len(started) == 1
+    assert started[0]["daemon"] is True
+    assert started[0]["name"].startswith("skylight-mirror-")
+
+
+def test_a_watering_inside_a_running_loop_is_scheduled_not_blocked(client, session, monkeypatch):
+    import asyncio
+
+    import services.garden.skylight_sync as sync
+    from services.garden.models import Plant
+
+    plant = _linked_plant(client)
+    row = session.get(Plant, plant["id"])
+    created: list[object] = []
+
+    class _Loop:
+        def create_task(self, coro):
+            created.append(coro)
+            coro.close()
+            return None
+
+    monkeypatch.setattr(sync.asyncio, "get_running_loop", lambda: _Loop())
+
+    sync.mirror_care_log(session, plant_id=row.id, action="water", performed_by="kaleb")
+
+    assert len(created) == 1
+    assert asyncio.iscoroutine(created[0])

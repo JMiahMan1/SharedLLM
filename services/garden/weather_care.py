@@ -590,7 +590,11 @@ async def build_weather_summary(session: Session, seed_get) -> dict | None:
     # Current-condition one-liner.
     current = (forecast or {}).get("current") or {}
     label = current.get("label") or current.get("condition") or ""
-    temp = current.get("temp") or current.get("temperature")
+    # ``or`` dropped a real 0°C/0°F reading as falsy; take the first that is
+    # actually present.
+    temp = current.get("temp")
+    if temp is None:
+        temp = current.get("temperature")
     if units == "metric" and temp is not None:
         try:
             temp = round(_c_to_f(float(temp)), 1)

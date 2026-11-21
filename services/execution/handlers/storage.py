@@ -88,27 +88,55 @@ async def handle_photo_upload(req) -> ExecutionResult:
     if not folder:
         return _fail("A folder inside Nextcloud is required (e.g. Garden/Photos/<plant_id>).")
 
+    # The thumbnail is made whether or not Nextcloud exists: the journal's grid
+    # is what people actually look at, and a garden without Nextcloud still gets
+    # the photo on the plant's timeline (the hub keeps the bytes as a warning).
+    thumb = _jpeg_thumbnail(data, req.thumbnail_max_px) if req.thumbnail_max_px else None
+    thumb_detail: dict = {}
+    if req.thumbnail_max_px:
+        if thumb is None:
+            thumb_detail["thumbnail_warning"] = "The photo could not be resized; no thumbnail was made."
+        else:
+            thumb_detail["thumbnail_base64"] = base64.b64encode(thumb).decode("ascii")
+            thumb_detail["thumbnail_bytes"] = len(thumb)
+
     provider = resolve_personal_data_provider(req.user_context)
     if provider is None:
-        return _fail("No Nextcloud account is connected, so the photo was not stored.")
+        return _ok(
+            "The photo was received but Nextcloud is not connected, so only the thumbnail was kept.",
+            detail={
+                "path": None,
+                "name": None,
+                "size": len(data),
+                "warning": "No Nextcloud account is connected, so the full photo was not stored.",
+                **thumb_detail,
+            },
+        )
     name = provider.sanitize_filename(req.filename or "photo.jpg", "photo.jpg")
     path = f"{folder}/{name}"
     try:
         await provider.ensure_directory(folder)
         if not await provider.upload_file(path, data, req.content_type or mimetypes.guess_type(name)[0] or "image/jpeg"):
-            return _fail("Could not store the photo in Nextcloud.")
+            return _ok(
+                "The photo could not be stored in Nextcloud; only the thumbnail was kept.",
+                detail={
+                    "path": None, "name": None, "size": len(data),
+                    "warning": "The full photo was not stored in Nextcloud.",
+                    **thumb_detail,
+                },
+            )
     except Exception as exc:
         log.error("Photo upload failed: %s", exc)
-        return _fail(str(exc))
+        return _ok(
+            "The photo could not be stored in Nextcloud; only the thumbnail was kept.",
+            detail={
+                "path": None, "name": None, "size": len(data),
+                "warning": f"The full photo was not stored in Nextcloud ({exc}).",
+                **thumb_detail,
+            },
+        )
 
-    detail: dict = {"path": path, "name": name, "size": len(data)}
-    if req.thumbnail_max_px:
-        thumb = _jpeg_thumbnail(data, req.thumbnail_max_px)
-        if thumb is None:
-            detail["thumbnail_warning"] = "The photo could not be resized; no thumbnail was made."
-        else:
-            detail["thumbnail_base64"] = base64.b64encode(thumb).decode("ascii")
-            detail["thumbnail_bytes"] = len(thumb)
+    detail: dict = {"path": path, "name": name, "size": len(data), **thumb_detail}
     return _ok(f"Stored {path}.", detail=detail)
 
 

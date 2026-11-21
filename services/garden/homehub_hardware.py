@@ -219,7 +219,8 @@ def classify(states_rows: list[dict[str, Any]], tag_rows: list[dict[str, Any]]) 
             elif any(word in named for word in _GROW_LIGHT_WORDS):
                 grow_lights.append(_entity_row(row))
         elif domain == "light":
-            grow_lights.append(_entity_row(row))
+            if any(word in named for word in _GROW_LIGHT_WORDS):
+                grow_lights.append(_entity_row(row))
 
     tags_out = [
         {
@@ -817,7 +818,9 @@ def binding_for_tag(session: Session, tag_id: str) -> HomeHubBinding | None:
 
 def _next_due_at(session: Session, plant_id: str) -> str | None:
     """The plant's soonest care, so a scan can say what is owed."""
-    rows = session.exec(select(CareRule).where(CareRule.plant_id == plant_id)).all()
+    rows = session.exec(
+        select(CareRule).where(CareRule.plant_id == plant_id, CareRule.paused == False)  # noqa: E712
+    ).all()
     stamps = [row.next_due_at for row in rows if row.next_due_at]
     return min(stamps) if stamps else None
 

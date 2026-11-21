@@ -954,3 +954,75 @@ def test_the_auto_notice_names_what_was_watered(client, hub, monkeypatch):
     assert alerts[0]["title"].startswith("Auto-watered")
     assert "soil 22%" in alerts[0]["body"]
     assert alerts[0]["audience"] == "parents"
+
+
+# --------------------------------------------------------------------------- progressive disclosure
+
+def test_ordinary_smart_bulbs_are_not_grow_lights(client, monkeypatch):
+    """A house of smart bulbs must not sprout a hardware panel."""
+    bulbs = Hub(
+        states_rows=[
+            {"entity_id": "light.kitchen", "state": "on", "attributes": {"friendly_name": "Kitchen"}},
+            {"entity_id": "light.bedroom", "state": "off", "attributes": {"friendly_name": "Bedroom"}},
+            {"entity_id": "switch.lamp", "state": "off", "attributes": {"friendly_name": "Lamp"}},
+        ],
+        tags_rows=[],
+    )
+    monkeypatch.setattr(config, "HOMEHUB_URL", "http://hub.test")
+    monkeypatch.setattr(hardware, "_call", bulbs)
+    hardware.invalidate()
+
+    body = client.get("/hardware/discover", headers=CHILD).json()
+
+    assert body["available"] is True
+    assert body["grow_lights"] == []
+    assert body["has_any_hardware"] is False
+
+
+def test_a_light_named_for_growing_is_a_grow_light(client, hub):
+    body = client.get("/hardware/discover", headers=CHILD).json()
+
+    assert [row["entity_id"] for row in body["grow_lights"]] == ["light.grow_shelf"]
+
+
+# --------------------------------------------------------------------------- deleting a target
+
+def test_deleting_a_plant_stops_its_valve_and_takes_its_rows(client, hub, session):
+    from sqlmodel import select as _select
+
+    from services.garden.models import CareLog, CareRule, HomeHubBinding, ValveRun
+
+    bed = _bed(client)
+    plant = _plant(client, nickname="Monty", location_id=bed["id"])
+    _bind(client, "plant", plant["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "plant", plant["id"])
+    client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+
+    resp = client.delete(f"/plants/{plant['id']}", headers=PARENT)
+
+    assert resp.status_code == 204, resp.text
+    # The valve was closed before anything was removed.
+    assert hub.services()[-1] == "valve/close_valve"
+    session.expire_all()
+    assert session.exec(_select(HomeHubBinding).where(HomeHubBinding.target_id == plant["id"])).all() == []
+    assert session.exec(_select(ValveRun).where(ValveRun.binding_id == binding_id)).all() == []
+    assert session.exec(_select(CareRule).where(CareRule.plant_id == plant["id"])).all() == []
+    assert session.exec(_select(CareLog).where(CareLog.plant_id == plant["id"])).all() == []
+
+
+def test_deleting_a_bed_takes_its_binding_and_logs(client, hub, session):
+    from sqlmodel import select as _select
+
+    from services.garden.models import CareLog, HomeHubBinding
+
+    bed = _bed(client, "Empty Bed")
+    _bind(client, "location", bed["id"], valve_entity_id="valve.bed1_drip")
+    binding_id = _binding_id(client, "location", bed["id"])
+    client.post(f"/bindings/{binding_id}/valve/run", headers=PARENT, json={})
+    client.delete(f"/locations/{bed['id']}", headers=PARENT)
+
+    session.expire_all()
+    assert session.exec(
+        _select(HomeHubBinding).where(HomeHubBinding.target_id == bed["id"])
+    ).all() == []
+    assert session.exec(_select(CareLog).where(CareLog.location_id == bed["id"])).all() == []
