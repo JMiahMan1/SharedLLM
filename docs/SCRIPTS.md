@@ -11,6 +11,10 @@ API keys, HA token) from the environment; none are hard-coded.
 |---|---|
 | `deploy_remote.sh` | **The deploy.** `bash scripts/deploy_remote.sh <user@host> <dir> <service…>`: waits for the CI image build of the commit, merges `.env` append-only (`merge_env.py`), pulls and recreates the named services, publishes the latest APK for the in-app updater, verifies, then tells admins it finished (commit, services) or failed (the step, and the server's `[FAIL]` line) |
 | `notify_admins.sh` | `scripts/notify_admins.sh "<title>" "<body>" [priority] [tag]`: one admin notice on every admin's phone (category `admin`, `docs/PUSH.md`). Run on the server, from cron or by hand; posts from inside the telemetry container, so `INTERNAL_SECRET` never appears in arguments or output. `deploy_remote.sh` uses it to report each deploy's result |
+| `rotate_fernet_key.sh` | Rotate `FERNET_KEY` on the server: `preflight` (dry run), `rotate` (encrypted backup, new key into `.env`, restart, re-encrypt, verify), `finalize` (drop the old key). Never prints a key (`docs/KEY_ROTATION.md`) |
+| `fernet_env.py` | Used by `rotate_fernet_key.sh`: writes a new `FERNET_KEY` into `.env` / drops `FERNET_KEY_PREVIOUS`, atomically, printing only fingerprints |
+| `reset_sign_ins.sh` | Sign everyone (or `--user` one person) out and reset their keys from the server console, or `--hub-only` revoke every person's hub login; prints what needs re-enrolling (`docs/KEY_ROTATION.md`) |
+| `create_test_account.py` | Run where an automated agent runs: creates or re-keys the least-privileged test account and writes its key to `~/.config/jarvis/test-agent.key` (mode 600) without printing it |
 | `merge_env.py` | Append-only `.env` merge used by `deploy_remote.sh` (never overwrites a key the host already has) |
 | `deploy.sh` | Restart the stack on the server after a `git pull` (used by the post-merge hook); does not build |
 | `deploy_local_build.sh` | Emergency only: build images **on the server** when GHCR/Actions are down. Normal deploys never build on the server (see `CONTRIBUTING.md`) |
