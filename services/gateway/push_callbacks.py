@@ -11,10 +11,13 @@ and acts as the caller (``request`` carries their key), never as the service.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import HTTPException, Request
+
+log = logging.getLogger("gateway.push_callbacks")
 
 PushCallback = Callable[[Request, dict, str | None], Awaitable[Any]]
 PUSH_CALLBACKS: dict[str, PushCallback] = {}
@@ -281,6 +284,36 @@ async def _garden_proxy(
     return body if isinstance(body, dict) else {"result": body}
 
 
+def garden_seg(value: Any) -> str:
+    """A client-supplied plant id as one encoded path segment (400 when unusable)."""
+    from services.gateway import garden_routes
+
+    return garden_routes.seg(value)
+
+
+async def _garden_each(request: Request, plant_ids: Any, make: Callable[[str], tuple[str, dict]]) -> dict:
+    """Run one Garden call per plant and say, per plant, what happened.
+
+    A digest button for several plants must not answer "done" when some of them
+    failed: every failure carries its status and the Garden's reason, and the
+    totals say how many went through.
+    """
+    if not isinstance(plant_ids, list) or not all(isinstance(pid, str) for pid in plant_ids):
+        raise HTTPException(status_code=422, detail="params.plant_ids must be a list of plant ids")
+    results: list[dict] = []
+    for pid in plant_ids:
+        try:
+            path, kwargs = make(pid)
+            body = await _garden_proxy(request, "POST", path, **kwargs)
+            results.append({"plant_id": pid, "ok": True, **body})
+        except HTTPException as exc:
+            results.append({"plant_id": pid, "ok": False, "status": exc.status_code, "error": exc.detail})
+    failed = [row for row in results if not row["ok"]]
+    if failed:
+        log.warning("[Garden] digest button: %d of %d plants failed: %s", len(failed), len(results), failed)
+    return {"results": results, "done": len(results) - len(failed), "failed": len(failed)}
+
+
 @push_callback("garden_done")
 async def garden_done(request: Request, params: dict, reply: str | None) -> dict:
     """Inline "Watered" button from the morning digest: log care as the tapper.
@@ -290,29 +323,12 @@ async def garden_done(request: Request, params: dict, reply: str | None) -> dict
     plant_id = params.get("plant_id")
     plant_ids = params.get("plant_ids")
     action = params.get("action", "water")
+    body = {"action": action, "source": "push_action"}
     if plant_ids:
-        results = []
-        for pid in plant_ids:
-            try:
-                results.append(
-                    await _garden_proxy(
-                        request,
-                        "POST",
-                        f"/plants/{pid}/care",
-                        json={"action": action, "source": "push_action"},
-                    )
-                )
-            except HTTPException:
-                results.append({"plant_id": pid, "error": "failed"})
-        return {"results": results}
+        return await _garden_each(request, plant_ids, lambda pid: (f"/plants/{garden_seg(pid)}/care", {"json": body}))
     if not plant_id:
         raise HTTPException(status_code=422, detail="params.plant_id or params.plant_ids is required")
-    return await _garden_proxy(
-        request,
-        "POST",
-        f"/plants/{plant_id}/care",
-        json={"action": action, "source": "push_action"},
-    )
+    return await _garden_proxy(request, "POST", f"/plants/{garden_seg(plant_id)}/care", json=body)
 
 
 @push_callback("garden_snooze")
@@ -324,27 +340,11 @@ async def garden_snooze(request: Request, params: dict, reply: str | None) -> di
     """
     plant_id = params.get("plant_id")
     plant_ids = params.get("plant_ids")
-    postpone_days = str(params.get("postpone_days", 2))
+    query = {"still_damp": "true", "postpone_days": str(params.get("postpone_days", 2))}
     if plant_ids:
-        results = []
-        for pid in plant_ids:
-            try:
-                results.append(
-                    await _garden_proxy(
-                        request,
-                        "POST",
-                        f"/plants/{pid}/snooze",
-                        params={"still_damp": "true", "postpone_days": postpone_days},
-                    )
-                )
-            except HTTPException:
-                results.append({"plant_id": pid, "error": "failed"})
-        return {"results": results}
+        return await _garden_each(
+            request, plant_ids, lambda pid: (f"/plants/{garden_seg(pid)}/snooze", {"params": query})
+        )
     if not plant_id:
         raise HTTPException(status_code=422, detail="params.plant_id or params.plant_ids is required")
-    return await _garden_proxy(
-        request,
-        "POST",
-        f"/plants/{plant_id}/snooze",
-        params={"still_damp": "true", "postpone_days": postpone_days},
-    )
+    return await _garden_proxy(request, "POST", f"/plants/{garden_seg(plant_id)}/snooze", params=query)

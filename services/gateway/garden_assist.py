@@ -13,8 +13,10 @@ caller to read out, and a missing plant is said plainly.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, Awaitable, Callable
+from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -24,6 +26,35 @@ log = logging.getLogger("gateway.garden_assist")
 GardenCall = Callable[..., Awaitable[dict]]
 
 _TIMEOUT = aiohttp.ClientTimeout(total=20)
+
+
+def seg(value: Any) -> str:
+    """One URL path segment from a caller's value, percent-encoded entirely.
+
+    Plant, room, harvest and plan ids reach Garden paths from client input (a
+    push button's params, a route's path parameter). Encoded with ``safe=""`` a
+    ``/``, ``?`` or ``#`` cannot add a segment, a query or a fragment, so
+    "../hooks/weather#" stays one (unknown) id instead of reaching the weather
+    hook with the internal secret.
+    """
+    text = str(value if value is not None else "")
+    if not text or text in (".", ".."):
+        raise ValueError(f"not a usable id: {text!r}")
+    return quote(text, safe="")
+
+
+def checked_path(path: str) -> str:
+    """Refuse a Garden path that could leave its route: ``..``, ``?``, ``#``, ``\\``.
+
+    Every Garden call carries ``X-Internal-Secret``; a path built from client
+    input must never reach a different route than the one the code named.
+    Queries go in ``params``, never in the path.
+    """
+    if not path.startswith("/") or any(bad in path for bad in ("?", "#", "\\")):
+        raise ValueError(f"refusing Garden path {path!r}")
+    if any(part in (".", "..") for part in path.split("/")):
+        raise ValueError(f"refusing Garden path {path!r}")
+    return path
 
 
 def garden_headers(creds: Any) -> dict[str, str]:
@@ -57,7 +88,7 @@ async def call_garden(
 
     async with shared_http_client() as client, client.request(
         method,
-        f"{GARDEN_SVC.rstrip('/')}{path}",
+        f"{GARDEN_SVC.rstrip('/')}{checked_path(path)}",
         params=params,
         json=json,
         headers=garden_headers(creds),
@@ -197,7 +228,7 @@ async def log_care(
             }
         answer = await call(
             "POST",
-            f"/locations/{location.get('location_id')}/water-all",
+            f"/locations/{seg(location.get('location_id'))}/water-all",
             creds=creds,
             params={"source": source},
         )
@@ -221,7 +252,7 @@ async def log_care(
         params = {"still_damp": "true"}
         if postpone_days is not None:
             params["postpone_days"] = str(postpone_days)
-        answer = await call("POST", f"/plants/{plant_id}/snooze", creds=creds, params=params)
+        answer = await call("POST", f"/plants/{seg(plant_id)}/snooze", creds=creds, params=params)
         if answer.get("__error__"):
             return {"status": "error", "message": f"The garden said: {answer['__error__']}"}
         when = due_phrase(answer.get("next_due_at"))
@@ -234,7 +265,7 @@ async def log_care(
 
     answer = await call(
         "POST",
-        f"/plants/{plant_id}/care",
+        f"/plants/{seg(plant_id)}/care",
         creds=creds,
         json={"action": action, "source": source},
     )
@@ -295,7 +326,7 @@ async def log_harvest(
     label = plant_label(plant)
     answer = await call(
         "POST",
-        f"/plants/{plant.get('plant_id')}/harvest",
+        f"/plants/{seg(plant.get('plant_id'))}/harvest",
         creds=creds,
         json={
             "quantity": quantity,

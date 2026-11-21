@@ -119,7 +119,9 @@ def test_one_bad_plant_does_not_stop_the_rest(garden):
     )
 
     assert json.dumps(body)
-    assert [row.get("error") for row in body["results"]] == ["failed", None]
+    assert [row.get("error") for row in body["results"]] == ["Plant not found", None]
+    assert [row["ok"] for row in body["results"]] == [False, True]
+    assert (body["done"], body["failed"]) == (1, 1)
 
 
 def test_a_tap_without_a_plant_is_refused():
