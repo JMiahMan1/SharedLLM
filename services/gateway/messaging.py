@@ -396,11 +396,20 @@ class InferenceJobQueue:
                 log.error(f"[Preemption] Failed to pause mission {_current_raven_mission}: {e}")
                 return False
 
-    async def register_raven_mission(self, mission_id: int, pause_event: asyncio.Event):
-        """Register the currently running Raven mission for preemption tracking."""
+    async def register_raven_mission(
+        self, mission_id: int, pause_event: asyncio.Event | None = None
+    ):
+        """Register the currently running Raven mission for preemption tracking.
+
+        ``pause_event`` is accepted for callers that still pass one (preemption is
+        signalled through Redis, not locally), but it is optional: the worker
+        registers a mission with its id alone, and requiring an event there was a
+        live TypeError that took the whole inference job down.
+        """
         global _current_raven_mission
         async with _preemption_lock:
             _current_raven_mission = mission_id
+
 
     async def unregister_raven_mission(self, mission_id: int):
         """Unregister a completed/failed Raven mission."""
