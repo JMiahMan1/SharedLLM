@@ -8,7 +8,41 @@ from __future__ import annotations
 
 import pytest
 
-from services.gateway import fast_garden
+from services.gateway import fast_garden, garden_assist
+
+
+@pytest.fixture(autouse=True)
+def _household_zone(monkeypatch):
+    from services.common import household_tz
+
+    household_tz.reset_cache()
+    monkeypatch.setenv("TZ", "UTC")
+
+
+def test_due_days_are_the_households(monkeypatch):
+    """In Denver, an evening due time is still today at home, not tomorrow (UTC)."""
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from services.common import household_tz
+
+    household_tz.reset_cache()
+    monkeypatch.setenv("TZ", "America/Denver")
+    tonight = datetime.now(ZoneInfo("America/Denver")).replace(hour=23, minute=0, second=0, microsecond=0)
+
+    assert garden_assist.due_phrase(tonight.astimezone(UTC).isoformat()) == "today"
+    assert garden_assist.due_phrase((tonight + timedelta(days=1)).astimezone(UTC).isoformat()) == "tomorrow"
+
+
+def test_no_household_zone_is_said_not_counted_in_utc(monkeypatch):
+    from services.common import household_tz
+
+    household_tz.reset_cache()
+    monkeypatch.delenv("TZ", raising=False)
+    monkeypatch.delenv("TIMEZONE", raising=False)
+
+    assert "time zone is not set" in garden_assist.due_phrase("2026-11-21T09:00:00+00:00")
+
 
 CREDS = {"user": "jamie", "family_role": "child", "is_admin": False}
 

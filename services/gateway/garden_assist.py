@@ -107,14 +107,28 @@ async def call_garden(
 
 
 def due_phrase(next_due_at: str | None) -> str:
-    """``"today"``, ``"in 3 days"``, ``"2 days ago"`` -- from a due timestamp."""
+    """``"today"``, ``"in 3 days"``, ``"2 days ago"`` -- from a due timestamp.
+
+    Days are the household's (``services/common/household_tz``): in UTC an
+    evening due time read as "tomorrow". Without a configured zone this says
+    so instead of counting in UTC.
+    """
     if not next_due_at:
         return ""
     try:
         when = datetime.fromisoformat(str(next_due_at).replace("Z", "+00:00"))
     except ValueError:
         return ""
-    days = (when.date() - datetime.now(UTC).date()).days
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    from services.common import household_tz
+
+    try:
+        zone = household_tz.zoneinfo()
+    except household_tz.HouseholdTimeZoneError as exc:
+        log.error("[Garden] cannot say when care is due: %s", exc)
+        return "at a time I can't name (the household time zone is not set)"
+    days = (when.astimezone(zone).date() - datetime.now(zone).date()).days
     if days == 0:
         return "today"
     if days == 1:

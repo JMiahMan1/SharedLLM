@@ -30,6 +30,7 @@ from sqlmodel import Session, select
 
 from services import config
 from services.common import notify
+from services.garden import clock
 from services.garden.models import (
     MAX_DAILY_RUNS_LIMIT,
     MAX_RUN_MINUTES_LIMIT,
@@ -393,18 +394,19 @@ def valve_domain(entity_id: str | None) -> tuple[str, str, str] | None:
 
 
 def runs_today(session: Session, binding: HomeHubBinding, *, now: datetime | None = None) -> int:
-    """How many guarded runs this binding has had today (UTC).
+    """How many guarded runs this binding has had today (the household's day).
 
     Counted from ``garden_valve_runs`` -- one row per run -- because a bed's run
     writes one care log per plant in it. Counting those would make a five-plant
     bed burn its whole daily allowance in one watering, and an empty bed never
     count at all.
     """
-    day_start = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m-%dT00:00:00")
+    day_start, day_end = clock.day_bounds_utc(clock.today(now))
     rows = session.exec(
         select(ValveRun).where(
             ValveRun.binding_id == binding.id,
             ValveRun.started_at >= day_start,
+            ValveRun.started_at < day_end,
         )
     ).all()
     return len(rows)
@@ -707,14 +709,12 @@ def grow_light_window(binding: HomeHubBinding | None, local_now: datetime) -> bo
 
 
 def local_now() -> datetime:
-    """The household's wall clock (``TZ``), so 06:00 means 06:00 at home."""
-    tz_name = os.getenv("TZ", "UTC")
-    try:
-        from zoneinfo import ZoneInfo
+    """The household's wall clock, so 06:00 means 06:00 at home.
 
-        return datetime.now(ZoneInfo(tz_name))
-    except Exception:
-        return datetime.now(UTC)
+    The household zone (``clock``); an unset or invalid one raises
+    ``HouseholdTimeZoneError`` instead of switching lights on UTC's clock.
+    """
+    return clock.now()
 
 
 async def _toggle_light(entity_id: str, on: bool) -> bool:

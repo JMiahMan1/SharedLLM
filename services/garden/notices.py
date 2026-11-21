@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session, select
 
+from services.garden import clock
 from services.common import notify
 from services import config
 from services.garden.models import (
@@ -200,7 +201,7 @@ async def send_digest_to_member(
     if digest is None:
         return True  # nothing due, nothing to send
 
-    day = datetime.now(UTC).date().isoformat()
+    day = clock.today_iso()
     payload = notify.notice(
         user=member,
         category="garden",

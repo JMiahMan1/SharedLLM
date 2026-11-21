@@ -97,7 +97,8 @@ from services.garden.achievements import evaluate as evaluate_achievements
 from services.garden import homehub_hardware as hardware
 from services.garden import hub_rooms as rooms_hub
 from services.garden import preservation as pantry
-from services.garden import household
+from services.common import household_tz
+from services.garden import clock, household
 from services.garden.notices import collect_due_tasks, build_digest, digest_loop, send_digest_to_member
 from services.garden.skylight_sync import mirror_care_log
 from services.garden.species_lookup import (
@@ -189,6 +190,9 @@ async def lifespan(app: FastAPI):
     if added:
         log.info("[Garden] added missing column(s): %s", ", ".join(added))
     migrate_family_size(engine)
+    # The household zone, logged once with its source. Unset is not fatal here:
+    # every route that needs "today" answers 503 with how to set it.
+    await household_tz.startup("garden")
     log.info("[Garden] ready db=%s seed=%s", _database_url(), _seed().path)
     # Start the quiet morning digest loop (disabled under pytest).
     digest_task = asyncio.create_task(digest_loop(_db, _family_list))
@@ -288,6 +292,12 @@ async def require_internal_secret_middleware(request: Request, call_next):
 
 
 app.include_router(info_router)
+
+
+@app.exception_handler(household_tz.HouseholdTimeZoneError)
+async def _no_household_zone(_request: Request, exc: household_tz.HouseholdTimeZoneError):
+    """Garden counts by the household's day; without a zone it says so, never UTC."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 @app.exception_handler(household.HouseholdUnavailable)
@@ -502,7 +512,8 @@ def _plant_out(
 
 
 def _today_iso() -> str:
-    return datetime.now(UTC).date().isoformat()
+    """The household's date (``clock``), never the UTC one."""
+    return clock.today_iso()
 
 
 def _validate_iso_date(name: str, value: str) -> None:
@@ -789,14 +800,15 @@ async def hooks_skylight_chore_completed(request: Request, session: Session = De
     if not matches:
         return {"ok": True, "matched": 0, "logged": 0, "skipped_duplicate": 0}
 
-    today = datetime.now(UTC).date().isoformat()
+    day_start, day_end = clock.day_bounds_utc()
     logged = skipped = 0
     for plant in matches:
         already = session.exec(
             select(CareLog).where(
                 CareLog.plant_id == plant.id,
                 CareLog.source == "skylight_chore",
-                CareLog.created_at.like(f"{today}%"),
+                CareLog.created_at >= day_start,
+                CareLog.created_at < day_end,
             )
         ).first()
         if already is not None:
@@ -1715,7 +1727,7 @@ def get_streaks(
     with at least one care log) and longest streak per user, plus earned
     garden achievements and points."""
     user = _user(request)
-    now = datetime.now(UTC).date()
+    now = clock.today()
 
     # All care logs for this user, ordered by date.
     logs = session.exec(
@@ -1728,8 +1740,7 @@ def get_streaks(
     logged_dates: set = set()
     for log in logs:
         try:
-            d = datetime.fromisoformat(log.created_at).date()
-            logged_dates.add(d)
+            logged_dates.add(clock.local_date(log.created_at))
         except (ValueError, TypeError):
             continue
 
@@ -1741,9 +1752,10 @@ def get_streaks(
             "total_logs": 0,
         }
     else:
-        # Current streak: count backwards from today.
+        # Current streak: count backwards from today -- or from yesterday while
+        # today's care is still to come, so a streak does not read 0 each morning.
         current_streak = 0
-        d = now
+        d = now if now in logged_dates else now - timedelta(days=1)
         while d in logged_dates:
             current_streak += 1
             d -= timedelta(days=1)
@@ -1766,10 +1778,13 @@ def get_streaks(
             "total_logs": len(logs),
         }
 
-    # Count active plants for this user.
-    plants_total = len(
-        session.exec(select(Plant).where(Plant.status == "active")).all()
-    )
+    # Achievements are this person's: the plants they have cared for, not every
+    # plant in the house (a child was "Plant Parent" the day a parent added ten).
+    plants_total = len({
+        row.plant_id
+        for row in session.exec(select(CareLog).where(CareLog.performed_by == user)).all()
+        if row.plant_id
+    })
 
     # Count harvests for this user (Phase 4: first_harvest achievement).
     harvests_total = len(
@@ -1788,7 +1803,7 @@ def get_streaks(
         room_water_total=len(
             session.exec(select(CareLog).where(CareLog.performed_by == user, CareLog.notes.like("%batch water room%"))).all()
         ),
-        pantry_batches_total=len(session.exec(select(PantryBatch)).all()),
+        pantry_batches_total=len(session.exec(select(PantryBatch).where(PantryBatch.logged_by == user)).all()),
     )
 
     return {**streaks, **ach}
@@ -3217,7 +3232,7 @@ def use_pantry_batch(
     session.commit()
     session.refresh(row)
     data = PantryBatchOut.model_validate(row).model_dump()
-    data.update(pantry.batch_flags(row, today=datetime.now(UTC).date()))
+    data.update(pantry.batch_flags(row, today=clock.today()))
     data["method_label"] = pantry.method_label(row.method)
     data["used_by"] = user
     data["qty_used"] = used

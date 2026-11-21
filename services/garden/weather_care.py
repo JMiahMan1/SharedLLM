@@ -35,6 +35,7 @@ from sqlmodel import Session, select
 from services.common import notify
 from services.common import weather_client as weather
 from services import config
+from services.garden import clock
 from services.garden.cadence import heat_factor
 from services.garden.models import (
     CareLog,
@@ -361,7 +362,8 @@ async def apply_rain_skip(session: Session, profile: GardenProfile | None,
     if rain_in < threshold:
         return skipped
 
-    today_iso = datetime.now(UTC).date().isoformat()
+    today_iso = clock.today_iso()
+    day_start, day_end = clock.day_bounds_utc()
     rules = session.exec(select(CareRule).where(CareRule.paused == False)).all()  # noqa: E712
     for rule in rules:
         plant = session.get(Plant, rule.plant_id)
@@ -383,11 +385,11 @@ async def apply_rain_skip(session: Session, profile: GardenProfile | None,
                 CareLog.plant_id == plant.id,
                 CareLog.action == "rain_skip",
                 CareLog.source == "rain_auto_skip",
+                CareLog.created_at >= day_start,
+                CareLog.created_at < day_end,
             )
-        ).all()
-        if any(
-            (l.created_at or "").startswith(today_iso) for l in already
-        ):
+        ).first()
+        if already is not None:
             _rain_skip_done[plant.id] = today_iso
             continue
 
@@ -661,7 +663,7 @@ async def dispatch_weather_notices(
     """
     if not weather_summary or not family:
         return
-    today = datetime.now(UTC).date().isoformat()
+    today = clock.today_iso()
 
     for alert in weather_summary.get("frost_alerts") or []:
         names = ", ".join(alert.get("names") or [])
