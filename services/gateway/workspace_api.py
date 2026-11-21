@@ -102,6 +102,41 @@ async def write_file(
     return body
 
 
+async def read_bytes(
+    workspace_id: str,
+    path: str,
+    *,
+    user: str = "default",
+    max_bytes: int = 64 * 1024 * 1024,
+    timeout: float = 120.0,
+) -> bytes:
+    """One file's raw bytes -- a mesh, a picture, a zip -- through ``/files/raw``.
+
+    ``read_file`` decodes as text, which is right for source and fatal for binary
+    STL: the bytes have to arrive exactly as stored. ``/files/raw`` streams the
+    file, so this is the only honest way to open a model.
+    """
+    from services.gateway.main import shared_http_client
+
+    async with shared_http_client() as client, client.post(
+        f"{WORKSPACE_RUNTIME_SVC}/files/raw",
+        json={
+            "workspace_id": workspace_id,
+            "relative_path": path,
+            "user_context": {"user": user},
+        },
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+        timeout=aiohttp.ClientTimeout(total=timeout),
+    ) as resp:
+        if resp.status != 200:
+            detail = (await resp.text())[:300]
+            raise WorkspaceError(f"Could not read {path}: {resp.status} {detail}")
+        data = await resp.read()
+    if len(data) > max_bytes:
+        raise WorkspaceError(f"{path} is {len(data):,} bytes; the limit is {max_bytes:,}")
+    return data
+
+
 async def write_bytes(
     workspace_id: str,
     path: str,

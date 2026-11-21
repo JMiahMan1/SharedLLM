@@ -1,9 +1,21 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Hammer, Image as ImageIcon, Play, Square, Sparkles, Wand2 } from 'lucide-react';
+import { ExternalLink, Hammer, Image as ImageIcon, Play, Square, Sparkles, Stethoscope, Wand2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { errorText } from '../../lib/errorText';
-import { previewState, runSummary, stackLine, stepsFor } from '../../lib/studio';
+import {
+  previewState,
+  runSummary,
+  stackLine,
+  stepsFor,
+  stlEditLine,
+  stlSizeLine,
+  stlVerdict,
+  verifyLine,
+  type StlEdit,
+  type StlSummary,
+  type StudioVerdict,
+} from '../../lib/studio';
 import { api } from '../../services/api';
 
 /**
@@ -23,6 +35,11 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
   const [deckTitle, setDeckTitle] = useState('');
   const [deckBody, setDeckBody] = useState('# Title\n- a point\n\n---\n\n# Next\n- another');
   const [gameTitle, setGameTitle] = useState('');
+  const [verdict, setVerdict] = useState<StudioVerdict | null>(null);
+  const [modelPath, setModelPath] = useState('');
+  const [fitMm, setFitMm] = useState('');
+  const [model, setModel] = useState<StlSummary | null>(null);
+  const [edit, setEdit] = useState<StlEdit | null>(null);
   const [busy, setBusy] = useState(false);
 
   const profileQuery = useQuery({
@@ -104,6 +121,49 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
     onSettled: () => setBusy(false),
   });
 
+  const verify = useMutation({
+    mutationFn: () => api.studioVerify(workspaceId),
+    onMutate: () => setBusy(true),
+    onSuccess: (result) => {
+      setVerdict(result);
+      if (result.ok) toast.success('The workspace works');
+      else toast.error(result.hint);
+    },
+    onError: (error) => toast.error(errorText(error, 'The check could not run')),
+    onSettled: () => setBusy(false),
+  });
+
+  const inspectModel = useMutation({
+    mutationFn: () => api.stlInspect(workspaceId, modelPath.trim()),
+    onMutate: () => {
+      setBusy(true);
+      setEdit(null);
+    },
+    onSuccess: (summary) => {
+      setModel(summary);
+      toast.success(stlVerdict(summary));
+    },
+    onError: (error) => toast.error(errorText(error, 'The model could not be read')),
+    onSettled: () => setBusy(false),
+  });
+
+  const editModel = useMutation({
+    // `fit` only when a size was typed; `center` always, so the button is never a no-op.
+    mutationFn: () =>
+      api.stlTransform(workspaceId, modelPath.trim(), {
+        ...(Number(fitMm) > 0 ? { fit: Number(fitMm) } : {}),
+        center: true,
+      }),
+    onMutate: () => setBusy(true),
+    onSuccess: (result) => {
+      setEdit(result);
+      setModel(result.after);
+      toast.success(`Wrote ${result.path}`);
+    },
+    onError: (error) => toast.error(errorText(error, 'The model could not be edited')),
+    onSettled: () => setBusy(false),
+  });
+
   const state = previewState(preview);
   const field =
     'w-full rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white placeholder:text-slate-600';
@@ -162,6 +222,90 @@ export default function WorkspaceStudio({ workspaceId }: { workspaceId: string }
           </a>
         ) : preview ? (
           <p className="mt-2 text-[11px] text-amber-300">{state.label}</p>
+        ) : null}
+      </div>
+
+      <div className="rounded-xl border border-white/10 bg-black/20 p-2.5">
+        <p className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+          <Stethoscope size={11} /> Check
+        </p>
+        <p className="mt-1 text-[11px] text-slate-500">
+          Proves the shell, a real program and the tests, in that order.
+        </p>
+        <button
+          onClick={() => verify.mutate()}
+          disabled={busy}
+          className="mt-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-sky-300 disabled:opacity-40"
+        >
+          run check
+        </button>
+        {verdict ? (
+          <p
+            className={`mt-1.5 text-[11px] ${verdict.ok ? 'text-emerald-300' : 'text-rose-300'}`}
+            data-testid="studio-verdict"
+          >
+            {verifyLine(verdict)}
+          </p>
+        ) : null}
+        {verdict && !verdict.shell.ok ? (
+          <button
+            onClick={() => verify.reset()}
+            className="mt-1 text-[10px] text-slate-500 underline decoration-dotted"
+          >
+            clear
+          </button>
+        ) : null}
+      </div>
+
+      <div className="rounded-xl border border-white/10 bg-black/20 p-2.5">
+        <p className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+          <Hammer size={11} /> 3D model (STL)
+        </p>
+        <input
+          value={modelPath}
+          onChange={(event) => setModelPath(event.target.value)}
+          placeholder="parts/bracket.stl"
+          className={`mt-1.5 ${field}`}
+        />
+        <div className="mt-1.5 flex gap-1.5">
+          <input
+            value={fitMm}
+            onChange={(event) => setFitMm(event.target.value)}
+            inputMode="decimal"
+            placeholder="longest side (mm)"
+            className={field}
+          />
+          <button
+            onClick={() => inspectModel.mutate()}
+            disabled={busy || !modelPath.trim()}
+            className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-300 disabled:opacity-40"
+          >
+            read
+          </button>
+          <button
+            onClick={() => editModel.mutate()}
+            disabled={busy || !modelPath.trim()}
+            className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-amber-300 disabled:opacity-40"
+          >
+            edit
+          </button>
+        </div>
+        {model ? (
+          <p className="mt-1.5 text-[11px] text-slate-300" data-testid="studio-model">
+            {stlSizeLine(model)} - {stlVerdict(model)}
+          </p>
+        ) : null}
+        {edit ? (
+          <p className="mt-1 text-[11px] text-emerald-300" data-testid="studio-model-edit">
+            {stlEditLine(edit)} - saved to {edit.path}
+          </p>
+        ) : null}
+        {model?.warnings?.length ? (
+          <ul className="mt-1 list-disc pl-4 text-[10px] text-amber-300">
+            {model.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
         ) : null}
       </div>
 

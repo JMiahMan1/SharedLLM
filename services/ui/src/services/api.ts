@@ -33,11 +33,15 @@ import type {
   TrainerReportSummary,
 } from '../lib/trainer';
 import type {
+  StlEdit,
+  StlSummary,
   StudioAsset,
   StudioBuilt,
+  StudioDiagnosis,
   StudioPreview,
   StudioProfile,
   StudioRunResult,
+  StudioVerdict,
 } from '../lib/studio';
 import { Capacitor } from '@capacitor/core';
 import { nativeBinaryAdapter, wantsNativeBinary } from '../lib/nativeBinary';
@@ -5134,6 +5138,66 @@ export const api = {
       { workspace_id: workspaceId, prompt, ...(name ? { name } : {}) },
       { timeout: 660_000 },
     );
+    return resp.data;
+  },
+
+  /** Which parts of the sandbox shell work, and what is wrong when one is not. */
+  async studioDiagnose(workspaceId: string): Promise<StudioDiagnosis> {
+    const resp = await apiClient.post('/api/studio/diagnose', { workspace_id: workspaceId });
+    return resp.data;
+  },
+
+  /** Prove the workspace works: the shell, a real program, and its tests. */
+  async studioVerify(
+    workspaceId: string,
+    options: { runTests?: boolean; timeoutS?: number } = {},
+  ): Promise<StudioVerdict> {
+    const resp = await apiClient.post(
+      '/api/studio/verify',
+      {
+        workspace_id: workspaceId,
+        ...(options.runTests === undefined ? {} : { run_tests: options.runTests }),
+        ...(options.timeoutS === undefined ? {} : { timeout: options.timeoutS }),
+      },
+      { timeout: 700_000 },
+    );
+    return resp.data;
+  },
+
+  /** Open a 3D model in the workspace and describe it. */
+  async stlInspect(workspaceId: string, path: string): Promise<StlSummary> {
+    const resp = await apiClient.post('/api/studio/stl/inspect', {
+      workspace_id: workspaceId,
+      path,
+    });
+    return resp.data;
+  },
+
+  /** Scale / rotate / centre / move a model; the answer carries both sizes. */
+  async stlTransform(
+    workspaceId: string,
+    path: string,
+    edit: {
+      scale?: number | number[];
+      rotate?: number[];
+      translate?: number[];
+      fit?: number;
+      center?: boolean;
+      format?: 'binary' | 'ascii';
+      outPath?: string;
+    },
+  ): Promise<StlEdit> {
+    const resp = await apiClient.post('/api/studio/stl/transform', {
+      workspace_id: workspaceId,
+      path,
+      ...(edit.scale === undefined ? {} : { scale: edit.scale }),
+      ...(edit.rotate === undefined ? {} : { rotate: edit.rotate }),
+      ...(edit.translate === undefined ? {} : { translate: edit.translate }),
+      ...(edit.fit === undefined ? {} : { fit: edit.fit }),
+      ...(edit.center === undefined ? {} : { center: edit.center }),
+      ...(edit.format === undefined ? {} : { format: edit.format }),
+      ...(edit.outPath === undefined ? {} : { out_path: edit.outPath }),
+    });
     return resp.data;
   },
 

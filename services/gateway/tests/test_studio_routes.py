@@ -34,6 +34,91 @@ def test_the_studio_needs_a_signed_in_user():
     assert anonymous.get("/api/studio/profile", params={"workspace_id": "w"}).status_code in (401, 403)
     assert anonymous.post("/api/studio/run", json={"workspace_id": "w"}).status_code in (401, 403)
     assert anonymous.post("/api/studio/deck", json={"workspace_id": "w", "markdown": "# x"}).status_code in (401, 403)
+    # the newer surfaces are behind the same door
+    assert anonymous.post("/api/studio/diagnose", json={"workspace_id": "w"}).status_code in (401, 403)
+    assert anonymous.post("/api/studio/verify", json={"workspace_id": "w"}).status_code in (401, 403)
+    assert anonymous.post("/api/studio/stl/inspect", json={"workspace_id": "w", "path": "a.stl"}).status_code in (401, 403)
+
+
+def test_a_broken_shell_is_reported_not_raised(client, monkeypatch):
+    async def fake_diagnose(workspace_id, *, user, profile=None):
+        return {"workspace_id": workspace_id, "ok": False, "failed": ["home"],
+                "probes": [], "hint": "HOME is /home/sharedllm (NOT writable)"}
+
+    monkeypatch.setattr(routes.runtime, "diagnose", fake_diagnose)
+
+    resp = client.post("/api/studio/diagnose", json={"workspace_id": "w1"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["failed"] == ["home"]
+
+
+def test_verify_passes_the_callers_choices_through(client, monkeypatch):
+    seen: dict = {}
+
+    async def fake_verify(workspace_id, *, user, run_tests, timeout):
+        seen.update({"workspace_id": workspace_id, "user": user, "run_tests": run_tests})
+        return {"ok": True, "shell": {"ok": True}, "program": {"ok": True}, "tests": None}
+
+    monkeypatch.setattr(routes.runtime, "verify", fake_verify)
+
+    body = client.post(
+        "/api/studio/verify", json={"workspace_id": "w1", "run_tests": False}
+    ).json()
+
+    assert body["ok"] is True
+    assert seen["run_tests"] is False
+
+
+def test_an_unreadable_model_is_a_400_with_the_reason(client, monkeypatch):
+    async def refuse(workspace_id, path, *, user):
+        raise routes.stl.StlError("the header declares 900 triangles but the file is 120 bytes")
+
+    monkeypatch.setattr(routes.stl, "inspect", refuse)
+
+    resp = client.post("/api/studio/stl/inspect", json={"workspace_id": "w1", "path": "m.stl"})
+
+    assert resp.status_code == 400
+    assert "declares 900 triangles" in resp.json()["detail"]
+
+
+def test_a_rotate_that_is_not_three_numbers_is_a_400(client, monkeypatch):
+    async def must_not_run(*args, **kwargs):  # pragma: no cover - the guard runs first
+        raise AssertionError("the route validated the vector only after calling the module")
+
+    monkeypatch.setattr(routes.stl, "transform", must_not_run)
+
+    resp = client.post(
+        "/api/studio/stl/transform",
+        json={"workspace_id": "w1", "path": "m.stl", "scale": 2.0, "rotate": [90, 0]},
+    )
+
+    assert resp.status_code == 400
+    assert "three numbers" in resp.json()["detail"]
+
+
+def test_a_model_transform_returns_both_measurements(client, monkeypatch):
+    async def fake_transform(workspace_id, path, **kwargs):
+        assert kwargs["rotate"] == (90.0, 0.0, 0.0)
+        return {
+            "source": path,
+            "path": "m_edited.stl",
+            "format": "binary",
+            "applied": {"rotate_deg": [90.0, 0.0, 0.0]},
+            "before": {"longest": 10.0},
+            "after": {"longest": 10.0},
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(routes.stl, "transform", fake_transform)
+
+    body = client.post(
+        "/api/studio/stl/transform",
+        json={"workspace_id": "w1", "path": "m.stl", "rotate": [90, 0, 0]},
+    ).json()
+
+    assert body["path"] == "m_edited.stl"
+    assert body["before"]["longest"] == body["after"]["longest"] == 10.0
 
 
 def test_the_profile_reports_the_stack_and_every_stack_present(client, monkeypatch):

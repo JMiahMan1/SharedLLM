@@ -246,6 +246,46 @@ def _seed_cases() -> list[Case]:
             ),
             checks={"must_match": [r"(?i)workspace"], "max_chars": 700},
         ),
+        Case(
+            id="seed-shell-home-eacces",
+            bucket="workspace",
+            title="Diagnose a shell that cannot write its own cache",
+            difficulty=2,
+            max_tokens=300,
+            tags=("workspace", "shell", "diagnosis"),
+            prompt=(
+                "In a workspace, `npm test` fails with:\n\n"
+                "npm error code EACCES\n"
+                "npm error Path: /home/sharedllm/.npm\n\n"
+                "The workspace shell itself runs other commands fine. "
+                "Name the cause and the fix in at most three sentences."
+            ),
+            checks={
+                # The model has to reach for the diagnosis surface, not guess a chmod.
+                "must_include": ["/api/studio/diagnose"],
+                "must_match": [r"(?i)HOME"],
+                "must_not_match": [r"(?i)chmod\s+777"],
+                "max_chars": 900,
+            },
+        ),
+        Case(
+            id="seed-stl-resize-checked",
+            bucket="workspace",
+            title="Resize a print and prove it with both measurements",
+            difficulty=3,
+            max_tokens=320,
+            tags=("workspace", "3d", "stl"),
+            prompt=(
+                "A workspace has `parts/bracket.stl` (80 mm long) and the printer needs it 120 mm "
+                "long, centred on the origin. Which single call does it, and what must you report "
+                "afterwards? Name the endpoint and the fields. Three sentences at most."
+            ),
+            checks={
+                "must_include": ["/api/studio/stl/transform"],
+                "must_match": [r"(?i)fit", r"(?i)center", r"(?i)before", r"(?i)after"],
+                "max_chars": 900,
+            },
+        ),
     ]
 
 

@@ -216,6 +216,11 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 - `POST /api/studio/assets/narration` `{workspace_id, text, name?, voice?}`: speak text into `assets/<name>.wav`
 - `POST /api/studio/deck` `{workspace_id, markdown, title?, footer?}`: render Markdown into one self-contained `decks/<slug>/index.html` (offline, keyboard and swipe), keeping `source.md` beside it
 - `POST /api/studio/game` `{workspace_id, title, sprites?}`: write a playable single-file canvas game to `games/<slug>/index.html` with a README that says what to edit
+- `POST /api/studio/diagnose` `{workspace_id}`: run six safe shell probes (identity, `$HOME` writability, working directory, `/bin/bash`, `python3`, `git`) and return each one's `ok`, `returncode`, output and a `hint` naming the cause; a probe that fails never hides the others (signed-in caller)
+- `POST /api/studio/verify` `{workspace_id, run_tests?, timeout?}`: prove the workspace works end to end — diagnose the shell, write and run a one-line program (`_studio_probe.py` / `.mjs`) and delete it, then run the detected project's test step — returning `{ok, shell, program, tests, hint}`
+- `POST /api/studio/stl/inspect` `{workspace_id, path}`: read a binary or ASCII STL in pure Python and report `triangles`, `vertices`, `size`, `volume`, `area`, `watertight`, `open_edges`, `degenerate`, the unit it looks like, and every warning (open surface, inside-out winding, zero-area facets) (signed-in caller)
+- `POST /api/studio/stl/transform` `{workspace_id, path, scale? (number or [x,y,z]), rotate? [x,y,z] degrees, translate? [x,y,z], fit?, center?, format? binary|ascii, out_path?}`: rotate → fit/scale → centre → translate, write a **new** file (default `<name>_edited.stl`), and return the measurements `before` and `after` plus what was `applied`; a request with nothing to do, a non-positive scale, or an unknown format is a 400
+- `GET /api/studio/stl/preview?workspace_id=&path=&limit=`: an indexed mesh (`positions` + `faces`, shared vertices merged, capped triangle list) for drawing a model in the browser
 
 ## Trainer (the local model's classroom, `docs/JARVIS_TRAINER.md`)
 

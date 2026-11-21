@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { previewState, runSummary, stackLine, stepsFor, type StudioProfile } from './studio';
+import {
+  diagnosisLine,
+  previewState,
+  runSummary,
+  stackLine,
+  stepsFor,
+  stlEditLine,
+  stlSizeLine,
+  stlVerdict,
+  verifyLine,
+  type StlSummary,
+  type StudioProfile,
+} from './studio';
 
 function profile(over: Partial<StudioProfile> = {}): StudioProfile {
   return {
@@ -74,5 +86,106 @@ describe('the studio panel helpers', () => {
       label: 'nothing answered at the published port',
     });
     expect(previewState(null)).toEqual({ live: false, label: '' });
+  });
+});
+
+function stl(over: Partial<StlSummary> = {}): StlSummary {
+  return {
+    path: 'parts/bracket.stl',
+    format: 'binary',
+    triangles: 4,
+    vertices: 4,
+    size: { x: 1, y: 1, z: 1 },
+    longest: 1,
+    volume: 0.1667,
+    area: 2.366,
+    watertight: true,
+    open_edges: 0,
+    degenerate: 0,
+    units: 'likely millimetres',
+    warnings: [],
+    ...over,
+  };
+}
+
+describe('the shell check', () => {
+  it('says the shell is healthy in one line', () => {
+    expect(diagnosisLine({ workspace_id: 'w', ok: true, failed: [], hint: '', probes: [] })).toBe(
+      'the sandbox shell is healthy',
+    );
+  });
+
+  it('names what failed and why', () => {
+    const line = diagnosisLine({
+      workspace_id: 'w',
+      ok: false,
+      failed: ['home'],
+      hint: 'HOME is /home/sharedllm (NOT writable)',
+      probes: [],
+    });
+
+    expect(line).toContain('home failed');
+    expect(line).toContain('NOT writable');
+  });
+
+  it('marks each part of a verdict, and never blames tests for a broken shell', () => {
+    const broken = verifyLine({
+      ok: false,
+      stack: 'python',
+      label: 'Python',
+      shell: { ok: false, failed: ['identity'] },
+      program: { ok: true },
+      tests: { ok: true, available: true },
+      hint: 'the shell could not report its user',
+    });
+
+    expect(broken).toContain('FAILED shell');
+    expect(broken).toContain('ok program');
+    expect(broken).toContain('ok tests');
+    expect(verifyLine(null)).toBe('');
+  });
+
+  it('says when a stack has no tests instead of pretending one passed', () => {
+    const line = verifyLine({
+      ok: true,
+      stack: 'static',
+      label: 'Static site',
+      shell: { ok: true, failed: [] },
+      program: { ok: true, skipped: true },
+      tests: { ok: true, available: false },
+      hint: 'there are no tests to run.',
+    });
+
+    expect(line).toContain('ok no tests');
+    expect(line).toContain('program (skipped)');
+  });
+});
+
+describe('the 3D model helpers', () => {
+  it('quotes both sizes after an edit, and what was applied', () => {
+    const edit = {
+      source: 'parts/bracket.stl',
+      path: 'parts/bracket_edited.stl',
+      format: 'binary',
+      applied: { fit_longest: 120, centered: true },
+      before: stl(),
+      after: stl({ size: { x: 120, y: 120, z: 120 }, longest: 120 }),
+      warnings: [],
+    };
+
+    expect(stlEditLine(edit)).toBe('1 -> 120 longest (fit_longest, centered)');
+    expect(stlEditLine(null)).toBe('');
+  });
+
+  it('reads a size as width x depth x height, rounded to two places', () => {
+    expect(stlSizeLine(stl({ size: { x: 120, y: 80, z: 12.456 } }))).toBe('120 x 80 x 12.46');
+    expect(stlSizeLine(null)).toBe('');
+  });
+
+  it('reports a clean solid, or every warning when there is one', () => {
+    expect(stlVerdict(stl())).toContain('closed solid');
+    const warned = stlVerdict(stl({ warnings: ['the surface is open', '1 triangles have no area'] }));
+    expect(warned).toBe('the surface is open; 1 triangles have no area');
+    expect(stlVerdict(null)).toBe('');
   });
 });

@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from services.gateway import workspace_api as ws
-from services.gateway.studio import media, runtime, works
+from services.gateway.studio import media, runtime, stl, works
 from services.gateway.studio import profiles as profiles_mod
 
 log = logging.getLogger("gateway.studio.routes")
@@ -39,6 +39,11 @@ class RunBody(WorkspaceBody):
 
 class PreviewBody(WorkspaceBody):
     port: int | None = Field(default=None, ge=1, le=65535)
+
+
+class VerifyBody(WorkspaceBody):
+    run_tests: bool = Field(default=True, description="Also run the project's test step")
+    timeout: int = Field(default=runtime.DEFAULT_TIMEOUT_S, ge=10, le=1800)
 
 
 class ImageBody(WorkspaceBody):
@@ -65,6 +70,31 @@ class GameBody(WorkspaceBody):
     sprites: dict[str, str] | None = None
 
 
+class StlBody(WorkspaceBody):
+    path: str = Field(..., description="Workspace-relative path to the .stl file")
+
+
+class StlTransformBody(StlBody):
+    out_path: str | None = Field(
+        default=None, description="Where to write the result (default: <name>_edited.stl)"
+    )
+    scale: float | list[float] = Field(default=1.0, description="Uniform factor, or [x, y, z]")
+    rotate: list[float] | None = Field(default=None, description="Degrees about [x, y, z]")
+    translate: list[float] | None = Field(default=None, description="Millimetres along [x, y, z]")
+    fit: float | None = Field(default=None, description="Scale so the longest side is this")
+    center: bool = Field(default=False, description="Put the bounding-box centre on the origin")
+    format: str | None = Field(default=None, description="binary | ascii")
+
+
+def _triple(values: list[float] | None, field: str) -> tuple[float, float, float]:
+    """A three-number vector, or a 400 that says what arrived instead."""
+    if not values:
+        return (0.0, 0.0, 0.0)
+    if len(values) != 3:
+        raise HTTPException(status_code=400, detail=f"{field} needs three numbers, got {len(values)}")
+    return (float(values[0]), float(values[1]), float(values[2]))
+
+
 async def _user(request: Request) -> str:
     from services.gateway.main import _require_authenticated
 
@@ -82,6 +112,25 @@ async def get_profile(request: Request, workspace_id: str) -> dict[str, Any]:
     payload = profiles_mod.detect(entries).to_dict()
     payload["all_stacks"] = profiles_mod.all_stacks(entries)
     return payload
+
+
+@router.post("/diagnose")
+async def diagnose_shell(request: Request, body: WorkspaceBody) -> dict[str, Any]:
+    """Prove which parts of the sandbox shell work, and name what does not."""
+    user = await _user(request)
+    return await runtime.diagnose(body.workspace_id, user=user)
+
+
+@router.post("/verify")
+async def verify_workspace(request: Request, body: VerifyBody) -> dict[str, Any]:
+    """Prove the workspace works: the shell, a real program, and its tests."""
+    user = await _user(request)
+    try:
+        return await runtime.verify(
+            body.workspace_id, user=user, run_tests=body.run_tests, timeout=body.timeout
+        )
+    except ws.WorkspaceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/run")
@@ -186,3 +235,55 @@ async def scaffold_game(request: Request, body: GameBody) -> dict[str, Any]:
     except ws.WorkspaceError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return built.to_dict()
+
+
+
+@router.post("/stl/inspect")
+async def inspect_stl(request: Request, body: StlBody) -> dict[str, Any]:
+    """Open a 3D model and describe it: size, volume, and what is wrong with it."""
+    user = await _user(request)
+    try:
+        return await stl.inspect(body.workspace_id, body.path, user=user)
+    except stl.StlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ws.WorkspaceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/stl/transform")
+async def transform_stl(request: Request, body: StlTransformBody) -> dict[str, Any]:
+    """Scale / rotate / centre / move a model and write the result as a new file."""
+    user = await _user(request)
+    try:
+        return await stl.transform(
+            body.workspace_id,
+            body.path,
+            out_path=body.out_path,
+            scale=body.scale,
+            rotate=_triple(body.rotate, "rotate"),
+            translate=_triple(body.translate, "translate"),
+            fit=body.fit,
+            center=body.center,
+            fmt=body.format,
+            user=user,
+        )
+    except stl.StlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ws.WorkspaceError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/stl/preview")
+async def preview_stl(
+    request: Request, workspace_id: str, path: str, limit: int = 20_000
+) -> dict[str, Any]:
+    """An indexed mesh (positions + faces) the browser can draw."""
+    user = await _user(request)
+    try:
+        return await stl.preview(
+            workspace_id, path, limit=max(100, min(limit, 100_000)), user=user
+        )
+    except stl.StlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ws.WorkspaceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
