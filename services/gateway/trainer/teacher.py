@@ -669,6 +669,61 @@ def finetune_row(trace: dict[str, Any], system_prompt: str, *, fmt: str = "opena
     raise TeacherError(f"unknown format {fmt!r}; use openai or sharegpt")
 
 
+#: A failed mission and a teacher trace are "the same task" above this goal overlap.
+CONTRASTIVE_MIN_SIMILARITY = 0.4
+
+
+def _failed_attempt_messages(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Raven's failed attempt (already scrubbed) as assistant tool calls and results."""
+    from services.gateway import tool_registry
+
+    canonical = {str(row[0]).lower(): str(row[0]) for row in tool_registry._RAVEN_TOOL_TABLE}
+    messages: list[dict[str, Any]] = []
+    for number, step in enumerate(record.get("steps") or [], start=1):
+        name = canonical.get(str(step.get("tool") or "").lower(), str(step.get("tool") or ""))
+        call_id = f"call_{number}"
+        messages.append({"role": "assistant", "content": "", "tool_calls": [
+            {"id": call_id, "type": "function",
+             "function": {"name": name, "arguments": json.dumps(step.get("payload") or {}, ensure_ascii=False)}}
+        ]})
+        messages.append({"role": "tool", "tool_call_id": call_id, "name": name, "content": str(step.get("result") or "")})
+    messages.append({"role": "assistant", "content": f"The mission failed ({str(record.get('kind')).replace('_', ' ')})."})
+    return messages
+
+
+def contrastive_rows(system_prompt: str) -> list[dict[str, Any]]:
+    """Failed attempt vs verified solution of a similar task, as DPO rows.
+
+    ``{"prompt": [system, user], "chosen": [...], "rejected": [...], "meta"}``,
+    the conversational shape TRL's DPO trainer reads. Only verified teacher
+    traces are ever "chosen", and each failed mission pairs with its closest.
+    """
+    from services.gateway.trainer import raven_failures
+
+    solutions = [
+        t for t in all_traces()
+        if t.get("outcome") == "success" and (t.get("scrub") or {}).get("status") != "dropped"
+    ]
+    pairs: list[dict[str, Any]] = []
+    for record in raven_failures.failed_attempts():
+        scored = sorted(((_similar(record["goal"], str(t.get("goal") or "")), t) for t in solutions),
+                        key=lambda item: item[0], reverse=True)
+        if not scored or scored[0][0] < CONTRASTIVE_MIN_SIMILARITY:
+            continue
+        similarity, trace = scored[0]
+        chosen = finetune_row(trace, system_prompt, fmt="openai")
+        if chosen is None:
+            continue
+        pairs.append({
+            "prompt": [{"role": "system", "content": system_prompt}, {"role": "user", "content": record["goal"]}],
+            "chosen": chosen["messages"][2:],
+            "rejected": _failed_attempt_messages(record),
+            "meta": {"mission_id": record["mission_id"], "failure_kind": record["kind"], "trace_id": trace["id"],
+                     "similarity": round(similarity, 2)},
+        })
+    return pairs
+
+
 async def raven_system_prompt() -> str:
     """Raven's live system prompt (Identity's ``raven_autonomous_protocol``).
 
@@ -723,6 +778,9 @@ def export_finetune(
             skipped["no_mapped_steps_or_answer"] += 1
             continue
         rows[_split(str(trace["id"]), eval_share)].append(row)
+    pairs = contrastive_rows(system_prompt)
+    if pairs:
+        rows["contrastive"] = pairs
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     target = pathlib.Path(directory) if directory else runner.DATA_DIR / "datasets"
     paths: dict[str, str] = {}
@@ -741,6 +799,7 @@ def export_finetune(
         "paths": paths,
         "train_rows": len(rows["train"]),
         "eval_rows": len(rows["eval"]),
+        "contrastive_rows": len(pairs),
         "skipped": dict(skipped),
         "created_at": stamp,
     }
@@ -781,7 +840,14 @@ def summary(report_limit: int = 30) -> dict[str, Any]:
         "exports": _read_json(teacher_dir() / "exports.json", {"exports": []})["exports"][:5],
         "scrub_version": scrub_mod.SCRUB_VERSION,
         "health": _health(),
+        "raven_failures": _failures(),
     }
+
+
+def _failures() -> dict[str, Any]:
+    from services.gateway.trainer import raven_failures
+
+    return raven_failures.summary()
 
 
 def _health() -> dict[str, Any]:

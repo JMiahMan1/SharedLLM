@@ -29,7 +29,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from services.gateway.trainer import alpaca, runner, teacher
+from services.gateway.trainer import alpaca, raven_failures, runner, teacher
 from services.gateway.trainer import llm as llm_mod
 from services.gateway.trainer import teacher_scrub as scrub_mod
 
@@ -131,6 +131,7 @@ _LABELS = {
     "lessons": "Teacher lessons",
     "eval": "Teacher evaluation",
     "snapshot": "Teacher dataset snapshot",
+    "missions": "Learning from failed missions",
     "sync": "Teacher sync from the Mac",
 }
 
@@ -209,6 +210,7 @@ async def run_pass(
     notify: Notify | None = _default_notify,
     complete_fn: Any | None = None,
     system_prompt: Callable[[], Awaitable[str]] | None = None,
+    failures_fetch: Any = None,
 ) -> dict[str, Any]:
     """One hands-off pass. Returns what it did; the status file holds the rest."""
     now = time.time() if now is None else now
@@ -245,14 +247,38 @@ async def run_pass(
             _ok(status, "lessons")
         done["lessons_written"] = len(lessons["written"])
 
-    # 2. The teacher bucket, when due and only on an idle card.
+    # 1b. Raven's own failed missions: avoid lessons and raven_failures cases.
+    if failures_fetch is not False:
+        try:
+            learned = await raven_failures.run_pass(**({"fetch": failures_fetch} if failures_fetch else {}))
+        except Exception as exc:  # Identity down, an empty roster, storage
+            _fail(status, "missions", f"failed missions could not be read: {exc}", now)
+        else:
+            status["missions"] = {
+                "at": _now_iso(now),
+                "examined": learned["examined"],
+                "infrastructure": learned["infrastructure"],
+                "by_kind": learned["by_kind"],
+                "lessons": len(learned["lessons"]),
+            }
+            if learned.get("errors"):
+                _fail(status, "missions", f"memory refused a failure lesson: {learned['errors'][0]}", now)
+            else:
+                _ok(status, "missions")
+            done["missions"] = {"examined": learned["examined"], "lessons": len(learned["lessons"])}
+
+    # 2. The teacher and raven_failures buckets, when due and only on an idle card.
     last_eval = _parse_iso((status.get("eval") or {}).get("at"))
     due = last_eval is None or now - last_eval >= config["eval_hours"] * 3600
-    cases = teacher.teacher_cases(limit=EVAL_CASE_LIMIT) if due else []
+    cases = (
+        [*teacher.teacher_cases(limit=EVAL_CASE_LIMIT), *raven_failures.failure_cases(limit=EVAL_CASE_LIMIT)]
+        if due
+        else []
+    )
     if due and cases:
         done["eval"] = await _evaluate(status, settings, cases, now, hardware, complete_fn)
     elif due:
-        done["eval"] = "no teacher cases yet"
+        done["eval"] = "no teacher or failure cases yet"
 
     # 3. A dataset snapshot every N new verified traces.
     verified = verified_count()
@@ -311,7 +337,9 @@ async def _evaluate(
     except (llm_mod.LocalModelUnavailable, runner.TrainerStorageError) as exc:
         _fail(status, "eval", str(exc), now)
         return "failed"
-    bucket = (report.get("by_bucket") or {}).get("teacher") or {}
+    by_bucket = report.get("by_bucket") or {}
+    bucket = by_bucket.get("teacher") or {}
+    failures = by_bucket.get("raven_failures") or {}
     status["eval"] = {
         "at": _now_iso(now),
         "report_id": report.get("id"),
@@ -319,13 +347,18 @@ async def _evaluate(
         "cases": bucket.get("cases", 0),
         "passed": bucket.get("passed", 0),
         "pass_rate": bucket.get("pass_rate", 0.0),
+        "failure_cases": failures.get("cases", 0),
+        "failure_passed": failures.get("passed", 0),
         "stopped_reason": report.get("stopped_reason"),
     }
     if report.get("stopped_reason") == "model_unavailable":
         _fail(status, "eval", "the local model stopped answering during the teacher evaluation", now)
     else:
         _ok(status, "eval")
-    return f"{bucket.get('passed', 0)}/{bucket.get('cases', 0)} passed"
+    text = f"{bucket.get('passed', 0)}/{bucket.get('cases', 0)} passed"
+    if failures.get("cases"):
+        text += f"; failed missions {failures.get('passed', 0)}/{failures.get('cases', 0)}"
+    return text
 
 
 async def _snapshot(
@@ -372,6 +405,7 @@ def health(now: float | None = None) -> dict[str, Any]:
         "lessons": status.get("lessons"),
         "eval": status.get("eval"),
         "snapshot": status.get("snapshot"),
+        "missions": status.get("missions"),
         "failures": [
             {"part": part, "label": _LABELS.get(part, part), **{k: v for k, v in failure.items() if k != "notified"}}
             for part, failure in sorted(status["failures"].items())

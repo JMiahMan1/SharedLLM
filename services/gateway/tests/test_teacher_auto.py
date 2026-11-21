@@ -76,6 +76,7 @@ async def _prompt():
 
 
 def _pass(settings=None, **kwargs):
+    kwargs.setdefault("failures_fetch", False)
     kwargs.setdefault("hardware", IDLE)
     kwargs.setdefault("complete_fn", _answer)
     kwargs.setdefault("system_prompt", _prompt)

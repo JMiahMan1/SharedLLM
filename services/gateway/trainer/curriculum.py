@@ -35,6 +35,7 @@ BUCKETS = (
     "tools",
     "knowledge",
     "teacher",
+    "raven_failures",
 )
 
 DEFAULT_SYSTEM = (
@@ -422,10 +423,16 @@ def derive_curriculum(
         from services.gateway.trainer import teacher as teacher_mod
 
         teacher = teacher_mod.teacher_cases()
+    failures: list[Case] = []
+    if include_teacher and (not buckets or "raven_failures" in buckets):
+        from services.gateway.trainer import raven_failures
+
+        failures = raven_failures.failure_cases()
     cases = [
         *_seed_cases(),
         *workspace_cases(catalog),
         *teacher,
+        *failures,
         *tool_cases(catalog),
         *service_cases(catalog),
     ]

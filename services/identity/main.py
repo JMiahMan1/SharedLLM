@@ -2522,6 +2522,24 @@ def family_directory(session: Session = Depends(get_session), _caller: User = De
     ]
 
 
+@app.get("/api/internal/name-roster")
+def internal_name_roster(session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Every account's names, for services that must scrub them out of text.
+
+    The gateway's trainer masks household names in mission logs before they
+    become lessons or training rows; it has no user's key to read the family
+    directory with. Only names: no avatar, role, URL or credential.
+    """
+    return [
+        {
+            "username": u.username,
+            "display_name": u.display_name or u.username,
+            "nextcloud_user": u.nextcloud_user or None,
+        }
+        for u in session.exec(select(User)).all()
+    ]
+
+
 @app.get("/api/users/sharing-recipients", response_model=list[ShareRecipient])
 def list_sharing_recipients(
     session: Session = Depends(get_session),
