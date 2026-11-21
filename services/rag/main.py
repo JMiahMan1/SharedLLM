@@ -718,6 +718,7 @@ def _hybrid_search(
     alpha: float,
     use_rrf: bool,
     tags: list[str] | None = None,
+    min_similarity: float | None = None,
 ) -> list[SearchResultItem]:
     user_id = user_id.lower()
     collection = canonical_collection(collection) or collection
@@ -732,6 +733,11 @@ def _hybrid_search(
     vec_scores: dict[str, float] = {}
     for i, (doc_id, _dist) in enumerate(vec_res):
         vec_scores[doc_id] = vec_scores.get(doc_id, 0.0) + 1.0 / (K_RRF + i + 1)
+    # How close each candidate really is: RRF ranks only, and the vector index
+    # returns its nearest rows however unrelated they are.
+    similarities = _adapter().cosine_similarities(
+        query_vector, list(dict.fromkeys([d for d, _ in vec_res] + [d for d, _ in bm25_res]))
+    )
     bm25_scores: dict[str, float] = {}
     for i, (doc_id, _rank) in enumerate(bm25_res):
         bm25_scores[doc_id] = bm25_scores.get(doc_id, 0.0) + 1.0 / (K_RRF + i + 1)
@@ -749,6 +755,13 @@ def _hybrid_search(
             fused[doc_id] = vec_scores.get(doc_id, 0.0) + bm25_scores.get(doc_id, 0.0)
 
     ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)
+    if min_similarity is not None:
+        # A keyword hit matched the whole query as a phrase, which is evidence enough.
+        phrase_hits = {doc_id for doc_id, _ in bm25_res}
+        ranked = [
+            (doc_id, score) for doc_id, score in ranked
+            if doc_id in phrase_hits or similarities.get(doc_id, -1.0) >= min_similarity
+        ]
     if not tags:
         ranked = ranked[:k]
 
@@ -777,6 +790,7 @@ def _hybrid_search(
                     content=row["content"],
                     metadata=meta,
                     score=score,
+                    similarity=round(similarities[doc_id], 4) if doc_id in similarities else None,
                 )
             )
     # Honest reuse accounting:
@@ -832,6 +846,7 @@ def _bump_columns(doc_ids: list[str], set_clause: str) -> None:
 
 def _search_all_collections(
     user_id: str, query: str, k: int, alpha: float, use_rrf: bool, tags: list[str] | None = None,
+    min_similarity: float | None = None,
 ) -> list[SearchResultItem]:
     """Search every collection the user (or the shared ``default`` user) owns.
 
@@ -854,7 +869,7 @@ def _search_all_collections(
     seen_contents: set[str] = set()
     for coll in collections:
         try:
-            res = _hybrid_search(coll, user_id, query, query_vector, k, alpha, use_rrf, tags)
+            res = _hybrid_search(coll, user_id, query, query_vector, k, alpha, use_rrf, tags, min_similarity)
         except Exception as e:  # pragma: no cover - isolated per collection
             log.debug(f"Search failed for collection {coll}: {e}")
             res = []
@@ -878,17 +893,19 @@ async def search(req: SearchRequest):
     try:
         if req.collection_name in (None, "", "all", "__all__"):
             results = _search_all_collections(
-                req.user_id, req.query, req.k, req.alpha, req.use_rrf, req.tags
+                req.user_id, req.query, req.k, req.alpha, req.use_rrf, req.tags, req.min_similarity
             )
         else:
             results = _hybrid_search(
                 req.collection_name, req.user_id, req.query,
-                embed([req.query])[0], req.k, req.alpha, req.use_rrf, req.tags
+                embed([req.query])[0], req.k, req.alpha, req.use_rrf, req.tags, req.min_similarity
             )
         return SearchResponse(results=results)
     except Exception as e:
+        # A failed search is not "nothing matched": answering [] here let every caller
+        # tell the person their files hold nothing on the subject while the index was down.
         log.error(f"Hybrid search failed: {e}")
-        return SearchResponse(results=[])
+        raise HTTPException(status_code=503, detail=f"Search failed: {type(e).__name__}: {e}") from e
 
 
 #: Limits for /rag/embed: enough for a batch of verses, small enough that one

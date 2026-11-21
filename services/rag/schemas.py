@@ -54,6 +54,15 @@ class SearchRequest(BaseModel):
         default=None, max_length=8,
         description="Only items about one of these topics (a Calibre tag, or a Resources/<Topic>/ folder); see topics.py",
     )
+    min_similarity: float | None = Field(
+        default=None, ge=-1.0, le=1.0,
+        description=(
+            "Drop hits whose cosine similarity to the query is below this. The vector index "
+            "always returns its k nearest rows, however unrelated, so without a floor every "
+            "collection answers every question. A keyword-index hit is kept whatever its "
+            "similarity: BM25 matched the whole query as a phrase."
+        ),
+    )
 
     @field_validator("collection_name")
     @classmethod
@@ -65,6 +74,9 @@ class SearchResultItem(BaseModel):
     content: str
     metadata: dict[str, Any]
     score: float | None = None
+    #: Cosine similarity to the query (None when the row has no stored vector).
+    #: ``score`` is a rank fusion and says nothing about relevance on its own.
+    similarity: float | None = None
 
 class SearchResponse(BaseModel):
     results: list[SearchResultItem]
