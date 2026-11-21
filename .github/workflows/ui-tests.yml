@@ -37,7 +37,7 @@ jobs:
 
     - name: Run Lint
       working-directory: services/ui
-      run: npm run lint || echo "Linting failed, but continuing for tests"
+      run: npm run lint
 
     # The root tsconfig only references the real configs ("files": []), so
     # plain `tsc -p .` checks nothing, and the Vite build strips types without

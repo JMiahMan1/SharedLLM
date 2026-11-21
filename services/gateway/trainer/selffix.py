@@ -22,12 +22,22 @@ from services.gateway import workspace_api as ws
 
 log = logging.getLogger("gateway.trainer.selffix")
 
-#: Nothing bigger is a single-file repair, and reading more wastes the model's
-#: small context window.
-MAX_FILE_BYTES = 60_000
+#: The largest file a repair will touch. The model must read the *whole* file
+#: and write the *whole* file back, so it has to fit the prompt budget below and
+#: the answer's token budget. A bigger file is refused, never trimmed: a trimmed
+#: prompt asking for "the complete file" gets back a file missing its middle.
+MAX_FILE_BYTES = 12_000
 
 #: Enough of the test output for the model to see the failing assertion.
 MAX_TEST_OUTPUT = 3_000
+
+#: The prompt budget for one repair call. The prompt is checked against it
+#: before the call and is never trimmed by :func:`llm.complete`.
+REPAIR_CONTEXT_CHARS = 24_000
+
+#: A repair is at most this many model attempts (the route and the cycle both
+#: enforce it; each attempt is a full-file generation).
+MAX_ATTEMPTS = 3
 
 _FENCE = re.compile(r"```[a-zA-Z0-9_+-]*\s*\n(.*?)```", re.DOTALL)
 
@@ -40,7 +50,7 @@ class RepairError(RuntimeError):
 class RepairResult:
     """What one repair attempt actually did."""
 
-    status: str  # repaired | unrepaired | skipped
+    status: str  # repaired | unrepaired | skipped | error (the gate or the restore broke)
     workspace_id: str
     path: str
     attempts: int = 0
@@ -83,16 +93,48 @@ def compiles(source: str) -> tuple[bool, str]:
     return True, ""
 
 
+_DEFINITION = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
 def top_level_definitions(source: str) -> set[str]:
-    """Names of the module's functions and classes, for the "did it keep them" guard."""
+    """Names of the module's top-level functions and classes."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    return {node.name for node in tree.body if isinstance(node, _DEFINITION)}
+
+
+def all_definitions(source: str) -> set[str]:
+    """Every function and class at any depth, as a dotted path.
+
+    ``Parser.feed`` and ``build.inner`` count, not just top-level names: a
+    candidate that keeps ``class Parser`` but drops its ``feed`` method has
+    deleted the code under test just as surely as one that drops the class.
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return set()
     names: set[str] = set()
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
+
+    def visit(body: list[ast.stmt], prefix: str) -> None:
+        for node in body:
+            if isinstance(node, _DEFINITION):
+                name = f"{prefix}{node.name}"
+                names.add(name)
+                visit(node.body, f"{name}.")
+            else:
+                # Definitions inside if/try/with/for blocks keep the enclosing path.
+                for field_name in ("body", "orelse", "finalbody", "handlers"):
+                    inner = getattr(node, field_name, None)
+                    if isinstance(inner, list):
+                        visit([item for item in inner if isinstance(item, ast.stmt)], prefix)
+                        for handler in inner:
+                            if isinstance(handler, ast.ExceptHandler):
+                                visit(handler.body, prefix)
+
+    visit(tree.body, "")
     return names
 
 
@@ -116,7 +158,7 @@ def reject_reason(candidate: str, original: str, path: str) -> str | None:
         ok, reason = compiles(candidate)
         if not ok:
             return f"the answer does not compile: {reason}"
-        lost = sorted(top_level_definitions(original) - top_level_definitions(candidate))
+        lost = sorted(all_definitions(original) - all_definitions(candidate))
         if lost:
             return f"the answer removes definitions: {', '.join(lost)}"
     return None
@@ -152,15 +194,24 @@ def build_repair_prompt(path: str, source: str, error: str, test_output: str = "
     return "\n".join(parts)
 
 
+def answer_tokens(source: str) -> int:
+    """Enough tokens for the whole file back (about 3 characters a token), plus room."""
+    return max(1600, len(source) // 3 + 512)
+
+
 async def _ask(
-    complete_fn: Any, prompt: str, result: RepairResult, llm_mod: Any
+    complete_fn: Any, prompt: str, result: RepairResult, llm_mod: Any, *, source: str
 ) -> str:
     """One model call, recording which model answered."""
     if complete_fn is not None:
         produced = await complete_fn(prompt)
         return str(produced or "")
     completion = await llm_mod.complete(
-        prompt, max_tokens=1600, context_chars=12_000, timeout=300.0
+        prompt,
+        model=result.model or None,
+        max_tokens=answer_tokens(source),
+        context_chars=REPAIR_CONTEXT_CHARS,
+        timeout=300.0,
     )
     result.model = completion.model
     return completion.text
@@ -183,36 +234,65 @@ async def repair_workspace(
     """
     from services.gateway.trainer import llm as llm_mod
 
+    if not 1 <= int(attempts) <= MAX_ATTEMPTS:
+        raise ValueError(f"attempts must be between 1 and {MAX_ATTEMPTS}, not {attempts}")
     result = RepairResult(status="unrepaired", workspace_id=workspace_id, path=path)
     targets = list(test_targets or [])
     try:
-        original = await ws.read_file(workspace_id, path, user)
+        # The whole file or nothing: the model is asked for the complete file, so
+        # it must be shown the complete file.
+        original = await ws.read_text_exact(workspace_id, path, user=user, max_bytes=MAX_FILE_BYTES)
     except ws.WorkspaceError as exc:
         result.status, result.message = "skipped", str(exc)
         return result
 
     gate: dict[str, Any] | None = None
     if not error_text:
-        gate = await ws.run_pytest(workspace_id, targets, user=user)
-        if gate["passed"]:
+        try:
+            gate = await ws.run_pytest(workspace_id, targets, user=user)
+        except ws.WorkspaceError as exc:
+            result.status, result.message = "error", str(exc)
+            return result
+        if gate["outcome"] == "passed":
             result.status = "skipped"
             result.tests_passed = True
             result.message = "the workspace's tests already pass"
             return result
+        if gate["outcome"] == "error":
+            # Pytest could not judge the code (collection error, no tests, bad
+            # targets): there is no failing test for a repair to fix or to prove.
+            result.status = "error"
+            result.test_output = _gate_output(gate)
+            result.message = (
+                f"the test gate did not run the tests (pytest exit code {gate['returncode']}); "
+                "fix the test setup before asking for a repair"
+            )
+            return result
         error_text = _gate_output(gate) or "the workspace's tests fail"
+
+    if complete_fn is None:
+        from services.gateway.orchestrator import get_llm_settings
+
+        result.model = await llm_mod.resolve_model(await get_llm_settings())
 
     result.initial_error = str(error_text)[:MAX_TEST_OUTPUT]
     current = original
     context = result.initial_error
     test_output = _gate_output(gate)
 
-    for attempt in range(1, max(1, attempts) + 1):
+    for attempt in range(1, int(attempts) + 1):
         result.attempts = attempt
         # The first attempt sees the file as it is on disk; a later attempt sees
         # the candidate that just failed the tests, so it can build on it.
         prompt = build_repair_prompt(path, current, context, test_output)
+        if len(prompt) > REPAIR_CONTEXT_CHARS:
+            result.final_error = (
+                f"the repair prompt is {len(prompt):,} characters, over the "
+                f"{REPAIR_CONTEXT_CHARS:,} budget; refusing to trim the file"
+            )
+            break
         try:
-            answer = await _ask(complete_fn, prompt, result, llm_mod)
+            answer = await _ask(complete_fn, prompt, result, llm_mod, source=current)
         except llm_mod.LocalModelUnavailable as exc:
             result.final_error = str(exc)
             break
@@ -230,6 +310,7 @@ async def repair_workspace(
                 "Return the whole file in one ```python block."
             )
             continue
+        assert candidate is not None
 
         try:
             await ws.write_file(
@@ -238,25 +319,43 @@ async def repair_workspace(
         except ws.WorkspaceError as exc:
             result.final_error = str(exc)
             break
+        current = candidate
 
-        gate = await ws.run_pytest(workspace_id, targets, user=user)
+        try:
+            gate = await ws.run_pytest(workspace_id, targets, user=user)
+        except ws.WorkspaceError as exc:
+            # The gate broke, not the code: no verdict, so the candidate is not kept.
+            result.final_error = str(exc)
+            result.guards.append(f"attempt {attempt}: the test gate could not run")
+            break
         test_output = _gate_output(gate)
-        result.tests_passed = bool(gate["passed"])
         result.test_output = test_output
-        if gate["passed"]:
+        if gate["outcome"] == "passed":
+            result.tests_passed = True
             result.status = "repaired"
             result.final_error = ""
             return result
+        if gate["outcome"] == "error":
+            result.final_error = (
+                f"the test gate did not run the tests (pytest exit code {gate['returncode']})"
+            )
+            result.guards.append(f"attempt {attempt}: {result.final_error}")
+            break
 
+        result.tests_passed = False
         result.final_error = test_output or "the tests still fail"
-        current = candidate
         context = result.final_error
 
     # Every attempt failed: leave the workspace exactly as it was found.
-    try:
-        await ws.write_file(workspace_id, path, original, expected_sha256=_sha256(current), user=user)
-    except ws.WorkspaceError as exc:  # pragma: no cover - only when something else edited it
-        result.guards.append(f"could not restore the original file: {exc}")
+    if current != original:
+        try:
+            await ws.write_file(
+                workspace_id, path, original, expected_sha256=_sha256(current), user=user
+            )
+        except ws.WorkspaceError as exc:
+            result.status = "error"
+            result.guards.append(f"could not restore the original file: {exc}")
+            result.message = f"the original {path} could not be restored: {exc}"
 
     if not result.message:
         result.message = "no attempt produced a file the tests accept"

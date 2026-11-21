@@ -31,6 +31,10 @@ class Step:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    def for_port(self, port: int | None) -> str:
+        """The command with ``{port}`` filled in, for a server that takes its port as an argument."""
+        return self.command.replace("{port}", str(port)) if port else self.command
+
 
 @dataclass
 class Profile:
@@ -55,7 +59,10 @@ class Profile:
             "entry": self.entry,
             "preview_port": self.preview_port,
             "notes": self.notes,
-            "steps": {name: step.to_dict() for name, step in self.steps.items()},
+            "steps": {
+                name: {**step.to_dict(), "command": step.for_port(self.preview_port)}
+                for name, step in self.steps.items()
+            },
         }
 
 
@@ -101,10 +108,13 @@ def _python(names: set[str]) -> Profile | None:
     if _has(names, "requirements.txt"):
         steps["install"] = Step("install", "pip install -q -r requirements.txt", "install the declared packages")
     elif _has(names, "pyproject.toml"):
+        # No requirements.txt here (the branch above), so the pyproject is the
+        # only declaration. It used to end in ``|| true``: a failed install
+        # reported success and the test step then failed on a missing import.
         steps["install"] = Step(
             "install",
-            "pip install -q -e . || pip install -q -r requirements.txt || true",
-            "editable install when the project supports it",
+            "pip install -q -e .",
+            "editable install of the project from pyproject.toml",
         )
     return Profile("python", "Python", "python", steps, entry=entry)
 
@@ -230,7 +240,8 @@ def _static(names: set[str]) -> Profile | None:
         "Static site",
         "html",
         {
-            "serve": Step("serve", "python3 -m http.server 8080 --bind 0.0.0.0", "a plain file server"),
+            # {port}: a preview on another port must serve on that port too.
+            "serve": Step("serve", "python3 -m http.server {port} --bind 0.0.0.0", "a plain file server"),
         },
         preview_port=8080,
         entry=entry,

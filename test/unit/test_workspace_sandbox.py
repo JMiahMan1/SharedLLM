@@ -225,7 +225,7 @@ def test_the_services_own_environment_is_never_handed_to_the_sandbox(monkeypatch
 
 def test_the_baseline_environment_is_still_there(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin:/bin")
-    env = sb.build_exec_env(home="/home/raven", cred_env={"GITHUB_TOKEN": "t"}, extra={"FOO": "bar"})
+    env = sb.build_exec_env(home="/home/raven", extra={"GITHUB_TOKEN": "t", "FOO": "bar"})
 
     assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin"
     assert env["GITHUB_TOKEN"] == "t" and env["FOO"] == "bar"

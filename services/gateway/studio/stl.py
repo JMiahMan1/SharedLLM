@@ -17,11 +17,14 @@ The rules this module keeps:
 """
 from __future__ import annotations
 
+import asyncio
 import math
+import posixpath
 import re
 import struct
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from services.gateway import workspace_api as ws
 
@@ -31,6 +34,14 @@ MAX_TRIANGLES = 400_000
 
 #: Files larger than this do not belong in a chat-driven edit.
 MAX_BYTES = 64 * 1024 * 1024
+
+#: Parsing and editing a mesh is pure-Python CPU work: it runs in a worker
+#: thread (never on the event loop, which serves every other request), and at
+#: most this many at once, so a few large models cannot take every core.
+MAX_CONCURRENT_JOBS = 2
+
+#: How many numbered names the default ``<name>_edited[_N].stl`` tries.
+MAX_EDITED_NAMES = 100
 
 Vec = tuple[float, float, float]
 Triangle = tuple[Vec, Vec, Vec]
@@ -313,32 +324,122 @@ def to_indexed(mesh: Mesh, *, limit: int = 20_000) -> dict[str, Any]:
 
 # --- the workspace-facing half ----------------------------------------------
 
-async def load(workspace_id: str, path: str, *, user: str = "default") -> tuple[Mesh, bytes]:
+_T = TypeVar("_T")
+_limits: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
+
+
+async def _off_loop(func: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
+    """Run mesh work in a worker thread, at most ``MAX_CONCURRENT_JOBS`` at once."""
+    loop = asyncio.get_running_loop()
+    limit = _limits.get(loop)
+    if limit is None:
+        limit = _limits[loop] = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+    async with limit:
+        return await asyncio.to_thread(func, *args, **kwargs)
+
+
+def _format_of(data: bytes) -> str:
+    return "binary" if looks_binary(data) else "ascii"
+
+
+def check_stl_path(path: str, *, field_name: str = "path") -> str:
+    """A workspace-relative ``.stl`` path, or a clear refusal.
+
+    Absolute paths are refused here as well as in the Workspace Runtime (which
+    confines every path to the caller's own workspace): the studio never has a
+    reason to name a file by its location on the host.
+    """
+    value = (path or "").strip()
+    if not value:
+        raise StlError(f"{field_name} is required")
+    if value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", value):
+        raise StlError(f"{field_name} must be relative to the workspace, not {value!r}")
+    normal = posixpath.normpath(value)
+    if normal == ".." or normal.startswith("../"):
+        raise StlError(f"{field_name} must stay inside the workspace: {value!r}")
+    if not normal.lower().endswith(".stl"):
+        raise StlError(f"{field_name} must name an .stl file, not {value!r}")
+    return normal
+
+
+def _finite(value: Any, name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise StlError(f"{name} must be a number, got {value!r}") from exc
+    if not math.isfinite(number):
+        raise StlError(f"{name} must be a finite number, got {value!r}")
+    return number
+
+
+def vector(values: Any, name: str) -> Vec:
+    """Exactly three finite numbers, or an ``StlError`` naming what arrived."""
+    if values is None:
+        return (0.0, 0.0, 0.0)
+    if isinstance(values, (str, bytes)) or not hasattr(values, "__len__"):
+        raise StlError(f"{name} needs three numbers, got {values!r}")
+    if len(values) != 3:
+        raise StlError(f"{name} needs three numbers, got {len(values)}")
+    x, y, z = (_finite(value, name) for value in values)
+    return (x, y, z)
+
+
+def _scale_factors(scale: Any) -> Vec:
+    if isinstance(scale, (int, float)):
+        value = _finite(scale, "scale")
+        return (value, value, value)
+    return vector(scale, "scale")
+
+
+async def load(workspace_id: str, path: str, *, user: str) -> tuple[Mesh, bytes]:
     """Read an STL out of a workspace, refusing what we cannot work with."""
-    data = await ws.read_bytes(workspace_id, path, user=user, max_bytes=MAX_BYTES)
-    return read(data), data
+    data = await ws.read_bytes(workspace_id, check_stl_path(path), user=user, max_bytes=MAX_BYTES)
+    return await _off_loop(read, data), data
 
 
-async def inspect(workspace_id: str, path: str, *, user: str = "default") -> dict[str, Any]:
+async def inspect(workspace_id: str, path: str, *, user: str) -> dict[str, Any]:
     """Open a model from a workspace and describe it."""
-    data = await ws.read_bytes(workspace_id, path, user=user, max_bytes=MAX_BYTES)
-    mesh = read(data)
-    return summary(
-        mesh,
-        path=path,
-        fmt="binary" if looks_binary(data) else "ascii",
-        size_bytes=len(data),
+    source = check_stl_path(path)
+    mesh, data = await load(workspace_id, source, user=user)
+    return await _off_loop(
+        summary, mesh, path=source, fmt=_format_of(data), size_bytes=len(data)
     )
 
 
-def _edited_path(path: str) -> str:
-    """``parts/bracket.stl`` -> ``parts/bracket_edited.stl``.
+def _edited_path(path: str, attempt: int = 1) -> str:
+    """``parts/bracket.stl`` -> ``parts/bracket_edited.stl``, then ``_edited_2.stl``...
 
     A new file rather than an overwrite: a mistyped scale must not cost the model
-    that took an hour to draw.
+    that took an hour to draw, and a second edit must not cost the first.
     """
     stem = path[:-4] if path.lower().endswith(".stl") else path
-    return f"{stem}_edited.stl"
+    return f"{stem}_edited{'' if attempt == 1 else f'_{attempt}'}.stl"
+
+
+def _apply_edits(
+    mesh: Mesh, *, scale: Vec, rotate: Vec, translate: Vec, fit: float | None, center: bool
+) -> tuple[Mesh, dict[str, Any]]:
+    """rotate -> fit/scale -> centre -> translate, and what was applied."""
+    applied: dict[str, Any] = {}
+    edited = mesh
+    if any(rotate):
+        edited = edited.rotated(rotate)
+        applied["rotate_deg"] = list(rotate)
+    if fit is not None:
+        edited = edited.fitted(fit)
+        applied["fit_longest"] = fit
+    if scale != (1.0, 1.0, 1.0):
+        edited = edited.scaled(scale)
+        applied["scale"] = list(scale)
+    if center:
+        edited = edited.centered()
+        applied["centered"] = True
+    if any(translate):
+        edited = edited.translated(translate)
+        applied["translate"] = list(translate)
+    if not applied:
+        raise StlError("nothing to do: give a scale, rotate, fit, center or translate")
+    return edited, applied
 
 
 async def transform(
@@ -346,65 +447,87 @@ async def transform(
     path: str,
     *,
     out_path: str | None = None,
-    scale: float | tuple[float, float, float] = 1.0,
-    rotate: tuple[float, float, float] = (0.0, 0.0, 0.0),
-    translate: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    scale: Any = 1.0,
+    rotate: Any = None,
+    translate: Any = None,
     fit: float | None = None,
     center: bool = False,
     format: str | None = None,
-    user: str = "default",
+    replace: bool = False,
+    user: str,
 ) -> dict[str, Any]:
-    """Scale, rotate, centre and move a model, then write it back as a new file.
+    """Scale, rotate, centre and move a model, then write it as a new file.
 
     Order is the order a person would use: rotate first (so ``fit`` measures the
     model as it will sit), then fit or scale, then centre, then translate into
     place. The answer carries the measurements from both sides of the edit, so a
     caller checks the result instead of trusting it.
+
+    The source is never written. With no ``out_path`` the result goes to the
+    first free ``<name>_edited[_N].stl``; a named ``out_path`` that already
+    exists is refused unless ``replace`` is set.
+
+    Every argument is checked before the file is read, so a bad request is a
+    ``StlError`` (a 400), never a crash halfway through an edit.
     """
-    mesh, data = await load(workspace_id, path, user=user)
-    before = summary(
-        mesh, path=path, fmt="binary" if looks_binary(data) else "ascii", size_bytes=len(data)
-    )
+    source = check_stl_path(path)
+    factors = _scale_factors(scale)
+    turn = vector(rotate, "rotate")
+    move = vector(translate, "translate")
+    longest = None if fit is None else _finite(fit, "fit")
+    wanted = (format or "").strip().lower() or None
+    if wanted not in (None, "binary", "ascii"):
+        raise StlError(f"unknown format {wanted!r}: use 'binary' or 'ascii'")
+    destination = None
+    if out_path is not None:
+        destination = check_stl_path(out_path, field_name="out_path")
+        if destination == source:
+            raise StlError("out_path is the source model: an edit always writes a new file")
 
-    applied: dict[str, Any] = {}
-    edited = mesh
-    if any(rotate):
-        edited = edited.rotated(tuple(float(v) for v in rotate))
-        applied["rotate_deg"] = [float(v) for v in rotate]
-    if fit is not None:
-        edited = edited.fitted(float(fit))
-        applied["fit_longest"] = float(fit)
-    factors = (float(scale),) * 3 if isinstance(scale, (int, float)) else tuple(
-        float(v) for v in scale
-    )
-    if factors != (1.0, 1.0, 1.0):
-        edited = edited.scaled(factors)
-        applied["scale"] = list(factors)
-    if center:
-        edited = edited.centered()
-        applied["centered"] = True
-    if any(translate):
-        edited = edited.translated(tuple(float(v) for v in translate))
-        applied["translate"] = [float(v) for v in translate]
-    if not applied:
-        raise StlError("nothing to do: give a scale, rotate, fit, center or translate")
+    mesh, data = await load(workspace_id, source, user=user)
+    source_format = _format_of(data)
+    chosen = wanted or source_format
 
-    target_format = (format or before["format"] or "binary").lower()
-    if target_format not in {"binary", "ascii"}:
-        raise StlError(f"unknown format {target_format!r}: use 'binary' or 'ascii'")
-    payload = (
-        write_binary(edited)
-        if target_format == "binary"
-        else write_ascii(edited).encode("utf-8")
-    )
+    def _work() -> tuple[dict[str, Any], Mesh, dict[str, Any], bytes]:
+        before = summary(mesh, path=source, fmt=source_format, size_bytes=len(data))
+        edited, applied = _apply_edits(
+            mesh, scale=factors, rotate=turn, translate=move, fit=longest, center=center
+        )
+        payload = write_binary(edited) if chosen == "binary" else write_ascii(edited).encode("utf-8")
+        return before, edited, applied, payload
 
-    destination = out_path or _edited_path(path)
-    await ws.write_bytes(workspace_id, destination, payload, user=user)
-    after = summary(edited, path=destination, fmt=target_format, size_bytes=len(payload))
+    before, edited, applied, payload = await _off_loop(_work)
+
+    if destination is not None:
+        await ws.write_bytes(
+            workspace_id,
+            destination,
+            payload,
+            user=user,
+            expected_sha256=None if replace else ws.CREATE_ONLY,
+        )
+    else:
+        for attempt in range(1, MAX_EDITED_NAMES + 1):
+            candidate = _edited_path(source, attempt)
+            try:
+                await ws.write_bytes(
+                    workspace_id, candidate, payload, user=user, expected_sha256=ws.CREATE_ONLY
+                )
+            except ws.WorkspaceConflict:
+                continue
+            destination = candidate
+            break
+        else:
+            raise StlError(
+                f"{_edited_path(source)} and {MAX_EDITED_NAMES - 1} numbered copies already exist: "
+                "name an out_path"
+            )
+
+    after = await _off_loop(summary, edited, path=destination, fmt=chosen, size_bytes=len(payload))
     return {
-        "source": path,
+        "source": source,
         "path": destination,
-        "format": target_format,
+        "format": chosen,
         "applied": applied,
         "before": before,
         "after": after,
@@ -413,12 +536,13 @@ async def transform(
 
 
 async def preview(
-    workspace_id: str, path: str, *, limit: int = 20_000, user: str = "default"
+    workspace_id: str, path: str, *, limit: int = 20_000, user: str
 ) -> dict[str, Any]:
     """An indexed mesh a browser can draw, straight from a workspace file."""
-    mesh, data = await load(workspace_id, path, user=user)
-    payload = to_indexed(mesh, limit=limit)
-    payload.update({"path": path, "format": "binary" if looks_binary(data) else "ascii"})
+    source = check_stl_path(path)
+    mesh, data = await load(workspace_id, source, user=user)
+    payload = await _off_loop(to_indexed, mesh, limit=limit)
+    payload.update({"path": source, "format": _format_of(data)})
     return payload
 
 
@@ -487,6 +611,8 @@ def _read_binary(data: bytes, *, max_triangles: int) -> Mesh:
     triangles: list[Triangle] = []
     for index in range(count):
         values = struct.unpack_from("<12fH", data, 84 + 50 * index)
+        if not all(math.isfinite(value) for value in values[3:12]):
+            raise StlError(f"facet {index + 1:,} has a vertex that is not a finite number")
         triangles.append(
             (
                 (values[3], values[4], values[5]),
@@ -500,11 +626,23 @@ def _read_binary(data: bytes, *, max_triangles: int) -> Mesh:
 def _read_ascii(data: bytes, *, max_triangles: int) -> Mesh:
     text = data.decode("latin-1", errors="replace")
     points: list[Vec] = []
+    limit = 3 * max_triangles
     for match in _ASCII_VERTEX.finditer(text):
+        if len(points) >= limit:
+            # Stop at the cap: parsing on would build a mesh only to refuse it.
+            raise StlError(
+                f"the mesh has more than {max_triangles:,} triangles; this tool edits up to "
+                f"{max_triangles:,} (decimate it in your slicer first)"
+            )
         try:
-            points.append((float(match[1]), float(match[2]), float(match[3])))
+            point = (float(match[1]), float(match[2]), float(match[3]))
         except ValueError as exc:  # a truncated last facet, usually
             raise StlError(f"unreadable vertex on line {text.count(chr(10), 0, match.start()) + 1}") from exc
+        if not all(math.isfinite(value) for value in point):
+            raise StlError(
+                f"the vertex on line {text.count(chr(10), 0, match.start()) + 1} is not a finite number"
+            )
+        points.append(point)
     if not points:
         raise StlError("no facets found: this is neither ASCII nor binary STL")
     if len(points) % 3:

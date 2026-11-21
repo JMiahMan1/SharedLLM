@@ -50,6 +50,33 @@ _DELETE_IF_EQUALS = (
 )
 
 
+#: claim_job's script results.
+CLAIM_OK = 1
+CLAIM_RACED = 0
+CLAIM_ORPHAN = -1
+#: Move a queued job to processing in one step.
+#: KEYS: queue zset, processing list, job record, lease.
+#: ARGV: job id, record as read ("" if missing), new record, record ttl,
+#:       lease value, lease ttl.
+_CLAIM_JOB = """
+if not redis.call('zscore', KEYS[1], ARGV[1]) then return 0 end
+local current = redis.call('get', KEYS[3])
+if not current then
+  if ARGV[2] == '' then
+    redis.call('zrem', KEYS[1], ARGV[1])
+    return -1
+  end
+  return 0
+end
+if current ~= ARGV[2] then return 0 end
+redis.call('zrem', KEYS[1], ARGV[1])
+redis.call('set', KEYS[3], ARGV[3], 'EX', tonumber(ARGV[4]))
+redis.call('set', KEYS[4], ARGV[5], 'EX', tonumber(ARGV[6]))
+redis.call('rpush', KEYS[2], ARGV[1])
+return 1
+"""
+
+
 class JobStatus:
     QUEUED = "queued"
     PROCESSING = "processing"
@@ -73,6 +100,7 @@ class InferenceJobQueue:
         self.DEFAULT_TTL_SECONDS = 3600
         self.LEASE_TTL_SECONDS = 120
         self.MAX_ATTEMPTS = 3
+        self.CLAIM_RETRIES = 5
         self._queue_type_checked = False
 
     async def connect(self):
@@ -165,35 +193,53 @@ class InferenceJobQueue:
         if not self._queue_type_checked:
             await self._migrate_fifo_queue()
 
-        # Get highest priority job (lowest score = highest priority)
-        job_ids = await self._redis.zrange(self.QUEUE_KEY, 0, 0)  # type: ignore[misc]
-        if not job_ids:
-            return None
-
-        job_id = job_ids[0]
-        # Atomic move from queue to processing
-        removed = await self._redis.zrem(self.QUEUE_KEY, job_id)  # type: ignore[misc]
-        if not removed:
-            return None
-
-        job_raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[misc]
-        if not job_raw:
-            return None
-
-        job = json.loads(job_raw)
-        job["status"] = JobStatus.PROCESSING
-        job["started_at"] = time.time()
-        job["attempts"] = int(job.get("attempts", 0)) + 1
-
-        await self._redis.set(
-            f"{self.JOB_PREFIX}{job_id}",
-            json.dumps(job),
-            ex=self.DEFAULT_TTL_SECONDS,
-        )
-        await self._redis.rpush(self.PROCESSING_KEY, job_id)  # type: ignore[misc]
-        await self._publish_status(job_id, JobStatus.PROCESSING)
-        await self.heartbeat_job(job_id)
-        return job
+        # One claim is one script: leave the queue, mark the record, take the
+        # lease and join the processing list together. Done as separate calls,
+        # a gateway that died between ZREM and RPUSH lost the job outright.
+        # The record is rewritten here in Python (Redis's cjson turns an empty
+        # list in a payload into {}), so the script only commits it when the
+        # record is still the one we read; a racing claimer makes it retry.
+        for _ in range(self.CLAIM_RETRIES):
+            job_ids = await self._redis.zrange(self.QUEUE_KEY, 0, 0)  # type: ignore[misc]
+            if not job_ids:
+                return None
+            job_id = job_ids[0]
+            job_key = f"{self.JOB_PREFIX}{job_id}"
+            job_raw = await self._redis.get(job_key)  # type: ignore[misc]
+            if job_raw:
+                job = json.loads(job_raw)
+                job["status"] = JobStatus.PROCESSING
+                job["started_at"] = time.time()
+                job["attempts"] = int(job.get("attempts", 0)) + 1
+                new_raw = json.dumps(job)
+            else:
+                job, new_raw = None, ""
+            outcome = await self._redis.eval(  # type: ignore[misc]
+                _CLAIM_JOB,
+                4,
+                self.QUEUE_KEY,
+                self.PROCESSING_KEY,
+                job_key,
+                f"{self.LEASE_PREFIX}{job_id}",
+                job_id,
+                job_raw or "",
+                new_raw,
+                self.DEFAULT_TTL_SECONDS,
+                str(time.time()),
+                self.LEASE_TTL_SECONDS,
+            )
+            outcome = int(outcome)
+            if outcome == CLAIM_ORPHAN:
+                log.warning("Dropped queued job %s: its record had expired.", job_id)
+                continue
+            if outcome == CLAIM_RACED:
+                continue  # another worker claimed or changed it first
+            if outcome != CLAIM_OK or job is None:
+                raise RuntimeError(f"claim script returned {outcome} for job {job_id}")
+            await self._publish_status(job_id, JobStatus.PROCESSING)
+            return job
+        log.warning("Could not claim a job after %s attempts (contention).", self.CLAIM_RETRIES)
+        return None
 
     async def _migrate_fifo_queue(self) -> None:
         """Move jobs left in the old FIFO list into the priority set.

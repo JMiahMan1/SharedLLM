@@ -14,9 +14,15 @@ This is the loop the household actually runs. Each pass:
 
 Every step is isolated: a RAG outage or an unloaded model becomes a recorded
 error, never a failed cycle, because the next pass needs the rest of the data.
+Two things are not isolated, because they would make the whole pass a lie: a data
+directory that cannot be written (nothing would be kept), and a second cycle
+starting while one runs (:class:`CycleBusy`; the manual route and the background
+loop share one lock). Infrastructure failures are recorded, never turned into
+lessons (see ``dream.INFRASTRUCTURE_KINDS``).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -26,6 +32,7 @@ from typing import Any
 from services.gateway.trainer import alpaca, curriculum, runner, selffix
 from services.gateway.trainer import catalog as catalog_mod
 from services.gateway.trainer import dream as dream_mod
+from services.gateway.trainer import llm as llm_mod
 
 log = logging.getLogger("gateway.trainer.facilitator")
 
@@ -36,8 +43,46 @@ UI_GAP_MIN_ROUTES = 10
 _NON_SCREEN_TAGS = {"tools", "admin", "telemetry", "memory", "identity"}
 
 
+class CycleBusy(RuntimeError):
+    """A cycle is already running in this gateway."""
+
+
+#: One cycle at a time: the manual route and the background loop both take it.
+_CYCLE_LOCK = asyncio.Lock()
+
+
+def cycle_running() -> bool:
+    return _CYCLE_LOCK.locked()
+
+
 def backlog_path() -> Any:
     return runner.DATA_DIR / "backlog.json"
+
+
+def validate_repair(repair: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The repair a cycle was asked for, checked before any work starts."""
+    if not repair:
+        return None
+    workspace_id = str(repair.get("workspace_id") or "").strip()
+    path = str(repair.get("path") or "").strip()
+    if not workspace_id or not path:
+        raise ValueError("repair needs both workspace_id and path")
+    raw = repair.get("attempts", 2)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValueError(f"repair.attempts must be a whole number, not {raw!r}")
+    if not 1 <= raw <= selffix.MAX_ATTEMPTS:
+        raise ValueError(f"repair.attempts must be between 1 and {selffix.MAX_ATTEMPTS}, not {raw}")
+    targets = repair.get("test_targets") or []
+    if not isinstance(targets, list) or not all(isinstance(item, str) for item in targets):
+        raise ValueError("repair.test_targets must be a list of paths")
+    error_text = repair.get("error_text")
+    return {
+        "workspace_id": workspace_id,
+        "path": path,
+        "attempts": raw,
+        "test_targets": targets,
+        "error_text": str(error_text) if error_text else None,
+    }
 
 
 async def _settings() -> dict[str, Any]:
@@ -157,7 +202,40 @@ async def cycle(
     complete_fn: Any | None = None,
     hardware: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """One full facilitator pass; returns a summary and writes the backlog."""
+    """One full facilitator pass; returns a summary and writes the backlog.
+
+    Raises :class:`CycleBusy` when another cycle holds the lock, ``ValueError``
+    for a malformed ``repair``, and ``runner.TrainerStorageError`` when the data
+    directory cannot be written -- all before any work is done.
+    """
+    checked_repair = validate_repair(repair)
+    if _CYCLE_LOCK.locked():
+        raise CycleBusy("A trainer cycle is already running; wait for it to finish.")
+    async with _CYCLE_LOCK:
+        runner.ensure_data_dir()
+        return await _cycle(
+            user=user,
+            buckets=buckets,
+            limit=limit,
+            budget_s=budget_s,
+            apply_lessons=apply_lessons,
+            repair=checked_repair,
+            complete_fn=complete_fn,
+            hardware=hardware,
+        )
+
+
+async def _cycle(
+    *,
+    user: str,
+    buckets: list[str] | None,
+    limit: int,
+    budget_s: float,
+    apply_lessons: bool,
+    repair: dict[str, Any] | None,
+    complete_fn: Any | None,
+    hardware: dict[str, Any] | None,
+) -> dict[str, Any]:
     started = time.time()
     summary: dict[str, Any] = {
         "status": "SUCCESS",
@@ -206,52 +284,87 @@ async def cycle(
     }
 
     report: dict[str, Any] = {}
-    # "Busy" is specifically "the host answered and said not now". An unconfigured
-    # or unreachable host is a different fact (a dev machine, a bare llama.cpp
-    # server) and must not block training or file a hardware proposal.
-    busy = hardware.get("reachable") is not False and hardware.get("ready") is False
-    if busy:
+    # Unknown is not ready: an unreachable host, or one that could not report its
+    # GPU, slots or requests, is not evaluated. "busy" (the host answered and said
+    # not now) also files a hardware proposal; "unreachable" is only an error.
+    reachable = hardware.get("reachable") is True
+    ready = reachable and hardware.get("ready") is True
+    busy = reachable and not ready
+    if not ready:
         # Do not queue a run the household would feel.
-        summary["eval"] = {"skipped": "hardware", "reasons": hardware.get("reasons") or []}
-    else:
-        report = await runner.run_curriculum(cases, complete_fn=complete_fn, budget_s=budget_s)
         summary["eval"] = {
-            "report_id": report["id"],
-            "model": report["model"],
-            "totals": report["totals"],
-            "stopped_reason": report["stopped_reason"],
-            "by_bucket": report["by_bucket"],
+            "skipped": "hardware" if busy else "unreachable",
+            "reasons": hardware.get("reasons") or [],
         }
+        if not reachable:
+            summary["errors"].append(
+                "eval: the model host could not be probed: "
+                + "; ".join(str(reason) for reason in hardware.get("reasons") or ["no answer"])
+            )
+    else:
+        try:
+            report = await runner.run_curriculum(
+                cases,
+                model=summary["hardware"].get("model") or None,
+                complete_fn=complete_fn,
+                budget_s=budget_s,
+            )
+        except llm_mod.LocalModelUnavailable as exc:
+            summary["errors"].append(f"eval: {exc}")
+            summary["eval"] = {"skipped": "model", "reasons": [str(exc)]}
+        else:
+            summary["eval"] = {
+                "report_id": report["id"],
+                "model": report["model"],
+                "totals": report["totals"],
+                "stopped_reason": report["stopped_reason"],
+                "by_bucket": report["by_bucket"],
+            }
 
-    benchmarks = alpaca.benchmark_summary(limit=10)
-    summary["benchmarks"] = {
-        "total": benchmarks.get("total"),
-        "weak": alpaca.weakest_categories(benchmarks, summary["hardware"].get("model") or ""),
-    }
+    benchmarks: dict[str, Any] | None
+    try:
+        benchmarks = alpaca.benchmark_summary(limit=10)
+    except alpaca.BenchmarksUnavailable as exc:
+        benchmarks = None
+        summary["errors"].append(f"benchmarks: {exc}")
+        summary["benchmarks"] = {"error": str(exc)}
+    else:
+        summary["benchmarks"] = {
+            "total": benchmarks.get("total"),
+            "weak": alpaca.weakest_categories(benchmarks, summary["hardware"].get("model") or ""),
+        }
 
     proposals = dream_mod.merge_proposals(
         dream_mod.proposals_from_dream(dream_report),
         dream_mod.proposals_from_failures(report),
-        hardware_proposal({"ready": not busy, "reasons": hardware.get("reasons")}) if busy else [],
+        hardware_proposal({"ready": False, "reasons": hardware.get("reasons")}) if busy else [],
         benchmark_proposals(summary["hardware"].get("model") or "", benchmarks),
         ui_proposals(catalog),
     )
     summary["proposals"] = proposals
-    summary["lessons"] = (
-        await dream_mod.ingest_proposals(proposals, user_id=user) if apply_lessons else []
-    )
-
-    if repair and repair.get("workspace_id") and repair.get("path"):
-        result = await selffix.repair_workspace(
-            str(repair["workspace_id"]),
-            path=str(repair["path"]),
-            error_text=repair.get("error_text"),
-            test_targets=repair.get("test_targets"),
-            attempts=int(repair.get("attempts") or 2),
-            user=user,
-            complete_fn=complete_fn,
+    summary["lessons"] = []
+    if apply_lessons:
+        ingested = await dream_mod.ingest_proposals(proposals, user_id=user)
+        summary["lessons"] = ingested["written"]
+        summary["errors"].extend(
+            f"lesson {item['proposal']}: {item['error']}" for item in ingested["failed"]
         )
-        summary["repair"] = result.to_dict()
+
+    if repair:
+        try:
+            result = await selffix.repair_workspace(
+                repair["workspace_id"],
+                path=repair["path"],
+                error_text=repair["error_text"],
+                test_targets=repair["test_targets"],
+                attempts=repair["attempts"],
+                user=user,
+                complete_fn=complete_fn,
+            )
+        except llm_mod.LocalModelUnavailable as exc:
+            summary["errors"].append(f"repair: {exc}")
+        else:
+            summary["repair"] = result.to_dict()
 
     backlog = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -272,14 +385,20 @@ def _write_backlog(backlog: dict[str, Any]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(backlog, indent=2, ensure_ascii=False), encoding="utf-8")
-    except OSError as exc:  # a read-only mount must not break the cycle
-        log.warning("[trainer] could not write the backlog: %s", exc)
+    except OSError as exc:
+        raise runner.TrainerStorageError(f"Could not write the backlog to {path}: {exc}") from exc
 
 
 def read_backlog() -> dict[str, Any]:
-    """The last saved backlog, or an empty one."""
+    """The last saved backlog, or an empty one when no cycle has run yet.
+
+    A backlog that exists but cannot be read raises: "no proposals" and "the file
+    is corrupt" are different answers.
+    """
     path = backlog_path()
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return {"generated_at": None, "eval_report_id": None, "proposals": [], "lessons": []}
+    except (OSError, ValueError) as exc:
+        raise runner.TrainerStorageError(f"Could not read the backlog at {path}: {exc}") from exc

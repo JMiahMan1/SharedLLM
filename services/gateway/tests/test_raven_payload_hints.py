@@ -33,6 +33,21 @@ NON_EXECUTION_TOOLS = {
     "ContextSearchRequest",
     "StorageIndexRequest",
     "ControlPlaneRequest",
+    # The Workspace Studio runs in the gateway; studio/tools.py validates each
+    # payload with the route's own body model (test_studio_e2e covers them).
+    "StudioProfileRequest",
+    "StudioRunRequest",
+    "StudioDiagnoseRequest",
+    "StudioVerifyRequest",
+    "StudioPreviewRequest",
+    "StudioPreviewStopRequest",
+    "StudioAssetsRequest",
+    "StudioImageRequest",
+    "StudioNarrationRequest",
+    "StudioDeckRequest",
+    "StudioGameRequest",
+    "StlInspectRequest",
+    "StlTransformRequest",
 }
 
 INJECTED_FIELDS = {"user_context", "workspace_id"}

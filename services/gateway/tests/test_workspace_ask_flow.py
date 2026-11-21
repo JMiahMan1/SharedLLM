@@ -254,6 +254,12 @@ def test_every_single_turn_route_is_served():
     for key, folder in service_dir.items():
         source = (services / folder / "main.py").read_text()
         served[key] = set(re.findall(r'@app\.(?:post|api_route)\("([^"]+)"', source))
+    # The gateway's own rows (the Workspace Studio) run in-process through the
+    # same handlers as its /api/studio routes, so those routes must exist too.
+    studio = (services / "gateway" / "studio" / "routes.py").read_text()
+    served[orchestrator.GATEWAY_IN_PROCESS] = {
+        "/api/studio" + p for p in re.findall(r'@router\.(?:post|api_route)\("([^"]+)"', studio)
+    }
     for name, path in orchestrator.SINGLE_TURN_TOOL_ENDPOINTS.items():
         key = orchestrator._TOOL_SERVICE_MAP.get(name, "execution_svc_url")
         assert path in served[key], f"{name} -> {key}{path} is not served"

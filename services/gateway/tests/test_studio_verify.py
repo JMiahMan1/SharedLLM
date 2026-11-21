@@ -29,7 +29,7 @@ def answering_shell(monkeypatch):
     """A shell that answers per command, and records what was asked."""
     state: dict = {"answers": {}, "calls": []}
 
-    async def fake_shell(workspace_id, command, *, user="default", timeout=30):
+    async def fake_shell(workspace_id, command, *, user, timeout=30):
         state["calls"].append(command)
         answer = state["answers"].get(command)
         if isinstance(answer, Exception):
@@ -39,7 +39,7 @@ def answering_shell(monkeypatch):
             "detail": {"returncode": 0, "stdout": "ok", "stderr": ""},
         }
 
-    async def fake_list(workspace_id, path, **kwargs):
+    async def fake_list(workspace_id, path=".", *, user, recursive=False, max_depth=2, max_entries=400):
         # A Python project, so the detected profile has a real test step.
         return ["pyproject.toml"]
 
@@ -53,7 +53,7 @@ def workspace(monkeypatch):
     """A workspace that records writes so cleanup can be observed."""
     state: dict = {"files": {}, "deleted": []}
 
-    async def fake_write(workspace_id, path, content, **kwargs):
+    async def fake_write(workspace_id, path, content, *, expected_sha256=None, user, create_parents=True):
         state["files"][path] = content
         return {"status": "SUCCESS"}
 
@@ -73,7 +73,7 @@ def _healthy(state) -> None:
 async def test_a_healthy_shell_reports_no_failures(answering_shell):
     _healthy(answering_shell)
 
-    report = await runtime.diagnose("ws1")
+    report = await runtime.diagnose("ws1", user="u1")
 
     assert report["ok"] is True
     assert report["failed"] == []
@@ -89,7 +89,7 @@ async def test_a_failing_probe_does_not_stop_the_others(answering_shell):
         "detail": {"returncode": 127, "stdout": "", "stderr": "bash: not found"},
     }
 
-    report = await runtime.diagnose("ws1")
+    report = await runtime.diagnose("ws1", user="u1")
 
     assert report["ok"] is False
     assert report["failed"] == ["bash"]
@@ -106,7 +106,7 @@ async def test_an_unwritable_home_is_named_as_the_cause(answering_shell):
         "detail": {"returncode": 1, "stdout": "/home/sharedllm (NOT writable)", "stderr": ""},
     }
 
-    report = await runtime.diagnose("ws1")
+    report = await runtime.diagnose("ws1", user="u1")
 
     assert "home" in report["failed"]
     assert "HOME is /home/sharedllm" in report["hint"]
@@ -117,7 +117,7 @@ async def test_a_probe_that_raises_is_reported_not_propagated(answering_shell):
     _healthy(answering_shell)
     answering_shell["answers"][COMMANDS["git"]] = ws.WorkspaceError("sandbox gone")
 
-    report = await runtime.diagnose("ws1")
+    report = await runtime.diagnose("ws1", user="u1")
 
     git_probe = next(p for p in report["probes"] if p["name"] == "git")
     assert git_probe["ok"] is False
@@ -128,12 +128,12 @@ async def test_a_probe_that_raises_is_reported_not_propagated(answering_shell):
 async def test_a_missing_profile_is_reported_without_losing_the_probes(answering_shell, monkeypatch):
     _healthy(answering_shell)
 
-    async def no_files(workspace_id, path, **kwargs):
+    async def no_files(workspace_id, path=".", *, user, recursive=False, max_depth=2, max_entries=400):
         raise ws.WorkspaceError("no such workspace")
 
     monkeypatch.setattr(runtime.ws, "list_files", no_files)
 
-    report = await runtime.diagnose("ws1")
+    report = await runtime.diagnose("ws1", user="u1")
 
     assert report["profile"] is None
     assert "no such workspace" in report["profile_error"]
@@ -151,7 +151,7 @@ async def test_verify_proves_a_program_ran_and_cleaned_up_after_itself(
         "detail": {"returncode": 0, "stdout": "studio-ok from python", "stderr": ""},
     }
 
-    verdict = await runtime.verify("ws1")
+    verdict = await runtime.verify("ws1", user="u1")
 
     assert verdict["ok"] is True
     assert verdict["program"]["ok"] is True
@@ -168,7 +168,7 @@ async def test_verify_names_a_program_that_cannot_run(answering_shell, workspace
         "detail": {"returncode": 1, "stdout": "", "stderr": "PermissionError: /home/sharedllm"},
     }
 
-    verdict = await runtime.verify("ws1")
+    verdict = await runtime.verify("ws1", user="u1")
 
     assert verdict["ok"] is False
     assert "`python3 _studio_probe.py` failed" in verdict["hint"]
@@ -183,7 +183,7 @@ async def test_verify_reports_failing_tests_with_their_output(answering_shell, w
         "detail": {"returncode": 1, "stdout": "", "stderr": "1 failed, 4 passed"},
     }
 
-    verdict = await runtime.verify("ws1")
+    verdict = await runtime.verify("ws1", user="u1")
 
     assert verdict["ok"] is False
     assert verdict["tests"]["ok"] is False
@@ -193,7 +193,7 @@ async def test_verify_reports_failing_tests_with_their_output(answering_shell, w
 async def test_verify_is_honest_when_a_stack_has_no_tests(answering_shell, monkeypatch, workspace):
     _healthy(answering_shell)
 
-    async def static_profile(workspace_id, *, user="default"):
+    async def static_profile(workspace_id, *, user):
         return profiles.Profile("static", "Static site", "html", {})
 
     monkeypatch.setattr(runtime, "profile_for", static_profile)
@@ -202,11 +202,32 @@ async def test_verify_is_honest_when_a_stack_has_no_tests(answering_shell, monke
         "detail": {"returncode": 0, "stdout": "studio-ok from python", "stderr": ""},
     }
 
-    verdict = await runtime.verify("ws1")
+    verdict = await runtime.verify("ws1", user="u1")
 
+    # No one-line probe for html and no test step: nothing proved code runs.
+    assert verdict["program"]["skipped"] is True and verdict["program"]["ok"] is False
     assert verdict["tests"]["available"] is False
-    assert verdict["ok"] is True
+    assert verdict["ok"] is False
+    assert "nothing proved code runs" in verdict["hint"]
     assert "nothing to run" in verdict["tests"]["message"]
+
+
+async def test_a_program_that_ran_is_proof_enough_without_a_test_step(answering_shell, monkeypatch, workspace):
+    _healthy(answering_shell)
+
+    async def no_tests(workspace_id, *, user):
+        return profiles.Profile("python", "Python", "python", {})
+
+    monkeypatch.setattr(runtime, "profile_for", no_tests)
+    answering_shell["answers"]["python3 _studio_probe.py"] = {
+        "status": "SUCCESS",
+        "detail": {"returncode": 0, "stdout": "studio-ok from python", "stderr": ""},
+    }
+
+    verdict = await runtime.verify("ws1", user="u1")
+
+    assert verdict["ok"] is True
+    assert "there are no tests to run" in verdict["hint"]
 
 
 async def test_a_broken_shell_is_not_mistaken_for_failing_tests(answering_shell, workspace):
@@ -216,13 +237,14 @@ async def test_a_broken_shell_is_not_mistaken_for_failing_tests(answering_shell,
             "detail": {"returncode": 127, "stdout": "", "stderr": "no such command"},
         }
 
-    verdict = await runtime.verify("ws1")
+    verdict = await runtime.verify("ws1", user="u1")
 
     assert verdict["shell"]["ok"] is False
     assert verdict["ok"] is False
     assert "identity" in verdict["shell"]["failed"]
-    # the tests were never reached, so they are not blamed
-    assert verdict["tests"] is not None and verdict["tests"]["ok"] is True
+    # a broken shell stops the check: nothing else ran, so nothing else is blamed
+    assert verdict["program"] is None and verdict["tests"] is None
+    assert answering_shell["calls"] == [command for _n, command, _w in runtime.DIAGNOSTIC_PROBES]
 
 
 
@@ -236,7 +258,7 @@ async def test_a_passing_run_says_the_tests_pass_not_that_there_are_none(
         "detail": {"returncode": 0, "stdout": "studio-ok from python", "stderr": ""},
     }
 
-    verdict = await runtime.verify("ws1")
+    verdict = await runtime.verify("ws1", user="u1")
 
     assert verdict["ok"] is True
     assert "the tests pass" in verdict["hint"]

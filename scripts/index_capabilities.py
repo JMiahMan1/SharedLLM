@@ -196,6 +196,21 @@ def index_capabilities():
             })
             log.info(f"Prepared storage schema: {class_name}")
 
+    # The Workspace Studio's tools, from the studio's own action table: the same
+    # body model, description and hint the routes and the tool registry use.
+    from services.gateway.studio import actions as studio_actions
+    from services.gateway.studio import tools as studio_tools
+
+    for class_name, action_name in studio_tools.TOOL_ACTIONS.items():
+        action = studio_actions.ACTIONS[action_name]
+        capabilities.append({
+            "name": class_name,
+            "description": f"{action.description} {action.hint}",
+            "schema": get_json_schema(action.body),
+            "type": "execution_schema",
+        })
+        log.info(f"Prepared studio schema: {class_name}")
+
     log.info("Skipping legacy phrasebook intents.")
 
     if not capabilities:

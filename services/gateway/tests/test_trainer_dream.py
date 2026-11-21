@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from services.gateway.trainer import dream
 
 
@@ -136,7 +138,7 @@ async def test_ingesting_proposals_is_bounded_and_survives_a_failure(monkeypatch
     async def fake_request(method, path, *, params=None, body=None, timeout=60.0):
         sent.append(body)
         if len(sent) == 1:
-            raise ConnectionError("rag is down")
+            raise dream.RagUnavailable("RAG /rag/ingest did not answer")
         return {"status": "SUCCESS"}
 
     monkeypatch.setattr(dream, "request", fake_request)
@@ -149,4 +151,85 @@ async def test_ingesting_proposals_is_bounded_and_survives_a_failure(monkeypatch
     written = await dream.ingest_proposals(proposals, user_id="alice", limit=2)
 
     assert len(sent) == 2, "only the requested number of lessons may be written"
-    assert len(written) == 1, "a failed write is skipped, not fatal"
+    assert len(written["written"]) == 1, "a failed write is skipped, not fatal"
+    assert written["failed"][0]["proposal"] == "p0", "and it is reported, not hidden"
+
+
+class _FakeResponse:
+    def __init__(self, status: int, text: str):
+        self.status = status
+        self._text = text
+
+    async def text(self):
+        return self._text
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeSession:
+    def __init__(self, response: _FakeResponse, **kwargs):
+        self._response = response
+
+    def request(self, *args, **kwargs):
+        return self._response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _rag_answers(monkeypatch, status: int, text: str) -> None:
+    monkeypatch.setattr(
+        dream.aiohttp, "ClientSession", lambda **kwargs: _FakeSession(_FakeResponse(status, text))
+    )
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+async def test_a_rag_4xx_is_a_failure_not_data(monkeypatch, status):
+    _rag_answers(monkeypatch, status, '{"detail": "refused"}')
+
+    with pytest.raises(dream.RagRejected, match=str(status)):
+        await dream.request("POST", "/rag/ingest", body={})
+
+
+async def test_a_rag_5xx_is_unavailable(monkeypatch):
+    _rag_answers(monkeypatch, 503, "down")
+
+    with pytest.raises(dream.RagUnavailable):
+        await dream.request("POST", "/rag/dream")
+
+
+async def test_a_refused_lesson_write_is_not_counted_as_written(monkeypatch):
+    _rag_answers(monkeypatch, 422, '{"detail": "bad lesson"}')
+    proposal = {"id": "p1", "kind": "tool_doc", "title": "t", "detail": "d",
+                "priority": 5, "evidence": [], "action": "a"}
+
+    result = await dream.ingest_proposals([proposal])
+
+    assert result["written"] == []
+    assert "422" in result["failed"][0]["error"]
+
+
+async def test_infrastructure_proposals_are_never_written(monkeypatch):
+    sent: list[dict] = []
+
+    async def fake_request(method, path, *, params=None, body=None, timeout=60.0):
+        sent.append(body)
+        return {"status": "SUCCESS"}
+
+    monkeypatch.setattr(dream, "request", fake_request)
+    proposals = [
+        dream.make_proposal(kind, "t", f"d-{kind}", priority=10, evidence=[], action="a")
+        for kind in ("hardware_busy", "host_busy", "model_unavailable")
+    ] + [dream.make_proposal("tool_doc", "t", "d", priority=1, evidence=[], action="document it")]
+
+    result = await dream.ingest_proposals(proposals, limit=3)
+
+    assert len(sent) == 1 and "tool_doc" in sent[0]["content"]
+    assert len(result["written"]) == 1

@@ -26,6 +26,7 @@ from services.gateway.trainer import catalog as catalog_mod
 from services.gateway.trainer import dream as dream_mod
 from services.gateway.trainer import sermon as sermon_mod
 from services.gateway.trainer.llm import LocalModelUnavailable
+from services.gateway.workspace_api import WorkspaceError
 
 log = logging.getLogger("gateway.trainer.routes")
 
@@ -39,12 +40,22 @@ class EvalRequest(BaseModel):
     model: str | None = None
 
 
+class RepairSpec(BaseModel):
+    """A repair inside a cycle: the same bounds as ``POST /repair``."""
+
+    workspace_id: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    error_text: str | None = None
+    test_targets: list[str] = Field(default_factory=list)
+    attempts: int = Field(default=2, ge=1, le=selffix.MAX_ATTEMPTS)
+
+
 class CycleRequest(BaseModel):
     buckets: list[str] | None = None
     limit: int = Field(default=12, ge=1, le=200)
     budget_s: float = Field(default=600.0, ge=10.0, le=3600.0)
     apply_lessons: bool = True
-    repair: dict[str, Any] | None = None
+    repair: RepairSpec | None = None
 
 
 class RepairRequest(BaseModel):
@@ -52,7 +63,7 @@ class RepairRequest(BaseModel):
     path: str
     error_text: str | None = None
     test_targets: list[str] | None = None
-    attempts: int = Field(default=2, ge=1, le=3)
+    attempts: int = Field(default=2, ge=1, le=selffix.MAX_ATTEMPTS)
 
 
 class SermonRequest(BaseModel):
@@ -102,6 +113,12 @@ async def _user(request: Request) -> str:
     from services.gateway.main import _require_authenticated
 
     return await _require_authenticated(request)
+
+
+def _rag_http_error(exc: dream_mod.RagError) -> HTTPException:
+    """RAG down is 503; RAG refusing the request is a 502 with its words."""
+    status = 503 if isinstance(exc, dream_mod.RagUnavailable) else 502
+    return HTTPException(status_code=status, detail=str(exc))
 
 
 @router.get("/catalog")
@@ -155,7 +172,7 @@ async def get_models(request: Request) -> dict[str, Any]:
     try:
         payload = await alpaca.get_json(f"{base}/admin/models")
     except Exception as exc:
-        return {"total": 0, "models": [], "chosen": "", "error": str(exc)}
+        raise HTTPException(status_code=502, detail=f"The model host did not list its models: {exc}") from exc
     return alpaca.summarise_models(payload, settings)
 
 
@@ -165,7 +182,10 @@ async def get_benchmarks(request: Request, limit: int = 20) -> dict[str, Any]:
     await _admin(request)
     from services.gateway.orchestrator import get_llm_settings
 
-    summary = alpaca.benchmark_summary(limit=max(1, min(limit, 100)))
+    try:
+        summary = alpaca.benchmark_summary(limit=max(1, min(limit, 100)))
+    except alpaca.BenchmarksUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     settings = await get_llm_settings()
     known = [{"name": row["model"]} for row in summary["results"] if row.get("model")]
     model = alpaca.choose_model(settings, known)
@@ -182,8 +202,8 @@ async def ingest_benchmarks(request: Request) -> dict[str, Any]:
     await _admin(request)
     try:
         return await dream_mod.ingest_benchmark_results()
-    except dream_mod.RagUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except dream_mod.RagError as exc:
+        raise _rag_http_error(exc) from exc
 
 
 @router.post("/eval")
@@ -194,10 +214,14 @@ async def run_eval(request: Request, body: EvalRequest) -> dict[str, Any]:
         catalog_mod.build_catalog(request.app), buckets=body.buckets, limit=body.limit
     )
     try:
+        # body.model, when given, is the model every case asks (validated against
+        # the host's inventory first); otherwise the trainer's own choice.
         return await runner.run_curriculum(
             cases, model=body.model, budget_s=body.budget_s
         )
     except LocalModelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except runner.TrainerStorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
@@ -208,24 +232,32 @@ async def list_reports(request: Request, limit: int = 20) -> dict[str, Any]:
     return {"reports": runner.list_reports(limit=max(1, min(limit, 100)))}
 
 
+def _load_report_or_error(report_id: str) -> dict[str, Any]:
+    try:
+        report = runner.load_report(report_id)
+    except runner.TrainerStorageError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report
+
+
 @router.get("/reports/{report_id}")
 async def get_report(report_id: str, request: Request) -> dict[str, Any]:
     """One evaluation report, with every case's answer and failed checks."""
     await _admin(request)
-    report = runner.load_report(report_id)
-    if report is None:
-        raise HTTPException(status_code=404, detail="Report not found")
-    return report
+    return _load_report_or_error(report_id)
 
 
 @router.post("/reports/dataset")
 async def export_dataset(request: Request, body: ExportRequest) -> dict[str, Any]:
     """Write a report's rows as JSONL, ready for a fine-tuning pass."""
     await _admin(request)
-    report = runner.load_report(body.report_id)
-    if report is None:
-        raise HTTPException(status_code=404, detail="Report not found")
-    return runner.export_dataset(report, accepted_only=body.accepted_only)
+    report = _load_report_or_error(body.report_id)
+    try:
+        return runner.export_dataset(report, accepted_only=body.accepted_only)
+    except runner.TrainerStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/repair")
@@ -241,6 +273,8 @@ async def repair(request: Request, body: RepairRequest) -> dict[str, Any]:
             attempts=body.attempts,
             user=user,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LocalModelUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return result.to_dict()
@@ -268,6 +302,8 @@ async def compose_sermon(request: Request, body: SermonRequest) -> dict[str, Any
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LocalModelUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except WorkspaceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return drafted.to_dict()
 
 
@@ -286,6 +322,8 @@ async def illustrate(request: Request, body: IllustrateRequest) -> dict[str, Any
         )
     except sermon_mod.SermonError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sermon_mod.ExecutionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/dream")
@@ -294,8 +332,8 @@ async def run_dream(request: Request, body: DreamRequest, user_id: str = "defaul
     await _admin(request)
     try:
         report = await dream_mod.dream(user_id, compact_at=body.compact_at, summary_len=body.summary_len)
-    except dream_mod.RagUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except dream_mod.RagError as exc:
+        raise _rag_http_error(exc) from exc
     return {
         "dream": report,
         "proposals": dream_mod.proposals_from_dream(report),
@@ -308,26 +346,36 @@ async def validate_lesson(request: Request, body: ValidateLessonRequest, user_id
     await _admin(request)
     try:
         return await dream_mod.validate(body.lesson_id, body.passed, body.evidence, user_id=user_id)
-    except dream_mod.RagUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except dream_mod.RagError as exc:
+        raise _rag_http_error(exc) from exc
 
 
 @router.get("/backlog")
 async def get_backlog(request: Request) -> dict[str, Any]:
     """The proposals from the last facilitator cycle."""
     await _admin(request)
-    return facilitator.read_backlog()
+    try:
+        return facilitator.read_backlog()
+    except runner.TrainerStorageError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/cycle")
 async def run_cycle(request: Request, body: CycleRequest) -> dict[str, Any]:
     """Dream, evaluate, propose, remember (and optionally repair) in one pass."""
     user = await _admin(request)
-    return await facilitator.cycle(
-        user=user,
-        buckets=body.buckets,
-        limit=body.limit,
-        budget_s=body.budget_s,
-        apply_lessons=body.apply_lessons,
-        repair=body.repair,
-    )
+    try:
+        return await facilitator.cycle(
+            user=user,
+            buckets=body.buckets,
+            limit=body.limit,
+            budget_s=body.budget_s,
+            apply_lessons=body.apply_lessons,
+            repair=body.repair.model_dump() if body.repair else None,
+        )
+    except facilitator.CycleBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except runner.TrainerStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

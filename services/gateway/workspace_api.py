@@ -25,7 +25,48 @@ DEFAULT_TIMEOUT_S = 120.0
 
 
 class WorkspaceError(RuntimeError):
-    """A workspace call could not be completed."""
+    """A workspace call could not be completed.
+
+    ``status`` is the Workspace Runtime's HTTP status when it answered (404 for
+    a missing workspace, 403 for a capability refusal), ``None`` otherwise.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class WorkspaceConflict(WorkspaceError):
+    """A write was refused because the file is not what the caller expected.
+
+    Either it changed since the caller read it (``expected_sha256`` mismatch), or
+    the caller asked to create a new file (``expected_sha256="new"``) and one is
+    already there. Never retried blindly: the caller decides what to keep.
+    """
+
+
+class WorkspaceFileNotFound(WorkspaceError):
+    """The workspace exists and answered, and the file is not in it."""
+
+
+#: Pass as ``expected_sha256`` to create a file and refuse when it already exists.
+CREATE_ONLY = "new"
+
+
+def _write_error(path: str, status: int, body: dict[str, Any]) -> WorkspaceError:
+    detail = body.get("detail") or body.get("message") or status
+    if status == 409:
+        return WorkspaceConflict(f"Could not write {path}: {detail}", status)
+    return WorkspaceError(f"Could not write {path}: {detail}", status)
+
+
+def _read_error(path: str, status: int, body: dict[str, Any]) -> WorkspaceError:
+    detail = body.get("detail") or body.get("message") or status
+    # The runtime answers 404 both for a missing workspace and a missing file;
+    # only its "Path not found" means the file.
+    if status == 404 and str(detail).startswith("Path not found"):
+        return WorkspaceFileNotFound(f"Could not read {path}: {detail}", status)
+    return WorkspaceError(f"Could not read {path}: {detail}", status)
 
 
 def sha256(content: str) -> str:
@@ -38,15 +79,24 @@ async def request(
     timeout: float = DEFAULT_TIMEOUT_S,
     *,
     method: str = "POST",
+    base_url: str | None = None,
+    internal: bool = True,
 ) -> tuple[int, dict[str, Any]]:
-    """Call the Workspace Runtime with the internal secret."""
+    """Call an internal service (the Workspace Runtime unless ``base_url`` says otherwise).
+
+    The one HTTP seam for the gateway's workspace features (the studio's shell
+    runs, media generation and file I/O all come through here), so there is one
+    place that knows the headers and the error-body shape. ``internal=False``
+    leaves the internal secret off, for a host outside the stack (the image
+    model's proxy must never see it).
+    """
     from services.gateway.main import shared_http_client
 
     async with shared_http_client() as client, client.request(
         method,
-        f"{WORKSPACE_RUNTIME_SVC}{endpoint}",
+        f"{base_url or WORKSPACE_RUNTIME_SVC}{endpoint}",
         json=payload if method != "GET" else None,
-        headers={"X-Internal-Secret": INTERNAL_SECRET},
+        headers={"X-Internal-Secret": INTERNAL_SECRET} if internal else {},
         timeout=aiohttp.ClientTimeout(total=timeout),
     ) as resp:
         try:
@@ -70,8 +120,31 @@ async def read_file(
         },
     )
     if status != 200 or body.get("status") != "SUCCESS":
-        detail = body.get("detail") or body.get("message") or status
-        raise WorkspaceError(f"Could not read {path}: {detail}")
+        raise _read_error(path, status, body)
+    return str(body.get("content") or "")
+
+
+async def read_text_exact(
+    workspace_id: str, path: str, *, user: str, max_bytes: int = MAX_FILE_BYTES
+) -> str:
+    """One file's whole text, or an error: never a silently truncated prefix.
+
+    For read-modify-write callers (a manifest, a sermon), where writing back a
+    truncated read would destroy the rest of the file.
+    """
+    status, body = await request(
+        "/files/read",
+        {
+            "workspace_id": workspace_id,
+            "relative_path": path,
+            "max_bytes": max_bytes,
+            "user_context": {"user": user},
+        },
+    )
+    if status != 200 or body.get("status") != "SUCCESS":
+        raise _read_error(path, status, body)
+    if body.get("truncated"):
+        raise WorkspaceError(f"{path} is larger than {max_bytes:,} bytes; refusing to read only part of it")
     return str(body.get("content") or "")
 
 
@@ -97,8 +170,7 @@ async def write_file(
         },
     )
     if status not in (200, 201) or body.get("status") not in (None, "SUCCESS"):
-        detail = body.get("detail") or body.get("message") or status
-        raise WorkspaceError(f"Could not write {path}: {detail}")
+        raise _write_error(path, status, body)
     return body
 
 
@@ -115,6 +187,10 @@ async def read_bytes(
     ``read_file`` decodes as text, which is right for source and fatal for binary
     STL: the bytes have to arrive exactly as stored. ``/files/raw`` streams the
     file, so this is the only honest way to open a model.
+
+    ``max_bytes`` is enforced *before* buffering: a declared length over the cap
+    is refused without reading, and the stream is abandoned the moment it passes
+    the cap, so an oversized file never sits in the gateway's memory.
     """
     from services.gateway.main import shared_http_client
 
@@ -129,12 +205,25 @@ async def read_bytes(
         timeout=aiohttp.ClientTimeout(total=timeout),
     ) as resp:
         if resp.status != 200:
-            detail = (await resp.text())[:300]
-            raise WorkspaceError(f"Could not read {path}: {resp.status} {detail}")
-        data = await resp.read()
-    if len(data) > max_bytes:
-        raise WorkspaceError(f"{path} is {len(data):,} bytes; the limit is {max_bytes:,}")
-    return data
+            text = (await resp.text())[:300]
+            try:
+                import json as _json
+
+                parsed = _json.loads(text)
+            except ValueError:
+                parsed = {}
+            body = parsed if isinstance(parsed, dict) else {}
+            body.setdefault("detail", f"{resp.status} {text}")
+            raise _read_error(path, resp.status, body)
+        declared = resp.content_length
+        if declared is not None and declared > max_bytes:
+            raise WorkspaceError(f"{path} is {declared:,} bytes; the limit is {max_bytes:,}")
+        buffer = bytearray()
+        async for chunk in resp.content.iter_chunked(1 << 16):
+            buffer += chunk
+            if len(buffer) > max_bytes:
+                raise WorkspaceError(f"{path} is over the {max_bytes:,}-byte limit")
+    return bytes(buffer)
 
 
 async def write_bytes(
@@ -161,8 +250,7 @@ async def write_bytes(
         },
     )
     if status not in (200, 201) or body.get("status") not in (None, "SUCCESS"):
-        detail = body.get("detail") or body.get("message") or status
-        raise WorkspaceError(f"Could not write {path}: {detail}")
+        raise _write_error(path, status, body)
     return body
 
 
@@ -173,7 +261,15 @@ async def run_pytest(
     user: str = "default",
     timeout_seconds: int = 300,
 ) -> dict[str, Any]:
-    """The workspace's own test gate."""
+    """The workspace's own test gate.
+
+    Returns ``{"passed", "outcome", "returncode", "stdout", "stderr"}`` where
+    ``outcome`` is ``"passed"``, ``"failed"`` (pytest ran and a test failed: exit
+    code 1) or ``"error"`` (pytest could not judge the code: interrupted, an
+    internal or usage error, no tests collected; exit codes 2-5). A call the
+    runtime itself refused (non-200, a timeout) raises :class:`WorkspaceError`:
+    that is a broken gate, not a failing test, and must not be read as one.
+    """
     status, body = await request(
         "/tests/pytest",
         {
@@ -185,11 +281,19 @@ async def run_pytest(
         timeout=float(timeout_seconds) + 30.0,
     )
     if status != 200:
-        detail = body.get("detail") or status
-        return {"passed": False, "returncode": -1, "stdout": "", "stderr": str(detail)}
+        detail = body.get("detail") or body.get("message") or status
+        raise WorkspaceError(f"The test gate could not run in {workspace_id}: {detail}")
+    returncode = body.get("returncode")
+    if returncode == 0:
+        outcome = "passed"
+    elif returncode == 1:
+        outcome = "failed"
+    else:
+        outcome = "error"
     return {
-        "passed": bool(body.get("passed")),
-        "returncode": body.get("returncode"),
+        "passed": outcome == "passed",
+        "outcome": outcome,
+        "returncode": returncode,
         "stdout": str(body.get("stdout") or ""),
         "stderr": str(body.get("stderr") or ""),
     }
@@ -219,7 +323,7 @@ async def list_files(
     )
     if status != 200 or body.get("status") != "SUCCESS":
         detail = body.get("detail") or body.get("message") or status
-        raise WorkspaceError(f"Could not list {path}: {detail}")
+        raise WorkspaceError(f"Could not list {path}: {detail}", status)
     return [entry for entry in (body.get("entries") or []) if isinstance(entry, dict)]
 
 
@@ -247,7 +351,7 @@ async def expose_port(
     )
     if status != 200 or body.get("status") not in (None, "SUCCESS", "active"):
         detail = body.get("detail") or body.get("message") or status
-        raise WorkspaceError(f"Could not expose port {container_port}: {detail}")
+        raise WorkspaceError(f"Could not expose port {container_port}: {detail}", status)
     return body
 
 
@@ -263,14 +367,24 @@ async def unexpose_port(workspace_id: str, host_port: int, *, user: str = "defau
     )
     if status != 200:
         detail = body.get("detail") or body.get("message") or status
-        raise WorkspaceError(f"Could not unexpose port {host_port}: {detail}")
+        raise WorkspaceError(f"Could not unexpose port {host_port}: {detail}", status)
     return bool(body.get("removed", True))
 
 
-async def list_ports(workspace_id: str, *, user: str = "default") -> list[dict[str, Any]]:
-    """The ports currently published for this workspace."""
+async def list_ports(workspace_id: str) -> list[dict[str, Any]]:
+    """The ports currently published for this workspace.
+
+    A failed lookup is an error, not ``[]``: "no ports" would let a caller report
+    every forward closed while they are still open.
+    """
     status, body = await request(f"/ports/list/{workspace_id}", {}, method="GET")
     if status != 200:
-        return []
-    ports = body.get("ports") if isinstance(body, dict) else body
-    return [port for port in (ports or []) if isinstance(port, dict)]
+        detail = body.get("detail") or body.get("message") or status
+        raise WorkspaceError(f"Could not list the published ports of {workspace_id}: {detail}", status)
+    # The runtime answers a bare JSON list, which ``request`` carries as
+    # ``{"detail": [...]}``. Reading only ``ports`` here used to find nothing,
+    # so a stopped preview "closed" no port and left every forward open.
+    ports = body.get("ports", body.get("detail"))
+    if not isinstance(ports, list):
+        raise WorkspaceError(f"The port list for {workspace_id} was not a list: {body!r:.200}")
+    return [port for port in ports if isinstance(port, dict)]

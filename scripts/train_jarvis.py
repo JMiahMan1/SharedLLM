@@ -6,13 +6,16 @@ can run on a timer (``trainer_cycle_interval_minutes``). This script drives the
 same endpoints from outside, which is what a cron job, a CI job or a person at a
 terminal wants: one bounded pass, and the evidence printed.
 
-Every call authenticates with ``INTERNAL_SECRET`` (the gateway treats an
-internal caller as an admin), so nothing here ever stores or echoes a secret.
+Every call authenticates with ``INTERNAL_SECRET`` plus ``X-User-Id``: the
+gateway honours an internal caller only when it also names the user it acts as
+(``_acting_identity``), so ``TRAINER_ADMIN_USER`` must name an admin account
+(``--admin-user`` overrides it). Nothing here ever stores or echoes a secret.
 
 Usage::
 
     export GATEWAY_URL=https://jarvis.example.com     # or --gateway
     export INTERNAL_SECRET=<from .env on the server>   # or DEPLOY_HOST=user@host
+    export TRAINER_ADMIN_USER=<an admin username>      # or --admin-user
 
     python scripts/train_jarvis.py catalog
     python scripts/train_jarvis.py curriculum --buckets writing,repair --limit 10
@@ -36,6 +39,8 @@ import httpx
 DEFAULT_GATEWAY_URL = os.getenv("GATEWAY_URL", "").rstrip("/")
 DEPLOY_HOST = os.getenv("DEPLOY_HOST", "")
 DEPLOY_DIR = os.getenv("DEPLOY_DIR", "SharedLLM")
+#: The admin account every call acts as, read once at startup.
+DEFAULT_ADMIN_USER = os.getenv("TRAINER_ADMIN_USER", "").strip()
 
 
 def internal_secret() -> str:
@@ -58,11 +63,22 @@ def internal_secret() -> str:
     return out.split("=", 1)[1].strip().strip('"')
 
 
-def call(gateway: str, secret: str, method: str, path: str, body: dict | None = None,
-         timeout: float = 900.0) -> dict:
+def admin_user(explicit: str) -> str:
+    """The admin the calls act as: ``--admin-user``, else ``TRAINER_ADMIN_USER``."""
+    user = (explicit or DEFAULT_ADMIN_USER).strip()
+    if not user:
+        sys.exit(
+            "Set TRAINER_ADMIN_USER (or pass --admin-user) to an admin username: the gateway "
+            "only accepts the internal secret together with the user it acts as."
+        )
+    return user
+
+
+def _call(gateway: str, secret: str, method: str, path: str, body: dict | None = None,
+         timeout: float = 900.0, *, user: str) -> dict:
     """One trainer call. A non-2xx answer prints the server's own words."""
     url = f"{gateway}{path}"
-    headers = {"X-Internal-Secret": secret}
+    headers = {"X-Internal-Secret": secret, "X-User-Id": user}
     with httpx.Client(timeout=timeout) as client:
         resp = client.request(method, url, json=body, headers=headers)
     try:
@@ -86,6 +102,7 @@ def _buckets(raw: str) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Drive the Jarvis Trainer.")
     parser.add_argument("--gateway", default=DEFAULT_GATEWAY_URL or "http://localhost:11435")
+    parser.add_argument("--admin-user", default="", help="admin username (default: TRAINER_ADMIN_USER)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("catalog", help="print the derived feature counts")
@@ -98,6 +115,7 @@ def main() -> None:
     evaluate.add_argument("--buckets", default="")
     evaluate.add_argument("--limit", type=int, default=12)
     evaluate.add_argument("--budget", type=float, default=600.0)
+    evaluate.add_argument("--model", default="", help="evaluate this model (default: the trainer's choice)")
 
     cycle = sub.add_parser("cycle", help="dream, evaluate, propose in one pass")
     cycle.add_argument("--buckets", default="")
@@ -127,16 +145,20 @@ def main() -> None:
 
     args = parser.parse_args()
     gateway = args.gateway.rstrip("/")
+    user = admin_user(args.admin_user)
     secret = internal_secret()
 
+    def call(method: str, path: str, body: dict | None = None, timeout: float = 900.0) -> dict:
+        return _call(gateway, secret, method, path, body, timeout, user=user)
+
     if args.command == "catalog":
-        data = call(gateway, secret, "GET", "/api/trainer/catalog")
+        data = call("GET", "/api/trainer/catalog")
         _print({"counts": data.get("counts"), "fingerprint": data.get("fingerprint")})
         return
 
     if args.command == "curriculum":
         query = f"?buckets={args.buckets}&limit={args.limit}" if args.buckets else f"?limit={args.limit}"
-        data = call(gateway, secret, "GET", f"/api/trainer/curriculum{query}")
+        data = call("GET", f"/api/trainer/curriculum{query}")
         _print(
             {
                 "summary": data.get("summary"),
@@ -150,9 +172,11 @@ def main() -> None:
 
     if args.command == "eval":
         body: dict = {"limit": args.limit, "budget_s": args.budget}
+        if args.model:
+            body["model"] = args.model
         if _buckets(args.buckets):
             body["buckets"] = _buckets(args.buckets)
-        report = call(gateway, secret, "POST", "/api/trainer/eval", body)
+        report = call("POST", "/api/trainer/eval", body)
         _print(
             {
                 "id": report.get("id"),
@@ -168,7 +192,7 @@ def main() -> None:
         body = {"limit": args.limit, "budget_s": args.budget, "apply_lessons": not args.no_lessons}
         if _buckets(args.buckets):
             body["buckets"] = _buckets(args.buckets)
-        summary = call(gateway, secret, "POST", "/api/trainer/cycle", body)
+        summary = call("POST", "/api/trainer/cycle", body)
         _print(
             {
                 "eval": summary.get("eval"),
@@ -192,7 +216,7 @@ def main() -> None:
         }
         if args.error:
             body["error_text"] = args.error
-        result = call(gateway, secret, "POST", "/api/trainer/repair", body, timeout=1200.0)
+        result = call("POST", "/api/trainer/repair", body, timeout=1200.0)
         _print(
             {
                 key: result.get(key)
@@ -211,7 +235,7 @@ def main() -> None:
             "points": args.points,
             "series": args.series,
         }
-        drafted = call(gateway, secret, "POST", "/api/trainer/sermon", body)
+        drafted = call("POST", "/api/trainer/sermon", body)
         _print(
             {
                 "title": drafted.get("title"),
@@ -224,8 +248,6 @@ def main() -> None:
 
     if args.command == "dataset":
         exported = call(
-            gateway,
-            secret,
             "POST",
             "/api/trainer/reports/dataset",
             {"report_id": args.report, "accepted_only": not args.all},
