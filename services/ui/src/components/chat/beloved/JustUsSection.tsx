@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { BellRing, Check, ChevronLeft, ChevronRight, Heart, Loader2, Trash2, X } from 'lucide-react';
+import { BellRing, Check, ChevronLeft, ChevronRight, Heart, Loader2, Pencil, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { dayLabel, dayNumber, formatDay, longDayLabel, parseDay, type Ymd } from '../../../lib/beloved/dates';
 import {
@@ -10,13 +10,13 @@ import {
   countIn,
   daysSince,
   eveningIdea,
-  markedToday,
+  marksOn,
   monthGrid,
   openPlans,
   sinceLabel,
   togetherFromPlan,
 } from '../../../lib/beloved/justus';
-import type { Opened, PlanRecord } from '../../../lib/beloved/records';
+import type { Opened, PlanRecord, TogetherRecord } from '../../../lib/beloved/records';
 import type { ReminderState } from '../../../plugins/belovedReminders';
 import { errorText } from '../privateChatModel';
 import { wantsNightSky } from '../../../lib/beloved/sky';
@@ -56,6 +56,8 @@ export function JustUsSection({
   const [planTime, setPlanTime] = useState('');
   const [planIdea, setPlanIdea] = useState<string | undefined>();
   const [planNote, setPlanNote] = useState('');
+  /** The mark whose note is being edited, and the text so far. */
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const swipe = useRef<number | null>(null);
   const todayKey = formatDay(today);
   const since = daysSince(data.view, today);
@@ -64,7 +66,8 @@ export function JustUsSection({
   const spouseName = data.spouse?.display_name ?? 'your spouse';
   const selectedDay = parseDay(selected);
   const selectedPast = selectedDay ? dayNumber(selectedDay) <= dayNumber(today) : false;
-  const onSelected = data.view.together.filter((t) => t.record.day === selected);
+  const onSelected = marksOn(data.view, selected);
+  const marksToday = marksOn(data.view, todayKey).length;
   const plansOnSelected = plans.filter((p) => p.record.day === selected);
 
   const run = async (job: () => Promise<void>, failure: string) => {
@@ -109,6 +112,16 @@ export function JustUsSection({
       toast.success('Marked');
     }, 'Could not save');
 
+  const saveNote = (t: Opened<TogetherRecord>, text: string) =>
+    run(async () => {
+      const trimmed = text.trim().slice(0, 1000);
+      const record: TogetherRecord = { b: 'together', day: t.record.day };
+      if (trimmed) record.note = trimmed;
+      await data.save('together', record, { id: t.id });
+      setEditing(null);
+      toast.success('Saved');
+    }, 'Could not save');
+
   const cancel = (p: Opened<PlanRecord>) => run(() => data.remove('plan', p.id), 'Could not cancel it');
 
   const step = (delta: number) => setMonth((current) => addMonths(current, delta));
@@ -130,16 +143,22 @@ export function JustUsSection({
         </span>
       </Card>
 
+      {/* A day can be marked more than once, so this stays open after the first. */}
       <button
         type="button"
-        disabled={busy || markedToday(data.view, today)}
+        disabled={busy}
         onClick={() => void mark(todayKey)}
         data-testid="justus-today"
         className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-rose-600 px-4 text-base font-semibold text-white disabled:opacity-60"
       >
         <Heart size={20} className="fill-white" aria-hidden />
-        {markedToday(data.view, today) ? 'Today is marked' : 'We were together'}
+        {marksToday ? 'Mark today again' : 'We were together'}
       </button>
+      {marksToday > 0 && (
+        <p className="-mt-2 text-center text-xs text-slate-300" data-testid="justus-today-count">
+          Today is marked{marksToday > 1 ? ` ${marksToday} times` : ''}
+        </p>
+      )}
 
       <section aria-label="Our calendar" className="rounded-2xl border border-indigo-300/10 bg-white/[0.03] p-2" data-testid="justus-calendar">
         <div className="flex items-center gap-1">
@@ -179,17 +198,24 @@ export function JustUsSection({
                   type="button"
                   onClick={() => setSelected(cell.key)}
                   aria-pressed={selected === cell.key}
-                  aria-label={`${dayLabel(cell.day)}${cell.marked ? ', marked' : ''}${cell.planned ? ', planned' : ''}`}
+                  aria-label={`${dayLabel(cell.day)}${cell.marks > 1 ? `, marked ${cell.marks} times` : cell.marked ? ', marked' : ''}${cell.planned ? ', planned' : ''}`}
                   data-testid="justus-day"
                   data-day={cell.key}
                   data-marked={cell.marked || undefined}
+                  data-marks={cell.marks || undefined}
                   data-planned={cell.planned || undefined}
                   className={`relative flex min-h-11 min-w-0 flex-col items-center justify-center rounded-lg text-sm tabular-nums ${
                     selected === cell.key ? 'bg-indigo-500/30 text-white' : cell.today ? 'text-indigo-100 ring-1 ring-indigo-300/50' : 'text-slate-200 hover:bg-white/5'
                   } ${cell.planned ? 'outline outline-1 -outline-offset-2 outline-rose-300/70' : ''}`}
                 >
                   <span>{cell.day.d}</span>
-                  {cell.marked && <Heart size={9} className="fill-rose-400 text-rose-400" aria-hidden />}
+                  {cell.marks === 1 && <Heart size={9} className="fill-rose-400 text-rose-400" aria-hidden />}
+                  {cell.marks > 1 && (
+                    <span className="flex items-center gap-px text-[9px] font-semibold leading-none text-rose-300" data-testid="justus-day-marks" aria-hidden>
+                      <Heart size={9} className="fill-rose-400 text-rose-400" />
+                      {cell.marks}
+                    </span>
+                  )}
                 </button>
               ) : (
                 <span key={`pad${i}`} aria-hidden />
@@ -205,7 +231,10 @@ export function JustUsSection({
 
       {selectedDay && (
         <Card testId="justus-selected">
-          <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200/80">{longDayLabel(selectedDay)}</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200/80">
+            {longDayLabel(selectedDay)}
+            {onSelected.length > 1 && <span className="ml-1 normal-case text-rose-200" data-testid="justus-selected-count">· marked {onSelected.length} times</span>}
+          </span>
           {dayNumber(selectedDay) >= dayNumber(today) && <BelovedWeather day={selectedDay} night />}
           <ul className="mt-1 space-y-1.5">
             {onSelected.map((t) => (
@@ -213,14 +242,35 @@ export function JustUsSection({
                 <Heart size={14} className="mt-1 shrink-0 fill-rose-400 text-rose-400" aria-hidden />
                 <span className="min-w-0 flex-1">
                   <span className="block text-xs text-slate-400">{t.own ? 'You marked it' : `${t.byName} marked it`}</span>
-                  {t.record.note && <span className="block whitespace-pre-wrap break-words">{t.record.note}</span>}
+                  {editing?.id === t.id ? (
+                    <span className="mt-1 flex min-w-0 flex-wrap gap-2">
+                      <input value={editing.text} onChange={(e) => setEditing({ id: t.id, text: e.target.value })} maxLength={1000}
+                        aria-label="Edit the note" data-testid="justus-entry-note" autoFocus
+                        className="glass-input min-h-11 min-w-0 flex-1 basis-40 text-base sm:text-sm" />
+                      <button type="button" disabled={busy} onClick={() => void saveNote(t, editing.text)} data-testid="justus-entry-save" className={quiet}>
+                        <Check size={14} aria-hidden /> Save
+                      </button>
+                      <button type="button" onClick={() => setEditing(null)} data-testid="justus-entry-cancel" className={quiet}>
+                        <X size={14} aria-hidden /> Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    t.record.note && <span className="block whitespace-pre-wrap break-words">{t.record.note}</span>
+                  )}
                 </span>
-                {t.own && (
-                  <button type="button" aria-label="Remove this" disabled={busy} data-testid="justus-entry-delete"
-                    onClick={() => void run(() => data.remove('together', t.id), 'Could not remove it')}
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-white/10">
-                    <Trash2 size={15} />
-                  </button>
+                {t.own && editing?.id !== t.id && (
+                  <>
+                    <button type="button" aria-label="Edit the note" disabled={busy} data-testid="justus-entry-edit"
+                      onClick={() => setEditing({ id: t.id, text: t.record.note ?? '' })}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-white/10">
+                      <Pencil size={15} />
+                    </button>
+                    <button type="button" aria-label="Remove this" disabled={busy} data-testid="justus-entry-delete"
+                      onClick={() => void run(() => data.remove('together', t.id), 'Could not remove it')}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-white/10">
+                      <Trash2 size={15} />
+                    </button>
+                  </>
                 )}
               </li>
             ))}
@@ -234,7 +284,7 @@ export function JustUsSection({
               <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} placeholder="A private note (optional)"
                 aria-label="A private note" data-testid="justus-note" className="glass-input min-h-11 w-full text-base sm:text-sm" />
               <button type="button" disabled={busy} onClick={() => void mark(selected, note)} data-testid="justus-mark" className={`${quiet} w-full`}>
-                <Check size={15} aria-hidden /> Mark this day
+                <Check size={15} aria-hidden /> {onSelected.length ? 'Mark this day again' : 'Mark this day'}
               </button>
             </div>
           ) : (

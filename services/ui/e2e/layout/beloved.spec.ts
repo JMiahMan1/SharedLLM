@@ -356,17 +356,38 @@ test.describe('Beloved on every form factor', () => {
     await expect(calendar.locator(`[data-day="${today.key}"]`)).toBeVisible();
     await check(page, info, run, 'just us', beloved);
 
-    // One tap for today.
+    // One tap for today, and a day can be marked more than once.
     await tab.getByTestId('justus-today').click();
     await expect(tab.getByTestId('justus-since-days')).toHaveText('0');
-    await expect(tab.getByTestId('justus-today')).toHaveText('Today is marked');
-    await expect(tab.getByTestId('justus-today')).toBeDisabled();
+    await expect(tab.getByTestId('justus-today-count')).toHaveText('Today is marked');
+    await expect(tab.getByTestId('justus-today')).toHaveText('Mark today again');
+    await expect(tab.getByTestId('justus-today')).toBeEnabled();
     expect(JSON.parse(server.sent.find((s) => s.path.endsWith('/together'))!.body).notify).toBe(false);
-    // Remove your own, then mark it again with a private note.
-    await calendar.locator(`[data-day="${today.key}"]`).click();
+    await tab.getByTestId('justus-today').click();
+    await expect(tab.getByTestId('justus-today-count')).toHaveText('Today is marked 2 times');
+    const todayCell = calendar.locator(`[data-day="${today.key}"]`);
+    await expect(todayCell).toHaveAttribute('data-marks', '2');
+    await expect(todayCell.getByTestId('justus-day-marks')).toHaveText('2');
+    await expect(todayCell).toHaveAttribute('aria-label', /marked 2 times/);
+    // Opening the day lists each mark, and each is edited and removed on its own.
+    await todayCell.click();
     const selected = tab.getByTestId('justus-selected');
-    await expect(selected).toContainText('You marked it');
-    await selected.getByTestId('justus-entry-delete').click();
+    await expect(selected.getByTestId('justus-selected-count')).toContainText('marked 2 times');
+    const entries = selected.getByTestId('justus-entry');
+    await expect(entries).toHaveCount(2);
+    await check(page, info, run, 'just us two marks', beloved);
+    await entries.nth(1).getByTestId('justus-entry-edit').click();
+    await entries.nth(1).getByTestId('justus-entry-note').fill('An invented afternoon note');
+    await entries.nth(1).getByTestId('justus-entry-save').click();
+    await expect(entries.nth(1)).toContainText('An invented afternoon note');
+    await expect(entries.nth(0)).not.toContainText('An invented afternoon note');
+    expect(server.records.filter((r) => r.kind === 'together' && r.own)).toHaveLength(2);
+    await entries.nth(0).getByTestId('justus-entry-delete').click();
+    await expect(entries).toHaveCount(1);
+    await expect(entries.nth(0)).toContainText('An invented afternoon note');
+    await expect(tab.getByTestId('justus-since-days')).toHaveText('0');
+    // Remove the last one too, then mark it again with a private note.
+    await entries.nth(0).getByTestId('justus-entry-delete').click();
     await expect(tab.getByTestId('justus-since-days')).toHaveText('3');
     await selected.getByTestId('justus-note').fill('Our quiet evening by the fire');
     await selected.getByTestId('justus-mark').click();
@@ -417,7 +438,7 @@ test.describe('Beloved on every form factor', () => {
     expect(server.sent.length).toBeGreaterThanOrEqual(6);
     const bodies = JSON.stringify(server.sent.map((s) => s.body));
     for (const secret of ['Our quiet evening', 'by the fire', 'Book the sitter', 'sitter', '19:30', 'candles', 'Candlelit', 'hotel', later.key, today.key,
-      earlier.key, 'together', 'night', 'intima', 'Just us']) {
+      earlier.key, 'together', 'night', 'intima', 'Just us', 'invented afternoon']) {
       expect(bodies, secret).not.toContain(secret);
     }
     for (const s of server.sent.filter((x) => x.method !== 'DELETE')) expect(JSON.parse(s.body).sealed).toContain('```jarvis-envelope');

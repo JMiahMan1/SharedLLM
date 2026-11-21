@@ -122,10 +122,13 @@ Beloved's home page, on the chat bar's heart, in a notice or in a reminder.
 
 - **Mark a day**: one tap on "We were together" marks today, or tap a day on
   the calendar to mark it, with an optional private note. Either spouse can
-  mark; both see it; each can remove only their own (`together` records are
-  author-only on the server).
+  mark; both see it; each can edit the note of, or remove, only their own
+  (`together` records are author-only on the server). A day can hold several
+  marks (each of them, or more than once): every mark is its own record, the
+  day shows a heart with the number of marks, and opening the day lists each
+  one to edit or remove on its own.
 - **Last time**: how many days since the last marked day, and how many days
-  were marked this month and this year (a day both of them marked counts
+  were marked this month and this year (a day marked more than once counts
   once). A month calendar (arrows, or swipe on a phone) shows a small heart on
   marked days and an outline on planned ones. No charts.
 - **Plan an evening**: a day, an optional time, an optional idea (a candlelit

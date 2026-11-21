@@ -83,6 +83,15 @@ export function countIn(view: Pick<BelovedView, 'together'>, today: Ymd, y: numb
   }).length;
 }
 
+/**
+ * Every mark on one day (`YYYY-MM-DD`), oldest first. A day can hold several:
+ * each of them may mark it, and more than once (an afternoon and an evening),
+ * and each mark stays its own record, kept, edited and removed on its own.
+ */
+export function marksOn(view: Pick<BelovedView, 'together'>, key: string): Opened<TogetherRecord>[] {
+  return view.together.filter((t) => t.record.day === key).sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
+}
+
 /** Whether today is already marked (by either of them). */
 export function markedToday(view: Pick<BelovedView, 'together'>, today: Ymd): boolean {
   const key = formatDay(today);
@@ -109,6 +118,8 @@ export interface MonthCell {
   day: Ymd;
   key: string;
   marked: boolean;
+  /** How many marks the day holds (0 when none). */
+  marks: number;
   planned: boolean;
   today: boolean;
 }
@@ -125,7 +136,8 @@ export function addMonths({ y, m }: { y: number; m: number }, delta: number): { 
  * open plan.
  */
 export function monthGrid(view: Pick<BelovedView, 'together' | 'plans'>, y: number, m: number, today: Ymd): Array<Array<MonthCell | null>> {
-  const marked = new Set(view.together.map((t) => t.record.day));
+  const marks = new Map<string, number>();
+  for (const t of view.together) marks.set(t.record.day, (marks.get(t.record.day) ?? 0) + 1);
   const planned = new Set(openPlans(view).map((p) => p.record.day));
   const todayKey = formatDay(today);
   const lead = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
@@ -133,7 +145,8 @@ export function monthGrid(view: Pick<BelovedView, 'together' | 'plans'>, y: numb
   for (let d = 1; d <= daysInMonth(y, m); d += 1) {
     const day = { y, m, d };
     const key = formatDay(day);
-    cells.push({ day, key, marked: marked.has(key), planned: planned.has(key), today: key === todayKey });
+    const count = marks.get(key) ?? 0;
+    cells.push({ day, key, marked: count > 0, marks: count, planned: planned.has(key), today: key === todayKey });
   }
   while (cells.length % 7) cells.push(null);
   const weeks: Array<Array<MonthCell | null>> = [];
