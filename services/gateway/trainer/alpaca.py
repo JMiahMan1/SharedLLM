@@ -193,19 +193,56 @@ def summarise_slots(payload: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def choose_model(settings: dict[str, Any] | None, models: list[str]) -> str:
-    """Which model the trainer would use: its own, then coding, then assistant."""
+#: Names that mark a model as a picture generator, not a text model. Alpaca
+#: reports ``capabilities: ["completion"]`` for its image models too (they are
+#: served by the same llama-server router), so the name is the honest signal.
+_IMAGE_HINTS = ("image", "diffusion", "flux", "sdxl", "sd3", "stable-diffusion")
+
+
+def is_image_model(name: str | None) -> bool:
+    low = (name or "").lower()
+    return any(hint in low for hint in _IMAGE_HINTS)
+
+
+def can_train(name: str | None) -> bool:
+    """A text model the trainer can actually ask questions."""
+    return bool(name) and not is_image_model(name)
+
+
+def _matches(name: str, wanted: str) -> bool:
+    return name == wanted or name.startswith(f"{wanted}:") or name.replace(":", "--") == wanted
+
+
+def choose_model(settings: dict[str, Any] | None, models: list[dict[str, Any]]) -> str:
+    """The model the trainer would use, from what the host really has.
+
+    Order: the explicit preference (``trainer_model``, then ``coding_model``, then
+    ``assistant_model``), then a *loaded* text model (already in VRAM: no load
+    stall, no eviction of what the household is using), then any text model, and
+    only then anything at all. Image models are never picked while a text model
+    exists -- Alpaca serves both through one router and labels both "completion".
+    """
     settings = settings or {}
+    rows = [item for item in models if isinstance(item, dict) and item.get("name")]
+    names = [str(item["name"]) for item in rows]
+
     for key in ("trainer_model", "coding_model", "assistant_model"):
         wanted = str(settings.get(key) or "").strip()
         if not wanted:
             continue
-        if not models:
-            return wanted
-        for candidate in models:
-            if candidate == wanted or candidate.startswith(f"{wanted}:"):
-                return candidate
-    return models[0] if models else ""
+        for name in names:
+            if _matches(name, wanted):
+                return name
+
+    for item in rows:
+        if can_train(item.get("name")) and item.get("router_status") == "loaded":
+            return str(item["name"])
+    for item in rows:
+        if can_train(item.get("name")):
+            return str(item["name"])
+    # Only picture models installed: there is nothing to train on, and picking one
+    # would produce garbage. Say so by returning nothing.
+    return ""
 
 
 def summarise_models(payload: dict[str, Any] | None, settings: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -214,27 +251,42 @@ def summarise_models(payload: dict[str, Any] | None, settings: dict[str, Any] | 
     models = [item for item in (payload.get("models") or []) if isinstance(item, dict)]
     rows = []
     for item in models:
+        name = item.get("name")
         rows.append(
             {
-                "name": item.get("name"),
+                "name": name,
                 "size_gb": round(float(item.get("size") or 0) / 1e9, 2),
                 "context_length": item.get("context_length"),
                 "capabilities": item.get("capabilities") or [],
                 "complete": bool(item.get("complete")),
                 "router_status": item.get("router_status"),
+                "trainable": can_train(name),
             }
         )
-    rows.sort(key=lambda row: (-(row["context_length"] or 0), row["name"] or ""))
+    # Loaded first, then text models, then the largest context, then by name:
+    # the list reads as "what you could use right now".
+    rows.sort(
+        key=lambda row: (
+            row.get("router_status") != "loaded",
+            not row["trainable"],
+            -(row["context_length"] or 0),
+            row["name"] or "",
+        )
+    )
     names = [str(row["name"]) for row in rows if row["name"]]
-    chosen = choose_model(settings, names)
+    chosen = choose_model(settings, rows)
     preferred = str((settings or {}).get("trainer_model") or "").strip()
 
     return {
         "total": len(rows),
         "models": rows,
         "chosen": chosen,
+        "chosen_trainable": can_train(chosen),
+        "chosen_loaded": any(
+            row["name"] == chosen and row.get("router_status") == "loaded" for row in rows
+        ),
         "trainer_model_setting": preferred,
-        "trainer_model_missing": bool(preferred) and preferred not in names,
+        "trainer_model_missing": bool(preferred) and not any(_matches(name, preferred) for name in names),
         "largest_context": max((row["context_length"] or 0) for row in rows) if rows else 0,
     }
 

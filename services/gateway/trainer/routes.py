@@ -167,7 +167,8 @@ async def get_benchmarks(request: Request, limit: int = 20) -> dict[str, Any]:
 
     summary = alpaca.benchmark_summary(limit=max(1, min(limit, 100)))
     settings = await get_llm_settings()
-    model = alpaca.choose_model(settings, [str(row["model"]) for row in summary["results"] if row.get("model")])
+    known = [{"name": row["model"]} for row in summary["results"] if row.get("model")]
+    model = alpaca.choose_model(settings, known)
     return {
         **summary,
         "chosen_model": model,

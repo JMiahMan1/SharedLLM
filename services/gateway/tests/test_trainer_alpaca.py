@@ -95,12 +95,46 @@ def test_readiness_blocks_on_low_vram_and_on_a_queue():
 
 
 def test_choosing_a_model_prefers_the_trainer_setting_then_coding_then_assistant():
-    models = ["qwen3:4b", "qwen3:8b", "llama3:70b"]
+    models = [{"name": "qwen3:4b"}, {"name": "qwen3:8b"}, {"name": "llama3:70b"}]
 
     assert alpaca.choose_model({"trainer_model": "qwen3:8b"}, models) == "qwen3:8b"
     assert alpaca.choose_model({"coding_model": "qwen3:4b"}, models) == "qwen3:4b"
     assert alpaca.choose_model({"assistant_model": "qwen3:8b"}, models) == "qwen3:8b"
     assert alpaca.choose_model({}, models) == "qwen3:4b"
+
+
+def test_a_loaded_text_model_wins_over_an_unloaded_one():
+    models = [
+        {"name": "big:70b", "router_status": "unloaded"},
+        {"name": "loaded-coder", "router_status": "loaded"},
+    ]
+
+    assert alpaca.choose_model({}, models) == "loaded-coder"
+
+
+def test_an_image_model_is_never_chosen_while_a_text_model_exists():
+    """Alpaca labels image models "completion" too, so the name is the signal."""
+    models = [
+        {"name": "Qwen-Image-2.1-Q4_K", "router_status": "unknown"},
+        {"name": "qwen-image-edit-rapid-aio:q4_k", "router_status": "loaded"},
+    ]
+
+    assert alpaca.can_train("Qwen-Image-2.1-Q4_K") is False
+    assert alpaca.summarise_models({"models": models})["chosen"] == ""
+
+    models.append({"name": "kat-coder-v2", "router_status": "unloaded"})
+    summary = alpaca.summarise_models({"models": models})
+    assert summary["chosen"] == "kat-coder-v2"
+    assert summary["chosen_trainable"] is True
+    assert summary["models"][0]["name"] == "qwen-image-edit-rapid-aio:q4_k", (
+        "the loaded model still heads the list, it is just not chosen"
+    )
+
+
+def test_a_preferred_model_matches_across_the_router_separator():
+    models = [{"name": "qwen3--8b"}]
+
+    assert alpaca.choose_model({"trainer_model": "qwen3:8b"}, models) == "qwen3--8b"
 
 
 def test_a_preferred_model_that_is_not_installed_is_reported():
@@ -117,7 +151,7 @@ def test_a_preferred_model_that_is_not_installed_is_reported():
     )
 
     assert summary["total"] == 2
-    assert summary["models"][0]["name"] == "qwen3:8b"  # largest context first
+    assert summary["models"][0]["name"] == "qwen3:8b"  # the loaded model heads the list
     assert summary["trainer_model_missing"] is True
     assert summary["chosen"] == "qwen3:8b"
     assert summary["largest_context"] == 32768
