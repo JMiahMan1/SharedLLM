@@ -47,6 +47,23 @@ def init_db():
     _migrate_workspace_table()
 
 
+#: Additive repairs for a workspace database created before these columns existed.
+#: ``create_all`` never alters an existing table, so each one is added here.
+WORKSPACE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("repo_url", "VARCHAR"),
+    ("webhook_token_enc", "VARCHAR"),
+    ("env_enc", "VARCHAR"),
+    ("auto_backup_enabled", "BOOLEAN DEFAULT 0"),
+    ("excludes", "TEXT"),
+    ("is_default", "BOOLEAN DEFAULT 0"),
+    ("sync_owner", "VARCHAR"),
+    ("last_sync_at", "TIMESTAMP"),
+    ("last_sync_status", "VARCHAR"),
+    ("last_sync_error", "VARCHAR"),
+    ("created_at", "TIMESTAMP"),
+)
+
+
 def _migrate_workspace_table():
     inspector = inspect(engine)
     try:
@@ -55,36 +72,19 @@ def _migrate_workspace_table():
         return
 
     with engine.begin() as conn:
-        if "repo_url" not in columns:
-            conn.execute(text("ALTER TABLE workspace ADD COLUMN repo_url VARCHAR"))
-        if "webhook_token_enc" not in columns:
-            conn.execute(text("ALTER TABLE workspace ADD COLUMN webhook_token_enc VARCHAR"))
-        if "env_enc" not in columns:
-            conn.execute(text("ALTER TABLE workspace ADD COLUMN env_enc VARCHAR"))
-        if "auto_backup_enabled" not in columns:
-            conn.execute(text("ALTER TABLE workspace ADD COLUMN auto_backup_enabled BOOLEAN DEFAULT 0"))
-        if "excludes" not in columns:
-            # Use TEXT for JSON storage in SQLite
-            conn.execute(text("ALTER TABLE workspace ADD COLUMN excludes TEXT"))
-        if "is_default" not in columns:
-            conn.execute(text("ALTER TABLE workspace ADD COLUMN is_default BOOLEAN DEFAULT 0"))
-        for column, ddl in (
-            ("sync_owner", "VARCHAR"),
-            ("last_sync_at", "TIMESTAMP"),
-            ("last_sync_status", "VARCHAR"),
-            ("last_sync_error", "VARCHAR"),
-        ):
-            if column not in columns:
-                conn.execute(text(f"ALTER TABLE workspace ADD COLUMN {column} {ddl}"))
-        if "created_at" not in columns:
-            # Add the column WITHOUT a server default: some SQLite builds / legacy
-            # file formats reject ADD COLUMN ... DEFAULT CURRENT_TIMESTAMP ("Cannot
-            # add a column with non-constant default"). New rows still get created_at
-            # via the model's default_factory, and we backfill existing rows here.
-            conn.execute(text("ALTER TABLE workspace ADD COLUMN created_at TIMESTAMP"))
-            conn.execute(
-                text("UPDATE workspace SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
-            )
+        for column, ddl in WORKSPACE_COLUMNS:
+            if column in columns:
+                continue
+            conn.execute(text(f"ALTER TABLE workspace ADD COLUMN {column} {ddl}"))
+            if column == "created_at":
+                # Add the column WITHOUT a server default: some SQLite builds /
+                # legacy file formats reject ADD COLUMN ... DEFAULT
+                # CURRENT_TIMESTAMP ("Cannot add a column with non-constant
+                # default"). New rows still get created_at via the model's
+                # default_factory, and existing rows are backfilled here.
+                conn.execute(
+                    text("UPDATE workspace SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+                )
 
 
 def get_session():

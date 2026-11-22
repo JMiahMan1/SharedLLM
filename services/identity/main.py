@@ -196,6 +196,77 @@ else:
 apply_sqlite_pragmas(engine)
 
 
+#: Additive schema repairs for an existing identity database. ``create_all`` creates
+#: missing tables and never adds a column to one that exists, so every column added
+#: after the first release has to be listed here or an old install crashes with
+#: "no such column". ``(table, column, ALTER statement)``; additive only.
+SCHEMA_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("user", "is_admin", "ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"),
+    ("user", "family_role", "ALTER TABLE user ADD COLUMN family_role VARCHAR NOT NULL DEFAULT 'other'"),
+    ("user", "mother_username", "ALTER TABLE user ADD COLUMN mother_username VARCHAR"),
+    ("user", "birth_date", "ALTER TABLE user ADD COLUMN birth_date VARCHAR"),
+    ("user", "phone_number", "ALTER TABLE user ADD COLUMN phone_number VARCHAR"),
+    ("user", "password_hash", "ALTER TABLE user ADD COLUMN password_hash VARCHAR"),
+    ("user", "api_key", "ALTER TABLE user ADD COLUMN api_key VARCHAR"),
+    ("user", "api_key_enc", "ALTER TABLE user ADD COLUMN api_key_enc VARCHAR"),
+    ("user", "api_key_hash", "ALTER TABLE user ADD COLUMN api_key_hash VARCHAR"),
+    ("user", "github_url", "ALTER TABLE user ADD COLUMN github_url VARCHAR"),
+    ("user", "github_user", "ALTER TABLE user ADD COLUMN github_user VARCHAR"),
+    ("user", "github_token_enc", "ALTER TABLE user ADD COLUMN github_token_enc VARCHAR"),
+    ("user", "huggingface_token_enc", "ALTER TABLE user ADD COLUMN huggingface_token_enc VARCHAR"),
+    ("user", "gitlab_url", "ALTER TABLE user ADD COLUMN gitlab_url VARCHAR"),
+    ("user", "gitlab_user", "ALTER TABLE user ADD COLUMN gitlab_user VARCHAR"),
+    ("user", "gitlab_token_enc", "ALTER TABLE user ADD COLUMN gitlab_token_enc VARCHAR"),
+    ("user", "audiobookshelf_url", "ALTER TABLE user ADD COLUMN audiobookshelf_url VARCHAR"),
+    ("user", "audiobookshelf_user", "ALTER TABLE user ADD COLUMN audiobookshelf_user VARCHAR"),
+    ("user", "audiobookshelf_pass_enc", "ALTER TABLE user ADD COLUMN audiobookshelf_pass_enc VARCHAR"),
+    ("user", "audiobookshelf_api_key_enc", "ALTER TABLE user ADD COLUMN audiobookshelf_api_key_enc VARCHAR"),
+    ("user", "mailcow_url", "ALTER TABLE user ADD COLUMN mailcow_url VARCHAR"),
+    ("user", "mailcow_api_key_enc", "ALTER TABLE user ADD COLUMN mailcow_api_key_enc VARCHAR"),
+    ("user", "mail_user", "ALTER TABLE user ADD COLUMN mail_user VARCHAR"),
+    ("user", "mail_pass_enc", "ALTER TABLE user ADD COLUMN mail_pass_enc VARCHAR"),
+    ("user", "mass_url", "ALTER TABLE user ADD COLUMN mass_url VARCHAR"),
+    ("user", "mass_token_enc", "ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR"),
+    ("user", "mass_user_id", "ALTER TABLE user ADD COLUMN mass_user_id VARCHAR"),
+    ("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1"),
+    ("user", "skylight_url", "ALTER TABLE user ADD COLUMN skylight_url VARCHAR"),
+    ("user", "avatar", "ALTER TABLE user ADD COLUMN avatar VARCHAR"),
+    ("user", "chat_default_token", "ALTER TABLE user ADD COLUMN chat_default_token VARCHAR"),
+    ("user", "push_topic", "ALTER TABLE user ADD COLUMN push_topic VARCHAR"),
+    ("user", "skylight_email", "ALTER TABLE user ADD COLUMN skylight_email VARCHAR"),
+    ("user", "skylight_pass_enc", "ALTER TABLE user ADD COLUMN skylight_pass_enc VARCHAR"),
+    ("user", "git_url", "ALTER TABLE user ADD COLUMN git_url VARCHAR"),
+    ("user", "git_user", "ALTER TABLE user ADD COLUMN git_user VARCHAR"),
+    ("user", "git_token_enc", "ALTER TABLE user ADD COLUMN git_token_enc VARCHAR"),
+    ("user", "forbidden_branches", "ALTER TABLE user ADD COLUMN forbidden_branches VARCHAR"),
+    ("user", "router_url", "ALTER TABLE user ADD COLUMN router_url VARCHAR"),
+    ("user", "router_user", "ALTER TABLE user ADD COLUMN router_user VARCHAR"),
+    ("user", "router_pass_enc", "ALTER TABLE user ADD COLUMN router_pass_enc VARCHAR"),
+    ("user", "router_cert_sha256", "ALTER TABLE user ADD COLUMN router_cert_sha256 VARCHAR"),
+    ("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR"),
+    ("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR"),
+    ("user", "malwarebazaar_key_enc", "ALTER TABLE user ADD COLUMN malwarebazaar_key_enc VARCHAR"),
+    ("user", "is_test_account", "ALTER TABLE user ADD COLUMN is_test_account BOOLEAN NOT NULL DEFAULT 0"),
+    ("apikey", "key_hash", "ALTER TABLE apikey ADD COLUMN key_hash VARCHAR"),
+    ("apikey", "key_prefix", "ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR"),
+    ("ravenmission", "slug", "ALTER TABLE ravenmission ADD COLUMN slug VARCHAR"),
+    ("ravenmission", "queued_at", "ALTER TABLE ravenmission ADD COLUMN queued_at VARCHAR"),
+    ("ravenmission", "started_at", "ALTER TABLE ravenmission ADD COLUMN started_at VARCHAR"),
+    ("ravenmission", "completed_at", "ALTER TABLE ravenmission ADD COLUMN completed_at VARCHAR"),
+    ("ravenmission", "duration", "ALTER TABLE ravenmission ADD COLUMN duration INTEGER"),
+    ("ravenmission", "workspace_id", "ALTER TABLE ravenmission ADD COLUMN workspace_id VARCHAR"),
+    ("ravenmission", "last_llm_reply", "ALTER TABLE ravenmission ADD COLUMN last_llm_reply TEXT"),
+    ("ravenmission", "artifacts", "ALTER TABLE ravenmission ADD COLUMN artifacts TEXT"),
+    ("device", "agent_key_hash", "ALTER TABLE device ADD COLUMN agent_key_hash VARCHAR NOT NULL DEFAULT ''"),
+    ("device", "agent_key_created_at", "ALTER TABLE device ADD COLUMN agent_key_created_at VARCHAR"),
+    ("device", "archived_at", "ALTER TABLE device ADD COLUMN archived_at VARCHAR"),
+    ("useravatarimage", "original", "ALTER TABLE useravatarimage ADD COLUMN original BLOB"),
+    ("useravatarimage", "original_mime", "ALTER TABLE useravatarimage ADD COLUMN original_mime VARCHAR"),
+    ("useravatarimage", "crop", "ALTER TABLE useravatarimage ADD COLUMN crop VARCHAR"),
+    ("deviceassignment", "revoked", "ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0"),
+)
+
+
 def _ensure_schema_upgrades() -> None:
     _table_columns: dict[str, set[str]] = {}
     _known_tables: set[str] = set()
@@ -220,83 +291,11 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text(sql))
                 conn.commit()
 
-    if _table_exists("user"):
-        _add_column("user", "is_admin", "ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
-        _add_column("user", "family_role", "ALTER TABLE user ADD COLUMN family_role VARCHAR NOT NULL DEFAULT 'other'")
-        _add_column("user", "mother_username", "ALTER TABLE user ADD COLUMN mother_username VARCHAR")
-        _add_column("user", "birth_date", "ALTER TABLE user ADD COLUMN birth_date VARCHAR")
-        _add_column("user", "phone_number", "ALTER TABLE user ADD COLUMN phone_number VARCHAR")
-        _add_column("user", "password_hash", "ALTER TABLE user ADD COLUMN password_hash VARCHAR")
-        _add_column("user", "api_key", "ALTER TABLE user ADD COLUMN api_key VARCHAR")
-        _add_column("user", "api_key_enc", "ALTER TABLE user ADD COLUMN api_key_enc VARCHAR")
-        _add_column("user", "api_key_hash", "ALTER TABLE user ADD COLUMN api_key_hash VARCHAR")
-        _add_column("user", "github_url", "ALTER TABLE user ADD COLUMN github_url VARCHAR")
-        _add_column("user", "github_user", "ALTER TABLE user ADD COLUMN github_user VARCHAR")
-        _add_column("user", "github_token_enc", "ALTER TABLE user ADD COLUMN github_token_enc VARCHAR")
-        _add_column("user", "huggingface_token_enc", "ALTER TABLE user ADD COLUMN huggingface_token_enc VARCHAR")
-        _add_column("user", "gitlab_url", "ALTER TABLE user ADD COLUMN gitlab_url VARCHAR")
-        _add_column("user", "gitlab_user", "ALTER TABLE user ADD COLUMN gitlab_user VARCHAR")
-        _add_column("user", "gitlab_token_enc", "ALTER TABLE user ADD COLUMN gitlab_token_enc VARCHAR")
-        _add_column("user", "audiobookshelf_url", "ALTER TABLE user ADD COLUMN audiobookshelf_url VARCHAR")
-        _add_column("user", "audiobookshelf_user", "ALTER TABLE user ADD COLUMN audiobookshelf_user VARCHAR")
-        _add_column("user", "audiobookshelf_pass_enc", "ALTER TABLE user ADD COLUMN audiobookshelf_pass_enc VARCHAR")
-        _add_column("user", "audiobookshelf_api_key_enc", "ALTER TABLE user ADD COLUMN audiobookshelf_api_key_enc VARCHAR")
-        _add_column("user", "mailcow_url", "ALTER TABLE user ADD COLUMN mailcow_url VARCHAR")
-        _add_column("user", "mailcow_api_key_enc", "ALTER TABLE user ADD COLUMN mailcow_api_key_enc VARCHAR")
-        _add_column("user", "mail_user", "ALTER TABLE user ADD COLUMN mail_user VARCHAR")
-        _add_column("user", "mail_pass_enc", "ALTER TABLE user ADD COLUMN mail_pass_enc VARCHAR")
-        _add_column("user", "mass_url", "ALTER TABLE user ADD COLUMN mass_url VARCHAR")
-        _add_column("user", "mass_token_enc", "ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR")
-        _add_column("user", "mass_user_id", "ALTER TABLE user ADD COLUMN mass_user_id VARCHAR")
-        _add_column("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1")
-        _add_column("user", "skylight_url", "ALTER TABLE user ADD COLUMN skylight_url VARCHAR")
-        _add_column("user", "avatar", "ALTER TABLE user ADD COLUMN avatar VARCHAR")
-        _add_column("user", "chat_default_token", "ALTER TABLE user ADD COLUMN chat_default_token VARCHAR")
-        _add_column("user", "push_topic", "ALTER TABLE user ADD COLUMN push_topic VARCHAR")
-        _add_column("user", "skylight_email", "ALTER TABLE user ADD COLUMN skylight_email VARCHAR")
-        _add_column("user", "skylight_pass_enc", "ALTER TABLE user ADD COLUMN skylight_pass_enc VARCHAR")
-        _add_column("user", "git_url", "ALTER TABLE user ADD COLUMN git_url VARCHAR")
-        _add_column("user", "git_user", "ALTER TABLE user ADD COLUMN git_user VARCHAR")
-        _add_column("user", "git_token_enc", "ALTER TABLE user ADD COLUMN git_token_enc VARCHAR")
-        _add_column("user", "forbidden_branches", "ALTER TABLE user ADD COLUMN forbidden_branches VARCHAR")
-        _add_column("user", "router_url", "ALTER TABLE user ADD COLUMN router_url VARCHAR")
-        _add_column("user", "router_user", "ALTER TABLE user ADD COLUMN router_user VARCHAR")
-        _add_column("user", "router_pass_enc", "ALTER TABLE user ADD COLUMN router_pass_enc VARCHAR")
-        _add_column("user", "router_cert_sha256", "ALTER TABLE user ADD COLUMN router_cert_sha256 VARCHAR")
-        _add_column("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR")
-        _add_column("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR")
-        _add_column("user", "malwarebazaar_key_enc", "ALTER TABLE user ADD COLUMN malwarebazaar_key_enc VARCHAR")
-        _add_column("user", "is_test_account", "ALTER TABLE user ADD COLUMN is_test_account BOOLEAN NOT NULL DEFAULT 0")
-
-    if _table_exists("apikey"):
-        _add_column("apikey", "key_hash", "ALTER TABLE apikey ADD COLUMN key_hash VARCHAR")
-        _add_column("apikey", "key_prefix", "ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR")
-
-    if _table_exists("ravenmission"):
-        _add_column("ravenmission", "slug", "ALTER TABLE ravenmission ADD COLUMN slug VARCHAR")
-        _add_column("ravenmission", "queued_at", "ALTER TABLE ravenmission ADD COLUMN queued_at VARCHAR")
-        _add_column("ravenmission", "started_at", "ALTER TABLE ravenmission ADD COLUMN started_at VARCHAR")
-        _add_column("ravenmission", "completed_at", "ALTER TABLE ravenmission ADD COLUMN completed_at VARCHAR")
-        _add_column("ravenmission", "duration", "ALTER TABLE ravenmission ADD COLUMN duration INTEGER")
-        _add_column("ravenmission", "workspace_id", "ALTER TABLE ravenmission ADD COLUMN workspace_id VARCHAR")
-        _add_column("ravenmission", "last_llm_reply", "ALTER TABLE ravenmission ADD COLUMN last_llm_reply TEXT")
-        _add_column("ravenmission", "artifacts", "ALTER TABLE ravenmission ADD COLUMN artifacts TEXT")
-
-    if _table_exists("device"):
-        # Windows agent credential: a scoped key the device stores instead of a
-        # user API key. sha256 hex (empty = none minted); the raw key is shown
-        # once at mint time and never stored.
-        _add_column("device", "agent_key_hash", "ALTER TABLE device ADD COLUMN agent_key_hash VARCHAR NOT NULL DEFAULT ''")
-        _add_column("device", "agent_key_created_at", "ALTER TABLE device ADD COLUMN agent_key_created_at VARCHAR")
-        _add_column("device", "archived_at", "ALTER TABLE device ADD COLUMN archived_at VARCHAR")
-
-    if _table_exists("useravatarimage"):
-        _add_column("useravatarimage", "original", "ALTER TABLE useravatarimage ADD COLUMN original BLOB")
-        _add_column("useravatarimage", "original_mime", "ALTER TABLE useravatarimage ADD COLUMN original_mime VARCHAR")
-        _add_column("useravatarimage", "crop", "ALTER TABLE useravatarimage ADD COLUMN crop VARCHAR")
+    for table, column, ddl in SCHEMA_COLUMNS:
+        if _table_exists(table):
+            _add_column(table, column, ddl)
 
     if _table_exists("deviceassignment"):
-        _add_column("deviceassignment", "revoked", "ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0")
         # A device used to have one user (unique device_id); now it can have
         # several, unique per (device, user).
         indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("deviceassignment")}
