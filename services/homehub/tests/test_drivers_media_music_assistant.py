@@ -91,14 +91,28 @@ def build(options=None):
 
 
 def test_url_precedence(monkeypatch):
-    monkeypatch.delenv("MUSIC_ASSISTANT_URL", raising=False)
     _, drv, _ = build()
     assert drv.url == "http://d5369777-music-assistant:8094"
+    # The config entry is the only source: an environment variable never overrides it.
     monkeypatch.setenv("MUSIC_ASSISTANT_URL", "http://192.0.2.205:8095")
+    monkeypatch.setenv("MUSIC_ASSISTANT_TOKEN", "env-token")
     _, drv, _ = build()
-    assert drv.url == "http://192.0.2.205:8095"
-    _, drv, _ = build(options={"url": "http://other:8095"})
-    assert drv.url == "http://other:8095"
+    assert drv.url == "http://d5369777-music-assistant:8094"
+    assert drv.token == TOKEN
+
+
+def test_an_imported_entrys_options_are_folded_into_its_data():
+    """HA's import kept the add-on address in data and the real one in options: the real one wins, stored once."""
+    from services.homehub import music_assistant_server
+
+    _, drv, _ = build(options={"url": "http://other:8095", "token": "new-token", "keep": 1})
+    entry = drv.entry
+    assert music_assistant_server.fold_entry(entry) is True
+    assert entry.data["url"] == "http://other:8095" and entry.data["token"] == "new-token"
+    assert entry.options == {"keep": 1}
+    assert music_assistant_server.fold_entry(entry) is False  # once only
+    drv2 = MusicAssistantDriver(drv.hub, entry)
+    assert drv2.url == "http://other:8095" and drv2.token == "new-token"
 
 
 async def test_state_mapping():

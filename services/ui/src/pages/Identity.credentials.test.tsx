@@ -13,13 +13,14 @@ const openTile = async (name: 'Home Assistant' | 'Music Assistant' | 'Audiobooks
 };
 
 describe('Identity credentials', () => {
-  it('offers a Music Assistant tile with a URL and a token field', async () => {
+  it('offers a Music Assistant tile with an optional own-server URL and a token field', async () => {
     renderWithProviders(<Identity />);
 
     await openTile('Music Assistant');
 
-    expect(await screen.findByText('Server URL')).toBeInTheDocument();
-    expect(screen.getByText('Access Token')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Your own server URL (optional)')).toBeInTheDocument();
+    expect(screen.getByText('Access token')).toBeInTheDocument();
+    expect(await screen.findByTestId('integration-status-Music Assistant')).toHaveTextContent('Household server, your account');
   });
 
   it('offers an Audiobookshelf API key alongside username and password', async () => {

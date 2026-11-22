@@ -186,7 +186,7 @@ class TestMusicAssistantGetsALibraryUri:
             result = await handle_audiobookshelf(req)
 
         assert result.status == "FAILURE"
-        assert "not configured" in result.message
+        assert "No Music Assistant is set up" in result.message
         mocks["call"].assert_not_awaited()
 
     @pytest.mark.asyncio

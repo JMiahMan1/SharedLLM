@@ -8,8 +8,9 @@ Run it after a deploy, when media misbehaves, or from a cron/monitoring job:
 
 Each target gets a classified answer (OK / UNAVAILABLE / UNREACHABLE /
 ERROR). Exit code is 1 when any target is not OK, so a scheduler can alert on
-it. Audiobookshelf, Music Assistant and Nextcloud come from ``.env`` (the same
-values the gateway uses); the gateway itself defaults to the production host.
+it. Audiobookshelf and Nextcloud come from ``.env``. Music Assistant has no
+``.env`` address (the household server is HomeHub's Music Assistant integration),
+so pass the address to check with ``--music-assistant URL``.
 """
 from __future__ import annotations
 
@@ -40,9 +41,9 @@ def load_env() -> None:
             os.environ.setdefault(key.strip(), value.strip())
 
 
-def targets() -> dict[str, str]:
+def targets(ma_url: str = "") -> dict[str, str]:
     abs_url = (os.getenv("AUDIOBOOKSHELF_URL") or "").strip().rstrip("/")
-    ma_url = (os.getenv("MA_URL") or os.getenv("MASS_URL") or "").strip().rstrip("/")
+    ma_url = (ma_url or "").strip().rstrip("/")
     nextcloud_url = (os.getenv("NEXTCLOUD_URL") or "").strip().rstrip("/")
     gateway_url = (os.getenv("GATEWAY_URL") or os.getenv("JARVIS_HOST") or "").strip().rstrip("/")
     result: dict[str, str] = {}
@@ -57,11 +58,11 @@ def targets() -> dict[str, str]:
     return result
 
 
-async def run(timeout: float) -> list[dict]:
+async def run(timeout: float, ma_url: str = "") -> list[dict]:
     async with aiohttp.ClientSession() as client:
         results = await probe_many(
             client,
-            targets(),
+            targets(ma_url),
             timeout=timeout,
             # Music Assistant has no health route; any HTTP answer proves it.
             expectations={"music_assistant": None},
@@ -73,10 +74,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
     parser.add_argument("--timeout", type=float, default=DEFAULT_PROBE_TIMEOUT, help="per-probe seconds")
+    parser.add_argument("--music-assistant", default="", metavar="URL",
+                        help="a Music Assistant address to check (HomeHub's integration names the household one)")
     args = parser.parse_args()
 
     load_env()
-    results = asyncio.run(run(args.timeout))
+    results = asyncio.run(run(args.timeout, args.music_assistant))
 
     if args.json:
         print(json.dumps(results, indent=2))

@@ -115,7 +115,7 @@ async def test_no_music_assistant_login_says_so(ma):
     req = MediaPlayRequest(user_context={"user": "casey"}, query="Hymns", entity_id="media_player.study")
     result = await media.play_music(req, "media_player.study", _ctx(mass_url=None, mass_token=None))
     assert result.status == "FAILURE"
-    assert "unreachable" in result.message and "Music Assistant login" in result.message
+    assert "unreachable" in result.message and "No Music Assistant is set up" in result.message
 
 
 async def test_a_speaker_named_by_device_name_resolves_without_ha():

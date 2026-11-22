@@ -94,7 +94,8 @@ def test_import_carries_registry_credentials_and_history(tmp_path, ha_dir):
 
     entries = {e.entry_id: e for e in store.load_config_entries()}
     assert entries["e_ma"].data["token"] == "MA-TOKEN"
-    assert entries["e_ma"].options["url"].startswith("http://127.0.0.1")  # no longer the add-on hostname
+    # No built-in address: the entry keeps HA's until an admin sets the real one on it (Configure).
+    assert "url" not in entries["e_ma"].options
     assert entries["e_atv"].data["cert_pem"] == "CERT" and entries["e_atv"].data["key_pem"] == "KEY"
     assert entries["e_phone"].options["jarvis_user"] == "sam"
     assert "BEGIN:VCALENDAR" in entries["e_todo"].data["ics"]

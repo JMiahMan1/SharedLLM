@@ -976,6 +976,13 @@ export const server = setupServer(
   }),
   http.get('/api/docs/:docName', () => HttpResponse.json({ content: '# Docs\n\nUseful documentation.' })),
   http.post('/api/auth/test-connection', () => HttpResponse.json({ status: 'SUCCESS', message: 'Connected' })),
+  // Which Music Assistant the signed-in person uses (identity; never a token). Made-up values.
+  http.get('/api/auth/music-assistant/status', () => HttpResponse.json({
+    server: 'household', login: 'own', url: 'http://music.example.test:8095', own_url: null,
+    household_url: 'http://music.example.test:8095', household_error: null, can_use_household: false,
+    note: 'Music Assistant keeps play history, resume points and playback speed for each person; favourites, the library and playlists are shared by everyone on the same server.',
+    ma_username: 'testuser', state: 'ok', message: 'Connected as testuser.',
+  })),
   http.post('/api/users/me/enroll', () => HttpResponse.json({ status: 'SUCCESS', message: 'Enrolled' })),
   http.post('/api/auth/import/nextcloud', () => HttpResponse.json({ status: 'SUCCESS', message: 'Users imported from Nextcloud' })),
   http.post('/api/storage/list', () => HttpResponse.json({

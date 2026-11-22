@@ -33,10 +33,12 @@ log = logging.getLogger("homehub.importer")
 
 # Where the hub reaches services HA used to host as add-ons. Overridable per
 # install; written into each entry's options so the stored HA data stays as HA
-# had it.
+# had it. Music Assistant is not here: its imported entry keeps HA's address
+# until an admin gives the entry the real one (Settings > Integrations). That
+# entry is then the household's one source for where Music Assistant runs, so
+# no built-in or environment address may stand in for it.
 DEFAULT_ENDPOINTS = {
     "matter": os.getenv("MATTER_SERVER_URL", "ws://127.0.0.1:5580/ws"),
-    "music_assistant": os.getenv("MUSIC_ASSISTANT_URL", "http://127.0.0.1:8095"),
 }
 
 

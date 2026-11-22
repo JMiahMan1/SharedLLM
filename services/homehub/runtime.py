@@ -53,6 +53,10 @@ class Runtime:
     def load_registry(self) -> None:
         hub = self.hub
         hub.config_entries = {e.entry_id: e for e in self.store.load_config_entries()}
+        # Music Assistant's address and login live in its entry's data only (music_assistant_server.py).
+        from services.homehub import music_assistant_server
+
+        music_assistant_server.fold_all(hub, self.store)
         hub.devices = {d.id: d for d in self.store.load_devices()}
         hub.entities = {e.entity_id: e for e in self.store.load_entities()}
         hub.areas = {a.area_id: a for a in self.store.load_areas()}

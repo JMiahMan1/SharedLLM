@@ -956,7 +956,6 @@ services:
       - HOMEHUB_DB=/data/homehub.db
       - HOMEHUB_IMPORT_DIR=/import
       - MATTER_SERVER_URL=${MATTER_SERVER_URL:-ws://127.0.0.1:5580/ws}
-      - MUSIC_ASSISTANT_URL=${MUSIC_ASSISTANT_URL:-http://127.0.0.1:8095}
       - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       # Bluetooth (services/homehub/README.md, "Bluetooth"): the host adapter by address or hciN; empty = off.
       - HOMEHUB_BLUETOOTH_ADAPTER=${HOMEHUB_BLUETOOTH_ADAPTER:-}

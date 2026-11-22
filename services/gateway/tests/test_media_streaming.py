@@ -160,7 +160,7 @@ async def test_stream_ma_missing_credentials_returns_400(monkeypatch, client):
         resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test")
 
         assert resp.status_code == 400
-        assert "not configured" in resp.json().get("detail", "")
+        assert "No Music Assistant is set up" in resp.json().get("detail", "")
 
 
 @pytest.mark.asyncio

@@ -124,4 +124,32 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         body = await request.json() if raw else {}
         return await link_music_assistant(runtime, ha, str((body or {}).get("hub_url") or default_hub_url()))
 
+    @router.get("/hub/music_assistant/server")
+    async def music_assistant_server_info(request: Request) -> dict[str, Any]:
+        """Where the household's Music Assistant is, from the hub's entry (never its token)."""
+        admin(request)
+        from services.homehub import music_assistant_server
+
+        return music_assistant_server.household_server(runtime.hub)
+
+    @router.post("/hub/music_assistant/accounts")
+    async def music_assistant_account(request: Request) -> dict[str, Any]:
+        """``{"username", "display_name"?, "token_name"?}``: that person's own MA account and a new token.
+
+        Only the stack itself may ask (its internal secret): the answer carries a token.
+        """
+        token = request.headers.get("x-internal-secret") or bearer(request.headers.get("authorization"))
+        p = auth.authenticate(token)
+        if p is None or p.user_id != "internal":
+            raise HTTPException(401, detail="Unauthorized")
+        from services.homehub import music_assistant_server
+
+        body = await request.json()
+        try:
+            return await music_assistant_server.provision_account(
+                runtime.hub, str((body or {}).get("username") or ""), (body or {}).get("display_name"),
+                str((body or {}).get("token_name") or "Jarvis"))
+        except music_assistant_server.AccountError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from exc
+
     return router
