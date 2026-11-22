@@ -4929,24 +4929,6 @@ async def proxy_music_assistant_status(request: Request):
         return await _proxy_json_response(resp)
 
 
-@app.api_route("/api/admin/music-assistant/{action}", methods=["GET", "POST"])
-async def proxy_music_assistant_admin(action: str, request: Request):
-    """Admin: Music Assistant accounts and stale-URL migration (identity checks the caller is an admin)."""
-    if action not in ("accounts", "stale-urls"):
-        raise HTTPException(status_code=404, detail="Not found")
-    auth_header = request.headers.get("Authorization")
-    headers = {"Authorization": auth_header} if auth_header else {}
-    async with shared_http_client() as client:
-        url = f"{IDENTITY_SVC}/api/admin/music-assistant/{action}"
-        if request.method == "GET":
-            resp = await client.get(url, params=dict(request.query_params), headers=headers,
-                                    timeout=aiohttp.ClientTimeout(total=30.0))
-        else:
-            resp = await client.post(url, json=await request.json(), headers=headers,
-                                     timeout=aiohttp.ClientTimeout(total=120.0))
-        return await _proxy_json_response(resp)
-
-
 @app.get("/api/auth/discover")
 async def proxy_discover(request: Request):
     auth_header = request.headers.get("Authorization")
