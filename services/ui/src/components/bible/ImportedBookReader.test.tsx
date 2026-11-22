@@ -205,4 +205,104 @@ describe('imported book reader', () => {
     await user.click(screen.getByRole('button', { name: 'Sepia page' }));
     expect(onPreferences).toHaveBeenCalledWith({ page: 'sepia' });
   });
+
+  it('opens at the specified section when startSection is provided', async () => {
+    apiMock.getBibleImportedBookChapter.mockImplementation((_bookId: number, ordinal: number) =>
+      Promise.resolve({
+        book_id: 1,
+        ordinal,
+        label: `Page ${ordinal}`,
+        text: pageText(ordinal),
+        questions: ordinal === 1 ? ['What does following Jesus mean here?'] : [],
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ImportedBookReader
+          book={book}
+          chapters={chapters}
+          startSection="s-lesson-3"
+          preferences={preferences}
+          onPreferences={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByTestId('bible-study-reader-text');
+    await waitFor(() => expect(apiMock.getBibleImportedBookChapter).toHaveBeenCalledWith(1, 3));
+    expect(screen.getByRole('heading', { name: 'Week 3: The First Steps' })).toBeInTheDocument();
+  });
+
+  it('falls back to startOrdinal when startSection is not found', async () => {
+    apiMock.getBibleImportedBookChapter.mockImplementation((_bookId: number, ordinal: number) =>
+      Promise.resolve({
+        book_id: 1,
+        ordinal,
+        label: `Page ${ordinal}`,
+        text: pageText(ordinal),
+        questions: ordinal === 1 ? ['What does following Jesus mean here?'] : [],
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ImportedBookReader
+          book={book}
+          chapters={chapters}
+          startSection="s-nonexistent"
+          startOrdinal={2}
+          preferences={preferences}
+          onPreferences={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByTestId('bible-study-reader-text');
+    await waitFor(() => expect(apiMock.getBibleImportedBookChapter).toHaveBeenCalledWith(1, 2));
+    expect(screen.getByRole('heading', { name: 'Week 1: The First Steps' })).toBeInTheDocument();
+  });
+
+  it('scrolls to the startAnchor when provided', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ImportedBookReader
+          book={book}
+          chapters={chapters}
+          startAnchor="p-1a2b3c4d"
+          preferences={preferences}
+          onPreferences={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByTestId('bible-study-reader-text');
+    const block = screen.getByTestId('bible-block-p-1a2b3c4d');
+    expect(block).toBeInTheDocument();
+  });
+
+  it('restores scroll position from startScrollFraction', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ImportedBookReader
+          book={book}
+          chapters={chapters}
+          startScrollFraction={0.5}
+          preferences={preferences}
+          onPreferences={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByTestId('bible-study-reader-text');
+    const container = screen.getByTestId('bible-study-page');
+    // The container should be scrolled to approximately 50%
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    expect(container.scrollTop).toBeGreaterThan(maxScroll * 0.4);
+    expect(container.scrollTop).toBeLessThan(maxScroll * 0.6);
+  });
 });
