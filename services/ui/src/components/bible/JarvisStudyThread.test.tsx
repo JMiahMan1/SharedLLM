@@ -212,3 +212,31 @@ describe('depth and references', () => {
     expect(onOpenRef).toHaveBeenCalledWith('Romans 5:8');
   });
 });
+
+describe('an answer from the online model while the local AI is offline', () => {
+  const NOTE = "Answered by an online model while Jarvis's local AI is offline.";
+
+  it('shows the note under the answer and saves it with the turn', async () => {
+    streams([
+      { ...START, verses_used: 1, notes_used: 0 },
+      { type: 'text', text: 'God loves the world.' },
+      { type: 'done', answer: 'God loves the world.', references: [], online_note: NOTE },
+    ]);
+    const onTurnSaved = vi.fn();
+    renderPanel({ onTurnSaved });
+    await askIt('Why?');
+    expect(await screen.findByTestId('bible-ask-online-note')).toHaveTextContent(NOTE);
+    expect(onTurnSaved).toHaveBeenCalledWith(
+      expect.objectContaining({ text: `God loves the world.\n\n(${NOTE})`, onlineNote: NOTE }),
+    );
+  });
+
+  it('shows no note for an answer from the local AI', async () => {
+    answering('It is about love for the whole world.');
+    renderPanel();
+    await askIt('Why?');
+    await screen.findByTestId('bible-ask-answer');
+    await waitFor(() => expect(screen.queryByTestId('bible-ask-streaming')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('bible-ask-online-note')).not.toBeInTheDocument();
+  });
+});

@@ -12,9 +12,11 @@ What people are told lives here too, one sentence per feature, with no host
 names, addresses or exception text. The detail is in the log under the error
 id the response carries.
 
-There is no fallback to an online model on purpose: anything sensitive may only
-ever run on the local model, so while it is offline the answer is "not now",
-never "somewhere else".
+There is no fallback to an online model here on purpose: anything sensitive may
+only ever run on the local model, so while it is offline the answer is "not now",
+never "somewhere else". The one exception is cloud_fallback.py: an allowlist of
+features with no personal data (a Bible question), each sending only its own
+minimal typed payload, and only while this breaker is open.
 """
 from __future__ import annotations
 

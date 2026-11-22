@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BookOpenCheck, Send, Sparkles, X } from 'lucide-react';
+import { BookOpenCheck, Globe, Send, Sparkles, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleStudyDepth } from '../../types/api';
@@ -30,6 +30,8 @@ interface Turn {
   references: string[];
   /** The answer is still being written. */
   streaming?: boolean;
+  /** Said under an answer an online model wrote while the local AI was offline. */
+  onlineNote?: string;
 }
 
 const DEPTHS: { id: BibleStudyDepth; label: string }[] = [
@@ -115,10 +117,13 @@ export default function JarvisStudyThread({
           written += event.text;
           updateLast({ text: written });
         } else if (event.type === 'done') {
-          updateLast({ text: event.answer, references: event.references, streaming: false });
+          const onlineNote = event.online_note || undefined;
+          updateLast({ text: event.answer, references: event.references, streaming: false, onlineNote });
           onTurnSaved?.({
             question: wanted,
-            text: event.answer,
+            // A saved online answer keeps its note in the text, so reopening the session still says so.
+            text: onlineNote ? `${event.answer}\n\n(${onlineNote})` : event.answer,
+            onlineNote,
             failed: false,
             verses: 0,
             notes: 0,
@@ -224,6 +229,15 @@ export default function JarvisStudyThread({
                     </span>
                   )}
                 </p>
+                {!turn.failed && turn.onlineNote && (
+                  <p
+                    className="flex items-center gap-1.5 text-[11px] text-amber-200"
+                    data-testid="bible-ask-online-note"
+                  >
+                    <Globe size={12} />
+                    {turn.onlineNote}
+                  </p>
+                )}
                 {!turn.failed && turn.references.length > 0 && (
                   <div className="flex flex-wrap gap-1.5" data-testid="bible-ask-references">
                     {turn.references.map((ref) => (
