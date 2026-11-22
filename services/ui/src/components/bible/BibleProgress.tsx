@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Award, BookMarked, Flame, Trash2, Users, BookOpen, Target, TrendingUp } from 'lucide-react';
+import { Award, BookMarked, Flame, Trash2, Users, BookOpen, Target } from 'lucide-react';
 import { api } from '../../services/api';
 import type { BibleMark } from '../../types/api';
 

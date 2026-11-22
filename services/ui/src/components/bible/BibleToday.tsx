@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
-import type { BibleVerseOfDay, BibleEncouragementVerse } from '../../types/api';
+import type { BibleVerseOfDay } from '../../types/api';
 import BiblePlans from './BiblePlans';
 import VerseContextPanel from './VerseContextPanel';
 import { pageStyle } from './readingPage';
