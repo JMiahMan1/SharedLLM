@@ -148,7 +148,7 @@ No new rules engine - reuse everything the phone uses, add Windows deltas:
 | Tamper taxonomy | Reuse `guard_tamper` events (`uninstall_attempt`, `safe_mode_boot`, `admin_revoked`, `service_stopped`, `clock_skew`) → devices page + `family_safety` notices, same as phone. |
 | Ask-to-time flow | Unchanged: `/api/screen-time/requests` + Approve/Disapprove push; granted minutes extend today's budget and suspend sleep locks (`granted_until`). The lock screen buttons call the same endpoints. |
 | Bonus / earn / chores | Unchanged: `/api/screen-time/{u}/bonus`, `EARN_KEYS`, chore-check approvals - Windows inherits step/exercise/chore earning automatically. |
-| Parent unlock on device | No password on the device: the lock surface asks (`POST /api/guard/unlock-requests`, bound to the PC's device key, ten-minute expiry, a newer request supersedes, once per 30 s and ten an hour per device); both parents answer Approve N min / Deny in the Jarvis app (push callback `guard_unlock_decide`, or the request card on the child's page); only a parent's own session may answer, never a device key or the child; the PC polls its own request (`GET /api/guard/unlock-requests/{id}`) and unlocks until the hub's `until`. The approval carries the PBKDF2 offline-code verifiers, so offline codes (10-minute lifts, reported later via `offline_unlock`) stay the no-network fallback. |
+| Parent unlock on device | No password on the device: the lock surface asks (`POST /api/guard/unlock-requests`, bound to the PC's device key, ten-minute expiry, a newer request supersedes, once per 30 s and ten an hour per device); both parents answer Approve N min / Deny in the Jarvis app (push callback `guard_unlock_decide`, or the request card on the child's page); only a parent's own session may answer, never a device key or the child; the PC polls its own request (`GET /api/guard/unlock-requests/{id}`) and unlocks until the hub's `until`. Offline codes (10-minute lifts, reported later via `offline_unlock`) stay the no-network fallback: the PBKDF2 verifiers arrive with every status poll (`offline_codes` on `GET /api/screen-time/{u}/status`, sent only to the PC's own agent key or the child's own registered device) and with the approval. |
 | MDM | `Devices.tsx` gets a "Windows PC" section (Lock now / Lift / Ask log / Tamper log / Update). **No wipe button** for windows-pc v1. |
 | Publish endpoint | New `POST /api/app-updates/windows` (internal-secret, mirrors the APK publish step): stores `data/app_updates/jarvis-guard.exe` + `version.json`; the exe is not served to children, only fetched by enrolled machines. |
 
@@ -359,9 +359,19 @@ that CI runs.
   today's chores with "Done" (the Skylight chore routes, same device-key
   rule; the hub then asks a parent whether each was done right, as on
   Android), a parent's sign-in, and a parent's **offline code** (the phone's
-  scheme: PBKDF2 verifiers arrive with an online parent unlock, five wrong
-  codes wait ten minutes, a good one unlocks for ten minutes and the parents
-  get `offline_unlock` once the hub answers). A "chores first" lock opens on
+  scheme: five wrong codes wait ten minutes, a good one unlocks for ten
+  minutes and the parents get `offline_unlock` once the hub answers).
+  **The verifiers (salt, iterations, hash; never a code) arrive with every
+  status poll** (`offline_codes` on `GET /api/screen-time/{u}/status`): the
+  gateway passes the PC's `device_key` on to identity's rules read, and
+  identity adds the list only for the PC's own agent key (or the child's own
+  registered, non-revoked device), never for a parent or another member. The
+  agent replaces `offline.codes.json` whenever the set changes, so a code a
+  parent sets, changes or deletes reaches the PC the next time it is online
+  (an empty list clears it), and an answer without the field (an older hub)
+  keeps the last good set. An approved unlock request still carries them as
+  well. Until 2026-11-21 they came only with an approval, so a PC that had
+  never asked had no offline code at all. A "chores first" lock opens on
   the chores. Calls do not apply on a PC.
 - The surface is one centred, wrapping, scrolling column sized from the DPI
   (PerMonitorV2), buttons at least 56 logical px tall.

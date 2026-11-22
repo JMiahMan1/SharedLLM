@@ -937,9 +937,21 @@ point.
       Accessibility; Android 13+ first needs App info ⋮ → Allow restricted settings for a
       sideloaded app). Needs APK 437 or later on the phone. **Offline parent code (2026-10-24,
       APK after 437):** a parent sets 6-12 digits (`PUT /api/guard/offline-code`, shown under the
-      child's controls); identity keeps only a PBKDF2-SHA256 verifier (`GuardOfflineCode`), which
-      reaches a child's phone or PC only with a parent's approval of an unlock request from that
-      device (never through the child's own reads). With no connection the guard screen takes the code, checks it on the
+      child's controls); identity keeps only a PBKDF2-SHA256 verifier (`GuardOfflineCode`).
+      **Delivery (2026-11-21):** the verifiers (salt, iterations, hash; never a code) ride on the
+      device's regular status refresh, `GET /api/screen-time/{u}/status?device_key=...` (gateway),
+      which passes the `device_key` to identity's `GET /api/screen-time/{u}/rules`; identity adds
+      `offline_codes` only when the caller is the child themselves naming one of their own
+      registered, non-revoked devices, or the device's own PC agent key. A parent reading the
+      child's rules, another member, or a revoked or unknown device gets no field at all. The
+      approval of an unlock request still carries them too. The phone (`GuardApi.refreshStatus`,
+      `KEY_OFFLINE_CODES`) and the PC (`HubStatus.OfflineCodes`, `offline.codes.json`) replace
+      their stored set on every answer that has the list, so a set, changed or deleted code
+      takes effect the next time the device is online (an empty list clears it); an answer
+      without the field (an older hub) keeps the last good set. Before this, a device learned
+      the codes only from an approved unlock request, so a child who had never asked had a
+      tablet on which no offline code could ever work. The member page's Devices section lists
+      each parent's code as set or not set and says plainly when no parent has set one. With no connection the guard screen takes the code, checks it on the
       phone (`OfflineCode`, five wrong tries then ten minutes), lifts the guard for ten minutes
       and reports `offline_unlock` to both parents once the phone is online again. Safe mode and
       factory reset still get around Layer 1; a start in safe mode (or any start in which the

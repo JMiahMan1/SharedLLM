@@ -172,8 +172,9 @@ tests/                xunit tests for JarvisGuard.Core (plain net10.0, any OS)
   `unlock-request` / `unlock-status`, and its own loop, so it unlocks even with
   the lock surface closed) and unlocks only on the hub's approval of its own
   request; an approval it cannot trust (another request's, no time it was
-  given, longer than 240 minutes) never unlocks. The approval carries the
-  parents' offline-code verifiers,
+  given, longer than 240 minutes) never unlocks. Every status poll (and the
+  approval) carries the parents' offline-code verifiers, replaced whenever the
+  set changes and kept when an older hub sends none,
   kept in `%ProgramData%\Jarvis Guard\offline.codes.json` (SYSTEM and
   Administrators only), so a parent's offline code (set and seen in the
   parent's Jarvis app) works later with no connection. Five wrong codes lock code entry for ten minutes, the next

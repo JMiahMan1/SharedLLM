@@ -272,6 +272,7 @@ export default function DevicesSection({ username, name }: { username: string; n
     );
   }
   const parents = Object.entries(data.offline_code);
+  const anyCode = parents.some(([, set]) => set);
   return (
     <>
       {data.devices.map((d) => (
@@ -283,10 +284,23 @@ export default function DevicesSection({ username, name }: { username: string; n
           {parents.map(([parent, set]) => (
             <li key={parent} className="flex justify-between gap-2">
               <span className="capitalize text-slate-200">{parent}</span>
-              <State on={set} />
+              {set ? (
+                <span className="inline-flex items-center gap-1 text-emerald-300"><Check size={12} /> set</span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-amber-300"><X size={12} /> not set</span>
+              )}
             </li>
           ))}
         </ul>
+        {anyCode ? (
+          <p className="mt-2 text-[11px] text-slate-400" data-testid="member-offline-codes-note">
+            {name}&apos;s devices pick up a new or changed code the next time they are online.
+          </p>
+        ) : (
+          <p className="mt-2 text-[11px] text-amber-300" data-testid="member-offline-codes-none">
+            No parent has set an offline code yet, so {name}&apos;s devices cannot be unlocked without a connection. Set yours under Your offline unlock code in the Time section; each device picks it up the next time it is online.
+          </p>
+        )}
       </MemberCard>
     </>
   );

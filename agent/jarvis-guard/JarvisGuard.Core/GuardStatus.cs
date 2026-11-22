@@ -25,6 +25,14 @@ public sealed class HubStatus
     /// <summary>The hub's raw rules JSON, for offline clock evaluation when the hub is unreachable.</summary>
     public JsonElement? Rules { get; set; }
     public JsonElement? Notices { get; set; }
+    /// <summary>
+    /// The parents' offline-code verifiers (salt, iterations, hash; never a
+    /// code). The hub sends them to this PC's own agent key on every status
+    /// answer, so a code a parent sets, changes or deletes reaches the PC the
+    /// next time it is online. Null when the answer has no such list (an older
+    /// hub): the PC then keeps the set it has.
+    /// </summary>
+    public JsonElement? OfflineCodes { get; set; }
 
     public static HubStatus Parse(string json)
     {
@@ -48,6 +56,7 @@ public sealed class HubStatus
         };
         if (root.TryGetProperty("rules", out var rules) && rules.ValueKind == JsonValueKind.Object) status.Rules = rules.Clone();
         if (root.TryGetProperty("notices", out var notices) && notices.ValueKind == JsonValueKind.Array) status.Notices = notices.Clone();
+        if (root.TryGetProperty("offline_codes", out var codes) && codes.ValueKind == JsonValueKind.Array) status.OfflineCodes = codes.Clone();
         return status;
     }
 

@@ -6069,16 +6069,29 @@ def _device_word(session: Session, username: str, device_key: str = "") -> str:
 
 
 @app.get("/api/screen-time/{username}/rules")
-def get_screen_rules(username: str, day: str = "", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+def get_screen_rules(
+    username: str,
+    day: str = "",
+    device_key: str = "",
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
+):
     """A member's rules: theirs to read, their parents' to read and change,
     and readable (not changeable) by the other parent for the father and the
     mother, whose collected data they share.
 
     A Windows agent holding a device-scoped key resolves as the member the
-    device is assigned to."""
+    device is assigned to.
+
+    The member's own registered device (a phone naming its ``device_key``,
+    or a PC with its own agent key) also gets the parents' offline-code
+    verifiers (``offline_codes``, never a code), so a parent's offline code
+    works on it without an unlock request first. Nobody else gets them."""
     subject = _screen_subject(session, username)
     if caller.username != subject.username and not may_view_raw_data(caller, subject):
         raise HTTPException(status_code=403, detail="Only a parent can see this")
+    own_device = _own_device_asking(session, caller, subject, authorization, device_key)
     theme_row = session.get(UserThemeSetting, subject.username)
     try:
         theme_data = json.loads(theme_row.data) if theme_row and theme_row.data else {}
@@ -6110,7 +6123,30 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         # Who a locked phone may still call (emergency numbers always go
         # through): the parents, with their own numbers.
         "parent_contacts": _parent_contacts(session, subject),
+        # The parents' offline-code verifiers, for the member's own device only.
+        **({"offline_codes": _offline_verifiers(session, _parents_of(session, subject))} if own_device else {}),
     }
+
+
+def _own_device_asking(
+    session: Session, caller: User, subject: User, authorization: str | None, device_key: str
+) -> Device | None:
+    """The subject's own registered, not revoked device making this call, or
+    None: a PC by its own agent key, a phone by the subject's own key plus its
+    ``device_key``. A parent reading the child's rules never matches, even
+    naming the child's device key."""
+    if caller.username != subject.username:
+        return None
+    agent = _device_for_agent_key(session, authorization)
+    if agent is not None:
+        return agent if (agent.owner_username or "").lower() == subject.username else None
+    key = (device_key or "").strip()
+    if not key:
+        return None
+    device = session.exec(select(Device).where(Device.device_key == key)).first()
+    if device is None or device.revoked or (device.owner_username or "").lower() != subject.username:
+        return None
+    return device
 
 
 @app.put("/api/screen-time/{username}/rules")
@@ -6969,7 +7005,8 @@ def _expire_if_due(session: Session, r: GuardUnlockRequest, now: datetime) -> No
 
 
 def _offline_verifiers(session: Session, parents: list[str]) -> list[dict]:
-    """The parents' offline-code verifiers (never a code), for a device a parent just unlocked."""
+    """The parents' offline-code verifiers (never a code), for the child's own
+    device: its status refresh and a parent's approval of its unlock request."""
     if not parents:
         return []
     return [
@@ -7187,8 +7224,9 @@ def get_offline_code(session: Session = Depends(get_session), caller: User = Dep
 def put_offline_code(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     """A parent sets their offline unlock code: 6 to 12 digits.
 
-    A child's phone or PC learns the new code the next time a parent approves
-    an unlock request from it (the approval carries the verifiers).
+    A child's phone or PC learns the new code at its next status refresh
+    (its own rules read carries the verifiers), and from any approval of an
+    unlock request it sends.
     """
     if not _is_a_parent(session, caller):
         raise HTTPException(status_code=403, detail="Only a parent sets an offline unlock code")

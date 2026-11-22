@@ -217,8 +217,9 @@ def test_an_approval_lifts_a_pause_given_before_it(family):
     assert "paused" not in family("dad").get("/api/screen-time/kid/rules").json()["rules"]
 
 
-def test_offline_verifiers_reach_a_device_only_through_an_approval(family):
+def test_an_approval_also_carries_the_offline_verifiers(family):
     assert family("mom").put("/api/guard/offline-code", json={"code": "48291735"}).status_code == 200
+    # Without naming a device of theirs, the child's own rules read has none.
     assert "offline" not in str(family("kid").get("/api/screen-time/kid/rules").json())
     rid = _ask(family)["request"]["id"]
     assert "offline_codes" not in family("kid", PC_KEY).get(f"/api/guard/unlock-requests/{rid}").json()
@@ -244,3 +245,79 @@ def test_a_minor_is_protected_and_a_grown_member_is_not(family):
 
 def test_the_old_password_unlock_is_gone(family):
     assert family("kid").post("/api/guard/parent-unlock", json={"username": "mom", "password": "x"}).status_code in (404, 405)
+
+
+# --- the verifiers on the device's regular status refresh (its own rules read) ---
+
+
+def _rules(client, username="kid", **params):
+    r = client.get(f"/api/screen-time/{username}/rules", params=params)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _check(verifier, code):
+    digest = hashlib.pbkdf2_hmac("sha256", code.encode(), bytes.fromhex(verifier["salt"]), verifier["iterations"])
+    return digest.hex() == verifier["hash"]
+
+
+def test_the_childs_own_phone_gets_the_verifiers_without_any_unlock_request(family):
+    assert family("mom").put("/api/guard/offline-code", json={"code": "48291735"}).status_code == 200
+    assert family("dad").put("/api/guard/offline-code", json={"code": "11223344"}).status_code == 200
+
+    body = _rules(family("kid"), device_key="phone-kid")
+    codes = {c["parent"]: c for c in body["offline_codes"]}
+    assert set(codes) == {"dad", "mom"}
+    assert _check(codes["mom"], "48291735") and _check(codes["dad"], "11223344")
+    assert "48291735" not in str(body) and "11223344" not in str(body)
+    # The family PC, by its own agent key, gets them too.
+    pc = _rules(family("kid", PC_KEY), device_key="pc-kid")
+    assert {c["parent"] for c in pc["offline_codes"]} == {"dad", "mom"}
+    assert {c["parent"] for c in _rules(family("kid", PC_KEY))["offline_codes"]} == {"dad", "mom"}
+
+
+def test_nobody_else_gets_them(family):
+    family("mom").put("/api/guard/offline-code", json={"code": "48291735"})
+    # A parent reading the child's rules, even naming the child's phone.
+    assert "offline_codes" not in _rules(family("mom"), device_key="phone-kid")
+    assert "offline_codes" not in _rules(family("dad"), device_key="phone-kid")
+    # A sibling naming the child's phone as if it were theirs.
+    assert "offline_codes" not in _rules(family("sib"), username="sib", device_key="phone-kid")
+    # The sibling's PC asking about itself gets the sibling's parents' set, never by the child's key.
+    assert "offline_codes" not in _rules(family("sib"), username="sib")
+    # The child naming a revoked, unknown or someone else's device.
+    assert "offline_codes" not in _rules(family("kid"), device_key="phone-old")
+    assert "offline_codes" not in _rules(family("kid"), device_key="no-such-device")
+    assert "offline_codes" not in _rules(family("kid"), device_key="phone-grown")
+    assert "offline_codes" not in _rules(family("kid"), device_key="pc-sib")
+    # The father's own PC reading the child's rules is not the child's device.
+    assert "offline_codes" not in _rules(family("dad", DAD_PC_KEY), device_key="pc-kid")
+
+
+def test_a_revoked_pc_gets_none(family):
+    family("mom").put("/api/guard/offline-code", json={"code": "48291735"})
+    with Session(main.engine) as s:
+        pc = s.exec(select(Device).where(Device.device_key == "pc-kid")).first()
+        pc.revoked = True
+        s.add(pc)
+        s.commit()
+    assert "offline_codes" not in _rules(family("kid", PC_KEY), device_key="pc-kid")
+
+
+def test_a_changed_code_reaches_the_device_at_its_next_refresh_and_a_deleted_one_leaves(family):
+    family("mom").put("/api/guard/offline-code", json={"code": "48291735"})
+    [before] = _rules(family("kid"), device_key="phone-kid")["offline_codes"]
+    assert _check(before, "48291735")
+
+    family("mom").put("/api/guard/offline-code", json={"code": "99887766"})
+    [after] = _rules(family("kid"), device_key="phone-kid")["offline_codes"]
+    assert _check(after, "99887766") and not _check(after, "48291735")
+    assert after["salt"] != before["salt"]
+
+    assert family("mom").delete("/api/guard/offline-code").json() == {"set": False}
+    # An empty list, not a missing field: the device replaces its set and the old code stops working.
+    assert _rules(family("kid"), device_key="phone-kid")["offline_codes"] == []
+
+
+def test_with_no_parent_code_the_owner_device_gets_an_empty_list(family):
+    assert _rules(family("kid"), device_key="phone-kid")["offline_codes"] == []
