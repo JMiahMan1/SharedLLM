@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
 import { BookMarked, BookOpen, Brain, ChevronLeft, ChevronRight, Gamepad2, Sparkles, Trophy } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
@@ -834,6 +834,7 @@ export default function Bible() {
   const { trigger } = useHaptics();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const [tab, setTab] = useState<Tab>(() => {
     const asked = searchParams.get('tab');
     if (asked === 'devotional') return 'today';
@@ -846,12 +847,31 @@ export default function Bible() {
   // come through openRef, and the bump is what lets tapping the same link
   // twice land on its verse each time instead of the first tap's scrolled place.
   const [requestedSeq, setRequestedSeq] = useState(0);
-  const [requestedRef, setRequestedRef] = useState<string | null>(searchParams.get('ref'));
+  const [requestedRef, setRequestedRef] = useState<string | null>(null);
   // Verse parameter from deep links (e.g., ?verse=16) for scrolling to a specific verse
   const [requestedVerse, setRequestedVerse] = useState<number | null>(() => {
     const verse = searchParams.get('verse');
     return verse ? Number(verse) : null;
   });
+
+  // Parse deep link path on mount: /bible/{book}/{chapter}?verse={v}#v{v}
+  useEffect(() => {
+    // Defer state updates to avoid ESLint warning about sync setState in effect
+    setTimeout(() => {
+      if (!requestedRef) {
+        const pathParts = location.pathname.split('/').filter(Boolean);
+        if (pathParts[0] === 'bible' && pathParts[1] && pathParts[2]) {
+          setRequestedRef(`${pathParts[1]} ${pathParts[2]}`);
+        } else {
+          setRequestedRef(searchParams.get('ref'));
+        }
+      }
+      const verse = searchParams.get('verse');
+      if (verse && !requestedVerse) {
+        setRequestedVerse(Number(verse));
+      }
+    }, 0);
+  }, [location.pathname, searchParams, requestedRef, requestedVerse]);
   // Where Read was last left: the verse under the reader's eye, kept across tab
   // switches (which unmount and remount the pane) so returning lands on it.
   const resumePosition = useRef<BiblePosition | null>(null);

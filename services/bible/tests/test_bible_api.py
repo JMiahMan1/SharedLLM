@@ -1009,12 +1009,13 @@ def test_imported_book_reader_accepts_start_ordinal_and_scroll_fraction(loaded_c
 
 
 def test_deep_link_shape_for_bible_chapter_verse():
-    """Confirm the deep link shape for Bible: /bible/{book}/{chapter}?verse={v}#v{v}"""
+    """Confirm the deep link shape for Bible: /bible?ref={book} {chapter}&verse={v}"""
     # This is the shape used in reminders.py _build_deep_link
     book = "John"
     chapter = 3
     verse = 16
-    expected = f"/bible/{book}/{chapter}?verse={verse}#v{verse}"
+    ref = f"{book} {chapter}"
+    expected = f"/bible?ref={ref}&verse={verse}"
     # The actual construction is in reminders.py
     from services.bible.reminders import _build_deep_link
     from services.bible.models import UserBibleState
@@ -1025,7 +1026,7 @@ def test_deep_link_shape_for_bible_chapter_verse():
 
 
 def test_deep_link_shape_for_study_section():
-    """Confirm the deep link shape for studies: /bible/study/{book_id}/{ordinal}?scroll={fraction}"""
+    """Confirm the deep link shape for studies: /bible/study?book_id={book_id}&ordinal={ordinal}&scroll={fraction}"""
     from services.bible.reminders import _build_study_link
     from services.bible.models import UserBibleState
 
@@ -1036,7 +1037,7 @@ def test_deep_link_shape_for_study_section():
         last_study_scroll_fraction=0.65,
     )
     link = _build_study_link(state)
-    expected = "/bible/study/7/3?scroll=0.65"
+    expected = "/bible/study?book_id=7&ordinal=3&scroll=0.65"
     assert link == expected
 
 

@@ -68,30 +68,35 @@ def read_today(session: Session, username: str, today: str) -> bool:
 
 
 def _build_deep_link(state: UserBibleState) -> str:
-    """Build a deep link to the reader's last position: whole chapter with verse highlighted."""
+    """Build a deep link to the reader's last position: whole chapter with verse highlighted.
+
+    Format: /bible?ref={book} {chapter}&verse={verse}
+    The reader route accepts ref for the chapter and verse for the verse to scroll to.
+    """
     # Study takes priority if that's what they were last reading
     if state.last_study_book_id:
         return _build_study_link(state)
     if not state.last_book:
         return "/bible"
-    # Format: /bible/<book>/<chapter>?verse=<verse>#v<verse>
-    # The reader route should accept this and scroll to the verse
     book = state.last_book
     chapter = state.last_chapter
     verse = state.last_verse
-    return f"/bible/{book}/{chapter}?verse={verse}#v{verse}"
+    ref = f"{book} {chapter}"
+    return f"/bible?ref={ref}&verse={verse}"
 
 
 def _build_study_link(state: UserBibleState) -> str:
-    """Build a deep link to the reader's last study position."""
+    """Build a deep link to the reader's last study position.
+
+    Format: /bible/study?book_id={book_id}&ordinal={ordinal}&scroll={fraction}
+    The study reader accepts these query parameters to open at the exact position.
+    """
     if not state.last_study_book_id:
         return "/bible"
-    # Format: /bible/study/{book_id}/{ordinal}?scroll={fraction}
-    # The study reader should accept this and scroll to the position
     book_id = state.last_study_book_id
     ordinal = state.last_study_section_ordinal
     fraction = state.last_study_scroll_fraction
-    return f"/bible/study/{book_id}/{ordinal}?scroll={fraction}"
+    return f"/bible/study?book_id={book_id}&ordinal={ordinal}&scroll={fraction}"
 
 
 def _build_plan_link(plan_id: str, plan_day: int) -> str:
@@ -191,11 +196,11 @@ def streak_message_for(session: Session, username: str, today: str) -> dict | No
     verse = pick_daily_encouragement()
     # Vary the wording based on streak length
     if streak == 1:
-        body = "Day 1 down! Keep going — your streak is just beginning."
+        body = "Day 1 down! Keep going: your streak is just beginning."
     elif streak < 7:
         body = f"You're on a {streak}-day streak! Don't break it now."
     elif streak < 30:
-        body = f"A {streak}-day streak — that's faithfulness. Keep it going."
+        body = f"A {streak}-day streak: that's faithfulness. Keep it going."
     else:
         body = f"{streak} days straight. You're building a habit that lasts."
     # Add the last reading position if available
@@ -207,7 +212,7 @@ def streak_message_for(session: Session, username: str, today: str) -> dict | No
             body += f" Continue in {book_name} {state.last_chapter}:{state.last_verse}?"
         except Exception:
             body += " Want to continue where you left off?"
-    body += f" {verse.text} — {verse.reference}"
+    body += f" {verse.text}: {verse.reference}"
     return {
         "title": "Keep your streak going",
         "body": body,

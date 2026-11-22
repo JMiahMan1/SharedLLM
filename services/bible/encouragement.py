@@ -103,7 +103,7 @@ STREAK_MILESTONE_VERSES: dict[int, EncouragingVerse] = {
     ),
     3: EncouragingVerse(
         reference="Ecclesiastes 4:12",
-        text="And though a man might prevail against one who is alone, two will withstand him—a threefold cord is not quickly broken.",
+        text="And though a man might prevail against one who is alone, two will withstand him: a threefold cord is not quickly broken.",
         book="Ecclesiastes",
         chapter=4,
         verse=12,
