@@ -58,6 +58,7 @@ from typing import Any
 import aiohttp
 
 from services.common import app_review, app_vetting, common_sense, malwarebazaar, notice_links, play_listing
+from services.common.backend_health import BackendUnavailable
 from services.telemetry import guardian, llm
 from services.telemetry.config import (
     APP_CATALOG_BACKOFF_BASE_S,
@@ -805,10 +806,15 @@ async def refresh_review(rc, session, package: str) -> dict[str, Any] | None:
         "stream": False,
     }
     try:
-        content = await llm.chat_content(
+        content = await llm.local_chat_content(
             session, f"{url.rstrip('/')}/v1/chat/completions", payload, APP_REVIEW_TIMEOUT_S, what="the local model"
         )
         parsed = app_review.parse(content, listing)
+    except BackendUnavailable:
+        # The local model is offline: not this listing's failure. Keep its attempts
+        # and look again after the first retry interval.
+        await rc.zadd(REVIEW_DUE, {package: now + REVIEW_RETRY_BASE_S})
+        return previous or None
     except Exception as exc:
         attempts += 1
         review = {"status": "failed", "listing_hash": entry["hash"], "model": model, "at": _iso(now),

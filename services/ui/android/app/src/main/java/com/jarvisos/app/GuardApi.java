@@ -762,12 +762,20 @@ final class GuardApi {
      */
     static int uploadMediaScan(Context context, String mediaType, String fileName, String thumbnailB64) {
         if (!photoScanEnabled(context)) return 204;
+        // The server said the check cannot run yet (its vision model's computer is
+        // off): hold every photo check until the time it gave, without asking.
+        // 503 here means "keep it and try later", exactly as the server's would.
+        if (System.currentTimeMillis() < prefs(context).getLong(KEY_MEDIA_SCAN_PAUSED_UNTIL, 0L)) return 503;
         try {
             JSONObject body = new JSONObject();
             body.put("media_type", mediaType);
             body.put("file_name", fileName);
             body.put("image_b64", thumbnailB64);
             HttpResult r = send(context, "POST", "/api/guardian/media/scan", body.toString(), MEDIA_SCAN_READ_TIMEOUT_MS);
+            if (r != null && r.status == 503) {
+                prefs(context).edit().putLong(KEY_MEDIA_SCAN_PAUSED_UNTIL,
+                        MediaScanOutbox.pausedUntil(System.currentTimeMillis(), r.body)).apply();
+            }
             return r == null ? 0 : r.status;
         } catch (Exception e) {
             // Best effort: media scanning never blocks the phone.
@@ -811,6 +819,8 @@ final class GuardApi {
     }
 
     static final String KEY_VIDEO_CAPTURE = "guard_video_capture";
+    /** Photo checks wait until this time (epoch ms) after the server answered 503 with retry_after_s. */
+    static final String KEY_MEDIA_SCAN_PAUSED_UNTIL = "guard_media_scan_paused_until";
 
     /**
      * How the last video call screenshot went ("ok", or why it failed), and
@@ -847,6 +857,9 @@ final class GuardApi {
             body.put("file_name", "video-call-" + frameIndex + ".jpg");
             body.put("image_b64", b64);
             body.put("metadata", meta);
+            // While the server has asked photo checks to wait, a frame is not sent at all:
+            // it lives only in memory, and a call must not hammer a check that cannot run.
+            if (System.currentTimeMillis() < prefs(context).getLong(KEY_MEDIA_SCAN_PAUSED_UNTIL, 0L)) return 503;
             HttpResult r = send(context, "POST", "/api/guardian/media/scan", body.toString());
             return r == null ? 0 : r.status;
         } catch (Exception e) {

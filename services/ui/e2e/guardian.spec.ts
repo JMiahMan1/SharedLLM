@@ -172,6 +172,7 @@ async function mockApi(page: Page, viewer: Viewer) {
     // records it as unmocked and the test fails for a request the page always makes.
     if (p === INTEGRATIONS_STATUS_PATH) return json(integrationsStatus());
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
+    if (p === '/api/status/local-ai') return route.fulfill({ json: { local_ai: { state: 'up', offline: false, since: null, message: null, still_working: [] }, backends: {}, any_offline: false } });
     // The app version on offer (the page asks whether a child's tablet runs an older APK), as familyPagesMocks answers.
     if (p === '/api/app-updates/version') {
       return route.fulfill({ json: { version: '1.0.0', git_sha: 'e2e', apk_available: true, apk_version_code: 100 } });

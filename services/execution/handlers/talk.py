@@ -479,7 +479,18 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any, re
             await update_room_history(token, "assistant", cleaned_ans)
             log.info(f"[Jarvis] Successfully posted answer to room {token}")
     except Exception as e:
-        log.error(f"[Jarvis] Orchestration failed: {e}", exc_info=True)
+        from services.common.backend_health import BackendUnavailable
+
+        # orchestrator.LocalAIOffline is raised from the breaker's BackendUnavailable.
+        offline = next((c for c in (e, e.__cause__) if isinstance(c, BackendUnavailable)), None)
+        if offline is not None:
+            # The local AI is off: the breaker logged it once with its error id; one
+            # line here, not a traceback per question.
+            log.info(f"[Jarvis] Local AI offline (error id {offline.error_id}); told room {token}")
+            reply = offline.message
+        else:
+            log.error(f"[Jarvis] Orchestration failed: {e}", exc_info=True)
+            reply = "I could not answer that just now. Try again in a moment."
         # A silent failure left the room with a "Jarvis is thinking…" bubble
         # that never resolved. Say so, in the room, where the person asked.
         try:
@@ -487,7 +498,7 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any, re
                 provider,
                 token,
                 {
-                    "message": _assistant_post("I could not answer that just now. Try again in a moment."),
+                    "message": _assistant_post(reply),
                     **({"replyTo": str(reply_to)} if reply_to else {}),
                 },
             )

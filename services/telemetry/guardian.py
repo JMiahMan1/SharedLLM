@@ -27,6 +27,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from services.common import concern_monitor, concern_review, device_noun, guardian_recap, notice_links, video_calls
+from services.common.backend_health import BackendUnavailable
 from services.telemetry import app_updates, llm, notices, store
 
 log = logging.getLogger("telemetry.guardian")
@@ -214,9 +215,13 @@ async def scan_media_item(
         "stream": False,
     }
     try:
-        content = await llm.chat_content(
+        content = await llm.local_chat_content(
             session, f"{url.rstrip('/')}/v1/chat/completions", payload, MEDIA_MODEL_TIMEOUT_SECONDS
         )
+    except BackendUnavailable as exc:
+        # The GPU box is off (logged once by the breaker). Not checked is not clean:
+        # the caller answers 503 with Retry-After and the phone keeps the picture.
+        raise MediaScanUnavailable("the local vision model is offline") from exc
     except Exception as exc:
         log.warning("media scan: the vision model did not answer for %s (%s): %r", child.get("username"), file_name, exc)
         raise MediaScanUnavailable(f"the vision model did not answer: {exc!r}") from exc
@@ -284,12 +289,13 @@ async def verify_media_frame(session, category: str, image_b64: str) -> dict[str
         "stream": False,
     }
     try:
-        content = await llm.chat_content(
+        content = await llm.local_chat_content(
             session, f"{url.rstrip('/')}/v1/chat/completions", payload, MODEL_TIMEOUT_SECONDS
         )
         check = concern_review.parse_media_check(content)
     except Exception as exc:
-        log.warning("video call second check failed: %s", exc)
+        if not isinstance(exc, BackendUnavailable):
+            log.warning("video call second check failed: %s", exc)
         return {"confirmed": False, "reason": f"second check unavailable: {exc or type(exc).__name__}", "model": model}
     return {**check, "model": model}
 
@@ -440,7 +446,7 @@ async def _ask_model(session, url: str, model: str, concern: dict[str, Any], tex
         "max_tokens": 200,
         "stream": False,
     }
-    content = await llm.chat_content(session, f"{url.rstrip('/')}/v1/chat/completions", payload, MODEL_TIMEOUT_SECONDS)
+    content = await llm.local_chat_content(session, f"{url.rstrip('/')}/v1/chat/completions", payload, MODEL_TIMEOUT_SECONDS)
     return concern_review.parse_verdict(content)
 
 
@@ -465,8 +471,12 @@ async def second_pass(session, event: dict[str, Any], found: list[dict[str, Any]
             verdict = await _ask_model(session, url, model, concern, text)
             out.append(concern_review.apply(concern, verdict, model))
         except Exception as exc:
-            reason = f"local model unavailable: {exc or type(exc).__name__}"
-            log.warning("content monitoring: %s; using the phrase list for %s", reason, concern.get("category"))
+            if isinstance(exc, BackendUnavailable):
+                # Logged once by the breaker; the phrase list decides meanwhile, as designed.
+                reason = "local model offline"
+            else:
+                reason = f"local model unavailable: {exc or type(exc).__name__}"
+                log.warning("content monitoring: %s; using the phrase list for %s", reason, concern.get("category"))
             out.append(concern_review.phrase_only(concern, reason))
     return out
 

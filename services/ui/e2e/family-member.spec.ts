@@ -184,6 +184,7 @@ async function mockApi(page: Page, viewer: Viewer) {
     // records it as unmocked and the test fails for a request the page always makes.
     if (p === INTEGRATIONS_STATUS_PATH) return json(integrationsStatus());
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
+    if (p === '/api/status/local-ai') return route.fulfill({ json: { local_ai: { state: 'up', offline: false, since: null, message: null, still_working: [] }, backends: {}, any_offline: false } });
     unmocked.push(`${route.request().method()} ${p}`);
     return route.fulfill({ json: [] });
   });

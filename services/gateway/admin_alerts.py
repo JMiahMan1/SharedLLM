@@ -12,6 +12,10 @@ services named in config. Admins hear about state changes only:
   ``alert_desktop_down_minutes``. The desktop sleeps and wakes as a whole, so
   all of them share one notice (tag ``admin:desktop``) that is updated as the
   set of unreachable services changes and replaced by "back" when it empties.
+* The local AI (``local_ai.LLM``, the alpaca proxy) has its own notice (tag
+  ``admin:local-ai``): once when its breaker opens and once when it closes, with
+  what the family still has and that missions are waiting. It is left out of the
+  desktop notice so one outage is not reported twice.
 * A watched HTTPS certificate (``alert_tls_hosts``) is checked every
   ``TLS_CHECK_SECONDS``: admins hear once when it is within
   ``alert_tls_days`` of expiring or no longer valid, and once more when a
@@ -156,8 +160,8 @@ def desktop_transitions(state: dict[str, Any], reachable: dict[str, bool], now: 
 
 def desktop_targets(settings: dict[str, Any]) -> dict[str, str]:
     """Label -> URL for every desktop service configured; unset ones are skipped."""
+    # The LLM proxy is not here: the local AI notice (local_ai_transitions) covers it.
     candidates = {
-        "LLM proxy": settings.get("llm_local_url") or "",
         "Vision OCR": settings.get("vision_ocr_proxy_url") or "",
         "Audio server": f"{ALPACA_AUDIO_URL}/health" if ALPACA_AUDIO_URL else "",
         "Alpaca dashboard": ALPACA_WEB_URL,
@@ -171,6 +175,40 @@ def desktop_targets(settings: dict[str, Any]) -> dict[str, str]:
             seen.add(url)
             targets[label] = url
     return targets
+
+
+def local_ai_transitions(state: dict[str, Any], snap: dict[str, Any]) -> list[dict[str, Any]]:
+    """One notice when the local AI goes offline and one when it is back; updates ``state``.
+
+    ``snap`` is ``local_ai.LLM.snapshot()``. ``state["alerted"]`` (kept in Redis)
+    is what stops a repeat, across passes and gateway restarts.
+    """
+    down = snap.get("state") == "down"
+    if down and not state.get("alerted"):
+        state.update(alerted=True, error_id=snap.get("error_id"), since=snap.get("since"))
+        when = datetime.fromtimestamp(float(snap.get("since") or time.time())).strftime("%H:%M")
+        return [{
+            "title": "Local AI offline",
+            "body": (f"Jarvis's local AI has not answered since {when} (error id {snap.get('error_id')}). "
+                     "Questions that need it get a plain 'offline' reply at once; home control, time and "
+                     "weather still work. Missions and background jobs are waiting and resume on their own."),
+            "priority": 4,
+            "tag": "admin:local-ai",
+            **_open_dashboard(),
+        }]
+    if not down and state.get("alerted"):
+        since = float(state.get("since") or 0)
+        minutes = int((time.time() - since) // 60) if since else 0
+        state.update(alerted=False, error_id=None, since=None)
+        return [{
+            "title": "Local AI back",
+            "body": f"Jarvis's local AI is answering again{f' after {minutes} min' if minutes else ''}. "
+                    "Waiting missions are resuming.",
+            "priority": 2,
+            "tag": "admin:local-ai",
+            **_open_dashboard(),
+        }]
+    return []
 
 
 async def _answers(client: aiohttp.ClientSession, url: str) -> bool:
@@ -360,6 +398,11 @@ async def check_once(r, client: aiohttp.ClientSession, settings: dict[str, Any],
     down_minutes = int(settings.get("alert_desktop_down_minutes") or ALERT_DESKTOP_DOWN_MINUTES)
     _queue(outbox, desktop_transitions(state.setdefault("desktop", {}), dict(zip(targets, results, strict=False)),
                                        now, down_minutes))
+
+    from services.gateway import local_ai
+
+    if local_ai.LLM.url or local_ai.LLM.is_down():
+        _queue(outbox, local_ai_transitions(state.setdefault("local_ai", {}), local_ai.LLM.snapshot()))
 
     hosts = tls_hosts(settings)
     tls_state = state.setdefault("tls", {})

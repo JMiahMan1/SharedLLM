@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatReplyText } from './chatReply';
+import { chatFailureText, chatReplyText, isOfflineFailure } from './chatReply';
 
 describe('chatReplyText', () => {
   it('reads the Ollama-shaped answer the gateway sends by default', () => {
@@ -18,5 +18,27 @@ describe('chatReplyText', () => {
     expect(chatReplyText({ message: { role: 'assistant', content: '' } })).toBeNull();
     expect(chatReplyText(null)).toBeNull();
     expect(chatReplyText('nope')).toBeNull();
+  });
+});
+
+describe('chatFailureText', () => {
+  const offline = "Jarvis's thinking brain (the local AI) is offline right now.";
+
+  it('shows the sentence a failed chat turn carries, not a generic failure', () => {
+    const err = { response: { status: 503, data: {
+      status: 'ERROR', message: { role: 'assistant', content: offline }, error: offline, offline: 'local_ai',
+    } } };
+    expect(chatFailureText(err)).toBe(offline);
+    expect(isOfflineFailure(err)).toBe(true);
+  });
+
+  it('reads the OpenAI error shape', () => {
+    expect(chatFailureText({ response: { data: { error: { message: offline } } } })).toBe(offline);
+  });
+
+  it('has nothing to show for a lost connection', () => {
+    expect(chatFailureText({ code: 'ERR_NETWORK' })).toBeNull();
+    expect(chatFailureText(new Error('boom'))).toBeNull();
+    expect(isOfflineFailure({ response: { data: { status: 'ERROR' } } })).toBe(false);
   });
 });

@@ -12,14 +12,16 @@ import os
 import re
 import threading
 import time
+import uuid
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
 
+from services.common.backend_health import BackendUnavailable
 from services.config import JARVIS_TALK_CLAIM_KEY
-from services.gateway import notices
+from services.gateway import local_ai, notices
 from services.gateway.agent_loop import mission_stopped_early, should_persist_learning
 from services.gateway.config import (
     EXECUTION_SVC,
@@ -113,6 +115,42 @@ MAX_INFLIGHT_INFERENCE_JOBS = 8
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
+def offline_cause(exc: BaseException | None) -> BackendUnavailable | None:
+    """The breaker's ``BackendUnavailable`` behind ``exc``, if a backend being off is why it failed."""
+    seen = 0
+    while exc is not None and seen < 6:
+        if isinstance(exc, BackendUnavailable):
+            return exc
+        exc = exc.__cause__ or exc.__context__
+        seen += 1
+    return None
+
+
+def describe_failure(exc: BaseException, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """What a person is told about a failed chat job, and the fields that go with it.
+
+    Never the exception text: that goes to the log under the error id. The local
+    AI being offline is its own case (503, ``local_ai_offline``), spoken in a
+    shorter sentence on a voice satellite.
+    """
+    from services.gateway.orchestrator import InferenceUnavailable
+
+    offline = offline_cause(exc)
+    if offline is not None:
+        voice = bool(payload.get("voice_context")) or payload.get("client") == "voice"
+        body = local_ai.offline_body(offline, voice=voice)
+        return body["message"], {"code": body["error_code"], "error_id": offline.error_id,
+                                 "http_status": 503, "offline": offline.backend, "retryable": True}
+    error_id = uuid.uuid4().hex[:8]
+    if isinstance(exc, InferenceUnavailable):
+        log.error(f"[Worker] The model could not answer (error id {error_id}): {exc}")
+        return local_ai.MODEL_TROUBLE, {"code": "inference_failed", "error_id": error_id, "http_status": 503,
+                                        "retryable": True}
+    log.error(f"[Worker] Chat job failed (error id {error_id}): {type(exc).__name__}: {exc}")
+    return local_ai.ANSWER_FAILED, {"code": "job_failed", "error_id": error_id, "http_status": 500,
+                                    "retryable": True}
+
+
 def _spawn(coro) -> asyncio.Task:
     task = asyncio.ensure_future(coro)
     _BACKGROUND_TASKS.add(task)
@@ -177,6 +215,86 @@ class RavenWorker:
         #: while this set has room, so one long Raven mission cannot stop Tier 2
         #: work from starting.
         self._inference_jobs: set[asyncio.Task] = set()
+        #: True while background work is held back because the local AI is offline.
+        self._llm_paused = False
+        self._last_touch = 0.0
+
+    def _is_deferrable(self, job: dict[str, Any]) -> bool:
+        """Work that waits for the local AI instead of being told it is offline:
+        missions and other autonomous or background jobs. A person's question is not."""
+        payload = job.get("payload") or {}
+        return bool(payload.get("background")) or self._is_autonomous_job(payload, str(job.get("user_id") or ""))
+
+    async def _local_ai_paused(self) -> bool:
+        """Whether to hold off claiming now, because the local AI is offline.
+
+        Queued missions and background jobs stay where they are (their records are
+        kept alive, so a long outage loses nothing) and start on their own once a
+        probe finds the machine again. A person's question at the head of the
+        queue is still claimed: it fails at once with the plain "offline" reply.
+        """
+        if not local_ai.LLM.is_down():
+            if self._llm_paused:
+                self._llm_paused = False
+                with suppress(Exception):
+                    waiting = await self.job_queue.queued_count()
+                    log.warning(f"[Worker] The local AI is back: resuming {waiting} queued job(s).")
+            await self._announce_local_ai_back()
+            return False
+        try:
+            from services.gateway.orchestrator import get_all_settings
+
+            if not local_ai.uses_local_llm(await get_all_settings()):
+                return False
+        except Exception as e:
+            log.debug(f"[Worker] Could not read the provider setting ({e}); treating the local AI as in use")
+        head = await self.job_queue.peek_job()
+        if head is not None and not self._is_deferrable(head):
+            return False
+        now = time.time()
+        if not self._llm_paused:
+            self._llm_paused = True
+            waiting = await self.job_queue.queued_count()
+            log.warning(f"[Worker] The local AI is offline: leaving {waiting} queued job(s) waiting "
+                        f"until it is back (error id {local_ai.LLM.error_id}).")
+        if now - self._last_touch >= 300:
+            self._last_touch = now
+            await self.job_queue.touch_queued_jobs()
+        await asyncio.sleep(1.0)
+        return True
+
+    async def _announce_local_ai_back(self) -> None:
+        """Tell the people who were promised "I'll let you know" that it is back."""
+        users = local_ai.take_waiting()
+        if not users:
+            return
+        from services.common import notify
+
+        error_id = local_ai.LLM.error_id
+        for user in users:
+            try:
+                await notify.send(local_ai.back_notice(user, error_id))
+            except Exception as e:  # a notice must never stop the queue
+                log.warning(f"[Worker] Could not tell {user} the local AI is back: {e}")
+        log.info(f"[Worker] Told {len(users)} person(s) the local AI is back.")
+
+    async def _park_mission(self, job_id: str, mission_id: Any, offline: BackendUnavailable) -> None:
+        """The local AI went offline under a mission: put it back in the queue, not failed.
+
+        The agent loop kept its checkpoint, so it resumes from the step it was on.
+        """
+        await self.job_queue.requeue_job(job_id, note=local_ai.MISSION_WAITING)
+        log.warning(f"[Worker] Mission {mission_id} is waiting for the local AI (error id {offline.error_id}).")
+        try:
+            async with _shared_http_client() as client:
+                await client.patch(
+                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
+                    json={"status": "queued", "result": local_ai.MISSION_WAITING},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                )
+        except Exception as patch_e:
+            log.error(f"Failed to mark mission {mission_id} as waiting: {patch_e}")
+
     def _is_autonomous_job(self, payload: dict[str, Any], user_id: str) -> bool:
         """Determine if a job requires Tier-3 (Raven) exclusive lock."""
         # A job carrying a `_mission_id` was submitted through the Raven mission
@@ -378,7 +496,10 @@ class RavenWorker:
                 suspended = str(settings.get("raven_suspended") or "false").lower() == "true"
                 interval_s = max(60, minutes * 60) if minutes > 0 else 300
 
-                if minutes > 0 and not suspended and await self.job_queue.claim_loop(
+                if minutes > 0 and local_ai.LLM.is_down():
+                    # Paused, not failed: the next pass after the local AI is back runs as usual.
+                    log.debug("[Trainer] the local AI is offline; skipping this pass.")
+                elif minutes > 0 and not suspended and await self.job_queue.claim_loop(
                     "trainer", self._lease_token, max(600, interval_s * 2)
                 ):
                     from services.gateway.trainer import facilitator
@@ -430,6 +551,8 @@ class RavenWorker:
                 suspended = str(settings.get("raven_suspended") or "false").lower() == "true"
                 if not settings:
                     log.warning("[Teacher] Identity settings could not be read; skipping this pass.")
+                elif local_ai.LLM.is_down():
+                    log.debug("[Teacher] the local AI is offline; skipping this pass.")
                 elif not suspended and await self.job_queue.claim_loop(
                     "trainer-teacher", self._lease_token, teacher_auto.PASS_SECONDS * 2
                 ):
@@ -467,10 +590,14 @@ class RavenWorker:
                     if reclaimed:
                         log.warning("Recovered %s expired Raven job(s) back into the queue.", reclaimed)
 
+                    # Missions and background jobs wait while the local AI is offline.
+                    if await self._local_ai_paused():
+                        continue
+
                     # Periodically reap orphaned queued/executing missions (no backing
                     # Redis job) so they cannot linger forever after a worker crash.
                     now = time.time()
-                    if now - getattr(self, "_last_reap", 0) > 60:
+                    if now - getattr(self, "_last_reap", 0) > 60 and not local_ai.LLM.is_down():
                         self._last_reap = now
                         try:
                             await self._reap_orphaned_missions()
@@ -1241,12 +1368,31 @@ class RavenWorker:
                     log.error(f"Failed to update mission {mission_id} status: {patch_e}")
 
         except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            log.error(f"Failed to process job {job_id}: {e}\n{tb}")
-            await self.job_queue.fail_job(job_id, str(e))
-
+            offline = offline_cause(e)
             mission_id = payload.get("_mission_id")
+            if offline is not None and (mission_id or self._is_deferrable(job)):
+                # Not the job's failure: the local AI is offline. It waits, and resumes.
+                if mission_id:
+                    await self._park_mission(job_id, mission_id, offline)
+                else:
+                    await self.job_queue.requeue_job(job_id, note=local_ai.BACKGROUND_PAUSED)
+                return
+            public, detail = describe_failure(e, payload)
+            if offline is None:
+                import traceback
+                log.error(f"Failed to process job {job_id} (error id {detail['error_id']}): {e}\n"
+                          f"{traceback.format_exc()}")
+            await self.job_queue.fail_job(job_id, public, detail)
+            if offline is not None:
+                # Promised "I'll let you know when it's back" (typed chat, not a satellite).
+                if not payload.get("voice_context") and not payload.get("_talk_token"):
+                    local_ai.remember_waiting(user_id)
+                if payload.get("device_id"):
+                    await self._trigger_tts_callback(payload, public)
+            if payload.get("_talk_token"):
+                # The room asked; say so in the room instead of leaving it waiting.
+                await self._trigger_talk_callback(payload, public)
+
             if mission_id:
                 try:
                     async with _shared_http_client() as client:

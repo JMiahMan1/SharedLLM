@@ -292,7 +292,25 @@ def test_a_model_that_cannot_answer_is_reported_as_a_failure(auth_headers, asks,
     response = _post(auth_headers, query="what did he say?", mode="librarian")
 
     assert response.status_code == 503
-    assert "queue_timeout" in response.json()["detail"]
+    detail = response.json()["detail"]
+    # Plain words and an error id for the log line; the server's own text stays in the log.
+    assert "queue_timeout" not in detail
+    assert "error id" in detail
+
+
+def test_an_offline_local_ai_is_said_plainly(auth_headers, asks, monkeypatch):
+    """With the local AI's breaker open the turn says the thinking brain is offline."""
+    from services.gateway import local_ai
+
+    async def offline(**kwargs):
+        raise orchestrator.LocalAIOffline(local_ai.LLM.unavailable())
+
+    monkeypatch.setattr(orchestrator, "_single_turn_inference", offline)
+
+    response = _post(auth_headers, query="what did he say?", mode="librarian")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == local_ai.CHAT_OFFLINE
 
 
 def test_a_raven_dispatch_does_not_force_the_library(asks, auth_headers):

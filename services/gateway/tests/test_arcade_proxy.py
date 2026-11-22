@@ -93,7 +93,7 @@ async def test_arcade_games_reports_offline(monkeypatch):
 
     assert payload["success"] is False
     assert payload["arcade_available"] is False
-    assert "connect timeout" in payload["error"]
+    assert "connect timeout" not in payload["error"] and "error id" in payload["error"]
     assert payload["games"] == []
     assert payload["count"] == 0
 

@@ -43,7 +43,7 @@ class FakeJobQueue:
     async def complete_job(self, job_id, result):
         self.completed.append((job_id, result))
 
-    async def fail_job(self, job_id, error):
+    async def fail_job(self, job_id, error, detail=None):
         self.failed.append((job_id, error))
 
 

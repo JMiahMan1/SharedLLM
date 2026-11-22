@@ -118,6 +118,8 @@ from services.gateway import (
 )
 from services.gateway import beloved as beloved_routes
 from services.gateway import client_origin
+from services.gateway import local_ai
+from services.common.backend_health import BackendUnavailable
 from services.gateway.trainer import routes as trainer_routes
 from services.gateway import context_routes
 from services.gateway.studio import routes as studio_routes
@@ -146,6 +148,7 @@ from services.gateway.config import (
     HEALTH_SVC,
     IDENTITY_SVC,
     INTERNAL_SECRET,
+    LLM_URL,
     LOGGING_SVC,
     OLLAMA_TIMEOUT,
     RAG_SVC,
@@ -433,6 +436,45 @@ def _make_openai_error(message: str, model: str) -> Any:
         "choices": [],
         "error": {"message": message, "type": "model_config_error", "code": 503}
     }
+
+def _chat_failure(message: str, model: str, is_openai: bool, detail: dict | None = None,
+                  default_status: int = 500) -> JSONResponse:
+    """A failed chat turn in the shape the caller speaks, with the right status.
+
+    ``message`` is the plain sentence for the person (never exception text); the
+    Ollama shape also carries it as the assistant's ``message.content`` so a
+    client that only reads the reply still shows it, and ``detail`` adds
+    ``error_code``, ``error_id`` and ``offline``.
+    """
+    detail = detail or {}
+    status = int(detail.get("http_status") or default_status)
+    extra = {k: v for k, v in (("error_code", detail.get("code")), ("error_id", detail.get("error_id")),
+                               ("offline", detail.get("offline")), ("retryable", detail.get("retryable")))
+             if v is not None}
+    if is_openai:
+        body = _make_openai_error(message, model)
+        body["error"].update({"type": detail.get("code") or "job_failed", "code": status,
+                              **{k: v for k, v in extra.items() if k != "error_code"}})
+        body.update({"message": message, **extra})
+    else:
+        body = {**_make_ollama_error(message, model), **extra}
+    headers = {"Retry-After": str(int(local_ai.SETTINGS.probe_interval))} if detail.get("offline") else None
+    return JSONResponse(body, status_code=status, headers=headers)
+
+
+def _offline_chat_reply(model: str, is_openai: bool, *, voice: bool, user: str | None) -> JSONResponse:
+    """The answer to a question that needs the local AI while it is known to be offline:
+    at once, in plain words, 503. Typed chat is promised a notice when it is back."""
+    exc = local_ai.LLM.unavailable()
+    body = local_ai.offline_body(exc, voice=voice)
+    if not voice:
+        local_ai.remember_waiting(user)
+    log.info(f"[ChatHandler] local AI offline (error id {exc.error_id}); answered at once")
+    return _chat_failure(body["message"], model, is_openai, {
+        "code": body["error_code"], "error_id": exc.error_id, "http_status": 503, "offline": exc.backend,
+        "retryable": True,
+    })
+
 
 # --- Imports from internal modules ---
 
@@ -801,6 +843,14 @@ async def lifespan(app: FastAPI):
     # Validate critical configuration from Identity
     try:
         settings = await get_all_settings()
+        # The GPU box's services: up/down state, fail-fast and background probes
+        # (local_ai.py). Addresses come from settings and .env, never a literal.
+        local_ai.configure(
+            llm_url=str(settings.get("llm_local_url") or LLM_URL or ""),
+            arcade_url=ALPACA_ARCADE_URL,
+            audio_url=ALPACA_AUDIO_URL,
+        )
+        local_ai.start_watching()
         _config_validation_result = validate_config(settings)
         log.info(f"[ConfigValidation] {_config_validation_result.summary()}")
         if not _config_validation_result.is_functional:
@@ -1123,6 +1173,15 @@ async def circuit_breaker_health(request: Request):
     if not creds_data.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
     return {"breakers": breaker_snapshots()}
+
+
+@app.get("/api/status/local-ai")
+async def local_ai_status(request: Request):
+    """Whether Jarvis's local AI (and the arcade, music and voice server on the same
+    machine) is reachable, for the app's offline banner. Any signed-in member: it
+    names no host, address or error text, only what is offline and what still works."""
+    await _require_identity_from_request(request)
+    return local_ai.status_snapshot()
 
 
 @app.get("/api/docs")
@@ -3200,6 +3259,8 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
     then returns it to be analyzed by the dev model.
     """
     log.info("[ShadowExecution] Initiating...")
+    if local_ai.LLM.is_down():
+        return ""  # it would poll /api/ps for two minutes against a machine that is off
     # 1. Query the 'Live' model for a proposal
     proposal_prompt = (
         "You are the production instance of SharedLLM. Provide a concise, logical proposal "
@@ -3229,13 +3290,15 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
                 deadline = asyncio.get_running_loop().time() + 120.0
                 while asyncio.get_running_loop().time() < deadline:
                     try:
-                        ps_resp = await slot_client.get(f"{ollama_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
+                        ps_resp = await slot_client.get(f"{ollama_url}/api/ps",
+                                                        timeout=aiohttp.ClientTimeout(total=3.0, sock_connect=2.5))
                         if ps_resp.status == 200:
                             slots = (await ps_resp.json()).get("slots", {})
                             if slots.get("available", 0) > 0:
                                 break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        if local_ai.LLM.record_failure(e):
+                            return ""
                     await asyncio.sleep(0.5)
                 else:
                     log.warning("[ShadowExecution] No slots available, proceeding anyway")
@@ -3855,6 +3918,13 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
             return
         if job["status"] == JobStatus.FAILED:
             err = str(job.get("error") or "Job failed")
+            fail = job.get("error_detail") or {}
+            if fail.get("offline"):
+                # The satellite says the plain sentence ("my thinking brain is offline")
+                # rather than playing its error chime.
+                yield json.dumps(_make_ollama_chunk("", model, True, reply=err, speech_rest=err, voice=reply_voice,
+                                                    error_code=fail.get("code"), error_id=fail.get("error_id"))) + "\n"
+                return
             yield json.dumps(_make_ollama_chunk("", model, True, error=err, voice=reply_voice)) + "\n"
             return
         await asyncio.sleep(0.05)
@@ -4468,11 +4538,12 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_ollama_response(msg, selected_model, "model_config_error")
 
         mission_id = mission["id"]
+        waiting_note = f" {local_ai.MISSION_WAITING}" if local_ai.LLM.is_down() else ""
         result_payload = {
             "status": "queued",
             "mission_id": mission_id,
             "message": (
-                f"Raven mission #{mission_id} dispatched. You will be notified when it completes. "
+                f"Raven mission #{mission_id} dispatched.{waiting_note} You will be notified when it completes. "
                 f"Track its progress in JarvisLab > Missions or at /api/raven/missions/{mission_id}. "
                 "Results are written into the mission's shared workspace (Workspaces page, "
                 "path users/default/raven-<topic>) for you to open, inspect, and download."
@@ -4484,6 +4555,13 @@ async def chat_handler(request: Request, background_tasks=None):
                 json.dumps(result_payload, indent=2), selected_model, "raven_mission"
             )
         return JSONResponse(status_code=202, content=result_payload)
+
+    # Everything below needs the local AI. When it is known to be offline, say so
+    # now (well under a second) instead of queueing a turn that would wait out a
+    # retry ladder against a machine that is off. Fast paths above still answered;
+    # Raven missions above were queued and wait for it.
+    if local_ai.llm_down(await get_all_settings()):
+        return _offline_chat_reply(selected_model, is_openai, voice=bool(voice_context), user=user_id)
 
     # Agentic path: standard OpenAI/Ollama clients that send `tools` (or
     # explicit `"agentic": true`) get a bounded multi-turn loop where the
@@ -4657,10 +4735,15 @@ async def chat_handler(request: Request, background_tasks=None):
 
                     if job["status"] == JobStatus.FAILED:
                         err = job.get("error", "Unknown error")
+                        fail = job.get("error_detail") or {}
+                        # An offline local AI is a plain sentence, not an "[ERROR]".
+                        text = err if fail.get("offline") else f"[ERROR]: {err}"
                         if is_openai:
-                            yield f"data: {json.dumps(_make_openai_chunk(f'[ERROR]: {err}', selected_model, 'stop'))}\n\n"
+                            yield f"data: {json.dumps(_make_openai_chunk(text, selected_model, 'stop'))}\n\n"
                         else:
-                            yield json.dumps(_make_ollama_chunk(f"[ERROR]: {err}", selected_model, True)) + "\n"
+                            yield json.dumps(_make_ollama_chunk(
+                                text, selected_model, True, error_code=fail.get("code"), error_id=fail.get("error_id"),
+                            )) + "\n"
                         break
 
                     if is_openai:
@@ -4700,10 +4783,8 @@ async def chat_handler(request: Request, background_tasks=None):
                         return _make_openai_response(clean_ans, selected_model, thinking=thinking if show_thinking else None)
                     return _make_ollama_response(clean_ans, selected_model, thinking=thinking if show_thinking else None)
                 if job["status"] == JobStatus.FAILED:
-                    err_msg = job.get("error", "Job failed")
-                    if is_openai:
-                        return JSONResponse(_make_openai_error(err_msg, selected_model), status_code=500)
-                    return JSONResponse(_make_ollama_error(err_msg, selected_model), status_code=500)
+                    return _chat_failure(str(job.get("error") or "Job failed"), selected_model, is_openai,
+                                         job.get("error_detail"))
                 await asyncio.sleep(0.2)
 
     # JARVIS-SPECIFIC CLIENTS (202 Accepted + SSE Polling)
@@ -4782,7 +4863,8 @@ async def stream_chat_job(job_id: str, request: Request):
                     break
 
                 if status == JobStatus.FAILED:
-                    yield f"data: {json.dumps({'status': 'FAILED', 'error': job.get('error')})}\n\n"
+                    fail = job.get("error_detail") or {}
+                    yield f"data: {json.dumps({'status': 'FAILED', 'error': job.get('error'), 'error_code': fail.get('code'), 'error_id': fail.get('error_id'), 'offline': fail.get('offline')})}\n\n"
                     break
 
                 # Wait for the next status change via pub/sub; fall back to a
@@ -4823,10 +4905,8 @@ async def get_chat_job_status(job_id: str, request: Request):
         return _make_ollama_response(result, job["payload"]["model"], "completed")
 
     if job["status"] == JobStatus.FAILED:
-        err_msg = job.get("error", "Job failed")
-        if job["payload"].get("is_openai"):
-            return JSONResponse(_make_openai_error(err_msg, job["payload"].get("model", "unknown")), status_code=500)
-        return JSONResponse(_make_ollama_error(err_msg, job["payload"].get("model", "unknown")), status_code=500)
+        return _chat_failure(str(job.get("error") or "Job failed"), job["payload"].get("model", "unknown"),
+                             bool(job["payload"].get("is_openai")), job.get("error_detail"))
 
     return {
         "status": job["status"].upper(),
@@ -5474,13 +5554,40 @@ def _rank_arcade_games(games: list, featured_slugs: list, sort: str | None = Non
 
 
 def _arcade_url() -> str:
-    """The arcade's LAN address, or a descriptive error naming the setting."""
+    """The arcade's LAN address, or a descriptive error naming the setting.
+
+    While the arcade's machine is known to be off this raises ``BackendUnavailable``
+    at once (local_ai.ARCADE), so the home screen's polls neither wait on a connect
+    timeout nor log a warning every few seconds.
+    """
     if not ALPACA_ARCADE_URL:
         raise RuntimeError(
             "ALPACA_ARCADE_URL is not set; set it in .env to the alpaca arcade "
             "(e.g. http://<llm-host>:5001) and restart the gateway"
         )
+    local_ai.ARCADE.set_url(ALPACA_ARCADE_URL)
+    local_ai.ARCADE.check()
     return ALPACA_ARCADE_URL.rstrip("/")
+
+
+def _arcade_failed(what: str, exc: BaseException) -> None:
+    """Log an arcade call that failed, once per outage when the machine is off."""
+    if local_ai.ARCADE.record_failure(exc):
+        return  # the breaker logged the outage once; each refused poll is DEBUG
+    log.warning("arcade: %s failed: %s", what, exc)
+
+
+def _arcade_error(exc: BaseException) -> str:
+    """What the app shows for a failed arcade call: plain words, no host or socket text."""
+    if local_ai.ARCADE.record_failure(exc):
+        return local_ai.ARCADE_OFFLINE
+    error_id = uuid.uuid4().hex[:8]
+    log.warning("arcade: call failed (error id %s): %s", error_id, exc)
+    return f"The arcade could not answer just now (error id {error_id})."
+
+
+def _arcade_status(exc: BaseException) -> int:
+    return 503 if local_ai.ARCADE.is_down() else 502
 
 
 def _arcade_public_url() -> str:
@@ -5518,7 +5625,7 @@ async def _family_published_slugs() -> set[str]:
             resp = await client.get(f"{_arcade_url()}/api/family/games", timeout=aiohttp.ClientTimeout(total=8.0))
             data = await _safe_json(resp)
     except Exception as exc:
-        log.warning("arcade: family states unavailable: %s", exc)
+        _arcade_failed("family states lookup", exc)
         return set()
     if resp.status >= 400 or not isinstance(data, dict) or not isinstance(data.get("games"), list):
         return set()
@@ -5583,11 +5690,12 @@ async def proxy_family_games(request: Request):
         if resp.status >= 400 or not isinstance(data, dict) or not isinstance(data.get("games"), list):
             raise ValueError(f"arcade responded {resp.status}")
     except Exception as exc:  # report the failure, never swallow it
-        log.warning("arcade: family games fetch failed: %s", exc)
+        _arcade_failed("family games fetch", exc)
         return {
             "success": False,
             "arcade_available": False,
-            "error": f"Arcade unreachable: {exc}",
+            "error": _arcade_error(exc),
+            "offline": local_ai.ARCADE.is_down(),
             **base,
             "games": [],
             "review": [],
@@ -5644,8 +5752,8 @@ async def proxy_family_game_state(slug: str, request: Request):
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
             return await _proxy_json_response(resp)
-    except aiohttp.ClientError as exc:
-        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+    except (aiohttp.ClientError, BackendUnavailable) as exc:
+        raise HTTPException(status_code=_arcade_status(exc), detail=_arcade_error(exc)) from exc
 
 
 @app.get("/api/arcade/live")
@@ -5661,8 +5769,8 @@ async def proxy_arcade_live(request: Request):
             if resp.status != 200:
                 return {"success": False, "arcade_available": True, "rooms": []}
             body = await resp.json()
-    except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
-        log.warning("arcade: live rooms fetch failed: %s", exc)
+    except (TimeoutError, aiohttp.ClientError, ValueError, BackendUnavailable) as exc:
+        _arcade_failed("live rooms fetch", exc)
         return {"success": False, "arcade_available": False, "rooms": []}
     rooms = [r for r in (body.get("rooms") or []) if isinstance(r, dict) and r.get("code")]
     return {"success": True, "arcade_available": True, "rooms": rooms}
@@ -5676,8 +5784,8 @@ async def proxy_party_rooms(request: Request):
         async with shared_http_client() as client:
             resp = await client.get(f"{_arcade_url()}/api/party/rooms", timeout=aiohttp.ClientTimeout(total=8.0))
             return await _proxy_json_response(resp)
-    except aiohttp.ClientError as exc:
-        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+    except (aiohttp.ClientError, BackendUnavailable) as exc:
+        raise HTTPException(status_code=_arcade_status(exc), detail=_arcade_error(exc)) from exc
 
 
 @app.post("/api/arcade/party/rooms/{code}/end")
@@ -5697,8 +5805,8 @@ async def proxy_party_room_end(code: str, request: Request):
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
             return await _proxy_json_response(resp)
-    except aiohttp.ClientError as exc:
-        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+    except (aiohttp.ClientError, BackendUnavailable) as exc:
+        raise HTTPException(status_code=_arcade_status(exc), detail=_arcade_error(exc)) from exc
 
 
 def _arcade_initials(username: str) -> str:
@@ -5795,8 +5903,8 @@ async def proxy_arcade_scoreboard(request: Request):
             players = await asyncio.gather(*(one(m) for m in members if m.get("username")))
         players.sort(key=lambda p: (-p["best_score"], p["display_name"].lower()))
         return {"success": True, "arcade_available": True, "players": players}
-    except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
-        log.warning("arcade: scoreboard fetch failed: %s", exc)
+    except (TimeoutError, aiohttp.ClientError, ValueError, BackendUnavailable) as exc:
+        _arcade_failed("scoreboard fetch", exc)
         return {"success": False, "arcade_available": False, "players": [], "error": str(exc)}
 
 
@@ -5834,8 +5942,8 @@ async def proxy_arcade_score(slug: str, request: Request):
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
             return await _proxy_json_response(resp)
-    except aiohttp.ClientError as exc:
-        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+    except (aiohttp.ClientError, BackendUnavailable) as exc:
+        raise HTTPException(status_code=_arcade_status(exc), detail=_arcade_error(exc)) from exc
 
 
 @app.get("/api/arcade/highscores")
@@ -5870,8 +5978,8 @@ async def proxy_arcade_highscores(request: Request):
             "players": players,
             "games": payload.get("games") or [],
         }
-    except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
-        log.warning("arcade: highscores fetch failed: %s", exc)
+    except (TimeoutError, aiohttp.ClientError, ValueError, BackendUnavailable) as exc:
+        _arcade_failed("highscores fetch", exc)
         return {
             "success": False,
             "arcade_available": False,
@@ -5903,11 +6011,12 @@ async def proxy_arcade_games(request: Request = None):
         ranked = _rank_arcade_games(games, featured_slugs, sort)
         return {"success": True, "arcade_available": True, **payload, **ranked, "count": len(games)}
     except Exception as exc:  # report the failure, never swallow it
-        log.warning("arcade: games fetch failed: %s", exc)
+        _arcade_failed("games fetch", exc)
         return {
             "success": False,
             "arcade_available": False,
-            "error": f"Arcade unreachable: {exc}",
+            "error": _arcade_error(exc),
+            "offline": local_ai.ARCADE.is_down(),
             **payload,
             "featured": [],
             "featured_source": "none",
@@ -5966,8 +6075,8 @@ async def proxy_arcade_rate(slug: str, request: Request):
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
             return await _proxy_json_response(resp)
-    except aiohttp.ClientError as exc:
-        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+    except (aiohttp.ClientError, BackendUnavailable) as exc:
+        raise HTTPException(status_code=_arcade_status(exc), detail=_arcade_error(exc)) from exc
 
 
 #: Each game's TV stage page on the arcade. A caller names the game, never a
@@ -7751,7 +7860,11 @@ async def guardian_media_scan(request: Request):
     async with borrow_http_client() as client:
         resp = await client.post(f"{TELEMETRY_SVC}/api/telemetry/media/scan", json=payload, headers=headers)
         data = await resp.json(content_type=None)
-        return JSONResponse(status_code=resp.status, content=data)
+        # A check that could not run (the local vision model is offline) comes back
+        # 503 with Retry-After: passed on, so the phone keeps the picture and waits.
+        retry_after = (getattr(resp, "headers", None) or {}).get("Retry-After")
+        return JSONResponse(status_code=resp.status, content=data,
+                            headers={"Retry-After": retry_after} if retry_after else None)
 
 
 @app.get("/api/family/member/{user}/devices")
@@ -10658,12 +10771,20 @@ async def sd_image_generate_proxy(request: Request):
     body = await request.json()
     try:
         base_url = await sd_proxy_base_url()
+        local_ai.IMAGES.check()
         resp = await get_http_client().post(f"{base_url}/v1/images/generations", json=body)
         return JSONResponse(status_code=resp.status, content=await resp.json())
+    except BackendUnavailable as exc:
+        return local_ai.offline_response(exc, message=local_ai.IMAGES_OFFLINE)
     except RuntimeError as exc:
         return JSONResponse(status_code=400, content={"status": "ERROR", "message": str(exc)})
     except Exception as exc:
-        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
+        if local_ai.IMAGES.record_failure(exc):
+            return local_ai.offline_response(local_ai.IMAGES, message=local_ai.IMAGES_OFFLINE)
+        error_id = uuid.uuid4().hex[:8]
+        log.error(f"[images] generation failed (error id {error_id}): {exc}")
+        return JSONResponse(status_code=502, content={"status": "ERROR", "error_id": error_id,
+                                                      "message": "Picture making could not answer just now. Please try again."})
 
 
 async def _music_backend(request: Request) -> JSONResponse | None:
@@ -10675,7 +10796,20 @@ async def _music_backend(request: Request) -> JSONResponse | None:
             status_code=503,
             content={"status": "ERROR", "message": "Music generation is not configured on this deployment (set ALPACA_AUDIO_URL)"},
         )
+    local_ai.AUDIO.set_url(ALPACA_AUDIO_URL)
+    if local_ai.AUDIO.is_down():
+        return local_ai.offline_response(local_ai.AUDIO)
     return None
+
+
+def _audio_failure(exc: BaseException) -> JSONResponse:
+    """A music call that failed: the offline answer when the machine is off, else a short error id."""
+    if local_ai.AUDIO.record_failure(exc):
+        return local_ai.offline_response(local_ai.AUDIO)
+    error_id = uuid.uuid4().hex[:8]
+    log.error(f"[music] audio server call failed (error id {error_id}): {exc}")
+    return JSONResponse(status_code=502, content={"status": "ERROR", "error_id": error_id,
+                                                  "message": "Music making could not answer just now. Please try again."})
 
 
 def _music_job_answer(status: int, result: dict) -> JSONResponse:
@@ -10718,7 +10852,7 @@ async def music_song_start(request: Request):
         )
         result = await resp.json()
     except Exception as exc:  # reported to the caller
-        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
+        return _audio_failure(exc)
     user = await _user_id_from_request(request)
     if resp.status < 400 and isinstance(result, dict) and result.get("id") and user:
         # The worker tells them when it is written (notices.check_songs_once).
@@ -10739,7 +10873,7 @@ async def music_song_status(request: Request, job_id: str):
         )
         result = await resp.json()
     except Exception as exc:  # reported to the caller
-        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
+        return _audio_failure(exc)
     return _music_job_answer(resp.status, result)
 
 
@@ -10755,7 +10889,7 @@ async def music_song_cancel(request: Request, job_id: str):
         )
         result = await resp.json()
     except Exception as exc:  # reported to the caller
-        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"})
+        return _audio_failure(exc)
     await notices.song_forgotten(job_id)
     return _music_job_answer(resp.status, result)
 
@@ -11006,12 +11140,20 @@ async def sd_image_models_proxy(request: Request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     try:
         base_url = await sd_proxy_base_url()
+        local_ai.IMAGES.check()
         resp = await get_http_client().get(f"{base_url}/v1/images/models")
         return JSONResponse(status_code=resp.status, content=await resp.json())
+    except BackendUnavailable as exc:
+        return local_ai.offline_response(exc, message=local_ai.IMAGES_OFFLINE)
     except RuntimeError as exc:
         return JSONResponse(status_code=400, content={"status": "ERROR", "message": str(exc)})
     except Exception as exc:
-        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
+        if local_ai.IMAGES.record_failure(exc):
+            return local_ai.offline_response(local_ai.IMAGES, message=local_ai.IMAGES_OFFLINE)
+        error_id = uuid.uuid4().hex[:8]
+        log.error(f"[images] model list failed (error id {error_id}): {exc}")
+        return JSONResponse(status_code=502, content={"status": "ERROR", "error_id": error_id,
+                                                      "message": "Picture making could not answer just now."})
 
 @app.post("/api/workspaces/{workspace_id}/images/edit")
 async def workspace_image_edit_proxy(workspace_id: str, request: Request):
@@ -11457,6 +11599,18 @@ async def _run_workspace_turn(
     }
 
 
+def _inference_failure_text(exc: Exception) -> str:
+    """What a workspace turn says when the model could not answer: the plain offline
+    sentence, or a short note with an error id (the detail goes to the log)."""
+    from services.gateway.orchestrator import LocalAIOffline
+
+    if isinstance(exc, LocalAIOffline):
+        return exc.message
+    error_id = uuid.uuid4().hex[:8]
+    log.error(f"[workspace] the model did not answer (error id {error_id}): {exc}")
+    return f"{local_ai.MODEL_TROUBLE} (error id {error_id})"
+
+
 @app.post("/api/workspaces/{workspace_id}/ask")
 async def ask_in_workspace(workspace_id: str, request: Request):
     """One workspace turn, answered as a single JSON reply (see _run_workspace_turn)."""
@@ -11473,7 +11627,7 @@ async def ask_in_workspace(workspace_id: str, request: Request):
     try:
         return await _run_workspace_turn(workspace_id, creds, query, requested_mode, system_override=body.get("system"))
     except InferenceUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"The model did not answer: {exc}") from exc
+        raise HTTPException(status_code=503, detail=_inference_failure_text(exc)) from exc
 
 
 # Workspace chats: conversations that open as tabs and continue
@@ -11572,7 +11726,7 @@ async def workspace_chat_turn(workspace_id: str, chat_id: str, request: Request)
             stored = await save(transcript.finish(answer), "done")
             await queue.put({"type": "done", "message": stored})
         except InferenceUnavailable as exc:
-            text = f"The model did not answer: {exc}"
+            text = _inference_failure_text(exc)
             stored = await save(transcript.finish(None, status="error", error=text), "error")
             await queue.put({"type": "error", "text": text, "message": stored})
         except asyncio.CancelledError:

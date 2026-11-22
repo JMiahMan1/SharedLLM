@@ -9,9 +9,26 @@ from typing import Any
 
 import aiohttp
 
+from services.common.backend_health import is_unreachable
+from services.gateway import local_ai
 from services.gateway.config import OLLAMA_SLOT_POLL_INTERVAL, OLLAMA_SLOT_POLL_MAX
 
 log = logging.getLogger("gateway.providers")
+
+
+def _probe_timeout(total: float = 3.0) -> aiohttp.ClientTimeout:
+    """A short status read whose connect phase fails on its own error type, so an
+    unreachable host reads as "unreachable" (ConnectionTimeoutError), not as a slow answer."""
+    return aiohttp.ClientTimeout(total=total, sock_connect=min(total * 0.8, local_ai.SETTINGS.connect_timeout))
+
+
+def _with_connect_timeout(timeout: aiohttp.ClientTimeout) -> aiohttp.ClientTimeout:
+    """``timeout`` with a connect limit: a powered-off box is found in seconds, while
+    the read limits (a long prefill) stay as they were."""
+    if timeout.sock_connect is not None or timeout.connect is not None:
+        return timeout
+    return aiohttp.ClientTimeout(total=timeout.total, sock_read=timeout.sock_read,
+                                 sock_connect=local_ai.SETTINGS.connect_timeout)
 
 THINKING_PATTERNS = [
     re.compile(r'<(?:think|thinking|reason|thought)>.*?(?:</(?:think|thinking|reason|thought)>|$)', re.DOTALL | re.IGNORECASE),
@@ -120,18 +137,23 @@ class BaseLLMProvider(ABC):
 class OllamaProvider(BaseLLMProvider):
     def __init__(self, base_url: str, timeout: float | aiohttp.ClientTimeout = 180.0, slot_wait_timeout: float = 120.0):
         self.base_url = base_url.rstrip("/")
-        self.timeout = timeout if isinstance(timeout, aiohttp.ClientTimeout) else aiohttp.ClientTimeout(total=timeout)
+        self.timeout = _with_connect_timeout(
+            timeout if isinstance(timeout, aiohttp.ClientTimeout) else aiohttp.ClientTimeout(total=timeout)
+        )
         self.slot_wait_timeout = slot_wait_timeout
+        # The breaker probes the address chat actually uses (the llm_local_url setting).
+        local_ai.LLM.set_url(self.base_url)
 
     async def _check_slots(self, client: aiohttp.ClientSession) -> dict | None:
         """Check slot availability via /api/ps. Returns slot info dict or None."""
         try:
-            resp = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
+            resp = await client.get(f"{self.base_url}/api/ps", timeout=_probe_timeout())
             if resp.status == 200:
                 data = await resp.json()
                 return data.get("slots")
-        except Exception:
-            pass
+        except Exception as e:
+            if is_unreachable(e):
+                raise
         return None
 
     async def _wait_for_model(self, client: aiohttp.ClientSession, model: str) -> bool:
@@ -141,7 +163,7 @@ class OllamaProvider(BaseLLMProvider):
         until Ollama has finished loading the weights into VRAM.
         """
         try:
-            resp = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
+            resp = await client.get(f"{self.base_url}/api/ps", timeout=_probe_timeout())
             if resp.status != 200:
                 return True
             data = await resp.json()
@@ -156,8 +178,9 @@ class OllamaProvider(BaseLLMProvider):
                 elif isinstance(entry, str) and entry == model:
                     log.info(f"[OllamaProvider] Model {model} loaded")
                     return True
-        except Exception:
-            pass
+        except Exception as e:
+            if is_unreachable(e):
+                raise  # the machine is off: no point "proceeding anyway"
         return False
 
     async def _wait_for_slot(self, client: aiohttp.ClientSession, model: str = "") -> bool:
@@ -174,7 +197,7 @@ class OllamaProvider(BaseLLMProvider):
                 log.warning(f"[OllamaProvider] Model {model} may not be fully loaded, proceeding anyway")
 
         try:
-            resp = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
+            resp = await client.get(f"{self.base_url}/api/ps", timeout=_probe_timeout())
             if resp.status != 200:
                 return True
             data = await resp.json()
@@ -190,7 +213,7 @@ class OllamaProvider(BaseLLMProvider):
             while loop.time() < deadline:
                 await asyncio.sleep(poll_interval)
                 poll_interval = min(poll_interval * 2, OLLAMA_SLOT_POLL_MAX)
-                resp2 = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
+                resp2 = await client.get(f"{self.base_url}/api/ps", timeout=_probe_timeout())
                 if resp2.status == 200:
                     d2 = await resp2.json()
                     s2 = d2.get("slots", {})
@@ -200,10 +223,36 @@ class OllamaProvider(BaseLLMProvider):
             log.warning(f"[OllamaProvider] Timed out waiting for slot after {self.slot_wait_timeout}s")
             return False
         except Exception as e:
+            if is_unreachable(e):
+                raise  # the machine is off: no point "proceeding anyway"
             log.warning(f"[OllamaProvider] Could not check slots ({e}), proceeding anyway")
             return True
 
     async def generate(
+        self,
+        model: str,
+        messages: list[dict[str, str]],
+        options: dict[str, Any] | None = None,
+        chunk_callback: Callable[[str], Awaitable[None]] | None = None
+    ) -> str:
+        """One model call through the local AI's breaker.
+
+        While the machine is known to be off this raises ``BackendUnavailable`` at
+        once. A call that cannot connect opens the breaker and raises the same; any
+        other failure (a read timeout, an HTTP error, a provider error) is raised as
+        it was, for the caller's own retry.
+        """
+        local_ai.LLM.check()
+        try:
+            result = await self._generate(model, messages, options, chunk_callback)
+        except Exception as e:
+            if local_ai.LLM.record_failure(e):
+                raise local_ai.LLM.unavailable() from e
+            raise
+        local_ai.LLM.record_success()
+        return result
+
+    async def _generate(
         self,
         model: str,
         messages: list[dict[str, str]],

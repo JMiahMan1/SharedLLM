@@ -304,7 +304,10 @@ class InferenceJobQueue:
         await self._finalize_job(job_id)
         log.info(f"Job {job_id} completed.")
 
-    async def fail_job(self, job_id: str, error: str):
+    async def fail_job(self, job_id: str, error: str, detail: dict[str, Any] | None = None):
+        """Mark a job failed. ``error`` is what the person is shown; ``detail``
+        (``code``, ``error_id``, ``http_status``, ``offline``) tells the chat
+        handler which status and fields to answer with."""
         if not self._redis:
             await self.connect()
         assert self._redis is not None
@@ -315,6 +318,8 @@ class InferenceJobQueue:
         job = json.loads(job_raw)
         job["status"] = JobStatus.FAILED
         job["error"] = error
+        if detail:
+            job["error_detail"] = detail
         job["completed_at"] = time.time()
 
         await self._redis.set(
@@ -326,6 +331,70 @@ class InferenceJobQueue:
         await self._publish_status(job_id, JobStatus.FAILED)
         await self._finalize_job(job_id)
         log.error(f"Job {job_id} failed: {error}")
+
+    async def peek_job(self) -> dict[str, Any] | None:
+        """The job ``claim_job`` would take next, without taking it (None when empty)."""
+        if not self._redis:
+            await self.connect()
+        assert self._redis is not None
+        if not self._queue_type_checked:
+            await self._migrate_fifo_queue()
+        for job_id in await self._redis.zrange(self.QUEUE_KEY, 0, 4):  # type: ignore[misc]
+            raw = await self._redis.get(f"{self.JOB_PREFIX}{job_id}")  # type: ignore[misc]
+            if raw:
+                return json.loads(raw)
+        return None
+
+    async def requeue_job(self, job_id: str, note: str = "") -> bool:
+        """Put a claimed job back in the queue as it was, without counting the attempt.
+
+        For work that could not start for a reason that is not its own (the local
+        AI is offline): it keeps its priority and place, and its lease and record
+        are refreshed so it does not expire while it waits.
+        """
+        if not self._redis:
+            await self.connect()
+        assert self._redis is not None
+        key = f"{self.JOB_PREFIX}{job_id}"
+        raw = await self._redis.get(key)  # type: ignore[misc]
+        if not raw:
+            return False
+        job = json.loads(raw)
+        job["status"] = JobStatus.QUEUED
+        job["attempts"] = max(0, int(job.get("attempts", 0)) - 1)
+        job.pop("started_at", None)
+        if note:
+            job["waiting"] = note
+        await self._redis.set(key, json.dumps(job), ex=self.DEFAULT_TTL_SECONDS)  # type: ignore[misc]
+        await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[misc]
+        await self._redis.delete(f"{self.LEASE_PREFIX}{job_id}")  # type: ignore[misc]
+        score = -int(job.get("priority", PRIORITY_NORMAL)) * 1_000_000_000 + float(job.get("created_at", time.time()))
+        await self._redis.zadd(self.QUEUE_KEY, {job_id: score})  # type: ignore[misc]
+        await self._publish_status(job_id, JobStatus.QUEUED)
+        log.warning("Job %s put back in the queue: %s", job_id, note or "it could not start")
+        return True
+
+    async def touch_queued_jobs(self) -> int:
+        """Keep every queued job's record alive (an outage can outlast its TTL).
+
+        A record that expired while it waited was dropped at claim time as an
+        orphan, and the mission reaper then failed its mission: work queued
+        before a long outage was lost. Returns how many records were refreshed.
+        """
+        if not self._redis:
+            await self.connect()
+        assert self._redis is not None
+        touched = 0
+        for job_id in await self._redis.zrange(self.QUEUE_KEY, 0, -1):  # type: ignore[misc]
+            if await self._redis.expire(f"{self.JOB_PREFIX}{job_id}", self.DEFAULT_TTL_SECONDS):  # type: ignore[misc]
+                touched += 1
+        return touched
+
+    async def queued_count(self) -> int:
+        if not self._redis:
+            await self.connect()
+        assert self._redis is not None
+        return int(await self._redis.zcard(self.QUEUE_KEY))  # type: ignore[misc]
 
     async def get_job_status(self, job_id: str) -> dict[str, Any] | None:
         if not self._redis:

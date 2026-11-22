@@ -77,7 +77,8 @@ def test_desktop_targets_skip_unset_and_duplicate_urls(monkeypatch):
     monkeypatch.setattr(admin_alerts, "ALPACA_WEB_URL", "http://desk:5000")
     monkeypatch.setattr(admin_alerts, "ALPACA_ARCADE_URL", "http://desk:5000/")
     targets = admin_alerts.desktop_targets({"llm_local_url": "http://desk:11434/", "vision_ocr_proxy_url": None})
-    assert targets == {"LLM proxy": "http://desk:11434", "Alpaca dashboard": "http://desk:5000"}
+    # The LLM proxy has its own notice (local_ai_transitions), so it is not a desktop target.
+    assert targets == {"Alpaca dashboard": "http://desk:5000"}
 
 
 class _Redis:

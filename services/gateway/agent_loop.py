@@ -15,7 +15,9 @@ from typing import Any, cast
 import aiohttp
 import redis.asyncio as redis
 
+from services.common.backend_health import BackendUnavailable, is_unreachable
 from services.common.http import INTERNAL_KEEPALIVE_S
+from services.gateway import local_ai
 from services.gateway.artifacts import create_artifact as create_artifact_record
 from services.gateway.config import (
     CONTROL_PLANE_URL,
@@ -342,9 +344,13 @@ class OllamaProvider(BaseLLMProvider):
         else:
             to = float(timeout) if timeout else 300.0
             read_to = max(180.0, to * 0.8)
+            # The connect limit comes from LOCAL_AI_CONNECT_TIMEOUT_S: a powered-off
+            # box is noticed in seconds and opens the local AI's breaker (local_ai.py).
+            connect_to = local_ai.SETTINGS.connect_timeout
             self.timeout = aiohttp.ClientTimeout(
-                total=to, connect=10.0, sock_connect=15.0, sock_read=read_to
+                total=to, connect=connect_to * 2, sock_connect=connect_to, sock_read=read_to
             )
+        local_ai.LLM.set_url(self.base_url)
 
     async def _wait_for_model(
         self, client: aiohttp.ClientSession, model: str, timeout: float = 120.0
@@ -359,7 +365,7 @@ class OllamaProvider(BaseLLMProvider):
             try:
                 resp = await client.get(
                     f"{self.base_url}/api/ps",
-                    timeout=aiohttp.ClientTimeout(total=3.0),
+                    timeout=aiohttp.ClientTimeout(total=3.0, sock_connect=2.5),
                 )
                 if resp.status == 200:
                     data = await resp.json()
@@ -386,8 +392,9 @@ class OllamaProvider(BaseLLMProvider):
                             "[OllamaProvider-Hardened] No active slots, but slot pool available; model may be preloaded"
                         )
                         return
-            except Exception:
-                pass
+            except Exception as e:
+                if is_unreachable(e):
+                    raise  # the machine is off: waiting two minutes for it to load a model is pointless
             await asyncio.sleep(2)
         log.warning(
             f"[OllamaProvider-Hardened] Timed out waiting for model {model} "
@@ -524,6 +531,8 @@ class OllamaProvider(BaseLLMProvider):
                 except RuntimeError:
                     raise  # provider errors are fatal -> AgentLoop retry
                 except (TimeoutError, aiohttp.ClientError) as e:
+                    if is_unreachable(e):
+                        raise  # cannot connect at all: the breaker takes it from here, no retry
                     last_err = e
                     log.warning(
                         f"[OllamaProvider-Hardened] stream attempt "
@@ -1940,9 +1949,14 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         params.pop("num_ctx", None)
         return params
 
+    if local_ai.LLM.is_down():
+        # The breaker already knows the machine is off: no 3-second timeout (and
+        # no warning) on every request just to learn it again.
+        return params
     try:
         async with shared_http_client() as client:
-            resp = await client.get(f"{local_url.rstrip('/')}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
+            resp = await client.get(f"{local_url.rstrip('/')}/api/ps",
+                                    timeout=aiohttp.ClientTimeout(total=3.0, sock_connect=2.5))
             if resp.status == 200:
                 raw_text = (await resp.text()).strip()
                 if not raw_text:
@@ -1961,13 +1975,30 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
                     log.warning(f"[AgentLoop] Failed to parse VRAM status (api/ps) from {local_url}; using configured num_ctx={max_ctx}")
     except Exception as e:
         # Never let a transient VRAM check drop the context to Ollama's default.
+        if local_ai.LLM.record_failure(e):
+            return params  # logged once by the breaker, not on every request
         log.warning(f"[AgentLoop] VRAM status check failed ({e!r}); using configured num_ctx={max_ctx}")
     return params
 
 
 async def execute_inference(provider: BaseLLMProvider, model: str, messages: list, options: dict, chunk_callback: Callable[[str], Awaitable[None]] | None = None) -> dict:
-    """Delegates inference to the specified provider."""
-    content = await provider.generate(model, messages, options=options, chunk_callback=chunk_callback)
+    """Delegates inference to the specified provider.
+
+    A local provider goes through the local AI's breaker (local_ai.py): while the
+    machine is known to be off this raises ``BackendUnavailable`` at once, and a
+    call that cannot connect opens the breaker and raises the same.
+    """
+    guarded = isinstance(provider, OllamaProvider)
+    if guarded:
+        local_ai.LLM.check()
+    try:
+        content = await provider.generate(model, messages, options=options, chunk_callback=chunk_callback)
+    except Exception as e:
+        if guarded and not isinstance(e, BackendUnavailable) and local_ai.LLM.record_failure(e):
+            raise local_ai.LLM.unavailable() from e
+        raise
+    if guarded:
+        local_ai.LLM.record_success()
     return {"message": {"role": "assistant", "content": content}}
 
 
@@ -3103,6 +3134,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "system",
                 f"PLAN GENERATED:\n{generated_plan[:2000]}",
             )
+    except BackendUnavailable:
+        raise  # the local AI is off: the worker parks the mission until it is back
     except Exception as e:
         log.warning(f"[AgentLoop] Planning phase failed (continuing without plan): {e}")
         generated_plan = ""
@@ -3573,6 +3606,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     break  # Success!
                 except MissionKilledError:
                     raise  # Never retry a user-requested cancel
+                except BackendUnavailable:
+                    raise  # the machine is off: retrying in 5 and 10 s cannot help
                 except Exception as e:
                     log.warning(f"[AgentLoop] Inference attempt {retry_count + 1} failed: {e}")
                     if retry_count < MAX_INFERENCE_RETRIES - 1:
@@ -3605,6 +3640,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await stream_event("system", "Mission terminated by user.")
             await _clear_checkpoint()
             return "MISSION TERMINATED: User requested cancellation via control plane."
+        except BackendUnavailable:
+            # Not a failure of the mission: the local AI is offline. The checkpoint
+            # is kept so the worker can park the mission and resume it from here.
+            heartbeat_stop.set()
+            await hb_task
+            await stream_event("system", local_ai.MISSION_WAITING)
+            raise
         except Exception as e:
             heartbeat_stop.set()
             await hb_task
