@@ -194,7 +194,7 @@ async def test_geo_echoes_of_ha_states_are_not_fixes(geo):
 
 
 #: An automation's notice that names no Jarvis page opens the dashboard.
-HOME = {"route": "home", "path": "/", "query": {}, "hash": "", "focus": "", "guard": "member", "href": "/"}
+HOME_LINK = {"route": "home", "path": "/", "query": {}, "hash": "", "focus": "", "guard": "member", "href": "/"}
 
 
 async def test_notify_mobile_app_goes_to_the_jarvis_user(geo, sent):
@@ -210,7 +210,7 @@ async def test_notify_mobile_app_goes_to_the_jarvis_user(geo, sent):
                                   "data": {"tag": "garage", "priority": "high"}})
     assert res["response"] == {"sent": 1}  # two phones, one person: one notice
     assert sent == [{"user": "alex", "category": "home", "kind": "home", "title": "Garage",
-                     "body": "The garage door is open", "data": {"link": HOME, "url": "/"}, "priority": 4,
+                     "body": "The garage door is open", "data": {"link": HOME_LINK, "url": "/"}, "priority": 4,
                      "tag": "garage"}]
     await hub.call_service("notify", "mobile_app_alexs_phone", {"message": "clear_notification"})
     assert len(sent) == 1
