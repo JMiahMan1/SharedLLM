@@ -26,6 +26,10 @@ from services.homehub.discovery import LABELS
 
 log = logging.getLogger("homehub.entries")
 
+
+def _iso_retry(when: Any) -> str | None:
+    return when.isoformat() if when is not None else None
+
 #: Entry data keys an admin may change, with how the UI shows them.
 RECONFIGURABLE: dict[str, dict[str, Any]] = {
     "host": {"label": "Address", "type": "text"},
@@ -239,7 +243,9 @@ def summary(runtime: Any, entry: ConfigEntry) -> dict[str, Any]:
         "entry_id": entry.entry_id, "domain": entry.domain, "label": label(entry.domain), "title": entry.title,
         "state": entry.state, "reason": entry.reason, "source": entry.source, "disabled_by": entry.disabled_by,
         "archived_at": entry.archived_at,
-        "offline_since": offline_since(runtime, entry), "needs": needs_of(entry),
+        "offline_since": offline_since(runtime, entry),
+        "retry_at": _iso_retry(getattr(runtime, "next_retry_at", lambda _eid: None)(entry.entry_id)),
+        "needs": needs_of(entry),
         "devices": sorted((dev_view(d) for d in devices), key=lambda d: d["name"].lower()),
         "entities": len(ents), "reconfigure": reconfigure_fields(entry, hub),
         "unpairs": entry.domain in _unpair_hooks(), "shared": entry.domain in SHARED_ENTRIES,
