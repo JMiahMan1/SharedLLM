@@ -4932,24 +4932,6 @@ async def proxy_music_assistant_status(request: Request):
         return await _proxy_json_response(resp)
 
 
-@app.api_route("/api/admin/music-assistant/{action}", methods=["GET", "POST"])
-async def proxy_music_assistant_admin(action: str, request: Request):
-    """Admin: Music Assistant accounts and stale-URL migration (identity checks the caller is an admin)."""
-    if action not in ("accounts", "stale-urls"):
-        raise HTTPException(status_code=404, detail="Not found")
-    auth_header = request.headers.get("Authorization")
-    headers = {"Authorization": auth_header} if auth_header else {}
-    async with shared_http_client() as client:
-        url = f"{IDENTITY_SVC}/api/admin/music-assistant/{action}"
-        if request.method == "GET":
-            resp = await client.get(url, params=dict(request.query_params), headers=headers,
-                                    timeout=aiohttp.ClientTimeout(total=30.0))
-        else:
-            resp = await client.post(url, json=await request.json(), headers=headers,
-                                     timeout=aiohttp.ClientTimeout(total=120.0))
-        return await _proxy_json_response(resp)
-
-
 @app.get("/api/auth/discover")
 async def proxy_discover(request: Request):
     auth_header = request.headers.get("Authorization")
@@ -8241,7 +8223,12 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
     device_creds = await _device_agent_key(request)
     if device_creds and device_creds["owner_username"].lower() != username.lower():
         raise HTTPException(status_code=403, detail="This PC is only registered to one member")
-    status, body = await _identity_as_caller(request, "GET", f"/api/screen-time/{username}/rules", params={"day": day})
+    # The device names itself to identity too: only the member's own,
+    # registered device gets the parents' offline-code verifiers back.
+    rules_params = {"day": day}
+    if (device_key or "").strip():
+        rules_params["device_key"] = device_key.strip()
+    status, body = await _identity_as_caller(request, "GET", f"/api/screen-time/{username}/rules", params=rules_params)
     if status != 200:
         raise HTTPException(status_code=status, detail=(body or {}).get("detail") or "Not allowed")
     # Only this member's own key counts. A key that does not resolve, or belongs
@@ -8334,6 +8321,12 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
         # push to one phone is never announced on another, and "not
         # device-scoped" never reads as "nothing waiting".
         **({"notices": mdm.notices_for(device_key)} if device_key else {}),
+        # The parents' offline-code verifiers (salt, iterations, hash; never a
+        # code). Identity adds them only for the member's own registered device
+        # (a phone naming its device_key, a PC with its agent key), so the
+        # device can check a parent's offline code with no connection. Absent
+        # for anyone else, and the device then keeps the set it has.
+        **({"offline_codes": body["offline_codes"]} if isinstance(body.get("offline_codes"), list) else {}),
         "week": weekly_screen_time(usage, now.date()),
         **state,
     }

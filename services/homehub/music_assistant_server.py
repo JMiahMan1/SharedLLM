@@ -17,6 +17,7 @@ into ``data`` so each value is stored once, where Configure edits it.
 """
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 from typing import Any
@@ -137,6 +138,18 @@ def _connection(hub: Any) -> Any:
     return conn
 
 
+#: username -> lock: one account request per person at a time, so two arriving together cannot each
+#: make a token (or, for a new person, each try to make the account).
+_ACCOUNT_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _account_lock(name: str) -> asyncio.Lock:
+    lock = _ACCOUNT_LOCKS.get(name)
+    if lock is None:
+        lock = _ACCOUNT_LOCKS[name] = asyncio.Lock()
+    return lock
+
+
 async def provision_account(hub: Any, username: str, display_name: str | None = None,
                             token_name: str = "Jarvis") -> dict[str, Any]:
     """The person's own Music Assistant account (made when missing) and a new long-lived token for it.
@@ -145,6 +158,11 @@ async def provision_account(hub: Any, username: str, display_name: str | None = 
     person needs one. An existing account with the same username (any case) is used, never a
     second one. Guest accounts get no token (Music Assistant refuses them). The token is returned
     to the caller (identity, over the internal secret) and never logged.
+
+    Music Assistant stores only a hash of a token, so an earlier one cannot be handed out again.
+    Instead the new token replaces it: the person's earlier long-lived tokens with the same name
+    (made by an earlier request, whose token identity no longer holds, since it only asks when it
+    has none) are revoked once the new one exists. Requests for one person run one at a time.
     """
     name = (username or "").strip().lower()
     if len(name) < 2:
@@ -152,10 +170,39 @@ async def provision_account(hub: Any, username: str, display_name: str | None = 
     conn = _connection(hub)
     from services.homehub.core import HubError
 
+    async with _account_lock(name):
+        try:
+            return await _provision(conn, name, display_name, token_name)
+        except HubError as exc:
+            raise AccountError(f"Music Assistant refused: {exc}") from exc
+
+
+async def _earlier_tokens(conn: Any, user_id: str, token_name: str) -> list[str]:
+    """Ids of the account's long-lived tokens named ``token_name`` ([] if MA cannot list them)."""
+    from services.homehub.core import HubError
+
     try:
-        return await _provision(conn, name, display_name, token_name)
+        tokens = await conn.command("auth/tokens", user_id=user_id)
     except HubError as exc:
-        raise AccountError(f"Music Assistant refused: {exc}") from exc
+        log.warning("Music Assistant could not list tokens (%s); earlier %r tokens are kept", exc, token_name)
+        return []
+    tokens = tokens.get("result", tokens) if isinstance(tokens, dict) else tokens
+    return [str(t["token_id"]) for t in tokens or []
+            if isinstance(t, dict) and t.get("token_id") and t.get("name") == token_name
+            and t.get("user_id") in (None, user_id) and t.get("is_long_lived", True)]
+
+
+async def _revoke(conn: Any, token_ids: list[str]) -> int:
+    from services.homehub.core import HubError
+
+    revoked = 0
+    for token_id in token_ids:
+        try:
+            await conn.command("auth/token/revoke", token_id=token_id)
+            revoked += 1
+        except HubError as exc:
+            log.warning("Music Assistant did not revoke an earlier token (%s)", exc)
+    return revoked
 
 
 async def _provision(conn: Any, name: str, display_name: str | None, token_name: str) -> dict[str, Any]:
@@ -174,13 +221,16 @@ async def _provision(conn: Any, name: str, display_name: str | None, token_name:
         raise AccountError(f"{name} is a guest account in Music Assistant and cannot have a token", 409)
     if found.get("enabled") is False:
         raise AccountError(f"{name}'s Music Assistant account is disabled; an admin can enable it in MA", 409)
+    earlier = [] if created else await _earlier_tokens(conn, found["user_id"], token_name)
     token = await conn.command("auth/token/create", name=token_name, user_id=found["user_id"])
     if not isinstance(token, str) or not token:
         raise AccountError("Music Assistant did not issue a token")
-    log.info("Music Assistant account for %s: %s, new %r token issued", name,
-             "made" if created else "existing", token_name)
+    revoked = await _revoke(conn, earlier)
+    log.info("Music Assistant account for %s: %s, new %r token issued%s", name,
+             "made" if created else "existing", token_name,
+             f", {revoked} earlier one(s) revoked" if revoked else "")
     return {"username": found.get("username") or name, "user_id": found["user_id"], "created": created,
-            "token": token}
+            "token": token, "revoked_tokens": revoked}
 
 
 async def check_music_assistant(data: dict[str, Any]) -> None:

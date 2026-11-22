@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from services.homehub import music_assistant_server as mas
@@ -19,14 +21,29 @@ from services.homehub.tests.test_drivers_media_music_assistant import STUDY, bui
 
 
 class Conn:
-    def __init__(self, base_url="http://192.0.2.205:8095", connected=True, users=None):
+    def __init__(self, base_url="http://192.0.2.205:8095", connected=True, users=None, tokens=None, delay=0.0):
         self.server_info = {"base_url": base_url, "server_id": "srv1", "server_version": "2.10.9"}
         self.connected = connected
         self.users = users if users is not None else [{"user_id": "u-sam", "username": "Sam", "role": "user"}]
+        self.tokens = tokens  # None: this MA cannot list tokens
+        self.delay = delay
         self.sent: list[tuple[str, dict]] = []
 
     async def command(self, command, **args):
         self.sent.append((command, args))
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if command == "auth/tokens":
+            if self.tokens is None:
+                return None
+            return [t for t in self.tokens if t["user_id"] == args["user_id"]]
+        if command == "auth/token/revoke":
+            self.tokens = [t for t in self.tokens if t["token_id"] != args["token_id"]]
+            return None
+        if command == "auth/token/create" and self.tokens is not None:
+            n = len([c for c, _ in self.sent if c == "auth/token/create"])
+            self.tokens.append({"token_id": f"tok{n}", "user_id": args["user_id"], "name": args["name"],
+                                "is_long_lived": True})
         if command == "auth/users":
             return list(self.users)
         if command == "auth/user/create":
@@ -110,8 +127,9 @@ async def test_a_person_with_an_ma_account_gets_a_token_for_it_and_no_second_acc
     conn = Conn()
     hub, _ = hub_with(conn=conn)
     out = await mas.provision_account(hub, "sam", "Sam")
-    assert out == {"username": "Sam", "user_id": "u-sam", "created": False, "token": "token-for-u-sam"}
-    assert [c for c, _ in conn.sent] == ["auth/users", "auth/token/create"]
+    assert out == {"username": "Sam", "user_id": "u-sam", "created": False, "token": "token-for-u-sam",
+                   "revoked_tokens": 0}
+    assert [c for c, _ in conn.sent] == ["auth/users", "auth/tokens", "auth/token/create"]
     assert conn.sent[-1][1] == {"name": "Jarvis", "user_id": "u-sam"}
 
 
@@ -124,6 +142,33 @@ async def test_a_person_without_one_gets_an_account_made_once():
     assert create["username"] == "robin" and create["role"] == "user" and len(create["password"]) >= 8
     again = await mas.provision_account(hub, "robin")
     assert again["created"] is False and [c for c, _ in conn.sent].count("auth/user/create") == 1
+
+
+async def test_a_new_token_replaces_earlier_jarvis_tokens_but_not_others():
+    tokens = [{"token_id": "old-jarvis", "user_id": "u-sam", "name": "Jarvis", "is_long_lived": True},
+              {"token_id": "phone", "user_id": "u-sam", "name": "Phone app", "is_long_lived": True},
+              {"token_id": "session", "user_id": "u-sam", "name": "Jarvis", "is_long_lived": False}]
+    conn = Conn(tokens=tokens)
+    hub, _ = hub_with(conn=conn)
+    out = await mas.provision_account(hub, "sam")
+    assert out["revoked_tokens"] == 1
+    assert sorted(t["token_id"] for t in conn.tokens) == ["phone", "session", "tok1"]
+    assert ("auth/token/revoke", {"token_id": "old-jarvis"}) in conn.sent
+    # the revoke comes after the new token exists, so a failure part way never leaves the person with none
+    order = [c for c, _ in conn.sent]
+    assert order.index("auth/token/create") < order.index("auth/token/revoke")
+
+
+async def test_two_requests_for_one_person_at_once_leave_one_jarvis_token():
+    conn = Conn(tokens=[], delay=0.01)
+    hub, _ = hub_with(conn=conn)
+    first, second = await asyncio.gather(mas.provision_account(hub, "sam"), mas.provision_account(hub, "Sam"))
+    assert {first["token"], second["token"]} == {"token-for-u-sam"}
+    jarvis = [t for t in conn.tokens if t["name"] == "Jarvis"]
+    assert [t["token_id"] for t in jarvis] == ["tok2"]  # the second replaced the first, they did not pile up
+    order = [c for c, _ in conn.sent]
+    assert order == ["auth/users", "auth/tokens", "auth/token/create",
+                     "auth/users", "auth/tokens", "auth/token/create", "auth/token/revoke"]
 
 
 async def test_guests_and_a_hub_without_ma_are_refused():

@@ -475,6 +475,23 @@ def collect_raw(
     return found
 
 
+def has_goal(trace: dict[str, Any]) -> bool:
+    """Whether the gateway will accept this trace: a kept trace without a goal is refused outright.
+
+    A dropped trace is a content-free stub (its session touched secrets) and is sent so the gateway can
+    replace what it stored before; it has no goal by design and the gateway accepts it.
+    """
+    if (trace.get("scrub") or {}).get("status") == "dropped":
+        return True
+    return bool(str(trace.get("goal") or "").strip())
+
+
+def skip_no_goal(traces: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Drop traces with no goal (an empty user message) and say how many were dropped."""
+    kept = [t for t in traces if has_goal(t)]
+    return kept, len(traces) - len(kept)
+
+
 def counts(scrubbed: list[dict[str, Any]]) -> dict[str, Any]:
     """What a dry run prints: numbers and categories, never content."""
     masked: Counter[str] = Counter()
@@ -528,7 +545,9 @@ def cmd_collect(args: argparse.Namespace) -> int:
         raw = collect_raw(args, pathlib.Path(work))
     scrubbed = scrub_all(raw, config, per_task=args.per_task_policy)
     del raw
+    scrubbed, no_goal = skip_no_goal(scrubbed)
     summary = counts(scrubbed)
+    summary["skipped_no_goal"] = no_goal
     if args.dry_run:
         print(json.dumps({"dry_run": True, **summary}, indent=2))
         return 0
@@ -616,6 +635,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     del raw
     scrubbed: list[dict[str, Any]] = []
     marks: dict[str, int] = {}
+    no_goal = 0
     by_session: dict[str, list[dict[str, Any]]] = {}
     for trace in everything:
         by_session.setdefault(f"{trace['source']}:{trace['session_id']}", []).append(trace)
@@ -624,16 +644,20 @@ def cmd_sync(args: argparse.Namespace) -> int:
         newest = max(int(t["task_index"]) for t in items)
         if newest <= last:
             continue
+        # The mark advances past a task with no goal: it is skipped here and never sent.
         marks[key] = newest
         if any((t.get("scrub") or {}).get("drop_reason") == "session_touched_secrets" for t in items):
             # Tasks sent before this one touched secrets are replaced by stubs too.
-            scrubbed += items
-            continue
-        # The previous last task is sent again: a correction typed since then
-        # changes its outcome, and the gateway upserts by id.
-        scrubbed += [t for t in items if int(t["task_index"]) >= max(0, last)]
+            selected = items
+        else:
+            # The previous last task is sent again: a correction typed since then
+            # changes its outcome, and the gateway upserts by id.
+            selected = [t for t in items if int(t["task_index"]) >= max(0, last)]
+        selected, skipped = skip_no_goal(selected)
+        no_goal += skipped
+        scrubbed += selected
     del everything
-    result: dict[str, Any] = {"flushed": flushed, **counts(scrubbed)}
+    result: dict[str, Any] = {"flushed": flushed, **counts(scrubbed), "skipped_no_goal": no_goal}
     if scrubbed:
         result["upload"] = upload(scrubbed, args, state_dir=state_dir)
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

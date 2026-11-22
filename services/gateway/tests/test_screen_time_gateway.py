@@ -566,3 +566,42 @@ def test_a_refused_amount_is_passed_on_and_tells_nobody(wired):
     answers[("POST", "/screen-time/requests/3")] = (422, {"detail": "minutes must be a whole number from 5 to 240"})
     assert client.post("/api/screen-time/requests/3", json={"grant": True, "minutes": 2}).status_code == 422
     assert sent == []
+
+
+def test_status_passes_the_device_key_and_the_owner_devices_offline_verifiers(wired, monkeypatch):
+    """Identity decides who gets the verifiers (only the member's own device);
+    the gateway names the device to it and passes the list through untouched."""
+    client, calls, _, answers = wired
+
+    async def _owned(_key, _user):
+        return True
+
+    monkeypatch.setattr(gateway_main.mdm, "device_owned_by", _owned)
+    monkeypatch.setattr(gateway_main.mdm, "notices_for", lambda _key: [])
+    verifiers = [{"parent": "parent-a", "salt": "00", "iterations": 1000, "hash": "aa"}]
+    answers[("GET", "/screen-time/kid/rules")] = (200, {"rules": {}, "offline_codes": verifiers})
+
+    body = client.get("/api/screen-time/kid/status", params={"device_key": " kid-tablet-01 "}).json()
+    assert body["offline_codes"] == verifiers
+    assert calls[0]["params"] == {"day": "2026-10-21", "device_key": "kid-tablet-01"}
+
+
+def test_status_without_verifiers_from_identity_has_no_field(wired):
+    """No field (not an empty list), so a device keeps the set it already has."""
+    client, calls, _, answers = wired
+    answers[("GET", "/screen-time/kid/rules")] = (200, {"rules": {}})
+    body = client.get("/api/screen-time/kid/status").json()
+    assert "offline_codes" not in body
+    assert calls[0]["params"] == {"day": "2026-10-21"}
+
+
+def test_an_empty_verifier_list_is_passed_on_so_a_deleted_code_leaves_the_device(wired, monkeypatch):
+    client, _, _, answers = wired
+
+    async def _owned(_key, _user):
+        return True
+
+    monkeypatch.setattr(gateway_main.mdm, "device_owned_by", _owned)
+    monkeypatch.setattr(gateway_main.mdm, "notices_for", lambda _key: [])
+    answers[("GET", "/screen-time/kid/rules")] = (200, {"rules": {}, "offline_codes": []})
+    assert client.get("/api/screen-time/kid/status", params={"device_key": "kid-tablet-01"}).json()["offline_codes"] == []

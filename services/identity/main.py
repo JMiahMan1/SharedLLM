@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -527,6 +528,35 @@ def _check_abuse_ch_key(update_data: dict) -> None:
 #: username -> monotonic time of the last failed Music Assistant account provisioning (retried later).
 _MA_PROVISION_FAILED: dict[str, float] = {}
 MA_PROVISION_RETRY_S = 300.0
+#: username -> the lock that makes a person's account provisioning single-flight. Identity's routes run
+#: in a thread pool, and a page load sends several requests that each resolve the same person at once;
+#: without it each one asked the hub for an account and a token, and Music Assistant kept them all.
+_MA_PROVISION_LOCKS: dict[str, threading.Lock] = {}
+_MA_PROVISION_LOCKS_GUARD = threading.Lock()
+
+
+def _ma_provision_lock(username: str) -> threading.Lock:
+    with _MA_PROVISION_LOCKS_GUARD:
+        return _MA_PROVISION_LOCKS.setdefault(username, threading.Lock())
+
+
+def _ma_never_provisioned(user: User) -> bool:
+    """Accounts that never get a Music Assistant account of their own: the household (system default)
+    account, which is not a person, and dedicated test accounts."""
+    return _is_system_default_user(user) or bool(getattr(user, "is_test_account", False))
+
+
+def _ma_reload_login(session: Session, user: User) -> None:
+    """Copy ``user``'s saved Music Assistant login from the database, as another request may just
+    have saved one. A fresh session, so this request's own transaction cannot hide that commit."""
+    with Session(session.get_bind()) as fresh:
+        row = fresh.exec(select(User.mass_url, User.mass_token_enc, User.mass_user_id)
+                         .where(User.id == user.id)).first()
+    if row is None:
+        return
+    mass_url, token_enc, user_id = row
+    if token_enc and token_enc != user.mass_token_enc:
+        user.mass_url, user.mass_token_enc, user.mass_user_id = mass_url, token_enc, user_id
 
 
 def _resolve_music_assistant(session: Session, user: User, granted: set[str], *,
@@ -534,8 +564,20 @@ def _resolve_music_assistant(session: Session, user: User, granted: set[str], *,
     """The Music Assistant server and login ``user`` uses (services/identity/music_assistant.py).
 
     A login made for them on the household server is saved on their account at once, so it is
-    made once. The system default (household) account is never given one: it is not a person.
+    made once, and only one request at a time may make it (``_MA_PROVISION_LOCKS``): a request
+    that waited re-reads the saved login and uses it. The system default (household) account and
+    test accounts are never given one.
     """
+    may_provision = may_provision and not _ma_never_provisioned(user)
+    if not may_provision or (user.mass_url or "").strip() or user.mass_token_enc:
+        return _resolve_music_assistant_locked(session, user, granted, may_provision=may_provision)
+    with _ma_provision_lock(user.username):
+        _ma_reload_login(session, user)
+        return _resolve_music_assistant_locked(session, user, granted, may_provision=may_provision)
+
+
+def _resolve_music_assistant_locked(session: Session, user: User, granted: set[str], *,
+                                    may_provision: bool) -> music_assistant.Resolution:
     grant = None
     if "music_assistant" in granted and not _is_system_default_user(user):
         owner = _system_default_user(session)
@@ -551,7 +593,7 @@ def _resolve_music_assistant(session: Session, user: User, granted: set[str], *,
         own_user_id=user.mass_user_id,
         display_name=user.display_name,
         grant=grant,
-        may_provision=may_provision and not recently_failed and not _is_system_default_user(user),
+        may_provision=may_provision and not recently_failed,
     )
     if res.login == "provisioned" and res.token:
         _MA_PROVISION_FAILED.pop(user.username, None)
@@ -3777,10 +3819,12 @@ def music_assistant_status(session: Session = Depends(get_session), user: User =
 
 
 def _ma_accounts_plan(session: Session) -> list[dict[str, Any]]:
-    """Each person and what giving everyone their own Music Assistant account would do (names only)."""
+    """Each person and what giving everyone their own Music Assistant account would do (names only).
+
+    The household account and test accounts are not people and are left out."""
     rows = []
     for u in session.exec(select(User)).all():
-        if _is_system_default_user(u):
+        if _ma_never_provisioned(u):
             continue
         if (u.mass_url or "").strip():
             action = "own_server"
@@ -6069,16 +6113,29 @@ def _device_word(session: Session, username: str, device_key: str = "") -> str:
 
 
 @app.get("/api/screen-time/{username}/rules")
-def get_screen_rules(username: str, day: str = "", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+def get_screen_rules(
+    username: str,
+    day: str = "",
+    device_key: str = "",
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
+):
     """A member's rules: theirs to read, their parents' to read and change,
     and readable (not changeable) by the other parent for the father and the
     mother, whose collected data they share.
 
     A Windows agent holding a device-scoped key resolves as the member the
-    device is assigned to."""
+    device is assigned to.
+
+    The member's own registered device (a phone naming its ``device_key``,
+    or a PC with its own agent key) also gets the parents' offline-code
+    verifiers (``offline_codes``, never a code), so a parent's offline code
+    works on it without an unlock request first. Nobody else gets them."""
     subject = _screen_subject(session, username)
     if caller.username != subject.username and not may_view_raw_data(caller, subject):
         raise HTTPException(status_code=403, detail="Only a parent can see this")
+    own_device = _own_device_asking(session, caller, subject, authorization, device_key)
     theme_row = session.get(UserThemeSetting, subject.username)
     try:
         theme_data = json.loads(theme_row.data) if theme_row and theme_row.data else {}
@@ -6110,7 +6167,30 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         # Who a locked phone may still call (emergency numbers always go
         # through): the parents, with their own numbers.
         "parent_contacts": _parent_contacts(session, subject),
+        # The parents' offline-code verifiers, for the member's own device only.
+        **({"offline_codes": _offline_verifiers(session, _parents_of(session, subject))} if own_device else {}),
     }
+
+
+def _own_device_asking(
+    session: Session, caller: User, subject: User, authorization: str | None, device_key: str
+) -> Device | None:
+    """The subject's own registered, not revoked device making this call, or
+    None: a PC by its own agent key, a phone by the subject's own key plus its
+    ``device_key``. A parent reading the child's rules never matches, even
+    naming the child's device key."""
+    if caller.username != subject.username:
+        return None
+    agent = _device_for_agent_key(session, authorization)
+    if agent is not None:
+        return agent if (agent.owner_username or "").lower() == subject.username else None
+    key = (device_key or "").strip()
+    if not key:
+        return None
+    device = session.exec(select(Device).where(Device.device_key == key)).first()
+    if device is None or device.revoked or (device.owner_username or "").lower() != subject.username:
+        return None
+    return device
 
 
 @app.put("/api/screen-time/{username}/rules")
@@ -6979,7 +7059,8 @@ def _expire_if_due(session: Session, r: GuardUnlockRequest, now: datetime) -> No
 
 
 def _offline_verifiers(session: Session, parents: list[str]) -> list[dict]:
-    """The parents' offline-code verifiers (never a code), for a device a parent just unlocked."""
+    """The parents' offline-code verifiers (never a code), for the child's own
+    device: its status refresh and a parent's approval of its unlock request."""
     if not parents:
         return []
     return [
@@ -7197,8 +7278,9 @@ def get_offline_code(session: Session = Depends(get_session), caller: User = Dep
 def put_offline_code(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     """A parent sets their offline unlock code: 6 to 12 digits.
 
-    A child's phone or PC learns the new code the next time a parent approves
-    an unlock request from it (the approval carries the verifiers).
+    A child's phone or PC learns the new code at its next status refresh
+    (its own rules read carries the verifiers), and from any approval of an
+    unlock request it sends.
     """
     if not _is_a_parent(session, caller):
         raise HTTPException(status_code=403, detail="Only a parent sets an offline unlock code")
