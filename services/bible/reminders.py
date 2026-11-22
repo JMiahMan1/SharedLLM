@@ -19,11 +19,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from urllib.parse import quote
 
 from sqlmodel import Session, select
 
 from services.common import notify
+from services.common.notice_links import link
 
 from . import plans
 from . import books as book_table
@@ -67,41 +67,60 @@ def read_today(session: Session, username: str, today: str) -> bool:
     )
 
 
-def _build_deep_link(state: UserBibleState) -> str:
+def _build_deep_link(state: UserBibleState) -> dict:
     """Build a deep link to the reader's last position: whole chapter with verse highlighted.
 
-    Format: /bible?ref={book} {chapter}&verse={verse}
-    The reader route accepts ref for the chapter and verse for the verse to scroll to.
+    Uses link("bible", tab="read", book=..., chapter=..., verse=..., translation=..., hash=f"v{verse}")
+    so the reader opens the WHOLE chapter scrolled to the verse.
     """
     # Study takes priority if that's what they were last reading
     if state.last_study_book_id:
         return _build_study_link(state)
     if not state.last_book:
-        return "/bible"
+        return link("bible", tab="read")
     book = state.last_book
     chapter = state.last_chapter
     verse = state.last_verse
-    ref = f"{book} {chapter}"
-    return f"/bible?ref={ref}&verse={verse}"
+    translation = state.last_translation or "kjv"
+    return link("bible", tab="read", book=book, chapter=chapter, verse=verse, translation=translation, hash=f"v{verse}")
 
 
-def _build_study_link(state: UserBibleState) -> str:
+def _build_study_link(state: UserBibleState) -> dict:
     """Build a deep link to the reader's last study position.
 
-    Format: /bible/study?book_id={book_id}&ordinal={ordinal}&scroll={fraction}
-    The study reader accepts these query parameters to open at the exact position.
+    Uses link("bible", tab="studies", book=<book_id>, section=<section_id>, ordinal=<n>)
+    with an optional anchor for a paragraph. Prefers section over ordinal since a section id
+    survives a reformat.
     """
     if not state.last_study_book_id:
-        return "/bible"
+        return link("bible", tab="read")
     book_id = state.last_study_book_id
+    section = state.last_study_section_id
     ordinal = state.last_study_section_ordinal
-    fraction = state.last_study_scroll_fraction
-    return f"/bible/study?book_id={book_id}&ordinal={ordinal}&scroll={fraction}"
+    # Prefer section over ordinal
+    params = {"tab": "studies", "book": book_id}
+    if section:
+        params["section"] = section
+    elif ordinal is not None:
+        params["ordinal"] = ordinal
+    return link("bible", **params)
 
 
-def _build_plan_link(plan_id: str, plan_day: int) -> str:
-    """Build a deep link to a plan day's reading."""
-    return f"/bible?tab=plans&plan={plan_id}&day={plan_day}"
+def _build_plan_link(plan_id: str, plan_day: int) -> dict:
+    """Build a deep link to a plan day's first reading chapter."""
+    readings = plans.day_readings(plan_id, plan_day)
+    if not readings:
+        return link("bible", tab="today")
+    first = readings[0]
+    book = first["osis"]
+    chapter = first["chapter_start"]
+    # Use verse 1 for the start of the chapter
+    return link("bible", tab="read", book=book, chapter=chapter, verse=1, hash="v1")
+
+
+def _build_memorize_link() -> dict:
+    """Build a deep link to the memorize tab."""
+    return link("bible", tab="memorize")
 
 
 def message_for(session: Session, username: str, today: str) -> dict:
@@ -110,7 +129,7 @@ def message_for(session: Session, username: str, today: str) -> dict:
     Includes a deep link to the exact chapter and verse the reader left off at.
     """
     state = session.get(UserBibleState, username)
-    deep_link = _build_deep_link(state) if state else "/bible"
+    deep_link = _build_deep_link(state) if state else link("bible", tab="read")
     enrolled = session.exec(
         select(PlanEnrollment).where(PlanEnrollment.username == username, PlanEnrollment.active == True)  # noqa: E712
     ).all()
@@ -140,7 +159,7 @@ def message_for(session: Session, username: str, today: str) -> dict:
             return {
                 "title": f"Today in {plans.find(row.plan_id)['name']}",
                 "body": body,
-                "data": {"url": plan_link, "link": plan_link},
+                "data": {"link": plan_link, "url": plan_link["href"]},
             }
     due = sum(
         1
@@ -148,10 +167,11 @@ def message_for(session: Session, username: str, today: str) -> dict:
         if r.due_on <= today
     )
     if due:
+        memorize_link = _build_memorize_link()
         return {
             "title": "Memory verses to practise",
             "body": f"{due} verse{'s' if due != 1 else ''} ready for review.",
-            "data": {"url": "/bible?tab=memorize", "link": "/bible?tab=memorize"},
+            "data": {"link": memorize_link, "url": memorize_link["href"]},
         }
     # Use the reader's last position for a personal nudge
     if state and state.last_study_book_id:
@@ -172,7 +192,7 @@ def message_for(session: Session, username: str, today: str) -> dict:
     return {
         "title": "Time to read?",
         "body": body,
-        "data": {"url": deep_link, "link": deep_link},
+        "data": {"link": deep_link, "url": deep_link["href"]},
     }
 
 
@@ -192,7 +212,7 @@ def streak_message_for(session: Session, username: str, today: str) -> dict | No
     if read_today(session, username, today):
         return None
     state = session.get(UserBibleState, username)
-    deep_link = _build_deep_link(state) if state else "/bible"
+    deep_link = _build_deep_link(state) if state else link("bible", tab="read")
     verse = pick_daily_encouragement()
     # Vary the wording based on streak length
     if streak == 1:
@@ -216,7 +236,7 @@ def streak_message_for(session: Session, username: str, today: str) -> dict | No
     return {
         "title": "Keep your streak going",
         "body": body,
-        "data": {"url": deep_link, "link": deep_link},
+        "data": {"link": deep_link, "url": deep_link["href"]},
     }
 
 

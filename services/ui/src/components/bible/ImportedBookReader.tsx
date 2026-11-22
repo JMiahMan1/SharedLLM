@@ -182,13 +182,10 @@ export default function ImportedBookReader({
   book,
   chapters,
   startOrdinal,
-<<<<<<< HEAD
   startScrollFraction = 0,
-=======
   startSection,
   startAnchor,
   aliases,
->>>>>>> origin/microservices
   preferences,
   onPreferences,
   onClose,
@@ -308,8 +305,7 @@ export default function ImportedBookReader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book.id, ordinal]);
 
-<<<<<<< HEAD
-  // Restore scroll position from deep link (startScrollFraction)
+// Restore scroll position from deep link (startScrollFraction)
   useEffect(() => {
     if (scrollRestored.current || !chapter.data) return;
     if (startScrollFraction > 0 && textRef.current) {
@@ -325,7 +321,7 @@ export default function ImportedBookReader({
       scrollRestored.current = true;
     }
   }, [chapter.data, startScrollFraction]);
-=======
+
   // A link to a paragraph: once its section has loaded, bring it into view.
   useEffect(() => {
     const anchor = anchorRef.current;
@@ -352,7 +348,6 @@ export default function ImportedBookReader({
       element.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   }, [activeBlock, listenOpen]);
->>>>>>> origin/microservices
 
   useEffect(() => {
     const previous = document.body.style.overflow;
