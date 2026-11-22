@@ -15,6 +15,9 @@ Rules under test:
 
 Every address and token is made up.
 """
+import threading
+import time
+
 import pytest
 from fastapi import Depends
 from fastapi.testclient import TestClient
@@ -160,6 +163,7 @@ def session_fixture():
         session.add(User(username="kim", display_name="Kim", mass_url=MINE, mass_token_enc=encrypt("t-kim")))
         session.add(User(username="lee", display_name="Lee", mass_url=RETIRED, mass_token_enc=encrypt("t-lee")))
         session.add(User(username="max", display_name="Max"))
+        session.add(User(username="qa-bot", display_name="QA Bot", is_test_account=True))
         session.commit()
         yield session
 
@@ -278,3 +282,82 @@ def test_bulk_provisioning_lists_then_makes_only_missing_accounts(client):
     assert [r["result"] for r in again] == ["unchanged", "unchanged", "unchanged"]
     assert client.made == ["max"]
     assert "t-new-max" not in str(done)  # never a token in the answer
+
+
+# -- who never gets an account ----------------------------------------------------------------
+
+def _user(session, username):
+    return session.exec(select(User).where(User.username == username)).first()
+
+
+def test_test_accounts_and_the_household_account_are_never_given_one_on_first_use(client, session):
+    for username in ("qa-bot", "default"):
+        res = identity_main._resolve_music_assistant(session, _user(session, username), set())
+        assert res.login != "provisioned"
+    qa = _resolve(client, "qa-bot")
+    assert qa["mass_token"] is None
+    _as("qa-bot")
+    assert client.get("/api/auth/music-assistant/status").json()["state"] == "not_set_up"
+    assert client.made == []
+    assert _user(session, "qa-bot").mass_token_enc is None
+
+
+def test_test_accounts_and_the_household_account_are_left_out_of_the_admin_accounts_run(client):
+    plan = client.get("/api/admin/music-assistant/accounts").json()["users"]
+    assert {r["username"] for r in plan} == {"kim", "lee", "max"}
+    done = client.post("/api/admin/music-assistant/accounts",
+                       json={"confirm": True, "usernames": ["qa-bot", "default"]}).json()["users"]
+    assert all(r["result"] == "unchanged" for r in done)
+    assert client.made == []
+
+
+def test_the_admin_command_dry_run_does_not_list_test_accounts(client, capsys):
+    from services.identity import music_assistant_admin
+
+    assert music_assistant_admin.main(["accounts"]) == 0
+    out = capsys.readouterr().out
+    assert "max: needs_account" in out
+    assert "qa-bot" not in out and "default:" not in out
+    assert client.made == []
+
+
+# -- one account request per person at a time -------------------------------------------------
+
+def test_concurrent_first_use_makes_one_account_and_both_get_its_token(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'identity.db'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as setup:
+        setup.add(User(username="default", display_name="Household", is_system_default=True))
+        setup.add(User(username="robin", display_name="Robin"))
+        setup.commit()
+    identity_main._MA_PROVISION_FAILED.clear()
+    calls: list[str] = []
+    calls_lock = threading.Lock()
+
+    def slow_provision(username, display_name=None):
+        with calls_lock:
+            calls.append(username)
+        time.sleep(0.2)  # long enough for the other request to arrive while this one is out
+        return {"username": username, "user_id": f"u-{username}", "created": False, "token": f"t-{len(calls)}"}
+
+    monkeypatch.setattr(music_assistant, "household_server", lambda fresh=False: {"url": HOUSEHOLD, "error": None})
+    monkeypatch.setattr(music_assistant, "provision_account", slow_provision)
+    start = threading.Barrier(3)
+    results: list[music_assistant.Resolution] = []
+
+    def first_use():
+        with Session(engine) as s:
+            user = s.exec(select(User).where(User.username == "robin")).first()
+            start.wait()
+            results.append(identity_main._resolve_music_assistant(s, user, set()))
+
+    threads = [threading.Thread(target=first_use) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+    assert calls == ["robin"]
+    assert sorted(r.token for r in results) == ["t-1", "t-1", "t-1"]
+    with Session(engine) as s:
+        robin = s.exec(select(User).where(User.username == "robin")).first()
+        assert decrypt(robin.mass_token_enc) == "t-1" and robin.mass_user_id == "u-robin"
