@@ -573,6 +573,35 @@ class Statistics:
                                "state, sum, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", batch)
         return written
 
+    def count_statistic_rows(self, statistic_ids: Iterable[str]) -> int:
+        """How many long-term and short-term rows these statistics have (what ``purge_statistic_ids`` deletes)."""
+        ids = sorted(set(statistic_ids))
+        if not ids:
+            return 0
+        marks = ",".join("?" * len(ids))
+        n = 0
+        for table in ("statistics", "statistics_short_term"):
+            n += self._exec(f"SELECT COUNT(*) FROM {table} WHERE metadata_id IN "
+                            f"(SELECT id FROM statistics_meta WHERE statistic_id IN ({marks}))", ids).fetchone()[0]
+        return n
+
+    def purge_statistic_ids(self, statistic_ids: Iterable[str]) -> int:
+        """Delete these statistics outright: their rows in both tables and their metadata. Answers the rows."""
+        ids = sorted(set(statistic_ids))
+        if not ids:
+            return 0
+        marks = ",".join("?" * len(ids))
+        n = 0
+        with self._tx() as db:
+            meta = [r[0] for r in db.execute(f"SELECT id FROM statistics_meta WHERE statistic_id IN ({marks})",
+                                             ids).fetchall()]
+            if meta:
+                mm = ",".join("?" * len(meta))
+                for table in ("statistics", "statistics_short_term"):
+                    n += db.execute(f"DELETE FROM {table} WHERE metadata_id IN ({mm})", meta).rowcount
+                db.execute(f"DELETE FROM statistics_meta WHERE id IN ({mm})", meta)
+        return n
+
     def prune_short_term(self, keep_days: int = SHORT_TERM_KEEP_DAYS) -> int:
         cutoff = time.time() - keep_days * 86400
         return self._exec("DELETE FROM statistics_short_term WHERE start_ts < ?", (cutoff,)).rowcount

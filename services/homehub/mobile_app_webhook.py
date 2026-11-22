@@ -341,6 +341,13 @@ class MobileAppManager:
         if now - self._last_saved > LAST_SEEN_SAVE_EVERY_S:
             self._last_saved = now
             self.store.set_kv(LAST_SEEN_KEY, self._last_seen)
+        entry = self.hub.config_entries.get(entry_id)
+        archive = getattr(self.runtime, "archive", None)
+        if entry is not None and entry.archived_at and archive is not None:
+            # The phone reported again: it is back (device_archive.py).
+            self.store.set_kv(LAST_SEEN_KEY, self._last_seen)
+            with contextlib.suppress(HubError):
+                archive.restore("entry", entry_id, why="the phone reported")
 
     def last_seen(self, entry_id: str) -> float | None:
         return self._last_seen.get(entry_id)
@@ -532,6 +539,7 @@ class MobileAppManager:
         entry.data = reg
         entry.title = reg["device_name"]
         entry.disabled_by = None
+        entry.archived_at = None  # a phone registering again is back (device_archive.py)
         self._save_entry(entry)
         self._ensure_device(entry, from_phone=True)
         with contextlib.suppress(Exception):

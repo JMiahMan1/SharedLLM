@@ -768,6 +768,13 @@ class DiscoveryManager:
             cur[k] = v
         cur["ids"] = sorted(keep_ids | set(finding.get("ids") or []))
         cur["last_seen"] = t
+        archive = getattr(self.runtime, "archive", None)
+        if archive is not None:
+            # An archived device announcing itself again is back (device_archive.py): restored as it was.
+            try:
+                archive.on_sighting(cur)
+            except Exception:
+                log.exception("restoring a rediscovered archived device failed")
         return cur
 
     def public(self, f: dict[str, Any], index: KnownIndex | None = None) -> dict[str, Any]:

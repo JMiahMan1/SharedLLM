@@ -11,6 +11,8 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import re
+import unicodedata
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import asdict, dataclass, field
@@ -273,6 +275,9 @@ class ConfigEntry:
     reason: str | None = None
     #: What a parked entry needs from an admin (``AuthRequired.needs``); None otherwise. Not stored.
     needs: str | None = None
+    #: When the entry was archived for going without contact (device_archive.py), ISO time; None while it is not.
+    #: An archived entry is never set up or retried, and its entities are hidden and unavailable.
+    archived_at: str | None = None
 
     def public(self) -> dict[str, Any]:
         """What HA's config_entries API shows: never the credentials in ``data``."""
@@ -310,6 +315,9 @@ class DeviceEntry:
     configuration_url: str | None = None
     #: The ``DEVICE_INFO_FIELDS`` the device itself reported (through its driver or the flow that added it).
     confirmed: list[str] = field(default_factory=list)
+    #: When this one device was archived (a device of an entry shared by many, a Matter node or a Cast device;
+    #: device_archive.py), ISO time. A device of an archived entry is archived with it without this being set.
+    archived_at: str | None = None
 
     @property
     def display_name(self) -> str:
@@ -666,14 +674,64 @@ class Hub:
 
     # -- hidden devices --------------------------------------------------------
     def is_hidden(self, entity_id: str) -> bool:
-        """Left out of what people and Jarvis browse: hidden itself, or on a hidden device. It still works."""
+        """Left out of what people and Jarvis browse: hidden itself, on a hidden device, or archived. A hidden
+        entity still works; an archived one does not (``archived_reason``)."""
         e = self.entities.get(entity_id)
         if e is None:
             return False
         if e.hidden_by:
             return True
         dev = self.devices.get(e.device_id or "")
-        return bool(dev and dev.hidden_by)
+        return bool(dev and dev.hidden_by) or self.archived_reason(entity_id) is not None
+
+    # -- archived devices (device_archive.py) ----------------------------------------------
+    def device_archived(self, dev: DeviceEntry) -> bool:
+        """Archived on its own, or every config entry it belongs to is archived."""
+        if dev.archived_at:
+            return True
+        links = [self.config_entries[x] for x in dev.config_entries if x in self.config_entries]
+        return bool(links) and all(e.archived_at for e in links)
+
+    def archived_reason(self, entity_id: str) -> str | None:
+        """Why a command to ``entity_id`` cannot run because its device is archived; None when it is not."""
+        e = self.entities.get(entity_id)
+        if e is None:
+            return None
+        entry = self.config_entries.get(e.config_entry_id or "")
+        dev = self.devices.get(e.device_id or "")
+        if entry is not None and entry.archived_at:
+            since = entry.archived_at
+            name = entry.title or entry.domain
+        elif dev is not None and dev.archived_at:
+            since = dev.archived_at
+            name = dev.display_name or dev.id
+        else:
+            return None
+        return (f"device archived: {name} was archived on {str(since)[:10]} after going without contact; "
+                "restore it under Devices > Setup > Archived devices")
+
+    def archived_action_reason(self, domain: str, service: str) -> str | None:
+        """Why a device's own action (``esphome.<node>_<action>``, ``notify.mobile_app_<phone>``) is not offered
+        because its device is archived; None when no archived device would offer it."""
+        if not self.is_device_action(domain, service):
+            return None
+        for entry in self.config_entries.values():
+            if not entry.archived_at:
+                continue
+            if domain == "esphome" and entry.domain == "esphome":
+                # As the ESPHome driver names them: the node name with dashes as underscores.
+                prefix = str(entry.data.get("device_name") or "").replace("-", "_")
+            elif domain == "notify" and entry.domain == "mobile_app":
+                # As the mobile_app driver names them: ``mobile_app_<slug of the phone's name>``.
+                name = unicodedata.normalize("NFKD", str(entry.data.get("device_name") or entry.title or ""))
+                slug = re.sub(r"[^a-z0-9]+", "_", name.encode("ascii", "ignore").decode().lower()).strip("_")
+                prefix = f"mobile_app_{slug}" if slug else ""
+            else:
+                continue
+            if prefix and (service == prefix or service.startswith(prefix + "_")):
+                return (f"device archived: {entry.title or entry.domain} was archived on {entry.archived_at[:10]} "
+                        "after going without contact; restore it under Devices > Setup > Archived devices")
+        return None
 
     def hidden_entity_ids(self) -> list[str]:
         """Every hidden entity, sorted."""
@@ -1153,6 +1211,11 @@ class Hub:
             domain = entry.domain if by_entity_domain else call.domain
             if not by_entity_domain and entry.domain != call.domain and call.domain != "homeassistant":
                 # HA silently skips entities of another domain; so do we.
+                continue
+            archived = self.archived_reason(eid)
+            if archived is not None:
+                # Said plainly, so an automation's trace names the cause instead of "no driver is running".
+                errors.append(f"{eid}: {archived}")
                 continue
             driver = self._driver_for(entry)
             if driver is None:
