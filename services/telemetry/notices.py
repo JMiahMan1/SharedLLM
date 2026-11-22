@@ -151,6 +151,8 @@ def parse(body: dict[str, Any]) -> dict[str, Any]:
         "once": str(body.get("once") or "").strip()[:200],
         "audience": audience,
         "replace": body.get("replace") is True,
+        # Data-only: for the person's devices to act on, not to read (see deliver).
+        "signal": body.get("signal") is True,
     }
 
 
@@ -252,6 +254,18 @@ async def deliver(rc, session: aiohttp.ClientSession, user: str, fields: dict[st
     """Send one parsed notice to one person. Returns what happened."""
     if not wanted(await preferences(session, user), fields["category"], fields["priority"]):
         return {"dropped": "preference"}
+    if fields.get("signal"):
+        # A data-only signal (a parent changed a child's screen time, so the
+        # phone re-reads its status now): straight to the push stream the
+        # phone listens on. It is not a notice to read, so it never enters the
+        # notification list or web push, and a missed one is not replayed; the
+        # phone also re-reads on wake, on reconnect and every minute.
+        topic = await push_topic(session, user)
+        signal = {"id": store.new_id(), "user": user, "category": fields["category"], "kind": fields["kind"],
+                  "title": fields["title"], "body": fields["body"], "priority": fields["priority"],
+                  "tag": fields["tag"], "data": fields["data"], "actions": [], "signal": True,
+                  "created_at": utcnow_iso()}
+        return {"signal": True, "ntfy": bool(topic) and await ntfy.publish(session, topic, signal)}
     once = fields["once"]
     once_key = f"telemetry:notify_once:{user}:{once}" if once else None
     if once_key and not await rc.set(once_key, "1", nx=True, ex=ONCE_SECONDS):

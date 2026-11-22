@@ -321,9 +321,31 @@ def test_a_failed_outbox_write_does_not_mark_the_notice_sent(rc, sent, identity,
 
 
 def test_a_replacing_notice_supersedes_unread_ones_with_its_tag(client, rc, sent, identity):
-    base = {**LINKED, "user": "sam", "category": "family_safety", "tag": "chores-approved:sam", "replace": True}
+    base = {**LINKED, "user": "sam", "category": "family_safety", "tag": "screen-time:chores-approved:sam", "replace": True}
     client.post("/api/telemetry/notify", headers=HEADERS, json={**base, "title": "Chore approved"})
     client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": "Other", "tag": "other"})
     client.post("/api/telemetry/notify", headers=HEADERS, json={**base, "title": "2 chores approved today"})
     titles = [n["title"] for n in _outbox(client, "sam")]
     assert titles.count("Chore approved") == 0 and "2 chores approved today" in titles and "Other" in titles
+
+
+def test_a_data_only_signal_goes_to_the_phone_only(client, rc, sent, identity):
+    """A screen-time refresh signal (a parent changed a child's rules) is for
+    the phone to act on: it reaches the push stream and nothing else."""
+    body = {**LINKED, "user": "sam", "category": "family_safety", "kind": "screen_time_refresh",
+            "title": "Screen time updated", "body": "A parent changed your screen time settings.",
+            "priority": 2, "tag": "screen-time:rules:sam", "replace": True, "signal": True}
+    resp = client.post("/api/telemetry/notify", headers=HEADERS, json=body)
+    assert resp.status_code == 200
+    assert resp.json()["signal"] is True and resp.json()["ntfy"] is True
+    assert _outbox(client, "sam") == []
+    assert sent["webpush"] == []
+    topic, notice = sent["ntfy"][0]
+    assert topic == "jarvis-sam-secret"
+    assert notice["kind"] == "screen_time_refresh" and notice["signal"] is True
+    assert notice["tag"] == "screen-time:rules:sam" and notice["id"]
+
+
+def test_signal_must_be_exactly_true():
+    fields = notices.parse({**LINKED, "user": "sam", "title": "x", "signal": "yes"})
+    assert fields["signal"] is False

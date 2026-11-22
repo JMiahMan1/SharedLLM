@@ -226,6 +226,26 @@ public final class GuardRules {
         return locked && !unlocked;
     }
 
+    /**
+     * The shortest gap between two status reads set off by the phone waking or
+     * a network coming back: the screen turning on, the unlock and the network
+     * returning usually arrive together, and one read covers them all.
+     */
+    static final long WAKE_REFRESH_GAP_MS = 5_000L;
+
+    /**
+     * Whether waking up (screen on, unlocked, a network back) should re-read
+     * the server's status now. A phone that slept, or was offline, while a
+     * parent gave time still holds the old "time is up" status, and its
+     * minute timer does not count the time asleep, so without this the lock
+     * stays up until the guard's next minute (or until the child asks).
+     * A clock that went backwards counts as due.
+     */
+    static boolean wakeRefreshDue(long nowMs, long lastWakeRefreshMs) {
+        return lastWakeRefreshMs <= 0L || nowMs < lastWakeRefreshMs
+                || nowMs - lastWakeRefreshMs >= WAKE_REFRESH_GAP_MS;
+    }
+
     /** Android's VPN dialogs; the one that manages a running VPN can disconnect the web filter. */
     static final String VPN_DIALOGS = "com.android.vpndialogs";
 

@@ -138,7 +138,16 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
   (`"dropped": "audience"`); if identity cannot be read the notice is refused
   (503), never delivered blind. Updates, system and ops notices use it.
 - `tag` groups and replaces: a newer notice with the same tag replaces the
-  older one on the phone (timer countdowns, "N new messages").
+  older one on the phone (timer countdowns, "N new messages"). The phone
+  re-reads its screen-time status at once on any `family_safety` notice tagged
+  `screen-time:` (a bonus, a granted request, an approved chore
+  `screen-time:chores-approved:<child>`, a pause).
+- `signal: true` makes it data-only: telemetry publishes it to the person's
+  ntfy topic and nothing else (no notification list, no web push, no replay).
+  The phone acts on its `kind` and shows nothing; today the one kind is
+  `screen_time_refresh` (a parent changed a child's rules: re-read the status
+  now). An app too old to know the kind shows it as an ordinary quiet notice,
+  so a signal still carries a readable title and body.
 - `actions` (up to 3):
   - `view`: opens `url`: an in-app path (`/wander?person=leo`) opens in the
     app, an `https://` URL with a host (SOS Directions) opens in the

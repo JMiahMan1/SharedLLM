@@ -663,9 +663,21 @@ def chore_answer_words(approved: bool, title: str | None,
     return f"{len(done)} chores approved today", f"{listed} were done right. Nice work!"
 
 
+#: The ``kind`` of the data-only signal that makes a member's phone re-read its
+#: screen-time status at once (a parent changed their rules). The phone acts on
+#: it and shows nothing (PushNotice.isScreenTimeRefresh).
+REFRESH_KIND = "screen_time_refresh"
+
+
 def chore_answer_tag(child: str, approved: bool) -> str:
-    """Approvals share one tag per child, so each merged notice replaces the last."""
-    return f"chores-approved:{child}" if approved else f"screen-time:{child}"
+    """Approvals share one tag per child, so each merged notice replaces the last.
+
+    Both start ``screen-time:``: the phone re-reads its status the moment a
+    screen-time notice arrives (PushNotice.isScreenTime), and an approved chore
+    earns minutes, so the time it gave reaches the lock at once instead of at
+    the guard's next minute.
+    """
+    return f"screen-time:chores-approved:{child}" if approved else f"screen-time:{child}"
 
 
 def evaluate(

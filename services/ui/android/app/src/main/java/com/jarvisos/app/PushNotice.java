@@ -198,6 +198,15 @@ final class PushNotice {
         return "family_safety".equals(category) && tag.startsWith("screen-time:");
     }
 
+    /**
+     * The data-only signal that a parent changed this member's screen time
+     * (the gateway's {@code screen_time_refresh}): the phone re-reads its
+     * status at once and shows nothing.
+     */
+    boolean isScreenTimeRefresh() {
+        return "screen_time_refresh".equals(kind);
+    }
+
     /** True when this screen-time notice announces that a device was just paused/locked. */
     boolean isPauseNotice() {
         if (!isScreenTime()) return false;

@@ -62,6 +62,9 @@ from services.common.screen_time import (
     parent_contacts,
 )
 from services.common.screen_time import (
+    REFRESH_KIND as SCREEN_TIME_REFRESH_KIND,
+)
+from services.common.screen_time import (
     evaluate as evaluate_screen_time,
 )
 from services.common.screen_time import (
@@ -8789,9 +8792,27 @@ async def spotify_unlink(request: Request):
     return JSONResponse(status_code=status, content=body)
 
 
+async def _screen_time_refresh(user: str) -> None:
+    """Tell a member's phone to re-read its screen-time status now: a data-only
+    signal (the phone shows nothing), sent when a parent changes their rules,
+    so a raised limit or a moved bedtime lifts a lock within seconds. An app
+    too old to know the signal shows it as a quiet notice and still re-reads
+    (its tag starts ``screen-time:``). A failed signal never fails the edit."""
+    try:
+        await _notify.send(_notify.notice(
+            user, "family_safety", "Screen time updated", "A parent changed your screen time settings.",
+            link=_my_screen_time(), kind=SCREEN_TIME_REFRESH_KIND, priority=2,
+            tag=f"screen-time:rules:{user}", replace=True, signal=True,
+        ))
+    except Exception as exc:  # the phone still re-reads within the minute
+        log.warning("[screen-time] refresh signal to %s failed: %s", user, exc)
+
+
 @app.put("/api/screen-time/{username}/rules")
 async def screen_time_set_rules(request: Request, username: str):
     status, body = await _identity_as_caller(request, "PUT", f"/api/screen-time/{username}/rules", json=await request.json())
+    if status == 200:
+        await _screen_time_refresh(str((body or {}).get("username") or username).strip().lower())
     return JSONResponse(status_code=status, content=body)
 
 
@@ -8870,9 +8891,22 @@ async def screen_time_ask(request: Request):
             f"{asked.get('username')} asks for {asked.get('minutes')} more minutes today{note}.",
             # The child's page, whose Overview answers it (Grant / Not today), at the request.
             _child_page(str(asked.get("username") or ""), focus=f"time-{request_id}" if request_id is not None else None),
-            actions=_decide_actions("more_time_decide", request_id, "grant") if request_id is not None else None,
+            actions=_more_time_actions(str(asked.get("username") or ""), request_id, asked.get("minutes"))
+            if request_id is not None else None,
         )
     return JSONResponse(status_code=status, content=body)
+
+
+def _more_time_actions(child: str, request_id: Any, minutes: Any) -> list[dict]:
+    """A request for more time on a parent's phone: one tap gives the full
+    amount asked, "Change minutes" opens the request on the child's page to
+    give a different amount, and "Not today" declines."""
+    asked = f"Approve {minutes} min" if isinstance(minutes, int) and not isinstance(minutes, bool) else "Approve"
+    return [
+        _notify.callback_action(asked, "more_time_decide", {"id": request_id, "grant": True}),
+        _notify.view_action(_child_page(child, focus=f"time-{request_id}"), "Change minutes"),
+        _notify.callback_action("Not today", "more_time_decide", {"id": request_id, "grant": False}),
+    ]
 
 
 async def decide_more_time(request: Request, request_id: int, payload: dict) -> tuple[int, dict]:
