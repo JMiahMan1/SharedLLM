@@ -848,7 +848,6 @@ export default function Bible() {
   // come through openRef, and the bump is what lets tapping the same link
   // twice land on its verse each time instead of the first tap's scrolled place.
   const [requestedSeq, setRequestedSeq] = useState(0);
-<<<<<<< HEAD
   const [requestedRef, setRequestedRef] = useState<string | null>(null);
   // Verse parameter from deep links (e.g., ?verse=16) for scrolling to a specific verse
   const [requestedVerse, setRequestedVerse] = useState<number | null>(() => {
@@ -874,6 +873,7 @@ export default function Bible() {
       }
     }, 0);
   }, [location.pathname, searchParams, requestedRef, requestedVerse]);
+
 const { user } = useAuth();
   // A link into a study book: ?tab=studies&book=7&section=s-lesson-3 (or
   // &ordinal=3), with an optional paragraph as #p-1a2b3c4d or &anchor=.
