@@ -284,6 +284,11 @@ const GET: Record<string, unknown> = {
       fit: { baseline: 8, per_degree_day: 0.6, r2: 0.71, days: 40 }, r_temperature: -0.62, r_precip: 0.1, wet_mean: 13.1, dry_mean: 12.0,
       projection: [{ date: new Date(NOW).toISOString().slice(0, 10), value: 13 }], insights: ['Colder days use more power in the barn.'] },
   ], insights: [`Barn power rises about 0.6 kWh for each degree-day of heating. ${LONG_WORD}`] },
+  // The Music Assistant tile in Accounts & Integrations (shape as src/lib/musicAssistant.ts): the household server, their own login.
+  '/api/auth/music-assistant/status': { server: 'household', login: 'provisioned', url: 'http://music.example.test:8095', own_url: null,
+    household_url: 'http://music.example.test:8095', household_error: null, can_use_household: false,
+    note: 'Favourites, the library and playlists are shared by everyone on the household server.', ma_username: 'parent',
+    state: 'ok', message: 'Connected as parent.' },
   '/api/auth/discover': { users: [
     { username: 'newcousin', source: 'home_assistant', display_name: 'New Cousin With A Long Display Name', email: 'cousin@example.test' },
     { username: LONG_WORD.toLowerCase(), source: 'nextcloud', nc_username: LONG_WORD.toLowerCase() },
