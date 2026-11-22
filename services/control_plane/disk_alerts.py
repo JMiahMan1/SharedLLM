@@ -12,13 +12,15 @@ import logging
 import os
 from typing import Any
 
+from services.common import notice_links
 from services.control_plane.admin_notice import notify_admins
 
 log = logging.getLogger("control_plane.disk_alerts")
 
 CHECK_SECONDS = int(os.getenv("DISK_ALERT_INTERVAL", "3600"))
 DEFAULT_PATHS = "/hostfs/data,/hostfs/workspaces,/hostfs/docker"
-DASHBOARD_URL = "/"
+#: Admin > Storage, where the disks are.
+DASHBOARD_URL = notice_links.link("admin", section="storage")["href"]
 
 
 def alert_paths() -> list[str]:
@@ -61,7 +63,7 @@ def disk_transitions(low: set[str], free: dict[str, float], threshold: int) -> l
                 "body": f"{label}: {pct:.1f}% free (alert below {threshold}%).",
                 "priority": 4,
                 "tag": tag,
-                "data": {"url": DASHBOARD_URL},
+                "data": {"link": notice_links.link("admin", section="storage")},
             })
         elif pct >= threshold and label in low:
             low.discard(label)
@@ -70,7 +72,7 @@ def disk_transitions(low: set[str], free: dict[str, float], threshold: int) -> l
                 "body": f"{label}: {pct:.1f}% free.",
                 "priority": 2,
                 "tag": tag,
-                "data": {"url": DASHBOARD_URL},
+                "data": {"link": notice_links.link("admin", section="storage")},
             })
     return notices
 

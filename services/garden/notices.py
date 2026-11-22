@@ -62,6 +62,9 @@ def build_digest(member: str, due_tasks: list[dict]) -> dict | None:
     single_id = plant_ids[0] if len(plant_ids) == 1 else None
 
     return {
+        # One plant: its own page. Several: the garden, at the first of them.
+        "link": (notify.link("plant", id=single_id) if single_id is not None
+                 else notify.link("garden", focus=f"plant-{plant_ids[0]}") if plant_ids else notify.link("garden")),
         "title": "Garden Morning Digest",
         "body": "Plants needing care today:\n" + "\n".join(lines),
         "actions": [
@@ -200,6 +203,7 @@ async def send_digest_to_member(
         title=digest["title"],
         body=digest["body"],
         actions=digest["actions"],
+        link=digest["link"],
         once=_once_key(member, day),
         kind="garden_digest",
         audience="all",

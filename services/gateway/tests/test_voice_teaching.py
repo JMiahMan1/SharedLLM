@@ -286,7 +286,7 @@ async def test_teaching_a_new_voice_is_held_until_the_owner_approves_it_end_to_e
     # The owner, and only the owner, got a notice with the two answers.
     assert [n["user"] for n in notices] == ["robin"]
     (notice,) = notices
-    assert notice["data"]["url"] == "/identity"
+    assert notice["data"]["url"] == "/identity?focus=voice-pending"
     approve, deny = notice["actions"]
     assert approve["callback"] == deny["callback"] == "voice_pending_decide"
     assert approve["params"]["approve"] is True and deny["params"]["approve"] is False

@@ -393,7 +393,7 @@ function Run({
                 : 'border border-white/[0.06] bg-slate-800/90 text-slate-100 shadow-sm';
           const open = activeKey === key;
           return (
-            <div key={key} className={`group relative flex w-full flex-col ${mine ? 'items-end' : 'items-start'} ${index > 0 ? 'mt-0.5' : ''}`}>
+            <div key={key} data-focus-id={typeof message.id === 'number' ? `msg-${message.id}` : undefined} className={`group relative flex w-full flex-col ${mine ? 'items-end' : 'items-start'} ${index > 0 ? 'mt-0.5' : ''}`}>
               <div className={`flex max-w-full items-center gap-1 ${mine ? 'flex-row-reverse' : ''}`}>
                 <div
                   role="button"

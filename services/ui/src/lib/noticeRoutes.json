@@ -1,0 +1,513 @@
+{
+  "focus_param": "focus",
+  "routes": {
+    "home": {
+      "path": "/",
+      "query": [],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "The dashboard"
+    },
+    "family": {
+      "path": "/family",
+      "query": [
+        "answer",
+        "drop_in",
+        "play",
+        "room",
+        "tab",
+        "video"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {
+        "tab": [
+          "announce",
+          "calls",
+          "chat",
+          "create",
+          "games"
+        ]
+      },
+      "description": "A tab of the Family page; Announce lists timers"
+    },
+    "chat": {
+      "path": "/family",
+      "query": [
+        "beloved",
+        "chat",
+        "private"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [
+        "msg"
+      ],
+      "guard": "member",
+      "query_guards": {
+        "beloved": "beloved",
+        "private": "private_chat"
+      },
+      "choices": {},
+      "description": "One family conversation; focus is the message"
+    },
+    "member": {
+      "path": "/family/member/{username}",
+      "query": [
+        "section"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [
+        "app",
+        "chore",
+        "concern",
+        "guard",
+        "time",
+        "unlock"
+      ],
+      "guard": "parent",
+      "query_guards": {},
+      "choices": {
+        "section": [
+          "activity",
+          "apps",
+          "comms",
+          "devices",
+          "faith",
+          "health",
+          "location",
+          "overview",
+          "time"
+        ]
+      },
+      "description": "A family member's page (a parent's view of a child)"
+    },
+    "guardian": {
+      "path": "/guardian",
+      "query": [
+        "area",
+        "child",
+        "member",
+        "week"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [
+        "recap"
+      ],
+      "guard": "parent",
+      "query_guards": {},
+      "choices": {
+        "area": [
+          "all",
+          "heart",
+          "overview",
+          "safety",
+          "time"
+        ]
+      },
+      "description": "The guardian hub"
+    },
+    "wander": {
+      "path": "/wander",
+      "query": [
+        "at",
+        "by",
+        "person",
+        "trips"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "The family map, at a person"
+    },
+    "health": {
+      "path": "/fitness",
+      "query": [
+        "tab"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {
+        "tab": [
+          "fitness",
+          "health",
+          "nutrition",
+          "sleep",
+          "today"
+        ]
+      },
+      "description": "The health hub (steps, fasting, screen time, chores)"
+    },
+    "calendar": {
+      "path": "/calendar",
+      "query": [
+        "date"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "The calendar, on a day"
+    },
+    "bible": {
+      "path": "/bible",
+      "query": [
+        "book",
+        "chapter",
+        "day",
+        "group",
+        "plan",
+        "ref",
+        "tab",
+        "translation",
+        "verse"
+      ],
+      "hashes": [],
+      "hash_pattern": "^(v|verse-?)[0-9]{1,3}(-[0-9]{1,3})?$",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {
+        "tab": [
+          "devotional",
+          "memorize",
+          "notes",
+          "plans",
+          "play",
+          "read",
+          "study",
+          "today"
+        ]
+      },
+      "description": "The Bible reader"
+    },
+    "garden": {
+      "path": "/garden",
+      "query": [
+        "tag"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [
+        "plant"
+      ],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "The garden, at a plant"
+    },
+    "plant": {
+      "path": "/garden/plants/{id}",
+      "query": [
+        "journal"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "One plant"
+    },
+    "devices": {
+      "path": "/devices",
+      "query": [],
+      "hashes": [
+        "add",
+        "add-fix",
+        "devices",
+        "devices-activity",
+        "devices-archived",
+        "devices-areas",
+        "devices-duplicates",
+        "devices-family",
+        "devices-folders",
+        "devices-hardware",
+        "devices-integrations",
+        "devices-labels",
+        "devices-light-groups",
+        "devices-logins",
+        "devices-new",
+        "devices-persons",
+        "devices-phones",
+        "devices-rooms",
+        "devices-windows",
+        "devices-zones",
+        "family",
+        "places",
+        "setup"
+      ],
+      "hash_pattern": "",
+      "focus": [
+        "discovery",
+        "entry"
+      ],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "Devices: a found device (Add), an integration (Setup), the family's (Family)"
+    },
+    "automations": {
+      "path": "/automations",
+      "query": [],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "hub",
+      "query_guards": {},
+      "choices": {},
+      "description": "Automations and the hub's repairs"
+    },
+    "history": {
+      "path": "/history",
+      "query": [
+        "area",
+        "e",
+        "view"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "hub",
+      "query_guards": {},
+      "choices": {},
+      "description": "One device's history"
+    },
+    "cameras": {
+      "path": "/cameras",
+      "query": [
+        "camera",
+        "view"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "hub",
+      "query_guards": {},
+      "choices": {},
+      "description": "Cameras"
+    },
+    "rooms": {
+      "path": "/rooms",
+      "query": [],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "hub",
+      "query_guards": {},
+      "choices": {},
+      "description": "Rooms"
+    },
+    "climate": {
+      "path": "/climate",
+      "query": [],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "hub",
+      "query_guards": {},
+      "choices": {},
+      "description": "Climate"
+    },
+    "energy": {
+      "path": "/energy",
+      "query": [],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "hub",
+      "query_guards": {},
+      "choices": {},
+      "description": "Energy"
+    },
+    "lists": {
+      "path": "/lists",
+      "query": [
+        "list"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "hub",
+      "query_guards": {},
+      "choices": {},
+      "description": "Lists"
+    },
+    "notes": {
+      "path": "/notes",
+      "query": [
+        "note"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "Notes, at a note"
+    },
+    "recipes": {
+      "path": "/recipes",
+      "query": [
+        "recipe",
+        "tab"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "Recipes"
+    },
+    "media": {
+      "path": "/media",
+      "query": [],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "Media"
+    },
+    "workspaces": {
+      "path": "/workspaces",
+      "query": [
+        "select"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "Workspaces, at a workspace"
+    },
+    "artifacts": {
+      "path": "/artifacts",
+      "query": [],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "Artifacts (generated files)"
+    },
+    "knowledge": {
+      "path": "/knowledge",
+      "query": [],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "Knowledge"
+    },
+    "settings": {
+      "path": "/settings",
+      "query": [],
+      "hashes": [
+        "family-drop-in"
+      ],
+      "hash_pattern": "",
+      "focus": [
+        "report",
+        "section"
+      ],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {},
+      "description": "Settings, at a section or a report"
+    },
+    "identity": {
+      "path": "/identity",
+      "query": [
+        "spotify"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [
+        "voice"
+      ],
+      "guard": "member",
+      "query_guards": {},
+      "choices": {
+        "spotify": [
+          "cancelled",
+          "failed",
+          "linked"
+        ]
+      },
+      "description": "Accounts and integrations; voice recordings waiting for an answer"
+    },
+    "admin": {
+      "path": "/admin/{section}",
+      "query": [
+        "mission"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [
+        "mission"
+      ],
+      "guard": "admin",
+      "query_guards": {},
+      "choices": {
+        "section": [
+          "bible",
+          "database",
+          "groups",
+          "hardware",
+          "integrations",
+          "intercom",
+          "monitor",
+          "network",
+          "ops",
+          "services",
+          "storage",
+          "users"
+        ]
+      },
+      "description": "An admin tab; Raven Ops opens a mission with ?mission="
+    },
+    "lab": {
+      "path": "/lab",
+      "query": [
+        "tab"
+      ],
+      "hashes": [],
+      "hash_pattern": "",
+      "focus": [],
+      "guard": "admin",
+      "query_guards": {},
+      "choices": {
+        "tab": [
+          "missions",
+          "tests",
+          "training"
+        ]
+      },
+      "description": "Jarvis Lab"
+    }
+  }
+}

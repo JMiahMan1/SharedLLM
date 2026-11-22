@@ -506,6 +506,24 @@ def _parse_duration(text: str | None) -> timedelta | None:
 
 
 
+def timer_link(stored: str) -> dict:
+    """Where a finished timer's notice opens.
+
+    A reminder made from a note (or a place) opens what it was made from; any
+    other timer opens Family > Announce, where timers are. A stored address no page
+    reads any more (an old ``/communication``) falls back to Announce rather
+    than losing the notice.
+    """
+    from services.common import notify
+
+    if stored != "/family?tab=announce":
+        try:
+            return notify.link_from_href(stored)
+        except notify.LinkError:
+            log.warning("[timer] stored link %r is not a page any more; opening Announce", stored)
+    return notify.link("family", tab="announce")
+
+
 async def notify_timer_done(user: str, timer_data: dict) -> bool:
     """Put "<title> is done" on the person's phone (category ``timers``).
 
@@ -552,6 +570,7 @@ async def notify_timer_done(user: str, timer_data: dict) -> bool:
     link = app_link(timer_data.get("url")) or default_link
     if link != default_link:
         again["url"] = link
+    target = timer_link(link)
 
     extra_data: dict = {}
     if emoji:
@@ -578,7 +597,7 @@ async def notify_timer_done(user: str, timer_data: dict) -> bool:
         for member in members:
             ok = await notify.send(notify.notice(
                 member, "timers", notice_title, notice_body,
-                url=link, kind="alarm" if kind == "alarm" else "timer",
+                link=target, kind="alarm" if kind == "alarm" else "timer",
                 priority=priority, tag=f"timer:{timer_id}",
                 data=extra_data or None,
                 actions=[
@@ -593,7 +612,7 @@ async def notify_timer_done(user: str, timer_data: dict) -> bool:
 
     return await notify.send(notify.notice(
         user, "timers", notice_title, notice_body,
-        url=link, kind="alarm" if kind == "alarm" else "timer",
+        link=target, kind="alarm" if kind == "alarm" else "timer",
         priority=priority, tag=f"timer:{timer_id}",
         data=extra_data or None,
         actions=[

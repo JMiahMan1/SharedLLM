@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import toast from 'react-hot-toast';
@@ -1458,6 +1459,13 @@ export default function Devices() {
   const [detailDevice, setDetailDevice] = useState<MdmDevice | null>(null);
   const [chosenTab, setTab] = useState<DeviceTab>(() => tabForHash(typeof window === 'undefined' ? '' : window.location.hash));
   const openTab = (id: DeviceTab) => { setTab(id); window.history.replaceState(null, '', `#${id}`); };
+  // A notice tapped while this page is open (a new device, an integration that
+  // keeps restarting) changes only the anchor: follow it to its tab.
+  const routerHash = useLocation().hash;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- following the link
+    if (routerHash) setTab(tabForHash(routerHash));
+  }, [routerHash]);
   // Every tab but Family is HomeHub's (its devices, discovery, areas and setup):
   // with HomeHub off only the family's phones and folders are left.
   const { homehub } = useIntegrations();

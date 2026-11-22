@@ -102,7 +102,7 @@ def test_a_chat_notice_has_its_category_tag_and_buttons():
     assert notice["tag"] == "chat:fam" and notice["once"] == "chat:fam:7"
     assert notice["actions"] == [
         {"label": "Reply", "type": "reply", "callback": "chat_reply", "params": {"token": "fam"}},
-        {"label": "Open", "type": "view", "url": "/family?chat=fam"},
+        {"label": "Open", "type": "view", "url": "/family?chat=fam&focus=msg-7"},
     ]
 
 
@@ -622,14 +622,15 @@ def test_only_an_admin_changes_a_place(safety_client):
 
 
 def test_notice_builder_caps_actions_and_priority():
-    n = notify.notice("leo", "jobs", "t", priority=9, actions=[{}] * 5)
+    n = notify.notice("leo", "jobs", "t", link=notify.link("home"), priority=9, actions=[{}] * 5)
     assert n["priority"] == 5 and len(n["actions"]) == 3
     assert json.dumps(n)
 
 
 def test_notice_builder_only_sends_a_non_default_audience():
-    assert "audience" not in notify.notice("leo", "app_updates", "t")
-    assert notify.notice("leo", "app_updates", "t", audience="parents")["audience"] == "parents"
+    home = notify.link("home")
+    assert "audience" not in notify.notice("leo", "app_updates", "t", link=home)
+    assert notify.notice("leo", "app_updates", "t", link=home, audience="parents")["audience"] == "parents"
 
 
 # ------------------------------------------------------- gateway route hooks

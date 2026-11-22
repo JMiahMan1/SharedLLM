@@ -147,5 +147,6 @@ self.addEventListener('notificationclick', (event) => {
   }
   // The notice itself, or a reply where the browser could not ask for text: open it in the app, where the
   // bell lists it with every button.
-  event.waitUntil(openApp(appPath(data.path || data.url), data));
+  // Its link (the page and the item on it, docs/PUSH.md "Deep links"), else the older url.
+  event.waitUntil(openApp(appPath((data.link && data.link.href) || data.path || data.url), data));
 });

@@ -86,7 +86,7 @@ export default function ChoresCard({ username, name }: { username: string; name:
           <p className="text-xs font-semibold text-sky-200">Done right? {name} ticked {waiting.length === 1 ? 'this' : 'these'} off</p>
           <ul className="space-y-1.5">
             {waiting.map((check) => (
-              <li key={check.id} className="flex flex-wrap items-center gap-2" data-testid="chore-check">
+              <li key={check.id} className="flex flex-wrap items-center gap-2" data-testid="chore-check" data-focus-id={`chore-${check.id}`}>
                 {/* On a phone the chore gets its own line and the two answers share the next one,
                     instead of the buttons cutting its name to "Take out the tr...". */}
                 <span className="min-w-0 basis-full break-words text-sm text-slate-100 sm:basis-0 sm:flex-1 sm:truncate">

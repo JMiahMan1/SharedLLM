@@ -339,6 +339,22 @@ body {
   .row-span-3 { grid-row: span 3; }
 }
 
+/* The item a tapped notice points at (components/layout/DeepLinkFocus.tsx). */
+@keyframes deep-link-glow {
+  0% { box-shadow: 0 0 0 0 rgb(56 189 248 / 0.7); }
+  60% { box-shadow: 0 0 0 6px rgb(56 189 248 / 0.25); }
+  100% { box-shadow: 0 0 0 3px rgb(56 189 248 / 0.45); }
+}
+.deep-link-highlight {
+  outline: 2px solid rgb(56 189 248);
+  outline-offset: 2px;
+  border-radius: 0.75rem;
+  animation: deep-link-glow 1.2s ease-out 2;
+}
+@media (prefers-reduced-motion: reduce) {
+  .deep-link-highlight { animation: none; }
+}
+
 /* Animations */
 @keyframes shimmer {
   0% { transform: translateX(-100%); }

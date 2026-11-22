@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Activity, AlertTriangle, Clock, History, Play, PowerOff, Search, ShieldAlert, Square, Terminal, Trash2, Volume2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -33,6 +34,21 @@ export default function RavenOpsPanel() {
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [liveMissionId, setLiveMissionId] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
+  // A notice about a mission (it needs approval, it finished) opens it here:
+  // /admin/ops?mission=<id>. The parameter is then dropped, so closing the
+  // detail and going back does not open it again.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedMission = searchParams.get('mission');
+  useEffect(() => {
+    if (!linkedMission) return;
+    const id = Number(linkedMission);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- following the link
+    if (Number.isInteger(id) && id > 0) setDetailId(id);
+    setSearchParams((params) => {
+      params.delete('mission');
+      return params;
+    }, { replace: true });
+  }, [linkedMission, setSearchParams]);
   const [missionPrompt, setMissionPrompt] = useState('');
 
   const { data: config, isLoading: configLoading, isError: configError } = useQuery<RavenConfig>({
@@ -281,7 +297,7 @@ export default function RavenOpsPanel() {
       <MissionSection icon={<Activity size={16} className="text-orange-400" />} title="Proposed fixes" loading={missionsLoading}
         empty="No proposed fixes. Raven has not seen a container keep failing.">
         {triage.map((mission) => (
-          <div key={mission.id} className="glass-card p-4 border-l-4 border-l-orange-500/50 flex flex-col gap-3 min-w-0">
+          <div key={mission.id} data-focus-id={`mission-${mission.id}`} className="glass-card p-4 border-l-4 border-l-orange-500/50 flex flex-col gap-3 min-w-0">
             <div className="min-w-0">
               <p className="text-sm font-bold text-white truncate">{mission.target_container || 'System'}</p>
               <p className="text-xs text-slate-400 line-clamp-2">{mission.error_summary}</p>
@@ -313,7 +329,7 @@ export default function RavenOpsPanel() {
       <MissionSection icon={<Activity size={16} className="text-emerald-400" />} title="Running now" loading={missionsLoading}
         empty="No missions are running.">
         {active.map((mission) => (
-          <div key={mission.id} className="glass-card p-4 border-l-4 border-l-emerald-500/50 flex flex-col gap-3 min-w-0">
+          <div key={mission.id} data-focus-id={`mission-${mission.id}`} className="glass-card p-4 border-l-4 border-l-emerald-500/50 flex flex-col gap-3 min-w-0">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 mb-1">
                 <span className="bg-emerald-500/10 text-emerald-300 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest">{mission.status}</span>

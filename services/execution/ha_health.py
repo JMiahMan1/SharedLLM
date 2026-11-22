@@ -219,6 +219,6 @@ async def _send_notice(ha_url: str, *, recovered: bool, reason: str = "") -> Non
                 3,
             )
         await notify.send(
-            notify.notice("@admins", "admin", title, body, url="/", priority=priority,
+            notify.notice("@admins", "admin", title, body, link=notify.link("admin", section="services"), priority=priority,
                           tag=f"admin:ha-down:{host}", kind="admin")
         )

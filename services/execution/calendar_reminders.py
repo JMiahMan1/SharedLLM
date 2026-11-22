@@ -20,6 +20,7 @@ from datetime import datetime, time, timedelta
 
 import pytz
 
+from services.common import notice_links
 from services.execution.leave_by import _clock, _start, all_day, events_for
 
 log = logging.getLogger("execution.calendar_reminders")
@@ -78,6 +79,11 @@ def _key(event: dict) -> str:
     return str(event.get("id") or event.get("summary") or "event")
 
 
+def event_link(ev: dict, start) -> dict:
+    """The calendar opened on the event's day (its day view lists it)."""
+    return notice_links.link("calendar", date=start.date().isoformat())
+
+
 def due(events: list[dict], now: datetime, lead_min: int, forecast: dict | None = None) -> list[dict]:
     """The notices due at ``now`` (aware, in the person's zone).
 
@@ -99,7 +105,8 @@ def due(events: list[dict], now: datetime, lead_min: int, forecast: dict | None 
             "kind": "calendar",
             "priority": 3,
             "tag": f"calendar:{_key(ev)}"[:120],
-            "data": {"url": "/calendar", "start_time": ev["start_time"]},
+            # The calendar on the event's day, at the event.
+            "data": {"link": event_link(ev, start), "start_time": ev["start_time"]},
         }
         if all_day(ev):
             today = now.date()

@@ -51,14 +51,14 @@ async def announce(person: str, display_name: str, battery: float, family: list[
 
     ``device`` is what they carry ("phone", "tablet"; services/common/device_noun.py).
     """
-    url = f"/wander?person={person}"
+    url = notify.link("wander", person=person)
     once = f"battery:{person}:{(today or date.today()).isoformat()}"
     title = f"{display_name}'s {device} is at {int(battery)}%"
     body = "It is not charging, so it may switch off soon."
     return await notify.send_many(
         [u for u in family if u != person],
         lambda user: notify.notice(
-            user, "family_safety", title, body, url=url, priority=4, tag=f"battery:{person}", once=once,
+            user, "family_safety", title, body, link=url, priority=4, tag=f"battery:{person}", once=once,
             data={"person": person, "battery": int(battery)}, actions=[notify.view_action(url, "Map")]),
     )
 
@@ -66,14 +66,15 @@ async def announce(person: str, display_name: str, battery: float, family: list[
 async def announce_watch(device_key: str, label: str, battery: float, family: list[str],
                          owner: str | None, today: date | None = None) -> int:
     """Tell the family (but not the watch's owner) that a watch is low."""
-    url = "/identity"
+    # The watch's owner's devices: Devices > Family, where the watch is listed.
+    url = notify.link("devices", hash="family")
     once = f"watch_battery:{device_key}:{(today or date.today()).isoformat()}"
     title = f"{label or 'Watch'} is at {int(battery)}%"
     body = "It is not charging, so it may switch off soon."
     return await notify.send_many(
         [u for u in family if u != owner],
         lambda user: notify.notice(
-            user, "family_safety", title, body, url=url, priority=4, tag=f"watch_battery:{device_key}",
+            user, "family_safety", title, body, link=url, priority=4, tag=f"watch_battery:{device_key}",
             once=once, data={"device_key": device_key, "battery": int(battery)},
             actions=[notify.view_action(url, "Devices")]),
     )

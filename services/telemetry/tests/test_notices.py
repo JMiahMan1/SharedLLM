@@ -14,6 +14,8 @@ from services.telemetry import notices, ntfy
 from services.telemetry.config import INTERNAL_SECRET as EXPECTED_SECRET
 from services.telemetry.main import app
 
+#: Where a tap goes: every notice has one (docs/PUSH.md, "Deep links").
+LINKED = {"data": {"url": "/"}}
 HEADERS = {"X-Internal-Secret": EXPECTED_SECRET}
 
 
@@ -100,7 +102,7 @@ def test_a_full_notice_reaches_the_outbox_web_push_and_ntfy(client, rc, sent, id
 
 
 def test_category_defaults_to_general(client, rc, sent):
-    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "Hi"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": "Hi"})
     assert _outbox(client, "sam")[-1]["category"] == "general"
     assert _outbox(client, "sam")[-1]["priority"] == 3
 
@@ -118,14 +120,14 @@ def test_category_defaults_to_general(client, rc, sent):
     {"actions": [{"label": "x", "type": "reply", "callback": "chat_reply", "params": "token"}]},
 ])
 def test_invalid_notices_are_refused(client, rc, sent, bad):
-    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x", **bad})
+    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": "x", **bad})
     assert resp.status_code == 422
     assert sent["webpush"] == [] and sent["ntfy"] == []
 
 
 def test_a_category_turned_off_is_dropped_and_recorded_nowhere(client, rc, sent, identity):
     identity["prefs"]["sam"] = {"bible": False}
-    body = {"user": "sam", "category": "bible", "title": "Read Psalm 23", "once": "bible:1"}
+    body = {**LINKED, "user": "sam", "category": "bible", "title": "Read Psalm 23", "once": "bible:1"}
     resp = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     assert resp["dropped"] == "preference"
     assert _outbox(client, "sam") == []
@@ -135,7 +137,7 @@ def test_a_category_turned_off_is_dropped_and_recorded_nowhere(client, rc, sent,
 
 def test_sos_is_delivered_even_with_family_safety_off(client, rc, sent, identity):
     identity["prefs"]["sam"] = {"family_safety": False}
-    sos = {"user": "sam", "category": "family_safety", "priority": 5, "title": "SOS from Alex"}
+    sos = {**LINKED, "user": "sam", "category": "family_safety", "priority": 5, "title": "SOS from Alex"}
     assert "dropped" not in client.post("/api/telemetry/notify", headers=HEADERS, json=sos).json()
     calm = {**sos, "priority": 3, "title": "Battery low"}
     assert client.post("/api/telemetry/notify", headers=HEADERS, json=calm).json()["dropped"] == "preference"
@@ -144,14 +146,14 @@ def test_sos_is_delivered_even_with_family_safety_off(client, rc, sent, identity
 
 def test_preferences_are_cached_briefly(client, rc, sent, identity):
     for _ in range(3):
-        client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"})
+        client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": "x"})
     assert identity["calls"].count("/api/internal/push/preferences") == 1
     assert identity["calls"].count("/api/internal/push/topic") == 1
 
 
 def test_admins_fan_out_to_every_admin(client, rc, sent, identity):
     identity["admins"] = ["alex", "kate"]
-    body = {"user": "@admins", "category": "admin", "title": "Disk nearly full", "once": "disk:root"}
+    body = {**LINKED, "user": "@admins", "category": "admin", "title": "Disk nearly full", "once": "disk:root"}
     resp = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     assert set(resp["recipients"]) == {"alex", "kate"}
     assert sent["webpush"] == ["alex", "kate"]
@@ -163,7 +165,7 @@ def test_admins_fan_out_to_every_admin(client, rc, sent, identity):
 def test_a_system_notice_never_reaches_a_non_admin(client, rc, sent, identity):
     """Outage, network and error notices are for admins, whoever a sender named."""
     identity["admins"] = ["alex"]
-    body = {"user": "sam", "category": "admin", "title": "The internet is down"}
+    body = {**LINKED, "user": "sam", "category": "admin", "title": "The internet is down"}
     resp = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     assert resp["dropped"] == "not_admin"
     assert sent["webpush"] == [] and sent["ntfy"] == [] and _outbox(client, "sam") == []
@@ -171,12 +173,12 @@ def test_a_system_notice_never_reaches_a_non_admin(client, rc, sent, identity):
     assert set(to_admin["recipients"]) == {"alex"}
     # Other categories still go to the person named.
     family = client.post("/api/telemetry/notify", headers=HEADERS,
-                         json={"user": "sam", "category": "home", "title": "Garage left open"}).json()
+                         json={**LINKED, "user": "sam", "category": "home", "title": "Garage left open"}).json()
     assert "dropped" not in family and sent["webpush"][-1] == "sam"
 
 
 def test_admins_unresolvable_is_503(client, rc, sent):
-    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "@admins", "title": "x"})
+    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "@admins", "title": "x"})
     assert resp.status_code == 503
 
 
@@ -186,7 +188,7 @@ def test_a_parents_only_notice_never_reaches_a_minor(client, rc, sent, identity)
         {"username": "sam", "is_minor": False},
         {"username": "leo", "is_minor": True},
     ]
-    body = {"user": "leo", "category": "app_updates", "title": "Jarvis app 2.4.1 is available",
+    body = {**LINKED, "user": "leo", "category": "app_updates", "title": "Jarvis app 2.4.1 is available",
             "audience": "parents"}
     assert client.post("/api/telemetry/notify", headers=HEADERS, json=body).json() == {
         "status": "SUCCESS", "dropped": "audience"}
@@ -202,7 +204,7 @@ def test_a_parents_only_notice_to_admins_skips_a_minor(client, rc, sent, identit
         {"username": "alex", "is_minor": False},
         {"username": "teen_admin", "is_minor": True},
     ]
-    body = {"user": "@admins", "category": "admin", "title": "The internet is down", "audience": "parents"}
+    body = {**LINKED, "user": "@admins", "category": "admin", "title": "The internet is down", "audience": "parents"}
     recipients = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()["recipients"]
     assert recipients["teen_admin"] == {"dropped": "audience"}
     assert "dropped" not in recipients["alex"]
@@ -211,7 +213,7 @@ def test_a_parents_only_notice_to_admins_skips_a_minor(client, rc, sent, identit
 
 def test_an_unknown_audience_is_refused(client, rc, sent):
     resp = client.post("/api/telemetry/notify", headers=HEADERS,
-                       json={"user": "sam", "title": "x", "audience": "kids"})
+                       json={**LINKED, "user": "sam", "title": "x", "audience": "kids"})
     assert resp.status_code == 422
     assert sent == {"webpush": [], "ntfy": []}
 
@@ -219,13 +221,13 @@ def test_an_unknown_audience_is_refused(client, rc, sent):
 def test_a_parents_only_notice_is_refused_when_identity_cannot_say(client, rc, sent):
     """Never deliver blind: an unreadable role list refuses the notice."""
     resp = client.post("/api/telemetry/notify", headers=HEADERS,
-                       json={"user": "sam", "title": "x", "audience": "parents"})
+                       json={**LINKED, "user": "sam", "title": "x", "audience": "parents"})
     assert resp.status_code == 503
     assert sent == {"webpush": [], "ntfy": []} and _outbox(client, "sam") == []
 
 
 def test_unreachable_identity_still_delivers_to_the_outbox(client, rc, sent):
-    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"}).json()
+    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": "x"}).json()
     assert resp["ntfy"] is False and sent["webpush"] == ["sam"]
     assert len(_outbox(client, "sam")) == 1
 
@@ -239,7 +241,7 @@ def test_ntfy_failure_does_not_fail_the_request_and_logs_once(client, rc, identi
     monkeypatch.setattr(ntfy, "NTFY_URL", "http://127.0.0.1:9")
     with caplog.at_level(logging.WARNING, logger="telemetry.ntfy"):
         for title in ("one", "two"):
-            resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": title})
+            resp = client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": title})
             assert resp.status_code == 200 and resp.json()["ntfy"] is False
     assert len([r for r in caplog.records if "ntfy publish failed" in r.getMessage()]) == 1
     assert [n["title"] for n in _outbox(client, "sam")] == ["one", "two"]
@@ -282,12 +284,12 @@ async def test_oversized_notices_are_not_published(monkeypatch):
 def test_the_topic_is_cached_for_ten_minutes(client, rc, sent, identity, monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(notices.time, "monotonic", lambda: now[0])
-    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": "x"})
     now[0] += notices.TOPIC_CACHE_SECONDS - 1
-    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": "x"})
     assert identity["calls"].count("/api/internal/push/topic") == 1
     now[0] += 2
-    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": "x"})
     assert identity["calls"].count("/api/internal/push/topic") == 2
 
 
@@ -305,7 +307,7 @@ def test_a_failed_outbox_write_does_not_mark_the_notice_sent(rc, sent, identity,
         await real(rc_, user, notification)
 
     monkeypatch.setattr(notices.store, "push_notification", flaky)
-    fields = notices.parse({"user": "sam", "category": "bible", "title": "Read Psalm 23", "once": "bible:1"})
+    fields = notices.parse({**LINKED, "user": "sam", "category": "bible", "title": "Read Psalm 23", "once": "bible:1"})
 
     async def run():
         with pytest.raises(ConnectionError):
@@ -319,9 +321,9 @@ def test_a_failed_outbox_write_does_not_mark_the_notice_sent(rc, sent, identity,
 
 
 def test_a_replacing_notice_supersedes_unread_ones_with_its_tag(client, rc, sent, identity):
-    base = {"user": "sam", "category": "family_safety", "tag": "chores-approved:sam", "replace": True}
+    base = {**LINKED, "user": "sam", "category": "family_safety", "tag": "chores-approved:sam", "replace": True}
     client.post("/api/telemetry/notify", headers=HEADERS, json={**base, "title": "Chore approved"})
-    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "Other", "tag": "other"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={**LINKED, "user": "sam", "title": "Other", "tag": "other"})
     client.post("/api/telemetry/notify", headers=HEADERS, json={**base, "title": "2 chores approved today"})
     titles = [n["title"] for n in _outbox(client, "sam")]
     assert titles.count("Chore approved") == 0 and "2 chores approved today" in titles and "Other" in titles
