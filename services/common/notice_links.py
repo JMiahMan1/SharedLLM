@@ -88,7 +88,11 @@ DEVICE_ANCHORS = ("devices-hardware", "devices-light-groups", "devices-duplicate
                   "devices-persons", "devices-logins", "devices-rooms", "devices-archived", "devices-family",
                   "devices-windows", "devices-folders", "devices-activity")
 HEALTH_TABS = ("today", "fitness", "sleep", "nutrition", "health")
-BIBLE_TABS = ("read", "today", "plans", "memorize", "play", "study", "notes", "devotional")
+# Actual tabs in the UI (services/ui/src/pages/Bible.tsx TAB_IDS):
+# read, today, play, memorize, studies, progress
+# Old values kept so existing links still validate.
+BIBLE_TABS = ("read", "today", "plans", "memorize", "play", "study", "notes", "devotional",
+              "studies", "progress")
 
 #: Every page a notice may open, by name. Adding a notice that needs a page not
 #: listed here means adding the page here (and running ``write_routes_json``).
@@ -112,8 +116,11 @@ ROUTES: dict[str, Route] = {
     # A reading reminder opens the whole chapter at its verse: ``ref`` (or
     # book/chapter/verse) in the query and the verse as ``#v16``. The reader
     # scrolls to and highlights the verse itself.
-    "bible": _r("/bible", query=("tab", "ref", "book", "chapter", "verse", "translation", "plan", "group", "day"),
-                choices={"tab": BIBLE_TABS}, hash_pattern=r"^(v|verse-?)[0-9]{1,3}(-[0-9]{1,3})?$",
+    # Study books use ?tab=studies&book=<id>&section=<id>&ordinal=<n> with
+    # an optional #p-<id> anchor for a paragraph.
+    "bible": _r("/bible", query=("tab", "ref", "book", "chapter", "verse", "translation", "plan", "group", "day",
+                                  "section", "ordinal"),
+                choices={"tab": BIBLE_TABS}, hash_pattern=r"^(v|verse-?)[0-9]{1,3}(-[0-9]{1,3})?$|^p-[a-z0-9]{1,32}$",
                 description="The Bible reader"),
     "garden": _r("/garden", query=("tag",), focus=("plant",), description="The garden, at a plant"),
     "plant": _r("/garden/plants/{id}", query=("journal",), description="One plant"),

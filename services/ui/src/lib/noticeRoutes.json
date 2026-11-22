@@ -173,14 +173,16 @@
         "chapter",
         "day",
         "group",
+        "ordinal",
         "plan",
         "ref",
+        "section",
         "tab",
         "translation",
         "verse"
       ],
       "hashes": [],
-      "hash_pattern": "^(v|verse-?)[0-9]{1,3}(-[0-9]{1,3})?$",
+      "hash_pattern": "^(v|verse-?)[0-9]{1,3}(-[0-9]{1,3})?$|^p-[a-z0-9]{1,32}$",
       "focus": [],
       "guard": "member",
       "query_guards": {},
@@ -191,7 +193,9 @@
           "notes",
           "plans",
           "play",
+          "progress",
           "read",
+          "studies",
           "study",
           "today"
         ]

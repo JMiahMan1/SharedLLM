@@ -44,6 +44,9 @@ READING_KINDS = frozenset(
         "share_tap",
         "blb_link_tap",
         "devotional_opened",
+        "study_opened",
+        "study_section_read",
+        "study_question_asked",
     }
 )
 
@@ -117,11 +120,13 @@ def compute(session: Session, username: str, today: date | None = None) -> dict[
         "quizzes_total": float(len(games)),
         "quiz_perfect": float(sum(1 for g in games if g.total and g.correct == g.total)),
     }
+    grace_used = bool(state and state.grace_day_used)
+    grace_date = state.grace_day_date if state and state.grace_day_date else None
     return {
         "metrics": metrics,
         "days_read": len(reads),
         "days_opened": len(open_days(session, username)),
-        "read_streak_current": ach.current_streak(reads, today),
+        "read_streak_current": ach.current_streak(reads, today, grace_used, grace_date),
         "read_streak_longest": int(metrics["read_streak"]),
         "open_streak_current": ach.current_streak(open_days(session, username), today),
         "open_streak_longest": ach.longest_streak(open_days(session, username)),
@@ -130,6 +135,8 @@ def compute(session: Session, username: str, today: date | None = None) -> dict[
         "bookmarks": sum(1 for m in marks if m.kind == "bookmark"),
         "position": _position(state),
         "last_read_at": state.last_read_at.isoformat() if state and state.last_read_at else None,
+        "grace_day_used": grace_used,
+        "grace_day_date": grace_date,
     }
 
 

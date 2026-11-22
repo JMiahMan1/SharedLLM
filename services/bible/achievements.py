@@ -161,10 +161,17 @@ def longest_streak(active_days: Any) -> int:
     return best
 
 
-def current_streak(active_days: Any, today: date | None = None) -> int:
+def current_streak(
+    active_days: Any,
+    today: date | None = None,
+    grace_day_used: bool = False,
+    grace_day_date: str | None = None,
+) -> int:
     """Run of consecutive days ending today or yesterday.
 
     Yesterday still counts: a streak is not broken before the day is over.
+    If a grace day has been used and it covers the single gap, the streak
+    continues across that one missed day.
     """
     days = sorted({d for d in (_parse_day(d) for d in active_days) if d is not None})
     if not days:
@@ -173,9 +180,19 @@ def current_streak(active_days: Any, today: date | None = None) -> int:
     if days[-1] < anchor - timedelta(days=1) or days[-1] > anchor:
         return 0
     run = 1
+    grace_applied = False
     for prev, nxt in zip(reversed(days[:-1]), reversed(days[1:]), strict=True):
-        if (nxt - prev) == timedelta(days=1):
+        diff = (nxt - prev).days
+        if diff == 1:
             run += 1
+        elif diff == 2 and grace_day_used and not grace_applied:
+            # Check if the grace day covers this specific gap
+            gap_date = (prev + timedelta(days=1)).isoformat()
+            if grace_day_date and grace_day_date == gap_date:
+                run += 2  # Count both days across the gap
+                grace_applied = True
+            else:
+                break
         else:
             break
     return run

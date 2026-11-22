@@ -121,4 +121,14 @@ def test_the_plan_link_is_url_encoded(loaded_client: TestClient):
     loaded_client.put("/state", params={"username": "sam"}, json={"reminder_time": "07:00"})
     loaded_client.post("/plans/john-21/start", params={"username": "sam"})
     [(_, note)] = _due("07:30")
-    assert note["data"]["url"] == "/bible?ref=John%201"
+    # New link format uses structured params: tab=read&book=John&chapter=1&verse=1#v1
+    assert note["data"]["url"].startswith("/bible?tab=read&book=John&chapter=1&verse=1")
+    assert note["data"]["url"].endswith("#v1")
+    # Also verify data.link is a structured link object
+    assert "link" in note["data"]
+    assert note["data"]["link"]["route"] == "bible"
+    assert note["data"]["link"]["query"]["tab"] == "read"
+    assert note["data"]["link"]["query"]["book"] == "John"
+    assert note["data"]["link"]["query"]["chapter"] == "1"
+    assert note["data"]["link"]["query"]["verse"] == "1"
+    assert note["data"]["link"]["hash"] == "v1"

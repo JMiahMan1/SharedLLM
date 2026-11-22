@@ -1289,6 +1289,13 @@ class StatePayload(BaseModel):
     split_view: str | None = Field(default=None, pattern="^(compare|parallel)$")
     layout: str | None = Field(default=None, pattern="^(flow|verses)$")
     devotional_work: str | None = None
+    # Reading plan context for deep linking
+    plan_id: str | None = None
+    plan_day: int | None = Field(default=None, ge=1)
+    # Imported study book context for deep linking
+    study_book_id: int | None = Field(default=None, ge=1)
+    study_section_ordinal: int | None = Field(default=None, ge=1)
+    study_scroll_fraction: float | None = Field(default=None, ge=0, le=1)
 
 
 @app.get("/state")
@@ -1300,20 +1307,30 @@ def get_state(username: str = Query(...), session: Session = Depends(get_session
 
 
 def _state_position(state: UserBibleState) -> dict | None:
-    if not state.last_book:
+    if not state.last_book and state.last_study_book_id == 0:
         return None
-    try:
-        name = book_table.book(state.last_book)["name"]
-    except (KeyError, ValueError, TypeError):
-        name = state.last_book
-    return {
-        "book": state.last_book,
-        "chapter": state.last_chapter,
-        "verse": state.last_verse,
-        "fraction": state.last_verse_fraction,
-        # "John 3", for places that show where reading left off (the widget).
-        "label": f"{name} {state.last_chapter}" if state.last_chapter else name,
-    }
+    pos = {}
+    if state.last_book:
+        try:
+            name = book_table.book(state.last_book)["name"]
+        except (KeyError, ValueError, TypeError):
+            name = state.last_book
+        pos.update({
+            "book": state.last_book,
+            "chapter": state.last_chapter,
+            "verse": state.last_verse,
+            "fraction": state.last_verse_fraction,
+            # "John 3", for places that show where reading left off (the widget).
+            "label": f"{name} {state.last_chapter}" if state.last_chapter else name,
+        })
+    if state.last_plan_id:
+        pos["plan_id"] = state.last_plan_id
+        pos["plan_day"] = state.last_plan_day
+    if state.last_study_book_id:
+        pos["study_book_id"] = state.last_study_book_id
+        pos["study_section_ordinal"] = state.last_study_section_ordinal
+        pos["study_scroll_fraction"] = state.last_study_scroll_fraction
+    return pos
 
 
 def _default_preferences(session: Session) -> dict:
@@ -1334,6 +1351,11 @@ def _default_preferences(session: Session) -> dict:
         "split_view": "compare",
         "layout": "flow",
         "devotional_work": "",
+        "plan_id": "",
+        "plan_day": 0,
+        "study_book_id": 0,
+        "study_section_ordinal": 0,
+        "study_scroll_fraction": 0.0,
     }
 
 
@@ -1354,6 +1376,11 @@ def _preferences(state: UserBibleState) -> dict:
         "split_view": state.split_view,
         "layout": state.layout,
         "devotional_work": state.devotional_work,
+        "plan_id": state.last_plan_id,
+        "plan_day": state.last_plan_day,
+        "study_book_id": state.last_study_book_id,
+        "study_section_ordinal": state.last_study_section_ordinal,
+        "study_scroll_fraction": state.last_study_scroll_fraction,
     }
 
 
@@ -1445,10 +1472,21 @@ def put_state(
             state.compare_version = _require_version(session, payload.compare_version)
     if payload.cross_version_notes is not None:
         state.cross_version_notes = payload.cross_version_notes
-    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "reminder_time", "read_aloud_voice", "split_view", "layout", "devotional_work"):
+    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "reminder_time", "read_aloud_voice", "split_view", "layout", "devotional_work", "plan_id", "plan_day", "study_book_id", "study_section_ordinal", "study_scroll_fraction"):
         value = getattr(payload, attr)
         if value is not None:
-            setattr(state, attr, value)
+            if attr == "plan_id":
+                state.last_plan_id = value
+            elif attr == "plan_day":
+                state.last_plan_day = value
+            elif attr == "study_book_id":
+                state.last_study_book_id = value
+            elif attr == "study_section_ordinal":
+                state.last_study_section_ordinal = value
+            elif attr == "study_scroll_fraction":
+                state.last_study_scroll_fraction = value
+            else:
+                setattr(state, attr, value)
     state.last_read_at = utcnow()
     session.commit()
     session.refresh(state)
@@ -2533,6 +2571,102 @@ def stop_plan(plan_id: str, username: str = Query(...), session: Session = Depen
 # stats / streaks / achievements
 
 
+@app.post("/streak/freeze")
+def use_grace_day(username: str = Query(...), session: Session = Depends(get_session)):
+    """Use a grace day to preserve the current streak across one missed day.
+
+    A reader may use this once per streak. The grace day covers the single
+    missed day between the last reading day and today (or yesterday). It is
+    recorded in the reader's state so the streak calculation knows to bridge
+    that gap.
+    """
+    from datetime import date, timedelta
+
+    state = session.get(UserBibleState, username)
+    if state is None:
+        raise HTTPException(404, "No reading state found for this user.")
+    if state.grace_day_used:
+        raise HTTPException(400, "You have already used your grace day for this streak.")
+    reads = metrics.active_days(session, username)
+    if not reads:
+        raise HTTPException(400, "No reading history yet.")
+    today = date.today()
+    last_read = date.fromisoformat(reads[-1])
+    # The grace day covers the gap between last_read and today-1
+    # (today itself doesn't break the streak yet; yesterday is the last day
+    # that could have been missed)
+    gap_date = (last_read + timedelta(days=1)).isoformat()
+    if last_read >= today - timedelta(days=1):
+        raise HTTPException(400, "Your streak is still intact; no grace day needed.")
+    # Check there's exactly one missed day
+    if (today - last_read).days > 2:
+        raise HTTPException(400, "Too many days missed; a grace day only covers one missed day.")
+    state.grace_day_used = True
+    state.grace_day_date = gap_date
+    session.add(state)
+    session.commit()
+    return {"ok": True, "grace_day_date": gap_date, "message": f"Grace day applied for {gap_date}. Your streak is preserved."}
+
+
+@app.get("/encouragement/welcome-back")
+def get_welcome_back_verse(username: str = Query(...), session: Session = Depends(get_session)):
+    """Get an encouraging verse for someone returning after a break.
+
+    Returns a warm, attributed verse from Scripture. The UI should call this
+    when the reader opens the app and their last reading day was more than
+    one day ago.
+    """
+    from .encouragement import pick_welcome_back
+
+    verse = pick_welcome_back()
+    return {
+        "reference": verse.reference,
+        "text": verse.text,
+        "book": verse.book,
+        "chapter": verse.chapter,
+        "verse": verse.verse,
+    }
+
+
+@app.get("/encouragement/streak-milestone/{days}")
+def get_streak_milestone_verse(days: int, username: str = Query(...), session: Session = Depends(get_session)):
+    """Get the encouraging verse for a specific streak milestone.
+
+    Returns the verse associated with the milestone (1, 3, 7, 14, 30, 100 days),
+    or 404 if no verse is defined for that milestone.
+    """
+    from .encouragement import pick_streak_milestone
+
+    verse = pick_streak_milestone(days)
+    if verse is None:
+        raise HTTPException(404, f"No milestone verse defined for {days} days.")
+    return {
+        "reference": verse.reference,
+        "text": verse.text,
+        "book": verse.book,
+        "chapter": verse.chapter,
+        "verse": verse.verse,
+    }
+
+
+@app.get("/encouragement/daily")
+def get_daily_encouragement(username: str = Query(...), session: Session = Depends(get_session)):
+    """Get a random encouraging verse for daily reminders.
+
+    Returns a warm, attributed verse suitable for a gentle nudge.
+    """
+    from .encouragement import pick_daily_encouragement
+
+    verse = pick_daily_encouragement()
+    return {
+        "reference": verse.reference,
+        "text": verse.text,
+        "book": verse.book,
+        "chapter": verse.chapter,
+        "verse": verse.verse,
+    }
+
+
 @app.get("/stats")
 def stats(
     username: str = Query(...),
@@ -3066,6 +3200,7 @@ def daily(
             "open_streak_current": picture["open_streak_current"],
             "days_read": picture["days_read"],
             "chapters_read": picture["metrics"]["chapters_total"],
+            "grace_day_used": picture["grace_day_used"],
         }
         payload["position"] = picture["position"]
         # The plan line and the memory line on the home card: today's reading
