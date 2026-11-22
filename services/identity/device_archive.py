@@ -262,7 +262,7 @@ async def notify_admins(result: dict[str, list[dict[str, Any]]], notifier: Notif
                 if key == "archived" else f"Archived a year and never back: {names}. Their records were removed.")
         payload = notify.notice(
             "@admins", "admin", f"{len(items)} registered device{'s' if len(items) != 1 else ''} {verb}", body,
-            url="/devices#devices-archived", priority=3, tag=f"admin:identity-devices-{key}",
+            link=notify.link("devices", hash="devices-archived"), priority=3, tag=f"admin:identity-devices-{key}",
             once=f"identity:devices-{key}:" + ",".join(sorted(i["id"] for i in items))[:150], kind="admin",
             audience="parents")
         try:

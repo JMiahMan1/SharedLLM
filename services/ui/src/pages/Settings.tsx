@@ -107,30 +107,30 @@ const Settings = () => {
         <NotificationsRow />
       </div>
 
-      <section className="space-y-4" aria-labelledby="settings-notifications">
+      <section className="space-y-4" aria-labelledby="settings-notifications" data-focus-id="section-notifications">
         <h2 id="settings-notifications" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Notifications</h2>
         <NotificationPreferencesPanel />
         {native && <PushAppsPanel />}
       </section>
 
-      <section className="space-y-4" aria-labelledby="settings-appearance">
+      <section className="space-y-4" aria-labelledby="settings-appearance" data-focus-id="section-appearance">
         <h2 id="settings-appearance" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Appearance</h2>
         <SiteThemePanel />
         <MapStylePanel />
         <MobileMenuPanel />
       </section>
 
-      <section className="space-y-4" aria-labelledby="settings-voice">
+      <section className="space-y-4" aria-labelledby="settings-voice" data-focus-id="section-voice">
         <h2 id="settings-voice" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Voice</h2>
         <MyVoicePanel />
       </section>
 
-      <section className="space-y-4" aria-labelledby="settings-weather">
+      <section className="space-y-4" aria-labelledby="settings-weather" data-focus-id="section-weather">
         <h2 id="settings-weather" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Weather</h2>
         <WeatherSettingsPanel />
       </section>
 
-      <section className="space-y-4" aria-labelledby="settings-family">
+      <section className="space-y-4" aria-labelledby="settings-family" data-focus-id="section-family">
         <h2 id="settings-family" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Family</h2>
         <FamilyPanel />
         <ActivitySharingPanel />
@@ -138,7 +138,7 @@ const Settings = () => {
         <TelemetryReportsPanel />
       </section>
 
-      <section className="space-y-4" aria-labelledby="settings-device">
+      <section className="space-y-4" aria-labelledby="settings-device" data-focus-id="section-device">
         <h2 id="settings-device" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">This device</h2>
         <SensorsSection />
         <LocationPausePanel />
@@ -148,7 +148,7 @@ const Settings = () => {
         <AppCleanupPanel />
       </section>
 
-      <section className="space-y-4" aria-labelledby="settings-watch">
+      <section className="space-y-4" aria-labelledby="settings-watch" data-focus-id="section-watch">
         <h2 id="settings-watch" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Jarvis Watch</h2>
         <WatchPanel />
       </section>

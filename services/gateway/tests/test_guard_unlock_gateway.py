@@ -73,7 +73,9 @@ def test_a_pc_asking_reaches_both_parents_with_approve_and_deny(wired):
     notice = sent[0]
     assert notice["title"] == "Unlock Kid's PC?"
     assert "30 minutes at bedtime" in notice["body"] and "homework" in notice["body"]
-    assert notice["data"]["url"] == "/family/member/kid"
+    # The child's page, at this request (docs/PUSH.md, "Deep links").
+    assert notice["data"]["url"] == "/family/member/kid?focus=unlock-7"
+    assert notice["data"]["link"]["guard"] == "parent"
     assert notice["tag"] == "guard-unlock:kid" and notice["replace"] is True
     assert notice["actions"] == [
         {"label": "Approve 30 min", "type": "callback", "callback": "guard_unlock_decide",

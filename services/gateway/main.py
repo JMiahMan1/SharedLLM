@@ -3490,9 +3490,6 @@ async def _store_take(state: dict, take: dict, satellite: str) -> tuple[int, str
         return 0, str(e), ""
 
 
-VOICE_APPROVAL_URL = "/identity"
-
-
 async def _ask_to_approve(state: dict, satellite: str) -> bool:
     """Ask the satellite's owner, in their own app, to approve takes held for them.
 
@@ -3503,7 +3500,8 @@ async def _ask_to_approve(state: dict, satellite: str) -> bool:
         state["username"], "home", "Approve your voice recordings?",
         f"Someone taught Jarvis {state['got']} sentence{'s' if state['got'] != 1 else ''} as your voice at "
         f"{satellite}. Approve only if it was you.",
-        url=VOICE_APPROVAL_URL,
+        # Accounts & integrations, at the recordings waiting for an answer.
+        link=_notify.link("identity", focus="voice-pending"),
         tag=f"voice-pending:{state['session']}",
         actions=[
             _notify.callback_action("It was me", "voice_pending_decide", {"id": state["session"], "approve": True}),
@@ -7657,7 +7655,7 @@ async def guardian_talk(request: Request):
             await _notify.send(_notify.notice(
                 parent, "family_safety", f"{name} would like to talk",
                 note or "No note, just a request to talk. A quiet moment together would mean a lot.",
-                url=f"/family/member/{me}", tag=f"talk:{me}", priority=4,
+                link=_child_page(me), tag=f"talk:{me}", priority=4,
             ))
         except Exception as exc:
             log.warning("[guardian] talk request to %s failed: %s", parent, exc)
@@ -8029,17 +8027,28 @@ async def _identity_as_caller(request: Request, method: str, path: str, **kwargs
     return resp.status, body
 
 
-async def _screen_time_notice(users: list[str], title: str, body: str, url: str,
+def _child_page(child: str, section: str | None = None, focus: str | None = None) -> dict:
+    """A parent's notice about a child: the child's page, at the item."""
+    return _notify.link("member", username=child, section=section, focus=focus)
+
+
+def _my_screen_time() -> dict:
+    """A child's own notice about their time: Health's Today tab, where the time card is."""
+    return _notify.link("health", tab="today")
+
+
+async def _screen_time_notice(users: list[str], title: str, body: str, target: dict,
                               actions: list[dict] | None = None, tag: str | None = None) -> None:
     """Tell people about a screen-time or family-safety event.
 
     ``actions`` adds buttons (a parent's Approve / Disapprove); a tap on the
-    notice itself still opens ``url``, where the same request can be answered.
+    notice itself opens ``target`` (a ``link()``): the page and the request on
+    it, where the same request can be answered.
     A notice that fails never fails the request.
     """
     for user in users or []:
         try:
-            payload = _notify.notice(user, "family_safety", title, body, url=url, actions=actions,
+            payload = _notify.notice(user, "family_safety", title, body, link=target, actions=actions,
                                      tag=tag or f"screen-time:{user}", replace=bool(tag))
             await _notify.send(payload)
         except Exception as exc:  # a missed notice never fails the request
@@ -8134,7 +8143,7 @@ async def _earning_week(username: str, now: datetime) -> dict[str, Any]:
             synced.get("parents") or [],
             "Chore done?",
             f"{username} ticked off \u201c{check.get('title') or 'a chore'}\u201d. Was it done right?",
-            f"/family/member/{username}",
+            _child_page(username, "time", f"chore-{check.get('id')}" if check.get("id") is not None else None),
             actions=[
                 _notify.callback_action("Done right", "chore_check_decide", {"id": check.get("id"), "approve": True}),
                 _notify.callback_action("Redo it", "chore_check_decide", {"id": check.get("id"), "approve": False}),
@@ -8401,7 +8410,7 @@ async def guard_unlock_ask(request: Request):
             body["notify"],
             f"Unlock {name}'s {device}?",
             f"{name} asks to unlock their {device} for {minutes} minutes{reason}{note}. It expires in 10 minutes.",
-            f"/family/member/{child}",
+            _child_page(child, focus=f"unlock-{asked['id']}" if asked.get("id") is not None else None),
             actions=_unlock_actions(asked.get("id"), minutes) if asked.get("id") is not None else None,
             tag=_unlock_tag(child),
         )
@@ -8442,7 +8451,7 @@ async def decide_unlock_request(request: Request, request_id: int, payload: dict
         else:
             title = f"{name}'s {device} stays locked"
             line = f"{by} said no to unlocking {name}'s {device}."
-        await _screen_time_notice(body.get("notify") or [], title, line, f"/family/member/{child}", tag=_unlock_tag(child))
+        await _screen_time_notice(body.get("notify") or [], title, line, _child_page(child), tag=_unlock_tag(child))
     return status, {k: v for k, v in (body or {}).items() if k != "notify"}
 
 
@@ -8543,7 +8552,7 @@ async def guard_tamper(request: Request):
         info.get("parents") or [],
         f"{device[:1].upper() + device[1:]} protection changed",
         f"{name}'s {device} {_tamper_sentence(event, detail)}",
-        f"/family/member/{child}",
+        _child_page(child, "devices"),
     )
     answer: dict = {"status": "SUCCESS"}
     dropped = (info or {}).get("dropped")
@@ -8605,7 +8614,7 @@ async def ask_a_parent(request: Request, payload: dict) -> tuple[int, dict]:
             tag = f"guard-app:{child}:{target}"
         await _screen_time_notice(
             body["notify"], title, text,
-            f"/family/member/{child}",
+            _child_page(child, focus=f"guard-{request_id}" if request_id is not None else None),
             actions=_decide_actions("guard_decide", request_id, "approve") if request_id is not None else None,
             tag=tag,
         )
@@ -8645,7 +8654,7 @@ async def decide_guard_request(request: Request, request_id: int, payload: dict)
             title, line = "App unlocked", f"You can use {what} for a while."
         else:
             title, line = "Approved", f"A parent said yes to {what}."
-        await _screen_time_notice(body.get("notify") or [], title, line, "/fitness")
+        await _screen_time_notice(body.get("notify") or [], title, line, _my_screen_time())
     return status, {k: v for k, v in (body or {}).items() if k != "notify"}
 
 
@@ -8772,7 +8781,7 @@ async def screen_time_pause(request: Request, username: str):
             text = f"You paused your {device} for now." if mine else f"A parent paused your {device} for now."
         else:
             title, text = f"{device[:1].upper() + device[1:]} unpaused", f"Your {device} is back on."
-        await _screen_time_notice([username], title, text, "/fitness")
+        await _screen_time_notice([username], title, text, _my_screen_time())
         # The Devices page's lock/unlock is this pause; keep it in the MDM audit
         # log (Phase 12) so "who locked a device, and when" has one answer. A
         # lock is only logged when the phone can really lock itself: a device
@@ -8794,7 +8803,7 @@ async def screen_time_bonus(request: Request, username: str):
     status, body = await _identity_as_caller(request, "POST", f"/api/screen-time/{username}/bonus", json=payload)
     if status == 200:
         minutes = (body.get("request") or {}).get("granted_minutes")
-        await _screen_time_notice(body.get("notify") or [], "Bonus time", f"A parent added {minutes} minutes for today.", "/fitness")
+        await _screen_time_notice(body.get("notify") or [], "Bonus time", f"A parent added {minutes} minutes for today.", _my_screen_time())
     return JSONResponse(status_code=status, content=body)
 
 
@@ -8816,8 +8825,8 @@ async def screen_time_ask(request: Request):
             body.get("notify") or [],
             "More screen time?",
             f"{asked.get('username')} asks for {asked.get('minutes')} more minutes today{note}.",
-            # The child's page, whose Overview answers it (Grant / Not today).
-            f"/family/member/{asked.get('username')}",
+            # The child's page, whose Overview answers it (Grant / Not today), at the request.
+            _child_page(str(asked.get("username") or ""), focus=f"time-{request_id}" if request_id is not None else None),
             actions=_decide_actions("more_time_decide", request_id, "grant") if request_id is not None else None,
         )
     return JSONResponse(status_code=status, content=body)
@@ -8835,7 +8844,7 @@ async def decide_more_time(request: Request, request_id: int, payload: dict) -> 
             body.get("notify") or [],
             "More time granted" if granted else "Not this time",
             f"You have {decided.get('granted_minutes')} more minutes today." if granted else "A parent said not today.",
-            "/fitness",
+            _my_screen_time(),
         )
     return status, body
 
@@ -8859,7 +8868,7 @@ async def decide_chore_check(request: Request, check_id: int, payload: dict) -> 
         heading, line = chore_answer_words(approved, title, body.get("approved_today"))
         for child in body.get("notify") or []:
             try:
-                await _notify.send(_notify.notice(child, "family_safety", heading, line, url="/fitness",
+                await _notify.send(_notify.notice(child, "family_safety", heading, line, link=_my_screen_time(),
                                                   tag=chore_answer_tag(child, approved), replace=approved))
             except Exception as exc:  # a missed notice never fails the answer
                 log.warning("[screen-time] chore notice to %s failed: %s", child, exc)
@@ -9760,7 +9769,7 @@ async def _announce_call(request: Request, token: str) -> None:
             "call",
             f"{display or me} is on a family call",
             "Tap to join.",
-            url="/family?tab=calls",
+            link=_notify.link("family", tab="calls"),
             tag=f"call:{token}",
             priority=4,
         ),
@@ -9911,7 +9920,7 @@ async def ring_family_call(room: str, request: Request):
             "call",
             f"{display} is video calling" if video else f"{display} is calling",
             f"Family call in {name}. Tap to answer." if group and name else "Tap to answer.",
-            url=link(person),
+            link=_notify.link_from_href(link(person)),
             tag=f"call:{room}",
             # 4 pops up on the "Family calls" channel; 5 would go to the
             # urgent SOS channel as an alarm.
@@ -17156,7 +17165,7 @@ async def _burden_check(request: Request) -> None:
             await _notify.send(_notify.notice(
                 parent, "family_safety", f"{name} has had a few hard days",
                 "From their own morning check-ins. A gentle word or some time together may help.",
-                url=f"/family/member/{me}", tag=f"burden:{me}", once=f"burden:{me}:{week}", priority=3,
+                link=_child_page(me), tag=f"burden:{me}", once=f"burden:{me}:{week}", priority=3,
             ))
     except Exception as exc:
         log.warning("[guardian] burden check skipped: %s", exc)
@@ -17456,7 +17465,7 @@ async def post_health_cheer(request: Request):
         try:
             await _notify.send(_notify.notice(
                 sent["to_user"], "health", f"{sent['from_user'].title()} cheered your day",
-                f"{sent['emoji']} {sent['label']}", url="/fitness", tag=f"cheer:{sent['id']}",
+                f"{sent['emoji']} {sent['label']}", link=_notify.link("health", tab="today"), tag=f"cheer:{sent['id']}",
             ))
         except Exception as exc:
             log.warning("[health] cheer notice skipped: %s", exc)

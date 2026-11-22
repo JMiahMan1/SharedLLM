@@ -465,12 +465,22 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
   );
 };
 
+/** The day a link names (`?date=2026-11-21`), or null. */
+function dayFromLink(search: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(new URLSearchParams(search).get('date') ?? '');
+  if (!m) return null;
+  const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(day.getTime()) || day.getDate() !== Number(m[3]) ? null : day;
+}
+
 const CalendarApp = () => {
   const { isDark } = useDarkModeSync();
   const isMobile = useIsMobile();
   const queryClient = useQueryClient();
-  const [view, setView] = useState<ViewKind>('agenda');
-  const [focused, setFocused] = useState<Date>(() => new Date());
+  // A reminder opens the calendar on the event's day: /calendar?date=YYYY-MM-DD.
+  const [linkedDay] = useState(() => dayFromLink(typeof window === 'undefined' ? '' : window.location.search));
+  const [view, setView] = useState<ViewKind>(linkedDay ? 'day' : 'agenda');
+  const [focused, setFocused] = useState<Date>(() => linkedDay ?? new Date());
   const [activeIntegration, setActiveIntegration] = useState<string>('all');
   const [showSources, setShowSources] = useState(false);
   const [summary, setSummary] = useState('');

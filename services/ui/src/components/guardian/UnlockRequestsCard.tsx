@@ -23,7 +23,7 @@ function UnlockRow({ request }: { request: UnlockRequest }) {
   const no = 'min-h-11 rounded-xl border border-white/10 bg-white/5 px-3.5 text-xs font-medium text-slate-300 hover:bg-white/10 hover:text-white transition-colors';
 
   return (
-    <li className="rounded-xl border border-sky-400/30 bg-gradient-to-br from-sky-500/10 to-sky-400/[0.03] p-3.5 space-y-3" data-testid={`unlock-request-${request.id}`}>
+    <li className="rounded-xl border border-sky-400/30 bg-gradient-to-br from-sky-500/10 to-sky-400/[0.03] p-3.5 space-y-3" data-testid={`unlock-request-${request.id}`} data-focus-id={`unlock-${request.id}`}>
       <div className="flex items-start justify-between gap-2">
         <p className="min-w-0 break-words text-xs font-medium leading-relaxed text-slate-100">
           {unlockLine(request)}

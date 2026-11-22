@@ -139,9 +139,14 @@ def test_another_service_can_notify_a_user(client, rc, monkeypatch):
     monkeypatch.setattr("services.telemetry.main.push.send_to_user", send)
     resp = client.post("/api/telemetry/notify", headers=HEADERS,
                        json={"user": "Sam", "kind": "presence", "title": "Alex left Work",
-                             "body": "Home in about 22 minutes.", "data": {"person": "alex"}})
+                             "body": "Home in about 22 minutes.",
+                             "data": {"person": "alex", "url": "/wander?person=alex"}})
     assert resp.status_code == 200
-    assert sent == [("sam", "Alex left Work", "Home in about 22 minutes.", {"person": "alex"})]
+    # The link is filled in from the url (docs/PUSH.md, "Deep links").
+    link = {"route": "wander", "path": "/wander", "query": {"person": "alex"}, "hash": "", "focus": "",
+            "guard": "member", "href": "/wander?person=alex"}
+    assert sent == [("sam", "Alex left Work", "Home in about 22 minutes.",
+                     {"person": "alex", "url": "/wander?person=alex", "link": link})]
     inbox = client.get("/api/telemetry/notifications/sam", headers=HEADERS).json()["notifications"]
     assert inbox[-1]["kind"] == "presence" and inbox[-1]["title"] == "Alex left Work"
 
@@ -159,7 +164,8 @@ def test_a_once_notice_is_sent_only_once(client, rc, monkeypatch):
         return {}
 
     monkeypatch.setattr("services.telemetry.main.push.send_to_user", send)
-    body = {"user": "alex", "kind": "leave_by", "title": "Leave by 2:40 for Dentist", "once": "leave:abc"}
+    body = {"user": "alex", "kind": "leave_by", "title": "Leave by 2:40 for Dentist", "once": "leave:abc",
+            "data": {"url": "/calendar"}}
     first = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     again = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     assert "duplicate" not in first and again["duplicate"] is True

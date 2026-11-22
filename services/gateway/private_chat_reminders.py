@@ -426,11 +426,11 @@ async def _remind_members(client: aiohttp.ClientSession, token: str, members: li
         if not await asyncio.to_thread(_claim, token, recipient, mid, at, tz, DAILY_MAX):
             continue
         sender = people.get(str(latest.get("by"))) or {"username": latest.get("by")}
-        url = f"/family?chat={token}"
+        target = notify.link("chat", chat=token, private=1, focus=f"msg-{mid}")
         payload = notify.notice(
             recipient, "chat", "Private chat", reminder_text(private_chat._display(sender), decision.question),
-            url=url, priority=3, tag=f"private-reminder:{token}", kind=KIND, replace=True,
-            actions=[notify.view_action(url)],
+            link=target, priority=3, tag=f"private-reminder:{token}", kind=KIND, replace=True,
+            actions=[notify.view_action(target)],
             data={"token": token, "private": True, "reminder": True},
         )
         if await notify.send(payload, client=client, telemetry=telemetry, secret=secret):

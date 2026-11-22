@@ -16,6 +16,7 @@ import { navPagesFor } from './navItems';
 import { useIntegrations } from '../../hooks/useIntegrations';
 import { useDialogFocus } from '../../lib/focusTrap';
 import { sharePushKey } from '../../lib/push';
+import { noticeHref } from '../../lib/noticeLink';
 
 // Navigation search index: the header box is a *command-palette* style finder
 // for pages/tabs/settings, distinct from the RAG/semantic search on Knowledge.
@@ -29,10 +30,6 @@ const EXTRA_ITEMS: NavItem[] = [
 ];
 
 /** When the bell was last opened; notices newer than this light the dot. */
-/** A notice's link when it is a path inside the app; anything else is not followed. */
-function inAppPath(url: unknown): string | null {
-  return typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') ? url : null;
-}
 
 const SEEN_KEY = 'jarvis_notifications_seen_at';
 /** When "Clear all" was last used; older notices stay hidden on this device. */
@@ -304,7 +301,8 @@ const Header = () => {
                     {(() => {
                       // The whole message, and a tap goes where the notice
                       // points (a verse, a chat, a report), as on the phone.
-                      const target = inAppPath(n.data?.url);
+                      // Its link (the page and the item on it), else its older in-app url.
+                      const target = noticeHref(n.data);
                       const content = (
                         <>
                           <p className="text-xs text-white font-medium break-words">{n.title}</p>

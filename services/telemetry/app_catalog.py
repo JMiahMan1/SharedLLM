@@ -57,7 +57,7 @@ from typing import Any
 
 import aiohttp
 
-from services.common import app_review, app_vetting, common_sense, malwarebazaar, play_listing
+from services.common import app_review, app_vetting, common_sense, malwarebazaar, notice_links, play_listing
 from services.telemetry import guardian, llm
 from services.telemetry.config import (
     APP_CATALOG_BACKOFF_BASE_S,
@@ -919,8 +919,10 @@ def _flag_notice(parent: str, child: dict[str, Any], verdict: dict[str, Any], fl
         "tag": f"app:{child['username']}:{verdict['package']}",
         "once": f"app:{child['username']}:{verdict['package']}:{verdict['fingerprint']}",
         "audience": "parents",
-        "data": {"url": f"/guardian?member={child['username']}&area=overview", "child": child["username"],
-                 "package": verdict["package"], "level": worst},
+        # The child's Apps & web, at this app's row.
+        "data": {"link": notice_links.link("member", username=child["username"], section="apps",
+                                           focus=f"app-{verdict['package']}"),
+                 "child": child["username"], "package": verdict["package"], "level": worst},
     }
 
 
@@ -936,7 +938,8 @@ def _group_notice(parent: str, child: dict[str, Any], verdicts: list[dict[str, A
         "body": f"{names}. Open the Apps card to see why.",
         "tag": f"apps:{child['username']}",
         "audience": "parents",
-        "data": {"url": f"/guardian?member={child['username']}&area=overview", "child": child["username"]},
+        "data": {"link": notice_links.link("member", username=child["username"], section="apps"),
+                 "child": child["username"]},
     }
 
 
@@ -1003,7 +1006,8 @@ def request_notice(parent: str, child: dict[str, Any], waiting: dict[str, Any], 
     return notify.notice(
         parent, "family_safety", "New app to approve",
         f"{name} installed {verdict['label']} and is waiting for your OK. {app_vetting.verdict_line(verdict)}",
-        url=f"/family/member/{child['username']}",
+        link=notify.link("member", username=child["username"],
+                         focus=f"guard-{request_id}" if request_id is not None else None),
         tag=f"guard-app:{child['username']}:{verdict['package']}",
         replace=True,
         actions=[

@@ -790,13 +790,13 @@ async def _tell_partner(token: str, chat: dict[str, Any], record: dict[str, Any]
     others = [m for m in chat.get("members", []) if m != user and markers.get(m, 0) < record["id"]]
     if not others:
         return
-    url = f"/family?chat={token}"
+    target = notify.link("chat", chat=token, private=1, focus=f"msg-{record['id']}")
     try:
         sent = await notify.send_many(
             others,
             lambda person: notify.notice(
                 person, "chat", "Private chat", f"New private message from {private_chat._display(me)}",
-                url=url, priority=4, tag=f"chat:{token}", actions=[notify.view_action(url)],
+                link=target, priority=4, tag=f"chat:{token}", actions=[notify.view_action(target)],
                 data={"token": token, "message_id": record["id"], "private": True},
                 once=f"chat:{token}:{record['id']}",
             ),

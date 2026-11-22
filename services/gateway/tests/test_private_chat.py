@@ -406,7 +406,7 @@ def test_a_nudge_says_who_and_nothing_else(env):
     assert notice["body"] == "Alex nudged you in your private chat"
     # Its own category and kind: the phone's "Nudges" channel (sound, heartbeat vibration).
     assert notice["category"] == "nudge" and notice["kind"] == "nudge"
-    assert notice["data"]["url"] == "/family?chat=room123abc"
+    assert notice["data"]["url"] == "/family?chat=room123abc&private=1"
     assert not any(a.get("type") == "reply" for a in notice.get("actions", []))
 
 
@@ -633,7 +633,7 @@ def test_the_other_parent_gets_a_notice_with_no_content(env):
     assert {n["user"] for n in env["notices"]} <= set(_saved(env)["members"])
     assert notice["title"] == "Private chat"
     assert notice["body"] == "Alex changed the private chat password"
-    assert notice["data"]["url"] == "/family?chat=room123abc"
+    assert notice["data"]["url"] == "/family?chat=room123abc&private=1"
     text = json.dumps(notice)
     for secret in (_fill(16, 12), _fill(48, 12), _fill(32, 2), VERIFIER["ct"]):
         assert secret not in text

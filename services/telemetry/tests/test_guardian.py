@@ -95,7 +95,8 @@ def test_sunday_evening_sends_each_recap_once(wired):
     assert sent[0]["title"] == "Emma's week" and sent[0]["kind"] == "recap"
     assert sent[0]["body"] == "Nothing was reported from Emma's phone this week."
     # The notice opens the recap it announces, not the member page.
-    assert sent[0]["data"]["url"] == "/guardian?member=kid&week=2026-10-19"
+    # The guardian hub on that week, at its recap (docs/PUSH.md, "Deep links").
+    assert sent[0]["data"]["link"]["href"] == "/guardian?member=kid&area=overview&week=2026-10-19&focus=recap-2026-10-19"
 
 
 def test_a_finished_week_reads_as_the_recap_that_was_sent(wired, monkeypatch):

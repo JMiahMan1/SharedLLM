@@ -147,7 +147,7 @@ async def auth_failed(service: str, account: str, detail: str = "") -> None:
             f"Credential expired: {label}",
             f"The {label} login{suffix} was rejected ({detail or 'unauthorized'}). "
             "Renew it in Settings; flows using it keep failing until then.",
-            url="/",
+            link=notify.link("admin", section="integrations"),
             priority=3,
             tag=f"admin:expired:{key}",
             kind="admin",
@@ -188,7 +188,7 @@ async def auth_ok(service: str, account: str) -> None:
             "admin",
             f"{label} login works again",
             f"The {label} login{suffix} was accepted again.",
-            url="/",
+            link=notify.link("admin", section="integrations"),
             priority=2,
             tag=f"admin:expired:{key}",
             kind="admin",

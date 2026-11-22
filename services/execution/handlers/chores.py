@@ -205,7 +205,7 @@ async def _answer_checks(req: ChoreRequest, names: list[str], by_voice: bool) ->
                 log.warning(f"[chores] could not untick {decided.get('chore_id')} for {child}: {unticked.get('message')}")
         heading, line = chore_answer_words(approve, decided.get("title"), answer.get("approved_today"))
         try:
-            await notify.send(notify.notice(child, "family_safety", heading, line, url="/fitness",
+            await notify.send(notify.notice(child, "family_safety", heading, line, link=notify.link("health", tab="today"),
                                             tag=chore_answer_tag(child, approve), replace=approve))
             if by_voice and approve:
                 # Approved from a voice alone: the parents hear, so a misheard or imitated voice shows.
@@ -213,7 +213,8 @@ async def _answer_checks(req: ChoreRequest, names: list[str], by_voice: bool) ->
                     await notify.send(notify.notice(
                         parent, "family_safety", "Chore approved by voice",
                         f"\u201c{decided.get('title') or 'A chore'}\u201d for {answer.get('display_name') or child} "
-                        f"was approved by voice as {ctx.user}.", url=f"/family/member/{child}", tag=f"screen-time:{child}"))
+                        f"was approved by voice as {ctx.user}.", link=notify.link("member", username=child, section="time"),
+                        tag=f"screen-time:{child}"))
         except Exception as e:  # a missed notice never undoes the answer
             log.warning(f"[chores] notice after answering a chore failed: {type(e).__name__}: {e}")
         done.append({**check, **decided})

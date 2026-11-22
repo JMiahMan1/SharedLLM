@@ -121,7 +121,8 @@ final class PushNotice {
         String body = str(o, "body");
         if (title.isEmpty() && body.isEmpty()) return null;
         JSONObject data = o.optJSONObject("data");
-        String url = data != null ? str(data, "url") : "";
+        // Where a tap goes: the structured link, else the older in-app url.
+        String path = DeepLink.forNotice(data);
         String token = data != null ? str(data, "token") : "";
         boolean ringPhone = data != null && data.optBoolean("ring_phone", false);
         String sound = data != null ? str(data, "sound") : "";
@@ -137,7 +138,7 @@ final class PushNotice {
                 body,
                 clampPriority(o.optInt("priority", 3)),
                 str(o, "tag"),
-                safePath(url),
+                path,
                 token,
                 ringPhone,
                 sound,

@@ -722,7 +722,9 @@ class RestartMonitor:
 
         payload = notify.notice(
             "@admins", "admin", f"{self.title} keeps restarting" if restarts == len(recent)
-            else f"{self.title} keeps going offline", body, url="/devices", priority=3,
+            else f"{self.title} keeps going offline", body,
+            # Devices > Setup, at this device's integration (its Restarts).
+            link=notify.link("devices", hash="setup", focus=f"entry-{entry_id}"), priority=3,
             tag=f"admin:device-restarts:{entry_id}", once=f"homehub:device-restarts:{entry_id}:{self.notified_at}",
             kind="admin", audience="parents")
 

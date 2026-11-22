@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from urllib.parse import quote
 
 import aiohttp
 from sqlmodel import Session, select
@@ -28,16 +27,17 @@ log = logging.getLogger(__name__)
 INTERVAL_S = 300
 #: A prayer reminder goes out within this long after its hour, never later.
 WINDOW = timedelta(minutes=30)
-URL = "/health"
+#: The fast itself: Health's Today tab, where the fasting card is.
+URL = notify.link("health", tab="today")
 
 
 def _who(user: str) -> str:
     return user[:1].upper() + user[1:]
 
 
-def bible_link(ref: str) -> str:
+def bible_link(ref: str) -> dict:
     """Where a tap on a verse goes: that passage in the app's Bible."""
-    return f"/bible?ref={quote(ref)}"
+    return notify.link("bible", ref=ref)
 
 
 async def _reading_version(client: aiohttp.ClientSession, username: str | None) -> str | None:
@@ -101,7 +101,7 @@ async def shared_started(fast: dict, owner: str, viewers: list[str]) -> int:
     for viewer in viewers:
         verse = await verse_text(ref, viewer)
         sent += int(await notify.send(notify.notice(
-            viewer, "health", f"Pray with {_who(owner)}", f"{body} {verse}", url=bible_link(ref),
+            viewer, "health", f"Pray with {_who(owner)}", f"{body} {verse}", link=bible_link(ref),
             actions=[notify.view_action(bible_link(ref), f"Read {ref}"), notify.view_action(URL, "See the fast")],
             tag=f"fast:{fast.get('id')}", once=f"fast-start:{fast.get('id')}:{viewer}", kind="fast_shared",
         )))
@@ -118,7 +118,7 @@ async def shared_ended(fast: dict, owner: str, viewers: list[str]) -> int:
         verse = await verse_text(ref, viewer)
         sent += int(await notify.send(notify.notice(
             viewer, "health", f"{_who(owner)}'s fast is complete",
-            f"{_who(owner)} has ended their fast. Give thanks with them. {verse}", url=bible_link(ref),
+            f"{_who(owner)} has ended their fast. Give thanks with them. {verse}", link=bible_link(ref),
             actions=[notify.view_action(bible_link(ref), f"Read {ref}")],
             tag=f"fast:{fast.get('id')}", once=f"fast-end:{fast.get('id')}:{viewer}", kind="fast_shared",
         )))
@@ -160,7 +160,7 @@ async def remind_once(engine_factory, tz_factory, now: datetime | None = None) -
             payload = notify.notice(
                 row.user_id, "health", "Your fast is complete",
                 "Thanks be to God. Break it gently with something small, and end the fast on the card.",
-                url=URL, tag=f"fast:{row.id}", once=f"fast-complete:{row.id}", kind="fast_complete",
+                link=URL, tag=f"fast:{row.id}", once=f"fast-complete:{row.id}", kind="fast_complete",
             )
         else:
             # A different psalm at each hour, and a different set each day.
@@ -173,7 +173,7 @@ async def remind_once(engine_factory, tz_factory, now: datetime | None = None) -
             payload = notify.notice(
                 row.user_id, "health", f"{detail['name']}: time to pray",
                 f"{detail['reason']} Pray the Lord's Prayer, then read {psalm}: {verse}",
-                url=bible_link(psalm),
+                link=bible_link(psalm),
                 actions=[notify.view_action(bible_link(psalm), f"Read {psalm}"), notify.view_action(URL, "Open my fast")],
                 tag=f"fast-prayer:{row.id}",
                 once=f"fast-prayer:{row.id}:{detail['day']}:{detail['clock']}", kind="fast_prayer",

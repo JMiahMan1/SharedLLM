@@ -34,7 +34,7 @@ from typing import Any
 
 import aiohttp
 
-from services.common import notify
+from services.common import notice_links, notify
 from services.config import ALERT_DESKTOP_DOWN_MINUTES, ALERT_TLS_DAYS, ALERT_TLS_HOSTS
 from services.gateway.config import (
     ALPACA_ARCADE_URL,
@@ -50,7 +50,6 @@ log = logging.getLogger("gateway.admin_alerts")
 CHECK_SECONDS = 60
 DOWN_AFTER_FAILURES = 2
 STATE_KEY = "admin:alerts:gateway"
-DASHBOARD_URL = "/"
 _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=10)
 TLS_CHECK_SECONDS = 6 * 3600
 _TLS_TIMEOUT_SECONDS = 15
@@ -66,10 +65,12 @@ async def notify_admins(client: aiohttp.ClientSession, notice: dict[str, Any]) -
     return await notify.send(payload, client=client, telemetry=TELEMETRY_SVC, secret=INTERNAL_SECRET)
 
 
-def _open_dashboard() -> dict[str, Any]:
+def _open_dashboard(section: str = "services") -> dict[str, Any]:
+    """Opens the admin tab the notice is about (admins only, as the page itself)."""
+    target = notice_links.link("admin", section=section)
     return {
-        "data": {"url": DASHBOARD_URL},
-        "actions": [{"label": "Open", "type": "view", "url": DASHBOARD_URL}],
+        "data": {"link": target},
+        "actions": [{"label": "Open", "type": "view", "url": target["href"]}],
     }
 
 
@@ -260,12 +261,12 @@ def tls_transitions(state: dict[str, Any], results: dict[str, dict[str, Any]], w
             else:
                 body = f"{host} is not serving a valid certificate: {result.get('reason')}. Browsers and the app will refuse it."
             notices.append({"title": f"Certificate problem: {host}", "body": body, "priority": 4, "tag": tag,
-                            **_open_dashboard()})
+                            **_open_dashboard("network")})
         elif not problem and host in warned:
             warned.remove(host)
             notices.append({"title": f"Certificate renewed: {host}",
                             "body": f"{host} serves a valid certificate again ({result['days']} days left).",
-                            "priority": 2, "tag": tag, **_open_dashboard()})
+                            "priority": 2, "tag": tag, **_open_dashboard("network")})
     for host in [h for h in warned if h not in results]:  # no longer watched
         warned.remove(host)
     return notices

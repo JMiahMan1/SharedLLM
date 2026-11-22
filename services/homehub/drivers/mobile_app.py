@@ -469,9 +469,33 @@ def _notice_actions(extra: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _tap_link(extra: dict[str, Any]) -> dict[str, Any]:
+    """Where a tap on an automation's notice goes.
+
+    The companion app's ``url`` / ``clickAction`` when it is a page of Jarvis,
+    else the history of the ``entity_id`` it is about, else the dashboard. An
+    address no page of Jarvis reads (a Lovelace view) opens the dashboard
+    rather than nothing.
+    """
+    for key in ("url", "clickAction"):
+        value = extra.get(key)
+        if isinstance(value, str) and value.startswith("/"):
+            try:
+                return jarvis_notify.link_from_href(value)
+            except jarvis_notify.LinkError:
+                pass
+    entity = extra.get("entity_id")
+    if isinstance(entity, str) and entity:
+        try:
+            return jarvis_notify.link("history", e=entity)
+        except jarvis_notify.LinkError:
+            pass
+    return jarvis_notify.link("home")
+
+
 def _notice_kwargs(data: dict[str, Any]) -> dict[str, Any]:
     extra = data.get("data") if isinstance(data.get("data"), dict) else {}
-    kw: dict[str, Any] = {}
+    kw: dict[str, Any] = {"link": _tap_link(extra)}
     if extra.get("tag"):
         kw["tag"] = str(extra["tag"])
     actions = _notice_actions(extra)

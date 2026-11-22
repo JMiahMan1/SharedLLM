@@ -17,6 +17,8 @@ import ActivityBeacon from './components/layout/ActivityBeacon';
 import PhoneUsageSync from './components/layout/PhoneUsageSync';
 import AppInventorySync from './components/layout/AppInventorySync';
 import GuardWatch from './components/layout/GuardWatch';
+import DeepLinkFocus from './components/layout/DeepLinkFocus';
+import AccessRefused from './components/layout/AccessRefused';
 import MediaSessionSync from './components/layout/MediaSessionSync';
 import CommsSync from './components/layout/CommsSync';
 import AdminElevation from './components/auth/AdminElevation';
@@ -98,13 +100,12 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
   
   if (locked.active) return <LockedShell sections={locked.sections}>{children}</LockedShell>;
 
-  if (requireAdmin && !user?.is_admin) {
-    console.warn("RBAC Violation: Admin required for this route.");
-    return <Navigate to="/" replace />;
-  }
+  // A page for admins says so (a notice, a bookmark or a typed address can lead
+  // here); nothing of the page itself is loaded.
+  const page = requireAdmin && !user?.is_admin ? <AccessRefused /> : children;
 
   if (isMobile) {
-    return <MobileShell>{children}</MobileShell>;
+    return <MobileShell>{page}</MobileShell>;
   }
   
   return (
@@ -114,7 +115,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
         <Header />
         <DeployBanner />
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 scroll-smooth">
-          {children}
+          {page}
         </main>
       </div>
     </div>
@@ -176,6 +177,7 @@ function App() {
           <PhoneUsageSync />
           <AppInventorySync />
           <GuardWatch />
+          <DeepLinkFocus />
 <MediaSessionSync />
 <CommsSync />
           <DropInReturn />

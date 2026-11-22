@@ -26,7 +26,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
-from services.common import concern_monitor, concern_review, device_noun, guardian_recap, video_calls
+from services.common import concern_monitor, concern_review, device_noun, guardian_recap, notice_links, video_calls
 from services.telemetry import app_updates, llm, notices, store
 
 log = logging.getLogger("telemetry.guardian")
@@ -113,7 +113,10 @@ def _concern_notice(parent: str, child: dict[str, Any], concern: dict[str, Any],
         # It quotes what was flagged (a message, often): never to a minor,
         # whoever is on the parents list.
         "audience": "parents",
-        "data": {"url": f"/family/member/{child['username']}", "child": child["username"], "level": concern["level"]},
+        # The child's page, at the concern (its review, its export, its clear).
+        "data": {"link": notice_links.link("member", username=child["username"],
+                                           focus=f"concern-{concern['id']}" if concern.get("id") else None),
+                 "child": child["username"], "level": concern["level"]},
     }
 
 
@@ -128,7 +131,8 @@ def _blocked_site_notice(parent: str, child: dict[str, Any], domain: str, count:
         "body": f"{name}'s {_device(child)} tried to open {domain} ({count} blocked attempts today).",
         "tag": f"blocked_site:{child['username']}:{domain}",
         "once": f"blocked_site:{child['username']}:{domain}:{day}",
-        "data": {"url": f"/family/member/{child['username']}", "child": child["username"], "domain": domain, "count": count},
+        "data": {"link": notice_links.link("member", username=child["username"], section="apps"),
+                 "child": child["username"], "domain": domain, "count": count},
     }
 
 
@@ -542,7 +546,9 @@ async def send_weekly_recaps(rc, session, deliver: Deliver, now: datetime) -> in
                     "body": line,
                     "tag": f"recap:{child['username']}:{week}",
                     # Opens this recap itself, not the member page.
-                    "data": {"url": f"/guardian?member={child['username']}&week={week}", "child": child["username"], "week": week},
+                    "data": {"link": notice_links.link("guardian", member=child["username"], area="overview", week=week,
+                                                       focus=f"recap-{week}"),
+                             "child": child["username"], "week": week},
                 })
             except Exception as exc:
                 log.warning("recap notice to %s failed: %s", parent, exc)
