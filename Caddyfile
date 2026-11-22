@@ -548,6 +548,11 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
             import patient
         }
     }
+    handle /api/admin/music-assistant* {
+        reverse_proxy identity:8001 {
+            import patient
+        }
+    }
     handle /api/admin* {
         reverse_proxy workspace_runtime:8007 {
             import patient
