@@ -26,9 +26,9 @@ function day(offset = 0): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Today at hh:mm local, plus `days`. */
-function at(hour: number, minute = 0, days = 0): Date {
-  const d = new Date();
+/** Today at hh:mm local, plus `days`; `base` fixes "today" for a frozen clock. */
+function at(hour: number, minute = 0, days = 0, base?: Date): Date {
+  const d = base ? new Date(base.getTime()) : new Date();
   d.setDate(d.getDate() + days);
   d.setHours(hour, minute, 0, 0);
   return d;
@@ -275,21 +275,21 @@ const ev = (id: string, summary: string, start: Date, minutes: number | null, ca
   calendar, integration: 'nextcloud', ...extra,
 });
 
-function calendarEvents() {
+function calendarEvents(base?: Date) {
   return [
-    ev('c1', 'Soccer practice at the community field on the far side of the park, bring water and shin guards', at(16, 30), 90,
+    ev('c1', 'Soccer practice at the community field on the far side of the park, bring water and shin guards', at(16, 30, 0, base), 90,
       'sky@example.com', { location: 'Riverside Elementary School And Community Recreation Center, Field 3' }),
-    ev('c2', 'Dentist', at(9), 30, 'robin@example.com'),
-    ev('c3', 'Family movie night', at(19), 150, 'family', { recurring: true }),
-    ev('c4', 'Grandma visits', at(0, 0, 1), null, 'family', { all_day: true, end_time: at(0, 0, 3).toISOString() }),
-    ev('c5', 'Piano lesson', at(15, 45, 2), 45, 'jordan@example.com'),
-    ev('c6', 'Parent-teacher conferences for every class this term', at(17, 0, 2), 60, 'robin@example.com'),
-    ev('c7', 'Early meeting', at(7, 0, 2), 30, 'parent@example.com'),
-    ev('c8', 'Lunch with an old friend', at(12, 0, 2), 60, 'parent@example.com'),
-    ev('c9', LONG_WORD, at(10, 0, 4), 60, 'taylor@example.com'),
-    ev('c10', 'Library books due', at(0, 0, 6), null, 'family', { all_day: true }),
-    ev('c11', 'Bike tune-up', at(11, 0, -2), 60, 'parent@example.com'),
-    ev('c12', 'Church picnic', at(13, 0, 9), 180, 'family'),
+    ev('c2', 'Dentist', at(9, 0, 0, base), 30, 'robin@example.com'),
+    ev('c3', 'Family movie night', at(19, 0, 0, base), 150, 'family', { recurring: true }),
+    ev('c4', 'Grandma visits', at(0, 0, 1, base), null, 'family', { all_day: true, end_time: at(0, 0, 3, base).toISOString() }),
+    ev('c5', 'Piano lesson', at(15, 45, 2, base), 45, 'jordan@example.com'),
+    ev('c6', 'Parent-teacher conferences for every class this term', at(17, 0, 2, base), 60, 'robin@example.com'),
+    ev('c7', 'Early meeting', at(7, 0, 2, base), 30, 'parent@example.com'),
+    ev('c8', 'Lunch with an old friend', at(12, 0, 2, base), 60, 'parent@example.com'),
+    ev('c9', LONG_WORD, at(10, 0, 4, base), 60, 'taylor@example.com'),
+    ev('c10', 'Library books due', at(0, 0, 6, base), null, 'family', { all_day: true }),
+    ev('c11', 'Bike tune-up', at(11, 0, -2, base), 60, 'parent@example.com'),
+    ev('c12', 'Church picnic', at(13, 0, 9, base), 180, 'family'),
   ];
 }
 
@@ -453,7 +453,7 @@ function memberAnswer(p: string, url: URL): unknown {
 // ---- The handler -------------------------------------------------------------
 
 /** Paths answered here (exact). */
-function answer(p: string, url: URL, method: string): unknown {
+function answer(p: string, url: URL, method: string, today?: Date): unknown {
   if (method !== 'GET') {
     if (p === '/api/communication/talk/conversations/open') return { status: 'SUCCESS', detail: { token: 'room-sky' } };
     // The cookbook (the Create tab) reads by POST.
@@ -511,7 +511,7 @@ function answer(p: string, url: URL, method: string): unknown {
     }
     // Calendar.
     case '/api/communication/calendar/events':
-      return { status: 'SUCCESS', detail: { integrations: CALENDAR_INTEGRATIONS, default: 'nextcloud' }, events: calendarEvents() };
+      return { status: 'SUCCESS', detail: { integrations: CALENDAR_INTEGRATIONS, default: 'nextcloud' }, events: calendarEvents(today) };
     case '/api/calendar/settings': return { status: 'SUCCESS', settings: CALENDAR_SETTINGS };
     case '/api/weather': return forecast();
     default: break;
@@ -526,7 +526,7 @@ function answer(p: string, url: URL, method: string): unknown {
   return undefined;
 }
 
-export async function mockFamilyPages(page: Page): Promise<void> {
+export async function mockFamilyPages(page: Page, opts: { today?: Date } = {}): Promise<void> {
   // Map tiles: a 1x1 picture, so nothing reaches the network.
   await page.route(/tile\.openstreetmap\.org|basemaps\.cartocdn\.com|arcgisonline\.com|tile\.thunderforest|stadiamaps/, (route) =>
     route.fulfill({ contentType: 'image/png', body: PNG }));
@@ -544,7 +544,7 @@ export async function mockFamilyPages(page: Page): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       return route.fulfill({ json: { status: 'SUCCESS', detail: { messages: [] } } }).catch(() => {});
     }
-    const body = answer(p, url, req.method());
+    const body = answer(p, url, req.method(), opts.today);
     if (body === undefined) return route.fallback();
     return route.fulfill({ json: body });
   });
