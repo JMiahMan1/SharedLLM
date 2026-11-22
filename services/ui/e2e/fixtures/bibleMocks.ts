@@ -97,6 +97,25 @@ export async function mockBible(page: Page) {
       return json({ username: 'parent', read_streak_current: 3, read_streak_longest: 9, open_streak_current: 4, open_streak_longest: 12,
         days_read: 20, metrics: {}, days_opened: 30, marks: 0, highlights: 0, bookmarks: 0, position: null, last_read_at: null, window: {} });
     }
+    if (p === '/encouragement/welcome-back') {
+      return json({ reference: 'Lamentations 3:22-23', text: 'The steadfast love of the LORD never ceases; his mercies never come to an end; they are new every morning; great is your faithfulness.', book: 'Lamentations', chapter: 3, verse: 22 });
+    }
+    if (p === '/encouragement/daily') {
+      return json({ reference: 'Psalm 119:18', text: 'Open my eyes, that I may behold wondrous things out of your law.', book: 'Psalm', chapter: 119, verse: 18 });
+    }
+    if (p.startsWith('/encouragement/streak-milestone/')) {
+      const days = parseInt(p.split('/').pop() ?? '0', 10);
+      const verses: Record<number, { reference: string; text: string; book: string; chapter: number; verse: number }> = {
+        1: { reference: 'Psalm 1:2-3', text: 'But his delight is in the law of the LORD, and on his law he meditates day and night. He is like a tree planted by streams of water.', book: 'Psalm', chapter: 1, verse: 2 },
+        3: { reference: 'Ecclesiastes 4:12', text: 'And though a man might prevail against one who is alone, two will withstand him: a threefold cord is not quickly broken.', book: 'Ecclesiastes', chapter: 4, verse: 12 },
+        7: { reference: 'Psalm 119:164', text: 'Seven times a day I praise you for your righteous rules.', book: 'Psalm', chapter: 119, verse: 164 },
+        14: { reference: 'Psalm 119:97', text: 'Oh how I love your law! It is my meditation all the day.', book: 'Psalm', chapter: 119, verse: 97 },
+        30: { reference: 'Psalm 119:11', text: 'I have stored up your word in my heart, that I might not sin against you.', book: 'Psalm', chapter: 119, verse: 11 },
+        100: { reference: 'Psalm 119:9-11', text: 'How can a young man keep his way pure? By guarding it according to your word. With my whole heart I seek you; let me not wander from your commandments! I have stored up your word in my heart, that I might not sin against you.', book: 'Psalm', chapter: 119, verse: 9 },
+      };
+      const verse = verses[days] || verses[1];
+      return json(verse);
+    }
     if (p === '/achievements') {
       return json({ username: 'parent', points: 120, newly_earned: [], earned: [], pending_rules: [],
         next_up: [{ id: 'streak-7', name: 'A week in the Word', description: 'Read seven days in a row', points: 50, current: 3,

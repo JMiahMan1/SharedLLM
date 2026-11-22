@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 
 import pytest
 
@@ -286,17 +287,47 @@ async def test_metric_household_gets_celsius():
     assert fake.puts[-1] == [(1, 20, 22.5)]
 
 
-async def test_poll_failure_marks_unavailable_then_recovers():
+async def test_a_short_drop_stays_available_and_polls_again_quickly(monkeypatch, caplog):
+    """A Wi-Fi thermostat closes an idle connection; both reads of one poll fail, then it is back."""
+    monkeypatch.setattr(homekit, "POLL_RETRY_PAUSE_S", 0)
+    caplog.set_level(logging.INFO, logger="homehub.homekit_controller")
+    hub, driver, fake = await setup()
+    fake.fail_next_reads = 2
+    await driver.async_poll()
+    assert hub.states.get("climate.hallway").state == "cool", "a short drop does not make it unavailable"
+    assert driver.poll_interval == homekit.OUTAGE_POLL_INTERVAL_S
+    stopped = [r for r in caplog.records if "stopped answering" in r.getMessage()]
+    assert len(stopped) == 1
+
+    fake.values[(1, 19)] = 25.0
+    await driver.async_poll()
+    assert hub.states.get("climate.hallway").state == "cool"
+    assert hub.states.get("sensor.hallway_current_temperature").state == "77.0"
+    assert driver.poll_interval == driver._healthy_poll_interval
+    assert len([r for r in caplog.records if "stopped answering" in r.getMessage()]) == 1, "logged once"
+    assert len([r for r in caplog.records if "answers again" in r.getMessage()]) == 1
+
+
+async def test_an_outage_past_the_grace_marks_unavailable_once_then_recovers(monkeypatch, caplog):
+    monkeypatch.setattr(homekit, "POLL_RETRY_PAUSE_S", 0)
+    monkeypatch.setattr(homekit, "OUTAGE_GRACE_S", 0)
+    caplog.set_level(logging.INFO, logger="homehub.homekit_controller")
     hub, driver, fake = await setup()
     fake.fail_reads = True
     await driver.async_poll()
     assert hub.states.get("climate.hallway").state == "unavailable"
     assert hub.states.get("sensor.hallway_current_temperature").state == "unavailable"
+    await driver.async_poll()
+    assert hub.states.get("climate.hallway").state == "unavailable"
+    assert len([r for r in caplog.records if "stopped answering" in r.getMessage()]) == 1
+
     fake.fail_reads = False
     fake.values[(1, 19)] = 25.0
     await driver.async_poll()
     assert hub.states.get("climate.hallway").state == "cool"
     assert hub.states.get("sensor.hallway_current_temperature").state == "77.0"
+    assert driver.poll_interval == driver._healthy_poll_interval
+    assert len([r for r in caplog.records if "answers again" in r.getMessage()]) == 1
 
 
 async def test_a_connection_the_accessory_closed_is_not_a_drop(monkeypatch):
@@ -308,9 +339,9 @@ async def test_a_connection_the_accessory_closed_is_not_a_drop(monkeypatch):
     await driver.async_poll()
     assert hub.states.get("climate.hallway").state == "cool"
     assert hub.states.get("sensor.hallway_current_temperature").state == "77.0"
-    fake.fail_next_reads = 2  # gone for real: both reads fail
+    fake.fail_next_reads = 2  # both reads fail once: still just a drop
     await driver.async_poll()
-    assert hub.states.get("climate.hallway").state == "unavailable"
+    assert hub.states.get("climate.hallway").state == "cool"
 
 
 async def test_setup_raises_when_the_accessory_is_silent():

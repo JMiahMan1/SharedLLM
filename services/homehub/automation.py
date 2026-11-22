@@ -1015,15 +1015,15 @@ class AutomationEngine:
         return "persistent_notification." + DEVICE_REPAIR_PREFIX + re.sub(r"[^a-z0-9_]+", "_",
                                                                            f"{item.kind}_{item.id}".lower())
 
-    def _raise_device_repair(self, item: Item | None, action: str) -> None:
+    def _raise_device_repair(self, item: Item | None, action: str, why: str) -> None:
         """A repair notice that stays until the device's action is offered again."""
         if item is None:
             return
         name = self._friendly(item.entity_id, item.alias)
         self.hub.states.set(self._device_repair_id(item), "notifying", {
             "title": f"{name} could not reach a device",
-            "message": (f"A run of {item.entity_id} stopped at {action}: no connected device offers it. "
-                        "Connect the device, or change the step."),
+            "message": f"A run of {item.entity_id} stopped at {action}: {why}. "
+                       "Connect the device, or change the step.",
             "entity_id": item.entity_id,
             "action": action,
         })
@@ -1291,8 +1291,16 @@ class AutomationEngine:
                 # An archived device (device_archive.py) is not away: no repair notice, just the plain reason.
                 raise DeviceActionMissing(f"{action}: {why}")
             item = _current_item.get()
-            self._raise_device_repair(item, action)
-            raise DeviceActionMissing(f"{action} is not offered: its device is not connected")
+            source = getattr(self.hub, "device_action_source", None)
+            state = source(domain, service) if source is not None else None
+            if state is None:
+                why = "its device is not connected"
+            else:
+                name, connected = state
+                why = (f"{name} is offline" if not connected
+                       else f"{name} is online but its firmware does not offer {service}")
+            self._raise_device_repair(item, action, why)
+            raise DeviceActionMissing(f"{action} is not offered: {why}")
         data = dict(self.render(step.get("data") or {}, v) or {})
         data.update(self.render(step.get("data_template") or {}, v) or {})
         target = self.render(step.get("target") or {}, v) or {}

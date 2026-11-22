@@ -13,6 +13,10 @@ const apiMock = vi.hoisted(() => ({
   getBibleVerseContext: vi.fn(),
   getBibleDevotionalWorks: vi.fn(),
   listBiblePlanGroups: vi.fn(),
+  getBibleWelcomeBackVerse: vi.fn(),
+  getBibleStreakMilestoneVerse: vi.fn(),
+  getBibleDailyEncouragement: vi.fn(),
+  useBibleGraceDay: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -187,5 +191,103 @@ describe('Today tab', () => {
     const select = await screen.findByTestId('bible-devotional-work');
     await user.selectOptions(select, 'book:2');
     expect(onDevotionalWork).toHaveBeenCalledWith('book:2');
+  });
+
+  it('shows welcome-back card when returning after a break', async () => {
+    apiMock.getBibleDevotionalWorks.mockResolvedValue({ works: [] });
+    apiMock.getBiblePlans.mockResolvedValue({ catalogue: [], mine: [] });
+    apiMock.getBibleDaily.mockResolvedValue({
+      day: '2026-10-21',
+      verse_of_day: { reference: 'Psalm 23:1', text: 'The LORD is my shepherd.' },
+      devotional: { entry: null, skipped: [], reason: 'none' },
+      sources: [],
+      streaks: { read_streak_current: 0, days_read: 5, chapters_read: 10 },
+    });
+    apiMock.getBibleWelcomeBackVerse.mockResolvedValue({
+      reference: 'Lamentations 3:22-23',
+      text: 'The steadfast love of the LORD never ceases; his mercies never come to an end; they are new every morning; great is your faithfulness.',
+      book: 'Lamentations',
+      chapter: 3,
+      verse: 22,
+    });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BibleToday onOpenRef={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTestId('bible-welcome-back')).toBeInTheDocument();
+    expect(screen.getByText('Welcome back')).toBeInTheDocument();
+    expect(screen.getByText(/You've read 5 days before/)).toBeInTheDocument();
+    expect(screen.getByText('Lamentations 3:22-23')).toBeInTheDocument();
+  });
+
+  it('shows milestone celebration card for streak milestones', async () => {
+    apiMock.getBibleDevotionalWorks.mockResolvedValue({ works: [] });
+    apiMock.getBiblePlans.mockResolvedValue({ catalogue: [], mine: [] });
+    apiMock.getBibleDaily.mockResolvedValue({
+      day: '2026-10-21',
+      verse_of_day: { reference: 'Psalm 23:1', text: 'The LORD is my shepherd.' },
+      devotional: { entry: null, skipped: [], reason: 'none' },
+      sources: [],
+      streaks: { read_streak_current: 7, days_read: 20, chapters_read: 10 },
+    });
+    apiMock.getBibleStreakMilestoneVerse.mockResolvedValue({
+      reference: 'Psalm 119:164',
+      text: 'Seven times a day I praise you for your righteous rules.',
+      book: 'Psalm',
+      chapter: 119,
+      verse: 164,
+    });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BibleToday onOpenRef={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTestId('bible-streak-milestone')).toBeInTheDocument();
+    expect(screen.getByText('7 days!')).toBeInTheDocument();
+    expect(screen.getByText('A full week of faithfulness.')).toBeInTheDocument();
+    expect(screen.getByText('Psalm 119:164')).toBeInTheDocument();
+  });
+
+  it('shows grace day offer when streak > 0 but no reading today', async () => {
+    apiMock.getBibleDevotionalWorks.mockResolvedValue({ works: [] });
+    apiMock.getBiblePlans.mockResolvedValue({ catalogue: [], mine: [] });
+    apiMock.getBibleDaily.mockResolvedValue({
+      day: '2026-10-21',
+      verse_of_day: { reference: 'Psalm 23:1', text: 'The LORD is my shepherd.' },
+      devotional: { entry: null, skipped: [], reason: 'none' },
+      sources: [],
+      streaks: { read_streak_current: 5, days_read: 20, chapters_read: 10, grace_day_used: false },
+    });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BibleToday onOpenRef={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByTestId('bible-grace-day')).toBeInTheDocument();
+    expect(screen.getByText('Grace day available')).toBeInTheDocument();
+    expect(screen.getByText('Use grace day')).toBeInTheDocument();
+  });
+
+  it('does not show grace day when already used', async () => {
+    apiMock.getBibleDevotionalWorks.mockResolvedValue({ works: [] });
+    apiMock.getBiblePlans.mockResolvedValue({ catalogue: [], mine: [] });
+    apiMock.getBibleDaily.mockResolvedValue({
+      day: '2026-10-21',
+      verse_of_day: { reference: 'Psalm 23:1', text: 'The LORD is my shepherd.' },
+      devotional: { entry: null, skipped: [], reason: 'none' },
+      sources: [],
+      streaks: { read_streak_current: 5, days_read: 20, chapters_read: 10, grace_day_used: true },
+    });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BibleToday onOpenRef={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByTestId('bible-grace-day')).not.toBeInTheDocument();
   });
 });

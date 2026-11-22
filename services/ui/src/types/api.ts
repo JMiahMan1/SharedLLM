@@ -3870,6 +3870,20 @@ export interface BibleActivityFeed {
   note?: string;
 }
 
+export interface BibleGraceDayResponse {
+  ok: boolean;
+  grace_day_date: string;
+  message: string;
+}
+
+export interface BibleEncouragementVerse {
+  reference: string;
+  text: string;
+  book: string;
+  chapter: number;
+  verse: number;
+}
+
 export interface BibleBlbLink {
   ref: string;
   url: string;
@@ -4037,6 +4051,8 @@ export interface BibleDailyResponse {
     open_streak_current: number;
     days_read: number;
     chapters_read: number;
+    /** The one missed day this streak forgave has been spent. */
+    grace_day_used?: boolean;
   };
   position?: BiblePosition | null;
   /** Plans in progress: today's reading and how far along. */

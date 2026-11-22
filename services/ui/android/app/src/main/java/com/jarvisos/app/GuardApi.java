@@ -31,7 +31,7 @@ final class GuardApi {
     static final String KEY_UNLOCKED_UNTIL = "guard_unlocked_until";
     static final String KEY_LAST_PAUSED_AT = "guard_last_paused_at";
     static final String KEY_SERVER_THEME_ID = "guard_server_theme_id";
-    /** The parents' offline-code verifiers, from the last parent approval of an unlock request. */
+    /** The parents' offline-code verifiers, from the last status refresh (or approval) that carried them. */
     static final String KEY_OFFLINE_CODES = "guard_offline_codes";
     /** This phone's unlock request still waiting for a parent (0: none). */
     static final String KEY_UNLOCK_REQUEST_ID = "guard_unlock_request_id";
@@ -78,6 +78,8 @@ final class GuardApi {
             String lastPausedAt = p.getString(KEY_LAST_PAUSED_AT, "");
             boolean freshPause = nowPaused && (!wasPaused || (!pausedAt.isEmpty() && !pausedAt.equals(lastPausedAt)));
             SharedPreferences.Editor ed = p.edit().putString(KEY_STATUS, body);
+            String codes = offlineCodesToKeep(next);
+            if (codes != null) ed.putString(KEY_OFFLINE_CODES, codes);
             if (!pausedAt.isEmpty()) {
                 ed.putString(KEY_LAST_PAUSED_AT, pausedAt);
             }
@@ -96,6 +98,21 @@ final class GuardApi {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * The parents' offline-code verifiers a status answer carries, to store in
+     * place of the ones kept, or null to keep what this device has. The hub
+     * sends them on every refresh to the device's own owner (identity's
+     * rules read), so a code a parent sets, changes or deletes reaches the
+     * device the next time it is online. An answer without the field (an
+     * older hub, or one that could not tell this device is the owner's) never
+     * wipes the last good set; an empty list does, since no parent has a code.
+     */
+    static String offlineCodesToKeep(JSONObject status) {
+        if (status == null) return null;
+        JSONArray codes = status.optJSONArray("offline_codes");
+        return codes == null ? null : codes.toString();
     }
 
     /** Clear any active unlock window a parent gave, so a new lock takes effect immediately. */
@@ -567,7 +584,7 @@ final class GuardApi {
             codes = new JSONArray();
         }
         if (codes.length() == 0) {
-            return "No offline code is set up on this " + DeviceNoun.of(context) + " yet. It arrives the first time a parent approves an unlock from their phone while this one is online.";
+            return "No offline code is set up on this " + DeviceNoun.of(context) + " yet. It arrives the next time this " + DeviceNoun.of(context) + " is online, once a parent has set one in Jarvis.";
         }
         for (int i = 0; i < codes.length(); i++) {
             JSONObject c = codes.optJSONObject(i);

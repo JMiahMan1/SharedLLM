@@ -395,6 +395,8 @@
 [data-theme-scheme="light"] .text-amber-500\/40 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 40%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-500\/60 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 60%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-500\/80 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 80%, transparent) !important; }
+[data-theme-scheme="light"] .text-blue-200 { color: oklch(48.8% 0.243 264.376) !important; }
+[data-theme-scheme="light"] .text-blue-200\/90 { color: color-mix(in srgb, oklch(48.8% 0.243 264.376) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-blue-300 { color: oklch(48.8% 0.243 264.376) !important; }
 [data-theme-scheme="light"] .text-blue-400 { color: oklch(48.8% 0.243 264.376) !important; }
 [data-theme-scheme="light"] .text-cyan-100 { color: oklch(52% 0.105 223.128) !important; }
@@ -418,6 +420,7 @@
 [data-theme-scheme="light"] .text-fuchsia-200 { color: oklch(51.8% 0.253 323.949) !important; }
 [data-theme-scheme="light"] .text-fuchsia-300 { color: oklch(51.8% 0.253 323.949) !important; }
 [data-theme-scheme="light"] .text-fuchsia-400 { color: oklch(51.8% 0.253 323.949) !important; }
+[data-theme-scheme="light"] .text-green-200\/90 { color: color-mix(in srgb, oklch(52.7% 0.154 150.069) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-green-300 { color: oklch(52.7% 0.154 150.069) !important; }
 [data-theme-scheme="light"] .text-green-400 { color: oklch(52.7% 0.154 150.069) !important; }
 [data-theme-scheme="light"] .text-lime-300 { color: oklch(53.2% 0.157 131.589) !important; }
@@ -468,6 +471,7 @@
 [data-theme-scheme="light"] .text-slate-300\/90 { color: color-mix(in srgb, var(--site-text) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-slate-400 { color: var(--site-text-muted) !important; }
 [data-theme-scheme="light"] .text-slate-500 { color: var(--site-text-muted) !important; }
+[data-theme-scheme="light"] .text-slate-500\/70 { color: color-mix(in srgb, var(--site-text-muted) 70%, transparent) !important; }
 [data-theme-scheme="light"] .text-stone-500 { color: var(--site-text-muted) !important; }
 [data-theme-scheme="light"] .text-teal-300 { color: oklch(51.1% 0.096 186.391) !important; }
 [data-theme-scheme="light"] .text-teal-50 { color: oklch(51.1% 0.096 186.391) !important; }
