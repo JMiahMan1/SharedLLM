@@ -9,9 +9,9 @@ namespace JarvisGuard.Core;
 /// A parent's offline unlock code, checked on the PC with no connection: the
 /// same scheme as the phone (services/ui/android OfflineCode.java and
 /// GuardApi.offlineUnlock). The PC holds only PBKDF2-SHA256 verifiers (salt,
-/// iterations, hash) that arrived with a parent's approval of an unlock
-/// request from this PC (<see cref="UnlockRequest"/>); the code itself never
-/// leaves the parent. A good code lifts the lock for ten
+/// iterations, hash) that arrive with every status answer from the hub (and
+/// with a parent's approval of an unlock request, <see cref="UnlockRequest"/>);
+/// the code itself never leaves the parent. A good code lifts the lock for ten
 /// minutes.
 ///
 /// Wrong codes are rate limited and the limit grows: five wrong codes lock
@@ -89,10 +89,15 @@ public sealed class OfflineCodes
     /// <summary>Ok, or why not; <see cref="Parent"/> is whose code matched.</summary>
     public readonly record struct Result(bool Ok, string? Error, string? Parent = null);
 
-    /// <summary>Keep the verifiers a parent's approval returned (<c>offline_codes</c>).</summary>
-    public void Remember(JsonElement offlineCodes)
+    /// <summary>
+    /// Keep the verifiers the hub returned (<c>offline_codes</c>, from a status
+    /// answer or an approval) in place of the ones held, so a changed or
+    /// deleted code takes effect. Anything but a list keeps the held set.
+    /// True when the held set changed (worth saving to disk).
+    /// </summary>
+    public bool Remember(JsonElement offlineCodes)
     {
-        if (offlineCodes.ValueKind != JsonValueKind.Array) return;
+        if (offlineCodes.ValueKind != JsonValueKind.Array) return false;
         var codes = new List<Verifier>();
         foreach (var c in offlineCodes.EnumerateArray())
         {
@@ -105,7 +110,11 @@ public sealed class OfflineCodes
                 Hash = Str(c, "hash"),
             });
         }
+        var same = codes.Count == Codes.Count && codes.Zip(Codes).All(p =>
+            p.First.Parent == p.Second.Parent && p.First.Salt == p.Second.Salt
+            && p.First.Iterations == p.Second.Iterations && p.First.Hash == p.Second.Hash);
         Codes = codes;
+        return !same;
     }
 
     /// <summary>How long a lockout lasts after <paramref name="earlierLockouts"/> in a row.</summary>
@@ -120,7 +129,7 @@ public sealed class OfflineCodes
         if (LockedUntil is { } until && now < until)
             return new Result(false, $"Too many tries. Wait until {until.ToLocalTime():t}, then try again.");
         if (Codes.Count == 0)
-            return new Result(false, "No offline code is set up on this PC yet. It arrives the first time a parent approves an unlock from their phone while the PC is online.");
+            return new Result(false, "No offline code is set up on this PC yet. It arrives the next time the PC is online, once a parent has set one in Jarvis.");
         var typed = (code ?? "").Trim();
         var match = Codes.FirstOrDefault(c => Matches(typed, c.Salt, c.Iterations, c.Hash));
         if (match is not null)
