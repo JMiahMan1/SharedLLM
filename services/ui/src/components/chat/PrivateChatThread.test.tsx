@@ -5,16 +5,20 @@ import type { ReactNode } from 'react';
 import PrivateChatThread from './PrivateChatThread';
 import type { DeviceUnlockPluginInterface } from '../../plugins/deviceUnlock';
 import type { PrivateChatInfo } from './privateChatModel';
-import { deriveKey, makeVerifier, PBKDF2_ITERATIONS, randomBytes, sealMessage, toBase64 } from '../../lib/privateChatCrypto';
+import { deriveKey, makeVerifier, PBKDF2_ITERATIONS, randomBytes, sealMessage, sealRecord, toBase64 } from '../../lib/privateChatCrypto';
 
 const flagPrivateChatExpectsReply = vi.fn();
 const getPrivateLinkPreview = vi.fn();
 const sendPrivateMessage = vi.fn();
+const getPrivateChatMarks = vi.fn();
+const markPrivateReactionsSeen = vi.fn();
 vi.mock('../../services/api', () => ({
   api: {
     flagPrivateChatExpectsReply: (...a: unknown[]) => flagPrivateChatExpectsReply(...a),
     getPrivateLinkPreview: (...a: unknown[]) => getPrivateLinkPreview(...a),
     sendPrivateMessage: (...a: unknown[]) => sendPrivateMessage(...a),
+    getPrivateChatMarks: (...a: unknown[]) => getPrivateChatMarks(...a),
+    markPrivateReactionsSeen: (...a: unknown[]) => markPrivateReactionsSeen(...a),
   },
 }));
 
@@ -67,6 +71,8 @@ afterEach(() => {
   flagPrivateChatExpectsReply.mockReset();
   getPrivateLinkPreview.mockReset();
   sendPrivateMessage.mockReset();
+  getPrivateChatMarks.mockReset();
+  markPrivateReactionsSeen.mockReset();
   toastError.mockReset();
 });
 
@@ -133,5 +139,27 @@ describe('private chat thread', () => {
     fireEvent.click(screen.getByTestId('private-send'));
     await waitFor(() => expect(sendPrivateMessage).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('Sent without the link preview: the server refused a message that size.'));
+  }, 30_000);
+
+  it('a reaction that arrives before its message plays once the message is on screen', async () => {
+    const { info, raw, key } = await chat('pw pw pw pw');
+    window.__jarvisDeviceUnlockMock = plugin(raw);
+    const heart = 'f'.repeat(32);
+    getPrivateChatMarks.mockResolvedValue({ marks: [{ message_id: 3, edit: null, reactions: [
+      { id: heart, by: 'b', by_name: 'Robin', own: false, at: 1000, seen: false,
+        sealed: await sealRecord(key, { t: 'reaction', m: 3, e: '\u2764\ufe0f' }) }] }] });
+    markPrivateReactionsSeen.mockResolvedValue({ seen: [heart] });
+    // The marks answer while the thread is still empty (its messages are fetched after the unlock).
+    const view = render(wrap(thread(info, [])));
+    await waitFor(() => expect(getPrivateChatMarks).toHaveBeenCalled(), { timeout: 10_000 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByTestId('reaction-animation')).toBeNull();
+
+    // The messages land; the marks have not changed, and the waiting heart still plays.
+    const mine = { id: 3, actor_id: 'a', actor_type: 'users', actor_display_name: 'a', timestamp: 1003, message_type: 'comment',
+      message: await sealMessage(key, { t: 'text', text: 'Dinner at seven?' }) };
+    view.rerender(wrap(thread(info, [mine])));
+    const burst = await screen.findByTestId('reaction-animation', undefined, { timeout: 5000 });
+    expect(burst.getAttribute('data-kind')).toBe('love');
   }, 30_000);
 });
