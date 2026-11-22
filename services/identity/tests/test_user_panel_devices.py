@@ -380,7 +380,7 @@ class TestTelemetryIngest:
         assert notice["title"] == "Jarvis Watch is at 14%"
         assert notice["tag"] == "watch_battery:esphome:watch"
         assert notice["data"]["device_key"] == "esphome:watch"
-        assert notice["data"]["url"] == "/identity"
+        assert notice["data"]["url"] == "/devices#family"
 
         login(session, "sam").post(
             "/api/user-panel/devices/telemetry",

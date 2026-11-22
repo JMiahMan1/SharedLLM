@@ -96,7 +96,7 @@ function PendingTakes({ pending, onSaved }: { pending: VoicePending[]; onSaved: 
   });
   const busy = approve.isPending || discard.isPending;
   return (
-    <ul className="flex flex-col gap-3" data-testid="voice-pending">
+    <ul className="flex flex-col gap-3" data-testid="voice-pending" data-focus-id="voice-pending">
       {pending.map((p) => (
         <li key={p.id} className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 flex flex-col gap-3">
           <p className="text-sm text-amber-300 flex items-start gap-2">

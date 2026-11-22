@@ -85,6 +85,12 @@ export interface MediaItemDetail {
   duration: number | null
   description: string
   children: MediaItemChild[]
+  /** Audiobookshelf books: the listener's own saved position in seconds
+   *  (from their ABS account); null when not started or finished. */
+  resume_position?: number | null
+  /** Their progress through the book, 0..1 (1 when finished). */
+  progress?: number | null
+  is_finished?: boolean | null
   errors: MediaErrorInfo
 }
 
@@ -198,7 +204,7 @@ export interface RemotePlayer {
  *  time; everything else is already a Music Assistant URI. */
 export type PlayRequest =
   | { kind: 'uri'; uri: string; title: string }
-  | { kind: 'abs'; id: string; title: string; /** The book's length, when known (for progress). */ durationSec?: number | null }
+  | { kind: 'abs'; id: string; title: string; /** The book's length, when known (for progress). */ durationSec?: number | null; /** Where this listener left off (s), from their own ABS progress; undefined means look it up. */ resumeSec?: number | null }
 
 /** Where a queued item goes: right after the current one, or at the end. */
 export type QueueOption = 'next' | 'add'

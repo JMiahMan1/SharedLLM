@@ -53,6 +53,11 @@ def preview(message: str | None) -> str:
     return text or "New message"
 
 
+def _message_focus(message_id: Any) -> str | None:
+    """The focus of one message in a conversation (``msg-<id>``), or None."""
+    return f"msg-{message_id}" if message_id not in (None, "", 0) else None
+
+
 def notice_for(conv: dict[str, Any], me: str, user: str = "", *, private: bool = False) -> dict[str, Any] | None:
     """The notice for ``user`` (Nextcloud login ``me``) a conversation summary
     deserves, or None.
@@ -77,16 +82,17 @@ def notice_for(conv: dict[str, Any], me: str, user: str = "", *, private: bool =
     body = preview(conv.get("last_message"))
     unread = int(conv.get("unread_messages") or 0)
     token = conv.get("token")
-    url = f"/family?chat={token}"
+    # The conversation, scrolled to the message the notice is about.
+    target = notify.link("chat", chat=token, focus=_message_focus(conv.get("last_message_id")))
     return notify.notice(
         user, "chat", sender if one_to_one else room, body if one_to_one else f"{sender}: {body}",
-        url=url,
+        link=target,
         priority=4 if one_to_one or conv.get("unread_mention") else 3,
         # A newer message in the same conversation replaces this one.
         tag=f"chat:{token}",
         actions=[
             notify.callback_action("Reply", "chat_reply", {"token": token}, reply=True),
-            notify.view_action(url),
+            notify.view_action(target),
         ],
         data={
             "token": token,
@@ -106,13 +112,14 @@ def _private_notice(conv: dict[str, Any], me: str, user: str) -> dict[str, Any] 
         return None
     sender = conv.get("last_message_actor") or actor or "your partner"
     token = conv.get("token")
-    url = f"/family?chat={token}"
+    # A private chat opens behind its own lock (private=1): the link never skips it.
+    target = notify.link("chat", chat=token, private=1, focus=_message_focus(conv.get("last_message_id")))
     return notify.notice(
         user, "chat", "Private chat", f"New private message from {sender}",
-        url=url,
+        link=target,
         priority=4,
         tag=f"chat:{token}",
-        actions=[notify.view_action(url)],
+        actions=[notify.view_action(target)],
         data={"token": token, "message_id": conv.get("last_message_id"), "private": True,
               "unread": int(conv.get("unread_messages") or 0)},
         once=f"chat:{token}:{conv.get('last_message_id')}",

@@ -29,6 +29,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from services.common import notice_links
 from services.gateway.trainer import alpaca, raven_failures, runner, teacher
 from services.gateway.trainer import llm as llm_mod
 from services.gateway.trainer import teacher_scrub as scrub_mod
@@ -149,6 +150,7 @@ async def _send_failure_notices(status: dict[str, Any], notify: Notify | None) -
                 "body": failure["reason"],
                 "priority": 3,
                 "tag": f"admin:trainer:teacher:{part}",
+                "data": {"link": notice_links.link("lab", tab="training")},
             }
         )
         failure["notified"] = bool(delivered)
@@ -391,6 +393,7 @@ async def _snapshot(
                 f"{verified} verified teacher tasks. See Lab, Training, Teacher traces.",
                 "priority": 2,
                 "tag": "admin:trainer:teacher:snapshot-ready",
+                "data": {"link": notice_links.link("lab", tab="training")},
             }
         )
     return f"{result['train_rows']} train / {result['eval_rows']} eval rows"

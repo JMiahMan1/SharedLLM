@@ -275,6 +275,7 @@ function AppRow({ app, policy, name, run, busy, open, onToggle }: {
     <li
       className={`min-w-0 rounded-xl border p-2.5 ${flagged ? 'border-amber-400/30 bg-amber-400/[0.04]' : 'border-white/5 bg-white/[0.02]'}`}
       data-testid={`app-row-${app.package}`}
+      data-focus-id={`app-${app.package}`}
     >
       <button
         type="button"

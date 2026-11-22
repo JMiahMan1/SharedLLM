@@ -13,7 +13,8 @@ def test_service_is_down_only_after_two_failed_checks_in_a_row():
     assert [n["title"] for n in notices] == ["Service down: rag"]
     assert notices[0]["tag"] == "admin:service:rag"
     assert "UNREACHABLE" in notices[0]["body"]
-    assert notices[0]["actions"] == [{"label": "Open", "type": "view", "url": "/"}]
+    assert notices[0]["actions"] == [{"label": "Open", "type": "view", "url": "/admin/services"}]
+    assert notices[0]["data"]["link"]["guard"] == "admin"
     # Still down: no second notice.
     assert admin_alerts.service_transitions(state, {"rag": "UNREACHABLE"}) == []
 

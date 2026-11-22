@@ -25,6 +25,7 @@ from typing import Any
 
 import aiohttp
 
+from services.common import notice_links
 from services.common.http import get_client
 from services.config import INTERNAL_SECRET, TELEMETRY_SVC_URL
 
@@ -34,7 +35,6 @@ WINDOW_SECONDS = 300
 CHECK_SECONDS = 60
 COOLDOWN_SECONDS = 1800
 COOLDOWN_KEY = "admin:alerts:errors:{fingerprint}"
-DASHBOARD_URL = "/"
 ERROR_LEVELS = {"ERROR", "CRITICAL", "FATAL"}
 SPIKE_FINGERPRINT = "spike"
 
@@ -57,10 +57,12 @@ def fingerprint(entry: dict[str, Any]) -> str:
     return hashlib.sha1(f"{entry.get('service')}|{text}".encode()).hexdigest()[:16]
 
 
-def _open_dashboard() -> dict[str, Any]:
+def _open_dashboard(section: str = "services") -> dict[str, Any]:
+    """Opens the admin tab the notice is about (admins only, as the page itself)."""
+    target = notice_links.link("admin", section=section)
     return {
-        "data": {"url": DASHBOARD_URL},
-        "actions": [{"label": "Open", "type": "view", "url": DASHBOARD_URL}],
+        "data": {"link": target},
+        "actions": [{"label": "Open", "type": "view", "url": target["href"]}],
     }
 
 

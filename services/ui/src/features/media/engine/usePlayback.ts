@@ -8,9 +8,27 @@ import { outputKind, type OutputId, type RepeatMode } from '../types';
 import { adapterFor, type WebPlayerHandle } from './adapters/adapters';
 import { nextRepeat, type TransportCommand } from './adapters/PlayerAdapter';
 import { refreshMediaStatus } from './statusFeed';
+import { getMediaItem } from '../api/client';
 
 /** Volume drags send only the value they settle on. */
 export const VOLUME_DEBOUNCE_MS = 150;
+
+/**
+ * Where a book starts for this listener: the position the caller already knows
+ * (a chapter, or the book page's copy of their progress), else their saved
+ * Audiobookshelf position from the gateway. Unknown or finished means 0.
+ */
+export async function resumePosition(req: Extract<PlayRequest, { kind: 'abs' }>): Promise<number> {
+  let at = req.resumeSec;
+  if (at === undefined) {
+    try {
+      at = (await getMediaItem(`abs://${req.id}`)).resume_position ?? null;
+    } catch {
+      at = null;
+    }
+  }
+  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : 0;
+}
 
 /**
  * Everything a media screen does to the selected output, routed through the
@@ -49,6 +67,19 @@ export function usePlayback(web: WebPlayerHandle) {
     const id = targetRef.current;
     try {
       await adapter(id).play(id, req);
+      if (req.kind === 'abs' && outputKind(id) !== 'ha') {
+        // Music Assistant plays the book through its own (shared) Audiobookshelf
+        // account, so on its own it resumes where *that* account left off. Start
+        // where this listener did, from their own ABS progress. (Home Assistant
+        // speakers get an ABS session that already resumes for them.)
+        const at = await resumePosition(req);
+        // The progress reporter reads this until the device's next update, so
+        // it must not save the pre-seek position over the listener's own.
+        if (id) store().actions.patchPlayer(id, { positionSec: at, positionUpdatedAt: Date.now() });
+        await adapter(id).seek(id, at).catch(() => {
+          toast.error('Could not jump to where you left off');
+        });
+      }
       // A book's progress is written back to Audiobookshelf while it plays;
       // anything else started on the same output ends that.
       const { absSession, actions } = store();

@@ -330,7 +330,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
           const callLine = videoCallLine(c);
           const alertText = videoCallAlertText(c);
           return (
-            <li key={c.id || `${c.category}-${c.at}-${i}`} className={`rounded-xl border p-3.5 text-xs space-y-2 ${level.style}`} data-testid="concern">
+            <li key={c.id || `${c.category}-${c.at}-${i}`} className={`rounded-xl border p-3.5 text-xs space-y-2 ${level.style}`} data-testid="concern" data-focus-id={c.id ? `concern-${c.id}` : undefined}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="flex items-center gap-1.5 font-semibold">
                   <Icon size={14} className="shrink-0" /> {c.label} · {level.word}

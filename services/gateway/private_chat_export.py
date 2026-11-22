@@ -360,14 +360,14 @@ def _has_data(token: str) -> dict[str, int]:
 async def _announce(chat: dict[str, Any], user: str, people: dict[str, dict[str, Any]]) -> None:
     me = people.get(user) or {"username": user}
     others = [m for m in chat["members"] if m != user]
-    url = f"/family?chat={chat['token']}"
+    target = notify.link("chat", chat=chat["token"], private=1)
     try:
         await notify.send_many(
             others,
             lambda person: notify.notice(
                 person, "chat", "Private chat", f"{private_chat._display(me)} restored the private chat from a backup",
-                url=url, priority=3, tag=f"private-restore:{chat['token']}",
-                actions=[notify.view_action(url)], data={"token": chat["token"], "private": True, "restored": True},
+                link=target, priority=3, tag=f"private-restore:{chat['token']}",
+                actions=[notify.view_action(target)], data={"token": chat["token"], "private": True, "restored": True},
             ),
         )
     except Exception as exc:

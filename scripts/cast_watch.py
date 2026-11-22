@@ -104,7 +104,7 @@ def notice_for(event: dict[str, Any]) -> dict[str, Any]:
             f"Spotify Connect: {who}. Devices that looked up Spotify in the last few minutes: "
             f"{', '.join(devices) or 'none'}. Full record saved by the Cast watcher.")
     return {"title": "Cast watcher: a session appeared on the TV box", "body": body,
-            "tag": "admin:cast-watch", "priority": 3}
+            "tag": "admin:cast-watch", "priority": 3, "data": {"url": "/admin/network"}}
 
 
 def spotify_connect_info(host: str) -> dict[str, Any] | None:

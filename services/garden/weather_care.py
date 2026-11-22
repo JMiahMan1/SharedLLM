@@ -793,13 +793,23 @@ async def build_weather_summary(session: Session, seed_get, *, apply_skips: bool
 # --------------------------------------------------------------------------- urgent notices via Telemetry
 
 
-async def _send_urgent_notice(user: str, title: str, body: str, once_key: str) -> None:
+def _plants_link(plant_ids: list | None) -> dict:
+    """The plant an alert is about (its page), or the garden at the first of several."""
+    ids = [p for p in plant_ids or [] if p is not None]
+    if len(ids) == 1:
+        return notify.link("plant", id=ids[0])
+    return notify.link("garden", focus=f"plant-{ids[0]}" if ids else None)
+
+
+async def _send_urgent_notice(user: str, title: str, body: str, once_key: str,
+                              target: dict | None = None) -> None:
     """Send one urgent garden notice via Telemetry with a ``once`` key."""
     payload = notify.notice(
         user=user,
         category="garden",
         title=title,
         body=body,
+        link=target or notify.link("garden"),
         priority=4,
         tag=f"{ONCE_PREFIX}:{once_key}",
         once=once_key,
@@ -835,6 +845,7 @@ async def dispatch_weather_notices(
                 "Frost alert — cover or bring inside",
                 f"Forecast low {alert.get('min_temp_f')}°F: {names}. {alert.get('safe_names') and 'Safe: ' + ', '.join(alert['safe_names']) or ''}".strip(),
                 key,
+                _plants_link(alert.get("plant_ids")),
             )
 
     if weather_summary.get("wind_advisory"):
@@ -847,6 +858,7 @@ async def dispatch_weather_notices(
                 "High wind alert",
                 f"{wa.get('advice')} ({names})",
                 key,
+                _plants_link(wa.get("plant_ids")),
             )
 
     if weather_summary.get("heat_advisory"):

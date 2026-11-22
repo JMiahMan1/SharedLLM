@@ -14,6 +14,7 @@ from typing import Any
 
 import aiohttp
 
+from services.common import notice_links
 from services.telemetry import ntfy, push, store
 from services.telemetry.config import IDENTITY_SVC
 from services.telemetry.store import internal_headers, utcnow_iso
@@ -79,6 +80,11 @@ def _actions(raw: Any) -> list[dict[str, Any]]:
             url = str(action.get("url") or "").strip()
             if not url:
                 raise NoticeError("a view action needs a url")
+            if not url.startswith("https://"):
+                try:
+                    url = notice_links.link_from_href(url)["href"]
+                except notice_links.LinkError as e:
+                    raise NoticeError(f"a view action must open a page of the app or an https page: {e}") from e
             clean["url"] = url[:500]
         else:
             callback = str(action.get("callback") or "")
@@ -91,6 +97,30 @@ def _actions(raw: Any) -> list[dict[str, Any]]:
             clean["params"] = params
         out.append(clean)
     return out
+
+
+def _data(raw: Any) -> dict[str, Any]:
+    """The notice's ``data`` with its ``link`` checked (docs/PUSH.md, Deep links).
+
+    Every notice says where a tap goes: ``data.link`` (from
+    ``services.common.notice_links.link``), or an in-app ``data.url`` that is
+    read into one. A notice with neither, or with a target no page of the app
+    reads, is refused, so a tap never lands on a page that cannot show it.
+    ``data.url`` is always rewritten to the link's address for older apps.
+    """
+    data = dict(raw) if isinstance(raw, dict) else {}
+    try:
+        if data.get("link") is not None:
+            target = notice_links.check(data["link"])
+        elif data.get("url"):
+            target = notice_links.link_from_href(str(data["url"]))
+        else:
+            raise NoticeError("a notice needs data.link: where a tap on it goes")
+    except notice_links.LinkError as e:
+        raise NoticeError(f"data.link: {e}") from e
+    data["link"] = target
+    data["url"] = target["href"]
+    return data
 
 
 def parse(body: dict[str, Any]) -> dict[str, Any]:
@@ -116,7 +146,7 @@ def parse(body: dict[str, Any]) -> dict[str, Any]:
         "body": str(body.get("body") or "")[:180],
         "priority": priority,
         "tag": str(body.get("tag") or "").strip()[:200] or None,
-        "data": body.get("data") if isinstance(body.get("data"), dict) else {},
+        "data": _data(body.get("data")),
         "actions": _actions(body.get("actions")),
         "once": str(body.get("once") or "").strip()[:200],
         "audience": audience,

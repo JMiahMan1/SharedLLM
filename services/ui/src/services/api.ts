@@ -486,7 +486,7 @@ const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
  * Base URL and auth headers for a request that bypasses `apiClient` -- one that
  * needs its own timeout, or a streamed body `fetch` can read but axios cannot.
  */
-function directRequestConfig(): { baseURL: string; headers: Record<string, string> } {
+export function directRequestConfig(): { baseURL: string; headers: Record<string, string> } {
   let baseURL = getBaseUrl();
   if (Capacitor.isNativePlatform()) {
     const serverUrl = storageGetSync('jarvis_server_url');

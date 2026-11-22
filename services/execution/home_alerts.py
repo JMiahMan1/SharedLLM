@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 
 import aiohttp
 
+from services.common import notice_links
 from services.execution.leave_by import _clock
 
 log = logging.getLogger("execution.home_alerts")
@@ -99,6 +100,18 @@ def _duration(seconds: float) -> str:
     return f"{mins} min" if mins < 60 else f"{mins // 60} h {mins % 60:02d} min"
 
 
+#: Alerts a camera shows best (who is at the door, what moved).
+CAMERA_EVENTS = frozenset({"doorbell", "motion_away"})
+
+
+def alert_link(event: str, entity_id: str) -> dict:
+    """Where a home alert opens: the cameras for the door and motion, else the
+    device's own history (when the door was unlocked, the leak began)."""
+    if event in CAMERA_EVENTS:
+        return notice_links.link("cameras")
+    return notice_links.link("history", e=entity_id)
+
+
 class Watcher:
     """Turns successive state snapshots into notices. Holds the previous
     round and each appliance's run, so it lives as long as the loop."""
@@ -121,7 +134,8 @@ class Watcher:
                 name = (cur.get("attributes") or {}).get("friendly_name") or eid
                 note["title"] = note["title"].format(name=name)[:120]
                 out.append((entry, {"category": "home", "kind": entry["event"], "priority": 4,
-                                    "tag": f"home:{eid}", "data": {"url": "/", "entity_id": eid}, **note}))
+                                    "tag": f"home:{eid}", "data": {"link": alert_link(entry["event"], eid),
+                                                                   "entity_id": eid}, **note}))
         for entry in entries:
             cur = states.get(entry["entity_id"])
             if cur is not None:

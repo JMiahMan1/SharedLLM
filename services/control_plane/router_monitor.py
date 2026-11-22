@@ -34,6 +34,7 @@ import socket
 import time
 from typing import Any
 
+from services.common import notice_links
 from services.control_plane.admin_notice import notify_admins
 from services.control_plane.router_client import CertificateChanged, RouterClient, RouterError
 
@@ -315,7 +316,8 @@ def _label(mac: str, snap: dict[str, Any]) -> str:
 
 
 def _notice(title: str, body: str, tag: str, priority: int = 3) -> dict[str, Any]:
-    return {"title": title, "body": body, "tag": tag, "priority": priority, "data": {"url": NETWORK_URL}}
+    return {"title": title, "body": body, "tag": tag, "priority": priority,
+            "data": {"link": notice_links.link("admin", section="network")}}
 
 
 def _minutes(seconds: float) -> str:

@@ -236,7 +236,9 @@ def test_read_and_left_gets_one_gentle_reminder(chat):
     assert notice["category"] == "chat" and notice["kind"] == "private_reminder" and notice["priority"] == 3
     assert "nudge" not in json.dumps(notice)
     assert notice["tag"] == f"private-reminder:{TOKEN}" and notice["replace"] is True
-    assert notice["data"]["url"] == f"/family?chat={TOKEN}" and notice["data"]["reminder"] is True
+    # Behind the private chat's lock, at the message left unanswered.
+    assert notice["data"]["link"]["guard"] == "private_chat" and notice["data"]["link"]["focus"].startswith("msg-")
+    assert notice["data"]["reminder"] is True
     text = json.dumps(notice)
     assert "jarvis-envelope" not in text and "sealed" not in text
     # Idempotent: every later pass, and a restart (the state is on disk), sends nothing more.

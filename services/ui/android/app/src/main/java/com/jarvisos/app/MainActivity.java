@@ -177,9 +177,16 @@ registerPlugin(CommsPlugin.class);
     /** A notification tap or a chat's home-screen shortcut carries the page to open (a chat, the player). */
     private void maybeOpenPath(Intent intent) {
         if (intent == null) return;
-        String path = intent.getStringExtra(PushNotifier.EXTRA_OPEN_PATH);
-        if (path == null || path.isEmpty() || getBridge() == null) return;
+        // The extra, else the jarvis://open/... data URI the notification set: both
+        // carry the page and the item (DeepLink), whether the app was running,
+        // started cold by the tap, or opened once the phone was unlocked.
+        android.net.Uri data = intent.getData();
+        String dataUri = data == null ? null : data.toString();
+        String path = DeepLink.fromIntent(intent.getStringExtra(PushNotifier.EXTRA_OPEN_PATH), dataUri);
+        if (path.isEmpty() || getBridge() == null) return;
+        // Consumed, so a recreate (rotation, theme change) does not open it again.
         intent.removeExtra(PushNotifier.EXTRA_OPEN_PATH);
+        if (dataUri != null && dataUri.startsWith(DeepLink.OPEN_URI_PREFIX + "/")) intent.setData(null);
         com.getcapacitor.PluginHandle handle = getBridge().getPlugin("ChatNotify");
         if (handle != null && handle.getInstance() instanceof PushPlugin) {
             ((PushPlugin) handle.getInstance()).open(path);

@@ -36,7 +36,7 @@ def test_a_repeated_error_above_the_limit_is_reported_with_its_readable_message(
     _, notice = notices[0]
     assert notice["title"] == "Repeated error: gateway"
     assert notice["body"].startswith("GET /api/notes/0: 500 Internal Server Error (11 times")
-    assert notice["actions"] == [{"label": "Open", "type": "view", "url": "/"}]
+    assert notice["actions"] == [{"label": "Open", "type": "view", "url": "/admin/services"}]
 
 
 def test_exactly_at_the_limits_is_quiet():

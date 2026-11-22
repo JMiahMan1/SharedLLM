@@ -57,7 +57,7 @@ def test_a_slow_device_downloading_nonstop_is_named_once():
     notices, loads = run_minutes(state, 8, server_mb_per_min=80, busy_pct=75)
     assert [n["title"] for n in notices] == ["server is crowding the 2.4 GHz Wi-Fi"]
     assert "server (192.0.2.205)" in notices[0]["body"] and "Home-Devices" in notices[0]["body"]
-    assert notices[0]["data"]["url"] == "/admin/network"
+    assert notices[0]["data"]["link"]["href"] == "/admin/network"
     top = max(loads[0]["clients"], key=lambda c: c["share_pct"])
     assert top["mac"] == SERVER and 50 < top["share_pct"] < 60
     # Still hogging: no repeat.

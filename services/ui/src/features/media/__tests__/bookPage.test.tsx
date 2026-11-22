@@ -106,6 +106,47 @@ describe('BookPage (P5-T5)', () => {
     renderAt('/media/book/nope');
     expect(await screen.findByText('Couldn’t load this book', {}, { timeout: 5000 })).toBeInTheDocument();
   });
+
+  it('says why the server could not load it, not just that it failed', async () => {
+    // Live, 2026-11-21: a listener with an ABS password but no API key saw only
+    // "Couldn't load this book" while the gateway knew exactly what was wrong.
+    const why = 'Audiobookshelf needs this account’s ABS username and password (or an API key).';
+    server.use(http.get('/api/media/item', () => HttpResponse.json({ detail: why }, { status: 400 })));
+    renderAt('/media/book/book-1');
+    expect(await screen.findByText('Couldn’t load this book', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByText(why)).toBeInTheDocument();
+  });
+
+  it('resumes where this listener left off, from their own Audiobookshelf progress', async () => {
+    server.use(http.get('/api/media/item', () => HttpResponse.json({ ...bookFixture, resume_position: 1234.5, progress: 0.0212, is_finished: false })));
+    renderAt('/media/book/book-1');
+    expect(await screen.findByText(/2% listened/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(web.state.play).toHaveBeenCalledWith('library://audiobook/7'));
+    // Music Assistant would resume where its own shared ABS account was.
+    await waitFor(() => expect(web.state.seek).toHaveBeenCalledWith(1234.5));
+  });
+
+  it('starts a book this listener has not begun at the beginning', async () => {
+    server.use(http.get('/api/media/item', () => HttpResponse.json({ ...bookFixture, resume_position: null, progress: null, is_finished: null })));
+    renderAt('/media/book/book-1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Play' }));
+    await waitFor(() => expect(web.state.seek).toHaveBeenCalledWith(0));
+    expect(screen.queryByText(/listened/)).not.toBeInTheDocument();
+  });
+});
+
+describe('resumePosition', () => {
+  it('asks the gateway when the caller does not know where the listener was', async () => {
+    const { resumePosition } = await import('../engine/usePlayback');
+    server.use(http.get('/api/media/item', () => HttpResponse.json({ ...bookFixture, resume_position: 77 })));
+    expect(await resumePosition({ kind: 'abs', id: 'book-1', title: 'B' })).toBe(77);
+    expect(await resumePosition({ kind: 'abs', id: 'book-1', title: 'B', resumeSec: 12 })).toBe(12);
+    server.use(http.get('/api/media/item', () => HttpResponse.json({ ...bookFixture, resume_position: null, is_finished: true })));
+    expect(await resumePosition({ kind: 'abs', id: 'book-1', title: 'B' })).toBe(0);
+    server.use(http.get('/api/media/item', () => HttpResponse.json({ detail: 'down' }, { status: 502 })));
+    expect(await resumePosition({ kind: 'abs', id: 'book-1', title: 'B' })).toBe(0);
+  });
 });
 
 describe('Audiobookshelf progress write-back (journey 8)', () => {
@@ -136,6 +177,21 @@ describe('Audiobookshelf progress write-back (journey 8)', () => {
     act(() => actions.ingest({ type: 'player', output_id: 'ma:study', item: { uri: 'library://track/1', title: 'Song' } }));
     await act(async () => { await vi.advanceTimersByTimeAsync(PROGRESS_INTERVAL_MS); });
     expect(useMediaStore.getState().absSession).toBeNull();
+  });
+
+  it('saves at once when the app goes to the background or the page closes', async () => {
+    useMediaStore.getState().actions.setAbsSession({ itemId: 'book-1', title: 'B', outputId: '', durationSec: 1000, startedAt: 1 });
+    const p = { isPlaying: true, position: 321, duration: 1000, mediaUri: 'library://audiobook/7', mediaTitle: 'B' } as unknown as SharedPlayer;
+    render(<Reporter p={p} />);
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+      await waitFor(() => expect(progress).toEqual([{ item_id: 'book-1', current_time: 321, duration: 1000 }]));
+    } finally {
+      visibility.mockRestore();
+    }
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    await waitFor(() => expect(progress).toHaveLength(2));
   });
 
   it('reads nothing for an output it does not know', () => {

@@ -156,7 +156,7 @@ export default function TelemetryReportsPanel() {
   const btn = 'glass-button px-3 py-1.5 text-xs pointer-coarse:min-h-11';
 
   return (
-    <div className="glass-panel rounded-2xl p-4 space-y-4" data-testid="telemetry-reports-panel">
+    <div className="glass-panel rounded-2xl p-4 space-y-4" data-testid="telemetry-reports-panel" data-focus-id="section-reports">
       <div>
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
           Health &amp; power reports
@@ -283,6 +283,7 @@ export default function TelemetryReportsPanel() {
               key={report.id}
               className="rounded-xl border border-white/5 bg-white/[0.02] p-3"
               data-testid="report-item"
+              data-focus-id={`report-${report.id}`}
             >
               <div className="flex items-center justify-between text-[11px] text-slate-500">
                 <span className="uppercase tracking-wider">

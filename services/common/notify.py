@@ -11,14 +11,24 @@ from typing import Any
 
 import aiohttp
 
+from services.common.notice_links import LinkError, check, link, link_from_href
+
+__all__ = ["LinkError", "callback_action", "family", "family_or_none", "link", "link_from_href", "notice", "send", "send_many",
+           "view_action"]
+
 log = logging.getLogger("notify")
 
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
-def view_action(url: str, label: str = "Open") -> dict[str, Any]:
-    """A button that opens ``url`` in the app."""
-    return {"label": label, "type": "view", "url": url}
+def view_action(target: str | dict[str, Any], label: str = "Open") -> dict[str, Any]:
+    """A button that opens a page: a ``link()`` (or an in-app address, checked
+    the same way), or an ``https://`` page the phone opens in the browser."""
+    if isinstance(target, dict):
+        return {"label": label, "type": "view", "url": check(target)["href"]}
+    if str(target).startswith("https://"):
+        return {"label": label, "type": "view", "url": target}
+    return {"label": label, "type": "view", "url": link_from_href(target)["href"]}
 
 
 def callback_action(label: str, callback: str, params: dict | None = None, *, reply: bool = False) -> dict[str, Any]:
@@ -35,6 +45,7 @@ def notice(
     title: str,
     body: str = "",
     *,
+    link: dict[str, Any] | None = None,
     url: str | None = None,
     priority: int | None = None,
     tag: str | None = None,
@@ -45,7 +56,13 @@ def notice(
     audience: str = "all",
     replace: bool = False,
 ) -> dict[str, Any]:
-    """The JSON body telemetry's notify takes. ``url`` is where a tap goes.
+    """The JSON body telemetry's notify takes.
+
+    ``link`` is where a tap goes, built with ``link()`` (services/common/
+    notice_links.py): the page and the one item on it. Every notice has one; a
+    notice without a target, or with one no page reads, raises ``LinkError``
+    here, where the sender's test sees it. ``url`` (an in-app address) is the
+    older form, read into a link the same way.
 
     ``audience`` is ``"all"`` (everyone, the default) or ``"parents"``: telemetry
     refuses to deliver a parents-only notice (updates, system and ops notices)
@@ -54,13 +71,16 @@ def notice(
     ``replace`` (with a ``tag``) also drops earlier unread notices with that tag
     from the person's notification list, as the phone already replaces them.
     """
+    if link is None and url is None:
+        raise LinkError(f"a {kind or category} notice needs a link (where a tap goes)")
+    target = check(link) if link is not None else link_from_href(str(url))
     payload: dict[str, Any] = {
         "user": user,
         "category": category,
         "kind": kind or category,
         "title": title,
         "body": body,
-        "data": {**(data or {}), **({"url": url} if url else {})},
+        "data": {**(data or {}), "link": target, "url": target["href"]},
     }
     if priority is not None:
         payload["priority"] = max(1, min(5, int(priority)))

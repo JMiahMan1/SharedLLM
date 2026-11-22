@@ -179,7 +179,7 @@ export default function NewDevicesPanel() {
           </p>
           <ul className="space-y-2">
             {moved.map((d) => (
-              <li key={d.id} className="flex flex-wrap items-center justify-between gap-2" data-testid="moved-device">
+              <li key={d.id} className="flex flex-wrap items-center justify-between gap-2" data-testid="moved-device" data-focus-id={`discovery-${d.id}`}>
                 <span className="min-w-0 text-sm text-slate-200">
                   <span className="font-semibold">{d.moved?.entry_title}</span>
                   <span className="block text-xs text-slate-400">
@@ -211,7 +211,7 @@ export default function NewDevicesPanel() {
 
       <ul className="divide-y divide-white/5">
         {fresh.map((d) => (
-          <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" data-testid="new-device">
+          <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" data-testid="new-device" data-focus-id={`discovery-${d.id}`}>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-white">{d.name || d.host}</p>
               <p className="text-xs text-slate-400">

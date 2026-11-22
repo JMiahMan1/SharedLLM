@@ -48,6 +48,7 @@ import aiohttp
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from services.common import notice_links
 from services.common import weather as wx
 from services.execution import weather_metrics as metrics
 from services.execution.weather_bus import parse_actions
@@ -463,7 +464,8 @@ def evaluate(rule: dict, forecast: dict, now: float, state: dict | None = None) 
         "priority": 3 if rule["kind"] == "rain" else 4,
         "tag": f"weather:{rule['id']}",
         "once": f"weather:{rule['id']}:{int(first)}",
-        "data": {"url": "/", "rule": rule["id"], "starts_at": first},
+        # The dashboard, where the forecast is.
+        "data": {"link": notice_links.link("home"), "rule": rule["id"], "starts_at": first},
     }
     return note, {"last_hit_ts": last, "notified_for": first}
 
@@ -867,6 +869,6 @@ async def test_reminder(body: TestReminder):
     ok = await notify.send({
         "user": body.user.strip().lower(), "category": "weather", "kind": f"weather_{rule['kind']}",
         "title": f"Test: {rule['title']}"[:120], "body": body_text[:400], "priority": 3,
-        "tag": f"weather:test:{rule['id']}", "data": {"url": "/"},
+        "tag": f"weather:test:{rule['id']}", "data": {"link": notice_links.link("home")},
     })
     return {"sent": ok, "would_trigger": bool(hits), "body": body_text}
