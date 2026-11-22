@@ -54,6 +54,11 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("userbiblestate", "layout", "TEXT", "'flow'"),
     ("userbiblestate", "last_verse_fraction", "REAL", "0"),
     ("planenrollment", "group_id", "INTEGER", "NULL"),
+    ("importedbook", "format_version", "INTEGER", "0"),
+    ("importedbook", "import_report", "TEXT", "''"),
+    ("importedbook", "stored_file", "TEXT", "''"),
+    ("importedbookchapter", "section_id", "TEXT", "''"),
+    ("importedbookchapter", "blocks", "TEXT", "''"),
 )
 
 

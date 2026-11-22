@@ -5,11 +5,12 @@ anything else. A daily devotional or a study book is not a Bible, so it needs
 the opposite contract: keep every readable section, in order, and never make a
 partial book look like a missing translation.
 
-Both formats are reduced to the same two fields the reader needs: a label and
-the prose under it. EPUB uses the spine-aware extractor the rest of the
-monorepo uses; PDF uses one page per section, because a scanned page or a
-laid-out devotional page is a natural reading unit and inventing chapter
-boundaries from typography would be guesswork.
+Every format (PDF, EPUB, MOBI/AZW3, DOCX, plain text) goes through the
+normaliser in ``study_format``/``study_blocks``: running heads and page numbers
+are removed, split words rejoined, headings, lists, quotes, footnotes, tables
+and discussion questions recognised, and scripture references linked. Each
+section keeps its plain ``text`` (what Ask, devotionals and Notes read) and its
+structured ``blocks`` (what the reader draws and reads aloud).
 """
 from __future__ import annotations
 
@@ -19,10 +20,10 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
-from services.bible.models import ImportedBook, ImportedBookChapter, utcnow
-from services.common.epub_text import EpubTextError, read_chapters
+from services.bible import study_format, study_reformat
+from services.bible.models import ImportedBook, ImportedBookAlias, ImportedBookAsset, ImportedBookChapter, utcnow
 
-SUPPORTED_SUFFIXES = (".pdf", ".epub")
+SUPPORTED_SUFFIXES = study_format.SUPPORTED_SUFFIXES
 BOOK_KINDS = ("devotional", "study")
 MAX_BOOK_BYTES = 1024 * 1024 * 1024
 MAX_CHAPTERS = 2000
@@ -41,11 +42,6 @@ def split_title_author(filename: str) -> tuple[str, str]:
         return match.group("title").strip(), match.group("author").strip()
     return stem.strip(), ""
 
-
-_QUESTION_LABEL = re.compile(
-    r"\b(questions?|discussion|reflection|study questions|for reflection|ponder)\b",
-    re.IGNORECASE,
-)
 
 # EPUB imports keep the package's own part names ("..._epub_c5_r1"): they mean
 # nothing to a reader, so the first short line of the text is a better label.
@@ -83,93 +79,12 @@ def display_label(chapter: ImportedBookChapter) -> str:
     return f"Reading {chapter.ordinal}"
 
 
-def _merge_question_sections(sections: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Keep a chapter's question list with the chapter it belongs to.
-
-    Many EPUB devotionals use an ``h2`` for "Questions" under the day's ``h1``.
-    The spine extractor correctly treats both as sections, but a reading app
-    must not show the questions as the next day's devotional. Merging the
-    question heading back into the preceding section also lets the question
-    detector see the lines it is meant to collect.
-    """
-    merged: list[tuple[str, str]] = []
-    for label, text in sections:
-        if merged and _QUESTION_LABEL.search(label or ""):
-            previous_label, previous_text = merged[-1]
-            merged[-1] = (previous_label, previous_text.rstrip() + "\n\n" + text.strip())
-        else:
-            merged.append((label, text))
-    return merged
-
-
-def _epub_sections(path: Path) -> list[tuple[str, str]]:
+def read_document(path: Path, *, title: str = ""):
+    """The normalised book, or a :class:`BookImportError` that says why not."""
     try:
-        chapters = read_chapters(path.read_bytes())
-    except EpubTextError as exc:
-        raise BookImportError(f"{path.name} could not be read as an EPUB: {exc}") from exc
-    sections = [(chapter.label, chapter.text) for chapter in chapters if chapter.text.strip()]
-    return _merge_question_sections(sections)
-
-
-def _pdf_sections(path: Path) -> list[tuple[str, str]]:
-    try:
-        import pymupdf
-    except ImportError:
-        try:
-            import fitz as pymupdf  # type: ignore[no-redef]
-        except ImportError as exc:
-            raise BookImportError(
-                "PDF import needs PyMuPDF in the bible service. Install it with "
-                "`pip install pymupdf`."
-            ) from exc
-    try:
-        document = pymupdf.open(path)
-    except Exception as exc:
-        raise BookImportError(f"{path.name} could not be opened as a PDF: {exc}") from exc
-    sections: list[tuple[str, str]] = []
-    try:
-        for page in document:
-            text = (page.get_text("text") or "").strip()
-            if text:
-                sections.append((f"Page {page.number + 1}", text))
-    finally:
-        document.close()
-    if not sections:
-        raise BookImportError(
-            f"{path.name} has no extractable text. A scanned book needs OCR first."
-        )
-    return sections
-
-
-def extract_sections(path: Path) -> list[tuple[str, str]]:
-    suffix = path.suffix.lower()
-    if suffix == ".epub":
-        sections = _epub_sections(path)
-    elif suffix == ".pdf":
-        sections = _pdf_sections(path)
-    else:
-        raise BookImportError(
-            f"{path.name} is not a book format this service can read. "
-            f"Supported: {', '.join(SUPPORTED_SUFFIXES)}."
-        )
-    if not sections:
-        raise BookImportError(f"{path.name} yielded no readable text.")
-    return sections[:MAX_CHAPTERS]
-
-
-def _questions_at_end(text: str) -> list[str]:
-    """Questions printed at the end of a chapter, in order.
-
-    A study book usually ends a chapter with a short question list. Looking only
-    at the last third of the section avoids treating a rhetorical question in
-    the prose as homework, while keeping every line that is actually a question.
-    """
-    lines = [line.strip(" \t-*•") for line in text.splitlines() if line.strip()]
-    if not lines:
-        return []
-    tail = lines[max(0, int(len(lines) * 0.66)) :]
-    questions = [line for line in tail if line.endswith("?") and len(line) > 8]
-    return questions[:20]
+        return study_format.read(path, title=title)
+    except study_format.FormatError as exc:
+        raise BookImportError(str(exc)) from exc
 
 
 def import_book(
@@ -194,7 +109,9 @@ def import_book(
     # title. An upload that already has a (decoded) filename title must not
     # gain an author from an edition suffix such as "- 1st Edition".
     author = (author or ("" if supplied_title else fallback_author)).strip()
-    sections = extract_sections(path)
+    document = read_document(path, title=title)
+    if len(document.sections) > MAX_CHAPTERS:
+        document.sections = document.sections[:MAX_CHAPTERS]
 
     existing = None
     if source_path:
@@ -210,33 +127,22 @@ def import_book(
         ).first()
 
     if existing is not None:
-        for chapter in session.exec(
-            select(ImportedBookChapter).where(ImportedBookChapter.book_id == existing.id)
-        ).all():
-            session.delete(chapter)
         book = existing
+        previous = study_reformat.old_sections(session, book.id)
     else:
         book = ImportedBook(title=title, author=author, created_at=utcnow())
         session.add(book)
+        previous = []
     book.title = title
     book.author = author
     book.kind = resolved_kind
     book.source = source or "upload"
     book.source_path = source_path
-    book.chapter_count = len(sections)
+    book.stored_file = str(path)
     session.add(book)
     session.flush()
     assert book.id is not None
-    for ordinal, (label, text) in enumerate(sections, start=1):
-        session.add(
-            ImportedBookChapter(
-                book_id=book.id,
-                ordinal=ordinal,
-                label=label[:300],
-                text=text,
-                questions=json.dumps(_questions_at_end(text)),
-            )
-        )
+    study_reformat.store(session, book, document, previous=previous)
     session.commit()
     session.refresh(book)
     return book
@@ -253,12 +159,15 @@ def book_dict(book: ImportedBook) -> dict:
         "chapter_count": book.chapter_count,
         "cadence": getattr(book, "cadence", "day") or "day",
         "created_at": book.created_at.isoformat() if book.created_at else None,
+        "format_version": int(getattr(book, "format_version", 0) or 0),
+        "reformattable": bool(getattr(book, "stored_file", "") or book.source_path),
     }
 
 
 def chapter_dict(chapter: ImportedBookChapter) -> dict:
     return {
         "ordinal": chapter.ordinal,
+        "section_id": chapter.section_id or f"ordinal-{chapter.ordinal}",
         "label": display_label(chapter),
         "number": devotion_number(chapter.text or ""),
         "characters": len(chapter.text or ""),
@@ -293,6 +202,9 @@ def delete_book(session: Session, book_id: int) -> bool:
         return False
     for chapter in chapters_for(session, book_id):
         session.delete(chapter)
+    for model in (ImportedBookAlias, ImportedBookAsset):
+        for row in session.exec(select(model).where(model.book_id == book_id)).all():
+            session.delete(row)
     session.delete(book)
     session.commit()
     return True

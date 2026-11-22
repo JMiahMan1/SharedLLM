@@ -601,6 +601,13 @@ class ImportedBook(SQLModel, table=True):
     cadence: str = Field(default="day")  # day | week
     chapter_count: int = Field(default=0)
     created_at: datetime = Field(default_factory=utcnow)
+    #: Which normalisation produced the sections (``study_blocks.FORMAT_VERSION``);
+    #: 0 is the original one-text-blob-per-section import.
+    format_version: int = Field(default=0)
+    #: JSON: what the normaliser did (running heads removed, words rejoined...).
+    import_report: str = Field(default="")
+    #: The local copy the sections were read from, so the book can be reformatted.
+    stored_file: str = Field(default="")
 
 
 class ImportedBookChapter(SQLModel, table=True):
@@ -614,6 +621,40 @@ class ImportedBookChapter(SQLModel, table=True):
     text: str = Field(default="")
     #: JSON array of questions found at the end of the section.
     questions: str = Field(default="")
+    #: A stable id derived from the section title ("s-lesson-3-the-vine"), which
+    #: a link or a reading position can name across a reformat.
+    section_id: str = Field(default="", index=True)
+    #: JSON array of structured blocks (see ``study_blocks.Block``); empty for
+    #: books imported before the normaliser, which the reader shows as text.
+    blocks: str = Field(default="")
+
+
+class ImportedBookAlias(SQLModel, table=True):
+    """Where an old section went when a book was reformatted.
+
+    Reading positions and links made before a reformat name the old ordinal or
+    section id; this is how they still land on the same words.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    old_ordinal: int = Field(default=0)
+    old_section_id: str = Field(default="")
+    section_id: str = Field(default="")
+    ordinal: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ImportedBookAsset(SQLModel, table=True):
+    """An image from an imported book, served to the reader by key."""
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    key: str = Field(index=True)
+    mime: str = Field(default="application/octet-stream")
+    data: bytes = Field(default=b"", sa_type=LargeBinary)
 
 
 class StudySession(SQLModel, table=True):
