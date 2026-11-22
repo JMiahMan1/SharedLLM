@@ -36,7 +36,7 @@ async function openDeepLink(page: Page, book: string, chapter: number, verse: nu
 test.describe('Bible deep link from reminder', () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test('opens the whole chapter scrolled to the verse on all form factors', async ({ page }, info) => {
+  test('opens the whole chapter scrolled to the verse on all form factors', async ({ page }) => {
     const home = await mockHome(page, 'admin');
     const unknown = await mockBible(page);
     const errors: string[] = [];
@@ -47,7 +47,7 @@ test.describe('Bible deep link from reminder', () => {
 
     // Use the book name format that the mock expects (matches reader-layout test)
     const verse = 3;
-    const url = await openDeepLink(page, 'Genesis', 1, verse);
+    await openDeepLink(page, 'Genesis', 1, verse);
 
     // Verify we're on the Bible reader page with the full chapter
     await expect(page.getByTestId('bible-reader-header')).toBeVisible();
@@ -80,14 +80,14 @@ test.describe('Bible deep link from reminder', () => {
     expect(unknown).toEqual([]);
   });
 
-  test('deep link with long book name fits and scrolls to verse', async ({ page }, info) => {
+  test('deep link with long book name fits and scrolls to verse', async ({ page }) => {
     const home = await mockHome(page, 'admin');
     const unknown = await mockBible(page);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
 
     const verse = 2;
-    const url = await openDeepLink(page, '1 Thessalonians', 4, verse);
+    await openDeepLink(page, '1 Thessalonians', 4, verse);
 
     // Verify we're on the Bible reader page with the full chapter
     await expect(page.getByTestId('bible-reader-header')).toBeVisible();
@@ -117,14 +117,14 @@ test.describe('Bible deep link from reminder', () => {
     expect(unknown).toEqual([]);
   });
 
-  test('deep link with verse at end of chapter scrolls correctly', async ({ page }, info) => {
+  test('deep link with verse at end of chapter scrolls correctly', async ({ page }) => {
     const home = await mockHome(page, 'admin');
     const unknown = await mockBible(page);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
 
     const verse = 40; // Last verse in the made-up chapter
-    const url = await openDeepLink(page, 'Genesis', 1, verse);
+    await openDeepLink(page, 'Genesis', 1, verse);
 
     // Verify we're on the Bible reader page with the full chapter
     await expect(page.getByTestId('bible-reader-header')).toBeVisible();
