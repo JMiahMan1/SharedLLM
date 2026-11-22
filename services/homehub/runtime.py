@@ -238,7 +238,11 @@ class Runtime:
             await asyncio.sleep(driver.poll_interval or 30.0)
             timeout = float(getattr(driver, "poll_timeout", None) or POLL_TIMEOUT_S)
             try:
-                await asyncio.wait_for(driver.async_poll(), timeout)
+                # asyncio.timeout, not wait_for: on Python 3.11 wait_for returns the poll's result when a cancel
+                # lands just as the poll finishes, swallowing the cancel, so this loop never stopped (the
+                # SOA CI shard holding test_runtime_poll hung until its 30 minute timeout).
+                async with asyncio.timeout(timeout):
+                    await driver.async_poll()
             except asyncio.CancelledError:
                 raise
             except (AuthRequired, SetupError) as exc:

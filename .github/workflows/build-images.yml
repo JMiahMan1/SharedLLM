@@ -21,6 +21,15 @@ on:
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
 
+# A new push to a pull request cancels that PR's previous build, which only
+# checks that the images still build. Pushes to a branch publish images and
+# pick their services from the diff against the previous push, so a cancelled
+# or superseded push run would never publish its services: each push run gets
+# a group of its own and always finishes.
+concurrency:
+  group: build-images-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   packages: write
@@ -218,8 +227,8 @@ jobs:
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=base
+          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,mode=max,scope=base' || '' }}
           platforms: linux/amd64
 
   build-services:
@@ -264,7 +273,10 @@ jobs:
         run: |
           TAG="${{ steps.slug.outputs.slug }}"
           # Try to pull the branch-specific base image. If it fails, fall back to latest.
-          if docker pull "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base:$TAG" 2>/dev/null; then
+          # Ask the registry whether the tag exists: pulling it to find out
+          # downloaded the multi-GB base onto a runner whose buildx builder
+          # then fetched it again on its own.
+          if docker manifest inspect "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base:$TAG" >/dev/null 2>&1; then
             echo "Using branch-specific base image tag: $TAG"
             echo "tag=$TAG" >> $GITHUB_OUTPUT
           else
@@ -300,8 +312,14 @@ jobs:
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # One cache scope per image. They all shared the default scope, so
+          # each matrix job overwrote the others' cache index and builds found
+          # nothing to reuse (workspace_runtime: 0 cached steps, 7 minutes, 3.5
+          # of them exporting a cache the next job overwrote). Only pushes
+          # write it: a pull request's cache is visible to that PR alone, and
+          # every PR reads the scopes its base branch writes.
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && format('type=gha,mode=max,scope={0}', matrix.service) || '' }}
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base:${{ steps.base-tag.outputs.tag }}
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
@@ -368,8 +386,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=ui
+          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,mode=max,scope=ui' || '' }}
           build-args: |
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
@@ -424,6 +442,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=caddy
+          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,mode=max,scope=caddy' || '' }}
           platforms: linux/amd64

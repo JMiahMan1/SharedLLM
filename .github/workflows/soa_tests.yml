@@ -74,10 +74,12 @@ jobs:
     - name: Import every test module
       run: pytest --collect-only -q
 
-  # Six shards, all at once. No .test_durations file is committed, so
-  # pytest-split gives each shard the same NUMBER of tests, not the same run
-  # time: a shard that draws the slow tests finishes last. To balance by time,
-  # run `pytest --store-durations` locally and commit .test_durations.
+  # Six shards, all at once, balanced by run time from the committed
+  # .test_durations (without it pytest-split split by test COUNT, and the shard
+  # that drew test_ma_ws_client and the bible API ran 426 s of tests against
+  # another's 64 s). Tests missing from the file count as the average, so a
+  # stale file only unbalances, never skips. Refresh it from a green run's
+  # junit artifacts: scripts/ci_test_durations.py <run-id>.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30

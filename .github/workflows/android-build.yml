@@ -21,9 +21,16 @@ on:
       - 'services/ui/package.json'
       - 'services/ui/package-lock.json'
       - 'services/ui/capacitor.config.*'
+      # A change to this workflow builds on its pull request, never on a push
+      # (a push publishes, and a new APK makes every phone offer an update).
+      - '.github/workflows/android-build.yml'
   workflow_dispatch:
 
 jobs:
+  # Two runners at once: the debug APK with its unit tests and lint on one, the
+  # release APK on the other. They were five Gradle runs in a row on a single
+  # runner. The release APK is published only after both have passed, as
+  # before: a failed test or lint still stops it going out.
   build-apk:
     runs-on: ubuntu-latest
     defaults:
@@ -45,6 +52,31 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: '21'
+
+    # Gradle's own cache action, not setup-java's: setup-java keeps one entry
+    # for every job with the same build files, so whichever job saved first won
+    # and the other (the release job lacks the lint and Robolectric jars) went
+    # back to Maven Central each run, where it got HTTP 429. setup-gradle keys
+    # its entries per job, restores them in both, and writes them from every
+    # branch (by default it writes only on main, which never builds here).
+    - name: Set up Gradle (dependency cache)
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        cache-read-only: false
+
+    # A fetch that still goes out retries a transient answer (429, 408, 5xx,
+    # a reset or a timeout) instead of failing the build: Gradle does that 3
+    # times 1 s apart by default; 6 times from 2 s (2+4+8+16+32 s) rides out
+    # Maven Central's rate limit. A missing or broken artifact still fails.
+    - name: Retry transient repository errors
+      run: |
+        mkdir -p ~/.gradle
+        cat >> ~/.gradle/gradle.properties <<'EOF'
+        systemProp.org.gradle.internal.repository.max.tentatives=6
+        systemProp.org.gradle.internal.repository.initial.backoff=2000
+        systemProp.org.gradle.internal.http.connectionTimeout=60000
+        systemProp.org.gradle.internal.http.socketTimeout=60000
+        EOF
 
     - name: Install dependencies
       run: |
@@ -140,6 +172,98 @@ jobs:
           services/ui/dist/version.json
         retention-days: 30
 
+  release-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ui
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: 'npm'
+        cache-dependency-path: services/ui/package-lock.json
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
+    # Gradle's own cache action, not setup-java's: setup-java keeps one entry
+    # for every job with the same build files, so whichever job saved first won
+    # and the other (the release job lacks the lint and Robolectric jars) went
+    # back to Maven Central each run, where it got HTTP 429. setup-gradle keys
+    # its entries per job, restores them in both, and writes them from every
+    # branch (by default it writes only on main, which never builds here).
+    - name: Set up Gradle (dependency cache)
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        cache-read-only: false
+
+    # A fetch that still goes out retries a transient answer (429, 408, 5xx,
+    # a reset or a timeout) instead of failing the build: Gradle does that 3
+    # times 1 s apart by default; 6 times from 2 s (2+4+8+16+32 s) rides out
+    # Maven Central's rate limit. A missing or broken artifact still fails.
+    - name: Retry transient repository errors
+      run: |
+        mkdir -p ~/.gradle
+        cat >> ~/.gradle/gradle.properties <<'EOF'
+        systemProp.org.gradle.internal.repository.max.tentatives=6
+        systemProp.org.gradle.internal.repository.initial.backoff=2000
+        systemProp.org.gradle.internal.http.connectionTimeout=60000
+        systemProp.org.gradle.internal.http.socketTimeout=60000
+        EOF
+
+    - name: Install dependencies
+      run: |
+        npm ci
+
+    - name: Install Capacitor Android platform
+      run: npx cap add android || true
+
+    - name: Build web assets
+      # The app's default server (src/lib/serverDefaults.ts) comes from the
+      # repo variable; without it a new install would have no server.
+      env:
+        VITE_DEFAULT_SERVER_URL: ${{ vars.VITE_DEFAULT_SERVER_URL }}
+      run: |
+        if [ -z "$VITE_DEFAULT_SERVER_URL" ]; then
+          echo "::error::Set the repository variable VITE_DEFAULT_SERVER_URL (the gateway URL new installs use)"
+          exit 1
+        fi
+        npm run build
+
+    - name: Sync Capacitor
+      run: npx cap sync android
+
+    - name: Verify the OTA bundle is packaged
+      run: test -f android/app/src/main/assets/public/bundle.zip
+
+    - name: Accept Android licenses and install platform tools
+      run: |
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || yes | sdkmanager --licenses || true
+        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" || true
+
+    # Keystore is NOT in git; restore it from Actions secrets before any Gradle sign step
+    - name: Restore release keystore from secrets
+      env:
+        RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        if [ -z "$RELEASE_KEYSTORE" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
+          echo "::error::Missing RELEASE_KEYSTORE / KEYSTORE_PASSWORD / KEY_PASSWORD secrets"
+          exit 1
+        fi
+        printf '%s' "$RELEASE_KEYSTORE" | base64 -d > android/app/release.keystore
+        printf 'storePassword=%s\nkeyPassword=%s\n' "$KEYSTORE_PASSWORD" "$KEY_PASSWORD" > android/app/keystore.properties
+        chmod 600 android/app/release.keystore android/app/keystore.properties
+
     - name: Build Release APK (self-signed)
       env:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -163,17 +287,27 @@ jobs:
         path: services/ui/android/app/build/outputs/apk/release/app-release.apk
         retention-days: 30
 
+  publish-apk:
+    needs: [build-apk, release-apk]
+    # Skipped on pull requests: a fork's APK must never be published.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download the release APK
+      uses: actions/download-artifact@v4
+      with:
+        name: jarvis-os-release-apk
+        path: services/ui/android/app/build/outputs/apk/release
+
     # Publish the freshly built APK so the in-app "new version available"
     # notice can clear. The gateway reads the version code out of the
     # uploaded file, so this never has to state one -- which is what let a
     # build.gradle-derived number drift ahead of the real artifact and leave
     # users told to update forever.
-    #
-    # Skipped on pull requests: a fork's APK must never be published.
     - name: Publish APK to the update server
-      if: github.event_name != 'pull_request'
-      # The job defaults run steps from services/ui, but the paths below are
-      # root-relative to match the upload-artifact steps above.
+      # The paths below are root-relative, like the artifact it downloaded.
       working-directory: .
       env:
         PUBLISH_URL: ${{ secrets.APK_PUBLISH_URL }}
