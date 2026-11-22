@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -72,6 +73,11 @@ REQUEST_TIMEOUT = 20.0
 #: the first read after that fails and the library reconnects on the next one. One retry
 #: after this pause tells a closed connection from an accessory that has gone away.
 POLL_RETRY_PAUSE_S = 1.0
+#: A drop shorter than this is a closed idle connection, not an accessory that has gone away: keep its
+#: entities as they are and poll often enough to catch the reconnect. Past it, say so and mark them unavailable.
+OUTAGE_GRACE_S = 90.0
+#: While an accessory is not answering, poll this often so a reconnect is noticed in seconds, not a minute.
+OUTAGE_POLL_INTERVAL_S = 5.0
 
 # Characteristic and service types, as the short form of the HAP UUID (the
 # first segment without leading zeros). Vendor types keep their first segment.
@@ -183,6 +189,9 @@ class HomeKitDriver(Driver):
         self.service_of: dict[tuple[int, int], tuple[int, int]] = {}  # (aid, char iid) -> (aid, service iid)
         self.values: dict[tuple[int, int], Any] = {}
         self.available = False
+        self._healthy_poll_interval = self.poll_interval
+        self._outage_since: float | None = None
+        self._outage_marked = False
         self._last_on_mode: dict[tuple[int, int], int] = {}
         #: (aid, service iid) -> (ISO time, event type) of a stateless switch's last press.
         self.event_stamps: dict[tuple[int, int], tuple[str, str]] = {}
@@ -295,19 +304,44 @@ class HomeKitDriver(Driver):
         return (self.specs.get(parsed[1:]) if parsed is not None else None) or {}
 
     # -- events and polling --------------------------------------------------
+    def _begin_outage(self, why: Any) -> float:
+        """Start (or continue) an outage quietly; returns how long it has lasted, in seconds."""
+        now = time.monotonic()
+        if self._outage_since is None:
+            self._outage_since = now
+            self.log.warning("%s: accessory stopped answering; reconnecting quietly: %s", self.entry.title, why)
+            # Poll often while it is away, so a reconnect is noticed in seconds instead of a minute.
+            self.poll_interval = min(self._healthy_poll_interval, OUTAGE_POLL_INTERVAL_S)
+        else:
+            self.log.debug("%s: accessory still not answering: %s", self.entry.title, why)
+        return now - self._outage_since
+
+    def _end_outage(self) -> None:
+        if self._outage_since is None:
+            return
+        lasted = time.monotonic() - self._outage_since
+        self.log.info("%s: accessory answers again after %.0f s", self.entry.title, lasted)
+        self._outage_since = None
+        self._outage_marked = False
+        self.poll_interval = self._healthy_poll_interval
+
     def _on_event(self, event: dict[tuple[int, int], dict[str, Any]]) -> None:
         hks.note_events(self, event)
         for key, item in (event or {}).items():
             if isinstance(item, dict) and "value" in item:
                 self.values[tuple(key)] = item["value"]  # type: ignore[index]
         if event:
+            self._end_outage()
             self.available = True
         self.publish_all()
 
     def _on_availability(self, available: bool) -> None:
-        if not available:
-            self.available = False
-            self.mark_unavailable()
+        # The library reconnects on its own. A short gap is not an outage: keep the entities' last state
+        # and let the next (quick) poll confirm the accessory is back.
+        if available:
+            self._end_outage()
+        else:
+            self._begin_outage("the library reported it unavailable")
 
     async def async_poll(self) -> None:
         readable = [k for k, c in self.chars.items() if "pr" in c["perms"]]
@@ -316,11 +350,15 @@ class HomeKitDriver(Driver):
         try:
             result = await self._read(readable)
         except Exception as exc:
-            if self.available:
-                self.log.warning("%s: accessory stopped answering: %s", self.entry.title, exc)
-            self.available = False
-            self.mark_unavailable()
+            lasted = self._begin_outage(exc)
+            if self.available and lasted >= OUTAGE_GRACE_S:
+                self.log.warning("%s: accessory has not answered for %.0f s; its entities are unavailable",
+                                 self.entry.title, lasted)
+                self.available = False
+                self.mark_unavailable()
+                self._outage_marked = True
             return
+        self._end_outage()
         for key, item in result.items():
             if isinstance(item, dict) and "value" in item:
                 self.values[tuple(key)] = item["value"]  # type: ignore[index]

@@ -710,6 +710,35 @@ class Hub:
         return (f"device archived: {name} was archived on {str(since)[:10]} after going without contact; "
                 "restore it under Devices > Setup > Archived devices")
 
+    def device_action_source(self, domain: str, service: str) -> tuple[str, bool] | None:
+        """The device that would offer ``domain.service`` and whether it is connected now.
+
+        An ESPHome node's user-defined actions come and go with its connection, so a missing one can mean the
+        node is offline or that its firmware does not define that action. The name is what a person calls the
+        device; ``False`` means no loaded driver is connected (or the entry is not loaded at all).
+        """
+        if not self.is_device_action(domain, service):
+            return None
+        for entry in self.config_entries.values():
+            if entry.archived_at:
+                continue
+            if domain == "esphome" and entry.domain == "esphome":
+                prefix = str(entry.data.get("device_name") or "").replace("-", "_")
+                if not prefix or not (service == prefix or service.startswith(prefix + "_")):
+                    continue
+            elif domain == "notify" and entry.domain == "mobile_app":
+                name = unicodedata.normalize("NFKD", str(entry.data.get("device_name") or entry.title or ""))
+                slug = re.sub(r"[^a-z0-9]+", "_", name.encode("ascii", "ignore").decode().lower()).strip("_")
+                prefix = f"mobile_app_{slug}" if slug else ""
+                if not prefix or not (service == prefix or service.startswith(prefix + "_")):
+                    continue
+            else:
+                continue
+            driver = self.drivers.get(entry.entry_id)
+            connected = bool(getattr(driver, "connected", driver is not None))
+            return str(entry.title or entry.data.get("device_name") or entry.domain), connected
+        return None
+
     def archived_action_reason(self, domain: str, service: str) -> str | None:
         """Why a device's own action (``esphome.<node>_<action>``, ``notify.mobile_app_<phone>``) is not offered
         because its device is archived; None when no archived device would offer it."""
