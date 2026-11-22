@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import BibleProgress from './BibleProgress';
@@ -56,18 +56,6 @@ vi.mock('../../services/api', () => ({
 
 import { api } from '../../services/api';
 
-vi.mock('../../hooks/useHaptics', () => ({ useHaptics: () => ({ trigger: vi.fn() }) }));
-vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: { username: 'sam' } }) }));
-
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import BibleProgress from './BibleProgress';
-import type { BibleMark } from '../../types/api';
-
 function renderProgress(marks: BibleMark[] = []) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
@@ -79,48 +67,53 @@ function renderProgress(marks: BibleMark[] = []) {
 describe('BibleProgress', () => {
   it('shows streak, days read, and chapters stats', async () => {
     renderProgress([]);
-    expect(await screen.findByText('Read streak')).toBeInTheDocument();
-    expect(screen.getByText('5')).toBeInTheDocument();
-    expect(screen.getByText('Best streak')).toBeInTheDocument();
-    expect(screen.getByText('12')).toBeInTheDocument();
-    expect(screen.getByText('Days read')).toBeInTheDocument();
-    expect(screen.getByText('45')).toBeInTheDocument();
-    expect(screen.getByText('Chapters')).toBeInTheDocument();
-    expect(screen.getByText('25')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Read streak')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('5')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Best streak')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('12')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Days read')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('45')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Chapters')).toBeInTheDocument());
+    // Chapters appears twice (Chapters and Chapters total), get the first one
+    const chaptersElements = await screen.findAllByText('25');
+    expect(chaptersElements.length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows this week chapters and plan progress', async () => {
     renderProgress([]);
-    expect(screen.getByText(/10/)).toBeInTheDocument();
-    expect(screen.getByText('Plan progress')).toBeInTheDocument();
-    expect(screen.getByText(/30/)).toBeInTheDocument();
-    expect(screen.getByText('Books finished')).toBeInTheDocument();
-    expect(screen.getByText('3')).toBeInTheDocument();
+    // This week value is 10, but 10 appears in multiple places. Target the "This week" card.
+    const thisWeekLabel = await screen.findByText('This week');
+    const thisWeekCard = thisWeekLabel.closest('.glass-panel');
+    await waitFor(() => expect(thisWeekCard).toHaveTextContent('10'));
+    await waitFor(() => expect(screen.getByText('Plan progress')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/30/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Books finished')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument());
   });
 
   it('shows earned badges and progress toward next', async () => {
     renderProgress([]);
-    expect(await screen.findByText('In the Word')).toBeInTheDocument();
-    expect(screen.getByText('Steady Reader')).toBeInTheDocument();
-    expect(screen.getByText('A Full Week')).toBeInTheDocument();
-    expect(await screen.findByText('One Hundred Chapters')).toBeInTheDocument();
-    expect(screen.getByText('25/100')).toBeInTheDocument();
-    expect(screen.getByText('Two Weeks Faithful')).toBeInTheDocument();
-    expect(screen.getByText('5/14')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('In the Word')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Steady Reader')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('A Full Week')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('One Hundred Chapters')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('25/100')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Two Weeks Faithful')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('5/14')).toBeInTheDocument());
   });
 
   it('shows family encouragement note', async () => {
     renderProgress([]);
-    expect(await screen.findByText(/Encourage each other/)).toBeInTheDocument();
-    expect(screen.getByText(/Dad read today/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/Encourage each other/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Dad read today/)).toBeInTheDocument());
   });
 
   it('shows family activity feed', async () => {
     renderProgress([]);
-    expect(await screen.findByText('parent')).toBeInTheDocument();
-    expect(screen.getByText(/8 day streak/)).toBeInTheDocument();
-    expect(screen.getByText('child')).toBeInTheDocument();
-    expect(screen.getByText(/3 day streak/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('parent')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/8 day streak/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('child')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/3 day streak/)).toBeInTheDocument());
   });
 
   it('shows empty state when no family activity shared', async () => {
@@ -130,6 +123,6 @@ describe('BibleProgress', () => {
       note: 'Nobody has shared their reading yet. Share it in Settings → Share my activity.',
     });
     renderProgress([]);
-    expect(await screen.findByText(/Nobody has shared their reading yet/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/Nobody has shared their reading yet/)).toBeInTheDocument());
   });
 });
