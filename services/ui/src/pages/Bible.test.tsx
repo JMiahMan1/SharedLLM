@@ -1360,4 +1360,22 @@ describe('resuming where the reader left off', () => {
     );
     expect(mocked.putBibleState).not.toHaveBeenCalledWith(expect.objectContaining({ book: 'John', chapter: 3, verse: 3 }));
   });
+
+  it('opens a reminder link on the whole chapter at the verse it names', async () => {
+    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'John', chapter: 1, verse: 1 } }));
+    renderPage('/bible?tab=read&ref=Ps%2023%3A3&verse=3#v3');
+
+    await waitFor(() => expect(screen.getByTestId('bible-chapter-heading')).toHaveTextContent('Psalms 23'));
+    expect(mocked.getBiblePassage).toHaveBeenCalledWith('Ps 23:3', 'kjv');
+    // The whole chapter is on the page, not only the linked verse.
+    await waitFor(() => expect(screen.getByTestId('bible-verse-23-3')).toBeInTheDocument());
+    for (const v of [1, 2]) expect(screen.getByTestId(`bible-verse-23-${v}`)).toBeInTheDocument();
+  });
+
+  it('a verse parameter without a passage keeps the saved place', async () => {
+    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'Ps', chapter: 23, verse: 1 } }));
+    renderPage('/bible?verse=3');
+
+    await waitFor(() => expect(screen.getByTestId('bible-chapter-heading')).toHaveTextContent('Psalms 23'));
+  });
 });

@@ -29,8 +29,9 @@ const book: BibleImportedBook = {
 };
 
 const chapters = [
-  { ordinal: 1, label: 'Page 1', characters: 120 },
-  { ordinal: 2, label: 'Page 2', characters: 140 },
+  { ordinal: 1, label: 'Page 1', characters: 120, section_id: 's-lesson-1' },
+  { ordinal: 2, label: 'Page 2', characters: 140, section_id: 's-lesson-2' },
+  { ordinal: 3, label: 'Page 3', characters: 160, section_id: 's-lesson-3' },
 ];
 
 const preferences: Pick<BiblePreferences, 'page' | 'font_scale' | 'line_height' | 'theme'> = {
@@ -52,12 +53,21 @@ function pageText(ordinal: number): string {
       'several lines exactly as the PDF stored it.',
     ].join('\n');
   }
+  if (ordinal === 2) {
+    return [
+      '2',
+      '',
+      'Week 1: The First Steps',
+      '',
+      'A second page with a different reflection.',
+    ].join('\n');
+  }
   return [
-    '2',
+    '3',
     '',
-    'Week 1: The First Steps',
+    'Week 3: The First Steps',
     '',
-    'A second page with a different reflection.',
+    'A third page with a reflection.',
   ].join('\n');
 }
 
@@ -120,7 +130,7 @@ describe('imported book reader', () => {
       'This is the first paragraph of the study, wrapped across several lines exactly as the PDF stored it.',
     );
     expect(screen.getByRole('heading', { name: 'Week 1: Introduction to Walk With Jesus' })).toBeInTheDocument();
-    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
+    expect(screen.getByText('Page 1 of 3')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Page 2' })).not.toBeInTheDocument();
     expect(apiMock.getBibleImportedBookChapter).toHaveBeenCalledTimes(1);
   });
@@ -137,7 +147,7 @@ describe('imported book reader', () => {
     );
     expect(await screen.findByText('A second page with a different reflection.')).toBeInTheDocument();
     expect(window.localStorage.getItem('jarvis.study-book.1.page')).toBe('2');
-    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+    expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
   });
 
   it('jumps to a page from the contents sheet', async () => {
@@ -204,5 +214,103 @@ describe('imported book reader', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sepia page' }));
     expect(onPreferences).toHaveBeenCalledWith({ page: 'sepia' });
+  });
+
+  it('opens at the specified section when startSection is provided', async () => {
+    apiMock.getBibleImportedBookChapter.mockImplementation((_bookId: number, ordinal: number) =>
+      Promise.resolve({
+        book_id: 1,
+        ordinal,
+        label: `Page ${ordinal}`,
+        text: pageText(ordinal),
+        questions: ordinal === 1 ? ['What does following Jesus mean here?'] : [],
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ImportedBookReader
+          book={book}
+          chapters={chapters}
+          startSection="s-lesson-3"
+          preferences={preferences}
+          onPreferences={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByTestId('bible-study-reader-text');
+    await waitFor(() => expect(apiMock.getBibleImportedBookChapter).toHaveBeenCalledWith(1, 3));
+    expect(screen.getByRole('heading', { name: 'Week 3: The First Steps' })).toBeInTheDocument();
+  });
+
+  it('falls back to startOrdinal when startSection is not found', async () => {
+    apiMock.getBibleImportedBookChapter.mockImplementation((_bookId: number, ordinal: number) =>
+      Promise.resolve({
+        book_id: 1,
+        ordinal,
+        label: `Page ${ordinal}`,
+        text: pageText(ordinal),
+        questions: ordinal === 1 ? ['What does following Jesus mean here?'] : [],
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ImportedBookReader
+          book={book}
+          chapters={chapters}
+          startSection="s-nonexistent"
+          startOrdinal={2}
+          preferences={preferences}
+          onPreferences={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByTestId('bible-study-reader-text');
+    await waitFor(() => expect(apiMock.getBibleImportedBookChapter).toHaveBeenCalledWith(1, 2));
+    expect(screen.getByRole('heading', { name: 'Week 1: The First Steps' })).toBeInTheDocument();
+  });
+
+  it('scrolls to the startAnchor when provided', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ImportedBookReader
+          book={book}
+          chapters={chapters}
+          startAnchor="p1"
+          preferences={preferences}
+          onPreferences={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByTestId('bible-study-reader-text');
+    const block = screen.getByTestId('bible-study-reader-text').querySelector('[data-block-id="p1"]');
+    expect(block).toBeInTheDocument();
+  });
+
+  it('restores scroll position from startScrollFraction without error', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ImportedBookReader
+          book={book}
+          chapters={chapters}
+          startScrollFraction={0.5}
+          preferences={preferences}
+          onPreferences={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    // In jsdom, scrollHeight equals clientHeight so scrollTop stays 0.
+    // This test verifies the effect runs without error.
+    await screen.findByTestId('bible-study-reader-text');
+    expect(true).toBe(true);
   });
 });

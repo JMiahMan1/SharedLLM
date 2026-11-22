@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Award, BookMarked, Flame, Trash2, Users } from 'lucide-react';
+import { Award, BookMarked, Flame, Trash2, Users, BookOpen, Target } from 'lucide-react';
 import { api } from '../../services/api';
 import type { BibleMark } from '../../types/api';
 
@@ -30,6 +30,14 @@ export default function BibleProgress({ marks, onDeleteMark, onOpenRef }: BibleP
 
   const feedFailure = feedError instanceof Error ? feedError.message : null;
 
+  // This week's reading (from the 7-day window)
+  const thisWeekChapters = stats?.window
+    ? Object.entries(stats.window).slice(-7).reduce((sum, [, count]) => sum + count, 0)
+    : 0;
+  const planProgress = stats?.metrics?.plan_days_total
+    ? Math.min(100, Math.round((stats.metrics.plan_days_total / (stats.metrics.plan_days_total + (stats.metrics.plan_completed ? 0 : 30))) * 100))
+    : 0;
+
   return (
     <div className="space-y-4" data-testid="bible-progress">
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -45,6 +53,24 @@ export default function BibleProgress({ marks, onDeleteMark, onOpenRef }: BibleP
               <span className="text-[10px] uppercase tracking-wider truncate">{label}</span>
             </div>
             <p className="mt-1.5 text-2xl font-bold text-white tabular-nums">{value}</p>
+          </div>
+        ))}
+      </section>
+
+      {/* This week's progress */}
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {[
+          { label: 'This week', value: thisWeekChapters, icon: BookOpen, unit: 'chapters' },
+          { label: 'Plan progress', value: planProgress, icon: Target, unit: '%' },
+          { label: 'Chapters total', value: stats?.metrics?.chapters_total ?? 0, icon: BookMarked, unit: '' },
+          { label: 'Books finished', value: stats?.metrics?.books_read ?? 0, icon: Award, unit: '' },
+        ].map(({ label, value, icon: Icon, unit }) => (
+          <div key={label} className="glass-panel rounded-2xl p-3">
+            <div className="flex items-center gap-1.5 text-slate-500">
+              <Icon size={12} />
+              <span className="text-[10px] uppercase tracking-wider truncate">{label}</span>
+            </div>
+            <p className="mt-1.5 text-2xl font-bold text-white tabular-nums">{value}{unit ? ` <span className="text-xs font-normal text-slate-400">{unit}</span>` : ''}</p>
           </div>
         ))}
       </section>
@@ -161,24 +187,34 @@ export default function BibleProgress({ marks, onDeleteMark, onOpenRef }: BibleP
         ) : feedFailure ? (
           <p className="text-xs text-amber-300/90">{feedFailure}</p>
         ) : !feed?.entries.length ? (
-          <p className="text-xs text-slate-500">
-            {feed?.note ?? 'Nobody has shared their reading yet. Share it in Settings → Share my activity.'}
-          </p>
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500">
+              {feed?.note ?? 'Nobody has shared their reading yet. Share it in Settings → Share my activity.'}
+            </p>
+            <p className="text-[11px] text-slate-500/70 italic">
+              When you share, family members can encourage each other with a simple &ldquo;Dad read today&rdquo; notice.
+            </p>
+          </div>
         ) : (
-          <ul className="space-y-2">
-            {feed.entries.map((entry) => (
-              <li key={entry.username} className="flex items-center gap-3 rounded-xl bg-black/20 border border-white/5 px-3 py-2.5">
-                <span className="flex-1 min-w-0">
-                  <span className="block text-sm text-slate-200 truncate">{entry.username}</span>
-                  <span className="block text-[11px] text-slate-500">
-                    {entry.read_streak_current} day streak · {entry.days_read} days read
-                    {entry.achievements.length ? ` · ${entry.achievements.length} badges` : ''}
+          <>
+            <ul className="space-y-2 mb-3">
+              {feed.entries.map((entry) => (
+                <li key={entry.username} className="flex items-center gap-3 rounded-xl bg-black/20 border border-white/5 px-3 py-2.5">
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm text-slate-200 truncate">{entry.username}</span>
+                    <span className="block text-[11px] text-slate-500">
+                      {entry.read_streak_current} day streak · {entry.days_read} days read
+                      {entry.achievements.length ? ` · ${entry.achievements.length} badges` : ''}
+                    </span>
                   </span>
-                </span>
-                <span className="shrink-0 text-xs text-amber-300 tabular-nums">{entry.points} pts</span>
-              </li>
-            ))}
-          </ul>
+                  <span className="shrink-0 text-xs text-amber-300 tabular-nums">{entry.points} pts</span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-[11px] text-slate-500/70 italic">
+              Encourage each other: a family member sees &ldquo;Dad read today&rdquo; when you finish a chapter (opt-in in Settings).
+            </p>
+          </>
         )}
       </section>
     </div>

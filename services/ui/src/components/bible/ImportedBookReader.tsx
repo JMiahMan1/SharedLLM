@@ -44,6 +44,8 @@ interface ImportedBookReaderProps {
   chapters: BibleImportedBookDetail['chapters'];
   /** Where to open first, e.g. today's entry in an imported devotional. */
   startOrdinal?: number;
+  /** Scroll fraction (0-1) to restore position within the section. */
+  startScrollFraction?: number;
   /** A section to open at by its stable id (a link, a reminder); old ids are followed through aliases. */
   startSection?: string;
   /** A block to scroll to once the section is open, e.g. "p-1a2b3c4d". */
@@ -180,6 +182,7 @@ export default function ImportedBookReader({
   book,
   chapters,
   startOrdinal,
+  startScrollFraction = 0,
   startSection,
   startAnchor,
   aliases,
@@ -206,6 +209,7 @@ export default function ImportedBookReader({
   const [question, setQuestion] = useState('');
   const [askedQuestion, setAskedQuestion] = useState<string | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
+  const scrollRestored = useRef(false);
 
   const index = Math.max(0, chapters.findIndex((entry) => entry.ordinal === ordinal));
   const total = chapters.length;
@@ -300,6 +304,23 @@ export default function ImportedBookReader({
     // The beacon records once per page; the label is best effort at that moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book.id, ordinal]);
+
+// Restore scroll position from deep link (startScrollFraction)
+  useEffect(() => {
+    if (scrollRestored.current || !chapter.data) return;
+    if (startScrollFraction > 0 && textRef.current) {
+      // Wait for layout to settle
+      requestAnimationFrame(() => {
+        const container = textRef.current;
+        if (container) {
+          const maxScroll = container.scrollHeight - container.clientHeight;
+          const targetScroll = Math.min(maxScroll, maxScroll * startScrollFraction);
+          container.scrollTop = targetScroll;
+        }
+      });
+      scrollRestored.current = true;
+    }
+  }, [chapter.data, startScrollFraction]);
 
   // A link to a paragraph: once its section has loaded, bring it into view.
   useEffect(() => {
