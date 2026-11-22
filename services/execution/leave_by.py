@@ -16,6 +16,8 @@ from datetime import datetime
 
 import aiohttp
 
+from services.common import notice_links
+
 log = logging.getLogger("execution.leave_by")
 
 INTERVAL_S = 300
@@ -122,7 +124,8 @@ def reminder(event: dict, eta: dict, leave_ts: float, now: float, tz) -> dict:
         "tag": f"leave_by:{event.get('id') or title}",
         "title": f"{head} for {title}"[:120],
         "body": f"{drive} drive to {event['location']}; starts at {_clock(start.timestamp(), tz)}.",
-        "data": {"location": event["location"], "start_time": event["start_time"], "duration_s": eta.get("duration_s")},
+        "data": {"link": notice_links.link("calendar", date=start.date().isoformat()),
+                 "location": event["location"], "start_time": event["start_time"], "duration_s": eta.get("duration_s")},
         "once": f"leave_by:{event.get('id') or ''}:{event['start_time']}:{title}"[:200],
     }
 

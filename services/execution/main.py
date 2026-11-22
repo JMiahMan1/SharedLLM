@@ -4009,10 +4009,10 @@ async def _notify_audiobook_done(req: AudiobookRegenerateRequest, output_mp3: st
     user = req.user_context.user if req.user_context else ""
     if not user or user == "default":
         return
-    url = f"/workspaces?select={req.workspace_id}" if req.workspace_id else "/workspaces"
+    url = notify.link("workspaces", select=req.workspace_id or None)
     body = f"{output_mp3} is ready." if all_ok else f"{output_mp3} is ready, with some chapters missing."
     await notify.send(notify.notice(
-        user, "jobs", "Your audiobook is ready", body, url=url, tag=f"audiobook:{req.workspace_id or ''}",
+        user, "jobs", "Your audiobook is ready", body, link=url, tag=f"audiobook:{req.workspace_id or ''}",
         actions=[notify.view_action(url)]))
 
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { HeartPulse } from 'lucide-react';
 import HealthTabs, { type HealthTab } from '../components/health/HealthTabs';
@@ -34,7 +35,12 @@ import type { HealthMetricSwitch } from '../types/api';
  * feed keep one implementation.
  */
 const Health = () => {
-  const [tab, setTab] = useState<HealthTab>('today');
+  // A notice opens a tab directly (`/fitness?tab=fitness` for a step goal).
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<HealthTab>(() => {
+    const asked = searchParams.get('tab');
+    return (['today', 'fitness', 'sleep', 'nutrition', 'health'] as const).find((t) => t === asked) ?? 'today';
+  });
   // The per-metric switches (Health → Health → Cards). A card the person
   // turned off is not rendered at all; while the profile loads, none are.
   const profileQuery = useQuery({ queryKey: ['health-profile'], queryFn: () => api.getHealthProfile() });

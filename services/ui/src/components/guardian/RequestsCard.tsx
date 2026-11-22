@@ -119,7 +119,7 @@ export default function RequestsCard({ username, name, kinds = ALL_KINDS, histor
               <span className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">{relativeTime(row.at)}</span>
             </li>
           ) : (
-            <li key={`${row.kind}-${row.id}`} className="rounded-xl border border-sky-400/30 bg-gradient-to-br from-sky-500/10 to-sky-400/[0.03] p-3.5 space-y-3" data-testid={`request-${row.kind}-${row.id}`}>
+            <li key={`${row.kind}-${row.id}`} className="rounded-xl border border-sky-400/30 bg-gradient-to-br from-sky-500/10 to-sky-400/[0.03] p-3.5 space-y-3" data-testid={`request-${row.kind}-${row.id}`} data-focus-id={`${row.kind === 'time' ? 'time' : 'guard'}-${row.id}`}>
               <div className="flex items-start justify-between gap-2">
                 <p className="text-xs font-medium leading-relaxed text-slate-100">
                   {row.kind === 'time' ? `Asks for ${(row.request as ScreenTimeRequest).minutes} more minutes` : requestLine(row.request as GuardRequest)}

@@ -825,7 +825,7 @@ async def _send_open_valve_alert(user: str, title: str, body: str, once_key: str
         once=once_key,
         kind="garden_valve_failsafe",
         audience="parents",
-        url="/garden",
+        link=notify.link("garden"),
     )
     try:
         await notify.send(payload)
@@ -920,7 +920,7 @@ async def alert_valve_may_be_open(
         tag=f"garden_valve:{once}",
         once=once,
         kind="garden_valve_failsafe",
-        url="/garden",
+        link=notify.link("garden"),
     )
     if not await notify.send(payload):
         log.error("[hardware] the admin open-valve alert was not delivered either: %s", body)
@@ -1082,7 +1082,7 @@ async def _notify_auto_watered(
         priority=2,
         kind="garden_auto_water",
         audience="parents",
-        url="/garden",
+        link=notify.link("garden"),
     )
     for member in await (get_family or _family)():
         try:

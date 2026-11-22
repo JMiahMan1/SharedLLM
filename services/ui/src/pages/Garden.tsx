@@ -641,6 +641,7 @@ function PlantCard({ plant, locationName }: { plant: GardenPlant; locationName: 
   return (
     <div
       onClick={() => navigate(`/garden/plants/${plant.id}`)}
+      data-focus-id={`plant-${plant.id}`}
       className="group bg-white/5 border border-white/10 rounded-xl p-4 hover:border-purple-500/50 hover:bg-white/10 transition-colors cursor-pointer pointer-coarse:min-h-[140px]"
     >
       <div className="flex items-start justify-between mb-3">

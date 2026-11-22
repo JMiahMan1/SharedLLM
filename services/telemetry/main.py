@@ -24,7 +24,7 @@ import aiohttp
 import redis.asyncio as redis
 from fastapi import HTTPException
 
-from services.common import jarvis_use
+from services.common import jarvis_use, notice_links
 from services.common.secrets import secret_matches
 from services.telemetry import app_catalog, guardian, notices, push, spotify_sync, store
 from services.telemetry.alpaca import is_busy
@@ -221,7 +221,10 @@ def _report_notice(job: dict[str, Any], kind: str, title: str, body: str, data: 
         "title": title,
         "body": body,
         "tag": f"report:{job.get('type')}:{job.get('period')}",
-        "data": {"url": "/settings", "report_type": job.get("type"), "period": job.get("period"), **data},
+        # Settings, at the report itself (a failed one: the reports panel).
+        "data": {"link": notice_links.link("settings", focus=f"report-{data['report_id']}" if data.get("report_id")
+                                           else "section-reports"),
+                 "report_type": job.get("type"), "period": job.get("period"), **data},
     }
 
 

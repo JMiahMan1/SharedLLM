@@ -113,15 +113,18 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
   "body": "On my way",
   "priority": 4,
   "tag": "chat:abc123",
-  "data": {"url": "/family?chat=abc123"},
+  "data": {"link": {"route": "chat", "path": "/family", "query": {"chat": "abc123"}, "hash": "",
+                    "focus": "msg-42", "guard": "member", "href": "/family?chat=abc123&focus=msg-42"}},
   "actions": [
     {"label": "Reply", "type": "reply", "callback": "chat_reply", "params": {"token": "abc123"}},
-    {"label": "Open", "type": "view", "url": "/family?chat=abc123"}
+    {"label": "Open", "type": "view", "url": "/family?chat=abc123&focus=msg-42"}
   ],
   "once": "chat:abc123:42"
 }
 ```
 
+- `data.link` (required) is where a tap goes: see "Deep links" below.
+  Telemetry sets `data.url` to the link's `href` for older apps.
 - `category` (required for new senders, defaults to `general`) is what
   preferences switch on and off. Categories:
   `chat`, `call`, `family_presence`, `family_safety`, `leave_by`, `calendar`,
@@ -183,6 +186,110 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
   the same call the bell makes. The page hands the worker the signed-in
   person's key (`lib/push.ts` `sharePushKey`) and takes it back on sign-out;
   with no key, or a key the gateway refuses, the worker says so in a notice.
+
+## Deep links
+
+Tapping a notice opens the page it is about, at the item: the exact message
+in its chat, the mission in Raven Ops, the child's unlock request, the plant,
+the found device. Every notice says where, as `data.link`, built by one helper:
+`services/common/notice_links.py` (`link()`, also `notify.link`).
+
+```python
+notify.notice(parent, "family_safety", title, body,
+              link=notify.link("member", username=child, focus=f"unlock-{request_id}"))
+# {"route": "member", "path": "/family/member/sam", "query": {}, "hash": "",
+#  "focus": "unlock-21", "guard": "parent", "href": "/family/member/sam?focus=unlock-21"}
+```
+
+- `route` names one of `ROUTES`, the pages a notice may open. `path` is that
+  page (placeholders filled), `query` only parameters the page reads, `hash`
+  only an anchor it knows (Devices' tabs, a Bible verse such as `v16`).
+- `focus` is `<kind>-<id>`, one item on the page. The page marks the item with
+  `data-focus-id="<focus>"`; the web app (`components/layout/DeepLinkFocus.tsx`)
+  scrolls it into view and highlights it, then drops `focus` from the address.
+  When the page never draws it within 12 s (answered, deleted, not this
+  person's to see) the page stays as it is and a toast says "That unlock
+  request is no longer here". The wait pauses while a gate is on screen
+  (`data-deep-link-wait`, the private chat's lock). A route lists the focus
+  kinds it can show; a kind only belongs there once the page marks it.
+- `guard` is who the page is for (`member`, `parent`, `admin`, `beloved`,
+  `private_chat`, `hub`). It is informational: every client sends the address
+  through the app's router, so the page's own guard decides, exactly as for any
+  other navigation. An admin page opened by someone else shows "You can't open
+  this here" (`AccessRefused`), never a silent jump to the dashboard; a Beloved
+  or private chat stays behind its own checks and lock.
+- `href` is all of it as one in-app address; it is also `data.url`.
+- `link()` refuses (`LinkError`) an unknown route, a parameter or anchor the
+  page does not read, a value outside a page's fixed set (an admin tab), or a
+  focus kind the page cannot show. `notify.notice()` refuses a notice without a
+  link, and telemetry answers 422 to one without `data.link` or a `data.url` no
+  page reads (`link_from_href` reads an older address into a link). A view
+  button is an in-app page checked the same way, or an `https://` page.
+- The clients read the routes from `services/ui/src/lib/noticeRoutes.json`,
+  written by `python -m services.common.notice_links`; a test fails when it is
+  stale. `tests/unit/test_notice_links.py` also fails when a `notice(...)` call
+  in any service has no target, or names a route, parameter or focus kind that
+  does not exist.
+- Clients: the bell and toasts (`lib/noticeLink.ts` `noticeHref`), browser
+  notifications (`push-sw.js` opens `data.link.href`), Android
+  (`DeepLink.java`: the link becomes the notification's open intent, extra and
+  `jarvis://open/...` data URI; `MainActivity` reads either on a running app, a
+  cold start or after unlocking, and the web app's `open` listener navigates).
+  The Windows Guard tray shows only its own local notices: a click on the time
+  warning opens the time panel.
+
+Targets, by sender (the item in brackets is the focus):
+
+| Notice | Opens |
+|---|---|
+| chat, Jarvis answer | the conversation `[msg-<id>]` |
+| private chat message, reminder | the private chat behind its lock (`private=1`) `[msg-<id>]` |
+| private chat nudge, reaction, restore, password | the private chat (`private=1`) |
+| Beloved note, heart, prayer | the chat with `beloved=1` (couples only) |
+| family call | Family > Calls (answering opens the call) |
+| on my way, SOS, crash, check-in, battery, arrivals, long stop | the map at the person |
+| watch battery | Devices > Family |
+| unlock request | the child's page `[unlock-<id>]`; answered: the child's page |
+| app, permission or site request | the child's page `[guard-<id>]` |
+| more screen time | the child's page `[time-<id>]` |
+| chore done? | the child's Time section `[chore-<check id>]` |
+| concern, video call concern | the child's page `[concern-<id>]` |
+| flagged app | the child's Apps & web `[app-<package>]` |
+| blocked site, many flagged apps | the child's Apps & web |
+| weekly recap | the guardian hub on that week `[recap-<week>]` |
+| tamper | the child's Devices section |
+| talk request, hard days | the child's page |
+| a child's own answers (time, requests, pause, bonus, chores), cheers | Health > Today |
+| step goal, weekly steps | Health > Fitness |
+| fasting | Health > Today; prayer and shared fasts open the passage in the Bible |
+| calendar reminder, leave by | the calendar on the event's day (day view) |
+| timer, alarm | what it was made from (a note), else Family > Announce |
+| place reminder | its note, else Notes |
+| home alert | Cameras (doorbell, motion), else the device's history |
+| HA automation (companion app) | its Jarvis page when it named one, else the entity's history, else the dashboard |
+| weather | the dashboard |
+| garden digest, weather alert | the plant (one), else the garden `[plant-<id>]` |
+| valve, auto-water | the garden |
+| song, picture | Family > Create |
+| audiobook | its workspace |
+| mission finished | its workspace, else Lab > Missions |
+| mission needs approval | Raven Ops with the mission open (`?mission=`) |
+| report ready / failed | Settings `[report-<id>]` / `[section-reports]` |
+| app update (MDM, reminder) | Settings `[section-device]` |
+| shared folder | Devices > Family |
+| voice recordings to approve | Accounts & integrations `[voice-pending]` |
+| new or moved device (admins) | Devices > Add `[discovery-<id>]` |
+| device followed, keeps restarting (admins) | Devices > Setup `[entry-<entry id>]` |
+| service, desktop, errors, HA down, deploy (admins) | Admin > System services |
+| TLS, network, Cast watcher (admins) | Admin > Network |
+| disk (admins) | Admin > Storage |
+| expired credential (admins) | Admin > LLM & Settings |
+| trainer (admins) | Lab > Training |
+| find my phone | the app (the alarm has Stop) |
+| Bible reminders | the reader at the passage (`ref`, `verse`, `#v<n>`) |
+
+`scripts/notify_admins.sh` takes the page as its fifth argument (default
+`/admin/services`).
 
 ## Phones: the stream
 

@@ -50,7 +50,7 @@ export default function RecapCard({ username, name }: { username: string; name: 
   };
 
   return (
-    <section className="glass-panel min-w-0 rounded-2xl border border-white/10 p-4 sm:p-5 space-y-4" data-testid="guardian-recap">
+    <section className="glass-panel min-w-0 rounded-2xl border border-white/10 p-4 sm:p-5 space-y-4" data-testid="guardian-recap" data-focus-id={week ? `recap-${week}` : undefined}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] pb-3">
         <h2 className="flex items-center gap-2.5 text-sm font-semibold tracking-tight text-white">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-sky-400/20 bg-sky-400/10">

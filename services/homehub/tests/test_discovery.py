@@ -193,7 +193,8 @@ async def test_new_devices_are_told_once_and_known_ones_never(env):
     assert notice["user"] == "@admins" and notice["category"] == "admin"
     assert notice["once"] == "homehub:new-device:esphome:aabbccddee01"
     assert "Porch Bulb" in notice["title"]
-    assert notice["data"]["url"] == "/devices"
+    # Devices > Add, at the device found (docs/PUSH.md, "Deep links").
+    assert notice["data"]["url"] == "/devices?focus=discovery-esphome%3Aaabbccddee01#add"
     assert await mgr.flush_notices() == 0
     assert len(sent) == 1
 

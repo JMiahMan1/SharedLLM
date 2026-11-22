@@ -1916,6 +1916,7 @@ async def test_notice(
             category="garden",
             title="Garden Morning Digest (test)",
             body=f"{user}, everything is caught up — no plants need care today.",
+            link=notify.link("garden"),
             kind="garden_digest_test",
         )
     else:
@@ -1925,6 +1926,7 @@ async def test_notice(
             title=digest["title"],
             body=digest["body"],
             actions=digest["actions"],
+            link=digest["link"],
             kind="garden_digest_test",
         )
     # Dispatch via Telemetry (actually await it — no fire-and-forget).

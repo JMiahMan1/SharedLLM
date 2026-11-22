@@ -188,7 +188,7 @@ async def test_the_step_goal_is_announced_once_a_day(sent, monkeypatch):
     notice = sent[0]
     assert notice["user"] == "leo" and notice["category"] == "health"
     assert notice["body"] == "8,200 steps today, past your goal of 8,000."
-    assert notice["data"]["url"] == "/fitness"
+    assert notice["data"]["url"] == "/fitness?tab=fitness"
 
 
 @pytest.mark.asyncio
