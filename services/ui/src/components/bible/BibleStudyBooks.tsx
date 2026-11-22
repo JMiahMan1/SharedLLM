@@ -7,7 +7,20 @@ import type { BibleImportedBook, BiblePreferences } from '../../types/api';
 import { errorText } from '../../lib/errorText';
 import ImportedBookReader from './ImportedBookReader';
 
-type ReadingPreferences = Pick<BiblePreferences, 'page' | 'font_scale' | 'line_height' | 'theme'>;
+type ReadingPreferences = Pick<BiblePreferences, 'page' | 'font_scale' | 'line_height' | 'theme'> &
+  Partial<Pick<BiblePreferences, 'read_aloud_voice'>>;
+
+/**
+ * A request to open a book at a place: from a link such as
+ * `/bible?tab=studies&book=7&section=s-lesson-3#p-1a2b3c4d`, or a reminder.
+ * `section` is the stable section id; `ordinal` the section number; `anchor` a block id.
+ */
+export interface StudyOpenRequest {
+  bookId: number;
+  section?: string;
+  ordinal?: number;
+  anchor?: string;
+}
 
 const DEFAULT_READING: ReadingPreferences = {
   page: 'dark',
@@ -20,6 +33,12 @@ interface BibleStudyBooksProps {
   /** Shared with the Scripture reader so both surfaces feel like one app. */
   preferences?: ReadingPreferences;
   onPreferences?: (patch: Partial<BiblePreferences>) => void;
+  /** Open a book straight away at a section or paragraph. */
+  openRequest?: StudyOpenRequest | null;
+  /** A scripture reference tapped in a book opens the Bible reader there. */
+  onOpenRef?: (ref: string) => void;
+  /** Admins see "Reformat this book" in a book's page actions. */
+  canReformat?: boolean;
 }
 
 /**
@@ -33,8 +52,13 @@ interface BibleStudyBooksProps {
 export default function BibleStudyBooks({
   preferences = DEFAULT_READING,
   onPreferences = () => {},
+  openRequest = null,
+  onOpenRef,
+  canReformat = false,
 }: BibleStudyBooksProps) {
-  const [book, setBook] = useState<BibleImportedBook | null>(null);
+  const [picked, setPicked] = useState<BibleImportedBook | null>(null);
+  // The link that was last closed, so closing a linked book returns to the shelf.
+  const [closedRequest, setClosedRequest] = useState<StudyOpenRequest | null>(null);
 
   const books = useQuery({
     queryKey: ['bible-imported-books', 'study'],
@@ -49,6 +73,18 @@ export default function BibleStudyBooks({
   // disappearing from the shelf.
   const studyBooks = (books.data?.books ?? []).filter((item) => item.chapter_count > 0);
 
+  // A link names the book by id; it opens once the shelf has it.
+  const linked =
+    openRequest && openRequest !== closedRequest
+      ? (books.data?.books ?? []).find((item) => item.id === openRequest.bookId) ?? null
+      : null;
+  const book = picked ?? linked;
+  const place = !picked && linked ? openRequest : null;
+  const setBook = (next: BibleImportedBook | null) => {
+    if (!next && openRequest) setClosedRequest(openRequest);
+    setPicked(next);
+  };
+
   const detail = useQuery({
     queryKey: ['bible-imported-book', book?.id],
     queryFn: () => api.getBibleImportedBook(book!.id),
@@ -60,10 +96,16 @@ export default function BibleStudyBooks({
     if (detail.data) {
       return (
         <ImportedBookReader
-          book={book}
+          book={detail.data.book ?? book}
           chapters={detail.data.chapters}
+          aliases={detail.data.aliases}
+          startOrdinal={place?.bookId === book.id ? place.ordinal : undefined}
+          startSection={place?.bookId === book.id ? place.section : undefined}
+          startAnchor={place?.bookId === book.id ? place.anchor : undefined}
           preferences={preferences}
           onPreferences={onPreferences}
+          onOpenRef={onOpenRef}
+          canReformat={canReformat}
           onClose={() => setBook(null)}
         />
       );

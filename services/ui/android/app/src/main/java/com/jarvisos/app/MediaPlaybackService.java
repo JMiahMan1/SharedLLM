@@ -68,7 +68,19 @@ public class MediaPlaybackService extends Service {
 
     static void update(Context context, String title, String artist, boolean playing,
                        String playerId, String playerName, int volume) {
-        lastPlaying = playing;
+        update(context, title, artist, playing, playerId, playerName, volume, false);
+    }
+
+    /**
+     * {@code speech} marks the app's own read-aloud (a Bible study section)
+     * rather than music. It keeps the same notification and foreground service
+     * so reading carries on with the screen off, but it is never handed off to
+     * the native music player when the app goes away: there is nothing for
+     * that player to carry on, and it would start the last music instead.
+     */
+    static void update(Context context, String title, String artist, boolean playing,
+                       String playerId, String playerName, int volume, boolean speech) {
+        lastPlaying = playing && !speech;
         if (playerId != null && !playerId.isEmpty()) lastPlayerId = playerId;
         if (playerName != null && !playerName.isEmpty()) lastPlayerName = playerName;
         lastVolume = volume;

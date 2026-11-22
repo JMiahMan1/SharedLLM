@@ -9,11 +9,14 @@ import {
   Loader2,
   Trash2,
   UploadCloud,
+  Wand2,
+  X,
 } from 'lucide-react';
 
 import { api } from '../../services/api';
 import type { BibleBookKind, BibleLibraryEntry } from '../../types/api';
 import { errorText } from '../../lib/errorText';
+import StudyReformatPreview from '../bible/StudyReformatPreview';
 
 type Source = 'nextcloud' | 'calibre';
 
@@ -23,11 +26,14 @@ const SOURCE_LABELS: Record<Source, string> = {
 };
 
 /**
- * Admin › Bible › Books: import ordinary PDF/EPUB books for devotionals and
- * study. A book is not a Bible translation, so this panel never asks for a
- * translation code and never runs the 66-book completeness check.
+ * Admin › Bible › Books: import ordinary books (PDF, EPUB, MOBI/AZW3, DOCX,
+ * text) for devotionals and study. A book is not a Bible translation, so this
+ * panel never asks for a translation code and never runs the 66-book
+ * completeness check. A book imported before the cleanup normaliser (or any
+ * book) can be reformatted here, with a preview first.
  */
 export default function BibleBooksPanel() {
+  const [reformatting, setReformatting] = useState<{ id: number; title: string } | null>(null);
   const client = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [source, setSource] = useState<Source>('nextcloud');
@@ -286,7 +292,7 @@ export default function BibleBooksPanel() {
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.epub,application/pdf,application/epub+zip"
+            accept=".pdf,.epub,.mobi,.azw,.azw3,.docx,.txt,.md,application/pdf,application/epub+zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
             className="hidden"
             onChange={(event) => {
               const file = event.target.files?.[0];
@@ -301,7 +307,7 @@ export default function BibleBooksPanel() {
             className="min-h-11 sm:min-h-10 rounded-lg bg-white/5 px-3 text-xs text-slate-200 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
             {runUpload.isPending ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
-            Choose PDF/EPUB
+            Choose a book file
           </button>
         </div>
       </div>
@@ -328,8 +334,20 @@ export default function BibleBooksPanel() {
                   <p className="truncate text-[10px] text-slate-500">
                     {book.author || 'Unknown author'} · {book.kind === 'devotional' ? 'Daily Devotions' : 'Bible study'} ·{' '}
                     {book.chapter_count} sections · {book.source}
+                    {(book.format_version ?? 0) === 0 ? ' · raw import' : ''}
                   </p>
                 </div>
+                {book.reformattable !== false ? (
+                  <button
+                    type="button"
+                    onClick={() => setReformatting({ id: book.id, title: book.title })}
+                    aria-label={`Reformat ${book.title}`}
+                    data-testid={`bible-book-reformat-${book.id}`}
+                    className="min-h-11 sm:min-h-9 min-w-11 sm:min-w-9 rounded-lg text-amber-200/80 hover:bg-amber-500/10"
+                  >
+                    <Wand2 size={14} className="mx-auto" />
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => remove.mutate(book.id)}
@@ -344,6 +362,36 @@ export default function BibleBooksPanel() {
           </ul>
         )}
       </div>
+
+      {reformatting ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-end sm:items-center sm:justify-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Reformat ${reformatting.title}`}
+        >
+          <button
+            type="button"
+            aria-label="Close reformat"
+            onClick={() => setReformatting(null)}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          />
+          <div className="relative max-h-[90dvh] w-full overflow-y-auto border border-white/10 bg-slate-950/97 p-4 pb-[max(1rem,var(--safe-bottom))] sm:max-w-2xl sm:rounded-2xl">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="truncate text-sm font-semibold text-white">Reformat {reformatting.title}</p>
+              <button
+                type="button"
+                onClick={() => setReformatting(null)}
+                aria-label="Close reformat"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-slate-400 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <StudyReformatPreview bookId={reformatting.id} title={reformatting.title} />
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
