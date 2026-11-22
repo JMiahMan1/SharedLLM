@@ -18,7 +18,7 @@ describe('Quick Assistant while the local AI is offline', () => {
         error_code: 'local_ai_offline', error_id: 'abcd1234', offline: 'local_ai',
       } },
     }));
-    render(<QuickAssistantWidget />);
+    render(<QuickAssistantWidget settingsButton={null} userSettings={{ config: {} } as never} onTogglePin={() => {}} />);
     fireEvent.change(screen.getByLabelText('Message the assistant'), { target: { value: 'What is a parable?' } });
     fireEvent.submit(screen.getByLabelText('Message the assistant').closest('form')!);
     const notice = await screen.findByTestId('assistant-notice');
