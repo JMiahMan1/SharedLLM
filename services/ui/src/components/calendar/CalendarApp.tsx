@@ -300,7 +300,8 @@ const EventCard = ({ ev, size = 'md', onSelect, people }: { ev: CalendarEvent; s
         className={`w-full text-left font-bold shadow-[0_1px_3px_rgba(72,60,38,0.07),0_10px_28px_-10px_rgba(72,60,38,0.16)] ${size === 'lg' ? 'min-h-14 rounded-2xl px-4 py-3 text-lg' : 'min-h-11 rounded-xl px-3 py-2 text-[15px]'}`}
         style={{ backgroundColor: color, color: textOn(color) }}
       >
-        <span className="truncate">{ev.summary}</span>
+        {/* A block, so the ellipsis is cut at the card's edge (an inline span ran past it in a narrow week column). */}
+        <span className="block truncate">{ev.summary}</span>
         <span className="mt-0.5 block truncate text-[11px] font-semibold opacity-80">{calendarLabel(ev.calendar, people)}</span>
       </button>
     );
