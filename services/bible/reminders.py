@@ -25,8 +25,8 @@ from sqlmodel import Session, select
 from services.common import notify
 from services.common.notice_links import link
 
-from . import plans
 from . import books as book_table
+from . import plans
 from .encouragement import pick_daily_encouragement
 from .metrics import OPEN_KINDS, READING_KINDS
 from .models import MemoryVerse, PlanEnrollment, PlanGroup, PlanGroupMember, ReadingEvent, UserBibleState
@@ -67,43 +67,33 @@ def read_today(session: Session, username: str, today: str) -> bool:
     )
 
 
-def _build_deep_link(state: UserBibleState) -> dict:
-    """Build a deep link to the reader's last position: whole chapter with verse highlighted.
+def _chapter_link(book: str, chapter: int, verse: int | None, translation: str | None = None) -> dict:
+    """The reader on the whole chapter, scrolled to and highlighting ``verse``.
 
-    Uses link("bible", tab="read", book=..., chapter=..., verse=..., translation=..., hash=f"v{verse}")
-    so the reader opens the WHOLE chapter scrolled to the verse.
+    The Bible page reads ``ref`` for the passage (``book`` alone means a study
+    book there), so a chapter link is ``ref=John 3:16`` plus ``verse`` and the
+    ``#v16`` anchor; the reader always shows the whole chapter around it.
     """
-    # Study takes priority if that's what they were last reading
+    verse = verse or 1
+    return link("bible", tab="read", ref=f"{book} {chapter}:{verse}", verse=verse,
+                translation=translation or None, hash=f"v{verse}")
+
+
+def _build_deep_link(state: UserBibleState) -> dict:
+    """Where the reader left off: a study section, else the chapter and verse."""
     if state.last_study_book_id:
         return _build_study_link(state)
-    if not state.last_book:
+    if not state.last_book or not state.last_chapter:
         return link("bible", tab="read")
-    book = state.last_book
-    chapter = state.last_chapter
-    verse = state.last_verse
-    translation = state.last_translation or "kjv"
-    return link("bible", tab="read", book=book, chapter=chapter, verse=verse, translation=translation, hash=f"v{verse}")
+    return _chapter_link(state.last_book, state.last_chapter, state.last_verse, state.default_version)
 
 
 def _build_study_link(state: UserBibleState) -> dict:
-    """Build a deep link to the reader's last study position.
-
-    Uses link("bible", tab="studies", book=<book_id>, section=<section_id>, ordinal=<n>)
-    with an optional anchor for a paragraph. Prefers section over ordinal since a section id
-    survives a reformat.
-    """
+    """The Studies tab at the study book and section the reader last had open."""
     if not state.last_study_book_id:
         return link("bible", tab="read")
-    book_id = state.last_study_book_id
-    section = state.last_study_section_id
-    ordinal = state.last_study_section_ordinal
-    # Prefer section over ordinal
-    params = {"tab": "studies", "book": book_id}
-    if section:
-        params["section"] = section
-    elif ordinal is not None:
-        params["ordinal"] = ordinal
-    return link("bible", **params)
+    ordinal = state.last_study_section_ordinal or None
+    return link("bible", tab="studies", book=state.last_study_book_id, ordinal=ordinal)
 
 
 def _build_plan_link(plan_id: str, plan_day: int) -> dict:
@@ -112,10 +102,7 @@ def _build_plan_link(plan_id: str, plan_day: int) -> dict:
     if not readings:
         return link("bible", tab="today")
     first = readings[0]
-    book = first["osis"]
-    chapter = first["chapter_start"]
-    # Use verse 1 for the start of the chapter
-    return link("bible", tab="read", book=book, chapter=chapter, verse=1, hash="v1")
+    return _chapter_link(first["osis"], first["chapter_start"], 1)
 
 
 def _build_memorize_link() -> dict:
@@ -203,7 +190,6 @@ def streak_message_for(session: Session, username: str, today: str) -> dict | No
     Includes the last reading position for a personal touch.
     """
     from . import metrics as metrics_mod
-    from .encouragement import pick_daily_encouragement
 
     picture = metrics_mod.compute(session, username)
     streak = picture.get("read_streak_current", 0)

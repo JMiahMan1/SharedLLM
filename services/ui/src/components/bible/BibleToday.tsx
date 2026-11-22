@@ -79,7 +79,7 @@ export default function BibleToday({
   const entry = data?.devotional?.entry ?? null;
   const skipped = data?.devotional?.skipped ?? [];
   const streaks = data?.streaks;
-  const graceDayAvailable = streaks && streaks.read_streak_current > 0 && streaks.read_streak_current < 100 && data?.grace_day_used !== true;
+  const graceDayAvailable = streaks && streaks.read_streak_current > 0 && streaks.read_streak_current < 100 && streaks.grace_day_used !== true;
 
   // Welcome-back verse: show when returning after a break (streak is 0 but days_read > 0)
   const showWelcomeBack = streaks && streaks.read_streak_current === 0 && streaks.days_read > 0;
@@ -323,7 +323,7 @@ export default function BibleToday({
       )}
 
       {/* Grace day offer: shown when streak > 0 but no reading today and grace day not used */}
-      {graceDayAvailable && !streaks?.grace_day_used && (
+      {graceDayAvailable && (
         <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-blue-400/15" data-testid="bible-grace-day">
           <div className="flex items-center gap-2 mb-3">
             <Shield size={16} className="text-blue-300" />

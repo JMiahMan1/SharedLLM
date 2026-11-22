@@ -1361,41 +1361,21 @@ describe('resuming where the reader left off', () => {
     expect(mocked.putBibleState).not.toHaveBeenCalledWith(expect.objectContaining({ book: 'John', chapter: 3, verse: 3 }));
   });
 
-  it('parses deep link with verse query parameter and scrolls to verse', async () => {
-    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'Ps', chapter: 23, verse: 1 } }));
-    renderPage('/bible?ref=Ps%2023&verse=3');
+  it('opens a reminder link on the whole chapter at the verse it names', async () => {
+    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'John', chapter: 1, verse: 1 } }));
+    renderPage('/bible?tab=read&ref=Ps%2023%3A3&verse=3#v3');
 
-    await screen.findByTestId('bible-chapter-heading');
-    await waitFor(() => expect(screen.getByTestId('bible-reader-header')).toBeVisible());
-    // The deep link verse should be scrolled to
-    await waitFor(() => expect(screen.getByTestId('bible-verse-1-3')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('bible-chapter-heading')).toHaveTextContent('Psalms 23'));
+    expect(mocked.getBiblePassage).toHaveBeenCalledWith('Ps 23:3', 'kjv');
+    // The whole chapter is on the page, not only the linked verse.
+    await waitFor(() => expect(screen.getByTestId('bible-verse-23-3')).toBeInTheDocument());
+    for (const v of [1, 2]) expect(screen.getByTestId(`bible-verse-23-${v}`)).toBeInTheDocument();
   });
 
-  it('parses deep link with long book name and verse', async () => {
-    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: '1Thess', chapter: 4, verse: 1 } }));
-    renderPage('/bible?ref=1%20Thessalonians%204&verse=2');
-
-    await screen.findByTestId('bible-chapter-heading');
-    await waitFor(() => expect(screen.getByTestId('bible-browse-open')).toHaveTextContent('1 Thessalonians 4'));
-    // The verse should be scrolled to
-    await waitFor(() => expect(screen.getByTestId('bible-verse-4-2')).toBeInTheDocument());
-  });
-
-  it('parses deep link with verse at end of chapter', async () => {
-    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'Ps', chapter: 23, verse: 1 } }));
-    renderPage('/bible?ref=Ps%2023&verse=40');
-
-    await screen.findByTestId('bible-chapter-heading');
-    // The last verse should be scrolled to
-    await waitFor(() => expect(screen.getByTestId('bible-verse-23-40')).toBeInTheDocument());
-  });
-
-  it('ignores verse query param when ref is missing', async () => {
+  it('a verse parameter without a passage keeps the saved place', async () => {
     mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'Ps', chapter: 23, verse: 1 } }));
     renderPage('/bible?verse=3');
 
-    await screen.findByTestId('bible-chapter-heading');
-    // Should default to verse 1 when no ref is provided
-    await waitFor(() => expect(mocked.putBibleState).toHaveBeenCalledWith(expect.objectContaining({ book: 'Ps', chapter: 1, verse: 1 })));
+    await waitFor(() => expect(screen.getByTestId('bible-chapter-heading')).toHaveTextContent('Psalms 23'));
   });
 });

@@ -5,7 +5,7 @@ edge (a reader's Scripture must not be readable by anyone who can reach the
 port), and the failure messages, because "unconfigured" is only useful if it
 says which setting to set.
 """
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -740,7 +740,7 @@ def test_a_chapter_runs_on_in_paragraphs_until_the_reader_chooses_lines(loaded_c
 
 def test_state_stores_reading_position_with_book_chapter_verse(loaded_client: TestClient):
     """PUT /state saves and returns the precise book, chapter, verse, and fraction.
-    
+
     Uses Genesis which has 3 verses per chapter in the test corpus.
     """
     loaded_client.put(
@@ -757,7 +757,7 @@ def test_state_stores_reading_position_with_book_chapter_verse(loaded_client: Te
 
 def test_state_stores_reading_plan_context(loaded_client: TestClient):
     """PUT /state saves and returns plan_id and plan_day for deep linking.
-    
+
     Position includes plan context when a book is also set.
     """
     loaded_client.put(
@@ -790,7 +790,7 @@ def test_state_stores_study_book_context(loaded_client: TestClient):
 
 def test_grace_day_preserves_streak_across_one_missed_day(loaded_client: TestClient, monkeypatch):
     """POST /streak/freeze uses the grace day and records it in state.
-    
+
     Note: The API records all events with today's date, so we can't build
     multi-day streaks in tests. This test verifies the grace day endpoint
     works and records the grace day in state when streak is broken.
@@ -798,7 +798,7 @@ def test_grace_day_preserves_streak_across_one_missed_day(loaded_client: TestCli
     # Create a user state but no reading today (streak broken)
     loaded_client.put("/state", params={"username": "sam"}, json={"book": "Gen", "chapter": 1, "verse": 1})
     # Don't post any reading event for today - streak is broken
-    
+
     # Use grace day
     resp = loaded_client.post("/streak/freeze", params={"username": "sam"})
     # The endpoint may return 400 if streak is intact, but we test the endpoint exists
@@ -826,7 +826,7 @@ def test_grace_day_refused_when_already_used(loaded_client: TestClient):
     # Create reading history first
     loaded_client.post("/events", params={"username": "sam"}, json={"kind": "chapter_complete", "ref": "Gen 1"})
     loaded_client.put("/state", params={"username": "sam"}, json={"book": "Gen", "chapter": 1, "verse": 1})
-    
+
     # Use grace day once
     loaded_client.post("/streak/freeze", params={"username": "sam"})
 
@@ -890,7 +890,7 @@ def test_daily_encouragement_verse_endpoint(loaded_client: TestClient):
 
 def test_reminder_message_includes_deep_link_to_chapter_and_verse(loaded_client: TestClient):
     """message_for includes a deep link to the whole chapter with verse anchor.
-    
+
     Uses Genesis which has 3 verses per chapter in the test corpus.
     """
     # Set up state with a last reading position
@@ -935,14 +935,13 @@ def test_reminder_respects_quiet_hours(monkeypatch):
 
 def test_reminder_once_per_day_limit(loaded_client: TestClient, monkeypatch):
     """Only one reminder per reader per day."""
-    from services.bible.reminders import read_today, message_for, due_now
-    from datetime import datetime
 
     # This test verifies the once-a-day key logic in reminders.py
     # The `once` key format is `bible-nudge:{today}`
     # We verify the key format by checking the send function builds it correctly
-    from services.bible.reminders import send
     import inspect
+
+    from services.bible.reminders import send
     source = inspect.getsource(send)
     assert "once" in source
     assert "bible-nudge" in source
@@ -951,11 +950,6 @@ def test_reminder_once_per_day_limit(loaded_client: TestClient, monkeypatch):
 def test_streak_milestone_achievement(loaded_client: TestClient):
     """Achievements include first_day (streak 1) and streak_14 (14 days)."""
     achievements = loaded_client.get("/achievements", params={"username": "sam"}).json()
-    earned_ids = [a["id"] for a in achievements["earned"]]
-    next_ids = [a["id"] for a in achievements["next_up"]]
-
-    # first_day should be in the definitions
-    # Check by looking at next_up for first_day
     first_day_up = next((a for a in achievements["next_up"] if a["id"] == "first_day"), None)
     assert first_day_up is not None
     assert first_day_up["target"] == 1
@@ -979,7 +973,7 @@ def test_study_event_kinds_count_toward_streak(loaded_client: TestClient):
 
 def test_imported_book_reader_accepts_start_ordinal_and_scroll_fraction(loaded_client: TestClient, reader_db):
     """ImportedBookReader can be opened at a specific section with scroll position.
-    
+
     This tests the API endpoints that serve imported book data.
     """
     from services.bible.models import ImportedBook, ImportedBookChapter
@@ -1009,42 +1003,53 @@ def test_imported_book_reader_accepts_start_ordinal_and_scroll_fraction(loaded_c
 
 
 def test_deep_link_shape_for_bible_chapter_verse():
-    """Confirm the deep link shape for Bible: /bible?ref={book} {chapter}&verse={v}"""
-    # This is the shape used in reminders.py _build_deep_link
-    book = "John"
-    chapter = 3
-    verse = 16
-    ref = f"{book} {chapter}"
-    expected = f"/bible?ref={ref}&verse={verse}"
-    # The actual construction is in reminders.py
-    from services.bible.reminders import _build_deep_link
+    """A reading reminder opens the whole chapter at the verse, through the shared link contract."""
     from services.bible.models import UserBibleState
+    from services.bible.reminders import _build_deep_link
 
-    state = UserBibleState(username="test", last_book=book, last_chapter=chapter, last_verse=verse)
-    link = _build_deep_link(state)
-    assert link == expected
+    state = UserBibleState(username="test", last_book="John", last_chapter=3, last_verse=16, default_version="web")
+    lnk = _build_deep_link(state)
+    assert lnk["route"] == "bible"
+    assert lnk["query"] == {"tab": "read", "ref": "John 3:16", "verse": "16", "translation": "web"}
+    assert lnk["hash"] == "v16"
+    assert lnk["href"].startswith("/bible?") and lnk["href"].endswith("#v16")
+    assert "ref=John%203%3A16" in lnk["href"] or "ref=John+3%3A16" in lnk["href"]
+
+
+def test_deep_link_without_a_verse_starts_the_chapter():
+    from services.bible.models import UserBibleState
+    from services.bible.reminders import _build_deep_link
+
+    lnk = _build_deep_link(UserBibleState(username="test", last_book="Ps", last_chapter=23))
+    assert lnk["query"]["ref"] == "Ps 23:1" and lnk["hash"] == "v1"
+
+
+def test_deep_link_with_nothing_read_opens_the_reader():
+    from services.bible.models import UserBibleState
+    from services.bible.reminders import _build_deep_link
+
+    lnk = _build_deep_link(UserBibleState(username="test"))
+    assert lnk["query"] == {"tab": "read"}
 
 
 def test_deep_link_shape_for_study_section():
-    """Confirm the deep link shape for studies: /bible/study?book_id={book_id}&ordinal={ordinal}&scroll={fraction}"""
-    from services.bible.reminders import _build_study_link
+    """A study reminder opens the Studies tab at the section the reader last had open."""
     from services.bible.models import UserBibleState
+    from services.bible.reminders import _build_study_link
 
-    state = UserBibleState(
-        username="test",
-        last_study_book_id=7,
-        last_study_section_ordinal=3,
-        last_study_scroll_fraction=0.65,
-    )
-    link = _build_study_link(state)
-    expected = "/bible/study?book_id=7&ordinal=3&scroll=0.65"
-    assert link == expected
+    by_ordinal = UserBibleState(username="test", last_study_book_id=7, last_study_section_ordinal=3)
+    assert _build_study_link(by_ordinal)["query"] == {"tab": "studies", "book": "7", "ordinal": "3"}
+    book_only = UserBibleState(username="test", last_study_book_id=7)
+    assert _build_study_link(book_only)["query"] == {"tab": "studies", "book": "7"}
 
 
 def test_deep_link_shape_for_plan_day():
-    """Confirm the deep link shape for plans: /bible?tab=plans&plan={plan_id}&day={plan_day}"""
+    """A plan reminder opens that day's first chapter in the reader."""
+    from services.bible import plans
     from services.bible.reminders import _build_plan_link
 
-    link = _build_plan_link("nt90", 42)
-    expected = "/bible?tab=plans&plan=nt90&day=42"
-    assert link == expected
+    first = plans.day_readings("nt-90", 42)[0]
+    lnk = _build_plan_link("nt-90", 42)
+    assert lnk["query"]["tab"] == "read"
+    assert lnk["query"]["ref"] == f"{first['osis']} {first['chapter_start']}:1"
+    assert lnk["hash"] == "v1"

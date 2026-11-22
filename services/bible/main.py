@@ -3200,6 +3200,7 @@ def daily(
             "open_streak_current": picture["open_streak_current"],
             "days_read": picture["days_read"],
             "chapters_read": picture["metrics"]["chapters_total"],
+            "grace_day_used": picture["grace_day_used"],
         }
         payload["position"] = picture["position"]
         # The plan line and the memory line on the home card: today's reading

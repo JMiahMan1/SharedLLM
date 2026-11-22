@@ -117,7 +117,7 @@ describe('BibleProgress', () => {
   });
 
   it('shows empty state when no family activity shared', async () => {
-    api.getBibleActivityFeed.mockResolvedValue({
+    vi.mocked(api.getBibleActivityFeed).mockResolvedValue({
       entries: [],
       members: [],
       note: 'Nobody has shared their reading yet. Share it in Settings → Share my activity.',
