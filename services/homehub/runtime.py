@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from services.homehub.core import UNAVAILABLE, AuthRequired, ConfigEntry, Driver, Hub, SetupError, utcnow
@@ -13,12 +13,15 @@ from services.homehub.store import Store
 
 log = logging.getLogger("homehub.runtime")
 
-# Capped at a minute: devices on a switched outlet or wall switch come back
-# often, and waiting five minutes for one to show again felt broken.
+# Capped at a minute to start with: devices on a switched outlet or wall switch come back
+# often, and waiting five minutes for one to show again felt broken. An entry that keeps
+# failing then doubles its wait, up to RETRY_MAX_S, so six unplugged gadgets do not write
+# thousands of warnings a day.
 RETRY_DELAYS = (5, 10, 30, 60)
-# A device that stays off is retried every minute for as long as it is off, but
-# is only reported when it first fails, when the reason changes, and then once
-# an hour: seven unplugged gadgets were writing 2,500 warnings in 12 hours.
+#: The longest wait between setup attempts for one entry.
+RETRY_MAX_S = 900.0
+# A device that stays off is retried quietly after its first warning, with one INFO
+# summary an hour: seven unplugged gadgets were writing 2,500 warnings in 12 hours.
 RETRY_REPORT_EVERY_S = 3600.0
 HISTORY_KEEP_DAYS = 30
 #: A poll that has not answered in this long has hung (a driver may set its own ``poll_timeout``).
@@ -27,6 +30,27 @@ POLL_TIMEOUT_S = 60.0
 #: carries the failure (``setup_retry`` with the reason) until a poll works again. One failed poll is often
 #: a dropped packet; the entities keep their last state through it.
 POLL_FAILURES_UNAVAILABLE = 3
+
+
+def retry_delay(attempt: int) -> float:
+    """Seconds to wait before retry number ``attempt`` (0-based).
+
+    The fast sequence first (a device switched back on should return in seconds), then
+    doubling from its last step up to :data:`RETRY_MAX_S`.
+    """
+    if attempt < len(RETRY_DELAYS):
+        return float(RETRY_DELAYS[attempt])
+    return min(float(RETRY_DELAYS[-1]) * 2 ** (attempt - len(RETRY_DELAYS) + 1), RETRY_MAX_S)
+
+
+def _minutes_text(minutes: int) -> str:
+    return f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+
+def _outage_text(since: datetime | None, now: datetime) -> str:
+    """``"5 minutes"`` for a recovery line; a short blip still reads as a minute."""
+    seconds = max(0.0, (now - since).total_seconds()) if since is not None else 0.0
+    return _minutes_text(max(1, round(seconds / 60)))
 
 
 class Runtime:
@@ -40,6 +64,8 @@ class Runtime:
         self._first_attempt: dict[str, asyncio.Event] = {}
         #: When each entry that is failing now first failed (this run of the hub).
         self.failing_since: dict[str, datetime] = {}
+        #: When the next setup attempt for each failing entry is due (this run of the hub).
+        self.next_retry: dict[str, datetime] = {}
         self._unsub_record = None
         self.recorder: Any = None  # recorder.Recorder, from start_recording
         self.automations: Any = None  # set by main once the engine is loaded
@@ -102,6 +128,9 @@ class Runtime:
         old = self._tasks.pop(entry.entry_id, None)
         if old is not None:
             old.cancel()
+        # A reload or a change to the entry is a fresh start: the next failure waits
+        # the first, short interval again.
+        self.next_retry.pop(entry.entry_id, None)
         if entry.archived_at:
             # Archived for going without contact (device_archive.py): never set up or retried until it is
             # restored (rediscovered, or an admin's Restore), which clears the mark first.
@@ -113,6 +142,7 @@ class Runtime:
     async def stop_entry(self, entry_id: str) -> None:
         task = self._tasks.pop(entry_id, None)
         self.failing_since.pop(entry_id, None)
+        self.next_retry.pop(entry_id, None)
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -157,19 +187,27 @@ class Runtime:
                 first.set()
                 return
             except Exception as exc:
-                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                delay = retry_delay(attempt)
                 attempt += 1
                 entry.state, entry.reason = "setup_retry", f"{type(exc).__name__}: {exc}"
                 now = loop.time()
                 # The same outage reads differently from try to try (a timeout has
                 # no text, a refusal names the socket): compare its headline only.
                 headline = f"{type(exc).__name__}: {str(exc).split(':', 1)[0]}"
-                loud = reported is None or reported[0] != headline or now - reported[1] >= RETRY_REPORT_EVERY_S
-                if loud:
+                since = self.failing_since.setdefault(entry.entry_id, utcnow())
+                self.next_retry[entry.entry_id] = utcnow() + timedelta(seconds=delay)
+                if reported is None or reported[0] != headline:
                     reported = (headline, now)
-                self.failing_since.setdefault(entry.entry_id, utcnow())
-                (log.warning if loud else log.debug)(
-                    "%s (%s) setup failed (attempt %d), retry in %ss: %s", entry.domain, entry.title, attempt, delay, exc)
+                    log.warning("%s (%s) setup failed (attempt %d), retry in %ss: %s",
+                                entry.domain, entry.title, attempt, delay, exc)
+                elif now - reported[1] >= RETRY_REPORT_EVERY_S:
+                    reported = (headline, now)
+                    minutes = max(0, int((utcnow() - since).total_seconds() // 60))
+                    log.info("%s (%s) still unreachable for %s, next try in %ds",
+                             entry.domain, entry.title, _minutes_text(minutes), int(delay))
+                else:
+                    log.debug("%s (%s) setup failed (attempt %d), retry in %ss: %s",
+                              entry.domain, entry.title, attempt, delay, exc)
                 driver.mark_unavailable()
                 with contextlib.suppress(Exception):
                     await driver.async_unload()
@@ -178,10 +216,11 @@ class Runtime:
                 continue
             self.hub.drivers[entry.entry_id] = driver
             entry.state, entry.reason, entry.needs = "loaded", None, None
-            self.failing_since.pop(entry.entry_id, None)
+            since = self.failing_since.pop(entry.entry_id, None)
+            self.next_retry.pop(entry.entry_id, None)
             first.set()
             if reported is not None:
-                log.info("%s (%s) is back after %d failed attempts", entry.domain, entry.title, attempt)
+                log.info("%s (%s) is back after %s", entry.domain, entry.title, _outage_text(since, utcnow()))
             attempt, reported = 0, None
             log.info("%s (%s) loaded with %d entities", entry.domain, entry.title, len(driver.entities))
             if driver.poll_interval is None:
@@ -199,7 +238,11 @@ class Runtime:
             await asyncio.sleep(driver.poll_interval or 30.0)
             timeout = float(getattr(driver, "poll_timeout", None) or POLL_TIMEOUT_S)
             try:
-                await asyncio.wait_for(driver.async_poll(), timeout)
+                # asyncio.timeout, not wait_for: on Python 3.11 wait_for returns the poll's result when a cancel
+                # lands just as the poll finishes, swallowing the cancel, so this loop never stopped (the
+                # SOA CI shard holding test_runtime_poll hung until its 30 minute timeout).
+                async with asyncio.timeout(timeout):
+                    await driver.async_poll()
             except asyncio.CancelledError:
                 raise
             except (AuthRequired, SetupError) as exc:
@@ -265,6 +308,10 @@ class Runtime:
         driver.mark_unavailable()
         with contextlib.suppress(Exception):
             await driver.async_unload()
+
+    def next_retry_at(self, entry_id: str) -> datetime | None:
+        """When the next setup attempt for an entry is due; None while it works or is parked."""
+        return self.next_retry.get(entry_id)
 
     async def wait_first_setups(self, timeout: float) -> list[str]:
         """Wait until every started entry has tried to load once; returns the ones still pending.

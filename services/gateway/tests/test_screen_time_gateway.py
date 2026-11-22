@@ -85,9 +85,12 @@ def test_asking_for_time_tells_the_parents(wired):
     assert calls[0]["json"]["day"] == "2026-10-21"  # the household's day, not the phone's
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert "30 more minutes" in sent[0]["body"] and "one more level" in sent[0]["body"]
+    # One tap gives the full amount asked; "Change minutes" opens the request
+    # on the child's page, where a parent gives a different amount.
     assert sent[0]["actions"] == [
-        {"label": "Approve", "type": "callback", "callback": "more_time_decide", "params": {"id": 3, "grant": True}},
-        {"label": "Disapprove", "type": "callback", "callback": "more_time_decide", "params": {"id": 3, "grant": False}},
+        {"label": "Approve 30 min", "type": "callback", "callback": "more_time_decide", "params": {"id": 3, "grant": True}},
+        {"label": "Change minutes", "type": "view", "url": "/family/member/kid?focus=time-3"},
+        {"label": "Not today", "type": "callback", "callback": "more_time_decide", "params": {"id": 3, "grant": False}},
     ]
     # A tap on the notice itself opens the child's page at the request, where it can be answered too.
     assert sent[0]["data"]["url"] == "/family/member/kid?focus=time-3"
@@ -542,6 +545,27 @@ def test_a_locked_family_pc_messages_the_childs_parents(wired, monkeypatch):
     assert r.status_code == 200 and r.json()["sent_to"] == ["mom"]
     assert parents_of == ["kid"]
     assert sent_as == ["kid", "kid"]
+
+
+def test_a_partial_grant_tells_the_child_the_minutes_given_not_asked(wired):
+    client, calls, sent, answers = wired
+    answers[("POST", "/screen-time/requests/3")] = (
+        200, {"request": {"id": 3, "username": "kid", "minutes": 60, "status": "granted", "granted_minutes": 30},
+              "notify": ["kid"]})
+    r = client.post("/api/screen-time/requests/3", json={"grant": True, "minutes": 30})
+    assert r.status_code == 200
+    assert calls[-1]["json"] == {"grant": True, "minutes": 30}  # passed on to identity as given
+    assert [n["user"] for n in sent] == ["kid"]
+    assert sent[0]["title"] == "More time granted"
+    assert sent[0]["body"] == "You have 30 more minutes today."
+    assert sent[0]["tag"].startswith("screen-time:")  # the phone re-reads its status at once
+
+
+def test_a_refused_amount_is_passed_on_and_tells_nobody(wired):
+    client, _, sent, answers = wired
+    answers[("POST", "/screen-time/requests/3")] = (422, {"detail": "minutes must be a whole number from 5 to 240"})
+    assert client.post("/api/screen-time/requests/3", json={"grant": True, "minutes": 2}).status_code == 422
+    assert sent == []
 
 
 def test_status_passes_the_device_key_and_the_owner_devices_offline_verifiers(wired, monkeypatch):

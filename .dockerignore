@@ -38,3 +38,6 @@ data/*
 !data/phrasebook.json
 !data/plants_seed/
 !data/plants_seed/**
+
+# CI test-shard timings (pytest-split): no service reads them
+.test_durations

@@ -59,6 +59,13 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("importedbook", "stored_file", "TEXT", "''"),
     ("importedbookchapter", "section_id", "TEXT", "''"),
     ("importedbookchapter", "blocks", "TEXT", "''"),
+    ("userbiblestate", "grace_day_used", "INTEGER", "0"),
+    ("userbiblestate", "grace_day_date", "TEXT", "''"),
+    ("userbiblestate", "last_plan_id", "TEXT", "''"),
+    ("userbiblestate", "last_plan_day", "INTEGER", "0"),
+    ("userbiblestate", "last_study_book_id", "INTEGER", "0"),
+    ("userbiblestate", "last_study_section_ordinal", "INTEGER", "0"),
+    ("userbiblestate", "last_study_scroll_fraction", "REAL", "0"),
 )
 
 

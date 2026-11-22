@@ -171,8 +171,8 @@ describe('The family member page (a parent)', () => {
 
     fireEvent.click(within(card).getByRole('button', { name: 'Approve app' }));
     await waitFor(() => expect(api.decideGuardRequest).toHaveBeenCalledWith(1, { approve: true }));
-    fireEvent.click(within(card).getByRole('button', { name: 'Grant' }));
-    await waitFor(() => expect(api.decideScreenTimeRequest).toHaveBeenCalledWith(7, true));
+    fireEvent.click(within(card).getByRole('button', { name: 'Approve 30 min' }));
+    await waitFor(() => expect(api.decideScreenTimeRequest).toHaveBeenCalledWith(7, true, 30));
   });
 
   it('pauses, locks for a while and gives bonus time from the header', async () => {

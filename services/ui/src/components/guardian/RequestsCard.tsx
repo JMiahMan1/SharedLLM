@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { History, Inbox } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { api } from '../../services/api';
 import { requestLine } from '../../lib/guardRequests';
+import { GRANT_MAX, GRANT_MIN, QUICK_PICKS, grantMinutes } from '../../lib/timeGrant';
 import { relativeTime } from '../../lib/wanderTrips';
 import MemberCard from '../member/MemberCard';
 import { guardRequestsQuery, timeRequestsQuery } from '../../lib/memberPage';
@@ -63,6 +65,70 @@ function RequestVerdict({ id, vetting }: { id: number; vetting: RequestVetting }
 }
 
 /**
+ * A request for more time: the asked minutes in a field the parent can change
+ * (less or more than asked, 5 to 240, with quick picks), then Approve gives
+ * exactly that, or Not today.
+ */
+function TimeRequestAnswer({ request, busy, onAnswer, yes, no }: {
+  request: ScreenTimeRequest;
+  busy: boolean;
+  onAnswer: (grant: boolean, minutes?: number) => void;
+  yes: string;
+  no: string;
+}) {
+  const [text, setText] = useState(String(request.minutes));
+  const minutes = grantMinutes(text);
+  const picks = Array.from(new Set([...QUICK_PICKS, request.minutes])).sort((a, b) => a - b);
+  const pick = 'min-h-11 min-w-11 rounded-xl border px-2.5 text-xs font-medium transition-colors';
+  const fieldId = `grant-minutes-${request.id}`;
+  return (
+    <div className="space-y-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={fieldId} className="text-xs text-slate-300">Give</label>
+        <input
+          id={fieldId}
+          type="number"
+          inputMode="numeric"
+          min={GRANT_MIN}
+          max={GRANT_MAX}
+          step={5}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          aria-invalid={minutes === null}
+          aria-describedby={`${fieldId}-hint`}
+          data-testid={`grant-minutes-${request.id}`}
+          className="min-h-11 w-20 rounded-xl border border-white/15 bg-slate-950/40 px-2.5 text-sm text-white"
+        />
+        <span className="text-xs text-slate-300">minutes</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Quick picks">
+        {picks.map((m) => (
+          <button
+            key={m}
+            type="button"
+            disabled={busy}
+            aria-pressed={minutes === m}
+            onClick={() => setText(String(m))}
+            className={`${pick} ${minutes === m ? 'border-sky-400/50 bg-sky-500/20 text-sky-100' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}`}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+      <p id={`${fieldId}-hint`} className={`text-[11px] ${minutes === null ? 'text-amber-300' : 'text-slate-400'}`}>
+        {minutes === null ? `Enter ${GRANT_MIN} to ${GRANT_MAX} minutes.` : minutes === request.minutes ? 'What they asked for.' : `They asked for ${request.minutes}.`}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className={yes} disabled={busy || minutes === null} onClick={() => minutes !== null && onAnswer(true, minutes)}>
+          {minutes === null ? 'Approve' : `Approve ${minutes} min`}
+        </button>
+        <button type="button" className={no} disabled={busy} onClick={() => onAnswer(false)}>Not today</button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * What a child is asking for, answered inline (Phase 11 steps 4 and 5): more
  * screen time, a newly installed app (closed on their phone until a parent
  * says yes), a permission an app asked for, a site the web filter blocked.
@@ -88,7 +154,10 @@ export default function RequestsCard({ username, name, kinds = ALL_KINDS, histor
     mutationFn: ({ id, body }: { id: number; body: { approve: boolean; minutes?: number; always?: boolean } }) => api.decideGuardRequest(id, body),
     onSuccess: refresh,
   });
-  const decideTime = useMutation({ mutationFn: ({ id, grant }: { id: number; grant: boolean }) => api.decideScreenTimeRequest(id, grant), onSuccess: refresh });
+  const decideTime = useMutation({
+    mutationFn: ({ id, grant, minutes }: { id: number; grant: boolean; minutes?: number }) => api.decideScreenTimeRequest(id, grant, minutes),
+    onSuccess: refresh,
+  });
 
   const rows: Row[] = [
     ...(wantsTime ? (time.data || []).filter((r) => r.username === username).map((r) => ({ kind: 'time' as const, id: r.id, at: r.created_at, request: r })) : []),
@@ -132,28 +201,29 @@ export default function RequestsCard({ username, name, kinds = ALL_KINDS, histor
               {row.kind !== 'time' && (row.request as GuardRequest).vetting && (
                 <RequestVerdict id={row.id} vetting={(row.request as GuardRequest).vetting as RequestVetting} />
               )}
-              <div className="flex flex-wrap items-center gap-2">
-                {row.kind === 'time' ? (
-                  <>
-                    <button type="button" className={yes} disabled={busy} onClick={() => decideTime.mutate({ id: row.id, grant: true })}>Grant</button>
-                    <button type="button" className={no} disabled={busy} onClick={() => decideTime.mutate({ id: row.id, grant: false })}>Not today</button>
-                  </>
-                ) : (
-                  <>
-                    {row.kind === 'site' || row.kind === 'app_unblock' ? (
-                      <>
-                        <button type="button" className={yes} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: true, minutes: 60 } })}>Allow 1 hour</button>
-                        <button type="button" className={yes} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: true, always: true } })}>Always allow</button>
-                      </>
-                    ) : (
-                      <button type="button" className={yes} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: true } })}>
-                        {row.kind === 'app' ? 'Approve app' : 'Allow'}
-                      </button>
-                    )}
-                    <button type="button" className={no} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: false } })}>No</button>
-                  </>
-                )}
-              </div>
+              {row.kind === 'time' ? (
+                <TimeRequestAnswer
+                  request={row.request as ScreenTimeRequest}
+                  busy={busy}
+                  yes={yes}
+                  no={no}
+                  onAnswer={(grant, minutes) => decideTime.mutate({ id: row.id, grant, ...(grant ? { minutes } : {}) })}
+                />
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  {row.kind === 'site' || row.kind === 'app_unblock' ? (
+                    <>
+                      <button type="button" className={yes} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: true, minutes: 60 } })}>Allow 1 hour</button>
+                      <button type="button" className={yes} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: true, always: true } })}>Always allow</button>
+                    </>
+                  ) : (
+                    <button type="button" className={yes} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: true } })}>
+                      {row.kind === 'app' ? 'Approve app' : 'Allow'}
+                    </button>
+                  )}
+                  <button type="button" className={no} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: false } })}>No</button>
+                </div>
+              )}
             </li>
           ),
         )}

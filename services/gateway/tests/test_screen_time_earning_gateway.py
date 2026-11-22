@@ -168,7 +168,9 @@ def test_an_approval_does_not_untick(wired):
     assert client.post("/api/screen-time/chore-checks/2", json={"approve": True}).status_code == 200
     assert not any(c["url"].endswith("/uncomplete") for c in calls)
     assert sent[0]["title"] == "Chore approved"
-    assert sent[0]["tag"] == "chores-approved:kid" and sent[0]["replace"] is True
+    # The phone re-reads its status on any notice tagged screen-time: (PushNotice.isScreenTime),
+    # so the minutes the approval earned reach the lock at once.
+    assert sent[0]["tag"] == "screen-time:chores-approved:kid" and sent[0]["replace"] is True
 
 
 def test_a_second_approval_the_same_day_is_one_merged_notice(wired):
