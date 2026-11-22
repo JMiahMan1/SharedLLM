@@ -94,7 +94,8 @@ def test_history_is_remembered_not_replayed_then_new_messages_notify():
     n = client.notified[0]
     assert n["user"] == "alex" and n["kind"] == "chat"
     assert n["title"] == "Rivera Family" and n["body"] == "Sam: Dinner at 6"
-    assert n["data"]["token"] == "fam" and n["data"]["url"] == "/family?chat=fam"
+    # The conversation, at the message (docs/PUSH.md, "Deep links").
+    assert n["data"]["token"] == "fam" and n["data"]["url"] == "/family?chat=fam&focus=msg-11"
     assert n["once"] == "chat:fam:11"
     assert _run(r, client) == 0, "the same message is announced once"
 

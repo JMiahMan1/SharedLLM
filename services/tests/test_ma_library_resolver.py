@@ -592,3 +592,86 @@ async def test_episodes_of_a_book_are_refused(fake_connect):
     with pytest.raises(MALibraryLookupError) as err:
         await ma_library.list_podcast_episodes(MASS_URL, MASS_TOKEN, NARNIA_ABS_ID, "Narnia")
     assert err.value.reason == "not_a_podcast"
+
+
+def _provider_item(*, abs_id: str = NARNIA_ABS_ID, media_type: str = "audiobook", available=True) -> dict:
+    return {
+        "uri": f"audiobookshelf--EpUcRzwM://{media_type}/{abs_id}",
+        "name": "A Book Added Today",
+        "provider": "audiobookshelf--EpUcRzwM",
+        "provider_mappings": [
+            {
+                "item_id": abs_id,
+                "provider_domain": "audiobookshelf",
+                "provider_instance": "audiobookshelf--EpUcRzwM",
+                "available": available,
+            }
+        ],
+    }
+
+
+class TestNotYetInMALibrary:
+    """A book added to Audiobookshelf since MA's last library sync.
+
+    Live, 2026-11-21: "Wild at Heart" was added to ABS at 19:08; MA's library
+    still held 193 of ABS's 199 books, so the library search found nothing and
+    the in-app player could not start it. MA's ABS provider knew the item by its
+    ABS id all along.
+    """
+
+    async def test_is_found_through_the_abs_provider_and_added_to_the_library(self, fake_connect):
+        opened, _ = fake_connect({
+            "auth": {"authenticated": True},
+            "music/search": {"audiobooks": []},
+            "music/item_by_uri": _provider_item(),
+            "music/library/add_item": {"uri": "library://audiobook/200", "name": "A Book Added Today"},
+        })
+        resolved = await _resolve(title="A Book Added Today")
+        assert resolved.ma_uri == "library://audiobook/200"
+        sent = [(f["command"], f.get("args")) for f in opened[0].sent]
+        assert ("music/item_by_uri", {"uri": f"audiobookshelf://audiobook/{NARNIA_ABS_ID}"}) in sent
+        assert ("music/library/add_item", {"item": f"audiobookshelf--EpUcRzwM://audiobook/{NARNIA_ABS_ID}"}) in sent
+
+    async def test_plays_by_provider_uri_when_the_library_add_fails(self, fake_connect):
+        fake_connect({
+            "auth": {"authenticated": True},
+            "music/search": {"audiobooks": []},
+            "music/item_by_uri": _provider_item(),
+            "music/library/add_item": MAError("read-only library"),
+        })
+        resolved = await _resolve()
+        assert resolved.ma_uri == f"audiobookshelf--EpUcRzwM://audiobook/{NARNIA_ABS_ID}"
+
+    async def test_a_provider_item_for_another_id_is_not_a_match(self, fake_connect):
+        fake_connect({
+            "auth": {"authenticated": True},
+            "music/search": {"audiobooks": []},
+            "music/item_by_uri": _provider_item(abs_id="someone-elses-book"),
+        })
+        with pytest.raises(MALibraryLookupError) as exc:
+            await _resolve()
+        assert exc.value.reason == "not_in_ma_library"
+
+    async def test_an_unavailable_provider_item_is_not_played(self, fake_connect):
+        fake_connect({
+            "auth": {"authenticated": True},
+            "music/search": {"audiobooks": []},
+            "music/item_by_uri": _provider_item(available=False),
+        })
+        with pytest.raises(MALibraryLookupError):
+            await _resolve()
+
+    async def test_the_provider_not_knowing_it_either_stays_a_loud_miss(self, fake_connect):
+        fake_connect({
+            "auth": {"authenticated": True},
+            "music/search": {"audiobooks": []},
+            "music/item_by_uri": MAError("not found"),
+        })
+        with pytest.raises(MALibraryLookupError) as exc:
+            await _resolve()
+        assert exc.value.reason == "not_in_ma_library"
+
+    async def test_a_library_hit_never_asks_the_provider(self, fake_connect):
+        opened, _ = fake_connect({"auth": {"authenticated": True}, "music/search": _search_result()})
+        await _resolve()
+        assert "music/item_by_uri" not in [f["command"] for f in opened[0].sent]

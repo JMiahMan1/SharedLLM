@@ -77,8 +77,8 @@ def song_notice(user: str, job_id: str, prompt: str) -> dict[str, Any]:
     return notify.notice(
         user, "jobs", "Your song is ready",
         f"{about} is ready to play. It expires in {SONG_KEEP_MINUTES} minutes, so save or send it before then.",
-        url="/family?tab=create", tag=f"song:{job_id}", once=f"song:{job_id}",
-        actions=[notify.view_action("/family?tab=create")],
+        link=notify.link("family", tab="create"), tag=f"song:{job_id}", once=f"song:{job_id}",
+        actions=[notify.view_action(notify.link("family", tab="create"))],
     )
 
 
@@ -127,7 +127,8 @@ async def find_phone(user: str, device: str = "phone") -> bool:
     """
     return await notify.send(notify.notice(
         user, "family_safety", f"Find my {device}", f"Your {device} is ringing.",
-        priority=5, tag="find_phone", kind="find_phone", data={"find_phone": True},
+        # The phone is ringing; a tap just opens Jarvis (Stop is on the alarm itself).
+        link=notify.link("home"), priority=5, tag="find_phone", kind="find_phone", data={"find_phone": True},
     ))
 
 
@@ -138,7 +139,8 @@ async def picture_ready(user: str) -> bool:
     """Family > Create's "Make it way better" pass came back with a picture."""
     return await notify.send(notify.notice(
         user, "jobs", "Your picture is ready", "Jarvis finished improving your drawing.",
-        url="/family?tab=create", tag="picture", actions=[notify.view_action("/family?tab=create")],
+        link=notify.link("family", tab="create"), tag="picture",
+        actions=[notify.view_action(notify.link("family", tab="create"))],
     ))
 
 
@@ -151,18 +153,23 @@ def _summary(result: str, limit: int = 160) -> str:
 
 
 def mission_url(mission: dict) -> str:
+    return mission_link(mission)["href"]
+
+
+def mission_link(mission: dict) -> dict[str, Any]:
+    """Where a mission's notice opens: its workspace, else the Lab's missions tab."""
     workspace = mission.get("workspace_id")
-    return f"/workspaces?select={workspace}" if workspace else "/lab?tab=missions"
+    return notify.link("workspaces", select=workspace) if workspace else notify.link("lab", tab="missions")
 
 
 async def mission_finished(user: str, mission_id: Any, status: str, result: str, workspace_id: str | None) -> bool:
     """Tell the person who started a mission how it ended."""
     if not user:
         return False
-    url = mission_url({"workspace_id": workspace_id})
+    url = mission_link({"workspace_id": workspace_id})
     title = f"Mission #{mission_id} finished" if status == "completed" else f"Mission #{mission_id} failed"
     return await notify.send(notify.notice(
-        user, "raven", title, _summary(result) or status, url=url, tag=f"mission:{mission_id}",
+        user, "raven", title, _summary(result) or status, link=url, tag=f"mission:{mission_id}",
         once=f"mission:{mission_id}:{status}", actions=[notify.view_action(url)],
     ))
 
@@ -176,11 +183,12 @@ async def mission_needs_approval(mission: dict) -> bool:
     return await notify.send(notify.notice(
         "@admins", "raven", f"Raven wants to fix {target}",
         _summary(mission.get("error_summary") or mission.get("proposed_mission") or ""),
-        url="/admin/ops", priority=4, tag=f"mission:{mission_id}", once=f"mission:{mission_id}:approval",
+        # Raven Ops with this mission open; admins only, as the page itself.
+        link=notify.link("admin", section="ops", mission=mission_id), priority=4, tag=f"mission:{mission_id}", once=f"mission:{mission_id}:approval",
         actions=[
             notify.callback_action("Approve", "raven_approve", params),
             notify.callback_action("Reject", "raven_reject", params),
-            notify.view_action("/admin/ops"),
+            notify.view_action(notify.link("admin", section="ops", mission=mission_id)),
         ],
         audience="parents",
     ))

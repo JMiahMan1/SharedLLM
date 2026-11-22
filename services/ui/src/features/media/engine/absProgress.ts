@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { postAbsProgress } from '../api/client';
+import { postAbsProgress, postAbsProgressOnExit } from '../api/client';
 import { livePosition } from '../store/ingest';
 import { useMediaStore, type AbsSession } from '../store/mediaStore';
 import type { SharedPlayer } from '../../../context/webPlayerContext';
@@ -15,12 +15,15 @@ export interface OutputReading {
   uri: string | null;
 }
 
-/** Save `position` of `session`'s book; failures wait for the next save. */
-function saveProgress(session: AbsSession, position: number, fallbackDuration: number): number | null {
+/** Save `position` of `session`'s book; failures wait for the next save.
+ *  `onExit` sends it so it survives the page being closed or backgrounded. */
+function saveProgress(session: AbsSession, position: number, fallbackDuration: number, onExit = false): number | null {
   const duration = session.durationSec || fallbackDuration;
   if (!(duration > 0)) return null;
   const current = Math.max(0, Math.min(duration, Math.round(position)));
-  void postAbsProgress({ item_id: session.itemId, current_time: current, duration }).catch(() => {});
+  const req = { item_id: session.itemId, current_time: current, duration };
+  if (onExit) postAbsProgressOnExit(req);
+  else void postAbsProgress(req).catch(() => {});
   return current;
 }
 
@@ -86,9 +89,26 @@ export function useAbsProgressReporter(web: SharedPlayer | null): void {
     const unsubscribe = useMediaStore.subscribe((s) => {
       if (session.outputId && s.players[session.outputId]?.status !== 'playing' && wasPlaying) tick();
     });
+    // Closing the tab or app, or the phone going to the background or the screen
+    // off, is saved at once and in a way that outlives the page: timers in a
+    // hidden page are throttled and a closed page runs none. Only the book's
+    // own position is saved: never while the output plays something else.
+    const saveOnExit = () => {
+      const reading = readOutput(session, webRef.current, Date.now());
+      if (!reading || (bookUri !== null && reading.uri !== bookUri)) return;
+      if (!(reading.playing || wasPlaying)) return;
+      lastSent = saveProgress(session, reading.position, reading.duration, true) ?? lastSent;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') saveOnExit();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', saveOnExit);
     return () => {
       clearInterval(id);
       unsubscribe();
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', saveOnExit);
     };
   }, [session]);
 

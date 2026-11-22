@@ -922,7 +922,7 @@ async def nudge(token: str, request: Request):
         )
 
     others = [m for m in chat["members"] if m != user]
-    url = f"/family?chat={token}"
+    target = notify.link("chat", chat=token, private=1)
     sent = await notify.send_many(
         others,
         lambda person: notify.notice(
@@ -930,8 +930,8 @@ async def nudge(token: str, request: Request):
             # heartbeat vibration (Android channel "Nudges"), and an open
             # Jarvis shows it full screen, so it does not pass as one more message.
             person, "nudge", "Private chat", f"{_display(me)} nudged you in your private chat",
-            url=url, priority=4, tag=f"private-nudge:{token}", kind="nudge",
-            actions=[notify.view_action(url)],
+            link=target, priority=4, tag=f"private-nudge:{token}", kind="nudge",
+            actions=[notify.view_action(target)],
             data={"token": token, "private": True, "nudge": True},
         ),
     )
@@ -1020,13 +1020,13 @@ async def change_password(token: str, request: Request):
 
     me = people.get(user) or {"username": user}
     others = [m for m in chat["members"] if m != user]
-    url = f"/family?chat={token}"
+    target = notify.link("chat", chat=token, private=1)
     sent = await notify.send_many(
         others,
         lambda person: notify.notice(
             person, "chat", "Private chat", f"{_display(me)} changed the private chat password",
-            url=url, priority=4, tag=f"private-password:{token}",
-            actions=[notify.view_action(url)],
+            link=target, priority=4, tag=f"private-password:{token}",
+            actions=[notify.view_action(target)],
             data={"token": token, "private": True, "password_changed": True},
         ),
     )

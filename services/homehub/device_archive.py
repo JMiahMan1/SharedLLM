@@ -640,7 +640,8 @@ class DeviceArchive:
         from services.common import notify
 
         digest = hashlib.sha256(",".join(sorted(i["id"] for i in items)).encode()).hexdigest()[:16]
-        payload = notify.notice("@admins", "admin", title, body, url="/devices#devices-archived", priority=3,
+        payload = notify.notice("@admins", "admin", title, body,
+                                link=notify.link("devices", hash="devices-archived"), priority=3,
                                 tag=f"admin:{key}", once=f"homehub:{key}:{digest}", kind="admin",
                                 audience="parents")
         try:

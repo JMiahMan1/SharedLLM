@@ -282,7 +282,7 @@ function LockScreen({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-6" data-testid="private-lock">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-6" data-testid="private-lock" data-deep-link-wait="">
       <form onSubmit={(event) => void submit(event)} className="w-full max-w-sm rounded-3xl border border-rose-300/15 bg-gradient-to-b from-rose-500/10 to-purple-500/5 p-5 text-center">
         <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-rose-500/15 text-rose-200">
           <Lock size={24} aria-hidden />
@@ -1016,6 +1016,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
               <div className={`mb-2 flex flex-col ${own ? 'items-end' : 'items-start'}`}>
                 <div
                   data-message-id={messageId ?? undefined}
+                  data-focus-id={messageId != null ? `msg-${messageId}` : undefined}
                   role={selectable ? 'button' : undefined}
                   tabIndex={selectable ? 0 : undefined}
                   aria-haspopup={selectable ? 'dialog' : undefined}

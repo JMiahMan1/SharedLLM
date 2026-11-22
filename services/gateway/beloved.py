@@ -253,15 +253,16 @@ async def _tell_spouse(token: str, chat: dict[str, Any], user: str, people: dict
         return False
     spouse = [m for m in chat["members"] if m != user]
     body = template.format(name=private_chat._display(people.get(user) or {"username": user}))
-    url = f"/family?chat={token}&beloved=1"
+    # Beloved opens only for the couple: the app checks it again on arrival.
+    target = notify.link("chat", chat=token, beloved=1)
     sent = await notify.send_many(
         spouse,
         lambda person: notify.notice(
             # The private chat's own gentle category: a heartbeat on the phone and, with
             # Jarvis open, the heart over the screen. No chat token, so no unread count.
             person, "nudge", "Beloved", body,
-            url=url, priority=4, tag=f"beloved-{kind}:{token}", kind="nudge",
-            actions=[notify.view_action(url)],
+            link=target, priority=4, tag=f"beloved-{kind}:{token}", kind="nudge",
+            actions=[notify.view_action(target)],
             data={"beloved": True, "private": True},
         ),
     )

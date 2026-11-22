@@ -89,8 +89,8 @@ def test_asking_for_time_tells_the_parents(wired):
         {"label": "Approve", "type": "callback", "callback": "more_time_decide", "params": {"id": 3, "grant": True}},
         {"label": "Disapprove", "type": "callback", "callback": "more_time_decide", "params": {"id": 3, "grant": False}},
     ]
-    # A tap on the notice itself opens the child's page, where it can be answered too.
-    assert sent[0]["data"]["url"] == "/family/member/kid"
+    # A tap on the notice itself opens the child's page at the request, where it can be answered too.
+    assert sent[0]["data"]["url"] == "/family/member/kid?focus=time-3"
 
 
 def test_a_refused_request_tells_nobody(wired):

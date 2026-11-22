@@ -317,13 +317,13 @@ async def _tell_partner(token: str, chat: dict[str, Any], user: str, people: dic
         return False
     others = [m for m in chat["members"] if m != user]
     me = people.get(user) or {"username": user}
-    url = f"/family?chat={token}"
+    target = notify.link("chat", chat=token, private=1)
     sent = await notify.send_many(
         others,
         lambda person: notify.notice(
             person, "chat", "Private chat", f"{private_chat._display(me)} reacted in your private chat",
-            url=url, priority=3, tag=f"private-reaction:{token}",
-            actions=[notify.view_action(url)],
+            link=target, priority=3, tag=f"private-reaction:{token}",
+            actions=[notify.view_action(target)],
             data={"token": token, "private": True, "reaction": True},
         ),
     )

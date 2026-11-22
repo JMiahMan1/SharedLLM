@@ -198,7 +198,7 @@ export default function IntegrationsPanel() {
         {shown.map((entry) => {
           const isOpen = open[entry.entry_id] || Boolean(filter.trim());
           return (
-            <li key={entry.entry_id} className="px-4 py-3" data-testid="integration">
+            <li key={entry.entry_id} className="px-4 py-3" data-testid="integration" data-focus-id={`entry-${entry.entry_id}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <button
                   type="button"

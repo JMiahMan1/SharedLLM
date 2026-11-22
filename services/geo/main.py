@@ -1243,9 +1243,12 @@ async def _fire_place_reminders(r, user: str, kind: str, zone: dict) -> None:
         # Place reminders belong to a note, so `url` normally points at that
         # note. The fallback used to be `/communication`, which redirects to
         # the Chat tab; the Notes list is where the reminder actually lives.
-        url = entry.get("url") or "/notes"
+        try:
+            url = notify.link_from_href(entry["url"]) if entry.get("url") else notify.link("notes")
+        except notify.LinkError:
+            url = notify.link("notes")  # a stored address no page reads any more
         await _send_notice(notify.notice(
-            user, "timers", title, body, url=url, kind="timer", priority=4,
+            user, "timers", title, body, link=url, kind="timer", priority=4,
             tag=f"place-reminder:{entry['id']}", once=f"place-reminder:{entry['id']}",
             data={"zone": zone["entity_id"], "event": kind, "place_reminder": entry["id"]},
             actions=[notify.view_action(url)],
@@ -1324,7 +1327,7 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
     # Parents configure arrival/departure alerts for places (School, Home, Activities) per child.
     notified_parents = set()
     data = {"person": person, "zone": zone["entity_id"], "event": kind}
-    url = f"/wander?person={person}"
+    url = notify.link("wander", person=person)
     if child_info:
         alerts = child_info.get("geofence_alerts") or {}
         zone_alert = alerts.get(zone["entity_id"]) or {}
@@ -1337,7 +1340,7 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
                     continue
                 notified_parents.add(parent)
                 await _send_notice(notify.notice(
-                    parent, "family_safety", geo_title, body, url=url, priority=4, data={**data, "geofence": True},
+                    parent, "family_safety", geo_title, body, link=url, priority=4, data={**data, "geofence": True},
                     tag=f"geofence:{person}:{zone['entity_id']}", actions=[notify.view_action(url, "Map")]
                 ))
 
@@ -1355,11 +1358,11 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
             continue
         if place.get("important") and (not chosen or viewer in chosen):
             await _send_notice(notify.notice(
-                viewer, "family_safety", title, body, url=url, priority=4, data=data,
+                viewer, "family_safety", title, body, link=url, priority=4, data=data,
                 tag=f"place:{person}", actions=[notify.view_action(url, "Map")]))
         else:
             await _send_notice(notify.notice(
-                viewer, "family_presence", title, body, url=url, data=data,
+                viewer, "family_presence", title, body, link=url, data=data,
                 tag=f"presence:{person}", actions=[notify.view_action(url, "Map")]))
 
 
@@ -1510,8 +1513,8 @@ async def _store_fused_day(r, clean_id: str, day: str) -> int:
         if total >= goal and await r.set(key, "1", ex=2 * 86400, nx=True):
             title, body = health_notices.goal_text(total, goal)
             await _send_notice(notify.notice(
-                clean_id, "health", title, body, url="/fitness", tag=f"steps:{day}",
-                once=f"step_goal:{day}", actions=[notify.view_action("/fitness")]))
+                clean_id, "health", title, body, link=notify.link("health", tab="fitness"), tag=f"steps:{day}",
+                once=f"step_goal:{day}", actions=[notify.view_action(notify.link("health", tab="fitness"))]))
     return total
 
 
@@ -1539,8 +1542,8 @@ async def _sweep_weekly_summaries(r, now: float | None = None) -> int:
             continue
         title, body = health_notices.weekly_text(this_week, last_week, days)
         await _send_notice(notify.notice(
-            user, "health", title, body, url="/fitness", tag="steps:week", once=f"step_week:{week}",
-            actions=[notify.view_action("/fitness")]))
+            user, "health", title, body, link=notify.link("health", tab="fitness"), tag="steps:week",
+            once=f"step_week:{week}", actions=[notify.view_action(notify.link("health", tab="fitness"))]))
         sent += 1
     return sent
 
@@ -3341,14 +3344,14 @@ async def _sweep_long_stops(r, now: float | None = None) -> int:
         hours = (now - float(stop["since"])) / 3600
         title = f"{person.title()} has been stopped for {hours:.0f} h"
         body = f"At {place}, which is not a saved place."
-        url = f"/wander?person={person}"
+        url = notify.link("wander", person=person)
         # A long stop is for the grown-ups: children and teens are not told.
         minors = set(await _guardian_children_cached())
         for viewer in await _alert_recipients(r):
             if viewer == person or viewer in minors or not await _viewer_may_see(viewer, person):
                 continue
             await _send_notice(notify.notice(
-                viewer, "family_safety", title, body, url=url, priority=4,
+                viewer, "family_safety", title, body, link=url, priority=4,
                 tag=f"stop:{person}", once=f"stop:{person}:{int(stop['since'])}",
                 data={"person": person, "lat": stop["lat"], "lon": stop["lon"], "since": stop["since"]},
                 actions=[notify.view_action(url, "Map")]))

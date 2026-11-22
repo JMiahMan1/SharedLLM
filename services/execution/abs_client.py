@@ -5,6 +5,7 @@ Handles authentication, library search, playback progress, and streaming.
 """
 import base64
 import json
+import json as _json  # abs_patch's ``json`` parameter shadows the module there
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -145,6 +146,26 @@ async def abs_get(
             return {"error": _unreachable(e)}
 
 
+async def _write_reply(resp: aiohttp.ClientResponse) -> dict:
+    """The body of a successful ABS write, which is not always JSON.
+
+    ABS answers several writes with a bare ``OK`` (text/plain,
+    ``res.sendStatus(200)``): ``PATCH /api/me/progress/:id``,
+    ``POST /api/session/:id/sync`` and ``/close``. Insisting on JSON turned
+    every saved position into a logged and reported failure (live,
+    2026-11-21: "Attempt to decode JSON with unexpected mimetype: text/plain").
+    The status already said it worked; a non-JSON body is a success.
+    """
+    body = await resp.text()
+    if not body.strip():
+        return {}
+    try:
+        data = _json.loads(body)
+    except ValueError:
+        return {"ok": True, "body": body.strip()[:200]}
+    return data if isinstance(data, dict) else {"ok": True, "result": data}
+
+
 async def abs_post(
     abs_url: str, abs_api_key: str, path: str, json: dict | None = None
 ) -> dict:
@@ -155,8 +176,7 @@ async def abs_post(
         try:
             async with client.post(url, headers=headers, json=json, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
-                data = await resp.json()
-                return data
+                return await _write_reply(resp)
         except aiohttp.ClientResponseError as e:
             log.error(f"[abs_client] HTTP error on POST {path}: {e}")
             return {"error": f"ABS returned {e.status}: {e.message}"}
@@ -175,8 +195,7 @@ async def abs_patch(
         try:
             async with client.patch(url, headers=headers, json=json, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
-                data = await resp.json()
-                return data
+                return await _write_reply(resp)
         except aiohttp.ClientResponseError as e:
             log.error(f"[abs_client] HTTP error on PATCH {path}: {e}")
             return {"error": f"ABS returned {e.status}: {e.message}"}
@@ -367,10 +386,16 @@ async def update_progress(
 
     ABS exposes per-episode progress at ``/api/me/progress/{item}/{episode}``;
     without ``episode_id`` the book-level route is used (docs/MEDIA_UPSTREAM_API_NOTES.md).
+
+    ABS's field is ``isFinished`` (its MediaProgress model and every progress
+    record it returns); the ``isComplete`` this used to send was ignored, so
+    "Mark finished" left the book in progress. ``progress`` is sent too, so the
+    percentage ABS shows and sorts by matches the position just saved.
     """
     path = f"/api/me/progress/{item_id}"
     if episode_id:
         path = f"{path}/{episode_id}"
+    fraction = 1.0 if is_complete else (max(0.0, min(1.0, current_time / duration)) if duration else 0.0)
     return await abs_patch(
         abs_url,
         abs_api_key,
@@ -378,7 +403,8 @@ async def update_progress(
         json={
             "currentTime": current_time,
             "duration": duration,
-            "isComplete": is_complete,
+            "progress": fraction,
+            "isFinished": is_complete,
         },
     )
 
@@ -485,7 +511,7 @@ async def batch_update_progress(
     abs_url: str, abs_api_key: str, progress_updates: list[dict]
 ) -> dict:
     """Batch update progress for multiple items.
-    Each update: {"libraryItemId": str, "currentTime": float, "duration": float, "isComplete": bool}
+    Each update: {"libraryItemId": str, "currentTime": float, "duration": float, "isFinished": bool}
     """
     return await abs_patch(
         abs_url, abs_api_key, "/api/me/progress/batch/update",

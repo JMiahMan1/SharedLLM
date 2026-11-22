@@ -118,7 +118,8 @@ async def remind_missed_updates(rc, session, deliver: Deliver, children: dict[st
                     "body": body,
                     "tag": f"app_update:{user}",
                     "audience": "parents",
-                    "data": {"url": "/settings"},
+                    # Settings, at the app-update controls.
+                    "data": {"link": notify.link("settings", focus="section-device")},
                 })
                 sent += 1
             except Exception as exc:

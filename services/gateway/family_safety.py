@@ -150,11 +150,11 @@ async def on_my_way(request: Request):
                                      "Your family was already told you are on the way.")
     eta = await _get_json(f"{GEO_SVC}/people/{user}/eta", to="home", viewer=user)
     title, body = on_my_way_text(user.title(), eta)
-    url = f"/wander?person={user}"
+    url = notify.link("wander", person=user)
     sent = await notify.send_many(
         [u for u in await notify.family() if u != user],
         lambda viewer: notify.notice(
-            viewer, "family_safety", title, body, url=url, priority=3, tag=f"on_my_way:{user}",
+            viewer, "family_safety", title, body, link=url, priority=3, tag=f"on_my_way:{user}",
             data={"person": user, "eta": (eta or {}).get("eta")}, actions=[notify.view_action(url, "Map")]),
     )
     if not sent:
@@ -201,7 +201,7 @@ async def sos(request: Request):
     # the SOS is sent); the last stored fix only when it could not.
     location = fresh_position(body, now) or await _get_json(f"{IDENTITY_SVC}/api/users/{user}/location")
     title, text, link = sos_text(user.title(), location, now)
-    url = f"/wander?person={user}"
+    url = notify.link("wander", person=user)
     actions = [notify.view_action(url, "Map")]
     if link:
         actions.append(notify.view_action(link, "Directions"))
@@ -209,7 +209,7 @@ async def sos(request: Request):
     sent = await notify.send_many(
         family,
         lambda viewer: notify.notice(
-            viewer, "family_safety", title, text, url=url, priority=5, tag=f"sos:{user}",
+            viewer, "family_safety", title, text, link=url, priority=5, tag=f"sos:{user}",
             once=f"sos:{user}:{int(now)}", data={"person": user, "sos": True, "map": link}, actions=actions),
     )
     log.warning(f"[family-safety] SOS from {user}: {sent} of {len(family)} notices accepted")
@@ -341,7 +341,7 @@ async def crash(request: Request):
     auto = body.get("auto") is not False
     device = await _device(user)
     title, text, link = crash_text(user.title(), auto, speed, location, now, device)
-    url = f"/wander?person={user}"
+    url = notify.link("wander", person=user)
     actions = [notify.view_action(url, "Map")]
     if link:
         actions.append(notify.view_action(link, "Directions"))
@@ -349,7 +349,7 @@ async def crash(request: Request):
     sent = await notify.send_many(
         family,
         lambda viewer: notify.notice(
-            viewer, "family_safety", title, text, url=url, priority=5, tag=f"crash:{user}",
+            viewer, "family_safety", title, text, link=url, priority=5, tag=f"crash:{user}",
             once=f"crash:{user}:{int(now)}", data={"person": user, "crash": True, "auto": auto, "map": link},
             actions=actions),
     )
@@ -390,12 +390,12 @@ async def check_in(request: Request):
     lat, lon = position["latitude"], position["longitude"]
     named = await _get_json(f"{GEO_SVC}/place-name", lat=lat, lon=lon) or {}
     title, text = check_in_text(user.title(), named.get("name"))
-    url = f"/wander?person={user}"
+    url = notify.link("wander", person=user)
     link = f"https://www.openstreetmap.org/?mlat={lat:.5f}&mlon={lon:.5f}#map=17/{lat:.5f}/{lon:.5f}"
     sent = await notify.send_many(
         [u for u in await notify.family() if u != user],
         lambda viewer: notify.notice(
-            viewer, "family_presence", title, text, url=url, priority=3, tag=f"check_in:{user}",
+            viewer, "family_presence", title, text, link=url, priority=3, tag=f"check_in:{user}",
             data={"person": user, "lat": lat, "lon": lon, "place": named.get("name")},
             actions=[notify.view_action(url, "Map"), notify.view_action(link, "Directions")]),
     )

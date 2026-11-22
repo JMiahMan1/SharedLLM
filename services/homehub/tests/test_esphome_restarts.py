@@ -295,7 +295,8 @@ async def test_repeated_restarts_send_one_admin_notice(env):
         await asyncio.sleep(0)
     assert len(env.notices) == 1
     notice = env.notices[0]
-    assert notice["user"] == "@admins" and notice["audience"] == "parents" and notice["data"]["url"] == "/devices"
+    assert notice["user"] == "@admins" and notice["audience"] == "parents"
+    assert notice["data"]["link"]["hash"] == "setup" and notice["data"]["link"]["focus"].startswith("entry-")
     assert "went offline 3 times" in notice["body"] and "Restarts" in notice["body"]
     assert drv.restarts.counts(3600)["unknown"] == 5
     await drv.async_unload()

@@ -2,11 +2,13 @@ import { useParams } from 'react-router-dom';
 import { CheckCircle2, Gauge, Play, RotateCcw, RotateCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { isAxiosError } from 'axios';
+import { errorText } from '../../../lib/errorText';
 import { postAbsProgress } from '../api/client';
 import { useBooksInProgress, useMediaItem } from '../api/queries';
 import { formatDuration, formatTimeLeft } from '../format';
 import { useLivePosition } from '../engine/useLivePosition';
 import { useMediaStore } from '../store/mediaStore';
+import { outputKind } from '../types';
 import { Artwork } from '../components/Artwork';
 import BackToLibrary from '../components/BackToLibrary';
 import { EmptyState, ErrorRetry, RowSkeletons } from '../components/StateViews';
@@ -50,17 +52,26 @@ export default function BookPage() {
         <BackToLibrary to="/media/library/audiobooks" label="Audiobooks" />
         {notFound
           ? <EmptyState title="This book isn’t in your library" action={{ label: 'Go to your library', to: '/media/library/audiobooks' }} />
-          : <ErrorRetry title="Couldn’t load this book" detail="Your audiobook server did not answer." onRetry={() => void q.refetch()} />}
+          : <ErrorRetry title="Couldn’t load this book" detail={isAxiosError(q.error) && q.error.response ? errorText(q.error, 'Your audiobook server did not answer.') : 'Your audiobook server did not answer.'} onRetry={() => void q.refetch()} />}
       </div>
     );
   }
 
   const book = q.data;
   const duration = book.duration ?? 0;
+  // The listener's own progress comes with the book (their ABS account), and
+  // null there means they have not started it. The in-progress shelf is only a
+  // fallback for a gateway that does not send it yet.
+  const own = book.progress !== undefined;
   const inProgress = books.data?.books.find((b) => b.id === id);
   const raw = Number(inProgress?.progress ?? 0);
-  const progress = inProgress?.is_complete ? 1 : raw > 1 ? raw / 100 : raw;
-  const req = { kind: 'abs' as const, id, title: book.name, durationSec: duration || null };
+  const progress = own
+    ? book.progress ?? 0
+    : inProgress?.is_complete ? 1 : raw > 1 ? raw / 100 : raw;
+  const resumeSec = own
+    ? (book.is_finished ? 0 : book.resume_position ?? 0)
+    : (progress > 0 && progress < 1 ? progress * duration : 0);
+  const req = { kind: 'abs' as const, id, title: book.name, durationSec: duration || null, resumeSec };
   const busyKey = `play:${book.uri}`;
   // Is this book what the selected output is playing right now?
   const current = session?.itemId === id && session.outputId === target;
@@ -74,9 +85,14 @@ export default function BookPage() {
   }, 0);
 
   const playFrom = async (seconds: number) => {
-    // `play` swallows a failure into the error state; only seek when it
-    // actually started, so a failed chapter does not jump whatever else is on.
-    if (!current && !(await playback.play(req, busyKey))) return;
+    // A book that is not on yet starts right at the chapter: on this device and
+    // Music Assistant players `play` seeks to `resumeSec`; a Home Assistant
+    // speaker resumes its ABS session, so it is moved afterwards. `play`
+    // swallows a failure, so a failed chapter does not jump whatever else is on.
+    if (!current) {
+      if (!(await playback.play({ ...req, resumeSec: seconds }, busyKey))) return;
+      if (outputKind(target ?? '') !== 'ha') return;
+    }
     await playback.seek(seconds);
   };
   const markFinished = async () => {

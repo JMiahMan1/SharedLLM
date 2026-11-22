@@ -878,7 +878,8 @@ class DiscoveryManager:
                 "@admins", "admin", f"New device found: {p['name']}",
                 f"A {p['label']} device{where} is on the network and not set up yet.{note} "
                 f"{action} on the Devices page.",
-                url="/devices", priority=2, tag=f"admin:new-device:{p['id']}", once=f"homehub:new-device:{p['id']}",
+                link=notify.link("devices", hash="add", focus=f"discovery-{p['id']}"), priority=2,
+                tag=f"admin:new-device:{p['id']}", once=f"homehub:new-device:{p['id']}",
                 kind="admin", audience="parents")
 
         if len(fresh) > NOTIFY_SUMMARY_OVER:
@@ -887,7 +888,7 @@ class DiscoveryManager:
             payloads = [notify.notice(
                 "@admins", "admin", f"{len(fresh)} new devices found",
                 f"Not set up yet: {names}{more}. Add or ignore them on the Devices page.",
-                url="/devices", priority=2, tag="admin:new-devices",
+                link=notify.link("devices", hash="add"), priority=2, tag="admin:new-devices",
                 once="homehub:new-devices:" + ",".join(sorted(p["id"] for p in fresh))[:150],
                 kind="admin", audience="parents")]
         else:
@@ -935,7 +936,8 @@ class DiscoveryManager:
             "@admins", "admin", f"{move.title} has a new address",
             f"The router gave {move.title} a new address ({move.old_ip} to {move.new_ip}). "
             "Jarvis followed it by its hardware address; nothing needs doing.",
-            url="/devices", priority=3, tag=f"admin:device-followed:{move.entry_id}",
+            link=notify.link("devices", hash="setup", focus=f"entry-{move.entry_id}"), priority=3,
+            tag=f"admin:device-followed:{move.entry_id}",
             once=f"homehub:followed:{move.entry_id}:{move.new_ip}", kind="admin", audience="parents")
         with contextlib.suppress(Exception):
             await self.notifier(payload)
@@ -951,7 +953,8 @@ class DiscoveryManager:
                 "@admins", "admin", f"{m['entry_title']} has a new address",
                 f"{m['entry_title']} ({p['label']}) now answers at {m['new_host']} instead of {m['old_host']}. "
                 "Update it on the Devices page so the hub can reach it.",
-                url="/devices", priority=2, tag=f"admin:device-moved:{p['id']}", once=f"homehub:{key}",
+                link=notify.link("devices", hash="add", focus=f"discovery-{p['id']}"), priority=2,
+                tag=f"admin:device-moved:{p['id']}", once=f"homehub:{key}",
                 kind="admin", audience="parents")
             sent = False
             with contextlib.suppress(Exception):

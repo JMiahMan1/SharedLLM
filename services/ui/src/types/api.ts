@@ -3185,8 +3185,8 @@ export interface TelemetryNotification {
   error?: string;
   created_at: string;
   read: boolean;
-  /** Where a tap goes (`data.url`, an in-app path), as on the phone. */
-  data?: { url?: string } & Record<string, unknown>;
+  /** Where a tap goes: `data.link` (lib/noticeLink.ts), else `data.url`, an in-app path, as on the phone. */
+  data?: { url?: string; link?: import('../lib/noticeLink').NoticeLink } & Record<string, unknown>;
   /** The notice's buttons (docs/PUSH.md), at most three. */
   actions?: NoticeAction[];
 }

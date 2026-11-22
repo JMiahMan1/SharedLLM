@@ -57,6 +57,14 @@ internal sealed class TrayContext : ApplicationContext
         };
         // One click shows today's time: used, left, and a way to ask for more.
         _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowPanel(null, null); };
+        // A click on a notice goes where it is about: the time warning opens the
+        // time panel (time left, Ask for more time); a problem notice has nowhere
+        // better to go than the About box that names the hub and the account.
+        _icon.BalloonTipClicked += (_, _) =>
+        {
+            if (_balloonTarget == BalloonTarget.TimePanel) ShowPanel(null, null);
+            else if (_balloonTarget == BalloonTarget.About) ShowAbout();
+        };
 
         _refresh.Tick += (_, _) => Refresh();
         _refresh.Start();
@@ -88,6 +96,7 @@ internal sealed class TrayContext : ApplicationContext
                 if (error != _lastReportError)
                 {
                     _lastReportError = error;
+                    _balloonTarget = BalloonTarget.About;
                     _icon.ShowBalloonTip(10_000, "Jarvis Guard", error, ToolTipIcon.Warning);
                 }
             }
@@ -97,6 +106,10 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     private string? _lastReportError;
+
+    /// <summary>Where a click on the last notice shown goes.</summary>
+    private enum BalloonTarget { None, TimePanel, About }
+    private BalloonTarget _balloonTarget = BalloonTarget.None;
 
     /// <summary>The time panel (or, with a title, the 10/5-minute warning), one at a time.</summary>
     private void ShowPanel(string? warningTitle, string? warningText)
@@ -121,7 +134,11 @@ internal sealed class TrayContext : ApplicationContext
         var w = _warnings.Next(DateTimeOffset.Now, at, state.NextLockReason);
         if (w is null) return;
         if (w.Dialog) ShowPanel(w.Title, w.Text);
-        else _icon.ShowBalloonTip(10_000, w.Title, w.Text, ToolTipIcon.Warning);
+        else
+        {
+            _balloonTarget = BalloonTarget.TimePanel;
+            _icon.ShowBalloonTip(10_000, w.Title, w.Text, ToolTipIcon.Warning);
+        }
     }
 
     private void Refresh()

@@ -154,3 +154,52 @@ async def test_abs_routes_match_real_api(upstream, coro, method, expected):
     result = await coro()
     assert "error" not in result, f"ABS call failed: {result}"
     await _assert_call(upstream, method, ABS + expected)
+
+
+def _patch_body(upstream) -> dict:
+    [call] = [c for (method, _url), calls in upstream.requests.items() if method == "PATCH" for c in calls]
+    return call.kwargs["json"]
+
+
+async def test_progress_uses_abs_field_names(upstream):
+    """ABS reads ``isFinished`` (MediaProgress); an ``isComplete`` key is ignored."""
+    await abs_client.update_progress(ABS, KEY, "book1", 25.0, 100.0)
+    assert _patch_body(upstream) == {"currentTime": 25.0, "duration": 100.0, "progress": 0.25, "isFinished": False}
+
+
+async def test_a_plain_ok_answer_is_a_saved_position():
+    """ABS answers a progress PATCH with a bare text/plain "OK"; that is success."""
+    with aioresponses() as mock:
+        mock.patch(re.compile(re.escape(ABS) + r".*"), body="OK", content_type="text/plain")
+        result = await abs_client.update_progress(ABS, KEY, "book1", 25.0, 100.0)
+    assert "error" not in result
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: abs_client.sync_session_position(ABS, KEY, "s1", 1.0, 2.0, 3.0),
+        lambda: abs_client.close_session(ABS, KEY, "s1"),
+    ],
+    ids=["session-sync", "session-close"],
+)
+async def test_session_writes_answered_with_plain_ok_are_success(call):
+    with aioresponses() as mock:
+        mock.post(re.compile(re.escape(ABS) + r".*"), body="OK", content_type="text/plain")
+        result = await call()
+    assert "error" not in result
+
+
+async def test_a_failed_write_is_still_an_error():
+    with aioresponses() as mock:
+        mock.patch(re.compile(re.escape(ABS) + r".*"), status=500, body="boom", content_type="text/plain")
+        result = await abs_client.update_progress(ABS, KEY, "book1", 25.0, 100.0)
+    assert "error" in result
+
+
+async def test_marking_finished_really_finishes(upstream):
+    await abs_client.update_progress(ABS, KEY, "book1", 100.0, 100.0, is_complete=True)
+    body = _patch_body(upstream)
+    assert body["isFinished"] is True
+    assert body["progress"] == 1.0
+    assert "isComplete" not in body

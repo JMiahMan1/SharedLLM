@@ -160,7 +160,7 @@ def test_update_push_notices_the_owner_without_a_parents_only_audience(world):
     note = state["notices"][0]
     assert note["user"] == "kid" and note["category"] == "app_updates"
     assert "audience" not in note  # reaches the device owner, a minor included
-    assert note["actions"] == [{"label": "Update now", "type": "view", "url": "/settings"}]
+    assert note["actions"] == [{"label": "Update now", "type": "view", "url": "/settings?focus=section-device"}]
 
 
 def test_update_push_queues_a_notice_for_the_named_device_not_the_person(world):
@@ -181,8 +181,8 @@ def test_update_push_queues_a_notice_for_the_named_device_not_the_person(world):
     assert note["owner"] == "kid"
     assert note["title"] == "Jarvis app 2.0.0 is available"
     assert note["body"].startswith("Update now:")
-    assert note["url"] == "/settings" and note["tag"] == "mdm_app_update"
-    assert note["actions"] == [{"label": "Update now", "type": "view", "url": "/settings"}]
+    assert note["url"] == "/settings?focus=section-device" and note["tag"] == "mdm_app_update"
+    assert note["actions"] == [{"label": "Update now", "type": "view", "url": "/settings?focus=section-device"}]
     assert mdm.notices_for("kid-tab-0002") == []  # only the named phone
 
 

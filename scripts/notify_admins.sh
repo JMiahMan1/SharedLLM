@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # notify_admins.sh
-# Usage: scripts/notify_admins.sh "<title>" "<body>" [priority 1-5] [tag]
+# Usage: scripts/notify_admins.sh "<title>" "<body>" [priority 1-5] [tag] [page]
 #
 # Sends one admin notice (category "admin") to every admin's phone, through
 # telemetry (docs/PUSH.md). Run it on the server, from any directory: a cron
@@ -10,12 +10,14 @@
 # INTERNAL_SECRET in its environment (compose passes it from the server's
 # .env), so the secret never appears on a command line, in a log or here.
 # Priority defaults to 3; the tag (default "admin:script") lets a later notice
-# replace an earlier one on the phone. Exits non-zero if telemetry refused it.
+# replace an earlier one on the phone. The page (default "/admin/services") is
+# where a tap opens: an in-app address of docs/PUSH.md "Deep links"; telemetry
+# refuses one no page reads. Exits non-zero if telemetry refused it.
 
 set -euo pipefail
 
 if [ $# -lt 2 ] || [ -z "$1" ]; then
-    echo "Usage: $0 \"<title>\" \"<body>\" [priority 1-5] [tag]" >&2
+    echo "Usage: $0 \"<title>\" \"<body>\" [priority 1-5] [tag] [page]" >&2
     exit 2
 fi
 
@@ -31,8 +33,8 @@ import os
 import sys
 import urllib.request
 
-args = sys.argv[1:] + ["", ""]
-title, body, priority, tag = args[0], args[1], args[2], args[3]
+args = sys.argv[1:] + ["", "", ""]
+title, body, priority, tag, page = args[0], args[1], args[2], args[3], args[4]
 notice = {
     "user": "@admins",
     "category": "admin",
@@ -41,7 +43,7 @@ notice = {
     "body": body,
     "priority": int(priority) if priority.isdigit() else 3,
     "tag": tag or "admin:script",
-    "data": {"url": "/"},
+    "data": {"url": page or "/admin/services"},
 }
 request = urllib.request.Request(
     f"http://localhost:{os.environ.get('TELEMETRY_PORT', '11438')}/api/telemetry/notify",

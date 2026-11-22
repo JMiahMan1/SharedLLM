@@ -932,18 +932,20 @@ async def mdm_push_app_update(request: Request):
         available.append("a new app build to install")
     text = "Update now: " + " and ".join(available) + "."
     title = f"Jarvis app {label} is available"
-    actions = [_notify.view_action("/settings", "Update now")]
+    # Settings, at the app-update controls.
+    update_link = _notify.link("settings", focus="section-device")
+    actions = [_notify.view_action(update_link, "Update now")]
     sent = 0
     for owner in people:
         payload = _notify.notice(
             owner, "app_updates", title, text,
-            url="/settings", tag="mdm_app_update", actions=actions,
+            link=update_link, tag="mdm_app_update", actions=actions,
         )
         sent += int(await _notify.send(payload))
     for device in devices:
         queue_notice(
             device["device_key"], device["owner"], title, text,
-            url="/settings", tag="mdm_app_update", actions=actions,
+            url=update_link["href"], tag="mdm_app_update", actions=actions,
         )
     queued = len(devices)
     record_audit("app_update_push", actor, detail={
@@ -1019,8 +1021,8 @@ async def mdm_push_shared_files(request: Request):
         payload = _notify.notice(
             user, "family_safety", f"{label} folder updated",
             f"{len(files)} file(s) are ready in your shared {label} folder.",
-            url="/devices", tag=f"mdm_files:{folder}",
-            actions=[_notify.view_action("/devices", f"Open {label}")],
+            link=_notify.link("devices", hash="family"), tag=f"mdm_files:{folder}",
+            actions=[_notify.view_action(_notify.link("devices", hash="family"), f"Open {label}")],
         )
         sent += int(await _notify.send(payload))
     record_audit("folder_push", actor, target=folder,
