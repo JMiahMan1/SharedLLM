@@ -3,6 +3,7 @@
 Microservice 1: Identity & Profile Service
 Manages user profiles, device assignments, and secure credential resolution.
 """
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -48,7 +49,7 @@ from services.config import (
     IDENTITY_DATABASE_URL,
     INTERNAL_SECRET,
 )
-from services.identity import abuse_ch, audit, battery_alerts, push, roles, voice
+from services.identity import abuse_ch, audit, battery_alerts, device_archive, push, roles, voice
 from services.identity import sign_in_reset
 from services.identity.crypto import decrypt, digest_candidates, digest_secret, encrypt
 from services.identity.models import (
@@ -284,6 +285,7 @@ def _ensure_schema_upgrades() -> None:
         # once at mint time and never stored.
         _add_column("device", "agent_key_hash", "ALTER TABLE device ADD COLUMN agent_key_hash VARCHAR NOT NULL DEFAULT ''")
         _add_column("device", "agent_key_created_at", "ALTER TABLE device ADD COLUMN agent_key_created_at VARCHAR")
+        _add_column("device", "archived_at", "ALTER TABLE device ADD COLUMN archived_at VARCHAR")
 
     if _table_exists("useravatarimage"):
         _add_column("useravatarimage", "original", "ALTER TABLE useravatarimage ADD COLUMN original BLOB")
@@ -724,7 +726,12 @@ async def lifespan(app: FastAPI):
             family_synced = roles.sync_family_role(session, existing) or family_synced
         if family_synced:
             session.commit()
-    yield
+    # Registered devices that stopped checking in are archived, and deleted a year later (device_archive.py).
+    archive_task = asyncio.create_task(device_archive.run(engine), name="device-archive")
+    try:
+        yield
+    finally:
+        archive_task.cancel()
 
 from services.common.logging_utils import redact_access_log  # noqa: E402
 
@@ -8776,7 +8783,7 @@ def _note_background_checkin(session: Session, person: str, device_name: str | N
     device = _uploading_device(mobiles, device_name)
     if device is None:
         return
-    device.last_seen_at = datetime.now().isoformat()  # the same clock as registration
+    device_archive.seen(session, device, datetime.now().isoformat())  # the same clock as registration
     session.add(device)
 
 
@@ -9068,6 +9075,7 @@ def _device_to_read(d: Device) -> DeviceRead:
         last_ip_address=d.last_ip_address,
         last_seen_at=d.last_seen_at,
         first_seen_at=d.first_seen_at,
+        archived_at=d.archived_at,
     )
 
 
@@ -9199,7 +9207,7 @@ def register_device(
     device.app_version = body.app_version or device.app_version
     device.app_build = body.app_build or device.app_build
     device.last_ip_address = _client_ip(request)
-    device.last_seen_at = now
+    device_archive.seen(session, device, now)  # a check-in; an archived device is back
     session.add(device)
     session.commit()
     session.refresh(device)
@@ -9274,17 +9282,87 @@ def device_manager(
     return {"can_manage": _is_device_admin(caller, session)}
 
 
+@app.get("/api/user-panel/devices/archive")
+def device_archive_list(
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Archived devices (device_archive.py) with the settings: device admins only."""
+    if not _is_device_admin(caller, session):
+        raise HTTPException(status_code=403, detail="Only a device admin can see archived devices")
+    return device_archive.listing(session)
+
+
+@app.get("/api/user-panel/devices/archive/preview")
+def device_archive_preview(
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Dry run: what the next daily pass would archive and delete. Changes nothing."""
+    if not _is_device_admin(caller, session):
+        raise HTTPException(status_code=403, detail="Only a device admin can see archived devices")
+    return device_archive.preview(session)
+
+
+@app.put("/api/user-panel/devices/archive/settings")
+def device_archive_settings(
+    body: dict,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    if not _is_device_admin(caller, session):
+        raise HTTPException(status_code=403, detail="Only a device admin can change this")
+    try:
+        return {"settings": device_archive.update_settings(session, body, actor=caller.username)}
+    except device_archive.ArchiveError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from None
+
+
+@app.post("/api/user-panel/devices/archive/{device_key}/restore")
+def device_archive_restore(
+    device_key: str,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    if not _is_device_admin(caller, session):
+        raise HTTPException(status_code=403, detail="Only a device admin can restore a device")
+    try:
+        device = device_archive.restore(session, device_key, actor=caller.username)
+    except device_archive.ArchiveError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from None
+    return {"status": "restored", "id": device.device_key}
+
+
+@app.delete("/api/user-panel/devices/archive/{device_key}")
+def device_archive_delete(
+    device_key: str,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Delete one archived device now (refused for a device that is not archived)."""
+    if not _is_device_admin(caller, session):
+        raise HTTPException(status_code=403, detail="Only a device admin can delete a device")
+    try:
+        return device_archive.delete_device(session, device_key, actor=caller.username, why="admin")
+    except device_archive.ArchiveError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from None
+
+
 @app.get("/api/user-panel/devices", response_model=list[DeviceRead])
 def list_user_panel_devices(
     session: Session = Depends(get_session),
     caller: User = Depends(require_api_key),
+    include_archived: bool = False,
 ):
     """Devices visible to the caller: their own, plus every device if admin.
 
     A non-admin sees only what they own, so the endpoint is safe to call from
-    the app itself and not just from an admin screen.
+    the app itself and not just from an admin screen. Archived devices
+    (device_archive.py) are left out unless ``include_archived``.
     """
     stmt = select(Device)
+    if not include_archived:
+        stmt = stmt.where(Device.archived_at.is_(None))  # type: ignore[union-attr]
     if not _is_device_admin(caller, session):
         stmt = stmt.where(Device.owner_username == caller.username)
     devices = session.exec(stmt).all()
@@ -9471,7 +9549,7 @@ def claim_device(
     if body.capabilities:
         device.capabilities = json.dumps(body.capabilities)
     device.last_ip_address = body.ip_address or device.last_ip_address
-    device.last_seen_at = now
+    device_archive.seen(session, device, now)  # a check-in; an archived device is back
     session.add(device)
     session.commit()
     session.refresh(device)
@@ -9603,7 +9681,7 @@ def ingest_telemetry(
                 usb if isinstance(usb, bool) else None,
             ))
 
-    device.last_seen_at = now
+    device_archive.seen(session, device, now)  # a check-in; an archived device is back
     device.last_ip_address = _client_ip(request)
     if body.app_version:
         device.app_version = body.app_version.strip()

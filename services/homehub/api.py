@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response, Streami
 
 from services.common.secrets import secret_matches
 from services.homehub import (  # HA companion apps: login, webhooks, pushes
+    archive_api,  # /hub/archive: devices archived after going without contact
     automation_api,  # automation editor, scheduler, thermostat schedules
     bluetooth_api,  # /hub/bluetooth: scanners, devices heard, the room map
     camera_recording,
@@ -846,6 +847,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(users_api.build_router(runtime, auth))  # hub users and login providers (admins)
     app.include_router(mobile_app_api.build_router(runtime, auth))
     app.include_router(prune_api.build_router(runtime, auth))  # /hub/prune/plan, /hub/prune/apply
+    app.include_router(archive_api.build_router(runtime, auth))  # archived devices (device_archive.py)
     app.include_router(service_logins_api.build_router(runtime, auth))  # service logins, Music Assistant link
     app.include_router(voice_api.build_router(runtime, auth))  # voice satellites (voice_pipeline.py)
     app.include_router(restarts_api.build_router(runtime, auth))  # ESPHome restarts (esphome_restarts.py)

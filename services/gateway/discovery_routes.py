@@ -230,6 +230,56 @@ async def unhide_duplicates(request: Request):
     return _answer(*await _hub("POST", "/hub/devices/duplicates/unhide", json=payload))
 
 
+# -- archived devices (homehub device_archive.py) ----------------------------------------------
+
+_ARCHIVE_KINDS = ("entry", "device")
+
+
+def _archive_target(body: dict[str, Any]) -> dict[str, str]:
+    kind, item_id = body.get("kind"), body.get("id")
+    if kind not in _ARCHIVE_KINDS or not isinstance(item_id, str) or not _REGISTRY_ID.match(item_id):
+        raise HTTPException(status_code=400, detail='Say what to act on: {"kind": "entry" or "device", "id"}')
+    return {"kind": kind, "id": item_id}
+
+
+@router.get("/archive")
+async def archived_devices(request: Request):
+    """Devices the hub archived after going without contact, with the settings and the audit trail."""
+    await _admin(request)
+    return _answer(*await _hub("GET", "/hub/archive"))
+
+
+@router.get("/archive/preview")
+async def archive_preview(request: Request):
+    """The dry run: what the hub would archive and delete next. Changes nothing."""
+    await _admin(request)
+    return _answer(*await _hub("GET", "/hub/archive/preview"))
+
+
+@router.put("/archive/settings")
+async def archive_settings(request: Request):
+    """``{"enabled"?, "archive_after_days"?, "delete_after_days"?}``."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("enabled", "archive_after_days", "delete_after_days") if k in body}
+    return _answer(*await _hub("PUT", "/hub/archive/settings", json=payload))
+
+
+@router.post("/archive/restore")
+async def archive_restore(request: Request):
+    """``{"kind", "id"}``: bring an archived device back as it was."""
+    await _admin(request)
+    return _answer(*await _hub("POST", "/hub/archive/restore", json=_archive_target(await _json(request))))
+
+
+@router.post("/archive/delete")
+async def archive_delete(request: Request):
+    """``{"kind", "id"}``: delete one archived device now, with its history and stored logins."""
+    await _admin(request)
+    return _answer(*await _hub("POST", "/hub/archive/delete", json=_archive_target(await _json(request)),
+                               timeout=_SCAN_TIMEOUT))
+
+
 #: Combining duplicates into one device with a main and a fallback (homehub duplicates.py): action -> fields.
 _COMBINE_FIELDS = {
     "combine": ("main", "fallback", "group", "main_domain", "fallback_domain"),

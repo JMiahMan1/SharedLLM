@@ -468,6 +468,8 @@ class Device(SQLModel, table=True):  # type: ignore
     last_ip_address: str | None = None
     last_seen_at: str | None = None
     first_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    #: When it was archived for not checking in (services/identity/device_archive.py); None while it is not.
+    archived_at: str | None = Field(default=None, index=True)
 
 
 class DeviceEvent(SQLModel, table=True):  # type: ignore

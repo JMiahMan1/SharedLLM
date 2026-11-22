@@ -285,9 +285,11 @@ def device_list(runtime: Any) -> dict[str, Any]:
     hub = runtime.hub
     areas = _area_names(hub)
     hosts = _finding_hosts(runtime)
+    # Archived devices (device_archive.py) are listed under Setup > Archived devices, not here.
     devices = [device_view(runtime, d, areas=areas, finding_hosts=hosts) for d in hub.devices.values()
-               if not any((e := hub.config_entries.get(x)) is not None and e.source == "ignore"
-                          for x in d.config_entries)]
+               if not hub.device_archived(d)
+               and not any((e := hub.config_entries.get(x)) is not None and e.source == "ignore"
+                           for x in d.config_entries)]
     for d in devices:
         dev = hub.devices[d["id"]]
         d["kind"] = device_kind(hub, d["id"], d["domain"])
@@ -342,8 +344,12 @@ def integrations(runtime: Any) -> dict[str, Any]:
 
     hub = runtime.hub
     by_domain: dict[str, list[Any]] = {}
+    archived: dict[str, int] = {}
     for e in hub.config_entries.values():
-        if e.source != "ignore":
+        if e.archived_at:
+            # Not retried and not needing attention: counted, never part of the integration's status.
+            archived[e.domain] = archived.get(e.domain, 0) + 1
+        elif e.source != "ignore":
             by_domain.setdefault(e.domain, []).append(e)
     new_found: dict[str, int] = {}
     moved: dict[str, int] = {}
@@ -359,8 +365,9 @@ def integrations(runtime: Any) -> dict[str, Any]:
     for domain in sorted(set(by_domain) | set(DRIVERS)):
         ents_ = by_domain.get(domain, [])
         ids = {e.entry_id for e in ents_}
-        devices = [d for d in hub.devices.values() if ids & set(d.config_entries)]
-        enabled = [x for x in hub.entities.values() if x.config_entry_id in ids and not x.disabled_by]
+        devices = [d for d in hub.devices.values() if ids & set(d.config_entries) and not hub.device_archived(d)]
+        enabled = [x for x in hub.entities.values() if x.config_entry_id in ids and not x.disabled_by
+                   and hub.archived_reason(x.entity_id) is None]
         unavailable = sum(1 for x in enabled if (s := hub.states.get(x.entity_id)) is None or s.state == UNAVAILABLE)
         live = [e for e in ents_ if not e.disabled_by]
         worst = max((e.state for e in live), key=lambda s: _STATE_RANK.get(s, 1), default=None)
@@ -375,6 +382,7 @@ def integrations(runtime: Any) -> dict[str, Any]:
             "discovery": DISCOVERY_SOURCES.get(domain, []),
             "manual": domain in manual, "self_added": SELF_ADDED.get(domain),
             "syncs": domain in SYNCERS, "new_found": new_found.get(domain, 0), "moved": moved.get(domain, 0),
+            "archived": archived.get(domain, 0),
         })
     rank = {"setup_error": 0, "setup_retry": 1, "not_loaded": 2, "loaded": 3, "disabled": 4, "unsupported": 5,
             "not_set_up": 6}

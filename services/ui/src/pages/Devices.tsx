@@ -29,6 +29,7 @@ import { CardSkeletons } from '../components/ui/StateViews';
 import IntegrationsPanel from '../components/devices/IntegrationsPanel';
 import HardwarePanel from '../components/devices/HardwarePanel';
 import DuplicatesPanel from '../components/devices/DuplicatesPanel';
+import ArchivedDevicesPanel from '../components/devices/ArchivedDevicesPanel';
 import LightGroupsPanel from '../components/devices/LightGroupsPanel';
 import PhonesPanel from '../components/devices/PhonesPanel';
 import RoomMapPanel from '../components/devices/RoomMapPanel';
@@ -1438,7 +1439,7 @@ const DEVICE_TABS = [
   { id: 'devices', label: 'Your devices', anchors: ['devices-hardware', 'devices-light-groups', 'devices-duplicates'] },
   { id: 'add', label: 'Add devices', anchors: ['devices-new', 'add-fix'] },
   { id: 'places', label: 'Rooms & places', anchors: ['devices-areas', 'devices-labels', 'devices-zones'] },
-  { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-persons', 'devices-logins', 'devices-rooms'] },
+  { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-persons', 'devices-logins', 'devices-rooms', 'devices-archived'] },
   { id: 'family', label: 'Family', anchors: ['devices-family', 'devices-windows', 'devices-folders', 'devices-activity'] },
 ] as const;
 type DeviceTab = (typeof DEVICE_TABS)[number]['id'];
@@ -1634,6 +1635,7 @@ export default function Devices() {
           <div id="devices-persons" className="scroll-mt-4"><PersonsPanel /></div>
           <div id="devices-logins" className="scroll-mt-4"><LoginProvidersPanel /></div>
           <div id="devices-rooms" className="scroll-mt-4"><RoomMapPanel /></div>
+          <div id="devices-archived" className="scroll-mt-4"><ArchivedDevicesPanel /></div>
         </div>
       )}
 

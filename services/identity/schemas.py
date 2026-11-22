@@ -680,6 +680,8 @@ class DeviceRead(BaseModel):
     last_ip_address: str | None = None
     last_seen_at: str | None = None
     first_seen_at: str | None = None
+    #: When it was archived for not checking in (device_archive.py); None while it is not.
+    archived_at: str | None = None
     #: The device's latest battery report, when it sends them.
     battery: BatteryReading | None = None
 

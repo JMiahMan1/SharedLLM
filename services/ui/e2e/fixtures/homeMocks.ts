@@ -647,6 +647,13 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
       return json(detailFor(decodeURIComponent(p.split('/').pop() || ''), initialStates(), voices));
     }
     if (p === '/api/homehub/entries') return json(ENTRIES);
+    // Nothing archived here (e2e/home/devices-archive.spec.ts mocks some); Devices > Setup asks both sources.
+    if (p === '/api/homehub/archive') {
+      return json({ settings: { enabled: true, archive_after_days: 90, delete_after_days: 365 }, items: [], audit: [] });
+    }
+    if (p === '/api/user-panel/devices/archive') {
+      return json({ settings: { enabled: true, archive_after_days: 90, delete_after_days: 365 }, items: [] });
+    }
     if (p === '/api/homehub/esphome-builder') return json({ configured: false });
     if (p === '/api/homehub/flows') return json({ flows: FLOWS });
     if (p === '/api/homehub/phones') return json(PHONES);

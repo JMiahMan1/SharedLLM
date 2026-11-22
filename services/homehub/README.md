@@ -48,6 +48,7 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | `statistics.py`, `statistics_api.py`, `energy.py`, `dashboard_api.py` | HA's recorder statistics (5-minute and hourly, `statistics.db`), `recorder/*` and `energy/*` WS commands, the HA statistics importer (`POST /hub/statistics/import`), energy settings and the Rooms/Energy/Climate pages' data; see each module's docstring |
 | `mobile_app_webhook.py`, `mobile_app_api.py`, `ha_auth.py`, `ha_auth_api.py` | The HA companion apps: webhooks, registration, pushes, `/auth/*` login and token refresh. See `MOBILE_APP.md` |
 | `drivers/` | One module per HA integration; see `drivers/__init__.py` |
+| `device_archive.py`, `archive_api.py` | Last contact per entry and device; archiving devices gone quiet, restoring them, deleting them a year later (see Archived devices below) |
 
 ## Integrations
 
@@ -842,6 +843,31 @@ Combine). A person picks the **main**; the other copy is kept as its **fallback*
 
 The gateway passes them through at `/api/homehub/devices/duplicates/{combine,uncombine,swap,rule}`
 (`discovery_routes.py`, each action's own fields only).
+
+## Archived devices (`device_archive.py`, `archive_api.py`)
+
+A device unplugged for good used to stay set up forever: retried every minute, warned about, offered to voice.
+
+- **Last contact** per config entry and per device is kept in the store (kv `device_contact`): an entry that is
+  loaded with an entity a driver published a live value for since the start, a Matter node or Cast device by its own
+  entities, a phone by its own reports (`MobileAppDriver.last_contact`; Jarvis's location relay counts only for a
+  user's one phone). The first time, the restored states say when it was last heard; with no evidence the clock
+  starts at that moment.
+- **Archive** after `archive_after_days` (90) without contact, for LAN, Bluetooth and phone integrations only
+  (`ENTRY_DOMAINS`, `DEVICE_DOMAINS`), checked every 10 minutes once the hub has run 15 minutes. An archived entry
+  is never set up or retried (`Runtime.start_entry`), its entities are unavailable and hidden (`Hub.is_hidden`: out of
+  voice, Jarvis's lists, the dashboard, Devices), and a command to one fails with "device archived"
+  (`Hub.archived_reason`, `Hub.archived_action_reason`; no repair notice). Configuration, area, names, credentials and
+  history stay. Admins get one notice per sweep that archived anything.
+- **Restore** by itself when discovery hears the device announce an id it reports (never by address alone), a
+  shared entry publishes a live value for it, or a phone reports; or an admin's Restore (Devices > Setup > Archived
+  devices). Reconfiguring an archived entry restores it too.
+- **Delete** `delete_after_days` (365) after archiving, once a day, only if it never came back: entry or device,
+  entities, last states, history rows, statistics, sealed credentials; each deletion is an audit record (kv
+  `device_archive_audit`) and admins get one summary notice.
+- `GET /hub/archive`, `GET /hub/archive/preview` (dry run), `PUT /hub/archive/settings`, `POST /hub/archive/restore`
+  and `POST /hub/archive/delete`; admins only. Identity archives its registered devices (phones, PCs, satellites)
+  the same way (`services/identity/device_archive.py`).
 
 ## WiZ bulbs (`drivers/wiz.py`)
 

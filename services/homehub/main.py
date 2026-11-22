@@ -107,6 +107,11 @@ class Service:
     async def start(self) -> None:
         self._bg.append(asyncio.create_task(self.runtime.loop_monitor.run(), name="loop-monitor"))
         self.runtime.load_registry()
+        # Last contact per device, read before any driver starts (archived entries are then never started).
+        from services.homehub.device_archive import DeviceArchive
+
+        self.runtime.archive = DeviceArchive(self.runtime)
+        self.runtime.archive.load()
         self.hub.entity_registry_ids = self.store.get_kv("entity_registry_ids", {}) or {}
         # HA user id -> name: mobile_app maps a phone to its Jarvis user through it.
         self.hub.ha_users = {u["id"]: u.get("name") or "" for u in self.store.get_kv("users", []) or []}
@@ -132,6 +137,7 @@ class Service:
         # it has started.
         self._bg.append(asyncio.create_task(self._start_automations_when_ready()))
         self._bg.append(asyncio.create_task(self.runtime.housekeeping()))
+        self._bg.append(asyncio.create_task(self.runtime.archive.run(), name="device-archive"))
         self._bg.append(asyncio.create_task(recorder_statistics.start(self.runtime)))  # recorder statistics
         await self._start_discovery()
 
@@ -232,6 +238,11 @@ class Service:
         for t in self._bg:
             t.cancel()
         self._bg.clear()
+        if self.runtime.archive is not None:
+            try:
+                self.runtime.archive.flush()  # last contact seen since the last sweep
+            except Exception:
+                log.exception("saving last contact failed")
         discovery = getattr(self.runtime, "discovery", None)
         if discovery is not None:
             self.runtime.discovery = None
