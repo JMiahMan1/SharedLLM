@@ -26,12 +26,12 @@ const ALLOWED: Allowed[] = [
 
 interface Run { mocks: HomeMocks; errors: string[]; found: string[] }
 
-async function open(page: Page, path: string, ready: (p: Page) => Locator): Promise<Run> {
+async function open(page: Page, path: string, ready: (p: Page) => Locator, today?: Date): Promise<Run> {
   await quietHotReload(page);
   const mocks = await mockHome(page, 'admin');
   await mockHealth(page);
   await mockBible(page);
-  await mockFamilyPages(page);
+  await mockFamilyPages(page, today ? { today } : {});
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   // A render error the app's error boundary catches never reaches pageerror; it is logged instead.
@@ -186,6 +186,33 @@ test.describe('every family page on every form factor', () => {
     await check(page, info, run, 'calendar edit event', dialog);
     await page.keyboard.press('Escape');
     if (isPhone(page)) await expect(page.getByRole('dialog')).toHaveCount(0);
+    done(run);
+  });
+
+  test('Calendar: frozen on a Sunday, the week view keeps its all-day chips inside their cards', async ({ page }, info) => {
+    // A Sunday to Saturday week that contains every fixture all-day event, whatever
+    // day the suite runs on: the week starts on Sunday, so only a Sunday-to-Saturday
+    // week holds both today + 1 and today + 6.
+    const frozen = new Date(2026, 9, 25, 12, 0, 0);
+    await page.clock.setFixedTime(frozen);
+    const run = await open(page, '/calendar', (p) => p.getByRole('group', { name: 'Calendar view' }), frozen);
+    await page.getByRole('group', { name: 'Calendar view' }).getByRole('button', { name: 'Week' }).click();
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await check(page, info, run, 'calendar week all-day frozen');
+
+    for (const summary of ['Grandma visits', 'Library books due']) {
+      const chips = page.getByRole('button', { name: new RegExp(summary) });
+      expect(await chips.count(), `${summary} is in the visible week`).toBeGreaterThan(0);
+      for (const chip of await chips.all()) {
+        await expect(chip, `${summary} is visible`).toBeVisible();
+        const chipBox = (await chip.boundingBox())!;
+        const cardBox = (await chip.locator('xpath=../..').boundingBox())!;
+        expect(chipBox.x, `${summary} starts inside its day card`).toBeGreaterThanOrEqual(cardBox.x - 1);
+        expect(chipBox.y, `${summary} starts inside its day card`).toBeGreaterThanOrEqual(cardBox.y - 1);
+        expect(chipBox.x + chipBox.width, `${summary} stays inside its day card`).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+        expect(chipBox.y + chipBox.height, `${summary} stays inside its day card`).toBeLessThanOrEqual(cardBox.y + cardBox.height + 1);
+      }
+    }
     done(run);
   });
 });

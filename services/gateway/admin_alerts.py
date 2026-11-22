@@ -182,21 +182,58 @@ async def _answers(client: aiohttp.ClientSession, url: str) -> bool:
         return False
 
 
-def media_targets(settings: dict[str, Any]) -> dict[str, str]:
-    """Service -> liveness URL for the self-hosted backends.
+async def music_assistant_status(client: aiohttp.ClientSession) -> str | None:
+    """Liveness line for the household's Music Assistant, or None when it is not set up.
 
-    Audiobookshelf has an explicit ``/ping``; Music Assistant answers on its
-    bare origin, so the root is its liveness check; Nextcloud exposes
-    ``/status.php``. Unset URLs are skipped.
+    The address comes from HomeHub (``GET /hub/music_assistant/server``, the hub's
+    ``music_assistant`` entry), the same source identity hands every service; the
+    retired ``mass_url`` setting is never read. A hub answer with no usable
+    address (configured but unreachable, or reachable only from the hub's own
+    host) is a Music Assistant that is down, so it alerts as one.
+    """
+    from services.common.hub_login import homehub_url
+
+    base = homehub_url()
+    if not base:
+        log.info("[admin-alerts] no HomeHub, so there is no household Music Assistant to probe")
+        return None
+    try:
+        async with client.get(
+            f"{base}/hub/music_assistant/server",
+            headers={"Authorization": f"Bearer {INTERNAL_SECRET}"},
+            timeout=_PROBE_TIMEOUT,
+        ) as resp:
+            data = await resp.json(content_type=None)
+            status = resp.status
+    except Exception as exc:
+        log.warning("[admin-alerts] HomeHub could not say where Music Assistant is (%s); not alerting",
+                    type(exc).__name__)
+        return None
+    if status != 200 or not isinstance(data, dict):
+        log.warning("[admin-alerts] HomeHub answered HTTP %s for the Music Assistant server; not alerting", status)
+        return None
+    if data.get("configured") is False:
+        log.info("[admin-alerts] no Music Assistant integration is set up in HomeHub; not alerting")
+        return None
+    url = str(data.get("url") or "").strip().rstrip("/")
+    if not url:
+        reason = str(data.get("error") or "HomeHub has no reachable Music Assistant address")
+        return f"UNREACHABLE ({reason})"
+    return (await probe_http(client, "music_assistant", url)).line
+
+
+def media_targets(settings: dict[str, Any]) -> dict[str, str]:
+    """Service -> liveness URL for the settings-based self-hosted backends.
+
+    Audiobookshelf has an explicit ``/ping``; Nextcloud exposes
+    ``/status.php``. Unset URLs are skipped. Music Assistant is not here: its
+    address is the hub's ``music_assistant`` entry (:func:`music_assistant_status`).
     """
     abs_url = str(settings.get("audiobookshelf_url") or settings.get("abs_url") or "").strip().rstrip("/")
-    ma_url = str(settings.get("mass_url") or settings.get("ma_url") or "").strip().rstrip("/")
     nextcloud_url = str(settings.get("nextcloud_url") or "").strip().rstrip("/")
     targets: dict[str, str] = {}
     if abs_url:
         targets["audiobookshelf"] = f"{abs_url}/ping"
-    if ma_url:
-        targets["music_assistant"] = ma_url
     if nextcloud_url:
         targets["nextcloud"] = f"{nextcloud_url}/status.php"
     return targets
@@ -313,6 +350,9 @@ async def check_once(r, client: aiohttp.ClientSession, settings: dict[str, Any],
             results = await asyncio.gather(*(probe_http(client, name, url) for name, url in media.items()))
             for result in results:
                 statuses[result.name] = result.line
+        ma_status = await music_assistant_status(client)
+        if ma_status is not None:
+            statuses["music_assistant"] = ma_status
         _queue(outbox, service_transitions(state.setdefault("services", {}), statuses))
 
     targets = desktop_targets(settings)
