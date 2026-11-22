@@ -45,6 +45,13 @@
       "rule": { "type": "books_read", "value": 10 }
     },
     {
+      "id": "first_day",
+      "name": "Day One",
+      "description": "Read Scripture for the first time.",
+      "points": 5,
+      "rule": { "type": "read_streak", "value": 1 }
+    },
+    {
       "id": "streak_3",
       "name": "Three Days",
       "description": "Read Scripture three days in a row.",
@@ -57,6 +64,13 @@
       "description": "Read Scripture seven days in a row.",
       "points": 25,
       "rule": { "type": "read_streak", "value": 7 }
+    },
+    {
+      "id": "streak_14",
+      "name": "Two Weeks Faithful",
+      "description": "Read Scripture fourteen days in a row.",
+      "points": 50,
+      "rule": { "type": "read_streak", "value": 14 }
     },
     {
       "id": "streak_30",

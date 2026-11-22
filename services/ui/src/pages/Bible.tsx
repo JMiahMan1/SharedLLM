@@ -124,6 +124,7 @@ function BibleReaderPane({
   resumePositionRef,
   honoredSeqRef,
   requestedRef,
+  requestedVerse,
   requestedSeq,
   onOpenRef,
   onRequestRef,
@@ -151,10 +152,12 @@ function BibleReaderPane({
    */
   honoredSeqRef: { current: number | null };
   requestedRef: string | null;
+  /** Verse from deep link (e.g., ?verse=16) to scroll to on chapter load. */
+  requestedVerse: number | null;
   /** Count of explicit requests (search hits, cross-reference taps, Go). */
   requestedSeq: number;
-  onOpenRef: (ref: string) => void;
-  onRequestRef: (ref: string) => void;
+  onOpenRef: (ref: string, verse?: number) => void;
+  onRequestRef: (ref: string, verse?: number) => void;
   marks: BibleMark[];
   onMarksChanged: () => Promise<void>;
   preferences: BiblePreferences;
@@ -310,7 +313,7 @@ function BibleReaderPane({
   // reference again produces the same key and React never re-runs the effect,
   // so a second tap on a search hit did nothing.
   const restoreKey = shownChapter && !shownChapter.whole_book
-    ? `${shownChapter.book} ${shownChapter.chapter_start} ${requestedRef ?? ''} @${requestedSeq}`
+    ? `${shownChapter.book} ${shownChapter.chapter_start} ${requestedRef ?? ''} @${requestedSeq} v${requestedVerse ?? ''}`
     : null;
   const restoredKey = useRef<string | null>(null);
   useEffect(() => {
@@ -334,8 +337,9 @@ function BibleReaderPane({
     const sameChapter = Boolean(
       resume && resume.book === shown.book && resume.chapter === shown.chapter_start
     );
-    const verse = linked ?? (sameChapter ? resume!.verse : 1);
-    const fraction = linked ? 0 : sameChapter ? (resume!.fraction ?? 0) : 0;
+    // Priority: deep link verse > linked verse from ref > saved position > verse 1
+    const verse = requestedVerse ?? linked ?? (sameChapter ? resume!.verse : 1);
+    const fraction = (requestedVerse || linked) ? 0 : sameChapter ? (resume!.fraction ?? 0) : 0;
     if (linked !== null) honoredSeqRef.current = requestedSeq;
     setTracked({ key: `${shown.book} ${shown.chapter_start}`, verse });
     resumePositionRef.current = { book: shown.book, chapter: shown.chapter_start, verse, fraction };
@@ -354,7 +358,7 @@ function BibleReaderPane({
     return () => cancelAnimationFrame(frame);
     // `resumePositionRef` is a ref: it is read inside, not a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [passage, restoreKey, requestedRef, requestedSeq, parallel, isFetching]);
+  }, [passage, restoreKey, requestedRef, requestedVerse, requestedSeq, parallel, isFetching]);
 
   // Saving now rather than after the settle delay: the scroll debounce writes
   // once the reader pauses, so flicking away (back to another Jarvis page, back
@@ -843,6 +847,11 @@ export default function Bible() {
   // twice land on its verse each time instead of the first tap's scrolled place.
   const [requestedSeq, setRequestedSeq] = useState(0);
   const [requestedRef, setRequestedRef] = useState<string | null>(searchParams.get('ref'));
+  // Verse parameter from deep links (e.g., ?verse=16) for scrolling to a specific verse
+  const [requestedVerse, setRequestedVerse] = useState<number | null>(() => {
+    const verse = searchParams.get('verse');
+    return verse ? Number(verse) : null;
+  });
   // Where Read was last left: the verse under the reader's eye, kept across tab
   // switches (which unmount and remount the pane) so returning lands on it.
   const resumePosition = useRef<BiblePosition | null>(null);
@@ -921,9 +930,16 @@ export default function Bible() {
   }, []);
 
   const openRef = useCallback(
-    (ref: string) => {
+    (ref: string, verse?: number) => {
       void trigger('light');
-      setSearchParams({ ref });
+      const params: Record<string, string> = { ref };
+      if (verse !== undefined && verse > 0) {
+        params.verse = String(verse);
+        setRequestedVerse(verse);
+      } else {
+        setRequestedVerse(null);
+      }
+      setSearchParams(params);
       setRequestedRef(ref);
       setRequestedSeq((seq) => seq + 1);
       setTab('read');
@@ -934,8 +950,15 @@ export default function Bible() {
   // Turning the page keeps the address in step (replacing, not pushing, so Back
   // still leaves the Bible rather than walking back through every chapter).
   const requestRef = useCallback(
-    (ref: string) => {
-      setSearchParams({ ref }, { replace: true });
+    (ref: string, verse?: number) => {
+      const params: Record<string, string> = { ref };
+      if (verse !== undefined && verse > 0) {
+        params.verse = String(verse);
+        setRequestedVerse(verse);
+      } else {
+        setRequestedVerse(null);
+      }
+      setSearchParams(params, { replace: true });
       setRequestedRef(ref);
     },
     [setSearchParams]
@@ -1046,6 +1069,7 @@ export default function Bible() {
               requestedSeq={requestedSeq}
               honoredSeqRef={honoredSeq}
               requestedRef={requestedRef}
+              requestedVerse={requestedVerse}
               onOpenRef={openRef}
               onRequestRef={requestRef}
               marks={marks}

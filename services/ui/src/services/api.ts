@@ -6818,6 +6818,30 @@ export const api = {
     return resp.data;
   },
 
+  /** Use a grace day to preserve the streak across one missed day. */
+  async useBibleGraceDay(): Promise<{ ok: boolean; grace_day_date: string; message: string }> {
+    const resp = await apiClient.post('/api/bible/streak/freeze');
+    return resp.data;
+  },
+
+  /** Get an encouraging verse for someone returning after a break. */
+  async getBibleWelcomeBackVerse(): Promise<{ reference: string; text: string; book: string; chapter: number; verse: number }> {
+    const resp = await apiClient.get('/api/bible/encouragement/welcome-back');
+    return resp.data;
+  },
+
+  /** Get the encouraging verse for a streak milestone. */
+  async getBibleStreakMilestoneVerse(days: number): Promise<{ reference: string; text: string; book: string; chapter: number; verse: number }> {
+    const resp = await apiClient.get(`/api/bible/encouragement/streak-milestone/${days}`);
+    return resp.data;
+  },
+
+  /** Get a random encouraging verse for daily reminders. */
+  async getBibleDailyEncouragement(): Promise<{ reference: string; text: string; book: string; chapter: number; verse: number }> {
+    const resp = await apiClient.get('/api/bible/encouragement/daily');
+    return resp.data;
+  },
+
   /** A Blue Letter Bible link: the verse in `version` (KJV when BLB lacks it), or its interlinear tab. */
   async getBlbLink(ref: string, tool?: 'interlinear', version?: string): Promise<BibleBlbLink> {
     const resp = await apiClient.get('/api/bible/blb/link', { params: { ref, tool, version } });

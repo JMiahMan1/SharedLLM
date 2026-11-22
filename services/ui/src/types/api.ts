@@ -3870,6 +3870,20 @@ export interface BibleActivityFeed {
   note?: string;
 }
 
+export interface BibleGraceDayResponse {
+  ok: boolean;
+  grace_day_date: string;
+  message: string;
+}
+
+export interface BibleEncouragementVerse {
+  reference: string;
+  text: string;
+  book: string;
+  chapter: number;
+  verse: number;
+}
+
 export interface BibleBlbLink {
   ref: string;
   url: string;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   Bell,
@@ -12,10 +12,12 @@ import {
   ExternalLink,
   Flame,
   Sparkles,
+  Shield,
+  Star,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
-import type { BibleVerseOfDay } from '../../types/api';
+import type { BibleVerseOfDay, BibleEncouragementVerse } from '../../types/api';
 import BiblePlans from './BiblePlans';
 import VerseContextPanel from './VerseContextPanel';
 import { pageStyle } from './readingPage';
@@ -76,6 +78,45 @@ export default function BibleToday({
   const verseError = vod && 'error' in vod ? vod.error : null;
   const entry = data?.devotional?.entry ?? null;
   const skipped = data?.devotional?.skipped ?? [];
+  const streaks = data?.streaks;
+  const graceDayAvailable = streaks && streaks.read_streak_current > 0 && streaks.read_streak_current < 100 && data?.grace_day_used !== true;
+
+  // Welcome-back verse: show when returning after a break (streak is 0 but days_read > 0)
+  const showWelcomeBack = streaks && streaks.read_streak_current === 0 && streaks.days_read > 0;
+  const { data: welcomeBackVerse } = useQuery({
+    queryKey: ['bible-welcome-back'],
+    queryFn: () => api.getBibleWelcomeBackVerse(),
+    enabled: showWelcomeBack,
+    staleTime: 24 * 60 * 60 * 1000, // 24 hours
+  });
+
+  // Streak milestone verse: show when hitting a milestone (3, 7, 14, 30, 100)
+  const currentStreak = streaks?.read_streak_current ?? 0;
+  const milestones = [1, 3, 7, 14, 30, 100];
+  const hitMilestone = milestones.includes(currentStreak);
+  const { data: milestoneVerse } = useQuery({
+    queryKey: ['bible-streak-milestone', currentStreak],
+    queryFn: () => api.getBibleStreakMilestoneVerse(currentStreak),
+    enabled: hitMilestone,
+    staleTime: 24 * 60 * 60 * 1000,
+  });
+
+  // Grace day mutation
+  const queryClient = useQueryClient();
+  const useGraceDayMutation = useMutation({
+    mutationFn: () => api.useBibleGraceDay(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bible-daily'] });
+      queryClient.invalidateQueries({ queryKey: ['bible-stats'] });
+    },
+  });
+
+  // Daily encouragement verse for the reminder section
+  const { data: dailyEncouragement } = useQuery({
+    queryKey: ['bible-daily-encouragement'],
+    queryFn: () => api.getBibleDailyEncouragement(),
+    staleTime: 24 * 60 * 60 * 1000,
+  });
 
   // The verse card's press-and-hold menu. `longPressed` is read by the click
   // that follows a release so opening the menu never also opens the passage.
@@ -228,6 +269,85 @@ export default function BibleToday({
         )}
       </section>
 
+      {/* Welcome-back verse: shown when returning after a break */}
+      {welcomeBackVerse && (
+        <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-green-400/15" data-testid="bible-welcome-back">
+          <div className="flex items-center gap-2 mb-3">
+            <Star size={16} className="text-green-300" />
+            <h2 className="text-sm font-bold text-white">Welcome back</h2>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm text-green-200/90 leading-relaxed">
+              You&apos;ve read {streaks?.days_read} day{streaks?.days_read !== 1 ? 's' : ''} before. Starting again is the bravest part.
+            </p>
+            <button
+              type="button"
+              onClick={() => onOpenRef(welcomeBackVerse.reference)}
+              className="w-full text-left min-h-11 pointer-coarse:min-h-11 rounded-xl px-4 py-3 border border-green-400/30 bg-green-400/5 transition-colors"
+              style={pageStyle(page)}
+            >
+              <p className="text-xs font-semibold text-green-300">{welcomeBackVerse.reference}</p>
+              <p className="mt-2 font-serif text-base sm:text-lg leading-relaxed text-slate-200">&ldquo;{welcomeBackVerse.text}&rdquo;</p>
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Streak milestone celebration */}
+      {milestoneVerse && (
+        <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-amber-400/15" data-testid="bible-streak-milestone">
+          <div className="flex items-center gap-2 mb-3">
+            <Flame size={16} className="text-amber-300" />
+            <h2 className="text-sm font-bold text-white">{currentStreak} day{currentStreak !== 1 ? 's' : ''}!</h2>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm text-amber-200/90 leading-relaxed">
+              {currentStreak === 1 ? 'Your first day in the Word.' :
+               currentStreak === 3 ? 'Three days&mdash;a cord not quickly broken.' :
+               currentStreak === 7 ? 'A full week of faithfulness.' :
+               currentStreak === 14 ? 'Two weeks&mdash;steadfast and growing.' :
+               currentStreak === 30 ? 'A month of daily bread.' :
+               'One hundred days&mdash;a testimony of grace.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => onOpenRef(milestoneVerse.reference)}
+              className="w-full text-left min-h-11 pointer-coarse:min-h-11 rounded-xl px-4 py-3 border border-amber-400/30 bg-amber-400/5 transition-colors"
+              style={pageStyle(page)}
+            >
+              <p className="text-xs font-semibold text-amber-300">{milestoneVerse.reference}</p>
+              <p className="mt-2 font-serif text-base sm:text-lg leading-relaxed text-slate-200">&ldquo;{milestoneVerse.text}&rdquo;</p>
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Grace day offer: shown when streak > 0 but no reading today and grace day not used */}
+      {graceDayAvailable && !streaks?.grace_day_used && (
+        <section className="glass-panel rounded-2xl p-4 sm:p-5 border border-blue-400/15" data-testid="bible-grace-day">
+          <div className="flex items-center gap-2 mb-3">
+            <Shield size={16} className="text-blue-300" />
+            <h2 className="text-sm font-bold text-white">Grace day available</h2>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm text-blue-200/90 leading-relaxed">
+              You have a {streaks?.read_streak_current}-day streak. Missed today? Use your one grace day to keep it going&mdash;it covers one missed day.
+            </p>
+            <button
+              type="button"
+              onClick={() => useGraceDayMutation.mutate()}
+              disabled={useGraceDayMutation.isPending}
+              className="w-full min-h-11 pointer-coarse:min-h-11 rounded-xl px-4 py-2.5 bg-blue-400/10 border border-blue-400/30 text-blue-200 font-medium transition-colors hover:bg-blue-400/20 disabled:opacity-50"
+            >
+              {useGraceDayMutation.isPending ? 'Applying grace day...' : 'Use grace day'}
+            </button>
+            {useGraceDayMutation.isError && (
+              <p className="text-xs text-red-300">{useGraceDayMutation.error instanceof Error ? useGraceDayMutation.error.message : 'Could not apply grace day'}</p>
+            )}
+          </div>
+        </section>
+      )}
+
       {data?.position?.reference && (
         <button
           type="button"
@@ -263,6 +383,11 @@ export default function BibleToday({
                   ? "If you haven't read by then, Jarvis sends one nudge with today's reading."
                   : 'Off. Pick a time to get one nudge on days you have not read yet.'}
               </p>
+              {dailyEncouragement && reminderTime && (
+                <p className="text-xs leading-relaxed text-amber-200/80 mt-2 italic">
+                  &ldquo;{dailyEncouragement.text}&rdquo; &mdash; {dailyEncouragement.reference}
+                </p>
+              )}
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 sm:mt-0 sm:shrink-0">

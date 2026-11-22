@@ -203,6 +203,21 @@ class UserBibleState(SQLModel, table=True):
     #: Imported devotional whose daily reading leads the Today tab; blank
     #: uses the built-in devotional sources.
     devotional_work: str = Field(default="")
+    #: Whether the reader has used their one grace day for the current streak.
+    #: A grace day preserves the streak across one missed day.
+    grace_day_used: bool = Field(default=False)
+    #: Date the grace day was used (ISO format), empty if none used.
+    grace_day_date: str = Field(default="")
+    #: Last reading plan being followed, if the reader was in a plan.
+    last_plan_id: str = Field(default="")
+    #: Last plan day read (1-based), for deep linking back to that day's reading.
+    last_plan_day: int = Field(default=0)
+    #: Last imported study book being read (book ID).
+    last_study_book_id: int = Field(default=0)
+    #: Last study section/page ordinal read.
+    last_study_section_ordinal: int = Field(default=0)
+    #: How far into the section the reader's top edge was (0 to 1).
+    last_study_scroll_fraction: float = Field(default=0.0)
 
 
 class VerseMark(SQLModel, table=True):
