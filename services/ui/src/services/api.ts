@@ -21,6 +21,7 @@ import { configureBackupKeys, type BackupKeyUpload } from '../lib/privateChatBac
 import type { RestoreBatch, RestoreClient, RestoreCounts } from '../lib/privateChatBackupFile';
 import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
 import type { FreshPosition } from '../lib/freshPosition';
+import type { MusicAssistantStatus } from '../lib/musicAssistant';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
 import type {
   TrainerBacklog,
@@ -3615,6 +3616,12 @@ export const api = {
 
   async testConnection(service: string, config: Record<string, unknown>): Promise<{ status: 'SUCCESS' | 'ERROR'; message?: string }> {
     const resp = await apiClient.post('/api/auth/test-connection', { service, config });
+    return resp.data;
+  },
+
+  /** Which Music Assistant the signed-in person uses and whether it answers (never a token). */
+  async getMusicAssistantStatus(): Promise<MusicAssistantStatus> {
+    const resp = await apiClient.get('/api/auth/music-assistant/status');
     return resp.data;
   },
 

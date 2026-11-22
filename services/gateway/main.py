@@ -34,6 +34,7 @@ from starlette.datastructures import UploadFile
 
 from services.common import active_minutes as _active_minutes
 from services.common import device_noun as _device_noun
+from services.common import ma_identity
 from services.common import guardian_recap as _recap
 from services.common import health_coach as _health_coach
 from services.common import notify as _notify
@@ -2695,6 +2696,16 @@ async def _read_target(request: Request, requested: str | None) -> tuple[str, st
 
 async def _resolve_ma_credentials(request: Request, body: dict | None = None) -> tuple[str, str]:
     """Resolve the caller's Music Assistant base URL and token."""
+    creds = await _resolve_ma_creds(request, body)
+    return creds.get("mass_url") or "", creds.get("mass_token") or ""
+
+
+async def _resolve_ma_creds(request: Request, body: dict | None = None) -> dict:
+    """The caller's resolved identity as a dict, for its Music Assistant fields (``mass_*``).
+
+    Identity decides which Music Assistant a person uses (services/identity/music_assistant.py);
+    ``mass_error`` says why there is none, ``mass_server`` whether it is their own or the household's.
+    """
     try:
         creds = await _resolve_identity_from_request(request, body)
         if not isinstance(creds, dict):
@@ -2705,7 +2716,7 @@ async def _resolve_ma_credentials(request: Request, body: dict | None = None) ->
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}") from e
-    return creds.get("mass_url") or "", creds.get("mass_token") or ""
+    return creds
 
 
 async def _ma_rpc(
@@ -4904,6 +4915,37 @@ async def proxy_test_connection(request: Request):
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return await _proxy_json_response(resp)
+
+@app.get("/api/auth/music-assistant/status")
+async def proxy_music_assistant_status(request: Request):
+    """Which Music Assistant the caller uses and whether it answers (identity; never a token)."""
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/auth/music-assistant/status",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=30.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.api_route("/api/admin/music-assistant/{action}", methods=["GET", "POST"])
+async def proxy_music_assistant_admin(action: str, request: Request):
+    """Admin: Music Assistant accounts and stale-URL migration (identity checks the caller is an admin)."""
+    if action not in ("accounts", "stale-urls"):
+        raise HTTPException(status_code=404, detail="Not found")
+    auth_header = request.headers.get("Authorization")
+    headers = {"Authorization": auth_header} if auth_header else {}
+    async with shared_http_client() as client:
+        url = f"{IDENTITY_SVC}/api/admin/music-assistant/{action}"
+        if request.method == "GET":
+            resp = await client.get(url, params=dict(request.query_params), headers=headers,
+                                    timeout=aiohttp.ClientTimeout(total=30.0))
+        else:
+            resp = await client.post(url, json=await request.json(), headers=headers,
+                                     timeout=aiohttp.ClientTimeout(total=120.0))
+        return await _proxy_json_response(resp)
+
 
 @app.get("/api/auth/discover")
 async def proxy_discover(request: Request):
@@ -19060,15 +19102,19 @@ async def _media_ma_rpc(
     timeout: float = _MEDIA_UPSTREAM_TIMEOUT,
 ) -> Any:
     """Run one MA JSON-RPC command for the caller; raise ``_MediaUpstreamError``."""
-    mass_url, mass_token = await _resolve_ma_credentials(request)
+    creds = await _resolve_ma_creds(request)
+    mass_url, mass_token = creds.get("mass_url") or "", creds.get("mass_token") or ""
     if not mass_url or not mass_token:
-        raise _MediaUpstreamError("Music Assistant is not configured")
+        raise _MediaUpstreamError(ma_identity.unavailable_message(creds))
     try:
         result = await _ma_rpc(mass_url, mass_token, command, args, timeout=timeout)
     except HTTPException as e:
-        raise _MediaUpstreamError(f"Music Assistant returned HTTP {e.status_code}") from e
+        if e.status_code == 502 and "HTTP 401" in str(e.detail):
+            raise _MediaUpstreamError(
+                "Music Assistant refused your access token. Update it in Accounts & Integrations.") from e
+        raise _MediaUpstreamError(ma_identity.unreachable_message(creds, f"HTTP {e.status_code}")) from e
     except (TimeoutError, aiohttp.ClientError) as e:
-        raise _MediaUpstreamError(f"Music Assistant is unreachable: {type(e).__name__}") from e
+        raise _MediaUpstreamError(ma_identity.unreachable_message(creds, type(e).__name__)) from e
     if isinstance(result, dict) and result.get("error_code"):
         # MA answers a rejected read with HTTP 200 and an error frame; without
         # this the endpoint would return an empty list instead of an error state.
@@ -20204,7 +20250,8 @@ async def sendspin_proxy(websocket: WebSocket):
 
     if not mass_url or not mass_token:
         log.error(f"[sendspin] MA credentials not configured: mass_url={'set' if mass_url else 'NOT SET'}, mass_token={'set' if mass_token else 'NOT SET'}")
-        await websocket.close(code=1008, reason="MA not configured")
+        # A WebSocket close reason holds at most 123 bytes.
+        await websocket.close(code=1008, reason=ma_identity.unavailable_message(creds)[:120])
         return
 
     # Build MA sendspin URL (NO query string token; auth via message)
@@ -20522,7 +20569,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
 
     if not mass_url or not mass_token:
         log.error("[ma-jsonrpc] STEP 2 FAIL: MA credentials not configured")
-        await websocket.close(code=1008, reason="MA not configured")
+        await websocket.close(code=1008, reason=ma_identity.unavailable_message(creds)[:120])
         return
 
     # Build MA JSON-RPC URL
@@ -20727,7 +20774,7 @@ async def _ma_discover_and_select(creds: dict[str, Any], player_id: str | None) 
 
     if not mass_url:
         log.error("[stream/ma] Music Assistant URL not configured")
-        raise HTTPException(status_code=400, detail="Music Assistant not configured")
+        raise HTTPException(status_code=400, detail=ma_identity.unavailable_message(creds))
 
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
@@ -21544,7 +21591,7 @@ async def media_ma_command(req: MediaMaCommandRequest, request: Request):
     mass_url = creds_dict.get("mass_url") or ""
     mass_token = creds_dict.get("mass_token") or ""
     if not mass_url or not mass_token:
-        raise HTTPException(status_code=400, detail="Music Assistant is not configured")
+        raise HTTPException(status_code=400, detail=ma_identity.unavailable_message(creds_dict))
 
     args = req.args or {}
     frame = json.dumps({"message_id": uuid.uuid4().hex, "command": command, "args": args})

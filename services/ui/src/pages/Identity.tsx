@@ -41,6 +41,7 @@ import VoiceSignaturePanel from '../components/settings/VoiceSignaturePanel';
 import SpotifyLinkPanel from '../components/settings/SpotifyLinkPanel';
 import AbuseChKeyTile from '../components/settings/AbuseChKeyTile';
 import HomeHubTile from '../components/settings/HomeHubTile';
+import MusicAssistantTile from '../components/settings/MusicAssistantTile';
 import { HA_OFF_NOTICE } from '../lib/homehub';
 import { useIntegrations } from '../hooks/useIntegrations';
 import UserAvatar from '../components/UserAvatar';
@@ -717,16 +718,7 @@ const Identity = () => {
                   "API Key": "audiobookshelf_api_key"
                 }}
               />
-              <IntegrationTile 
-                name="Music Assistant" 
-                icon={ListMusic} 
-                color="fuchsia" 
-                userData={fullUser}
-                configKeys={{
-                  "Server URL": "mass_url",
-                  "Access Token": "mass_token"
-                }}
-              />
+              <MusicAssistantTile userData={fullUser} />
               <IntegrationTile 
                 name="Private Git" 
                 icon={Server} 

@@ -55,7 +55,10 @@ class User(SQLModel, table=True):  # type: ignore
     mailcow_api_key_enc: str | None = None
     mail_user: str | None = None
     mail_pass_enc: str | None = None
+    #: The person's own Music Assistant server; empty means the household's (HomeHub's integration).
     mass_url: str | None = None
+    #: Their account id on the household Music Assistant (set when Jarvis made or checked the account).
+    mass_user_id: str | None = None
     skylight_url: str | None = None
     skylight_email: str | None = None
     skylight_enabled: bool = Field(default=True)

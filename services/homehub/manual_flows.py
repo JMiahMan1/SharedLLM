@@ -601,7 +601,17 @@ async def check_tasmota(data: dict[str, Any]) -> None:
 
 
 #: Settings checked before a reconfigure saves them: ``{domain: (keys that trigger it, async check(new data))}``.
-RECONFIGURE_CHECKS: dict[str, tuple[tuple[str, ...], Any]] = {"tasmota": (("host", "password"), check_tasmota)}
+async def check_music_assistant(data: dict[str, Any]) -> None:
+    """A new Music Assistant address or token: refused unless the server answers and accepts the token."""
+    from services.homehub import music_assistant_server
+
+    await music_assistant_server.check_music_assistant(data)
+
+
+RECONFIGURE_CHECKS: dict[str, tuple[tuple[str, ...], Any]] = {
+    "tasmota": (("host", "password"), check_tasmota),
+    "music_assistant": (("url", "token"), check_music_assistant),
+}
 
 
 SUN_SENSORS = (("next_dawn", "Next dawn", "timestamp"), ("next_dusk", "Next dusk", "timestamp"),

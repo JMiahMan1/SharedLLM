@@ -95,8 +95,31 @@ play or resume a book or podcast episode (`AudiobookshelfRequest`: `libraries`,
 
 ## Music Assistant
 
-- **Server URL**: e.g. `http://music-assistant.local:8095`.
-- **Access Token**: a long-lived token from Music Assistant (Settings → Users / tokens).
+Every person uses one Music Assistant server with their own Music Assistant
+account (`services/identity/music_assistant.py`):
+
+- **Server URL** (optional): only for someone who runs their own Music Assistant
+  for their own library. Left blank, they use the **household** server, which is
+  wherever HomeHub's Music Assistant integration points (Integrations > Music
+  Assistant > Configure, where the address and token are tried before saving).
+  No `.env` variable names it. With neither, the error says "No Music Assistant
+  is set up: add the Music Assistant integration in HomeHub or your own in
+  Accounts & Integrations."
+- **Access Token**: the person's own Music Assistant login. Left blank on the
+  household server, Jarvis makes them an account there (same username) and saves
+  a long-lived token for it; `python -m services.identity.music_assistant_admin
+  accounts` does it for everyone at once (dry run unless `--apply`).
+- A personal server that does not answer is shown as that integration's error,
+  with **Use the household Music Assistant** (which clears their URL). Jarvis
+  never switches anyone to another server, or to someone else's login, by itself.
+- Music Assistant keeps play history, resume points and playback speed per
+  account; favourites, the library and playlists are shared by everyone on a
+  server. Playback started through HomeHub carries the person's account (`user`,
+  Music Assistant's impersonation argument) so it resumes from and records to
+  their account, not the hub's.
+- Music Assistant's long-lived tokens expire after a year and do not renew;
+  an expired one shows as "refused" on the card. Clear the token and Jarvis
+  makes a new one.
 
 Test makes one JSON-RPC read to `<server>/api` with the token.
 

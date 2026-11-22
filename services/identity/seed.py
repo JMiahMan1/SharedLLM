@@ -31,7 +31,8 @@ def system_service_urls() -> dict[str, str | None]:
         "gitlab_url": os.getenv("GITLAB_URL"),
         "git_url": os.getenv("GIT_URL"),
         "audiobookshelf_url": os.getenv("AUDIOBOOKSHELF_URL"),
-        "mass_url": os.getenv("MA_URL") or os.getenv("MUSIC_ASSISTANT_URL"),
+        # No Music Assistant URL: the household's comes from HomeHub's Music Assistant integration
+        # (services/identity/music_assistant.py), and a person's own server is theirs to type.
     }
 
 
@@ -283,8 +284,8 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             "nextcloud_pass_enc": "NEXTCLOUD_PASS",
             "nextcloud_user": "NEXTCLOUD_USER",
             "nextcloud_url": "NEXTCLOUD_URL",
+            # The household account's Music Assistant login; its server is HomeHub's integration (no MA_URL).
             "mass_token_enc": "MA_TOKEN",
-            "mass_url": "MA_URL",
             "huggingface_token_enc": "HF_TOKEN",
         }
         # The default user's HA login is only refilled while the Home Assistant

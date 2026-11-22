@@ -509,9 +509,10 @@ async def _ma_media_id(
     mass_token = ctx_mass_token(req)
 
     if not mass_token:
+        from services.common import ma_identity
+
         return None, (
-            "Music Assistant credentials are not configured, so its library cannot be "
-            "resolved. Set MA_URL and MA_TOKEN, or pick a player that is not a "
+            f"{ma_identity.unavailable_message(req.user_context)} Or pick a player that is not a "
             "Music Assistant player."
         )
     if not abs_item_id:

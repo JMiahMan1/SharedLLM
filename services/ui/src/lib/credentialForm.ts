@@ -92,10 +92,11 @@ export const INTEGRATIONS: Integration[] = [
     id: 'music_assistant',
     name: 'Music Assistant',
     fields: [
-      { key: 'mass_url', label: 'Music Assistant URL' },
+      // Blank URL: the household server (HomeHub's Music Assistant integration). A token alone is a login there.
+      { key: 'mass_url', label: 'Own Music Assistant URL (optional)' },
       { key: 'mass_token', label: 'Music Assistant Token', secret: true },
     ],
-    complete: [['mass_url', 'mass_token']],
+    complete: [['mass_token'], ['mass_url', 'mass_token']],
   },
   {
     id: 'abuse_ch',
