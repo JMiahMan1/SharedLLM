@@ -981,9 +981,19 @@ class Hub:
         return any(service.startswith(prefix) and len(service) > len(prefix)
                    for prefix in DEVICE_ACTIONS.get(domain, ()))
 
-    def resolve_targets(self, data: dict[str, Any]) -> list[str]:
-        """``entity_id`` / ``target`` / ``area_id`` / ``device_id`` -> entity ids (HA's rules)."""
+    def resolve_targets(self, data: dict[str, Any], domain: str | None = None) -> list[str]:
+        """``entity_id`` / ``target`` / ``area_id`` / ``device_id`` -> entity ids (HA's rules).
+
+        With ``domain``, what an area, a device or ``all`` expands to is limited to that
+        domain's entities, as in HA: ``light.turn_on`` on a room or a bulb's device runs on
+        its lights, not on the bulb's signal-strength and uptime sensors. Entity ids named
+        outright are kept as given. ``homeassistant`` services take every domain.
+        """
         ids: list[str] = []
+        prefix = f"{domain}." if domain and domain != "homeassistant" else ""
+
+        def expanded(eids: Any) -> list[str]:
+            return [e for e in eids if not prefix or e.startswith(prefix)]
         sources = [data, data.get("target") or {}]
 
         def as_list(v: Any) -> list[str]:
@@ -996,16 +1006,16 @@ class Hub:
         for src in sources:
             for eid in as_list(src.get("entity_id")):
                 if eid == "all":
-                    ids.extend(self.states.entity_ids())
+                    ids.extend(expanded(self.states.entity_ids()))
                 else:
                     ids.append(eid)
             for area in as_list(src.get("area_id")):
                 # A hidden device's entities are left out of a room (it is the duplicate of one that stays);
                 # named by entity or device id they still run (HA skips hidden entities in areas too).
-                ids.extend(eid for eid in self.area_entities(area)
-                           if (e := self.entities.get(eid)) is None or e.hidden_by != "device")
+                ids.extend(expanded(eid for eid in self.area_entities(area)
+                                    if (e := self.entities.get(eid)) is None or e.hidden_by != "device"))
             for dev in as_list(src.get("device_id")):
-                ids.extend(self.device_entities(dev))
+                ids.extend(expanded(self.device_entities(dev)))
         seen: set[str] = set()
         out = []
         for i in ids:
@@ -1018,7 +1028,7 @@ class Hub:
                            context_id: str | None = None, return_response: bool = False) -> dict[str, Any]:
         """Run a service. Returns ``{"changed_states": [...], "response": ...}``."""
         data = dict(data or {})
-        targets = self.resolve_targets(data)
+        targets = self.resolve_targets(data, domain)
         call = ServiceCall(domain, service, data, targets, context_id or new_context_id(), return_response)
         changed: list[State] = []
 

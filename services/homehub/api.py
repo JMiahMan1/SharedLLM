@@ -132,7 +132,7 @@ def call_allowed(hub: Any, p: Principal | None, domain: str, service: str, data:
         return f"{domain}.{service} is for admins only"
     if p is None or not p.restricted:
         return None
-    targets = hub.resolve_targets(data)
+    targets = hub.resolve_targets(data, domain)
     if not targets and domain == "script" and service not in ("turn_on", "turn_off", "toggle", "reload"):
         targets = [f"script.{service}"]
     if not targets:
