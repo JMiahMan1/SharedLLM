@@ -6,3 +6,4 @@ aiohttp>=3.9.0
 pymupdf>=1.24.0
 python-multipart
 numpy>=1.26
+mobi>=0.3.3

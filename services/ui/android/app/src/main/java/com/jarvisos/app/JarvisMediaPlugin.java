@@ -33,7 +33,8 @@ public class JarvisMediaPlugin extends Plugin {
                 Boolean.TRUE.equals(call.getBoolean("playing", false)),
                 call.getString("playerId"),
                 call.getString("playerName"),
-                volume != null ? volume : 70);
+                volume != null ? volume : 70,
+                Boolean.TRUE.equals(call.getBoolean("speech", false)));
         call.resolve();
     }
 
