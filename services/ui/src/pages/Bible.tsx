@@ -1018,19 +1018,30 @@ const { user } = useAuth();
   return (
     <div className="mx-auto max-w-4xl space-y-4 px-1 pb-28 sm:space-y-5 sm:px-0" data-testid="bible-page">
       {/* A slim section bar in the Bible App's manner: the reader is the page,
-          and the sections sit above it as tabs rather than a header card. The
-          row scrolls sideways on a narrow screen instead of wrapping or running
-          off the edge. */}
-      <header className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center lg:gap-4">
+          and the sections sit above it as tabs rather than a header card. All
+          six stay in view with their whole name on every screen: never a
+          sideways scroll, never a "more" menu. The header is a size container
+          so the pill row is chosen by the room the page actually has (in rem,
+          so a large system font counts), not by the window alone: a desktop
+          sidebar with a large font leaves too little room for pills. */}
+      <div className="@container">
+      <header className="flex min-w-0 flex-col gap-2 lg:@2xl:flex-row lg:@2xl:items-center lg:@2xl:gap-4">
         <h1 className="shrink-0 text-lg font-bold text-slate-100 sm:text-xl">
           Bible
           <span className="sr-only">
             {version ? ` (${version.toUpperCase()})` : ' (no translation loaded yet)'}
           </span>
         </h1>
-        {/* Six sections always in view: equal columns with the icon over the
-            label on a phone or tablet, a row of pills on a wide screen. */}
-        <nav className="grid grid-cols-6 gap-1 lg:flex lg:flex-1" role="group" aria-label="Bible sections">
+        {/* Six columns with the icon over the label on a phone or tablet, a
+            row of pills on a wide screen. A column is never narrower than its
+            label (minmax(max-content, 1fr)): the short names (Read, Play) give
+            up width to the long ones (Memorize, Progress), so on a 320 px phone
+            every name is whole instead of cut to "Memo...". */}
+        <nav
+          className="grid grid-cols-[repeat(6,minmax(max-content,1fr))] gap-0.5 min-[360px]:gap-1 lg:@2xl:flex lg:@2xl:flex-1"
+          role="group"
+          aria-label="Bible sections"
+        >
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -1040,16 +1051,17 @@ const { user } = useAuth();
                 setTab(id);
               }}
               data-testid={`bible-tab-${id}`}
-              className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-0.5 text-[10px] leading-tight min-[380px]:text-[11px] transition-colors sm:text-xs lg:min-h-11 lg:flex-row lg:gap-1.5 lg:rounded-full lg:px-3.5 lg:text-sm ${
+              className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 text-[10px] leading-tight min-[380px]:text-[11px] transition-colors sm:text-xs lg:@2xl:min-h-11 lg:@2xl:flex-row lg:@2xl:gap-1.5 lg:@2xl:rounded-full lg:@2xl:px-3.5 lg:@2xl:text-sm ${
                 tab === id ? 'bg-slate-100 font-semibold text-slate-900' : 'text-slate-300 hover:bg-white/10 hover:text-white'
               }`}
             >
               <Icon size={16} aria-hidden className="shrink-0" />
-              <span className="max-w-full truncate">{label}</span>
+              <span className="whitespace-nowrap">{label}</span>
             </button>
           ))}
         </nav>
       </header>
+      </div>
 
       {tab === 'read' && (
         loadError ? (

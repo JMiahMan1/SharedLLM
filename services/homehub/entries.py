@@ -82,7 +82,8 @@ ENTRY_OPTIONS: dict[str, frozenset[str]] = {
     "matter": frozenset({"url"}),
     "mjpeg": frozenset({"mjpeg_url", "still_image_url", "username", "password", "authentication", "verify_ssl"}),
     "mobile_app": frozenset({"jarvis_user", "jarvis_fallback"}),
-    "music_assistant": frozenset({"url", "token"}),
+    # Music Assistant's address and token are setup fields kept in the entry's data (Configure), never options.
+    "music_assistant": frozenset(),
     "reolink": frozenset({"host", "protocol"}),
     "roku": frozenset({"host"}),
     "samsungtv": frozenset({"host", "mac"}),

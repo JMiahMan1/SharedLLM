@@ -150,11 +150,16 @@ class UserContext(BaseModel):
     audiobookshelf_user: str | None = None
     audiobookshelf_pass: str | None = None
     audiobookshelf_api_key: str | None = None
-    # Music Assistant is token-only; the per-user pair comes from Identity
-    # (a grant may supply the system default user's pair -- see
-    # docs/PER_USER_CREDENTIALS.md).
+    # Music Assistant: the person's server and their own account's token, from Identity
+    # (services/identity/music_assistant.py; docs/PER_USER_CREDENTIALS.md).
     mass_url: str | None = None
     mass_token: str | None = None
+    #: "own" (their own server), "household" (HomeHub's integration) or "absent".
+    mass_server: str | None = None
+    #: Their account id on the household Music Assistant: hub calls act as them with it.
+    mass_user_id: str | None = None
+    #: Why there is no usable Music Assistant, to say as is.
+    mass_error: str | None = None
     preferred_tts_voice: str | None = None
     calendar_settings: dict | None = None  # per-user calendar integration prefs (Identity UserCalendarSetting)
 

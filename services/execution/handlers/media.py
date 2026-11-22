@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 from typing import cast
 
+from services.common import ma_identity
 from services.config import MASS_CONFIG_ENTRY_ID
 from services.execution import activity, ha_client, ha_health
 from services.execution.media_links import media_file_url
@@ -226,7 +227,8 @@ async def play_music_direct(req: MediaPlayRequest, entity_id: str, ctx, why: str
     if not (ctx.mass_url and ctx.mass_token):
         return ExecutionResult(
             status="FAILURE",
-            message=f"{prefix} and no Music Assistant login is set up for direct playback.",
+            message=f"{prefix}, and there is no Music Assistant for direct playback: "
+                    f"{ma_identity.unavailable_message(ctx)}",
             service="media_play", detail={"route": "none"},
         )
     query = (req.query or "").strip()
@@ -317,7 +319,7 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx) -> Exec
 
             result = await ha_client.call_service(
                 ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
-                {"media_id": req.query, "enqueue": req.enqueue or "replace"},
+                {"media_id": req.query, "enqueue": req.enqueue or "replace", **ma_identity.act_as(ctx)},
             )
             log.info(f"[media/play] play_media service call response for direct URI: {result}")
             if result.get("ok"):
@@ -334,6 +336,7 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx) -> Exec
                 "name": req.query,
                 "media_type": ["track", "artist", "album", "playlist", "radio"],
                 "limit": 5,
+                **ma_identity.act_as(ctx),
             },
             return_response=True,
         )
@@ -370,7 +373,8 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx) -> Exec
                 log.info(f"[media/play] Calling music_assistant.play_media on '{mass_entity}' with media_id='{uri}'")
                 result = await ha_client.call_service(
                     ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
-                    {"media_id": uri, "enqueue": req.enqueue or "replace"},
+                    # As the person: MA then resumes and records the play under their own account.
+                    {"media_id": uri, "enqueue": req.enqueue or "replace", **ma_identity.act_as(ctx)},
                 )
                 log.info(f"[media/play] play_media service call response: {result}")
                 if result.get("ok"):

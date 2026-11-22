@@ -116,7 +116,7 @@ def test_home_partial_when_ma_is_unreachable(client, upstream, ma):
     body = resp.json()
     assert [item["name"] for item in body["recent"]] == ["Abs Book"]
     assert body["continue"] == []
-    assert "Music Assistant is unreachable" in body["errors"]["ma"]
+    assert "Music Assistant at http://ma.local:8095 is unreachable" in body["errors"]["ma"]
     assert body["errors"]["abs"] is None
 
 

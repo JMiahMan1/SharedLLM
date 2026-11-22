@@ -12,11 +12,13 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as dt
+from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -50,7 +52,7 @@ from services.config import (
     INTERNAL_SECRET,
 )
 from services.identity import abuse_ch, audit, battery_alerts, device_archive, push, roles, voice
-from services.identity import sign_in_reset
+from services.identity import music_assistant, sign_in_reset
 from services.identity.crypto import decrypt, digest_candidates, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
@@ -245,6 +247,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "mail_pass_enc", "ALTER TABLE user ADD COLUMN mail_pass_enc VARCHAR")
         _add_column("user", "mass_url", "ALTER TABLE user ADD COLUMN mass_url VARCHAR")
         _add_column("user", "mass_token_enc", "ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR")
+        _add_column("user", "mass_user_id", "ALTER TABLE user ADD COLUMN mass_user_id VARCHAR")
         _add_column("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1")
         _add_column("user", "skylight_url", "ALTER TABLE user ADD COLUMN skylight_url VARCHAR")
         _add_column("user", "avatar", "ALTER TABLE user ADD COLUMN avatar VARCHAR")
@@ -520,6 +523,90 @@ def _check_abuse_ch_key(update_data: dict) -> None:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     except abuse_ch.Unreachable as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from None
+
+
+#: username -> monotonic time of the last failed Music Assistant account provisioning (retried later).
+_MA_PROVISION_FAILED: dict[str, float] = {}
+MA_PROVISION_RETRY_S = 300.0
+#: username -> the lock that makes a person's account provisioning single-flight. Identity's routes run
+#: in a thread pool, and a page load sends several requests that each resolve the same person at once;
+#: without it each one asked the hub for an account and a token, and Music Assistant kept them all.
+_MA_PROVISION_LOCKS: dict[str, threading.Lock] = {}
+_MA_PROVISION_LOCKS_GUARD = threading.Lock()
+
+
+def _ma_provision_lock(username: str) -> threading.Lock:
+    with _MA_PROVISION_LOCKS_GUARD:
+        return _MA_PROVISION_LOCKS.setdefault(username, threading.Lock())
+
+
+def _ma_never_provisioned(user: User) -> bool:
+    """Accounts that never get a Music Assistant account of their own: the household (system default)
+    account, which is not a person, and dedicated test accounts."""
+    return _is_system_default_user(user) or bool(getattr(user, "is_test_account", False))
+
+
+def _ma_reload_login(session: Session, user: User) -> None:
+    """Copy ``user``'s saved Music Assistant login from the database, as another request may just
+    have saved one. A fresh session, so this request's own transaction cannot hide that commit."""
+    with Session(session.get_bind()) as fresh:
+        row = fresh.exec(select(User.mass_url, User.mass_token_enc, User.mass_user_id)
+                         .where(User.id == user.id)).first()
+    if row is None:
+        return
+    mass_url, token_enc, user_id = row
+    if token_enc and token_enc != user.mass_token_enc:
+        user.mass_url, user.mass_token_enc, user.mass_user_id = mass_url, token_enc, user_id
+
+
+def _resolve_music_assistant(session: Session, user: User, granted: set[str], *,
+                             may_provision: bool = True) -> music_assistant.Resolution:
+    """The Music Assistant server and login ``user`` uses (services/identity/music_assistant.py).
+
+    A login made for them on the household server is saved on their account at once, so it is
+    made once, and only one request at a time may make it (``_MA_PROVISION_LOCKS``): a request
+    that waited re-reads the saved login and uses it. The system default (household) account and
+    test accounts are never given one.
+    """
+    may_provision = may_provision and not _ma_never_provisioned(user)
+    if not may_provision or (user.mass_url or "").strip() or user.mass_token_enc:
+        return _resolve_music_assistant_locked(session, user, granted, may_provision=may_provision)
+    with _ma_provision_lock(user.username):
+        _ma_reload_login(session, user)
+        return _resolve_music_assistant_locked(session, user, granted, may_provision=may_provision)
+
+
+def _resolve_music_assistant_locked(session: Session, user: User, granted: set[str], *,
+                                    may_provision: bool) -> music_assistant.Resolution:
+    grant = None
+    if "music_assistant" in granted and not _is_system_default_user(user):
+        owner = _system_default_user(session)
+        if owner is not None:
+            shared = _own_service_creds(owner, "music_assistant")
+            grant = (shared["mass_url"], shared["mass_token"])
+    failed_at = _MA_PROVISION_FAILED.get(user.username)
+    recently_failed = failed_at is not None and time.monotonic() - failed_at < MA_PROVISION_RETRY_S
+    res = music_assistant.resolve(
+        username=user.username,
+        own_url=ha_redirect.redirect(user.mass_url),
+        own_token=_decrypt_field(user.mass_token_enc),
+        own_user_id=user.mass_user_id,
+        display_name=user.display_name,
+        grant=grant,
+        may_provision=may_provision and not recently_failed,
+    )
+    if res.login == "provisioned" and res.token:
+        _MA_PROVISION_FAILED.pop(user.username, None)
+        user.mass_token_enc = encrypt(res.token)
+        user.mass_user_id = res.user_id
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        log.info(f"[music_assistant] {user.username} now has their own Music Assistant account "
+                 f"({'made' if res.provisioned.get(user.username) else 'existing'}, new token saved)")
+    elif res.error and not res.token and res.server == "household" and may_provision and not recently_failed:
+        _MA_PROVISION_FAILED[user.username] = time.monotonic()
+    return res
 
 
 def _resolve_service_creds(
@@ -1126,7 +1213,9 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             shared_owner = owner
 
     ha = service_creds["home_assistant"]
-    mass = service_creds["music_assistant"]
+    # Music Assistant has its own rules (their own server, else HomeHub's, with their own account on it).
+    mass_res = _resolve_music_assistant(session, user, granted)
+    mass = {"mass_url": mass_res.url, "mass_token": mass_res.token}
     abs_ = service_creds["audiobookshelf"]
     nextcloud = service_creds["nextcloud"]
 
@@ -1160,6 +1249,12 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         )
         for service, values in household_default.items():
             credential_sources[service] = "household" if any(values.values()) else "absent"
+
+    if mass_res.token:
+        credential_sources["music_assistant"] = (
+            "shared" if household else ("granted" if mass_res.login == "granted" else "own"))
+    else:
+        credential_sources["music_assistant"] = "absent"
 
     log.info(
         f"[resolve] Returning credentials for user={user.username}, "
@@ -1198,8 +1293,11 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         mail_pass=None if household else (
             decrypt(user.mail_pass_enc) if user.mail_pass_enc else None
         ),
-        mass_url=mass["mass_url"],
+        mass_url=mass["mass_url"] if mass_res.token else None,
         mass_token=mass["mass_token"],
+        mass_server=mass_res.server,
+        mass_user_id=mass_res.user_id,
+        mass_error=mass_res.error,
         git_url=None if household else user.git_url,
         git_user=None if household else user.git_user,
         git_token=None if household else (
@@ -2059,6 +2157,10 @@ def _apply_user_update(user: User, update_data: dict, clear_fields: list[str] | 
     erase wiped a saved password whenever anyone saved the form for any other
     reason. Erasing is explicit -- the field is named in ``clear_fields``.
     """
+    ma_fields = {"mass_url", "mass_token"}
+    if ma_fields & set(clear_fields or []) or any(str(update_data.get(k) or "").strip() for k in ma_fields):
+        # A different Music Assistant server or login: the account id it was checked as no longer applies.
+        user.mass_user_id = None
     for field in clear_fields or []:
         if field in CREDENTIAL_COLUMNS:
             setattr(user, CREDENTIAL_COLUMNS[field], None)
@@ -3678,6 +3780,138 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
         # hosts, URLs or other request internals) back to the client.
         log.error(f"[test_connection] {service} failed: {type(e).__name__}: {e}")
         return {"status": "ERROR", "message": f"Could not connect to {service}. Check the URL and credentials."}
+
+
+# Music Assistant: status for Accounts & Integrations, accounts and stale-URL migration (admin)
+
+@app.get("/api/auth/music-assistant/status")
+def music_assistant_status(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """Which Music Assistant this person uses and whether it answers; never a token."""
+    granted = set(_granted_services(session, user.username))
+    res = _resolve_music_assistant(session, user, granted)
+    household = music_assistant.household_server()
+    out: dict[str, Any] = {
+        "server": res.server, "login": res.login, "url": res.url, "own_url": user.mass_url or None,
+        "household_url": household.get("url"), "household_error": household.get("error"),
+        "can_use_household": bool(user.mass_url) and bool(household.get("url")),
+        "note": music_assistant.FAVORITES_NOTE, "ma_username": None,
+    }
+    if not res.token:
+        return {**out, "state": "not_set_up", "message": res.error or music_assistant.NO_MA_MESSAGE}
+    found = music_assistant.probe(res.url or "", res.token)
+    state = found["state"]
+    if state == "ok":
+        if res.server == "household" and found.get("ma_user_id") and found["ma_user_id"] != user.mass_user_id \
+                and res.login != "granted":
+            user.mass_user_id = found["ma_user_id"]
+            session.add(user)
+            session.commit()
+        message = f"Connected as {found.get('ma_username') or 'your account'}."
+        if res.login == "granted":
+            message += " This is the household's shared login, not an account of your own."
+        return {**out, "state": "ok", "message": message, "ma_username": found.get("ma_username")}
+    if state == "unreachable":
+        return {**out, "state": state, "message": music_assistant.unreachable_message(res, found["message"])}
+    where = "your own Music Assistant" if res.server == "own" else "the household Music Assistant"
+    return {**out, "state": state, "message": f"{found['message']} Update the token for {where} in Accounts & "
+                                              "Integrations" + (", or ask an admin to renew your account."
+                                                                if res.server == "household" else ".")}
+
+
+def _ma_accounts_plan(session: Session) -> list[dict[str, Any]]:
+    """Each person and what giving everyone their own Music Assistant account would do (names only).
+
+    The household account and test accounts are not people and are left out."""
+    rows = []
+    for u in session.exec(select(User)).all():
+        if _ma_never_provisioned(u):
+            continue
+        if (u.mass_url or "").strip():
+            action = "own_server"
+        elif u.mass_token_enc:
+            action = "has_login"
+        else:
+            action = "needs_account"
+        rows.append({"username": u.username, "action": action})
+    return sorted(rows, key=lambda r: r["username"])
+
+
+def _ma_provision(session: Session, usernames: list[str] | None = None) -> list[dict[str, Any]]:
+    """Give each person who needs one their own household Music Assistant account (idempotent)."""
+    wanted = {n.lower() for n in usernames} if usernames else None
+    out = []
+    for row in _ma_accounts_plan(session):
+        if row["action"] != "needs_account" or (wanted is not None and row["username"] not in wanted):
+            out.append({**row, "result": "unchanged"})
+            continue
+        u = session.exec(select(User).where(User.username == row["username"])).first()
+        _MA_PROVISION_FAILED.pop(u.username, None)
+        res = _resolve_music_assistant(session, u, set())
+        out.append({**row, "result": "provisioned" if res.login == "provisioned" else "failed",
+                    "message": None if res.login == "provisioned" else res.error})
+    return out
+
+
+def _ma_retired_hosts(given: list[str] | None) -> list[str]:
+    """The hosts to treat as retired: the ones given, else the sources of HA_URL_REDIRECTS (retired hosts)."""
+    hosts = [h.strip().lower() for h in (given or []) if h and h.strip()]
+    if hosts:
+        return hosts
+    return sorted({(urlparse(src).hostname or "").lower() for src in ha_redirect.redirects()} - {""})
+
+
+def _ma_clear_stale(session: Session, hosts: list[str]) -> list[dict[str, Any]]:
+    """Clear saved Music Assistant URLs on a retired host, so those people follow the household's."""
+    plan = music_assistant.stale_url_plan(list(session.exec(select(User)).all()), hosts)
+    for row in plan:
+        u = session.exec(select(User).where(User.username == row["username"])).first()
+        u.mass_url = None
+        u.mass_user_id = None  # it was an account on the old server's id space; checked again on use
+        session.add(u)
+    session.commit()
+    return plan
+
+
+@app.get("/api/admin/music-assistant/accounts")
+def music_assistant_accounts(session: Session = Depends(get_session), _: Any = Depends(require_admin_or_internal)):
+    """Dry run: who already has a Music Assistant login and who would get their own account."""
+    return {"users": _ma_accounts_plan(session), "household": music_assistant.household_server()}
+
+
+@app.post("/api/admin/music-assistant/accounts")
+def music_assistant_provision(body: dict, request: Request, session: Session = Depends(get_session),
+                              _: Any = Depends(require_admin_or_internal)):
+    """``{"confirm": true, "usernames"?: [...]}``: make the missing accounts (never shows a token)."""
+    if body.get("confirm") is not True:
+        raise HTTPException(status_code=400, detail="Send confirm: true after reviewing the dry run (GET).")
+    results = _ma_provision(session, body.get("usernames"))
+    _audit(request, session, "music_assistant.accounts_provisioned", None,
+           changes=[{"field": r["username"], "change": r["result"]} for r in results if r["result"] != "unchanged"])
+    return {"users": results}
+
+
+@app.get("/api/admin/music-assistant/stale-urls")
+def music_assistant_stale_urls(retired: str | None = None, session: Session = Depends(get_session),
+                               _: Any = Depends(require_admin_or_internal)):
+    """Dry run: whose saved Music Assistant URL is on a retired host (``?retired=host1,host2``)."""
+    hosts = _ma_retired_hosts((retired or "").split(","))
+    return {"retired_hosts": hosts,
+            "users": music_assistant.stale_url_plan(list(session.exec(select(User)).all()), hosts)}
+
+
+@app.post("/api/admin/music-assistant/stale-urls")
+def music_assistant_clear_stale_urls(body: dict, request: Request, session: Session = Depends(get_session),
+                                     _: Any = Depends(require_admin_or_internal)):
+    """``{"confirm": true, "retired_hosts"?: [...]}``: clear those URLs; the tokens are kept."""
+    if body.get("confirm") is not True:
+        raise HTTPException(status_code=400, detail="Send confirm: true after reviewing the dry run (GET).")
+    hosts = _ma_retired_hosts(body.get("retired_hosts"))
+    if not hosts:
+        raise HTTPException(status_code=400, detail="Name the retired host(s): retired_hosts.")
+    cleared = _ma_clear_stale(session, hosts)
+    _audit(request, session, "music_assistant.stale_urls_cleared", None,
+           changes=[{"field": r["username"], "change": f"cleared {r['host']}"} for r in cleared])
+    return {"retired_hosts": hosts, "cleared": cleared}
 
 # Credential Seeding
 

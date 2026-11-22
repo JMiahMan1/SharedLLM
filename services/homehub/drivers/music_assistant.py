@@ -3,10 +3,14 @@
 MA ran as an HA add-on and moves to a standalone container (see
 ``services/homehub/MUSIC_ASSISTANT.md``). The add-on's URL in the HA entry
 (``http://d5369777-music-assistant:8094``) only resolved inside HA's network,
-so the URL is taken from, in order: ``entry.options["url"]``, the
-``MUSIC_ASSISTANT_URL`` environment variable, ``entry.data["url"]``. The
-token (the long-lived token MA issued to HA, kept in MA's ``auth.db``) comes
-from ``options["token"]``, ``MUSIC_ASSISTANT_TOKEN`` or ``data["token"]``.
+so the URL is taken from the config entry only: ``entry.data["url"]``. The
+token (the long-lived token MA issued to HA, kept in MA's ``auth.db``) is
+``data["token"]``. An imported entry's ``options`` copies are folded into
+``data`` when the hub loads (``music_assistant_server.fold_entry``). No
+environment variable or built-in address is consulted: the entry is the one
+source of truth, changed under Integrations > Music Assistant > Configure, and
+the rest of the stack reads the household server from it
+(``GET /hub/music_assistant/server``, ``music_assistant_server.household_server``).
 
 One persistent WebSocket (``/ws``, JSON-RPC: ``{"message_id", "command",
 "args"}``) carries commands and MA's pushed events (``player_updated``,
@@ -26,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
 import time
 import urllib.parse
 import uuid
@@ -219,10 +222,8 @@ class MusicAssistantDriver(Driver):
 
     def __init__(self, hub, entry) -> None:
         super().__init__(hub, entry)
-        self.url = str(entry.options.get("url") or os.environ.get("MUSIC_ASSISTANT_URL")
-                       or entry.data.get("url") or "")
-        self.token = (entry.options.get("token") or os.environ.get("MUSIC_ASSISTANT_TOKEN")
-                      or entry.data.get("token"))
+        self.url = str(entry.data.get("url") or "")
+        self.token = entry.data.get("token")
         self.conn: Any = None
         self.players: dict[str, dict[str, Any]] = {}
         self.queues: dict[str, dict[str, Any]] = {}
@@ -233,7 +234,7 @@ class MusicAssistantDriver(Driver):
     # -- lifecycle ------------------------------------------------------------------
     async def async_setup(self) -> None:
         if not self.url:
-            raise HubError("music_assistant has no URL: set options.url or MUSIC_ASSISTANT_URL")
+            raise HubError("music_assistant has no URL: set the entry's url (Settings > Integrations > Music Assistant)")
         for service, schema in SERVICE_SCHEMAS.items():
             self.hub.register_service("music_assistant", service, _ma_service, schema)
         await self._connect()
@@ -586,11 +587,13 @@ class MusicAssistantDriver(Driver):
 
     async def play_media(self, player_id: str, media_ids: Any, *, media_type: str | None = None,
                          artist: str | None = None, album: str | None = None, enqueue: str | None = None,
-                         radio_mode: bool | None = None) -> None:
+                         radio_mode: bool | None = None, user: str | None = None) -> None:
+        """``user`` (an MA account id or username) makes MA start playback as that person, so their
+        play history and resume points are the ones used and updated (MA's impersonation argument)."""
         uris = await self.resolve_uris(media_ids, media_type, artist, album)
         option = ENQUEUE.get(str(enqueue)) if enqueue else None
         await self.cmd("player_queues/play_media", queue_id=player_id, media=uris, option=option,
-                       radio_mode=True if radio_mode else None)
+                       radio_mode=True if radio_mode else None, user=str(user) if user else None)
 
     async def play_announcement(self, player_id: str, url: str, use_pre_announce: Any = None,
                                 announce_volume: Any = None, pre_announce_url: str | None = None) -> None:
@@ -650,7 +653,8 @@ class MusicAssistantDriver(Driver):
             name = f"{artist} - {name}"
         types = [str(t) for t in as_list(data.get("media_type"))] or None
         result = await self.cmd("music/search", search_query=name, media_types=types,
-                                limit=int(data.get("limit") or 5), library_only=bool(data.get("library_only", False)))
+                                limit=int(data.get("limit") or 5), library_only=bool(data.get("library_only", False)),
+                                user=str(data["user"]) if data.get("user") else None)
         result = result if isinstance(result, dict) else {}
         return {k: [self.media_item_dict(i) for i in (result.get(k) or [])] for k in SEARCH_KEYS}
 
@@ -679,13 +683,14 @@ def _ma_type(content_type: Any) -> str | None:
 
 
 SERVICE_SCHEMAS: dict[str, dict[str, Any]] = {
+    # ``user``: the MA account to act as (play history, resume points); omitted, the hub's own login.
     "play_media": {"media_id": {"required": True}, "media_type": {}, "artist": {}, "album": {}, "enqueue": {},
-                   "radio_mode": {}},
+                   "radio_mode": {}, "user": {}},
     "play_announcement": {"url": {"required": True}, "use_pre_announce": {}, "announce_volume": {}},
     "transfer_queue": {"source_player": {}, "auto_play": {}},
     "get_queue": {},
     "search": {"config_entry_id": {}, "name": {"required": True}, "media_type": {}, "artist": {}, "album": {},
-               "limit": {}, "library_only": {}},
+               "limit": {}, "library_only": {}, "user": {}},
     "get_library": {"config_entry_id": {}, "media_type": {"required": True}, "favorite": {}, "search": {},
                     "limit": {}, "offset": {}, "order_by": {}, "album_type": {}, "album_artists_only": {}},
 }
@@ -729,7 +734,8 @@ async def _ma_service(hub, call: ServiceCall) -> Any:
         pid = ent.unique_id
         if s == "play_media":
             await drv.play_media(pid, d.get("media_id"), media_type=d.get("media_type"), artist=d.get("artist"),
-                                 album=d.get("album"), enqueue=d.get("enqueue"), radio_mode=d.get("radio_mode"))
+                                 album=d.get("album"), enqueue=d.get("enqueue"), radio_mode=d.get("radio_mode"),
+                                 user=d.get("user"))
         elif s == "play_announcement":
             await drv.play_announcement(pid, str(d.get("url") or ""), d.get("use_pre_announce"),
                                         d.get("announce_volume"), d.get("pre_announce_url"))

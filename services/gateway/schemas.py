@@ -56,6 +56,9 @@ class ResolvedCredentials(BaseModel):
     api_key: str | None = None
     mass_url: str | None = None
     mass_token: str | None = None
+    mass_server: str | None = None
+    mass_user_id: str | None = None
+    mass_error: str | None = None
     is_admin: bool = False
     #: Branch patterns the workspace runtime must never push to (from identity).
     forbidden_branches: list[str] | None = None

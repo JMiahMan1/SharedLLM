@@ -57,6 +57,12 @@ class ResolvedCredentials(BaseModel):
     mail_pass: str | None = None  # decrypted at resolution time
     mass_url: str | None = None
     mass_token: str | None = None           # decrypted at resolution time
+    #: "own" (the person's own Music Assistant server), "household" (HomeHub's), or "absent".
+    mass_server: str = "absent"
+    #: The person's account id on the household Music Assistant, for acting as them through the hub.
+    mass_user_id: str | None = None
+    #: Why there is no usable Music Assistant (said to the person as is); None when there is one.
+    mass_error: str | None = None
     git_url: str | None = None
     git_user: str | None = None
     git_token: str | None = None

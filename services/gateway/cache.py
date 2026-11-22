@@ -9,6 +9,7 @@ Caches are process-local and TTL-bounded:
 - The TTL bounds the exposure window of cached identity (which includes tokens)
   and guarantees eventual consistency even if an invalidation call is missed.
 """
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -32,6 +33,8 @@ _settings_cache_time: float = 0.0
 # --- Identity cache (keyed by api_key / token / user_id) ---
 _identity_cache: dict[str, Any] = {}
 _identity_cache_time: dict[str, float] = {}
+#: key -> the resolution already on its way to identity, which concurrent callers share.
+_identity_inflight: dict[str, asyncio.Future] = {}
 
 
 async def get_cached_settings(
@@ -75,16 +78,41 @@ async def get_cached_identity(
 ) -> Any:
     """Return cached resolved identity for ``body``, refreshing when expired.
 
-    Only successful resolutions are cached; failures are never stored.
+    Only successful resolutions are cached; failures are never stored. Concurrent misses for
+    the same key share one fetch: a page load sends many requests at once, and each one used
+    to ask identity separately, which made identity do first-use work (such as making a
+    person's Music Assistant account) several times in the same instant.
     """
     key = _identity_key(body)
     now = time.time()
     cached = _identity_cache.get(key)
     if cached is not None and (now - _identity_cache_time.get(key, 0.0)) < IDENTITY_CACHE_TTL:
         return cached
-    fresh = await fetcher()
+    pending = _identity_inflight.get(key)
+    if pending is not None and not pending.done() and pending.get_loop() is asyncio.get_running_loop():
+        try:
+            return await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            if not pending.cancelled():
+                raise  # this caller was cancelled, not the shared fetch
+            # The caller that was fetching went away; fetch for ourselves below.
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    _identity_inflight[key] = future
+    try:
+        fresh = await fetcher()
+    except asyncio.CancelledError:
+        future.cancel()
+        raise
+    except BaseException as exc:
+        future.set_exception(exc)
+        future.exception()  # retrieved: no "never retrieved" warning when nobody else waited
+        raise
+    finally:
+        if _identity_inflight.get(key) is future:
+            del _identity_inflight[key]
     _identity_cache[key] = fresh
     _identity_cache_time[key] = now
+    future.set_result(fresh)
     return fresh
 
 
@@ -96,9 +124,11 @@ def invalidate_identity(api_key: str | None = None) -> None:
     if api_key is None:
         _identity_cache.clear()
         _identity_cache_time.clear()
+        _identity_inflight.clear()
     else:
         _identity_cache.pop(api_key, None)
         _identity_cache_time.pop(api_key, None)
+        _identity_inflight.pop(api_key, None)
 
 
 # --- Shared Redis-backed cache (per-entity / per-user live state) ---

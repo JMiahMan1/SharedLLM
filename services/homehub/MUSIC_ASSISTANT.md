@@ -140,12 +140,19 @@ server (no ingress, its own webserver on 8095, already enabled: `core.webserver.
 
 ## 5. Pointing homehub and Jarvis at it
 
-- homehub's `music_assistant` driver reads the URL from, in order: the entry's `options["url"]`, the
-  environment variable **`MUSIC_ASSISTANT_URL`**, then the imported `data["url"]` (the dead add-on address).
-  Set `MUSIC_ASSISTANT_URL=http://192.0.2.205:8095` in the homehub container's environment. The token
-  stays the imported one (`MUSIC_ASSISTANT_TOKEN` or `options["token"]` override it if ever needed).
-- Jarvis's own direct MA client (`mass_url`/`mass_token`, used by `services/execution/handlers/mass_client.py`
-  when HA was down) should point at the same `http://192.0.2.205:8095`.
+- The hub's `music_assistant` **config entry is the one source** for where MA runs and the hub's own login
+  (`data["url"]`, `data["token"]`). No environment variable or built-in address is read. Change them under
+  Integrations > Music Assistant > Configure; the new address and token are tried against MA before they
+  are saved. An entry imported from HA kept the add-on address in `data` and the real one in `options`:
+  the hub folds `options` into `data` when it loads (`music_assistant_server.fold_entry`), once.
+- Jarvis reads the household server from the hub (`GET /hub/music_assistant/server`, no token in the
+  answer). When the entry's address is loopback (`http://127.0.0.1:8095`, fine for the hub on the host
+  network), other services are given the address MA itself publishes (its `base_url`, Settings > Core >
+  Streams), so that must be the host's LAN address.
+- Each person uses their **own MA account** on that server (identity makes one when they have none:
+  `POST /hub/music_assistant/accounts`, internal secret only). Playback the hub starts for a person carries
+  `user` so MA records it, and resumes it, under their account. A person may instead give their own MA
+  server in Accounts & Integrations.
 - After the first start, check Settings > Core > Streams: the published IP should be 192.0.2.205 (the
   add-on published 192.0.2.20), or Cast and DLNA players will be told to fetch audio from the old address.
 
