@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { clientName, useMAWebPlayer } from '../lib/maWebPlayer';
 import type { MAWebPlayerState } from '../lib/maWebPlayer';
 import JarvisMedia from '../plugins/jarvisMedia';
+import { speechSessionActive } from '../lib/speechSession';
 import { api } from '../services/api';
 import { TabLock } from '../features/media/engine/tabLock';
 import { applySessionMetadata, applySessionPosition, bindSessionHandlers } from '../features/media/engine/mediaSession';
@@ -202,6 +203,9 @@ export function MediaPlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!native) return;
     const handle = JarvisMedia.addListener('action', ({ action }) => {
+      // A study section being read aloud holds the notification: its Play
+      // resumes the reading, not the last song.
+      if (speechSessionActive()) return;
       const p = playerRef.current;
       if (action === 'play') void p.play().catch(() => {});
       else if (action === 'pause') void p.pause();

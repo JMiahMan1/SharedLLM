@@ -639,6 +639,26 @@ class MobileAppDriver(Driver):
         mgr = self._manager()
         return bool(mgr is not None and mgr.is_fresh(self.entry.entry_id))
 
+    def last_contact(self) -> Any:
+        """When this phone itself was last heard from (device_archive.py): its companion app's own report, or
+        Jarvis's latest fix for its user while it is that user's one phone. A fix for a user who has moved to
+        another phone says nothing about this one, so it never counts then."""
+        from datetime import UTC, datetime
+
+        times = []
+        mgr = self._manager()
+        seen = mgr.last_seen(self.entry.entry_id) if mgr is not None else None
+        if seen:
+            times.append(datetime.fromtimestamp(float(seen), UTC))
+        cache = getattr(self.hub, "_geo_people_cache", None) or {}
+        user = self.jarvis_user()
+        fix = (cache.get("fixes") or {}).get(user) if user else None
+        if fix and fix.get("last_updated") and self.jarvis_fills() and self._only_phone_of(user):
+            with contextlib.suppress(TypeError, ValueError):
+                at = datetime.fromisoformat(str(fix["last_updated"]))
+                times.append(at if at.tzinfo is not None else at.replace(tzinfo=UTC))
+        return max(times) if times else None
+
     def jarvis_fills(self) -> bool:
         """Jarvis's reports may write this phone's entities (the setting, the phone's option, a quiet app)."""
         mgr = self._manager()

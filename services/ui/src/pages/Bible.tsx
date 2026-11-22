@@ -34,7 +34,8 @@ import BibleProgress from '../components/bible/BibleProgress';
 import BibleGames from '../components/bible/BibleGames';
 import BibleMemorize from '../components/bible/BibleMemorize';
 import BibleStudySessions from '../components/bible/BibleStudySessions';
-import BibleStudyBooks from '../components/bible/BibleStudyBooks';
+import BibleStudyBooks, { type StudyOpenRequest } from '../components/bible/BibleStudyBooks';
+import { useAuth } from '../context/AuthContext';
 import ImportedDevotionals from '../components/bible/ImportedDevotionals';
 import { marksOnVerse } from '../components/bible/verseMarks';
 import { errorText } from '../lib/errorText';
@@ -847,6 +848,7 @@ export default function Bible() {
   // come through openRef, and the bump is what lets tapping the same link
   // twice land on its verse each time instead of the first tap's scrolled place.
   const [requestedSeq, setRequestedSeq] = useState(0);
+<<<<<<< HEAD
   const [requestedRef, setRequestedRef] = useState<string | null>(null);
   // Verse parameter from deep links (e.g., ?verse=16) for scrolling to a specific verse
   const [requestedVerse, setRequestedVerse] = useState<number | null>(() => {
@@ -872,8 +874,22 @@ export default function Bible() {
       }
     }, 0);
   }, [location.pathname, searchParams, requestedRef, requestedVerse]);
+const { user } = useAuth();
+  // A link into a study book: ?tab=studies&book=7&section=s-lesson-3 (or
+  // &ordinal=3), with an optional paragraph as #p-1a2b3c4d or &anchor=.
+  const studyOpenRequest = useMemo<StudyOpenRequest | null>(() => {
+    const bookId = Number(searchParams.get('book'));
+    if (!bookId) return null;
+    const ordinal = Number(searchParams.get('ordinal'));
+    const hash = typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '') : '';
+    return {
+      bookId,
+      section: searchParams.get('section') || undefined,
+      ordinal: ordinal > 0 ? ordinal : undefined,
+      anchor: searchParams.get('anchor') || hash || undefined,
+    };
+  }, [searchParams]);
   // Where Read was last left: the verse under the reader's eye, kept across tab
-  // switches (which unmount and remount the pane) so returning lands on it.
   const resumePosition = useRef<BiblePosition | null>(null);
   // The identity (the openRef counter) of the requested reference whose named
   // verse has already been honored, so a return to Read resumes where the
@@ -1148,8 +1164,12 @@ export default function Bible() {
               font_scale: effectivePreferences.font_scale,
               line_height: effectivePreferences.line_height,
               theme: effectivePreferences.theme,
+              read_aloud_voice: effectivePreferences.read_aloud_voice,
             }}
             onPreferences={applyPreferences}
+            openRequest={studyOpenRequest}
+            onOpenRef={openRef}
+            canReformat={Boolean(user?.is_admin)}
           />
         </div>
       )}

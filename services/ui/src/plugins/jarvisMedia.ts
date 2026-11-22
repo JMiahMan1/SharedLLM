@@ -16,6 +16,9 @@ export interface JarvisMediaPluginInterface {
     playerId?: string;
     playerName?: string;
     volume?: number;
+    /** The app's own read-aloud rather than music: kept alive with the screen
+     *  off, never handed to the native music player. Older APKs ignore it. */
+    speech?: boolean;
   }): Promise<void>;
   /** Ends the native player if it is running; `playing` says whether to carry on here. */
   reclaim(): Promise<{ playing: boolean }>;

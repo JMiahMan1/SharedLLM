@@ -4228,6 +4228,10 @@ export interface BibleImportedBook {
   /** How often a devotional advances: a reading a day or one a week. */
   cadence?: 'day' | 'week';
   created_at: string | null;
+  /** Which import normaliser produced the sections; 0 is the original raw text. */
+  format_version?: number;
+  /** Whether the original file is still available, so the book can be reformatted. */
+  reformattable?: boolean;
 }
 
 export interface BibleImportedBooksResponse {
@@ -4248,17 +4252,127 @@ export interface BibleBookListing {
   installable: number;
 }
 
+/** Where an old section went when a book was reformatted. */
+export interface BibleBookAlias {
+  old_ordinal: number;
+  old_section_id: string;
+  section_id: string;
+  ordinal: number;
+}
+
 export interface BibleImportedBookDetail {
   book: BibleImportedBook;
-  chapters: Array<{ ordinal: number; label: string; characters: number; number?: number | null }>;
+  chapters: Array<{
+    ordinal: number;
+    /** A stable id from the section title; links and reading positions name it. */
+    section_id?: string;
+    label: string;
+    characters: number;
+    number?: number | null;
+  }>;
+  aliases?: BibleBookAlias[];
+}
+
+export type StudyBlockType = 'heading' | 'paragraph' | 'list' | 'quote' | 'question' | 'note' | 'table' | 'image';
+
+/** A scripture reference found in a block's text, confirmed by the reference parser. */
+export interface StudyBlockRef {
+  start: number;
+  end: number;
+  ref: string;
+}
+
+/** One unit of an imported study section, with an id stable across re-imports. */
+export interface StudyBlock {
+  id: string;
+  type: StudyBlockType;
+  text: string;
+  level?: number;
+  items?: string[];
+  ordered?: boolean;
+  rows?: string[][];
+  marker?: string;
+  notes?: string[];
+  src?: string;
+  refs?: StudyBlockRef[];
 }
 
 export interface BibleBookChapter {
   book_id: number;
   ordinal: number;
+  section_id?: string;
   label: string;
   text: string;
   questions: string[];
+  /** Structured blocks; empty for a book imported before the normaliser. */
+  blocks?: StudyBlock[];
+}
+
+/** Where a block starts and ends in a spoken piece's text. */
+export interface StudyNarrationMark {
+  block_id: string;
+  start: number;
+  end: number;
+}
+
+export interface StudyNarrationPlan {
+  book_id: number;
+  ordinal: number;
+  section_id: string;
+  voice: string;
+  count: number;
+  characters: number;
+  cached_count: number;
+  all_cached: boolean;
+  chunks: Array<{ index: number; characters: number; cached: boolean; blocks: StudyNarrationMark[] }>;
+}
+
+export interface StudyNarrationChunk {
+  book_id: number;
+  ordinal: number;
+  section_id: string;
+  voice: string;
+  index: number;
+  count: number;
+  characters: number;
+  cached: boolean;
+  blocks: StudyNarrationMark[];
+  mime_type: string;
+  length_bytes: number;
+  audio_base64: string;
+}
+
+export interface StudyReformatPreview {
+  book_id: number;
+  token: string;
+  fingerprint: string;
+  /** Share of the old wording (4-word runs) still present; running heads lower it a little. */
+  retained: number;
+  before: {
+    format_version: number;
+    sections: number;
+    characters: number;
+    labels: string[];
+    sample: { label: string; text: string } | null;
+  };
+  after: {
+    format_version: number;
+    sections: number;
+    characters: number;
+    labels: string[];
+    sample: { label: string; section_id: string; blocks: StudyBlock[] } | null;
+    report: Record<string, unknown>;
+  };
+  mapping: Array<{
+    old_ordinal: number;
+    old_section_id: string;
+    old_label: string;
+    ordinal: number;
+    section_id: string;
+    label: string;
+    matched_by: 'text' | 'position';
+  }>;
+  assist: { status: string; reason?: string; changed?: number } | null;
 }
 
 export interface BibleDevotionalWork {

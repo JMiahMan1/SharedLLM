@@ -1367,7 +1367,7 @@ The two halves of that are deliberate: **`.env` seeds the host**, the
 
 ## Books, study sessions and chapter questions
 
-Ordinary PDF/EPUB books are imported separately from Bible translations:
+Ordinary books (PDF, EPUB, MOBI/AZW3, DOCX, TXT) are imported separately from Bible translations:
 
 - **Admin › Bible › Devotionals and study books** browses two shelves through
   the storage service: the Nextcloud books folder (`bible_books_path`, seeded
@@ -1375,9 +1375,82 @@ Ordinary PDF/EPUB books are imported separately from Bible translations:
   files). A file can also be uploaded from the admin's computer, which covers
   a folder such as `~/Desktop/Bible Study`.
 - A book is stored as `ImportedBook` plus ordered `ImportedBookChapter` rows;
-  it is never checked against the 66-book canon. EPUB uses the spine-aware
-  extractor; PDF uses one page per section because a scanned or typeset page
-  is the natural reading unit.
+  it is never checked against the 66-book canon.
+- **Import cleanup (study_format / study_blocks).** Every format goes through
+  one normaliser and comes out as the same structure: sections with stable
+  ids (`s-lesson-3-the-vine`, from the title), and per section a list of
+  blocks (heading, paragraph, list, quote, question, note, table, image), each
+  with an id derived from its own words (`p-1a2b3c4d`), so a link to a
+  paragraph survives a re-import. Each section also keeps its plain `text`,
+  which Ask, devotionals and Notes read as before.
+  - PDF (`study_pdf`, PyMuPDF span data): running heads, running feet and
+    page numbers are removed (a margin line that repeats across pages, digits
+    folded, or that is only a page number); hard-wrapped lines are rejoined
+    and words split at a line end are joined (`self-`, `God-` and similar keep
+    their hyphen); a paragraph that runs over a page break stays one
+    paragraph; two-column pages are read left column then right; headings
+    come from size and weight (and "Lesson/Chapter/Session/Week/Day N"
+    lines); small type at the foot of a page starting with a marker becomes a
+    footnote; superscript markers are lifted out of the sentence; tables
+    (`find_tables`) and images of a useful size are kept. A PDF with no
+    headings at all is still one section per page. A scanned PDF says it
+    needs OCR.
+  - EPUB (`study_html`): `h1`-`h6` and publishers' heading classes (`ct`,
+    `ah`, `chapter-title`...), paragraphs, block quotes, lists, tables,
+    images, and footnotes (`epub:type` noteref/footnote/endnote, footnote
+    classes) as notes; CSS spans, page-break markers, nav and scripts are
+    dropped. A spine file that opens with a heading starts a section; one
+    that does not (a chapter split for size) continues the previous one.
+  - MOBI/AZW/AZW3: unpacked to EPUB (or HTML for old MOBI) with the `mobi`
+    package, or Calibre's `ebook-convert` when it is on the path, then read
+    as above. DRM-protected files are refused with that reason.
+  - DOCX (`study_docx`, standard library): paragraph styles (Title,
+    Heading N, custom styles through `basedOn` and outline level, Quote,
+    List), numbered lists, tables, images and footnotes (`footnotes.xml`,
+    placed after the paragraph that cites them).
+  - TXT/MD: blank-line paragraphs, `#` headings, bullet lists, `>` quotes.
+  - Shared rules: ligatures, soft hyphens, zero-width characters, non-breaking
+    spaces and cp1252 mojibake (curly quotes decoded as three odd characters) are cleaned;
+    discussion questions are recognised (everything ending in "?" under a
+    Questions/Discussion/Reflect heading, or a numbered line ending in "?");
+    scripture references are found and confirmed by `refs.parse_reference`
+    (ambiguous book names such as Job, Mark, Acts need chapter and verse), and
+    each becomes a link that opens Bible › Read at the verse. The import
+    report (`ImportedBook.import_report`) counts what was removed or found.
+- **Optional local-model pass (`study_assist`).** On request in the reformat
+  preview, the lines the rules are unsure of (short lines with no
+  punctuation, weak bold headings; at most 80) are sent to the household's
+  local model (`llm_local_url`, never a cloud model) to be labelled heading or
+  paragraph. The model returns ids only, never text, and the pass is
+  discarded if the book's letters-and-digits fingerprint changes.
+- **Reformat.** Admin › Bible › Books has a Reformat button per book, and an
+  admin sees "Reformat this book" in the reader's page actions. Both preview
+  first (`POST /admin/books/{id}/reformat/preview`: sections before and after,
+  a sample of the new layout, the share of the old wording kept, and where
+  each old section goes) and write only on Apply (`.../reformat/apply` with
+  the preview's token; refused if the file now reads differently). The old
+  sections are mapped to the new ones by looking for runs of their words in
+  reading order, stored as `ImportedBookAlias`, so an old ordinal or section
+  id still resolves (`GET /imported-books/{id}/resolve`,
+  `/sections/{section_id}`), the reader's saved place follows, and a saved
+  study position on `UserBibleState` (when that feature is present) is moved.
+- **Links into a book.** `/bible?tab=studies&book=<id>&section=<section_id>`
+  (or `&ordinal=<n>`), optionally with `#<block id>` or `&anchor=<block id>`,
+  opens the reader at that section and paragraph.
+- **Read aloud.** A study section is read like Scripture: same engine
+  (`/execute/tts`, Kokoro or Piper via the alpaca audio server, scripture-aware
+  text normalisation), same chunked plan/chunk protocol and cache
+  (`/imported-books/{id}/chapters/{n}/narration/plan|chunk`). The script is
+  built server side from the stored blocks: headings are read with a pause,
+  footnotes, tables and images are skipped, questions are announced
+  ("Question 2."). Each piece lists the blocks it speaks and their offsets, so
+  the reader starts at the paragraph on screen, lights up the paragraph being
+  read and keeps it in view, and can keep going into the next section. Speed
+  and voice (the same `read_aloud_voice` preference as Scripture) are on the
+  bar. On Android the read-aloud holds the media notification as speech
+  (`JarvisMedia.update({speech: true})`), which keeps it playing with the
+  screen off and never hands off to the native music player; lock-screen and
+  headset play/pause reach it. Closing the bar, the book or the page stops it.
 - Books marked **Daily Devotions** become a `book:<id>` work. The rotation
   starts on Day 1 of the year at the book's first printed devotion - front
   matter (contents, introduction) never takes a day - and each book carries
@@ -1385,9 +1458,9 @@ Ordinary PDF/EPUB books are imported separately from Bible translations:
   reads devotion 42. The Devotional books shelf on Bible › Today shows each
   imported devotional, lets you switch its cadence, and opens it in the
   focused reader.
-- Books marked **Bible study** are readable under Bible › Studies. Lines that
-  end in a question in the last third of a chapter are stored as its
-  end-of-chapter questions. "Answer from this chapter" calls the model with
+- Books marked **Bible study** are readable under Bible › Studies. The
+  section's discussion questions are stored as its questions and drawn with
+  room for an answer (kept on the device). "Answer from this chapter" calls the model with
   that chapter as the only source and keeps the answer in the study session.
 - A Bible study book opens in a focused reader rather than a wall of page
   buttons: one page at a time, a contents sheet, progress remembered per book,

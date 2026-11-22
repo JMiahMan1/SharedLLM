@@ -47,6 +47,13 @@ ROUTES = [
     ("get", "/api/bible/narration?ref=John+3:16"),
     ("get", "/api/bible/narration/plan?ref=John+3:16"),
     ("get", "/api/bible/narration/chunk?ref=John+3:16&index=0"),
+    ("get", "/api/bible/imported-books/7/sections/s-lesson-1"),
+    ("get", "/api/bible/imported-books/7/resolve?ordinal=3"),
+    ("get", "/api/bible/imported-books/7/assets/epub-vine.png"),
+    ("get", "/api/bible/imported-books/7/chapters/1/narration/plan"),
+    ("get", "/api/bible/imported-books/7/chapters/1/narration/chunk?index=0"),
+    ("post", "/api/bible/admin/books/7/reformat/preview"),
+    ("post", "/api/bible/admin/books/7/reformat/apply"),
     ("post", "/api/bible/study/ask"),
     ("post", "/api/bible/study/ask/stream"),
     ("post", "/api/bible/verse-of-day/context"),
@@ -98,6 +105,7 @@ def _patch_bible(monkeypatch, status=200, payload=None, captured=None, raw=None)
         def __init__(self):
             self.status = status
             self.text = raw.decode("utf-8", errors="replace") if raw else json.dumps(payload or {})
+            self.headers = {"Content-Type": "image/png" if raw is not None else "application/json"}
 
         async def json(self, **kwargs):
             if raw is not None:
@@ -971,3 +979,56 @@ def test_search_ask_is_asked_as_the_caller_with_only_its_own_fields(make_client,
     sent = captured["calls"][-1]
     assert sent["params"]["username"] == "sam"
     assert sent["json"] == {"question": "What about worry?", "version": None, "scope": "nt", "depth": "adult"}
+
+
+# imported study books: structure, places, images, reading aloud, reformat
+
+
+def test_a_study_section_is_read_aloud_through_its_own_route(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"audio_base64": "AAA=", "index": 2, "blocks": []})
+    resp = make_client(user="sam").get(
+        "/api/bible/imported-books/7/chapters/3/narration/chunk", params={"index": 2, "voice": "af_heart"}
+    )
+    assert resp.status_code == 200
+    call = captured["calls"][-1]
+    assert call["url"].endswith("/imported-books/7/chapters/3/narration/chunk")
+    assert call["params"] == {"index": 2, "voice": "af_heart"}
+
+
+def _allow_reader(monkeypatch):
+    async def _allow(*_args, **_kwargs):
+        return {"user": "sam", "is_admin": False}
+
+    monkeypatch.setattr(gateway_main, "_require_identity_from_request", _allow)
+
+
+def test_a_book_image_passes_through_as_bytes(make_client, monkeypatch):
+    png = b"\x89PNG fake image bytes"
+    captured = _patch_bible(monkeypatch, raw=png)
+    _allow_reader(monkeypatch)
+    resp = make_client(user="sam").get("/api/bible/imported-books/7/assets/epub-vine.png")
+    assert resp.status_code == 200
+    assert resp.content == png
+    assert resp.headers["content-type"] == "image/png"
+    assert captured["calls"][-1]["url"].endswith("/imported-books/7/assets/epub-vine.png")
+
+
+def test_a_legacy_place_is_resolved_with_its_flag(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"ordinal": 2, "section_id": "s-lesson-2"})
+    _allow_reader(monkeypatch)
+    resp = make_client(user="sam").get("/api/bible/imported-books/7/resolve", params={"ordinal": 5, "legacy": "true"})
+    assert resp.status_code == 200
+    assert captured["calls"][-1]["params"] == {"ordinal": 5, "legacy": "true"}
+
+
+def test_reformatting_a_book_is_for_admins_only(make_client, monkeypatch):
+    captured = _patch_bible(monkeypatch, payload={"token": "abc"})
+    member = make_client(user="sam", is_admin=False)
+    assert member.post("/api/bible/admin/books/7/reformat/preview", json={}).status_code == 403
+    assert captured["calls"] == []
+    admin = make_client(user="parent", is_admin=True)
+    resp = admin.post("/api/bible/admin/books/7/reformat/preview", json={"assist": True, "extra": "dropped"})
+    assert resp.status_code == 200
+    assert captured["calls"][-1]["json"] == {"assist": True}
+    admin.post("/api/bible/admin/books/7/reformat/apply", json={"token": "tok12345"})
+    assert captured["calls"][-1]["json"] == {"token": "tok12345"}
