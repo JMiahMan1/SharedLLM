@@ -225,6 +225,22 @@ public sealed class GuardService
             // not wipe. It is logged for the parents' MDM log instead.
             if (hub.WipeRequested) Log("wipe requested by the hub; ignored (no wipe in this build)");
 
+            // The parents' offline-code verifiers come with every status answer
+            // now, so a parent's offline code works here without an unlock
+            // request first. Replaced (a changed or deleted code takes effect);
+            // an answer without them keeps the set already held.
+            if (hub.OfflineCodes is { } offlineCodes)
+            {
+                lock (_stateLock)
+                {
+                    if (_offline.Remember(offlineCodes))
+                    {
+                        SaveOfflineCodes();
+                        Log($"offline codes: {_offline.Codes.Count} parent code(s) from the hub");
+                    }
+                }
+            }
+
             var now = DateTimeOffset.Now;
             var time = TimeBudget.Apply(hub, _meter.PendingMinutes, now);
             KeepLimitSnapshot(time);

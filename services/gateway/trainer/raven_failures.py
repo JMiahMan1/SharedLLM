@@ -62,15 +62,36 @@ _INFRA = re.compile(
 )
 _LOOP = re.compile(
     r"(?i)\blooping:|infinite loop|no-progress loop|same step failed repeatedly|same action repeated|"
-    r"stuck in a loop"
+    r"stuck in a loop|no progress"
 )
-_CAP = re.compile(r"(?i)max(?:imum)? iterations|iteration (?:cap|limit)|ran out of iterations|reached iteration")
+_CAP = re.compile(
+    r"(?i)max(?:imum)?(?: number of)? iterations?|iteration (?:cap|limit)|"
+    r"ran out of iterations|out of iterations|iterations? (?:exhausted|reached)|"
+    r"reached (?:the )?(?:max(?:imum)?|iteration|limit)"
+)
+#: A mission killed after this many iterations was going round in circles, not
+#: unlucky: the loop guard would have stopped it at the cap anyway.
+KILLED_LOOP_ITERATIONS = 10
+#: Repeating the same failing call this often is a loop, even below the loop
+#: detector's window: by the third identical failure the model has stopped
+#: reading the error.
+REPEATED_FAILURES = 3
+_KILLED = re.compile(
+    r"(?i)mission terminated|aborted by user|cancelled by user|killed by user|"
+    r"user requested cancellation"
+)
+_ITERATION = re.compile(r"(?i)iteration\s+(\d+)\s*(?:/|\bof\b)\s*(\d+)")
+_WRAP_KEYS = ("events", "output_log", "log", "audit_log", "items")
 _WRONG_TOOL = re.compile(r"(?i)unknown action|unknown tool|not a (?:valid|known) tool|no such tool")
 _BAD_ARGS = re.compile(
     r"(?i)validation error|field required|missing required|invalid payload|unexpected keyword|"
     r"keyerror|typeerror|is not of type|expected .* got"
 )
-_BAD_PATH = re.compile(r"(?i)no such file or directory|filenotfounderror|does not exist|path not found|not a directory")
+_BAD_PATH = re.compile(
+    r"(?i)no such file or directory|no such file|filenotfounderror|file not found|does not exist|"
+    r"path not found|not a directory|can't open file|cannot open file|could not open file|"
+    r"\[errno 2\]|errno 2|nonexistent (?:file|path)"
+)
 _UNVERIFIED = re.compile(r"(?i)unverified|without (?:running|verif)|verification gate|lint_errors|tests? failed")
 _GAVE_UP = re.compile(r"(?i)\b(?:i (?:cannot|can't|am unable to)|unable to (?:complete|proceed)|giving up|gave up)\b")
 _USER_ABORT = re.compile(r"(?i)aborted by user|cancelled by user")
@@ -110,15 +131,55 @@ def write_state(state: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _text(value: Any) -> str:
+    """A log field as text: JSON for structures, so error shapes stay stable."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _log_events(mission: dict[str, Any]) -> list[Any]:
+    """The mission's audit log, tolerating wrappers and double-encoded JSON.
+
+    Some writers store the log as a JSON string, some as a dict with an
+    ``events`` list, and some encode the whole list twice. All of those are the
+    same log; only the outer wrapping differs.
+    """
+    value = mission.get("output_log")
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "replace")
+    for _ in range(3):
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                return []
+        elif isinstance(value, dict):
+            nested = None
+            for key in _WRAP_KEYS:
+                candidate = value.get(key)
+                if isinstance(candidate, list) or (isinstance(candidate, str) and candidate.strip()):
+                    nested = candidate
+                    break
+            if nested is None:
+                return [value] if ("type" in value or "raw_type" in value) else []
+            value = nested
+        elif isinstance(value, list):
+            return value
+        else:
+            return []
+    return value if isinstance(value, list) else []
+
+
 def mission_events(mission: dict[str, Any]) -> list[dict[str, Any]]:
     """The tool calls of a mission's normalised audit log, as ``{tool, payload, ok, result}``."""
-    raw = mission.get("output_log")
-    try:
-        events = json.loads(raw) if isinstance(raw, str) and raw.strip() else (raw or [])
-    except ValueError:
-        return []
     calls: list[dict[str, Any]] = []
-    for event in events if isinstance(events, list) else []:
+    for event in _log_events(mission):
         if not isinstance(event, dict):
             continue
         kind = event.get("raw_type") or event.get("type")
@@ -135,16 +196,65 @@ def mission_events(mission: dict[str, Any]) -> list[dict[str, Any]]:
                 "tool": str(event.get("tool") or ""),
                 "payload": payload if isinstance(payload, dict) else {},
                 "ok": kind == "result_success",
-                "result": str(event.get("raw_data") or event.get("data") or ""),
+                "result": _text(event.get("raw_data") if event.get("raw_data") not in (None, "") else event.get("data")),
             }
         )
     return calls
+
+
+def iteration_span(mission: dict[str, Any]) -> tuple[int | None, int | None]:
+    """``(last_iteration, max_iterations)`` from the log's system events or the mission row."""
+    last: int | None = None
+    maximum: int | None = None
+    for event in _log_events(mission):
+        if not isinstance(event, dict):
+            continue
+        if (event.get("raw_type") or event.get("type")) != "system":
+            continue
+        match = _ITERATION.search(_text(event.get("data") or event.get("message") or ""))
+        if match:
+            last, maximum = int(match.group(1)), int(match.group(2))
+    for key in ("iteration", "iterations", "iteration_count", "current_iteration"):
+        try:
+            value = int(str(mission.get(key)).strip())
+        except (TypeError, ValueError):
+            continue
+        if last is None or value > last:
+            last = value
+    for key in ("max_iterations", "iteration_limit"):
+        try:
+            value = int(str(mission.get(key)).strip())
+        except (TypeError, ValueError):
+            continue
+        if maximum is None or value > maximum:
+            maximum = value
+    return last, maximum
 
 
 def _call_signature(call: dict[str, Any]) -> str:
     from services.gateway.agent_loop import action_signature
 
     return action_signature(call["tool"], call["payload"])
+
+
+def _most_common(values: list[str]) -> str | None:
+    return max(values, key=values.count) if values else None
+
+
+def _repeated_failure(calls: list[dict[str, Any]], threshold: int = REPEATED_FAILURES) -> str | None:
+    """``"looping: <call> failed N times"`` when the same call keeps failing."""
+    counts: dict[str, int] = {}
+    for call in calls:
+        if call["ok"]:
+            continue
+        signature = _call_signature(call)
+        counts[signature] = counts.get(signature, 0) + 1
+    if not counts:
+        return None
+    signature, count = max(counts.items(), key=lambda item: item[1])
+    if count >= threshold:
+        return f"looping: {signature[:120]} failed {count} times"
+    return None
 
 
 def _error_shape(text: str) -> str:
@@ -167,6 +277,8 @@ def classify(mission: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, 
     result = " ".join(str(mission.get(k) or "") for k in ("result", "error_summary"))
     errors = [c for c in calls if not c["ok"]]
     last_error = errors[-1] if errors else None
+    last_iteration, max_iteration = iteration_span(mission)
+    killed = bool(_KILLED.search(result))
 
     def finding(kind: str, tool: str | None, evidence: str) -> dict[str, Any]:
         return {"kind": kind, "infrastructure": kind == INFRASTRUCTURE, "tool": tool, "evidence": evidence[:300]}
@@ -180,23 +292,35 @@ def classify(mission: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, 
         return finding(INFRASTRUCTURE, last_error["tool"] if last_error else None, result or (last_error or {}).get("result", ""))
     history = [(_call_signature(c), c["ok"], _error_shape(c["result"]) if not c["ok"] else "") for c in calls]
     loop = detect_mission_loop(history, window=max(16, len(history)))
+    repeated = _repeated_failure(calls)
     if _LOOP.search(result) or loop:
-        tools = [c["tool"] for c in calls]
-        tool = max(tools, key=tools.count) if tools else None
-        return finding("loop", tool, loop or result)
+        return finding("loop", _most_common([c["tool"] for c in calls]), loop or result)
+    # Killed while still making iterations: a kill is not a verdict on the work,
+    # but 38 of 60 iterations on a trivial task is a loop that never got a name.
+    if killed and (repeated or (last_iteration is not None and last_iteration >= KILLED_LOOP_ITERATIONS)):
+        tool = _most_common([c["tool"] for c in calls if not c["ok"]]) or _most_common([c["tool"] for c in calls])
+        if repeated:
+            return finding("loop", tool, repeated)
+        where = f" at iteration {last_iteration}/{max_iteration}" if max_iteration else f" at iteration {last_iteration}"
+        return finding("loop", tool, f"killed while looping{where}: {result}".strip())
+    # The third identical failure is the model no longer reading the error.
+    if repeated:
+        return finding("loop", _most_common([c["tool"] for c in calls if not c["ok"]]), repeated)
     for kind, pattern in (("wrong_tool", _WRONG_TOOL), ("bad_arguments", _BAD_ARGS), ("hallucinated_path", _BAD_PATH)):
         hit = next((c for c in reversed(errors) if pattern.search(c["result"])), None)
         if hit or pattern.search(result):
             return finding(kind, hit["tool"] if hit else None, hit["result"] if hit else result)
-    if _CAP.search(result):
-        return finding("iteration_cap", None, result)
+    capped = _CAP.search(result) or (last_iteration is not None and max_iteration is not None and last_iteration >= max_iteration)
+    if capped:
+        where = f"iteration {last_iteration}/{max_iteration}" if max_iteration else result
+        return finding("iteration_cap", None, where)
     if _UNVERIFIED.search(result):
         return finding("unverified_success", None, result)
     if len({_error_shape(c["result"]) for c in errors}) >= 3:
         return finding("ignored_errors", last_error["tool"] if last_error else None, last_error["result"] if last_error else result)
     if _GAVE_UP.search(result + " " + str(mission.get("last_llm_reply") or "")) and len(calls) < 5:
         return finding("gave_up", None, result)
-    if _USER_ABORT.search(result):
+    if killed:
         return finding("aborted_unexplained", None, result)
     return finding("unexplained", last_error["tool"] if last_error else None, result)
 

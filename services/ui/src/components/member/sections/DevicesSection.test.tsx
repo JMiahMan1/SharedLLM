@@ -96,3 +96,35 @@ describe('last location', () => {
     expect(within(card).queryByText('none yet')).toBeNull();
   });
 });
+
+describe('offline unlock codes', () => {
+  function withCodes(offline_code: Record<string, boolean>) {
+    vi.mocked(api.getMemberDevices).mockResolvedValue({
+      username: 'kid',
+      devices: [{ device_key: 'kid-tablet-000000001', kind: 'tablet', capabilities: {} }],
+      tamper: [],
+      offline_code,
+    } as never);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <DevicesSection username="kid" name="Kid" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('says plainly when no parent has set one', async () => {
+    withCodes({ 'parent-a': false, 'parent-b': false });
+    const card = await screen.findByTestId('member-offline-codes');
+    expect(within(card).getByTestId('member-offline-codes-none')).toHaveTextContent('No parent has set an offline code yet');
+    expect(within(card).getAllByText('not set')).toHaveLength(2);
+    expect(within(card).queryByTestId('member-offline-codes-note')).toBeNull();
+  });
+
+  it('says devices pick a code up when online once one is set', async () => {
+    withCodes({ 'parent-a': true, 'parent-b': false });
+    const card = await screen.findByTestId('member-offline-codes');
+    expect(within(card).getByTestId('member-offline-codes-note')).toHaveTextContent('the next time they are online');
+    expect(within(card).queryByTestId('member-offline-codes-none')).toBeNull();
+  });
+});

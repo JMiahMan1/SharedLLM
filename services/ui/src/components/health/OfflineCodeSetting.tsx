@@ -8,9 +8,9 @@ import { api } from '../../services/api';
  * A parent's offline unlock code (Phase 11, tamper resistance): 6 to 12
  * digits that open Jarvis's protection on their children's phones and PCs
  * with no connection. The server keeps only a verifier; a child's device
- * learns it the next time a parent approves an unlock request from it (the
- * approval carries the verifiers), and an offline unlock is reported to both
- * parents once the device is back online.
+ * learns it at its next status refresh while online (its own status answer
+ * carries the verifiers), and an offline unlock is reported to both parents
+ * once the device is back online.
  */
 export default function OfflineCodeSetting() {
   const queryClient = useQueryClient();
@@ -36,8 +36,8 @@ export default function OfflineCodeSetting() {
       </div>
       <p className="text-[11px] text-slate-400">
         {data.set
-          ? 'Set. It works on your children’s phones, tablets and PCs when they have no connection; each picks up a new code the next time a parent approves an unlock request from it.'
-          : 'For when a child’s phone, tablet or PC has no connection: 6 to 12 digits, yours only. A device learns it the first time a parent approves an unlock request from it while online.'}
+          ? 'Set. It works on your children’s phones, tablets and PCs when they have no connection; each picks up a new or changed code the next time it is online.'
+          : 'For when a child’s phone, tablet or PC has no connection: 6 to 12 digits, yours only. A device learns it the next time it is online.'}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <input
