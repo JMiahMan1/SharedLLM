@@ -209,6 +209,10 @@ async def test_chat_storage_routing(auth_headers, monkeypatch):
     sess = _make_session(settings, ollama_iter)
     monkeypatch.setattr(gateway_main, "get_http_client", lambda: sess)
     monkeypatch.setattr(gateway_main.engine, "is_fast_path", lambda *args: False)
+    # The VRAM check reaches the model server through its own client; unmocked, the
+    # refused connection to the test's model address (rightly) marks the local AI
+    # offline and the turn is answered "offline". Not what this test is about.
+    monkeypatch.setattr(gateway_main, "get_vram_safe_params", AsyncMock(return_value={}))
 
     # Also cover orchestrator's direct aiohttp.ClientSession usage for /api/settings
     with patch("aiohttp.ClientSession", return_value=sess):

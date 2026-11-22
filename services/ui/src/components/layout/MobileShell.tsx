@@ -3,6 +3,7 @@ import BottomNav from './BottomNav';
 import Header from './Header';
 import ServerConfigBanner from './ServerConfigBanner';
 import DeployBanner from './DeployBanner';
+import LocalAIBanner from './LocalAIBanner';
 
 let shellsMounted = 0;
 
@@ -34,6 +35,7 @@ const MobileShell = ({ children }: MobileShellProps) => {
         <ServerConfigBanner />
         <Header />
         <DeployBanner />
+        <LocalAIBanner />
       </div>
       <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-clear-bottom-bar scroll-smooth transition-all duration-300">
         {children}

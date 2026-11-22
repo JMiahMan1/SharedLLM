@@ -153,6 +153,7 @@ export async function mockClimateApi(page: Page, scenario: ClimateScenario): Pro
     const url = request.url();
     // No deploy under way (the "Jarvis is updating" flag: 404 when there is none).
     if (new URL(url).pathname === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
+    if (new URL(url).pathname === '/api/status/local-ai') return route.fulfill({ json: { local_ai: { state: 'up', offline: false, since: null, message: null, still_working: [] }, backends: {}, any_offline: false } });
     unmocked.push(`${request.method()} ${new URL(url).pathname}`);
     if (request.method() !== 'GET') return route.fulfill({ json: { status: 'ok', message: 'e2e' } });
     const hit = objectResponses.find(([re]) => re.test(url));

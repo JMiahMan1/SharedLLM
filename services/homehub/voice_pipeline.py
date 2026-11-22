@@ -547,7 +547,16 @@ def _chat_headers(settings: VoiceSettings) -> dict[str, str]:
 
 
 def _reply_from_answer(status: int, data: Any) -> Reply:
-    """The reply in a whole (not streamed) gateway answer, or the error it is."""
+    """The reply in a whole (not streamed) gateway answer, or the error it is.
+
+    One failure is said aloud rather than chimed: the gateway's "my thinking brain
+    is offline" answer (``offline`` set, 503). It is written for a person to hear,
+    and says what still works.
+    """
+    if isinstance(data, dict) and data.get("offline") and chat_reply_text(data):
+        out = Reply(chat_reply_text(data) or "")
+        out.voice = _voice_of(data)
+        return out
     if status != 200 or (isinstance(data, dict) and str(data.get("status") or "").upper() == "ERROR"):
         detail = (data.get("message") or data.get("detail") or data.get("error")) if isinstance(data, dict) else data
         raise PipelineError("intent-failed", f"Jarvis could not answer (HTTP {status}): {detail}")

@@ -73,6 +73,16 @@ final class PhotoScan {
             if (!GuardApi.isProtected(app) || !GuardApi.photoScanEnabled(app) || !hasMediaAccess(app)) {
                 return result(true, 0, 0);
             }
+            // Chat images kept while the check could not run go first (see MediaScanOutbox).
+            for (MediaScanOutbox.Item item : MediaScanOutbox.pending(outboxDir(app), MAX_UPLOADS)) {
+                int status = GuardApi.uploadMediaScan(app, item.mediaType, item.fileName, item.b64);
+                if ((status >= 200 && status < 300) || (status >= 400 && status < 500 && status != 429)) {
+                    MediaScanOutbox.done(item);
+                    uploaded++;
+                } else {
+                    return result(false, 0, uploaded); // still not possible: keep them and the gallery's place
+                }
+            }
             SharedPreferences prefs = prefs(app);
             long lastAt = prefs.getLong(KEY_CURSOR_AT, 0L);
             long lastId = prefs.getLong(KEY_CURSOR_ID, 0L);
@@ -160,6 +170,11 @@ final class PhotoScan {
             Log.w(TAG, "gallery scan stopped: " + e.getMessage());
         }
         return result(ok, scanned, uploaded);
+    }
+
+    /** App-private folder for photo checks that are waiting (MediaScanOutbox). */
+    static java.io.File outboxDir(Context app) {
+        return new java.io.File(app.getFilesDir(), "media_scan_outbox");
     }
 
     private static JSONObject result(boolean ok, int scanned, int uploaded) {
@@ -259,7 +274,14 @@ final class PhotoScan {
                 String b64 = mediaThumbnail(app, uri, mime);
                 if (b64 == null) return;
                 int status = GuardApi.uploadMediaScan(app, "image", "notification-image.jpg", b64);
-                if ((status >= 200 && status < 300) || (status >= 400 && status < 500 && status != 429)) {
+                boolean settled = (status >= 200 && status < 300) || (status >= 400 && status < 500 && status != 429);
+                if (!settled) {
+                    // Not checked yet (offline, or the server's check cannot run now). The
+                    // picture lives only as long as the notification, so keep the thumbnail
+                    // and send it with the next gallery pass rather than lose it.
+                    settled = MediaScanOutbox.add(outboxDir(app), "image", "notification-image.jpg", b64);
+                }
+                if (settled) {
                     SharedPreferences prefs = prefs(app);
                     Set<String> seen = seen(prefs, KEY_SEEN);
                     remember(prefs, KEY_SEEN, seen, key);

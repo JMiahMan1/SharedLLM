@@ -38,6 +38,9 @@ if _root not in sys.path:
     sys.path.insert(0, _root)
 
 os.environ["FERNET_KEY"] = _test_fernet_key
+# No background health-probe threads in tests (services/common/backend_health.py):
+# tests drive probe_once() themselves.
+os.environ["BACKEND_HEALTH_PROBES"] = "0"
 os.environ.setdefault("INIT_DB", "false")
 os.environ.setdefault("WORKSPACE_DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("IDENTITY_DATABASE_URL", "sqlite:///:memory:")
@@ -364,6 +367,17 @@ def _reset_ha_health():
         mod = sys.modules.get(name)
         if mod is not None:
             mod.reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_backend_health():
+    """The GPU box's up/down state (backend_health) is process-wide and learned from
+    failed calls: a test whose fake refuses a connection must not leave the local AI
+    "offline" for every later test."""
+    yield
+    mod = sys.modules.get("services.common.backend_health")
+    if mod is not None:
+        mod.reset_all()
 
 
 @pytest.fixture(autouse=True)

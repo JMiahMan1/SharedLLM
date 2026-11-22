@@ -209,6 +209,7 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
 
   // The deploy banner asks every page whether a deploy is running; no file means none (as homeMocks answers).
   await page.route((url: URL) => url.pathname === '/api/deploy-status', (route) => route.fulfill({ status: 404, body: '' }));
+  await page.route((url: URL) => url.pathname === '/api/status/local-ai', (route) => route.fulfill({ json: { local_ai: { state: 'up', offline: false, since: null, message: null, still_working: [] }, backends: {}, any_offline: false } }));
 
   await page.route('**/api/raven/missions', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/admin/services/updates', (route) =>

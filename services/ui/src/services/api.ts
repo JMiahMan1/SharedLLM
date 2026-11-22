@@ -919,6 +919,9 @@ export function serverMessage(data: unknown): string | null {
   // FastAPI's validation errors arrive as an array of {loc, msg, type}.
   if (Array.isArray(detail) && typeof detail[0]?.msg === 'string') return detail[0].msg;
   if (typeof body?.message === 'string' && body.message.trim()) return body.message;
+  // A failed chat turn carries its sentence in `error` (the reply itself is an object).
+  const err = (body as { error?: unknown } | null | undefined)?.error;
+  if (typeof err === 'string' && err.trim()) return err;
   return null;
 }
 
@@ -932,12 +935,16 @@ apiClient.interceptors.response.use(
     const status = error.response?.status;
     const code = error.code;
     const silent = config?.silent === true;
-    const isRetryable = !silent && isAxiosError && isRetryableRequest(config?.method, status, code);
+    // The gateway says when a backend is known to be offline (the local AI's
+    // computer is off): retrying or "reconnecting" cannot help, it already
+    // answered in plain words.
+    const knownOffline = Boolean((error.response?.data as { offline?: unknown } | undefined)?.offline);
+    const isRetryable = !silent && !knownOffline && isAxiosError && isRetryableRequest(config?.method, status, code);
     // A deploy restarts the gateway for 15-25 s and Caddy holds requests
     // meanwhile, so they time out here. Asked only when the server was not
     // reached, and never for a background (silent) call such as the deploy
     // flag itself.
-    const updating = !silent && isAxiosError && isUnreachableFailure(status, code)
+    const updating = !silent && !knownOffline && isAxiosError && isUnreachableFailure(status, code)
       ? await deployUnderwayNow()
       : false;
 

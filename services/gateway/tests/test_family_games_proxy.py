@@ -123,7 +123,8 @@ async def test_an_unreachable_arcade_is_reported_not_raised(monkeypatch):
     payload = await main.proxy_family_games(MagicMock())
 
     assert payload["success"] is False and payload["arcade_available"] is False
-    assert "connect refused" in payload["error"]
+    # Plain words and an error id; the connection error itself stays in the log.
+    assert "connect refused" not in payload["error"] and "error id" in payload["error"]
     assert payload["games"] == []
 
 

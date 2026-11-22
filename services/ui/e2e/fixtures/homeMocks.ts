@@ -780,6 +780,8 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     }
     // No deploy under way (the "Jarvis is updating" flag, served from a file: 404 when there is none).
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
+    // The local AI is up (the offline banner's status; local-ai-offline.spec.ts answers it itself).
+    if (p === '/api/status/local-ai') return route.fulfill({ json: { local_ai: { state: 'up', offline: false, since: null, message: null, still_working: [] }, backends: {}, any_offline: false } });
     unmocked.push(`${method} ${p}`);
     return route.fulfill({ json: [] });
   });

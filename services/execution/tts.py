@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 import numpy as np
 
 from services import config as _config
+from services.common.backend_health import BackendHealth, Settings
 from services.config import MODELS_DIR
 from services.execution import piper_tts
 
@@ -42,6 +43,11 @@ def speech_server() -> str:
 GPU_MAX_CHARS = 3800
 #: A cold card loads Kokoro in ~15 s; past this the reply is spoken here.
 GPU_TIMEOUT_S = 30.0
+#: The GPU box's audio server, up or down (services/common/backend_health.py). While it is
+#: off every reply is spoken here at once, instead of each one first waiting out a connect
+#: timeout and logging a warning.
+SPEECH_HEALTH = BackendHealth("speech_server", "Jarvis's voice on the graphics card", probe_path="/health",
+                              settings=Settings.from_env(), logger=log)
 
 #: Voices worth naming in the voice pickers, by id. The Parable Party announcer is alpaca's
 #: game-show voice (``arcade/announcer.py``), a blend of three British Kokoro voices.
@@ -612,15 +618,22 @@ async def _speak_on_alpaca(text: str, voice: str, **extra) -> bytes | None:
 
     if len(text) > GPU_MAX_CHARS:
         return None
+    SPEECH_HEALTH.set_url(speech_server())
+    if SPEECH_HEALTH.is_down():
+        return None  # the machine is off: speak here at once (logged once when it went down)
     body = {"text": text, "voice": voice, "normalize": False, **extra}
+    timeout = aiohttp.ClientTimeout(total=GPU_TIMEOUT_S, sock_connect=SPEECH_HEALTH.settings.connect_timeout)
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=GPU_TIMEOUT_S)) as client, \
+        async with aiohttp.ClientSession(timeout=timeout) as client, \
                 client.post(f"{speech_server()}/api/tts", json=body) as resp:
             data = await resp.json(content_type=None)
             status = resp.status
     except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
+        if SPEECH_HEALTH.record_failure(exc):
+            return None  # logged once by the breaker; this and later replies are spoken here
         log.warning("[tts] alpaca's audio server did not speak (%s); speaking here", exc or type(exc).__name__)
         return None
+    SPEECH_HEALTH.record_success()
     audio = data.get("audio_b64") if isinstance(data, dict) else None
     if status != 200 or not audio:
         detail = data.get("error") if isinstance(data, dict) else data

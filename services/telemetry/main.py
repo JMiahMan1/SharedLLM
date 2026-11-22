@@ -23,10 +23,11 @@ from typing import Any
 import aiohttp
 import redis.asyncio as redis
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 from services.common import jarvis_use, notice_links
 from services.common.secrets import secret_matches
-from services.telemetry import app_catalog, guardian, notices, push, spotify_sync, store
+from services.telemetry import app_catalog, guardian, llm, notices, push, spotify_sync, store
 from services.telemetry.alpaca import is_busy
 from services.telemetry.config import (
     BUSY_DEFER_SECONDS,
@@ -47,6 +48,11 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
 )
 log = logging.getLogger("telemetry")
+
+#: When a phone should send a photo again after the check could not run: soon after
+#: a passing failure, later while the local model's machine is known to be off.
+MEDIA_SCAN_RETRY_S = 60
+MEDIA_SCAN_RETRY_OFFLINE_S = 300
 
 #: Most calls and messages the Calls & messages tab gets in one read.
 COMMS_MAX = 3000
@@ -634,8 +640,18 @@ def create_app():
             )
         except guardian.MediaScanUnavailable as exc:
             # Not checked is not clean: 503 keeps the phone's place so it sends
-            # this picture again later instead of marking it done.
-            raise HTTPException(status_code=503, detail=f"photo check unavailable, try again later: {exc}") from exc
+            # this picture again later instead of marking it done. Retry-After
+            # tells it when, so a GPU box that is off is not met with a retry storm;
+            # the detail is plain (the reason is in the log, once).
+            offline = llm.LOCAL_MODEL.is_down()
+            retry_after = MEDIA_SCAN_RETRY_OFFLINE_S if offline else MEDIA_SCAN_RETRY_S
+            log.info("media scan for %s deferred (%s); retry in %ss", user, exc, retry_after)
+            return JSONResponse(
+                status_code=503,
+                headers={"Retry-After": str(retry_after)},
+                content={"detail": "The photo check is not available right now; keep the picture and try again later.",
+                         "scanned": False, "retry_after_s": retry_after, "offline": "local_model" if offline else None},
+            )
         if concern:
             if await store.save_concern_image(rc, user, str(concern.get("id") or ""), image_b64):
                 concern["has_image"] = True

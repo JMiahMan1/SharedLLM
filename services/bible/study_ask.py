@@ -338,7 +338,12 @@ async def _refusal(resp) -> StudyAskUnavailable:
     try:
         payload = await resp.json()
         if isinstance(payload, dict):
-            detail = str(payload.get("detail") or payload.get("message") or "").strip()
+            message = payload.get("message")
+            if payload.get("offline") and isinstance(message, str) and message.strip():
+                # The gateway knows the local AI is offline and said so in plain words:
+                # pass them on as they are, not behind "HTTP 503".
+                return StudyAskUnavailable(message.strip())
+            detail = str(payload.get("detail") or (message if isinstance(message, str) else "") or "").strip()
     except Exception:
         detail = ""
     return StudyAskUnavailable(

@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import type { IWidgetProps } from '../../types/widget';
-import { chatReplyText } from '../../lib/chatReply';
+import { chatFailureText, chatReplyText, isOfflineFailure } from '../../lib/chatReply';
 import toast from 'react-hot-toast';
 
 
@@ -11,6 +11,8 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** A reply that says why there is no answer (the local AI is offline, or the turn failed). */
+  notice?: boolean;
 }
 
 const QuickAssistantWidget = ({ settingsButton }: IWidgetProps) => {
@@ -53,10 +55,21 @@ const QuickAssistantWidget = ({ settingsButton }: IWidgetProps) => {
         ...prev,
         { id: `assistant-${Date.now()}`, role: 'assistant', content, timestamp: Date.now() },
       ]);
-    } catch {
-      toast.error('Failed to send message');
-      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
-      setInput(text);
+    } catch (err) {
+      // The server said why (the local AI is offline, or the turn failed): show its
+      // words as the reply and keep the question. Only a lost connection is a toast.
+      const said = chatFailureText(err);
+      if (said) {
+        setMessages((prev) => [
+          ...prev,
+          { id: `assistant-${Date.now()}`, role: 'assistant', content: said, timestamp: Date.now(), notice: true },
+        ]);
+        if (!isOfflineFailure(err)) setInput('');
+      } else {
+        toast.error('Failed to send message');
+        setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+        setInput(text);
+      }
     } finally {
       setSending(false);
     }
@@ -82,10 +95,13 @@ const QuickAssistantWidget = ({ settingsButton }: IWidgetProps) => {
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
+                data-testid={msg.notice ? 'assistant-notice' : undefined}
                 className={`max-w-[85%] rounded-lg px-3 py-2 ${
                   msg.role === 'user'
                     ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-800/50 border border-slate-700/50 text-white'
+                    : msg.notice
+                      ? 'bg-amber-500/10 border border-amber-400/30 text-amber-50'
+                      : 'bg-slate-800/50 border border-slate-700/50 text-white'
                 }`}
               >
                 <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>

@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import aiohttp
 
+from services.common.backend_health import BackendUnavailable
 from services.common.circuit_breaker import CircuitOpenError, get_breaker
 from services.common.rag_collections import HOME_DEVICES, canonical_collection
 from services.gateway import context_router, prompt_budget, tool_cache
@@ -713,14 +714,13 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         ans = await AgentLoop(query, model, raven_system, short_term, user_id, creds, mission_id, rag_context=rag_context, show_thinking=show_thinking, workspace_id=workspace_id, history_log=history_log)
     else:
         # Librarian handles standard single-turn inference
-        try:
-            ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat")
-        except InferenceUnavailable as exc:
-            # A mission and the voice assistant have no status code to report
-            # on: the answer field is the only channel they have, so the old
-            # sentence is kept here and nowhere else.
-            log.error(f"[Orchestrator] Inference unavailable: {exc}")
-            ans = f"I encountered an error while trying to generate a response (All retries failed): {exc}"
+        # A model that cannot answer is raised, never returned as the answer: the
+        # worker fails the job with a plain sentence and an error status (the old
+        # "I encountered an error ... Cannot connect to host <ip>" went out as a
+        # SUCCESS and showed family members the socket error). LocalAIOffline
+        # (the local AI's breaker is open) is told apart so the reply can say the
+        # thinking brain is offline rather than that something broke.
+        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat")
 
     return ans
 
@@ -1838,9 +1838,26 @@ class InferenceUnavailable(RuntimeError):
     sentence in an ``answer`` field reports a failure as a success: the
     workspace composer showed "I encountered an error while trying to generate a
     response" with HTTP 200 and a success toast, so the only visible symptom was
-    that the chat never worked. Callers with no error channel -- a mission, the
-    voice assistant -- catch this and keep the old sentence.
+    that the chat never worked. The queued chat path raises it too now: the
+    worker fails the job with a plain sentence and an error id (the detail stays
+    in the log), and the voice assistant speaks that sentence.
     """
+
+
+class LocalAIOffline(InferenceUnavailable):
+    """The local AI is known to be offline (``local_ai.LLM``'s breaker is open).
+
+    ``str()`` is the plain sentence for a person, never the socket error;
+    ``error_id`` names the one log line that has the detail.
+    """
+
+    def __init__(self, cause: BackendUnavailable):
+        self.cause = cause
+        self.error_id = cause.error_id
+        self.backend = cause.backend
+        self.message = cause.message
+        super().__init__(cause.message)
+        self.__cause__ = cause
 
 
 def _is_capacity_refusal(error: Exception) -> bool:
@@ -1915,6 +1932,8 @@ async def _closing_turn(
         raw = data.get("message", {}).get("content", "")
         # "Let me search once more: {tool call}" is another step, not an answer.
         answer = "" if extract_action_json(raw) else strip_thinking_blocks(strip_json_from_response(raw)).strip()
+    except BackendUnavailable as exc:
+        raise LocalAIOffline(exc) from exc
     except Exception as exc:
         if _is_capacity_refusal(exc):
             raise InferenceUnavailable(str(exc)) from exc
@@ -2101,6 +2120,11 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 if gate is not None:
                     await gate.end_call()
                 break
+            except BackendUnavailable as e:
+                # The local AI cannot be reached (its breaker is open, or this call
+                # just opened it). Retrying in 5 and 10 s against a machine that is
+                # off is what made an offline answer take 37 s.
+                raise LocalAIOffline(e) from e
             except Exception as e:
                 log.warning(f"[_single_turn_inference] Inference attempt {retry_count + 1} failed: {e}")
                 if _is_capacity_refusal(e):

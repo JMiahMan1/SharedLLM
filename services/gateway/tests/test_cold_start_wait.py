@@ -174,17 +174,28 @@ class TestWaitForModel:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_connection_error(self):
-        """When /api/ps raises an error, _wait_for_model returns False (can't verify model)."""
+    async def test_returns_false_on_an_unreadable_answer(self):
+        """When /api/ps fails for another reason, _wait_for_model returns False (can't verify model)."""
         provider = OllamaProvider("http://fake:11434")
         session = MagicMock()
-        session.get = AsyncMock(side_effect=Exception("connection refused"))
+        session.get = AsyncMock(side_effect=ValueError("not json"))
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=None)
 
         async with session as client:
             result = await provider._wait_for_model(client, "qwen3:35b")
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_a_machine_that_cannot_be_reached_is_raised_not_waited_out(self):
+        """A refused connection is raised, so the local AI's breaker opens (local_ai.py)
+        instead of the call "proceeding anyway" into the same refusal."""
+        provider = OllamaProvider("http://fake:11434")
+        session = MagicMock()
+        session.get = AsyncMock(side_effect=ConnectionRefusedError(61, "Connection refused"))
+
+        with pytest.raises(ConnectionRefusedError):
+            await provider._wait_for_model(session, "qwen3:35b")
 
 
 class TestWaitForSlot:

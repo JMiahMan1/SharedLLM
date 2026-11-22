@@ -22,3 +22,29 @@ export function chatReplyText(resp: unknown): string | null {
   );
   return text ?? null;
 }
+
+/**
+ * What to show in the conversation when a chat request failed with an answer
+ * from the server: its plain sentence (for example that Jarvis's thinking brain
+ * is offline), or null when the failure has none (a lost connection).
+ *
+ * The gateway answers a failed turn with an error status *and* the sentence in
+ * the usual reply fields, so it is shown as Jarvis's reply rather than as a
+ * generic "Failed to send" toast that took the question away.
+ */
+export function chatFailureText(error: unknown): string | null {
+  const data = (error as { response?: { data?: unknown } } | null)?.response?.data;
+  if (!data || typeof data !== 'object') return null;
+  const body = data as { status?: unknown; offline?: unknown; error?: unknown };
+  const text = chatReplyText(data);
+  if (text && (body.status === 'ERROR' || body.offline)) return text;
+  const openai = body.error as { message?: unknown } | undefined;
+  if (openai && typeof openai.message === 'string' && openai.message.trim()) return openai.message.trim();
+  return null;
+}
+
+/** Whether a failed chat request was the local AI being offline (shown softer than an error). */
+export function isOfflineFailure(error: unknown): boolean {
+  const data = (error as { response?: { data?: { offline?: unknown } } } | null)?.response?.data;
+  return Boolean(data && typeof data === 'object' && data.offline);
+}

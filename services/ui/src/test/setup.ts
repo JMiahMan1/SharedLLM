@@ -340,6 +340,8 @@ export const server = setupServer(
   ...mediaHandlers,
   // No deploy under way: Caddy answers 404 when there is no status file.
   http.get('/api/deploy-status', () => new HttpResponse(null, { status: 404 })),
+  // The local AI is up: no offline banner (tests that need it down answer this themselves).
+  http.get('/api/status/local-ai', () => HttpResponse.json({ local_ai: { state: 'up', offline: false, since: null, message: null, still_working: [] }, backends: {}, any_offline: false })),
   http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
   // Both home integrations on, as in a full install; a test that needs one off answers it itself.
