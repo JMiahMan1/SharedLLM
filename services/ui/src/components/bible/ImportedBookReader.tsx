@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  Headphones,
   List,
   Loader2,
   Minus,
@@ -13,6 +14,7 @@ import {
   Share2,
   Sparkles,
   Type,
+  Wand2,
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -30,38 +32,93 @@ import ShareToChatSheet from './ShareToChatSheet';
 import { cleanBookPage, type BookPage } from './readerText';
 import { PAGE_TONES, PAGE_TONE_ORDER, pageStyle, toneOf } from './readingPage';
 import AutoScrollControl from '../reading/AutoScrollControl';
+import StudyBlocks from './StudyBlocks';
+import StudyReadAloud from './StudyReadAloud';
+import StudyReformatPreview from './StudyReformatPreview';
 
-type ReadingPreferences = Pick<BiblePreferences, 'page' | 'font_scale' | 'line_height' | 'theme'>;
+type ReadingPreferences = Pick<BiblePreferences, 'page' | 'font_scale' | 'line_height' | 'theme'> &
+  Partial<Pick<BiblePreferences, 'read_aloud_voice'>>;
 
 interface ImportedBookReaderProps {
   book: BibleImportedBook;
   chapters: BibleImportedBookDetail['chapters'];
   /** Where to open first, e.g. today's entry in an imported devotional. */
   startOrdinal?: number;
+  /** A section to open at by its stable id (a link, a reminder); old ids are followed through aliases. */
+  startSection?: string;
+  /** A block to scroll to once the section is open, e.g. "p-1a2b3c4d". */
+  startAnchor?: string;
+  /** Where sections went when the book was reformatted. */
+  aliases?: BibleImportedBookDetail['aliases'];
   preferences: ReadingPreferences;
   onPreferences: (patch: Partial<BiblePreferences>) => void;
   onClose: () => void;
+  /** Open a scripture reference in the Bible reader. */
+  onOpenRef?: (ref: string) => void;
+  /** Admins can reformat the book from its page actions. */
+  canReformat?: boolean;
 }
 
 function positionKey(bookId: number): string {
   return `jarvis.study-book.${bookId}.page`;
 }
 
+/** The stable place: a section id survives a reformat where an ordinal does not. */
+function sectionKey(bookId: number): string {
+  return `jarvis.study-book.${bookId}.section`;
+}
+
+type Chapters = BibleImportedBookDetail['chapters'];
+
+function ordinalOfSection(chapters: Chapters, aliases: BibleImportedBookDetail['aliases'], section: string): number | null {
+  const direct = chapters.find((entry) => entry.section_id === section);
+  if (direct) return direct.ordinal;
+  const moved = [...(aliases ?? [])].reverse().find((alias) => alias.old_section_id === section);
+  const target = moved ? chapters.find((entry) => entry.section_id === moved.section_id) : null;
+  return target ? target.ordinal : null;
+}
+
 function initialOrdinal(
   bookId: number,
-  chapters: BibleImportedBookDetail['chapters'],
+  chapters: Chapters,
   startOrdinal?: number,
+  startSection?: string,
+  aliases?: BibleImportedBookDetail['aliases'],
 ): number {
-  const fallback = chapters.some((entry) => entry.ordinal === startOrdinal)
-    ? (startOrdinal as number)
-    : chapters[0]?.ordinal ?? 1;
+  if (startSection) {
+    const found = ordinalOfSection(chapters, aliases, startSection);
+    if (found) return found;
+  }
+  if (chapters.some((entry) => entry.ordinal === startOrdinal)) return startOrdinal as number;
   try {
+    const section = window.localStorage.getItem(sectionKey(bookId));
+    if (section) {
+      const found = ordinalOfSection(chapters, aliases, section);
+      if (found) return found;
+    }
+    // A page saved before section ids existed: if the book has since been
+    // reformatted, its old ordinal is followed to where those words are now.
     const saved = Number(window.localStorage.getItem(positionKey(bookId)));
+    if (saved && !section && aliases?.length) {
+      const moved = aliases.find((alias) => alias.old_ordinal === saved);
+      const target = moved ? chapters.find((entry) => entry.section_id === moved.section_id) : null;
+      if (target) return target.ordinal;
+    }
     if (chapters.some((entry) => entry.ordinal === saved)) return saved;
   } catch {
     /* private mode / storage disabled: read from the start */
   }
-  return fallback;
+  return chapters[0]?.ordinal ?? 1;
+}
+
+/** The first block whose bottom is below the top of the reading area: what the reader is looking at. */
+function blockInView(container: HTMLElement | null): string | null {
+  if (!container) return null;
+  const top = container.getBoundingClientRect().top + 8;
+  for (const element of container.querySelectorAll<HTMLElement>('[data-block-id]')) {
+    if (element.getBoundingClientRect().bottom > top) return element.dataset.blockId ?? null;
+  }
+  return null;
 }
 
 /** A small sheet used by contents, settings, page actions and Jarvis. */
@@ -123,12 +180,24 @@ export default function ImportedBookReader({
   book,
   chapters,
   startOrdinal,
+  startSection,
+  startAnchor,
+  aliases,
   preferences,
   onPreferences,
   onClose,
+  onOpenRef,
+  canReformat = false,
 }: ImportedBookReaderProps) {
   const { trigger } = useHaptics();
-  const [ordinal, setOrdinal] = useState(() => initialOrdinal(book.id, chapters, startOrdinal));
+  const [ordinal, setOrdinal] = useState(() => initialOrdinal(book.id, chapters, startOrdinal, startSection, aliases));
+  const [listenOpen, setListenOpen] = useState(false);
+  const [activeBlock, setActiveBlock] = useState<string | null>(null);
+  const [continueReading, setContinueReading] = useState(true);
+  const [autoStart, setAutoStart] = useState(0);
+  const [reformatOpen, setReformatOpen] = useState(false);
+  const anchorRef = useRef<string | null>(startAnchor ?? null);
+  const lastUserScroll = useRef(0);
   const [contentsOpen, setContentsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -157,9 +226,14 @@ export default function ImportedBookReader({
     [chapter.data?.text],
   );
   const pageLabel = chapter.data?.label || meta?.label || `${unit} ${index + 1}`;
+  const blocks = chapter.data?.blocks ?? [];
+  const structured = blocks.length > 0;
   const plainText = useMemo(
-    () => [page.heading, ...page.paragraphs].filter(Boolean).join('\n\n'),
-    [page],
+    () =>
+      structured
+        ? (chapter.data?.text ?? '')
+        : [page.heading, ...page.paragraphs].filter(Boolean).join('\n\n'),
+    [page, structured, chapter.data?.text],
   );
 
   const ask = useMutation({
@@ -174,7 +248,9 @@ export default function ImportedBookReader({
         // "Bible" folder was saved but never shown.
         category: 'Notes/Bible',
         content: `${book.title}\n${payload.label}\n\n${
-          [payload.page.heading, ...payload.page.paragraphs].filter(Boolean).join('\n\n')
+          structured
+            ? (chapter.data?.text ?? '')
+            : [payload.page.heading, ...payload.page.paragraphs].filter(Boolean).join('\n\n')
         }`,
       }),
     onSuccess: () => toast.success('Saved to Notes'),
@@ -192,6 +268,7 @@ export default function ImportedBookReader({
       setAskOpen(false);
       setQuestion('');
       setOrdinal(target.ordinal);
+      setActiveBlock(null);
       setContentsOpen(false);
     },
     [ask, chapters, trigger],
@@ -205,6 +282,8 @@ export default function ImportedBookReader({
   useEffect(() => {
     try {
       window.localStorage.setItem(positionKey(book.id), String(ordinal));
+      const section = chapters.find((entry) => entry.ordinal === ordinal)?.section_id;
+      if (section) window.localStorage.setItem(sectionKey(book.id), section);
     } catch {
       /* storage disabled: this session still reads correctly */
     }
@@ -222,6 +301,33 @@ export default function ImportedBookReader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book.id, ordinal]);
 
+  // A link to a paragraph: once its section has loaded, bring it into view.
+  useEffect(() => {
+    const anchor = anchorRef.current;
+    if (!anchor || !chapter.data) return;
+    const element = textRef.current?.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(anchor)}"]`);
+    if (element) {
+      anchorRef.current = null;
+      element.scrollIntoView({ block: 'start' });
+      setActiveBlock(anchor);
+    }
+  }, [chapter.data]);
+
+  // Read aloud keeps the paragraph being spoken in view, unless the reader
+  // has just scrolled somewhere else themselves.
+  useEffect(() => {
+    if (!activeBlock || !listenOpen) return;
+    if (Date.now() - lastUserScroll.current < 5000) return;
+    const container = textRef.current;
+    const element = container?.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(activeBlock)}"]`);
+    if (!container || !element) return;
+    const box = element.getBoundingClientRect();
+    const frame = container.getBoundingClientRect();
+    if (box.top < frame.top + 8 || box.bottom > frame.bottom - 8) {
+      element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [activeBlock, listenOpen]);
+
   useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -237,7 +343,8 @@ export default function ImportedBookReader({
 
       if (event.key === 'Escape') {
         event.stopPropagation();
-        if (askOpen) setAskOpen(false);
+        if (reformatOpen) setReformatOpen(false);
+        else if (askOpen) setAskOpen(false);
         else if (shareOpen) setShareOpen(false);
         else if (actionsOpen) setActionsOpen(false);
         else if (settingsOpen) setSettingsOpen(false);
@@ -247,7 +354,7 @@ export default function ImportedBookReader({
       }
       // Page keys must not fire while the reader is typing a question.
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
-      if (askOpen || shareOpen || actionsOpen || settingsOpen || contentsOpen) return;
+      if (askOpen || shareOpen || actionsOpen || settingsOpen || contentsOpen || reformatOpen) return;
       if (event.key === 'ArrowRight' || event.key === 'PageDown') {
         event.preventDefault();
         event.stopPropagation();
@@ -260,7 +367,7 @@ export default function ImportedBookReader({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [actionsOpen, askOpen, contentsOpen, onClose, settingsOpen, shareOpen, step]);
+  }, [actionsOpen, askOpen, contentsOpen, onClose, reformatOpen, settingsOpen, shareOpen, step]);
 
   const swipe = useSwipe(() => step(1), () => step(-1));
 
@@ -319,6 +426,18 @@ export default function ImportedBookReader({
           </div>
           <button
             type="button"
+            onClick={() => setListenOpen((open) => !open)}
+            aria-label={listenOpen ? 'Hide read aloud' : 'Read aloud'}
+            aria-pressed={listenOpen}
+            data-testid="bible-study-listen"
+            className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl hover:bg-[var(--page-hover)] ${
+              listenOpen ? 'text-amber-500' : 'text-[var(--page-muted)]'
+            }`}
+          >
+            <Headphones size={18} />
+          </button>
+          <button
+            type="button"
             onClick={() => setContentsOpen(true)}
             aria-label="Table of contents"
             className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-[var(--page-muted)] hover:bg-[var(--page-hover)]"
@@ -356,6 +475,12 @@ export default function ImportedBookReader({
         ref={textRef}
         className="flex-1 overflow-y-auto overscroll-contain"
         {...swipe}
+        onWheel={() => {
+          lastUserScroll.current = Date.now();
+        }}
+        onTouchMove={() => {
+          lastUserScroll.current = Date.now();
+        }}
         data-testid="bible-study-page"
       >
         <article className="mx-auto w-full max-w-[68ch] px-5 pb-16 pt-7 sm:px-8 sm:pt-10">
@@ -383,29 +508,57 @@ export default function ImportedBookReader({
               <p className="mb-3 text-[11px] uppercase tracking-[0.16em] text-[var(--page-muted)]">
                 {pageLabel}
               </p>
-              {page.heading ? (
-                <h2 className="mb-5 font-serif text-2xl leading-tight text-[var(--page-ink)] sm:text-3xl">
-                  {page.heading}
-                </h2>
-              ) : null}
-              <div
-                className={`select-text text-[var(--page-ink)] ${
-                  preferences.theme === 'serif' ? 'font-serif' : 'font-sans'
-                }`}
-                style={{
-                  fontSize: `${1.125 * preferences.font_scale}rem`,
-                  lineHeight: preferences.line_height,
-                }}
-                data-testid="bible-study-reader-text"
-              >
-                {page.paragraphs.map((paragraph, entry) => (
-                  <p key={entry} className="mb-4 text-pretty hyphens-auto">
-                    {paragraph}
-                  </p>
-                ))}
-              </div>
+              {structured ? (
+                <StudyBlocks
+                  bookId={book.id}
+                  blocks={blocks}
+                  activeBlockId={listenOpen ? activeBlock : null}
+                  onOpenRef={onOpenRef}
+                  onAsk={(question) => askQuestion(question)}
+                  askPending={ask.isPending}
+                  askedQuestion={askedQuestion}
+                  fontFamily={preferences.theme === 'sans' ? 'sans' : 'serif'}
+                  fontScale={preferences.font_scale}
+                  lineHeight={preferences.line_height}
+                />
+              ) : (
+                <>
+                  {page.heading ? (
+                    <h2 className="mb-5 font-serif text-2xl leading-tight text-[var(--page-ink)] sm:text-3xl">
+                      {page.heading}
+                    </h2>
+                  ) : null}
+                  <div
+                    className={`select-text text-[var(--page-ink)] ${
+                      preferences.theme === 'serif' ? 'font-serif' : 'font-sans'
+                    }`}
+                    style={{
+                      fontSize: `${1.125 * preferences.font_scale}rem`,
+                      lineHeight: preferences.line_height,
+                    }}
+                    data-testid="bible-study-reader-text"
+                  >
+                    {page.paragraphs.map((paragraph, entry) => (
+                      <p
+                        key={entry}
+                        data-block-id={`p${entry + 1}`}
+                        className={`mb-4 text-pretty hyphens-auto rounded-md ${
+                          listenOpen && activeBlock === `p${entry + 1}` ? 'bg-amber-400/15 ring-1 ring-amber-400/40' : ''
+                        }`}
+                      >
+                        {paragraph}
+                      </p>
+                    ))}
+                  </div>
+                </>
+              )}
 
-              {chapter.data && chapter.data.questions.length > 0 ? (
+              {structured && ask.isError ? (
+                <p className="mt-3 text-xs text-rose-400">{errorText(ask.error, 'Jarvis could not answer that.')}</p>
+              ) : null}
+              {structured && !askOpen && !shareOpen ? <div className="mt-3">{answer}</div> : null}
+
+              {!structured && chapter.data && chapter.data.questions.length > 0 ? (
                 <section className="mt-10 border-t border-[var(--page-rule)] pt-5" data-testid="bible-study-questions">
                   <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--page-muted)]">
                     Questions for reflection
@@ -477,6 +630,29 @@ export default function ImportedBookReader({
         testId="bible-study-auto-scroll"
       />
       </div>
+
+      {listenOpen ? (
+        <StudyReadAloud
+          bookId={book.id}
+          ordinal={ordinal}
+          bookTitle={book.title}
+          sectionLabel={pageLabel}
+          voice={preferences.read_aloud_voice ?? ''}
+          onVoiceChange={(read_aloud_voice) => onPreferences({ read_aloud_voice })}
+          startBlock={() => blockInView(textRef.current)}
+          onBlock={setActiveBlock}
+          onFinished={() => {
+            if (continueReading && index < total - 1) {
+              goToIndex(index + 1);
+              setAutoStart((value) => value + 1);
+            }
+          }}
+          onClose={() => setListenOpen(false)}
+          autoStart={autoStart}
+          continueOn={continueReading}
+          onContinueChange={setContinueReading}
+        />
+      ) : null}
 
       <footer className="shrink-0 border-t border-[var(--page-rule)] bg-[var(--page-paper)] pb-[max(0.25rem,var(--safe-bottom))]">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-2 px-2 py-1">
@@ -685,6 +861,17 @@ export default function ImportedBookReader({
           <div className="space-y-1">
             <button
               type="button"
+              onClick={() => {
+                setActionsOpen(false);
+                setListenOpen(true);
+              }}
+              className="flex min-h-12 w-full items-center gap-3 rounded-xl px-2 text-left text-sm text-slate-200 hover:bg-white/5"
+            >
+              <Headphones size={17} className="text-sky-300" />
+              Read aloud
+            </button>
+            <button
+              type="button"
               onClick={openAsk}
               className="flex min-h-12 w-full items-center gap-3 rounded-xl px-2 text-left text-sm text-slate-200 hover:bg-white/5"
             >
@@ -709,6 +896,37 @@ export default function ImportedBookReader({
               <Share2 size={17} className="text-emerald-300" />
               Share page to chat
             </button>
+            {canReformat && book.reformattable !== false ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setActionsOpen(false);
+                  setReformatOpen(true);
+                }}
+                data-testid="bible-study-reformat"
+                className="flex min-h-12 w-full items-center gap-3 rounded-xl px-2 text-left text-sm text-slate-200 hover:bg-white/5"
+              >
+                <Wand2 size={17} className="text-amber-300" />
+                Reformat this book
+              </button>
+            ) : null}
+          </div>
+        </ReaderSheet>
+      ) : null}
+
+      {reformatOpen ? (
+        <ReaderSheet title="Reformat this book" onClose={() => setReformatOpen(false)} wide>
+          <div className="overflow-y-auto">
+            <StudyReformatPreview
+              bookId={book.id}
+              title={book.title}
+              onApplied={(mapping) => {
+                // The page being read is mapped to where its words are now.
+                const moved = mapping.find((entry) => entry.old_ordinal === ordinal);
+                if (moved) setOrdinal(moved.ordinal);
+                setActiveBlock(null);
+              }}
+            />
           </div>
         </ReaderSheet>
       ) : null}

@@ -16919,7 +16919,7 @@ async def proxy_bible_admin_book_upload(request: Request):
     form = await request.form()
     uploaded = form.get("file")
     if not isinstance(uploaded, UploadFile) or not uploaded.filename:
-        raise HTTPException(status_code=400, detail="A PDF or EPUB is required")
+        raise HTTPException(status_code=400, detail="A book file (PDF, EPUB, MOBI, AZW3, DOCX or TXT) is required")
     upload = aiohttp.FormData()
     for field in ("title", "author", "kind"):
         value = form.get(field)
@@ -16972,6 +16972,108 @@ async def proxy_bible_imported_book_chapter(request: Request, book_id: int, ordi
     await _require_identity_from_request(request)
     return await _bible_json(
         "GET", f"/imported-books/{book_id}/chapters/{ordinal}", label="Failed to read that chapter"
+    )
+
+
+@app.get("/api/bible/imported-books/{book_id}/sections/{section_id}")
+async def proxy_bible_imported_book_section(request: Request, book_id: int, section_id: str):
+    """A section by its stable id; a reformat's aliases are followed upstream."""
+    await _require_identity_from_request(request)
+    return await _bible_json(
+        "GET", f"/imported-books/{book_id}/sections/{quote(section_id, safe='')}",
+        label="Failed to read that section",
+    )
+
+
+@app.get("/api/bible/imported-books/{book_id}/resolve")
+async def proxy_bible_imported_book_resolve(
+    request: Request, book_id: int, section: str = "", ordinal: int | None = None, legacy: bool = False
+):
+    """Where a saved place in a book (section id or ordinal) is now."""
+    await _require_identity_from_request(request)
+    return await _bible_json(
+        "GET",
+        f"/imported-books/{book_id}/resolve",
+        label="Failed to find that place in the book",
+        params={"section": section or None, "ordinal": ordinal, "legacy": "true" if legacy else None},
+    )
+
+
+@app.get("/api/bible/imported-books/{book_id}/assets/{key}")
+async def proxy_bible_imported_book_asset(request: Request, book_id: int, key: str):
+    """An image from an imported book. Bytes pass through with their own type."""
+    await _require_identity_from_request(request)
+    resp = await _bible_call("GET", f"/imported-books/{book_id}/assets/{quote(key, safe='')}")
+    if resp.status >= 400:
+        await _raise_scoped_failure(resp, "That image is not in the book")
+    body = await resp.read()
+    return Response(
+        content=body,
+        media_type=resp.headers.get("Content-Type", "application/octet-stream"),
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@app.get("/api/bible/imported-books/{book_id}/chapters/{ordinal}/narration/plan")
+async def proxy_bible_imported_book_narration_plan(
+    request: Request, book_id: int, ordinal: int, voice: str = ""
+):
+    """How a study section will be read aloud. Nothing is synthesised to answer it."""
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        f"/imported-books/{book_id}/chapters/{ordinal}/narration/plan",
+        label="Failed to plan reading this section aloud",
+        params={"voice": voice or None},
+        timeout=_BIBLE_NARRATION_TIMEOUT,
+    )
+
+
+@app.get("/api/bible/imported-books/{book_id}/chapters/{ordinal}/narration/chunk")
+async def proxy_bible_imported_book_narration_chunk(
+    request: Request, book_id: int, ordinal: int, index: int, voice: str = ""
+):
+    """One spoken piece of a study section. 503 keeps the engine's own diagnosis."""
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET",
+        f"/imported-books/{book_id}/chapters/{ordinal}/narration/chunk",
+        label="Failed to read this part of the section aloud",
+        params={"index": index, "voice": voice or None},
+        timeout=_BIBLE_NARRATION_TIMEOUT,
+    )
+
+
+@app.post("/api/bible/admin/books/{book_id}/reformat/preview")
+async def proxy_bible_admin_book_reformat_preview(request: Request, book_id: int):
+    """What re-running the import normaliser on a book would change. Writes nothing."""
+    await _require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    payload = body if isinstance(body, dict) else {}
+    return await _bible_json(
+        "POST",
+        f"/admin/books/{book_id}/reformat/preview",
+        label="Could not preview reformatting that book",
+        json={"assist": bool(payload.get("assist"))},
+        timeout=_BIBLE_IMPORT_TIMEOUT,
+    )
+
+
+@app.post("/api/bible/admin/books/{book_id}/reformat/apply")
+async def proxy_bible_admin_book_reformat_apply(request: Request, book_id: int):
+    """Apply a previewed reformat; readers' places move with the text."""
+    await _require_admin(request)
+    body = await request.json()
+    payload = body if isinstance(body, dict) else {}
+    return await _bible_json(
+        "POST",
+        f"/admin/books/{book_id}/reformat/apply",
+        label="Could not reformat that book",
+        json={"token": str(payload.get("token") or "")},
+        timeout=_BIBLE_IMPORT_TIMEOUT,
     )
 
 

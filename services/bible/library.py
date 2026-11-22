@@ -284,19 +284,30 @@ class LibraryClient:
         return books
 
     async def fetch(
-        self, *, root: str, path: str, destination: Path, provider: str = "nextcloud"
+        self,
+        *,
+        root: str,
+        path: str,
+        destination: Path,
+        provider: str = "nextcloud",
+        allowed: tuple[str, ...] | None = None,
     ) -> Path:
-        """Download one file into ``destination`` and return the path written."""
+        """Download one file into ``destination`` and return the path written.
+
+        ``allowed`` replaces the Bible formats with another set of suffixes,
+        which is how the study-book shelf fetches a DOCX or a MOBI.
+        """
         wanted = normalise_path(path)
         base = normalise_path(root)
         if not _within(wanted, base) or wanted == base:
             raise LibraryError(
                 f"{wanted!r} is not a file inside the library folder {base!r}."
             )
-        if not _kind_of(wanted):
+        suffixes = allowed if allowed is not None else tuple(SUFFIX_KINDS)
+        if Path(wanted).suffix.lower() not in suffixes:
             raise LibraryError(
-                f"{wanted!r} is not a Bible format this service can read. "
-                f"Supported: {', '.join(sorted(SUFFIX_KINDS))}."
+                f"{wanted!r} is not a format this service can read. "
+                f"Supported: {', '.join(sorted(suffixes))}."
             )
 
         url = f"{self._endpoint()}/providers/fetch"

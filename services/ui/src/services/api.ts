@@ -315,6 +315,9 @@ import type {
   BibleImportedBook,
   BibleImportedBookDetail,
   BibleImportedBooksResponse,
+  StudyNarrationChunk,
+  StudyNarrationPlan,
+  StudyReformatPreview,
   BibleDevotionalWork,
   BibleStudySession,
   BibleStudyMemoryResponse,
@@ -7034,6 +7037,68 @@ export const api = {
 
   async getBibleImportedBookChapter(bookId: number, ordinal: number): Promise<BibleBookChapter> {
     const resp = await apiClient.get(`/api/bible/imported-books/${bookId}/chapters/${ordinal}`);
+    return resp.data;
+  },
+
+  /** Where a saved place (a section id, or an ordinal saved before a reformat) is now. */
+  async resolveBibleBookPlace(
+    bookId: number,
+    place: { section?: string; ordinal?: number; legacy?: boolean },
+  ): Promise<{ book_id: number; ordinal: number; section_id: string; label: string }> {
+    const resp = await apiClient.get(`/api/bible/imported-books/${bookId}/resolve`, { params: place });
+    return resp.data;
+  },
+
+  /** An image from an imported book, as a blob (the request carries the session). */
+  async getBibleBookAsset(bookId: number, key: string): Promise<Blob> {
+    const resp = await apiClient.get(`/api/bible/imported-books/${bookId}/assets/${encodeURIComponent(key)}`, {
+      responseType: 'blob',
+    });
+    return resp.data;
+  },
+
+  /** How a study section is read aloud: its pieces and the blocks each one speaks. */
+  async getStudyNarrationPlan(bookId: number, ordinal: number, voice?: string): Promise<StudyNarrationPlan> {
+    const resp = await apiClient.get(`/api/bible/imported-books/${bookId}/chapters/${ordinal}/narration/plan`, {
+      params: voice ? { voice } : undefined,
+    });
+    return resp.data;
+  },
+
+  /** One spoken piece of a study section; the first play renders it, later plays are cached. */
+  async getStudyNarrationChunk(
+    bookId: number,
+    ordinal: number,
+    index: number,
+    voice?: string,
+  ): Promise<StudyNarrationChunk> {
+    const resp = await apiClient.get(`/api/bible/imported-books/${bookId}/chapters/${ordinal}/narration/chunk`, {
+      params: voice ? { index, voice } : { index },
+      timeout: 200_000,
+    });
+    return resp.data;
+  },
+
+  /** What reformatting a book with the import normaliser would change. Writes nothing. */
+  async previewBibleBookReformat(bookId: number, assist = false): Promise<StudyReformatPreview> {
+    const resp = await apiClient.post(
+      `/api/bible/admin/books/${bookId}/reformat/preview`,
+      { assist },
+      { timeout: 300_000 },
+    );
+    return resp.data;
+  },
+
+  /** Apply a previewed reformat; readers' places are mapped to the new sections. */
+  async applyBibleBookReformat(
+    bookId: number,
+    token: string,
+  ): Promise<{ status: string; book: BibleImportedBook; mapping: StudyReformatPreview['mapping'] }> {
+    const resp = await apiClient.post(
+      `/api/bible/admin/books/${bookId}/reformat/apply`,
+      { token },
+      { timeout: 300_000 },
+    );
     return resp.data;
   },
 
