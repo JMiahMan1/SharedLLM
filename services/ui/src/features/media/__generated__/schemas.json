@@ -683,6 +683,18 @@
         "title": "Image",
         "type": "string"
       },
+      "is_finished": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Is Finished"
+      },
       "media_type": {
         "default": "",
         "title": "Media Type",
@@ -692,6 +704,30 @@
         "default": "",
         "title": "Name",
         "type": "string"
+      },
+      "progress": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Progress"
+      },
+      "resume_position": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resume Position"
       },
       "uri": {
         "default": "",

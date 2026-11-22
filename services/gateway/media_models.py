@@ -100,6 +100,12 @@ class MediaItemDetail(BaseModel):
     duration: float | None = None
     description: str = ""
     children: list[MediaItemChild] = Field(default_factory=list)
+    #: Audiobookshelf books only: the listener's OWN saved position (seconds),
+    #: from their ABS account; None when they have not started it or finished it.
+    resume_position: float | None = None
+    #: Their progress through the book, 0..1 (1 when finished).
+    progress: float | None = None
+    is_finished: bool | None = None
     errors: MediaErrorInfo = Field(default_factory=MediaErrorInfo)
 
 

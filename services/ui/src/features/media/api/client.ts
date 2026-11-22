@@ -1,4 +1,4 @@
-import { apiClient } from '../../../services/api';
+import { apiClient, directRequestConfig } from '../../../services/api';
 import type {
   AbsProgressRequest,
   AbsProgressResponse,
@@ -61,6 +61,26 @@ export async function getMediaFavorites(limit = 50): Promise<MediaFavoritesRespo
 export async function postAbsProgress(req: AbsProgressRequest): Promise<AbsProgressResponse> {
   const resp = await apiClient.post('/api/media/abs/progress', req);
   return resp.data as AbsProgressResponse;
+}
+
+/**
+ * The same progress save, sent so it survives the page going away: a
+ * `keepalive` fetch is finished by the browser even while the tab, the app or
+ * the WebView is being closed or backgrounded, which an axios request is not.
+ * Fire and forget: nothing is waiting for the answer.
+ */
+export function postAbsProgressOnExit(req: AbsProgressRequest): void {
+  try {
+    const { baseURL, headers } = directRequestConfig();
+    void fetch(`${baseURL || ''}/api/media/abs/progress`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // A save on the way out is best effort; the periodic saves already ran.
+  }
 }
 
 /** `abs://<id>` → `<id>`; null for anything that is not an Audiobookshelf item. */

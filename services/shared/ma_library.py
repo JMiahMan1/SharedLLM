@@ -184,6 +184,46 @@ def _match_by_abs_id(items: list[dict], abs_item_id: str) -> dict | None:
     return None
 
 
+#: The kinds of item MA's Audiobookshelf provider serves at the item level.
+_ABS_PROVIDER_MEDIA_TYPES = ("audiobook", "podcast")
+
+
+async def _from_abs_provider(ws, abs_item_id: str) -> ResolvedAudiobook | None:
+    """Look an ABS item up through MA's Audiobookshelf provider, not its library.
+
+    ``audiobookshelf://<type>/<abs id>`` names the item by its upstream id, so
+    there is nothing to guess: MA either has it (with a provider mapping for
+    exactly this id) or answers an error. A found item is added to MA's library
+    (``music/library/add_item``, what MA's own sync would do) so the caller gets
+    the usual ``library://`` URI; if that add fails, the provider URI MA just
+    returned is played instead, which ``player_queues/play_media`` accepts.
+    Returns None when the provider does not know the item either.
+    """
+    for media_type in _ABS_PROVIDER_MEDIA_TYPES:
+        try:
+            item = await _rpc(ws, "music/item_by_uri", {"uri": f"audiobookshelf://{media_type}/{abs_item_id}"})
+        except MALibraryLookupError as e:
+            log.info("[ma_library] ABS provider has no %s %s: %s", media_type, abs_item_id, e)
+            continue
+        if not isinstance(item, dict) or _match_by_abs_id([item], abs_item_id) is None:
+            continue
+        provider_uri = str(item.get("uri") or "").strip()
+        name = str(item.get("name") or "").strip()
+        try:
+            added = await _rpc(ws, "music/library/add_item", {"item": provider_uri})
+        except MALibraryLookupError as e:
+            log.warning("[ma_library] Could not add %s to Music Assistant's library: %s", provider_uri, e)
+            added = None
+        library_uri = str((added or {}).get("uri") or "").strip() if isinstance(added, dict) else ""
+        if library_uri.startswith("library://"):
+            log.info("[ma_library] Added ABS item %s to Music Assistant's library as %s", abs_item_id, library_uri)
+            return ResolvedAudiobook(abs_item_id=abs_item_id, ma_uri=library_uri, title=str(added.get("name") or name).strip())
+        if provider_uri.startswith("audiobookshelf"):
+            log.info("[ma_library] Playing ABS item %s by its provider URI %s", abs_item_id, provider_uri)
+            return ResolvedAudiobook(abs_item_id=abs_item_id, ma_uri=provider_uri, title=name)
+    return None
+
+
 async def _resolve_once(
     mass_url: str,
     mass_token: str,
@@ -214,9 +254,19 @@ async def _resolve_once(
                 "config": {"providers": ["library"]},
             },
         )
+        items = _iter_candidates(result)
+        match = _match_by_abs_id(items, abs_item_id)
+        if match is None:
+            # Not in MA's library *index* yet. MA only re-reads Audiobookshelf on
+            # its periodic library sync, so a book added to ABS since then is
+            # missing for hours (live, 2026-11-21: "Wild at Heart" was added at
+            # 19:08, MA's library still had 193 of ABS's 199 books, and the
+            # player could not start it). MA's ABS provider can still look the
+            # item up by its ABS id, so ask it directly and add it to the library.
+            fresh = await _from_abs_provider(ws, abs_item_id)
+            if fresh is not None:
+                return fresh
 
-    items = _iter_candidates(result)
-    match = _match_by_abs_id(items, abs_item_id)
     if match is None:
         raise MALibraryLookupError(
             f"Music Assistant does not have Audiobookshelf item {abs_item_id} "

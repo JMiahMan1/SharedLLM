@@ -77,6 +77,7 @@ from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
 from services.common.weather import weather_question
 from services.gateway import (
+    abs_auth,
     account_export,
     app_vetting_routes,
     automation_routes,
@@ -19282,32 +19283,64 @@ async def search_media(request: Request, q: str = "", types: str = "", limit: in
     return MediaSearchResponse(top=top, errors=errors, **buckets).model_dump(by_alias=True)
 
 
+async def _media_abs_progress(client: aiohttp.ClientSession, creds: Any, item_id: str) -> dict | None:
+    """This listener's own ABS progress record for one item, or None.
+
+    ``GET /api/me/progress/{id}`` answers 404 when they have never played it.
+    Progress is a nicety on the book page, so any failure is logged and the
+    page still loads; it never borrows another account's position.
+    """
+    try:
+        resp = await abs_auth.abs_request(
+            client, creds, "GET", f"/api/me/progress/{item_id}",
+            timeout=aiohttp.ClientTimeout(total=_MEDIA_CHILD_TIMEOUT),
+        )
+    except (abs_auth.AbsAuthError, TimeoutError, aiohttp.ClientError) as e:
+        log.warning(f"[media/item] Could not read Audiobookshelf progress for {item_id}: {e}")
+        return None
+    try:
+        if resp.status != 200:
+            if resp.status != 404:
+                log.warning(f"[media/item] Audiobookshelf progress for {item_id} returned HTTP {resp.status}")
+            return None
+        data = await resp.json(content_type=None)
+    finally:
+        await resp.release()
+    return data if isinstance(data, dict) else None
+
+
 async def _media_abs_item_detail(creds: Any, item_id: str) -> dict:
     """ABS item detail via direct ``GET /api/items/{id}?expanded=1`` (P2-T29).
 
-    The user's stored ABS API key is available on the resolved identity, and
-    the imageproxy route already uses it the same way. A missing key fails
-    fast -- ABS answers 401 and pretending otherwise would look like data loss.
+    Authenticated as the caller's own ABS account (``abs_auth``): their API
+    key, or a login with their ABS username and password. The listener's own
+    resume position comes with it, so the player can pick up where *they* left
+    off rather than where Music Assistant's shared ABS account did.
     """
-    abs_url = (creds.get("audiobookshelf_url") or "").rstrip("/")
-    abs_key = creds.get("audiobookshelf_api_key") or ""
-    if not abs_url:
-        raise HTTPException(status_code=400, detail="Audiobookshelf is not configured")
-    if not abs_key:
-        raise HTTPException(status_code=400, detail="Audiobookshelf API key is not configured")
     try:
+        abs_auth.abs_base_url(creds)
         async with shared_http_client() as client:
-            resp = await client.get(
-                f"{abs_url}/api/items/{item_id}",
+            resp = await abs_auth.abs_request(
+                client, creds, "GET", f"/api/items/{item_id}",
                 params={"expanded": "1"},
-                headers={"Authorization": f"Bearer {abs_key}"},
                 timeout=aiohttp.ClientTimeout(total=_MEDIA_CHILD_TIMEOUT),
             )
-            if resp.status == 404:
-                raise HTTPException(status_code=404, detail="Audiobookshelf does not know this item")
-            if resp.status != 200:
-                raise HTTPException(status_code=502, detail=f"Audiobookshelf returned HTTP {resp.status}")
-            raw = await resp.json()
+            try:
+                if resp.status == 404:
+                    raise HTTPException(status_code=404, detail="Audiobookshelf does not know this item")
+                if resp.status in (401, 403):
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Audiobookshelf refused this account (HTTP {resp.status}). Check the ABS sign-in under Accounts & Integrations.",
+                    )
+                if resp.status != 200:
+                    raise HTTPException(status_code=502, detail=f"Audiobookshelf returned HTTP {resp.status}")
+                raw = await resp.json(content_type=None)
+            finally:
+                await resp.release()
+            progress = await _media_abs_progress(client, creds, item_id)
+    except abs_auth.AbsAuthError as e:
+        raise HTTPException(status_code=e.status, detail=str(e)) from e
     except HTTPException:
         raise
     except (TimeoutError, aiohttp.ClientError) as e:
@@ -19350,7 +19383,33 @@ async def _media_abs_item_detail(creds: Any, item_id: str) -> dict:
         duration=media.get("duration"),
         description=metadata.get("description") or "",
         children=children,
+        **_media_abs_resume_fields(progress, media.get("duration"), is_podcast),
     ).model_dump(by_alias=True)
+
+
+def _media_abs_resume_fields(progress: dict | None, duration: Any, is_podcast: bool) -> dict:
+    """``resume_position``/``progress``/``is_finished`` from an ABS progress record.
+
+    A podcast's item-level record is not an episode position, so podcasts get none.
+    """
+    if is_podcast or not progress:
+        return {}
+    finished = bool(progress.get("isFinished"))
+    try:
+        position = float(progress.get("currentTime") or 0)
+    except (TypeError, ValueError):
+        position = 0.0
+    try:
+        fraction = float(progress.get("progress") or 0)
+    except (TypeError, ValueError):
+        fraction = 0.0
+    if not fraction and position and isinstance(duration, (int, float)) and duration > 0:
+        fraction = position / float(duration)
+    return {
+        "resume_position": None if finished else max(0.0, position),
+        "progress": 1.0 if finished else max(0.0, min(1.0, fraction)),
+        "is_finished": finished,
+    }
 
 
 @app.get("/api/media/item")
@@ -21242,13 +21301,21 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
                 headers["Authorization"] = f"Bearer {token}"
     elif svc == "abs":
         base = creds.get("audiobookshelf_url") or ""
-        token = creds.get("audiobookshelf_api_key") or ""
         if not base:
             raise HTTPException(status_code=400, detail="Audiobookshelf not configured")
         rel = parsed.path if is_full else (path if path.startswith("/") else "/" + path)
         target_url = f"{base.rstrip('/')}{rel}"
         if parsed.query:
             target_url += "?" + parsed.query
+        # The caller's own ABS token: their API key, or a login with their own
+        # ABS username and password (abs_auth). A cover is a nicety, so an
+        # account with neither still asks ABS without one rather than failing.
+        try:
+            async with shared_http_client() as _abs_client:
+                token = await abs_auth.abs_token(_abs_client, creds)
+        except abs_auth.AbsAuthError as e:
+            log.info(f"[imageproxy] No Audiobookshelf token for this account: {e}")
+            token = ""
         if token:
             headers["Authorization"] = f"Bearer {token}"
     else:

@@ -111,9 +111,12 @@ describe('Media page: playing an audiobook on a Music Assistant player', () => {
     renderWithProviders(<Media />);
     await playOnMaPlayer('Narnia');
 
-    await waitFor(() => expect(remoteCalls).toHaveLength(1));
-    const [{ command, args }] = remoteCalls;
+    // play_media, then a seek to where this listener left off (their own ABS
+    // progress, not MA's shared account; here they have none, so 0).
+    await waitFor(() => expect(remoteCalls).toHaveLength(2));
+    const [{ command, args }, seek] = remoteCalls;
     expect(command).toBe('player_queues/play_media');
+    expect(seek).toEqual({ command: 'player_queues/seek', args: expect.objectContaining({ position: 0 }) });
 
     // The original bug: MA was handed `audiobookshelf://<uuid>`, which it has no
     // media controller for, so the player stayed silent.
@@ -139,7 +142,7 @@ describe('Media page: playing an audiobook on a Music Assistant player', () => {
     renderWithProviders(<Media />);
     await playOnMaPlayer('Narnia');
 
-    await waitFor(() => expect(remoteCalls).toHaveLength(1));
+    await waitFor(() => expect(remoteCalls.length).toBeGreaterThanOrEqual(1));
     const { args } = remoteCalls[0];
     expect(Array.isArray(args.media)).toBe(true);
     expect(args.media).toEqual(['library://audiobook/260']);
