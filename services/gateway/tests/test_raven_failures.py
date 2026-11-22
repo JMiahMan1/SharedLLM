@@ -44,6 +44,47 @@ def _looping() -> dict:
     return _mission(1, f"Create test.txt for {NAME}", "Aborted by user", events)
 
 
+def _system(text: str) -> dict:
+    return {"type": "system", "data": text, "timestamp": "2026-11-21T10:00:00Z"}
+
+
+def _mission_nine() -> dict:
+    """Killed while looping on a trivial file task, iteration 38 of 60, varied calls.
+
+    Nothing here repeats the same call or error often enough for the detector, and
+    there is no path error: only the iteration count says this was a loop.
+    """
+    events = []
+    for iteration in range(1, 39):
+        events.append(_system(f"Agent loop iteration {iteration}/60 started."))
+        if iteration == 12:
+            events.append(_event("workspacefilereadrequest", {"file_path": "notes.txt"}, False, "No such file or directory"))
+        elif iteration == 30:
+            events.append(_event("workspaceshellrequest", {"command": "pytest -q"}, False, "1 failed, 2 passed"))
+        else:
+            events.append(_event("workspaceshellrequest", {"command": f"ls step{iteration}"}, True, "ok"))
+    return _mission(9, "Tidy the notes", "MISSION TERMINATED: User requested cancellation via control plane.", events, status="killed")
+
+
+def _mission_ten() -> dict:
+    """The same invented script path, run three times, then killed."""
+    events = [_system(f"Agent loop iteration {iteration}/60 started.") for iteration in range(1, 13)]
+    for _ in range(3):
+        events.append(_event(
+            "workspaceshellrequest", {"command": "python3 test_lessons.py"}, False,
+            "python3: can't open file '/workspace/test_lessons.py': [Errno 2] No such file or directory",
+        ))
+    events.append(_event("workspaceshellrequest", {"command": "ls"}, True, "README.md"))
+    return _mission(10, "Run the lessons tests", "MISSION TERMINATED: User requested cancellation via control plane.",
+                    events, status="killed")
+
+
+def _capped(iteration: int = 60) -> dict:
+    events = [_system(f"Agent loop iteration {n}/60 started.") for n in range(iteration - 2, iteration + 1)]
+    events.append(_event("workspaceshellrequest", {"command": "ls"}, True, "ok"))
+    return _mission(11, "Keep working", "Tool failed", events)
+
+
 MISSIONS = {
     1: _looping(),
     2: _mission(2, "Summarise the logs", "LocalModelUnavailable: the model host is busy", []),
@@ -99,6 +140,75 @@ def test_causes_are_classified_infrastructure_first():
     assert kind(_mission(9, "x", "ERROR: looping: workspaceshellrequest::'ls' repeated 5 times", [])) == "loop"
     timeouts = [_event("workspaceshellrequest", {"command": "pytest"}, False, "ClientTimeout: timed out")] * 5
     assert kind(_mission(9, "x", "Tool failed", timeouts)) == "infrastructure", "a repeated timeout is not a model loop"
+
+
+def test_a_kill_while_looping_is_a_loop_not_unexplained():
+    finding = raven_failures.classify(_mission_nine(), raven_failures.mission_events(_mission_nine()))
+
+    assert finding["kind"] == "loop", "38 of 60 iterations on a trivial task is a loop"
+    assert "iteration 38/60" in finding["evidence"]
+    assert "unexplained" not in finding["evidence"]
+
+
+def test_repeating_an_invented_path_is_a_loop():
+    mission = _mission_ten()
+    finding = raven_failures.classify(mission, raven_failures.mission_events(mission))
+
+    assert finding["kind"] == "loop"
+    assert "test_lessons.py" in finding["evidence"]
+    assert finding["tool"] == "workspaceshellrequest"
+
+
+def test_one_missing_file_is_a_hallucinated_path():
+    mission = _mission(12, "Fix the thing", "Tool failed", [
+        _event("workspacefilepatchrequest", {"file_path": "src/invented.py"}, False,
+               "FileNotFoundError: src/invented.py does not exist"),
+    ])
+    finding = raven_failures.classify(mission, raven_failures.mission_events(mission))
+
+    assert finding["kind"] == "hallucinated_path"
+    assert finding["tool"] == "workspacefilepatchrequest"
+
+
+def test_repeating_the_same_failing_call_is_a_loop():
+    mission = _mission(13, "Deploy", "Tool failed", [
+        _event("workspaceshellrequest", {"command": "make deploy"}, False, "permission denied"),
+    ] * 3)
+    finding = raven_failures.classify(mission, raven_failures.mission_events(mission))
+
+    assert finding["kind"] == "loop"
+    assert "failed 3 times" in finding["evidence"]
+
+
+def test_the_iteration_cap_is_recognised_from_the_log_and_the_verdict():
+    from_log = raven_failures.classify(_capped(), raven_failures.mission_events(_capped()))
+    from_verdict = raven_failures.classify(
+        _mission(14, "Keep going", "Reached the maximum number of iterations (60).",
+                 [_event("workspaceshellrequest", {"command": "ls"}, True, "ok")]),
+        raven_failures.mission_events(_mission(14, "Keep going", "Reached the maximum number of iterations (60).",
+                                               [_event("workspaceshellrequest", {"command": "ls"}, True, "ok")])),
+    )
+
+    assert from_log["kind"] == "iteration_cap" and "60/60" in from_log["evidence"]
+    assert from_verdict["kind"] == "iteration_cap"
+
+
+def test_a_kill_before_any_loop_is_not_called_a_loop():
+    mission = _mission(15, "Quick look", "MISSION TERMINATED: User requested cancellation via control plane.",
+                       [_event("workspaceshellrequest", {"command": "ls"}, True, "ok")])
+    finding = raven_failures.classify(mission, raven_failures.mission_events(mission))
+
+    assert finding["kind"] == "aborted_unexplained"
+
+
+def test_a_double_encoded_or_wrapped_log_is_still_read():
+    events = [_event("workspaceshellrequest", {"command": "ls"}, True, "ok")]
+    wrapped = {"events": json.dumps(events)}
+    double = json.dumps(json.dumps(events))
+
+    assert [c["tool"] for c in raven_failures.mission_events({"output_log": wrapped})] == ["workspaceshellrequest"]
+    assert [c["tool"] for c in raven_failures.mission_events({"output_log": double})] == ["workspaceshellrequest"]
+    assert raven_failures.iteration_span({"output_log": json.dumps([_system("Agent loop iteration 7/60 started.")])}) == (7, 60)
 
 
 def test_a_pass_learns_from_mistakes_and_never_from_infrastructure(data_dir, rag):

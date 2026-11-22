@@ -72,6 +72,23 @@ def test_a_dry_run_prints_counts_and_nothing_else(world, capsys):
     assert not list((world["tmp"] / "work").glob("snapshot-*")), "the snapshot is removed"
 
 
+def test_a_trace_with_no_goal_is_counted_and_not_written(world, capsys):
+    messages = [
+        *samples.opencode_messages(),
+        ("user", 9, 1_790_000_250_000, json.dumps({"text": "", "files": []})),
+    ]
+    samples.make_opencode_db(world["db"], messages=messages)
+    out_file = world["tmp"] / "out.jsonl"
+
+    assert collect.main(["collect", *_base(world), "--out", str(out_file)]) == 0
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["skipped_no_goal"] == 1
+    assert summary["tasks"] == 4, "the empty-goal task is not counted as a task to send"
+    rows = [json.loads(line) for line in out_file.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 4 and all(row["goal"].strip() for row in rows)
+
+
 def test_written_traces_are_scrubbed(world):
     out_file = world["tmp"] / "out.jsonl"
 
@@ -159,6 +176,37 @@ def test_sync_sends_only_new_tasks_and_remembers(world, gateway, monkeypatch, ca
     samples.make_opencode_db(world["db"], messages=messages)
     assert collect.main(args) == 0
     assert [t["task_index"] for t in posted[1]] == [2, 3]
+
+
+def test_sync_never_sends_a_trace_with_no_goal_and_moves_past_it(world, gateway, monkeypatch, capsys):
+    messages = [
+        *samples.opencode_messages(),
+        ("user", 9, 1_790_000_250_000, json.dumps({"text": "", "files": []})),
+    ]
+    samples.make_opencode_db(world["db"], messages=messages)
+    posted: list[list[dict]] = []
+
+    def fake_post(url, key, batch, timeout=60.0):
+        posted.append(batch)
+        return {"accepted": [t["id"] for t in batch], "updated": [], "refused": []}
+
+    monkeypatch.setattr(collect, "post_batch", fake_post)
+    args = ["sync", *_base(world), "--source", "opencode", "--session", "ses_synthetic01",
+            "--gateway", "https://gateway.test", "--key-file", str(world["key"]),
+            "--state-dir", str(world["tmp"] / "state")]
+
+    assert collect.main(args) == 0
+    assert [t["task_index"] for t in posted[0]] == [0, 1, 2]
+    assert json.loads(capsys.readouterr().out)["skipped_no_goal"] == 1
+
+    # A real task after the empty one is sent; the empty one is not resent.
+    samples.make_opencode_db(world["db"], messages=[
+        *messages,
+        ("user", 10, 1_790_000_300_000, json.dumps({"text": "Add a health check", "files": []})),
+    ])
+    assert collect.main(args) == 0
+    assert [t["task_index"] for t in posted[1]] == [4]
+    assert json.loads(capsys.readouterr().out)["skipped_no_goal"] == 1
 
 
 def test_a_failed_upload_is_queued_scrubbed_and_flushed_later(world, gateway, monkeypatch, capsys):
