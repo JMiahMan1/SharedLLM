@@ -6,6 +6,7 @@ Supports templates for common notifications (device arrival/departure, alerts).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import smtplib
