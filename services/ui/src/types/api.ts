@@ -3433,6 +3433,8 @@ export interface BibleSearchAnswer {
   verses: BibleSearchHit[];
   /** References in the answer that exist, and whether the model was given each one. */
   references: Array<{ reference: string; in_results: boolean }>;
+  /** Set when an online model answered because Jarvis's local AI was offline; always shown. */
+  online_note?: string | null;
 }
 
 /**
@@ -3949,7 +3951,8 @@ export type BibleStudyDepth = 'child' | 'teen' | 'adult';
 export type BibleStudyStreamEvent =
   | { type: 'start'; reference: string; version: string; edition: string; edition_name: string; depth: BibleStudyDepth; verses_used: number; notes_used: number; related_used?: number; library_used?: number; web_used?: number }
   | { type: 'text'; text: string }
-  | { type: 'done'; answer: string; references: string[] }
+  /** `online_note` is set when an online model answered because the local AI was offline. */
+  | { type: 'done'; answer: string; references: string[]; online_note?: string | null }
   | { type: 'error'; detail: string; status?: number };
 
 /**

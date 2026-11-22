@@ -278,3 +278,31 @@ def test_off_topic_verses_drop_out_but_a_few_always_stay():
 
 def test_pronouns_are_not_searched_as_words():
     assert meaning.content_words("forgiving someone who hurt you") == ["forgiving", "hurt"]
+
+
+def test_a_whole_bible_question_goes_online_with_only_the_found_verses(bible, monkeypatch):
+    """Local AI offline: the search's verses (reference and text), the translation, the question
+    and the reading level go to the online fallback, and the answer carries the note."""
+    from services.bible import study_ask
+
+    async def offline(**_kw):
+        raise study_ask.StudyAskOffline("The local AI is offline right now.")
+
+    sent: list[dict] = []
+
+    async def online(payload, **_kw):
+        sent.append(payload)
+        return "See Philippians 4:1.", "Answered by an online model while Jarvis's local AI is offline."
+
+    monkeypatch.setattr(study_ask, "ask", offline)
+    monkeypatch.setattr(study_ask, "ask_online", online)
+    resp = bible.post("/search/ask", params={"username": "reader-sam-secret"},
+                      json={"question": "What should I do when I worry?", "depth": "child"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["online_note"].startswith("Answered by an online model")
+    [payload] = sent
+    assert set(payload) == {"feature", "reference", "verses", "translation", "question", "reading_level"}
+    assert payload["reference"] == "" and payload["reading_level"] == "child"
+    assert all(set(v) == {"reference", "text"} for v in payload["verses"])
+    assert "reader-sam-secret" not in json.dumps(payload)

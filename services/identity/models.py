@@ -584,6 +584,8 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "llm_local_max_ctx", "value": "16384", "description": "Maximum token context allowed for local inference (raise on larger VRAM; no code ceiling)"},
     {"key": "llm_cloud_api_key", "value": "", "description": "API Key for cloud fallback (OpenRouter, OpenAI, etc.)"},
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
+    {"key": "cloud_fallback_features", "value": "bible_study_ask", "description": "Features that may ask an online model (llm_cloud_url, llm_cloud_api_key, cloud_fallback_model) ONLY while the local AI is offline. Comma separated; empty turns it off. Only features with a dedicated minimal template can be listed (today: bible_study_ask); an unknown name stops the gateway at startup. Guardian, chat, Raven and anything with personal data never go online. Read at gateway startup."},
+    {"key": "cloud_fallback_model", "value": "", "description": "Model on the online provider used by cloud_fallback_features, ideally a free one (for OpenRouter a ':free' model). Empty: no online fallback, the normal offline message is shown. Read at gateway startup."},
 
     # --- LLM MODELS (SINGLE SOURCE OF TRUTH) ---
     # Model settings default to "" (unconfigured); they MUST be set explicitly via the UI or .env.

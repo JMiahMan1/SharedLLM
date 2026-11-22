@@ -107,3 +107,26 @@ def test_content_monitoring_falls_back_to_the_phrase_list_quietly(offline, caplo
     # The phrase list still pages the parents: safety does not wait for the model.
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert not [r for r in caplog.records if "content monitoring" in r.getMessage()]
+
+
+def test_guardian_never_reaches_the_online_fallback_even_wide_open(offline, monkeypatch):
+    """Photo checks and content monitoring with the breaker open and the online fallback
+    configured as wide as it goes (every feature, a provider): nothing is sent online."""
+    from services.gateway import cloud_fallback as cf
+
+    client, _sent, _calls = offline
+    online: list[object] = []
+
+    async def record(provider, messages):
+        online.append(messages)
+        return "should never happen"
+
+    provider = cf.CloudProvider(url="https://cloud.test/v1/chat/completions", api_key="k", model="m:free", name="custom")
+    monkeypatch.setattr(cf, "CLIENT", cf.CloudFallbackClient(frozenset(cf.FEATURES), provider, lambda: True))
+    monkeypatch.setattr(cf, "_send", record)
+    llm.LOCAL_MODEL.mark_down("refused")
+    assert client.post("/api/telemetry/media/scan", headers=HEADERS, json=PHOTO).status_code == 503
+    client.post("/api/telemetry/activity", headers=HEADERS, json={
+        "user": "kid", "feature": "sms", "item": "Unknown", "action": "incoming", "at": "2026-10-21T10:00:00Z",
+        "detail": {"body": "meet me after school"}})
+    assert online == []

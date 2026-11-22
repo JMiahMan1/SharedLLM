@@ -598,6 +598,19 @@ def _chapter_context(session: Session, version: str, spans, verses: list[dict]) 
     return [r for r in around if id(r) in kept]
 
 
+async def _online_answer(*, reference: str, verses: list[dict], version: str, question: str,
+                         depth: str) -> tuple[str, str] | None:
+    """The gateway's online fallback for a question it refused because the local AI is offline.
+
+    Only ``study_ask.online_payload`` is sent: the reference, the verses' public
+    text, the translation, the question and the reading level. ``(answer, note)``
+    or None, in which case the caller shows the offline sentence it already has.
+    """
+    payload = study_ask.online_payload(reference=reference, verses=verses, translation=version,
+                                       question=question, depth=depth)
+    return await study_ask.ask_online(payload, gateway_url=GATEWAY_INTERNAL_URL, internal_secret=INTERNAL_SECRET)
+
+
 @app.post("/study/ask/stream")
 async def study_ask_stream_route(
     payload: StudyAskPayload,
@@ -639,6 +652,19 @@ async def study_ask_stream_route(
             ):
                 parts.append(piece)
                 yield json.dumps({"type": "text", "text": piece}) + "\n"
+        except study_ask.StudyAskOffline as exc:
+            online = None if parts else await _online_answer(
+                reference=ctx["reference"], verses=ctx["verses"], version=ctx["version"],
+                question=payload.question, depth=payload.depth,
+            )
+            if online is None:
+                yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+                return
+            answer, note = online
+            yield json.dumps({"type": "text", "text": answer}) + "\n"
+            yield json.dumps({"type": "done", "answer": answer, "references": study_ask.find_references(answer),
+                              "online_note": note}) + "\n"
+            return
         except study_ask.StudyAskUnavailable as exc:
             yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
             return
@@ -669,6 +695,7 @@ async def study_ask_route(
     reference, resolved, chosen, verses, notes, prompt = (
         ctx["reference"], ctx["version"], ctx["edition"], ctx["verses"], ctx["notes"], ctx["prompt"]
     )
+    online_note = None
     try:
         answer = await study_ask.ask(
             prompt=prompt,
@@ -679,6 +706,12 @@ async def study_ask_route(
         )
     except study_ask.StudyAskError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except study_ask.StudyAskOffline as exc:
+        online = await _online_answer(reference=reference, verses=verses, version=resolved,
+                                      question=payload.question, depth=payload.depth)
+        if online is None:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        answer, online_note = online
     except study_ask.StudyAskUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -695,6 +728,7 @@ async def study_ask_route(
         "verses_used": len(verses),
         "notes_used": len(notes),
         **_source_counts(ctx["sources"]),
+        "online_note": online_note,
     }
 
 
@@ -744,6 +778,7 @@ async def search_ask_route(
         except verse_search.QueryError as exc2:
             raise HTTPException(status_code=400, detail=str(exc2)) from exc2
     verses = found["results"]
+    online_note = None
     try:
         prompt = study_ask.build_search_prompt(question=payload.question, verses=verses, retrieval=retrieval)
         answer = await study_ask.ask(
@@ -755,6 +790,12 @@ async def search_ask_route(
         )
     except study_ask.StudyAskError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except study_ask.StudyAskOffline as exc:
+        online = await _online_answer(reference="", verses=verses, version=resolved,
+                                      question=payload.question, depth=payload.depth)
+        if online is None:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        answer, online_note = online
     except study_ask.StudyAskUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -776,6 +817,7 @@ async def search_ask_route(
         "answer": answer,
         "verses": verses,
         "references": references,
+        "online_note": online_note,
     }
 
 

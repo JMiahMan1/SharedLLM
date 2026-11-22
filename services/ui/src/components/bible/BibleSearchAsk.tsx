@@ -95,6 +95,11 @@ export default function BibleSearchAsk({ question: initial, version, scope, onOp
       ) : result ? (
         <div className="mt-3 space-y-2" data-testid="bible-search-ask-answer">
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-200">{result.answer}</p>
+          {result.online_note ? (
+            <p className="text-[11px] text-amber-200" data-testid="bible-search-ask-online-note">
+              {result.online_note}
+            </p>
+          ) : null}
           {result.references.length ? (
             <div className="flex flex-wrap gap-1.5">
               {result.references.map((r) => (

@@ -118,7 +118,7 @@ from services.gateway import (
 )
 from services.gateway import beloved as beloved_routes
 from services.gateway import client_origin
-from services.gateway import local_ai
+from services.gateway import cloud_fallback, local_ai
 from services.common.backend_health import BackendUnavailable
 from services.gateway.trainer import routes as trainer_routes
 from services.gateway import context_routes
@@ -860,6 +860,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.critical(f"[ConfigValidation] Failed to validate config: {e}")
         _config_validation_result = None
+    # The online fallback for allowlisted public features (cloud_fallback.py): read once.
+    # An unknown feature name raises here and stops startup with the name in the message.
+    try:
+        _fallback_settings = await get_all_settings()
+    except Exception as e:
+        log.error(f"[cloud-fallback] settings unavailable at startup, so the online fallback stays off: {e}")
+        _fallback_settings = None
+    if _fallback_settings is not None:
+        cloud_fallback.configure(_fallback_settings)
     if raven_worker:
         raven_worker.start()
 
@@ -939,6 +948,7 @@ app.include_router(garden_routes.router)
 app.include_router(trainer_routes.router)  # Jarvis Trainer: catalogue, curriculum, eval, self-repair, sermons
 app.include_router(context_routes.router)  # prompt budget and knowledge map (admin)
 app.include_router(studio_routes.router)  # Workspace Studio: profile, run, preview, assets, deck, game
+app.include_router(cloud_fallback.router)  # online model for allowlisted public features while the local AI is offline
 app.include_router(calls.router)
 app.include_router(drawing.router)
 app.include_router(mdm.router)

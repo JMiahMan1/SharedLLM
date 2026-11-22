@@ -130,6 +130,10 @@ class StudyAskUnavailable(RuntimeError):
     """The model could not be reached (the operator's side)."""
 
 
+class StudyAskOffline(StudyAskUnavailable):
+    """The gateway said the local AI is offline (its breaker is open)."""
+
+
 def _verse_lines(verses: list[dict]) -> list[str]:
     lines: list[str] = []
     for verse in verses:
@@ -342,7 +346,7 @@ async def _refusal(resp) -> StudyAskUnavailable:
             if payload.get("offline") and isinstance(message, str) and message.strip():
                 # The gateway knows the local AI is offline and said so in plain words:
                 # pass them on as they are, not behind "HTTP 503".
-                return StudyAskUnavailable(message.strip())
+                return StudyAskOffline(message.strip())
             detail = str(payload.get("detail") or (message if isinstance(message, str) else "") or "").strip()
     except Exception:
         detail = ""
@@ -446,3 +450,68 @@ async def ask_stream(
         raise StudyAskUnavailable(f"Study help could not reach the language model: {exc}") from exc
     if not wrote:
         raise StudyAskUnavailable("The model returned an empty answer.")
+
+
+# --------------------------------------------------------------- online fallback
+
+#: The feature name the gateway's allowlist (cloud_fallback_features) knows this as.
+ONLINE_FEATURE = "bible_study_ask"
+ONLINE_TIMEOUT = 150.0
+
+
+def online_payload(*, reference: str, verses: list[dict], translation: str, question: str, depth: str) -> dict:
+    """The whole request an online model may see for a Bible question, and nothing else.
+
+    Built here from five things only: the passage reference, each verse's
+    reference and public text, the translation code, the question and the
+    reading level. Notes, the rest of the chapter, related passages, the family
+    library, web results, the reader's name and anything stored about them are
+    never passed in, so they cannot be passed on. The gateway refuses any body
+    with another field (services/gateway/cloud_fallback.py).
+    """
+    return {
+        "feature": ONLINE_FEATURE,
+        "reference": str(reference or ""),
+        "verses": [
+            {"reference": str(v.get("reference") or "").strip(), "text": str(v.get("text") or "").strip()}
+            for v in verses[:MAX_VERSES]
+            if str(v.get("text") or "").strip() and str(v.get("reference") or "").strip()
+        ],
+        "translation": str(translation or ""),
+        "question": str(question or "").strip(),
+        "reading_level": depth if depth in DEPTHS else "adult",
+    }
+
+
+async def ask_online(
+    payload: dict,
+    *,
+    gateway_url: str,
+    internal_secret: str,
+    timeout: float = ONLINE_TIMEOUT,
+) -> tuple[str, str] | None:
+    """Ask the gateway's online fallback; ``(answer, note)`` or None when it will not answer.
+
+    Called only after the gateway said the local AI is offline. None (not
+    allowlisted, no provider configured, the local AI came back, the provider
+    failed) means the caller shows its normal offline sentence.
+    """
+    if not gateway_url:
+        return None
+    url = f"{gateway_url.rstrip('/')}/internal/cloud-fallback/bible-study"
+    headers = {"X-Internal-Secret": internal_secret} if internal_secret else {}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session, \
+                session.post(url, json=payload, headers=headers) as resp:
+            if resp.status != 200:
+                log.info("[study_ask] online fallback declined (HTTP %s)", resp.status)
+                return None
+            data = await resp.json()
+    except Exception as exc:
+        log.info("[study_ask] online fallback unavailable: %s", type(exc).__name__)
+        return None
+    answer = str((data or {}).get("answer") or "").strip()
+    note = str((data or {}).get("note") or "").strip()
+    if not answer or not note:
+        return None
+    return answer, note

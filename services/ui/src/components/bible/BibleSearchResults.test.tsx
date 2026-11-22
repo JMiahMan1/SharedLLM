@@ -174,6 +174,33 @@ describe('meaning search and Ask Jarvis', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
+  it('says when an online model answered because the local AI was offline', async () => {
+    const note = "Answered by an online model while Jarvis's local AI is offline.";
+    mocked.askBibleSearch.mockResolvedValue({
+      question: 'faith', version: 'kjv', depth: 'adult', retrieval: 'meaning',
+      answer: 'Faith rests on God (Romans 1:17).',
+      verses: page().results,
+      references: [{ reference: 'Romans 1:17', in_results: true }],
+      online_note: note,
+    });
+    renderResults();
+    fireEvent.click(await screen.findByTestId('bible-search-ask-toggle'));
+    fireEvent.click(screen.getByTestId('bible-search-ask-go'));
+    expect(await screen.findByTestId('bible-search-ask-online-note')).toHaveTextContent(note);
+  });
+
+  it('shows no online note for a local answer', async () => {
+    mocked.askBibleSearch.mockResolvedValue({
+      question: 'faith', version: 'kjv', depth: 'adult', retrieval: 'meaning',
+      answer: 'Faith rests on God.', verses: page().results, references: [], online_note: null,
+    });
+    renderResults();
+    fireEvent.click(await screen.findByTestId('bible-search-ask-toggle'));
+    fireEvent.click(screen.getByTestId('bible-search-ask-go'));
+    await screen.findByTestId('bible-search-ask-answer');
+    expect(screen.queryByTestId('bible-search-ask-online-note')).not.toBeInTheDocument();
+  });
+
   it("shows why Jarvis could not answer", async () => {
     mocked.askBibleSearch.mockRejectedValue({ response: { data: { detail: 'Study help could not reach the language model' } } });
     renderResults();
