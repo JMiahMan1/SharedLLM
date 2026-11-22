@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -527,6 +528,35 @@ def _check_abuse_ch_key(update_data: dict) -> None:
 #: username -> monotonic time of the last failed Music Assistant account provisioning (retried later).
 _MA_PROVISION_FAILED: dict[str, float] = {}
 MA_PROVISION_RETRY_S = 300.0
+#: username -> the lock that makes a person's account provisioning single-flight. Identity's routes run
+#: in a thread pool, and a page load sends several requests that each resolve the same person at once;
+#: without it each one asked the hub for an account and a token, and Music Assistant kept them all.
+_MA_PROVISION_LOCKS: dict[str, threading.Lock] = {}
+_MA_PROVISION_LOCKS_GUARD = threading.Lock()
+
+
+def _ma_provision_lock(username: str) -> threading.Lock:
+    with _MA_PROVISION_LOCKS_GUARD:
+        return _MA_PROVISION_LOCKS.setdefault(username, threading.Lock())
+
+
+def _ma_never_provisioned(user: User) -> bool:
+    """Accounts that never get a Music Assistant account of their own: the household (system default)
+    account, which is not a person, and dedicated test accounts."""
+    return _is_system_default_user(user) or bool(getattr(user, "is_test_account", False))
+
+
+def _ma_reload_login(session: Session, user: User) -> None:
+    """Copy ``user``'s saved Music Assistant login from the database, as another request may just
+    have saved one. A fresh session, so this request's own transaction cannot hide that commit."""
+    with Session(session.get_bind()) as fresh:
+        row = fresh.exec(select(User.mass_url, User.mass_token_enc, User.mass_user_id)
+                         .where(User.id == user.id)).first()
+    if row is None:
+        return
+    mass_url, token_enc, user_id = row
+    if token_enc and token_enc != user.mass_token_enc:
+        user.mass_url, user.mass_token_enc, user.mass_user_id = mass_url, token_enc, user_id
 
 
 def _resolve_music_assistant(session: Session, user: User, granted: set[str], *,
@@ -534,8 +564,20 @@ def _resolve_music_assistant(session: Session, user: User, granted: set[str], *,
     """The Music Assistant server and login ``user`` uses (services/identity/music_assistant.py).
 
     A login made for them on the household server is saved on their account at once, so it is
-    made once. The system default (household) account is never given one: it is not a person.
+    made once, and only one request at a time may make it (``_MA_PROVISION_LOCKS``): a request
+    that waited re-reads the saved login and uses it. The system default (household) account and
+    test accounts are never given one.
     """
+    may_provision = may_provision and not _ma_never_provisioned(user)
+    if not may_provision or (user.mass_url or "").strip() or user.mass_token_enc:
+        return _resolve_music_assistant_locked(session, user, granted, may_provision=may_provision)
+    with _ma_provision_lock(user.username):
+        _ma_reload_login(session, user)
+        return _resolve_music_assistant_locked(session, user, granted, may_provision=may_provision)
+
+
+def _resolve_music_assistant_locked(session: Session, user: User, granted: set[str], *,
+                                    may_provision: bool) -> music_assistant.Resolution:
     grant = None
     if "music_assistant" in granted and not _is_system_default_user(user):
         owner = _system_default_user(session)
@@ -551,7 +593,7 @@ def _resolve_music_assistant(session: Session, user: User, granted: set[str], *,
         own_user_id=user.mass_user_id,
         display_name=user.display_name,
         grant=grant,
-        may_provision=may_provision and not recently_failed and not _is_system_default_user(user),
+        may_provision=may_provision and not recently_failed,
     )
     if res.login == "provisioned" and res.token:
         _MA_PROVISION_FAILED.pop(user.username, None)
@@ -3777,10 +3819,12 @@ def music_assistant_status(session: Session = Depends(get_session), user: User =
 
 
 def _ma_accounts_plan(session: Session) -> list[dict[str, Any]]:
-    """Each person and what giving everyone their own Music Assistant account would do (names only)."""
+    """Each person and what giving everyone their own Music Assistant account would do (names only).
+
+    The household account and test accounts are not people and are left out."""
     rows = []
     for u in session.exec(select(User)).all():
-        if _is_system_default_user(u):
+        if _ma_never_provisioned(u):
             continue
         if (u.mass_url or "").strip():
             action = "own_server"
