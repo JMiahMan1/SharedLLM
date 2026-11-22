@@ -186,6 +186,31 @@ public class PushNoticeTest {
     }
 
     @Test
+    public void aParentsRuleChangeIsADataOnlyRefreshSignal() {
+        PushNotice signal = PushNotice.parse("{\"id\":\"r1\",\"category\":\"family_safety\","
+                + "\"kind\":\"screen_time_refresh\",\"title\":\"Screen time updated\","
+                + "\"body\":\"A parent changed your screen time settings.\",\"priority\":2,"
+                + "\"tag\":\"screen-time:rules:kid\",\"signal\":true}");
+        assertTrue(signal.isScreenTimeRefresh());
+        // Still a screen-time notice, so an older app that shows it also re-reads.
+        assertTrue(signal.isScreenTime());
+        assertFalse(signal.isPauseNotice());
+        // An ordinary screen-time notice is shown, not swallowed.
+        assertFalse(PushNotice.parse("{\"category\":\"family_safety\",\"kind\":\"family_safety\","
+                + "\"title\":\"Bonus time\",\"body\":\"A parent added 15 minutes for today.\","
+                + "\"tag\":\"screen-time:kid\"}").isScreenTimeRefresh());
+    }
+
+    @Test
+    public void anApprovedChoreIsAScreenTimeNoticeSoTheLockReReadsAtOnce() {
+        PushNotice chores = PushNotice.parse("{\"category\":\"family_safety\",\"kind\":\"family_safety\","
+                + "\"title\":\"3 chores approved today\",\"body\":\"Nice work!\","
+                + "\"tag\":\"screen-time:chores-approved:kid\"}");
+        assertTrue(chores.isScreenTime());
+        assertFalse(chores.isPauseNotice());
+    }
+
+    @Test
     public void alarmAndPhoneTimerNoticesRingOnTheAlarmStream() {
         PushNotice alarm = PushNotice.parse("{\"id\":\"a1\",\"category\":\"timers\",\"kind\":\"alarm\","
                 + "\"title\":\"🌅 Alarm: Wake up\",\"body\":\"Wake up (Morning Melody)\",\"priority\":5,"

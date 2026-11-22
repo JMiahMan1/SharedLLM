@@ -1,6 +1,8 @@
 package com.jarvisos.app;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import com.jarvisos.app.GuardRules.Action;
 
@@ -291,5 +293,19 @@ public class GuardRulesTest {
                 "", "Jarvis OS Do you want to uninstall this app?"));
         // Settings pages about Jarvis stay covered too.
         assertEquals(Action.BLOCK_TAMPER, duringUpdate(true, "com.android.settings", "", "App info Jarvis OS Force stop"));
+    }
+
+    @Test
+    public void wakingUpReReadsTheStatusOnceForEventsThatArriveTogether() {
+        long t = 1_000_000L;
+        // The first wake since the guard started always reads.
+        assertTrue(GuardRules.wakeRefreshDue(t, 0L));
+        // Screen on, unlock and the network back within a moment: one read.
+        assertFalse(GuardRules.wakeRefreshDue(t + 1_200L, t));
+        assertFalse(GuardRules.wakeRefreshDue(t + GuardRules.WAKE_REFRESH_GAP_MS - 1, t));
+        // The next wake reads again.
+        assertTrue(GuardRules.wakeRefreshDue(t + GuardRules.WAKE_REFRESH_GAP_MS, t));
+        // A clock set back never blocks the read.
+        assertTrue(GuardRules.wakeRefreshDue(t - 60_000L, t));
     }
 }

@@ -365,6 +365,11 @@ public class PushService extends Service {
             if (notice.isAlarmRing()) {
                 FindPhoneService.startAlarm(this, notice.title, notice.body);
             }
+            if (notice.isScreenTimeRefresh()) {
+                // Data-only: a parent changed this member's screen time. Re-read now, show nothing.
+                GuardService.refreshNow();
+                return;
+            }
             // Auto drop-in on: answer the family call by itself instead of ringing.
             if (DropInCall.maybeAutoJoin(this, notice)) return;
             PushNotifier.show(this, notice);

@@ -296,3 +296,40 @@ def test_only_parents_choose_a_notification_level_and_only_known_levels(family):
     assert family("kid").put("/api/screen-time/kid/notify-level", json={"level": "off"}).status_code == 403
     assert family("sib").put("/api/screen-time/kid/notify-level", json={"level": "off"}).status_code == 403
     assert family("mom").put("/api/screen-time/kid/notify-level", json={"level": "loud"}).status_code == 422
+
+
+def _ask(family, minutes=60):
+    r = family("kid").post("/api/screen-time/requests", json={"minutes": minutes, "day": DAY})
+    assert r.status_code == 200, r.text
+    return r.json()["request"]["id"]
+
+
+def test_a_parent_edits_the_asked_minutes_down_then_approves(family):
+    rid = _ask(family, 60)
+    granted = family("dad").post(f"/api/screen-time/requests/{rid}", json={"grant": True, "minutes": 30}).json()["request"]
+    assert (granted["minutes"], granted["granted_minutes"], granted["status"]) == (60, 30, "granted")
+    assert family("kid").get(f"/api/screen-time/kid/rules?day={DAY}").json()["bonus_min"] == 30
+
+
+def test_a_parent_may_give_more_than_asked_and_no_minutes_gives_the_asked_amount(family):
+    rid = _ask(family, 15)
+    assert family("dad").post(f"/api/screen-time/requests/{rid}", json={"grant": True, "minutes": 45}).json()["request"]["granted_minutes"] == 45
+    # One pending request a day, so the next ask is for another day.
+    r = family("kid").post("/api/screen-time/requests", json={"minutes": 20, "day": "2026-10-22"})
+    rid = r.json()["request"]["id"]
+    assert family("dad").post(f"/api/screen-time/requests/{rid}", json={"grant": True}).json()["request"]["granted_minutes"] == 20
+
+
+@pytest.mark.parametrize("minutes", [0, 4, 241, 1000, 30.5, "30", True, None])
+def test_granted_minutes_must_be_a_whole_number_from_5_to_240(family, minutes):
+    rid = _ask(family, 60)
+    r = family("dad").post(f"/api/screen-time/requests/{rid}", json={"grant": True, "minutes": minutes})
+    assert r.status_code == 422
+    # Refused, so still waiting for an answer.
+    assert [p["id"] for p in family("dad").get("/api/screen-time/requests").json()["requests"]] == [rid]
+
+
+def test_declining_ignores_minutes(family):
+    rid = _ask(family, 60)
+    r = family("dad").post(f"/api/screen-time/requests/{rid}", json={"grant": False, "minutes": 9999})
+    assert r.status_code == 200 and r.json()["request"]["granted_minutes"] == 0

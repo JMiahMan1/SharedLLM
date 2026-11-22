@@ -19,5 +19,5 @@ def test_a_long_day_is_counted_not_listed():
 
 def test_a_redo_is_its_own_notice():
     assert chore_answer_words(False, "Dishes", [])[0] == "Have another go"
-    assert chore_answer_tag("kid", True) == "chores-approved:kid"
+    assert chore_answer_tag("kid", True) == "screen-time:chores-approved:kid"
     assert chore_answer_tag("kid", False) == "screen-time:kid"

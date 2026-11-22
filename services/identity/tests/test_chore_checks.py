@@ -164,3 +164,26 @@ def test_the_days_approvals_come_back_so_the_child_gets_one_notice(family):
     assert mom.post(f"/api/screen-time/chore-checks/{ids[1]}", json={"approve": False}).json()["approved_today"] == []
     last = mom.post(f"/api/screen-time/chore-checks/{ids[2]}", json={"approve": True}).json()
     assert last["approved_today"] == ["Bed", "Toys"]
+
+
+def test_time_given_without_a_request_is_in_the_next_read_the_status_makes(family):
+    """The live status (gateway) reads /rules and the chore sync on every call,
+    so what a parent gives must be in those two answers at once: a bonus with
+    the moment it runs out (it opens bedtime too), and an approved chore."""
+    from datetime import UTC, datetime, timedelta
+
+    dad = family("dad")
+    assert dad.put("/api/screen-time/kid/rules", json={"bedtime_start": "21:20", "bedtime_end": "06:00",
+                                                       "earn": {"chore_min": 5}}).status_code == 200
+    check = sync(dad, [{"id": "c1", "title": "Bed"}])["new"][0]
+    before = datetime.now(UTC)
+    assert dad.post("/api/screen-time/kid/bonus", json={"minutes": 15, "day": DAY}).status_code == 200
+    assert dad.post(f"/api/screen-time/chore-checks/{check['id']}", json={"approve": True}).status_code == 200
+
+    rules = family("kid").get(f"/api/screen-time/kid/rules?day={DAY}").json()
+    assert rules["bonus_min"] == 15
+    until = datetime.fromisoformat(rules["granted_until"])
+    assert before + timedelta(minutes=15) <= until <= datetime.now(UTC) + timedelta(minutes=15)
+    after = sync(dad, [{"id": "c1", "title": "Bed"}])
+    assert [c["status"] for c in after["checks"]] == ["approved"]
+    assert after["bonus_by_day"] == {DAY: 15}

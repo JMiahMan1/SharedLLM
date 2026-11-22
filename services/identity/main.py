@@ -6492,9 +6492,17 @@ def list_screen_time_requests(status: str = "pending", session: Session = Depend
     return {"requests": [_request_read(r) for r in _visible_requests(session, caller, rows)]}
 
 
+#: What a parent may give when answering a request for more time (the same
+#: range a child may ask for; the parent can give less or more than asked).
+GRANT_MIN_MINUTES = 5
+GRANT_MAX_MINUTES = 240
+
+
 @app.post("/api/screen-time/requests/{request_id}")
 def decide_screen_time_request(request_id: int, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A parent grants (optionally fewer minutes) or declines a request."""
+    """A parent grants or declines a request. ``minutes`` (optional, 5 to 240)
+    is what they give: fewer than asked (asked 60, give 30) or more; without
+    it the asked amount is given."""
     request = session.get(ScreenTimeRequest, request_id)
     if request is None:
         raise HTTPException(status_code=404, detail="No such request")
@@ -6505,8 +6513,10 @@ def decide_screen_time_request(request_id: int, body: dict, session: Session = D
         raise HTTPException(status_code=409, detail="Already answered")
     grant = bool((body or {}).get("grant"))
     minutes = (body or {}).get("minutes", request.minutes)
-    if grant and (not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= 240):
-        raise HTTPException(status_code=422, detail="minutes must be 1 to 240")
+    if grant and (not isinstance(minutes, int) or isinstance(minutes, bool)
+                  or not GRANT_MIN_MINUTES <= minutes <= GRANT_MAX_MINUTES):
+        raise HTTPException(status_code=422,
+                            detail=f"minutes must be a whole number from {GRANT_MIN_MINUTES} to {GRANT_MAX_MINUTES}")
     request.status = "granted" if grant else "declined"
     request.granted_minutes = minutes if grant else 0
     request.decided_by = caller.username

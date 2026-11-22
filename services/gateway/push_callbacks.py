@@ -258,15 +258,20 @@ async def guard_unlock_decide(request: Request, params: dict, reply: str | None)
 async def more_time_decide(request: Request, params: dict, reply: str | None) -> dict:
     """A parent taps Approve / Disapprove on a request for more screen time,
     through the same path as ``POST /api/screen-time/requests/{id}``, as the
-    caller: ``params`` is ``{"id", "grant"}``. Identity checks that the caller
-    may answer."""
+    caller: ``params`` is ``{"id", "grant"}`` (the notification's one-tap
+    Approve gives the full amount asked) with an optional ``minutes`` to give a
+    different amount. Identity checks that the caller may answer, and the
+    amount (5 to 240)."""
     from services.gateway.main import decide_more_time
 
     try:
         request_id = int(params.get("id"))
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="params.id is required") from None
-    status, body = await decide_more_time(request, request_id, {"grant": bool(params.get("grant"))})
+    payload: dict = {"grant": bool(params.get("grant"))}
+    if "minutes" in params:
+        payload["minutes"] = params["minutes"]
+    status, body = await decide_more_time(request, request_id, payload)
     if status != 200:
         raise HTTPException(status_code=status, detail=body.get("detail") or "Could not answer")
     return body

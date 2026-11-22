@@ -55,6 +55,7 @@ def notice(
     kind: str | None = None,
     audience: str = "all",
     replace: bool = False,
+    signal: bool = False,
 ) -> dict[str, Any]:
     """The JSON body telemetry's notify takes.
 
@@ -70,6 +71,12 @@ def notice(
 
     ``replace`` (with a ``tag``) also drops earlier unread notices with that tag
     from the person's notification list, as the phone already replaces them.
+
+    ``signal`` makes it a data-only message for the person's devices (the
+    phone acts on its ``kind`` and shows nothing): telemetry publishes it to
+    the push stream only, never to the notification list or web push. An app
+    too old to know the ``kind`` shows it as an ordinary notice, so the title
+    and body must still read well on their own.
     """
     if link is None and url is None:
         raise LinkError(f"a {kind or category} notice needs a link (where a tap goes)")
@@ -94,6 +101,8 @@ def notice(
         payload["audience"] = audience
     if replace and tag:
         payload["replace"] = True
+    if signal:
+        payload["signal"] = True
     return payload
 
 

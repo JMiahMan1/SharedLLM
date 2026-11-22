@@ -13,6 +13,8 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Handler;
@@ -104,6 +106,12 @@ public class GuardService extends AccessibilityService {
     /** The ten- and five-minute warning dialog; created on first use. */
     private TimePanelOverlay timePanel;
     private BroadcastReceiver installs;
+    /** Screen on and unlock: re-read the status at once ({@link #refreshOnWake()}). */
+    private BroadcastReceiver wakes;
+    /** A network coming back: re-read the status at once ({@link #refreshOnWake()}). */
+    private ConnectivityManager.NetworkCallback networkBack;
+    /** When a wake last set off a status read (GuardRules.wakeRefreshDue). */
+    private volatile long lastWakeRefreshAt = 0L;
     /** Installed apps that get around the web filter (FilterBypass.apps). */
     private volatile Set<String> bypassApps = Collections.emptySet();
     /**
@@ -182,6 +190,47 @@ public class GuardService extends AccessibilityService {
         IntentFilter filter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
         filter.addDataScheme("package");
         ContextCompat.registerReceiver(this, installs, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
+        watchWakes();
+    }
+
+    /**
+     * Re-read the status the moment the phone wakes or gets a network back.
+     * Time a parent gives while the phone sleeps or is offline (a bonus, an
+     * approved chore, a rule change) cannot reach it by push, and the push
+     * stream does not replay it; the minute timer also stops while the phone
+     * sleeps. Without this, a phone woken at bedtime kept its old "time is up"
+     * lock for up to a minute of use, long enough for a child to ask for the
+     * time a parent had already given.
+     */
+    private void watchWakes() {
+        wakes = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                refreshOnWake();
+            }
+        };
+        IntentFilter screen = new IntentFilter(Intent.ACTION_SCREEN_ON);
+        screen.addAction(Intent.ACTION_USER_PRESENT);
+        ContextCompat.registerReceiver(this, wakes, screen, ContextCompat.RECEIVER_NOT_EXPORTED);
+        try {
+            networkBack = new ConnectivityManager.NetworkCallback() {
+                @Override
+                public void onAvailable(Network network) {
+                    refreshOnWake();
+                }
+            };
+            ((ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE)).registerDefaultNetworkCallback(networkBack);
+        } catch (Exception e) {
+            networkBack = null; // the screen-on read and the minute timer still run
+        }
+    }
+
+    /** One status read for a wake, however many wake events arrive together. */
+    private void refreshOnWake() {
+        long now = System.currentTimeMillis();
+        if (!GuardRules.wakeRefreshDue(now, lastWakeRefreshAt)) return;
+        lastWakeRefreshAt = now;
+        refreshNow();
     }
 
     /**
@@ -966,6 +1015,20 @@ public class GuardService extends AccessibilityService {
         if (installs != null) {
             try {
                 unregisterReceiver(installs);
+            } catch (Exception ignored) {
+                // never registered
+            }
+        }
+        if (wakes != null) {
+            try {
+                unregisterReceiver(wakes);
+            } catch (Exception ignored) {
+                // never registered
+            }
+        }
+        if (networkBack != null) {
+            try {
+                ((ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE)).unregisterNetworkCallback(networkBack);
             } catch (Exception ignored) {
                 // never registered
             }
