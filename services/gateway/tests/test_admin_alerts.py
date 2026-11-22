@@ -2,6 +2,7 @@
 GPU services stop answering, once per change (services/gateway/admin_alerts.py)."""
 import asyncio
 import json
+import logging
 
 from services.gateway import admin_alerts
 
@@ -173,16 +174,24 @@ def test_media_targets_build_the_right_liveness_probes():
     })
     assert targets == {
         "audiobookshelf": "https://abs.example.com/ping",
-        "music_assistant": "http://ha.example.com:8095",
         "nextcloud": "https://cloud.example.com/status.php",
     }
+
+
+def test_media_targets_ignore_the_retired_ma_setting():
+    targets = admin_alerts.media_targets({
+        "audiobookshelf_url": "https://abs.example.com/",
+        "mass_url": "http://ha.example.com:8095/",
+        "ma_url": "http://legacy.example.com:8095",
+        "nextcloud_url": "https://cloud.example.com/",
+    })
+    assert "music_assistant" not in targets
 
 
 def test_media_targets_accept_legacy_keys_and_skip_unset():
     assert admin_alerts.media_targets({"abs_url": "http://abs.local"}) == {
         "audiobookshelf": "http://abs.local/ping",
     }
-    assert admin_alerts.media_targets({"ma_url": "  "}) == {}
     assert admin_alerts.media_targets({"nextcloud_url": "https://cloud.local/"}) == {
         "nextcloud": "https://cloud.local/status.php",
     }
@@ -238,14 +247,101 @@ def test_check_once_reports_a_wedged_audiobookshelf_after_two_failures():
     assert notice["tag"] == "admin:service:audiobookshelf"
 
 
-def test_check_once_reports_music_assistant_connection_refused():
+_UP_SERVER = {"configured": True, "url": "http://ma.local", "connected": True}
+
+
+class _HubClient(_MediaClient):
+    """Readiness, backends, and HomeHub's answer about the household MA."""
+
+    def __init__(self, services, server, *, ma_down=False, telemetry_ok=False):
+        super().__init__(services, telemetry_ok=telemetry_ok)
+        self.server = server
+        self.ma_down = ma_down
+        self.hub_asked = 0
+
+    def get(self, url, **kw):
+        if url.endswith("/hub/music_assistant/server"):
+            self.hub_asked += 1
+            assert str(kw["headers"]["Authorization"]).startswith("Bearer ")
+            return _Resp(200, self.server)
+        if url == "http://ma.local":
+            if self.ma_down:
+                raise ConnectionError("refused")
+            return _Resp(200)
+        return super().get(url, **kw)
+
+
+def _hub(monkeypatch):
+    monkeypatch.setattr("services.common.hub_login.homehub_url", lambda: "http://hub.local")
+
+
+def test_music_assistant_health_asks_the_hub_and_probes_its_address(monkeypatch):
+    _hub(monkeypatch)
+    client = _HubClient({"geo": "OK"}, _UP_SERVER)
+
+    line = asyncio.run(admin_alerts.music_assistant_status(client))
+
+    assert line == "OK"
+    assert client.hub_asked == 1
+
+
+def test_a_healthy_music_assistant_does_not_alert(monkeypatch):
+    _hub(monkeypatch)
     r = _Redis()
-    client = _MediaClient({"geo": "OK"}, ma_down=True, telemetry_ok=False)
+    client = _HubClient({"geo": "OK"}, _UP_SERVER)
     _run_media(r, client)
     _run_media(r, client)
+
+    assert client.notified == []
+    assert json.loads(r.kv[admin_alerts.STATE_KEY])["outbox"] == []
+
+
+def test_music_assistant_down_alerts_after_two_failed_checks(monkeypatch):
+    _hub(monkeypatch)
+    r = _Redis()
+    client = _HubClient({"geo": "OK"}, _UP_SERVER, ma_down=True, telemetry_ok=False)
+    _run_media(r, client)
+    _run_media(r, client)
+
     queued = json.loads(r.kv[admin_alerts.STATE_KEY])["outbox"][0]
     assert queued["title"] == "Service down: music assistant"
     assert "UNREACHABLE" in queued["body"]
+    assert queued["tag"] == "admin:service:music_assistant"
+
+
+def test_no_music_assistant_integration_is_not_an_alert(monkeypatch, caplog):
+    _hub(monkeypatch)
+    r = _Redis()
+    client = _HubClient({"geo": "OK"}, {"configured": False, "url": None,
+                                        "error": "HomeHub has no Music Assistant integration."})
+    with caplog.at_level(logging.INFO):
+        _run_media(r, client)
+        _run_media(r, client)
+
+    assert client.notified == []
+    assert json.loads(r.kv[admin_alerts.STATE_KEY])["outbox"] == []
+    assert any("no Music Assistant integration" in record.message for record in caplog.records)
+
+
+def test_a_configured_music_assistant_without_a_usable_address_is_down(monkeypatch):
+    _hub(monkeypatch)
+    r = _Redis()
+    client = _HubClient({"geo": "OK"}, {"configured": True, "url": None, "connected": False,
+                                        "error": "HomeHub cannot reach Music Assistant"})
+    _run_media(r, client)
+    _run_media(r, client)
+
+    queued = json.loads(r.kv[admin_alerts.STATE_KEY])["outbox"][0]
+    assert queued["title"] == "Service down: music assistant"
+    assert "UNREACHABLE" in queued["body"]
+
+
+def test_no_homehub_means_no_music_assistant_probe_or_alert(monkeypatch):
+    monkeypatch.setattr("services.common.hub_login.homehub_url", lambda: "")
+    client = _HubClient({"geo": "OK"}, _UP_SERVER)
+
+    assert asyncio.run(admin_alerts.music_assistant_status(client)) is None
+    assert client.hub_asked == 0
 
 
 def test_check_once_reports_a_wedged_nextcloud():
