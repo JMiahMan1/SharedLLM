@@ -9,7 +9,7 @@ from typing import Any
 
 import aiohttp
 
-from services.common.backend_health import is_unreachable
+from services.common.backend_health import is_suspect, is_unreachable
 from services.gateway import local_ai
 from services.gateway.config import OLLAMA_SLOT_POLL_INTERVAL, OLLAMA_SLOT_POLL_MAX
 
@@ -154,7 +154,22 @@ class OllamaProvider(BaseLLMProvider):
         except Exception as e:
             if is_unreachable(e):
                 raise
+            await self._confirm_ready(e)
         return None
+
+    async def _confirm_ready(self, exc: BaseException) -> None:
+        """The proxy could not even list its models in time: ask whether its model server is there.
+
+        The proxy answers ``/api/ps`` only after reaching llama-server, so a status
+        read that times out is either a busy moment or a proxy waiting on a server
+        that is gone (a GPU box rebooted without its GPU: the chat after it waited
+        54 s). The breaker's readiness probe tells them apart in milliseconds; if
+        the proxy says its server is unreachable, this call fails fast instead.
+        """
+        if not is_suspect(exc):
+            return
+        if not await asyncio.to_thread(local_ai.LLM.confirm, f"{type(exc).__name__} reading {self.base_url}/api/ps"):
+            raise local_ai.LLM.unavailable() from exc
 
     async def _wait_for_model(self, client: aiohttp.ClientSession, model: str) -> bool:
         """Poll /api/ps until the target model appears in loaded models.
@@ -181,6 +196,7 @@ class OllamaProvider(BaseLLMProvider):
         except Exception as e:
             if is_unreachable(e):
                 raise  # the machine is off: no point "proceeding anyway"
+            await self._confirm_ready(e)
         return False
 
     async def _wait_for_slot(self, client: aiohttp.ClientSession, model: str = "") -> bool:
@@ -225,7 +241,8 @@ class OllamaProvider(BaseLLMProvider):
         except Exception as e:
             if is_unreachable(e):
                 raise  # the machine is off: no point "proceeding anyway"
-            log.warning(f"[OllamaProvider] Could not check slots ({e}), proceeding anyway")
+            await self._confirm_ready(e)
+            log.warning(f"[OllamaProvider] Could not check slots ({e!r}), proceeding anyway")
             return True
 
     async def generate(

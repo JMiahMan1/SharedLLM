@@ -201,3 +201,162 @@ def test_a_watch_probe_needs_two_misses_in_a_row_to_mark_it_down():
     assert health.state == UP  # the answer in between reset the count
     health.probe_once()
     assert health.state == DOWN
+
+
+# ------------------------------------------------ readiness: answered is not ready
+
+
+def _ready(ok: bool, answered: bool = True, reason: str = ""):
+    from services.common.backend_health import ProbeResult
+
+    return ProbeResult(ok, answered=answered, reason=reason)
+
+
+class Probe:
+    """A scripted probe: each call pops the next verdict, and counts the calls."""
+
+    def __init__(self, *verdicts):
+        self.verdicts = list(verdicts)
+        self.calls = 0
+
+    def __call__(self, url, timeout):
+        self.calls += 1
+        return self.verdicts.pop(0)
+
+
+def test_a_proxy_that_answers_but_cannot_serve_does_not_close_it():
+    # The GPU box rebooted without its GPU: the proxy answers, llama-server is gone.
+    probe = Probe(_ready(False, reason="found the proxy up but its model server unreachable"))
+    health = _health(probe=probe)
+    health.mark_down("refused")
+    assert health.probe_once() is False
+    assert health.state == DOWN
+
+
+def test_a_ready_answer_closes_it():
+    health = _health(probe=Probe(_ready(True, reason="found the model server ready")))
+    health.mark_down("refused")
+    assert health.probe_once() is True
+    assert health.state == UP
+
+
+def test_a_slow_answer_while_a_model_loads_never_opens_it():
+    # The failed call is suspect; the probe finds the server there (loading): stays up.
+    probe = Probe(_ready(True, reason="found the model server answering (HTTP 503)"))
+    health = _health(probe=probe)
+    assert health.record_failure(aiohttp.SocketTimeoutError("Timeout on reading data from socket")) is False
+    assert health.state == UP
+    assert health.seconds_to_next_probe() == 0.0  # a confirming probe is due now
+    health.probe_once()
+    assert health.state == UP and probe.calls == 1
+    assert health.seconds_to_next_probe() is None  # nothing more to check
+
+
+def test_a_failed_call_then_the_proxy_saying_its_server_is_gone_opens_it():
+    probe = Probe(_ready(False, reason="found the proxy up but its model server unreachable (HTTP 502)"))
+    health = _health(probe=probe)
+    health.record_failure(RuntimeError("Ollama HTTP 503: No llama-server slots available within timeout"))
+    assert health.state == UP  # the failed call alone proves nothing
+    health.probe_once()
+    assert health.state == DOWN
+    assert "model server unreachable" in health.detail
+    with pytest.raises(BackendUnavailable):
+        health.check()
+
+
+def test_silence_after_a_failed_call_needs_a_second_probe_spaced_out():
+    clock = Clock()
+    probe = Probe(_ready(False, answered=False), _ready(False, answered=False))
+    health = _health(probe=probe, clock=clock, verify_interval=10.0)
+    health.record_failure(TimeoutError())
+    health.probe_once()
+    assert health.state == UP  # no answer once can be a busy moment
+    assert health.seconds_to_next_probe() == 10.0
+    # More failed calls meanwhile do not pull the second probe forward.
+    health.record_failure(TimeoutError())
+    assert health.seconds_to_next_probe() == 10.0
+    clock.now += 10
+    health.probe_once()
+    assert health.state == DOWN
+
+
+def test_a_watch_probe_finding_it_not_ready_needs_two_in_a_row():
+    # No failed call: the proxy's "not ready" during a quick restart must not open it alone.
+    probe = Probe(_ready(False), _ready(True), _ready(False), _ready(False))
+    health = _health(probe=probe)
+    health.probe_once()
+    assert health.state == UP
+    health.probe_once()
+    health.probe_once()
+    assert health.state == UP
+    health.probe_once()
+    assert health.state == DOWN
+
+
+def test_confirm_probes_inline_and_says_whether_to_go_ahead():
+    health = _health(probe=Probe(_ready(True)))
+    assert health.confirm("TimeoutError reading /api/ps") is True
+    dead = _health(probe=Probe(_ready(False, reason="found the proxy up but its model server unreachable")))
+    assert dead.confirm("TimeoutError reading /api/ps") is False
+    assert dead.state == DOWN
+    assert dead.confirm("again") is False  # down already: no second probe
+
+
+@pytest.mark.parametrize("exc", [
+    TimeoutError(),
+    aiohttp.SocketTimeoutError("Timeout on reading data from socket"),
+    aiohttp.ServerDisconnectedError(),
+    RuntimeError("Ollama HTTP 503: model is loading"),
+    RuntimeError("No slots available within 120.0s"),
+])
+def test_inconclusive_failures_are_suspect(exc):
+    from services.common.backend_health import is_suspect
+
+    assert is_suspect(exc)
+
+
+@pytest.mark.parametrize("exc", [ValueError("bad json"), RuntimeError("Ollama HTTP 400: bad request")])
+def test_a_plain_error_is_not_suspect(exc):
+    from services.common.backend_health import is_suspect
+
+    health = _health(probe=Probe())
+    assert not is_suspect(exc)
+    health.record_failure(exc)
+    assert health.seconds_to_next_probe() is None
+
+
+def test_http_probe_hands_every_answer_to_the_judge_and_silence_is_not_ready():
+    import http.server
+    import threading
+
+    from services.common.backend_health import ProbeResult, http_probe
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            code = 200 if self.path == "/ok" else 502
+            body = b'{"detail": "Failed to fetch props: All connection attempts failed"}'
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            seen.append(self.headers.get("X-API-Key"))
+
+        def log_message(self, *a):
+            pass
+
+    seen: list[str | None] = []
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        probe = http_probe(lambda status, body: ProbeResult(status == 200, reason=f"{status} {body[:30]!r}"),
+                           headers={"X-API-Key": "k"})
+        assert probe(f"{base}/ok", 2).ok is True
+        bad = probe(f"{base}/admin/props", 2)
+        assert bad.ok is False and bad.answered is True and "502" in bad.reason
+        assert seen == ["k", "k"]
+    finally:
+        server.shutdown()
+        server.server_close()
+    silent = probe(base, 0.5)  # nothing listens there any more
+    assert silent.ok is False and silent.answered is False

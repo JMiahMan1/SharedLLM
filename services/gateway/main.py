@@ -10781,6 +10781,7 @@ async def sd_image_generate_proxy(request: Request):
     body = await request.json()
     try:
         base_url = await sd_proxy_base_url()
+        local_ai.IMAGES.set_url(base_url)
         local_ai.IMAGES.check()
         resp = await get_http_client().post(f"{base_url}/v1/images/generations", json=body)
         return JSONResponse(status_code=resp.status, content=await resp.json())
@@ -11150,6 +11151,7 @@ async def sd_image_models_proxy(request: Request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     try:
         base_url = await sd_proxy_base_url()
+        local_ai.IMAGES.set_url(base_url)
         local_ai.IMAGES.check()
         resp = await get_http_client().get(f"{base_url}/v1/images/models")
         return JSONResponse(status_code=resp.status, content=await resp.json())
