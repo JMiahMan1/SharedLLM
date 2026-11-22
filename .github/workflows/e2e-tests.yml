@@ -256,9 +256,11 @@ jobs:
         run: |
           docker compose -f docker-compose.test.yml down -v
 
+  # No `needs:` either: e2e-full starts its own compose stack on its own
+  # runner and shares nothing with integration-tests. Chained, the pipeline was
+  # two back-to-back ~5 minute jobs; side by side it is one.
   e2e-full:
     runs-on: ubuntu-latest
-    needs: [integration-tests]
     steps:
       - uses: actions/checkout@v4
 

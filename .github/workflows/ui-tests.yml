@@ -11,14 +11,17 @@ on:
     branches: [main, master, microservices, 'feat/**']
     paths:
       - 'services/ui/**'
+      - '.github/workflows/ui-tests.yml'
   pull_request:
     paths:
       - 'services/ui/**'
+      - '.github/workflows/ui-tests.yml'
 
 jobs:
-  # Three jobs, one runner each, all at once. They used to be five steps in one
-  # job, so a lint failure waited for npm ci and the typecheck waited for lint.
-  lint-and-typecheck:
+  # Every check on its own runner, all at once. Lint and typecheck used to share
+  # a job (one waited for the other), and the unit suite ran on one runner for
+  # ~6 minutes, which made it the whole workflow's critical path.
+  lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -39,6 +42,23 @@ jobs:
       working-directory: services/ui
       run: npm run lint
 
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: 'npm'
+        cache-dependency-path: services/ui/package-lock.json
+
+    - name: Install dependencies
+      working-directory: services/ui
+      run: npm ci
+
     # The root tsconfig only references the real configs ("files": []), so
     # plain `tsc -p .` checks nothing, and the Vite build strips types without
     # checking them. This is the step that actually typechecks the UI.
@@ -46,9 +66,17 @@ jobs:
       working-directory: services/ui
       run: npm run typecheck
 
-  unit-tests:
+  # The same suite (`npm run test` = `vitest run`), split by file across four
+  # runners. Vitest's --shard takes every Nth test file, so each test runs in
+  # exactly one shard and the four together are the whole suite.
+  unit-tests-shard:
+    name: unit-tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
     - uses: actions/checkout@v4
 
@@ -65,9 +93,9 @@ jobs:
       working-directory: services/ui
       run: npm ci
 
-    - name: Run Unit Tests
+    - name: Run Unit Tests (shard ${{ matrix.shard }} of 4)
       working-directory: services/ui
-      run: npm run test
+      run: npm run test -- --shard=${{ matrix.shard }}/4
 
   build:
     runs-on: ubuntu-latest
@@ -89,3 +117,26 @@ jobs:
     - name: Build
       working-directory: services/ui
       run: npm run build
+
+  # The check names this workflow had before the split, so anything that waits
+  # on "unit-tests" or "lint-and-typecheck" still sees one result for each.
+  # They pass only when every job they stand for passed.
+  unit-tests:
+    needs: unit-tests-shard
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Every unit-test shard passed
+      run: test "${{ needs.unit-tests-shard.result }}" = "success"
+
+  lint-and-typecheck:
+    needs: [lint, typecheck]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Lint and typecheck both passed
+      run: |
+        test "${{ needs.lint.result }}" = "success"
+        test "${{ needs.typecheck.result }}" = "success"
