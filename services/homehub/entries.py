@@ -214,7 +214,7 @@ def offline_since(runtime: Any, entry: ConfigEntry) -> str | None:
     restarts (they are restored, then set to the same state), so that is the first
     choice; an entry with none falls back to when this run of the hub saw it fail.
     """
-    if entry.state == "loaded" or entry.disabled_by:
+    if entry.state == "loaded" or entry.disabled_by or entry.archived_at:
         return None
     hub = runtime.hub
     gone = [s.last_changed for e in hub.entities.values() if e.config_entry_id == entry.entry_id
@@ -237,6 +237,7 @@ def summary(runtime: Any, entry: ConfigEntry) -> dict[str, Any]:
     return {
         "entry_id": entry.entry_id, "domain": entry.domain, "label": label(entry.domain), "title": entry.title,
         "state": entry.state, "reason": entry.reason, "source": entry.source, "disabled_by": entry.disabled_by,
+        "archived_at": entry.archived_at,
         "offline_since": offline_since(runtime, entry), "needs": needs_of(entry),
         "devices": sorted((dev_view(d) for d in devices), key=lambda d: d["name"].lower()),
         "entities": len(ents), "reconfigure": reconfigure_fields(entry, hub),
@@ -247,7 +248,8 @@ def summary(runtime: Any, entry: ConfigEntry) -> dict[str, Any]:
 
 def list_entries(runtime: Any) -> dict[str, Any]:
     hub = runtime.hub
-    entries = [summary(runtime, e) for e in hub.config_entries.values() if e.source != "ignore"]
+    # Archived entries (device_archive.py) are listed under Archived devices, not with what needs attention.
+    entries = [summary(runtime, e) for e in hub.config_entries.values() if e.source != "ignore" and not e.archived_at]
     entries.sort(key=lambda e: (e["label"].lower(), e["title"].lower()))
     areas = sorted(({"area_id": a.area_id, "name": a.name} for a in hub.areas.values()),
                    key=lambda a: a["name"].lower())
@@ -340,6 +342,9 @@ async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -
         if data.get("password") and not data.get("username"):
             data["username"] = "admin"  # Tasmota's web user is always admin
     await _check_changes(entry.domain, changes, data)
+    if entry.archived_at and getattr(runtime, "archive", None) is not None:
+        # An admin giving an archived device a new address or login wants it back.
+        runtime.archive.restore("entry", entry_id, why="reconfigured")
     old = (dict(entry.data), dict(entry.options), entry.title)
     entry.data, entry.options = data, options
     if title:
@@ -434,13 +439,16 @@ def _drop_device(runtime: Any, dev: DeviceEntry) -> None:
     runtime.hub.bus.fire("device_registry_updated", {"action": "remove", "device_id": dev.id})
 
 
-async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False) -> dict[str, Any]:
-    """Unpair (where the protocol has one), stop and delete an entry with its entities and devices."""
+async def remove_entry(runtime: Any, entry_id: str, *, force: bool = False, unpair: bool = True) -> dict[str, Any]:
+    """Unpair (where the protocol has one), stop and delete an entry with its entities and devices.
+
+    ``unpair=False`` skips the device's side (an archived device gone for a year cannot answer).
+    """
     hub = runtime.hub
     entry = _entry(runtime, entry_id)
     unpaired: bool | None = None
     warning = None
-    hook = _unpair_hooks().get(entry.domain)
+    hook = _unpair_hooks().get(entry.domain) if unpair else None
     if hook is not None:
         try:
             await hook(runtime, entry)

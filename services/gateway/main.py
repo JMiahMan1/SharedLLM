@@ -5061,6 +5061,57 @@ async def proxy_device_activity(device_key: str, request: Request, hours: int = 
         return await _proxy_json_response(resp)
 
 
+# Archived registered devices (identity device_archive.py): device admins only, checked by identity.
+_ARCHIVE_KEY = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
+
+
+def _archive_key(device_key: str) -> str:
+    if not _ARCHIVE_KEY.match(device_key or ""):
+        raise HTTPException(status_code=404, detail="No such device")
+    return device_key
+
+
+@app.get("/api/user-panel/devices/archive")
+async def proxy_device_archive(request: Request):
+    async with shared_http_client() as client:
+        resp = await client.get(f"{IDENTITY_SVC}/api/user-panel/devices/archive", headers=_panel_headers(request),
+                                timeout=aiohttp.ClientTimeout(total=10.0))
+        return await _proxy_json_response(resp)
+
+
+@app.get("/api/user-panel/devices/archive/preview")
+async def proxy_device_archive_preview(request: Request):
+    async with shared_http_client() as client:
+        resp = await client.get(f"{IDENTITY_SVC}/api/user-panel/devices/archive/preview",
+                                headers=_panel_headers(request), timeout=aiohttp.ClientTimeout(total=10.0))
+        return await _proxy_json_response(resp)
+
+
+@app.put("/api/user-panel/devices/archive/settings")
+async def proxy_device_archive_settings(request: Request):
+    async with shared_http_client() as client:
+        resp = await client.put(f"{IDENTITY_SVC}/api/user-panel/devices/archive/settings",
+                                headers=_panel_headers(request), json=await request.json(),
+                                timeout=aiohttp.ClientTimeout(total=10.0))
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/user-panel/devices/archive/{device_key}/restore")
+async def proxy_device_archive_restore(device_key: str, request: Request):
+    async with shared_http_client() as client:
+        resp = await client.post(f"{IDENTITY_SVC}/api/user-panel/devices/archive/{_archive_key(device_key)}/restore",
+                                 headers=_panel_headers(request), timeout=aiohttp.ClientTimeout(total=10.0))
+        return await _proxy_json_response(resp)
+
+
+@app.delete("/api/user-panel/devices/archive/{device_key}")
+async def proxy_device_archive_delete(device_key: str, request: Request):
+    async with shared_http_client() as client:
+        resp = await client.delete(f"{IDENTITY_SVC}/api/user-panel/devices/archive/{_archive_key(device_key)}",
+                                   headers=_panel_headers(request), timeout=aiohttp.ClientTimeout(total=10.0))
+        return await _proxy_json_response(resp)
+
+
 @app.patch("/api/user-panel/devices/{device_key}")
 async def proxy_assign_device(device_key: str, request: Request):
     async with shared_http_client() as client:

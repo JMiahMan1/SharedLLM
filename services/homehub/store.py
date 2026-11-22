@@ -374,6 +374,17 @@ class Store:
         self.purge_orphan_attributes(db)
         return n
 
+    def count_history(self, entity_ids: list[str]) -> int:
+        """How many history rows these entities have (a deletion preview)."""
+        self._sync_writer()
+        n = 0
+        ids = sorted(set(entity_ids))
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            n += self._exec(f"SELECT COUNT(*) FROM history WHERE entity_id IN ({','.join('?' * len(chunk))})",
+                            tuple(chunk)).fetchone()[0]
+        return n
+
     def purge_orphan_attributes(self, db: sqlite3.Connection | None = None) -> int:
         conn, lock = self._using(db)
         with lock:

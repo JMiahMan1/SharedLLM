@@ -48,6 +48,7 @@ class Runtime:
         self.provider_configs: dict[str, Any] = {}  # login providers the stack configures (main)
         self.provider_sync_every_s: float = 60.0
         self.auth_providers: Any = None  # auth_providers.manager.ProviderManager (ha_auth_api)
+        self.archive: Any = None  # device_archive.DeviceArchive, set by main
 
     def load_registry(self) -> None:
         hub = self.hub
@@ -97,6 +98,11 @@ class Runtime:
         old = self._tasks.pop(entry.entry_id, None)
         if old is not None:
             old.cancel()
+        if entry.archived_at:
+            # Archived for going without contact (device_archive.py): never set up or retried until it is
+            # restored (rediscovered, or an admin's Restore), which clears the mark first.
+            entry.state, entry.reason, entry.needs = "not_loaded", f"Archived on {entry.archived_at[:10]}", None
+            return
         self._first_attempt.setdefault(entry.entry_id, asyncio.Event())
         self._tasks[entry.entry_id] = asyncio.create_task(self._supervise(entry), name=f"entry:{entry.domain}")
 

@@ -1285,6 +1285,11 @@ class AutomationEngine:
         is_device_action = getattr(self.hub, "is_device_action", None)
         if ((domain, service) not in self.hub.services and is_device_action is not None
                 and is_device_action(domain, service)):
+            archived = getattr(self.hub, "archived_action_reason", None)
+            why = archived(domain, service) if archived is not None else None
+            if why:
+                # An archived device (device_archive.py) is not away: no repair notice, just the plain reason.
+                raise DeviceActionMissing(f"{action}: {why}")
             item = _current_item.get()
             self._raise_device_repair(item, action)
             raise DeviceActionMissing(f"{action} is not offered: its device is not connected")
