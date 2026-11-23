@@ -115,6 +115,7 @@ class UserCreate(BaseModel):
     display_name: str = ""
     is_admin: bool = False
     is_system_default: bool = False
+    is_test_account: bool = False
     family_role: FamilyRole = "other"
     mother_username: str | None = None
     api_key: str | None = None

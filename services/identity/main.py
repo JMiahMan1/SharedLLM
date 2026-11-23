@@ -32,8 +32,8 @@ from pydantic import Field as PydField
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from services.common import concern_monitor as concern_levels
 from services.common import app_vetting, device_noun, ha_redirect, video_calls
+from services.common import concern_monitor as concern_levels
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import (
     LOCKED_SECTIONS,
@@ -51,15 +51,14 @@ from services.config import (
     IDENTITY_DATABASE_URL,
     INTERNAL_SECRET,
 )
-from services.identity import abuse_ch, audit, battery_alerts, device_archive, push, roles, voice
-from services.identity import music_assistant, sign_in_reset
+from services.identity import abuse_ch, audit, battery_alerts, device_archive, music_assistant, onboarding, push, roles, sign_in_reset, voice
 from services.identity.crypto import decrypt, digest_candidates, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
     DEVICE_KINDS,
     MOBILE_DEVICE_KINDS,
-    SELF_REGISTER_KINDS,
     NO_OPT_IN_EVENTS,
+    SELF_REGISTER_KINDS,
     APIKey,
     AuditEvent,
     CapabilityInventory,
@@ -1040,6 +1039,54 @@ def admin_set_password(username: str, req: dict, request: Request, session: Sess
     session.commit()
     _audit(request, session, "user.password_reset", user.username, changes=[{"field": "password", "change": "changed", "secret": True}])
     return {"status": "SUCCESS", "message": f"Password for @{username} updated"}
+
+
+@app.post("/api/admin/users/{username}/provision-accounts")
+def admin_provision_accounts(
+    username: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    admin_check: bool = Depends(require_admin_or_internal),
+):
+    """Trigger account provisioning for an existing user (admin only)."""
+    target = session.exec(select(User).where(User.username == username.lower())).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Get the admin user for credential lookup (system default user if internal auth)
+    admin_user = _system_default_user(session)
+
+    def _resolve_ma(session: Session, user: User):
+        granted = set(_granted_services(session, user.username))
+        return _resolve_music_assistant(session, user, granted, may_provision=True)
+
+    def _sync_ma_abs(session: Session, user: User):
+        return _sync_user_ma_audiobookshelf(session, user, best_effort=True, remove_if_unconfigured=False)
+
+    try:
+        provisioning_results = onboarding.provision_new_user_accounts(
+            session,
+            target,
+            admin=admin_user,
+            raw_password=None,  # No raw password available for existing users
+            resolve_ma_fn=_resolve_ma,
+            sync_ma_abs_fn=_sync_ma_abs,
+        )
+        # Audit account provisioning if any service ran (status != 'skipped')
+        ran_any = any(v.get("status") != "skipped" for v in provisioning_results.values())
+        if ran_any:
+            changes = [
+                {"field": f"provisioning.{svc}", "change": "set", "to": result.get("status")}
+                for svc, result in provisioning_results.items()
+                if result.get("status") != "skipped"
+            ]
+            _audit(request, session, "user.accounts_provisioned", target.username, actor=admin_user, changes=changes)
+    except Exception as exc:
+        log.warning(f"[onboarding] Unexpected error during account provisioning for {target.username}: {exc}")
+        provisioning_results = {"error": {"status": "error", "detail": str(exc)}}
+
+    return {"username": target.username, "services": provisioning_results}
+
 
 def require_api_key(authorization: str = Header(None), session: Session = Depends(get_session)) -> User:
     if not authorization or not authorization.startswith("Bearer "):
@@ -2975,6 +3022,7 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
         display_name=body.display_name,
         is_admin=body.is_admin,
         is_system_default=body.is_system_default,
+        is_test_account=body.is_test_account,
         family_role=body.family_role,
         mother_username=(body.mother_username or "").strip().lower() or None,
         password_hash=hash_password(body.password) if body.password else None,
@@ -3016,6 +3064,36 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
     if roles.sync_family_role(session, user):
         session.commit()
     _audit(request, session, "user.create", user.username, actor=admin, before={}, after=audit.snapshot(user))
+
+    # Provision accounts for external services (best-effort, non-fatal)
+    def _resolve_ma(session: Session, user: User):
+        granted = set(_granted_services(session, user.username))
+        return _resolve_music_assistant(session, user, granted, may_provision=True)
+
+    def _sync_ma_abs(session: Session, user: User):
+        return _sync_user_ma_audiobookshelf(session, user, best_effort=True, remove_if_unconfigured=False)
+
+    try:
+        provisioning_results = onboarding.provision_new_user_accounts(
+            session,
+            user,
+            admin=admin,
+            raw_password=body.password,
+            resolve_ma_fn=_resolve_ma,
+            sync_ma_abs_fn=_sync_ma_abs,
+        )
+        # Audit account provisioning if any service ran (status != 'skipped')
+        ran_any = any(v.get("status") != "skipped" for v in provisioning_results.values())
+        if ran_any:
+            changes = [
+                {"field": f"provisioning.{svc}", "change": "set", "to": result.get("status")}
+                for svc, result in provisioning_results.items()
+                if result.get("status") != "skipped"
+            ]
+            _audit(request, session, "user.accounts_provisioned", user.username, actor=admin, changes=changes)
+    except Exception as exc:
+        log.warning(f"[onboarding] Unexpected error during account provisioning for {user.username}: {exc}")
+
     return user
 
 def _require_assignment_admin(
