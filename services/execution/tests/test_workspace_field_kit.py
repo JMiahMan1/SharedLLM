@@ -356,3 +356,27 @@ async def test_plain_reads_stay_plain_for_other_callers(tmp_ws):
     with patch("services.execution.handlers.workspace._resolve_workspace_info", _resolve(tmp_ws)):
         r = await handle_workspace_read(_read_req(tmp_ws, "raven_memory.md", line_numbers=False))
     assert r.detail["content"] == "lesson one\nlesson two\n"
+
+
+@pytest.mark.asyncio
+async def test_list_falls_back_to_find_without_ripgrep(tmp_ws):
+    """CI runners and some sandboxes have no rg; listing still works (and skips .git)."""
+    from services.execution.handlers import workspace as ws_mod
+
+    (tmp_ws / "a.py").write_text("x")
+    (tmp_ws / "b.txt").write_text("y")
+    (tmp_ws / ".git").mkdir()
+    (tmp_ws / ".git" / "config").write_text("z")
+    real_run = ws_mod._sandbox_run
+
+    async def no_rg(workspace_id, ws_root, cmd, **kw):
+        if cmd[0] == "rg":
+            return -1, "", "Executable or directory not found: rg"
+        return await real_run(workspace_id, ws_root, cmd, **kw)
+
+    with patch("services.execution.handlers.workspace._resolve_workspace_info", _resolve(tmp_ws)), \
+            patch("services.execution.handlers.workspace._sandbox_run", no_rg):
+        r = await handle_workspace_list(_list_req(tmp_ws, glob="*.py"))
+        everything = await handle_workspace_list(_list_req(tmp_ws))
+    assert r.status == "SUCCESS" and r.detail["entries"] == ["a.py"]
+    assert sorted(everything.detail["entries"]) == ["a.py", "b.txt"]
