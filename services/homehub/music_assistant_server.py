@@ -430,7 +430,14 @@ def abs_provider_name(username: str) -> str:
 
 
 def _unwrap_result(raw: Any) -> Any:
-    return raw.get("result", raw) if isinstance(raw, dict) and "result" in raw else raw
+    """Unwrap a JSON-RPC envelope ``{"result": ...}`` without stripping a SetupFlowStep dict.
+
+    MA's ``SetupFlowStep`` objects carry both ``flow_id`` and ``result`` (which is ``None`` on
+    ``form`` steps and ``{"instance_id": ...}`` on ``finish`` steps), so they must be kept intact.
+    """
+    if isinstance(raw, dict) and "result" in raw and "flow_id" not in raw:
+        return raw["result"]
+    return raw
 
 
 def _shared_music_provider_ids(providers: list[dict[str, Any]]) -> list[str]:

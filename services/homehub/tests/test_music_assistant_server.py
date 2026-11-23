@@ -260,13 +260,13 @@ class AbsProviderConn(Conn):
             self._flow_seq += 1
             fid = f"flow-{self._flow_seq}"
             self._flows[fid] = {"mode": "setup", "domain": args["provider_domain"]}
-            return {"flow_id": fid, "type": "form"}
+            return {"flow_id": fid, "type": "form", "result": None}
         if command == "config/providers/reconfigure":
             self.sent.append((command, args))
             self._flow_seq += 1
             fid = f"flow-{self._flow_seq}"
             self._flows[fid] = {"mode": "reconfigure", "instance_id": args["instance_id"]}
-            return {"flow_id": fid, "type": "form"}
+            return {"flow_id": fid, "type": "form", "result": None}
         if command == "config/flows/submit":
             self.sent.append((command, args))
             if self.fail_submit:
