@@ -111,7 +111,7 @@ notices above: the server learns only what was looked at, who looked and when.
   the last 50 entries, each `{who, what, at}` and newest first, kept as metadata
   only (what, who and when, never any content) in the Beloved store directory
   next to the records, capped at the last 200 entries per couple. It powers the
-  "Today with <spouse>" line in the UI and is visible only to the couple.
+  "Today with (spouse)" line in the UI and is visible only to the couple.
 
 ## Encouragements
 
