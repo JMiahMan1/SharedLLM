@@ -277,12 +277,26 @@ class OllamaProvider(BaseLLMProvider):
         chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
         from services.gateway.main import shared_http_client
-        # Queue-and-wait: check if Ollama has available slots before submitting
-        async with shared_http_client() as slot_client:
-            if not await self._wait_for_slot(slot_client, model=model):
-                raise RuntimeError(f"No slots available within {self.slot_wait_timeout}s")
+        from services.gateway.messaging import PRIORITY_HIGH
 
-        opts = options or {}
+        opts = dict(options or {})
+        raw_priority = opts.pop("priority", None)
+        priority_int: int | None = None
+        if raw_priority is not None:
+            try:
+                priority_int = int(raw_priority)
+            except (TypeError, ValueError):
+                priority_int = None
+        request_source = str(opts.pop("request_source", None) or "shared-llm/app")
+
+        # HIGH/CRITICAL requests (voice, home control, emergency SOS) skip the
+        # client-side /api/ps sleep-poll and enter Alpaca's priority-FIFO queue
+        # directly so they jump ahead of queued normal/low/trainer/coding traffic.
+        if priority_int is None or priority_int < PRIORITY_HIGH:
+            async with shared_http_client() as slot_client:
+                if not await self._wait_for_slot(slot_client, model=model):
+                    raise RuntimeError(f"No slots available within {self.slot_wait_timeout}s")
+
         show_thinking = opts.get("show_thinking", False)
 
         payload = {
@@ -304,11 +318,15 @@ class OllamaProvider(BaseLLMProvider):
             opts["think"] = False
             opts["enable_thinking"] = False
 
+        headers = {"X-Request-Source": request_source}
+        if priority_int is not None:
+            headers["X-Priority"] = str(priority_int)
+
         full_content = ""
         async with shared_http_client() as client:
             log.info(f"[OllamaProvider] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
-                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout)
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers=headers, timeout=self.timeout)
                 if resp.status >= 400:
                     raw_text = await resp.text()
                     raise RuntimeError(f"Ollama HTTP {resp.status}: {raw_text}")
@@ -353,7 +371,7 @@ class OllamaProvider(BaseLLMProvider):
                     return ""
 
             # Streaming
-            async with client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as response:
+            async with client.post(f"{self.base_url}/api/chat", json=payload, headers=headers, timeout=self.timeout) as response:
                 if response.status >= 400:
                     await response.read()
                     raise RuntimeError(f"Ollama stream HTTP {response.status}: {await response.text()}")

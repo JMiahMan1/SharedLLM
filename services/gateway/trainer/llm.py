@@ -223,9 +223,13 @@ async def complete(
     # No num_ctx: the household's model is already loaded at its own context,
     # and asking for a different one makes the host reload it (at 4K, which then
     # starves every household request until the next reload).
+    from services.gateway.messaging import PRIORITY_LOW
+
     options = {
         "temperature": temperature,
         "num_predict": max(16, int(max_tokens)),
+        "priority": PRIORITY_LOW,
+        "request_source": "shared-llm/trainer",
     }
 
     started = time.monotonic()

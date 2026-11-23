@@ -720,7 +720,10 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         # SUCCESS and showed family members the socket error). LocalAIOffline
         # (the local AI's breaker is open) is told apart so the reply can say the
         # thinking brain is offline rather than that something broke.
-        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat")
+        from services.gateway.messaging import infer_priority_from_payload
+
+        job_priority = infer_priority_from_payload(job_payload)
+        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat", priority=job_priority)
 
     return ans
 
@@ -1964,7 +1967,7 @@ def _speaker_line(creds: ResolvedCredentials | None) -> str:
     return f"Speaker: {user}{how}."
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat") -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None) -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
 
     The system message carries the knowledge map (``knowledge_map``): where every
@@ -2054,7 +2057,22 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
 
-    options = {"temperature": 0.0, "num_predict": 2048, "show_thinking": show_thinking}
+    from services.gateway.messaging import PRIORITY_CRITICAL, PRIORITY_HIGH, PRIORITY_NORMAL
+
+    effective_priority = priority if priority is not None else (PRIORITY_HIGH if budget_path == "voice" else PRIORITY_NORMAL)
+    if effective_priority >= PRIORITY_CRITICAL:
+        req_source = "shared-llm/emergency"
+    elif budget_path == "voice" or effective_priority >= PRIORITY_HIGH:
+        req_source = "voice/assistant"
+    else:
+        req_source = "shared-llm/app"
+    options = {
+        "temperature": 0.0,
+        "num_predict": 2048,
+        "show_thinking": show_thinking,
+        "priority": effective_priority,
+        "request_source": req_source,
+    }
 
     def _step_stream(step: int | str):
         """Forward a step's thinking and text deltas as events."""

@@ -408,7 +408,13 @@ class OllamaProvider(BaseLLMProvider):
         options: dict[str, Any] | None = None,
         chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
-        opts = options or {}
+        opts = dict(options or {})
+        raw_priority = opts.pop("priority", None)
+        request_source = str(opts.pop("request_source", None) or "shared-llm/app")
+        headers = {"X-Request-Source": request_source}
+        if raw_priority is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                headers["X-Priority"] = str(int(raw_priority))
         show_thinking = opts.get("show_thinking", False)
 
         payload = {
@@ -432,7 +438,7 @@ class OllamaProvider(BaseLLMProvider):
 
             log.info(f"[OllamaProvider-Hardened] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
-                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout)
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers=headers, timeout=self.timeout)
                 resp.raise_for_status()
                 raw_text = (await resp.text()).strip()
                 if not raw_text:
@@ -498,7 +504,7 @@ class OllamaProvider(BaseLLMProvider):
                 try:
                     async with client.post(
                         f"{self.base_url}/api/chat", json=payload,
-                        headers={"X-Request-Source": "shared-llm/app"},
+                        headers=headers,
                         timeout=self.timeout,
                     ) as response:
                         response.raise_for_status()
@@ -2021,8 +2027,14 @@ async def execute_inference_with_kill(
     if not mission_id:
         return await execute_inference(provider, model, messages, options, chunk_callback=chunk_callback)
 
+    from services.gateway.messaging import PRIORITY_LOW
+
+    mission_options = dict(options or {})
+    mission_options.setdefault("priority", PRIORITY_LOW)
+    mission_options.setdefault("request_source", "shared-llm/raven")
+
     inf_task = asyncio.create_task(
-        execute_inference(provider, model, messages, options, chunk_callback=chunk_callback)
+        execute_inference(provider, model, messages, mission_options, chunk_callback=chunk_callback)
     )
 
     async def _kill_watch() -> None:
