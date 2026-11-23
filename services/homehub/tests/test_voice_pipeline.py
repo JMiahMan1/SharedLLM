@@ -786,8 +786,8 @@ async def test_a_node_that_cannot_report_its_wake_words_says_so(env, monkeypatch
     hub, drv = make_driver()
     original = drv._make_client
 
-    def failing(host):
-        c = original(host)
+    def failing(host, port=None):
+        c = original(host, port)
         c.config_error = RuntimeError("connection reset")
         return c
 
@@ -806,8 +806,8 @@ async def test_a_wake_word_fixed_in_firmware_is_not_reported_as_missing(env, mon
     hub, drv = make_driver()
     original = drv._make_client
 
-    def fixed(host):
-        c = original(host)
+    def fixed(host, port=None):
+        c = original(host, port)
         c.available_wake_words, c.active_wake_words = [], []
         return c
 
