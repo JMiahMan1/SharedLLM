@@ -1792,6 +1792,7 @@ export interface PullAndRestartResult {
   status: string;
   message: string;
   updated: boolean;
+  pending?: boolean;
   current_image_id: string;
   new_image_id: string;
   volumes_fixed?: string[];
@@ -1799,6 +1800,7 @@ export interface PullAndRestartResult {
 
 export interface ImageUpdateCheck {
   service: string;
+  container_name?: string;
   image: string;
   /** Local image RepoDigest (sha256:...); may be null if image was built locally */
   current_digest: string | null;
