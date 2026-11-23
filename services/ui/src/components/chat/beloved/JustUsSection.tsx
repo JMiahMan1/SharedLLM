@@ -107,7 +107,7 @@ export function JustUsSection({
 
   const finish = (p: Opened<PlanRecord>) =>
     run(async () => {
-      await data.save('plan', { ...p.record, doneAt: Math.floor(Date.now() / 1000) }, { id: p.id });
+      await data.save('plan', { ...p.record, doneAt: Math.floor(Date.now() / 1000) }, { id: p.id, notify: true });
       if (!data.view.together.some((t) => t.record.day === p.record.day)) await data.save('together', togetherFromPlan(p.record));
       toast.success('Marked');
     }, 'Could not save');

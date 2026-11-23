@@ -26,7 +26,7 @@ import os
 import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import aiohttp
@@ -52,6 +52,7 @@ from services.bible import (
     plans,
     provider_cache,
     providers,
+    quiz_nudges,
     reminders,
     study,
     study_ask,
@@ -62,10 +63,10 @@ from services.bible import (
 )
 from services.bible import books as book_table
 from services.bible import meaning as meaning_mod
-from services.bible import search as verse_search
 from services.bible import (
     narration as narration_mod,
 )
+from services.bible import search as verse_search
 from services.bible.corpus import CorpusError
 from services.bible.devotionals import registry as devotional_registry
 from services.bible.models import (
@@ -87,8 +88,11 @@ from services.bible.models import (
 )
 from services.bible.providers import ProviderError, ProviderUnavailable
 from services.bible.refs import ReferenceError, format_reference, parse_reference
+from services.common.notify import family_or_none as _family_or_none
+from services.common.notify import notice as _notice
+from services.common.notify import send as _notify_send
+from services.common.notify import view_action as _view_action
 from services.common.secrets import secret_matches
-from services.common.notify import notice as _notice, send as _notify_send, view_action as _view_action, family_or_none as _family_or_none
 from services.common.sqlite import apply_sqlite_pragmas
 from services.config import (
     BIBLE_DATABASE_URL,
@@ -110,6 +114,40 @@ log = logging.getLogger(__name__)
 _START_TIME = time.time()
 
 DEFAULT_DATABASE_URL = "sqlite:////data/bible.db"
+
+_QUIZ_NUDGE_TASKS: set[asyncio.Task] = set()
+
+
+def _discard_quiz_nudge_task(task: asyncio.Task) -> None:
+    _QUIZ_NUDGE_TASKS.discard(task)
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        log.warning("[Bible] quiz nudge task failed: %s", exc)
+
+
+async def _display_name(username: str) -> str | None:
+    """The player's display name from Identity's name roster; None when Identity cannot say."""
+    if not IDENTITY_SVC_URL:
+        return None
+    try:
+        async with aiohttp.ClientSession() as client, client.get(
+            f"{IDENTITY_SVC_URL}/api/internal/name-roster",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        ) as resp:
+            if resp.status >= 400:
+                return None
+            roster = await resp.json()
+    except Exception as exc:
+        log.warning("[Bible] name roster lookup errored: %s", type(exc).__name__)
+        return None
+    for row in roster if isinstance(roster, list) else []:
+        if isinstance(row, dict) and row.get("username") == username:
+            return str(row.get("display_name") or "") or None
+    return None
 
 
 # secret verification (same contract as every other service)
@@ -161,7 +199,9 @@ async def lifespan(app: FastAPI):
         bool(BIBLE_DEVOTIONAL_DIR),
         bool(BLB_BASE_URL),
     )
-    reminder_task = asyncio.create_task(reminders.reminder_loop(_db, TELEMETRY_SVC_URL, INTERNAL_SECRET))
+    reminder_task = asyncio.create_task(
+        reminders.reminder_loop(_db, TELEMETRY_SVC_URL, INTERNAL_SECRET, IDENTITY_SVC_URL)
+    )
     tagged_task = asyncio.create_task(_tagged_sync_loop())
     context_task = asyncio.create_task(
         verse_context.ensure_daily_loop(_db, GATEWAY_INTERNAL_URL, INTERNAL_SECRET)
@@ -1327,6 +1367,9 @@ class StatePayload(BaseModel):
     theme: str | None = Field(default=None, pattern="^(serif|sans)$")
     page: str | None = Field(default=None, pattern="^(dark|sepia|light)$")
     reminder_time: str | None = Field(default=None, pattern="^$|^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    # Whether reengagement nudges may be sent to this reader. Defaults on; the
+    # reader (or the reminder time they set) may turn it off.
+    reengage: bool | None = None
     read_aloud_voice: str | None = None
     split_view: str | None = Field(default=None, pattern="^(compare|parallel)$")
     layout: str | None = Field(default=None, pattern="^(flow|verses)$")
@@ -1338,6 +1381,7 @@ class StatePayload(BaseModel):
     study_book_id: int | None = Field(default=None, ge=1)
     study_section_ordinal: int | None = Field(default=None, ge=1)
     study_scroll_fraction: float | None = Field(default=None, ge=0, le=1)
+    quiz_nudges: bool | None = None
 
 
 @app.get("/state")
@@ -1389,6 +1433,7 @@ def _default_preferences(session: Session) -> dict:
         "theme": "serif",
         "page": "dark",
         "reminder_time": "",
+        "reengage": True,
         "read_aloud_voice": "",
         "split_view": "compare",
         "layout": "flow",
@@ -1398,6 +1443,7 @@ def _default_preferences(session: Session) -> dict:
         "study_book_id": 0,
         "study_section_ordinal": 0,
         "study_scroll_fraction": 0.0,
+        "quiz_nudges": True,
     }
 
 
@@ -1414,6 +1460,7 @@ def _preferences(state: UserBibleState) -> dict:
         "theme": state.theme,
         "page": state.page,
         "reminder_time": state.reminder_time,
+        "reengage": state.reengage,
         "read_aloud_voice": state.read_aloud_voice,
         "split_view": state.split_view,
         "layout": state.layout,
@@ -1423,6 +1470,7 @@ def _preferences(state: UserBibleState) -> dict:
         "study_book_id": state.last_study_book_id,
         "study_section_ordinal": state.last_study_section_ordinal,
         "study_scroll_fraction": state.last_study_scroll_fraction,
+        "quiz_nudges": state.quiz_nudges,
     }
 
 
@@ -1514,7 +1562,7 @@ def put_state(
             state.compare_version = _require_version(session, payload.compare_version)
     if payload.cross_version_notes is not None:
         state.cross_version_notes = payload.cross_version_notes
-    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "reminder_time", "read_aloud_voice", "split_view", "layout", "devotional_work", "plan_id", "plan_day", "study_book_id", "study_section_ordinal", "study_scroll_fraction"):
+    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "reminder_time", "reengage", "read_aloud_voice", "split_view", "layout", "devotional_work", "plan_id", "plan_day", "study_book_id", "study_section_ordinal", "study_scroll_fraction", "quiz_nudges"):
         value = getattr(payload, attr)
         if value is not None:
             if attr == "plan_id":
@@ -1751,6 +1799,26 @@ async def attempt_game(
         )
     )
     session.commit()
+    if counted:
+        try:
+            task = asyncio.create_task(
+                quiz_nudges.nudge_family(
+                    session.get_bind(),
+                    username,
+                    correct,
+                    len(questions),
+                    identity_url=IDENTITY_SVC_URL,
+                    telemetry_url=TELEMETRY_SVC_URL,
+                    secret=INTERNAL_SECRET,
+                    consent=_consent,
+                    display_name=_display_name,
+                    now=datetime.now(),
+                )
+            )
+            _QUIZ_NUDGE_TASKS.add(task)
+            task.add_done_callback(_discard_quiz_nudge_task)
+        except Exception as exc:
+            log.warning("[Bible] quiz nudge scheduling failed: %s", exc)
     _record_event(session, username, "quiz_played", ref=mode, value=len(questions))
     if correct:
         _record_event(session, username, "quiz_correct", ref=mode, value=correct)

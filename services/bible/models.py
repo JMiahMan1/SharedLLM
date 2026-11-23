@@ -195,6 +195,13 @@ class UserBibleState(SQLModel, table=True):
     page: str = Field(default="dark")
     # Daily reading reminder, "HH:MM" local time; empty is off.
     reminder_time: str = Field(default="")
+    # Whether to send reengagement nudges to this reader when they have not read
+    # recently. Off by default for readers who set a reminder time; the reminder
+    # covers them. On by default for everyone else.
+    reengage: bool = Field(default=True)
+    # ISO day of the last reengagement nudge sent, so the same day is never
+    # nudged twice. Empty means no nudge has been sent yet.
+    reengage_last_sent: str = Field(default="")
     read_aloud_voice: str = Field(default="")
     split_view: str = Field(default="compare")
     #: How a chapter is set: "flow" (verses run on in paragraphs, as a printed
@@ -218,6 +225,10 @@ class UserBibleState(SQLModel, table=True):
     last_study_section_ordinal: int = Field(default=0)
     #: How far into the section the reader's top edge was (0 to 1).
     last_study_scroll_fraction: float = Field(default=0.0)
+    #: Whether to send family quiz-nudge notifications when the reader counts
+    #: their first daily game. Defaults on; readers may turn it off in Bible
+    #: preferences.
+    quiz_nudges: bool = Field(default=True)
 
 
 class VerseMark(SQLModel, table=True):

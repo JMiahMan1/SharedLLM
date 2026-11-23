@@ -20,6 +20,7 @@ import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto
 import { configureBackupKeys, type BackupKeyUpload } from '../lib/privateChatBackupKey';
 import type { RestoreBatch, RestoreClient, RestoreCounts } from '../lib/privateChatBackupFile';
 import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
+import type { BelovedActivityEntry, BelovedPrefs, BelovedSeenWhat } from '../lib/beloved/activity';
 import type { FreshPosition } from '../lib/freshPosition';
 import type { MusicAssistantStatus } from '../lib/musicAssistant';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
@@ -4724,13 +4725,41 @@ export const api = {
     return resp.data;
   },
 
-  async replaceBelovedRecord(token: string, kind: BelovedKind, id: string, sealed: string): Promise<SealedRecord> {
-    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/${kind}/${encodeURIComponent(id)}`, { sealed });
+  /** Change one sealed record. `notify` tells the other spouse about a change that matters. */
+  async updateBelovedRecord(token: string, kind: BelovedKind, id: string, sealed: string, notify = false): Promise<SealedRecord & { notified?: boolean }> {
+    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/${kind}/${encodeURIComponent(id)}`, { sealed, notify });
     return resp.data;
+  },
+
+  /** The former name of `updateBelovedRecord`, kept for callers that have not moved over yet. */
+  async replaceBelovedRecord(token: string, kind: BelovedKind, id: string, sealed: string, notify = false): Promise<SealedRecord & { notified?: boolean }> {
+    return api.updateBelovedRecord(token, kind, id, sealed, notify);
   },
 
   async deleteBelovedRecord(token: string, kind: BelovedKind, id: string): Promise<void> {
     await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/${kind}/${encodeURIComponent(id)}`);
+  },
+
+  /** A metadata-only reading signal: names what was looked at, never any of its content. */
+  async belovedSeen(token: string, what: BelovedSeenWhat): Promise<{ shared: boolean; notified: boolean }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/seen`, { what });
+    return resp.data;
+  },
+
+  /** The couple's recent reading signals, newest first: `{who, who_name, what, at}` only. */
+  async belovedActivity(token: string): Promise<{ me: string; activity: BelovedActivityEntry[] }> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/activity`);
+    return resp.data;
+  },
+
+  async getBelovedPrefs(token: string): Promise<BelovedPrefs> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/prefs`);
+    return resp.data;
+  },
+
+  async setBelovedPrefs(token: string, prefs: Partial<BelovedPrefs>): Promise<BelovedPrefs> {
+    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/prefs`, prefs);
+    return resp.data;
   },
 
   /** A chat attachment's bytes (or its thumbnail), fetched as the caller. */
