@@ -93,6 +93,7 @@ from services.gateway import (
     discovery_routes,
     drawing,
     echo_dropin_routes,
+    echo_ota_routes,
     echo_tunnel_routes,
     email_routes,
     family_safety,
@@ -961,6 +962,7 @@ app.include_router(image_routes.router)
 app.include_router(camera_live_routes.router)  # Real-time camera video (go2rtc)
 app.include_router(discovery_routes.router)  # New devices
 app.include_router(echo_dropin_routes.router)  # Echo Drop-In status, hangup, and WebSocket audio proxy
+app.include_router(echo_ota_routes.router)  # Echo OTA status and update-all
 app.include_router(echo_tunnel_routes.router)  # Echo Reverse WSS Tunnel
 app.include_router(hub_registry_routes.router)  # Areas, floors, labels, zones, persons
 app.include_router(light_group_routes.router)  # Light groups (parents and admins)

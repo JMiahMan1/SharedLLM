@@ -52,6 +52,7 @@ export default function EchoFleetPanel({ states: providedStates, onDropIn }: Ech
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [updateRequested, setUpdateRequested] = useState<string[]>([]);
+  const [updatingAll, setUpdatingAll] = useState(false);
 
   const statesQuery = useQuery({
     queryKey: FLEET_STATES_KEY,
@@ -66,6 +67,7 @@ export default function EchoFleetPanel({ states: providedStates, onDropIn }: Ech
   const loadError = providedStates === undefined && statesQuery.isError
     ? messageError(statesQuery.error)
     : null;
+  const updatesCount = fleet.filter((d) => d.updateAvailable).length;
 
   const runAction = async (key: string, label: string, task: () => Promise<unknown>) => {
     setActionError(null);
@@ -147,6 +149,19 @@ export default function EchoFleetPanel({ states: providedStates, onDropIn }: Ech
     });
   };
 
+  const updateAll = async () => {
+    setActionError(null);
+    setUpdatingAll(true);
+    try {
+      await api.updateAllEchos();
+      await queryClient.invalidateQueries({ queryKey: FLEET_STATES_KEY });
+    } catch (error) {
+      setActionError(`Could not queue updates for all Echos: ${messageError(error)}`);
+    } finally {
+      setUpdatingAll(false);
+    }
+  };
+
   return (
     <section className="space-y-4" aria-label="Echo fleet">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -158,9 +173,21 @@ export default function EchoFleetPanel({ states: providedStates, onDropIn }: Ech
             Echo Dot and Echo Show nodes adopted through Home Hub (hassmic / echo-dot-assist).
           </p>
         </div>
-        <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300" data-testid="echo-fleet-count">
-          {fleet.length} {fleet.length === 1 ? 'device' : 'devices'}
-        </span>
+        <div className="flex items-center gap-2">
+          {updatesCount >= 2 && (
+            <button
+              type="button"
+              onClick={updateAll}
+              disabled={updatingAll}
+              className={`${TOUCH} rounded-xl bg-amber-500 px-3 text-sm font-semibold text-amber-950 hover:bg-amber-400 disabled:opacity-50`}
+            >
+              {updatingAll ? 'Queuing...' : 'Update all Echos'}
+            </button>
+          )}
+          <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300" data-testid="echo-fleet-count">
+            {fleet.length} {fleet.length === 1 ? 'device' : 'devices'}
+          </span>
+        </div>
       </div>
 
       {loading && <p role="status" className="rounded-xl bg-slate-800/60 p-4 text-sm text-slate-300">Loading Home Hub states…</p>}
@@ -282,9 +309,10 @@ export default function EchoFleetPanel({ states: providedStates, onDropIn }: Ech
                     <span>Firmware</span>
                     {device.updateAvailable
                       ? <span className="rounded-full bg-amber-500/20 px-2 py-0.5 font-semibold text-amber-200">Update available</span>
-                      : <span className="text-slate-400">Up to date{device.installedVersion ? ` (${device.installedVersion})` : ''}</span>}
+                      : <span className="text-slate-400">Up to date</span>}
                   </div>
-                  {device.latestVersion && <p className="mt-1 text-slate-400">Latest: {device.latestVersion}</p>}
+                  {device.installedVersion && <p className="mt-1 text-slate-400">Installed: {device.installedVersion}</p>}
+                  {device.updateAvailable && device.latestVersion && <p className="mt-1 text-slate-400">Latest: {device.latestVersion}</p>}
                   {device.updateAvailable && (
                     <button
                       type="button"

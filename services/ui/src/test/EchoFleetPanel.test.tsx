@@ -30,6 +30,12 @@ const CROWN: EchoState[] = [
   state('binary_sensor.crown_last_request_whispered', 'off'),
 ];
 
+const CROWN2: EchoState[] = [
+  state('sensor.crown2_drop_in', 'idle', { friendly_name: 'Crown2 Drop In' }),
+  state('assist_satellite.crown2', 'idle', { friendly_name: 'Echo Show Crown2' }),
+  state('update.crown2_firmware', 'on', { installed_version: '1.0.0', latest_version: '1.5.0' }),
+];
+
 const DONUT: EchoState[] = [
   state('assist_satellite.donut_assist_satellite', 'idle', { friendly_name: 'Kitchen Dot' }),
   state('input_boolean.donut_dnd', 'on'),
@@ -257,6 +263,23 @@ describe('EchoFleetPanel', () => {
       );
       expect(refreshes).toHaveLength(4);
     });
+  });
+
+  it('shows installed and latest firmware versions', () => {
+    renderPanel(CROWN);
+    expect(screen.getByText('Installed: 1.2.0')).toBeInTheDocument();
+    expect(screen.getByText('Latest: 2.0.0')).toBeInTheDocument();
+  });
+
+  it('shows Update all Echos button when two or more updates available', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('/api/homehub/echo_ota/update_all', () => HttpResponse.json({ queued: 2 })),
+    );
+    renderPanel([...CROWN, ...CROWN2]);
+    const btn = screen.getByRole('button', { name: /Update all Echos/i });
+    expect(btn).toBeInTheDocument();
+    await user.click(btn);
   });
 
   it('offers firmware install only when the hub reports an update', async () => {

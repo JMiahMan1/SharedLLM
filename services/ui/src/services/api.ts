@@ -3507,6 +3507,12 @@ export const api = {
     );
   },
 
+  /** Queue firmware updates for all Echos that have an update available (one at a time). */
+  async updateAllEchos(): Promise<{ queued: number }> {
+    const resp = await apiClient.post('/api/homehub/echo_ota/update_all', {});
+    return resp.data ?? { queued: 0 };
+  },
+
   /** Ring the conversation's other members for a call you just started; ``video`` rings it as a video call. */
   async ringCall(room: string, opts: { video?: boolean } = {}): Promise<{ ringing: string[]; reason?: string }> {
     const resp = await apiClient.post(`/api/communication/calls/${encodeURIComponent(room)}/ring`, { video: Boolean(opts.video) });

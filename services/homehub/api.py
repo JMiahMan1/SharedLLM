@@ -32,6 +32,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     conversation,  # /hub/conversation/triggers: HA sentence triggers, asked by Jarvis first
     dashboard_api,
     discovery_api,
+    echo_ota,
     entries_api,  # integrations: reconfigure, remove/unpair, add by address
     esphome_logs_api,  # /hub/devices/{id}/logs: an ESPHome node's live logs
     esphome_restarts,  # ESPHome restarts and drops, for /health
@@ -1090,6 +1091,54 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             await manager.disconnect(node)
             with contextlib.suppress(Exception):
                 await websocket.close()
+
+    @app.get("/hub/echo_ota/status")
+    async def echo_ota_status(request: Request) -> dict[str, Any]:
+        admin(request)
+        data = runtime.store.get_kv(echo_ota.ECHO_OTA_KV_KEY, {}) or {}
+        if not isinstance(data, dict):
+            data = {}
+        last_results = data.get("last_results") or {}
+        if not isinstance(last_results, dict):
+            last_results = {}
+        nodes_out = []
+        for node_id in echo_ota.echo_nodes(hub):
+            upd = echo_ota._find_firmware_update_entity(hub, node_id)
+            installed_version = None
+            latest_version = None
+            update_available = False
+            if upd is not None:
+                st = hub.states.get(getattr(upd, "entity_id", ""))
+                if st is not None:
+                    installed_version = (st.attributes.get("installed_version") if st.attributes else None)
+                    latest_version = (st.attributes.get("latest_version") if st.attributes else None)
+                    update_available = str(st.state).lower() == "on"
+            nodes_out.append({
+                "node": node_id,
+                "installed_version": installed_version,
+                "latest_version": latest_version,
+                "update_available": update_available,
+                "last_result": last_results.get(node_id),
+            })
+        return {
+            "channel": echo_ota.ONLINE_UPDATES_CHANNEL,
+            "auto_update": echo_ota.HOMEHUB_ECHO_AUTO_UPDATE,
+            "update_hour": echo_ota.HOMEHUB_ECHO_UPDATE_HOUR,
+            "nodes": nodes_out,
+        }
+
+    @app.post("/hub/echo_ota/update_all")
+    async def echo_ota_update_all(request: Request) -> dict[str, Any]:
+        admin(request)
+        queued = 0
+        for node_id in echo_ota.echo_nodes(hub):
+            upd = echo_ota._find_firmware_update_entity(hub, node_id)
+            if upd is None:
+                continue
+            st = hub.states.get(getattr(upd, "entity_id", ""))
+            if st is not None and str(st.state).lower() == "on":
+                queued += 1
+        return {"queued": queued}
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

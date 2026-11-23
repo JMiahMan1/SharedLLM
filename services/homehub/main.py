@@ -27,6 +27,7 @@ from services.homehub import (
     builtin,
     camera_recording,
     conversation,
+    echo_ota,
     echo_ring,
     light_cluster_move,
     recorder_statistics,
@@ -146,6 +147,7 @@ class Service:
         self._bg.append(asyncio.create_task(self.runtime.housekeeping()))
         self._bg.append(asyncio.create_task(self.runtime.archive.run(), name="device-archive"))
         self._bg.append(asyncio.create_task(recorder_statistics.start(self.runtime)))  # recorder statistics
+        self._bg.append(asyncio.create_task(echo_ota.run_loop(self.hub), name="echo-ota"))
         await self._start_discovery()
 
     def _start_login_providers(self) -> None:
