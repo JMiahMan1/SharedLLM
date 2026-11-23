@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
+import aiohttp
 from sqlmodel import Session, select
 
 from services.common import notify
@@ -43,6 +44,10 @@ QUIET_START = 22
 QUIET_END = 7
 # Streak reminder: fires at 19:00 if streak > 0 and no reading today
 STREAK_REMINDER_HOUR = 19
+# Reengagement: fires at 10:00 for readers who have not read recently.
+REENGAGE_HOUR = 10
+# Steps at which a nudge is sent: 3 days, 7, 14, 30, then every 30 after that.
+REENGAGE_STEPS_DAYS = (3, 7, 14, 30)
 
 
 def _in_quiet_hours(hour: int) -> bool:
@@ -226,6 +231,166 @@ def streak_message_for(session: Session, username: str, today: str) -> dict | No
     }
 
 
+def reengage_steps() -> list[int]:
+    """All step values, including the repeating 30-day tail."""
+    out = list(REENGAGE_STEPS_DAYS)
+    next_step = out[-1] + 30
+    while next_step < 1000:
+        out.append(next_step)
+        next_step += 30
+    return out
+
+
+def reengage_due(last_read_day: str | None, last_sent_day: str, today: str) -> bool:
+    """Whether a reengagement nudge should go out today.
+
+    One nudge per step: 3, 7, 14, 30 days after the last reading, then every
+    30 days. A reader who never opened the app is treated as reaching the
+    first step (3) on the first check.
+    """
+    today_dt = date.fromisoformat(today)
+    if last_read_day:
+        try:
+            last = date.fromisoformat(last_read_day)
+        except ValueError:
+            last = today_dt
+        days_since = (today_dt - last).days
+    else:
+        # Never read: first check is treated as day 3 reached.
+        days_since = 3
+    steps = reengage_steps()
+    # The step reached today: the largest step not exceeding days_since.
+    current_step = None
+    for s in steps:
+        if s <= days_since:
+            current_step = s
+        else:
+            break
+    if current_step is None:
+        return False
+    # The date on which this step was first reached.
+    if last_read_day:
+        try:
+            step_reached = last + timedelta(days=current_step)
+        except Exception:
+            step_reached = today_dt
+    else:
+        # First check: the step was "reached" today.
+        step_reached = today_dt
+    # Send only if we have not already nudged on or after the step-reached date.
+    if last_sent_day:
+        try:
+            sent = date.fromisoformat(last_sent_day)
+        except ValueError:
+            sent = date.min
+        if sent >= step_reached:
+            return False
+    return True
+
+
+def reengage_message(days: int | None) -> dict:
+    """A warm reengagement message with a link back to the reader."""
+    bodies = [
+        "Today's verse is ready whenever you are.",
+        "Try a reading plan: a few minutes a day.",
+        "Listen to a chapter read aloud on the way somewhere.",
+        "Play today's Bible quiz with the family.",
+        "Memorize one verse this week.",
+        "Pick up where you left off.",
+    ]
+    body = bodies[days % len(bodies)] if days is not None else bodies[0]
+    verse = pick_daily_encouragement()
+    body += f" {verse.text}: {verse.reference}"
+    return {
+        "title": "Bible",
+        "body": body,
+        "link": link("bible", tab="read"),
+    }
+
+
+async def _send_reengage(username: str, today: str, telemetry_url: str, secret: str, note: dict) -> bool:
+    """Send a reengagement notice (title, body, link from ``reengage_message``) with its own once key."""
+    body = {
+        "user": username,
+        "category": "bible",
+        "kind": "bible_reengage",
+        "tag": "bible:reengage",
+        "once": f"bible-reengage:{today}",
+        **note,
+    }
+    return await notify.send(body, telemetry=telemetry_url, secret=secret)
+
+
+async def reengage_once(engine, telemetry_url: str, secret: str, identity_url: str, now: datetime | None = None) -> int:
+    """One pass over the household for reengagement nudges.
+
+    Fires only when ``now.hour == REENGAGE_HOUR`` and we are outside quiet
+    hours. Identity unreachable means nothing is sent.
+    """
+    now = now or datetime.now()
+    if now.hour != REENGAGE_HOUR or _in_quiet_hours(now.hour):
+        return 0
+    today = now.date().isoformat()
+    if not identity_url:
+        return 0
+    try:
+        async with aiohttp.ClientSession() as client, client.get(
+            f"{identity_url.rstrip('/')}/api/internal/household",
+            headers={"X-Internal-Secret": secret},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        ) as resp:
+            if resp.status >= 400:
+                log.warning("[Bible] household lookup failed: HTTP %s", resp.status)
+                return 0
+            data = await resp.json()
+    except Exception as exc:
+        log.warning("[Bible] household lookup errored: %s", exc)
+        return 0
+    usernames = data.get("usernames") if isinstance(data, dict) else None
+    if not isinstance(usernames, list):
+        log.warning("[Bible] household lookup returned an unexpected shape")
+        return 0
+    reading_kinds = READING_KINDS - OPEN_KINDS
+    sent = 0
+    with Session(engine) as session:
+        for username in usernames:
+            state = session.get(UserBibleState, username)
+            # No row yet means defaults: reengage on, no reminder time, never nudged.
+            if state is not None and not state.reengage:
+                continue
+            if state is not None and state.reminder_time:
+                continue
+            if read_today(session, username, today):
+                continue
+            # Newest reading-day event (not an open).
+            last_read_day = None
+            for evt in session.exec(
+                select(ReadingEvent)
+                .where(ReadingEvent.username == username, ReadingEvent.kind.in_(reading_kinds))
+                .order_by(ReadingEvent.day.desc())
+            ).all():
+                if evt.day:
+                    last_read_day = evt.day
+                    break
+            last_sent_day = state.reengage_last_sent if state is not None else ""
+            if not reengage_due(last_read_day, last_sent_day, today):
+                continue
+            try:
+                days = (date.fromisoformat(today) - date.fromisoformat(last_read_day)).days if last_read_day else None
+                ok = await _send_reengage(username, today, telemetry_url, secret, reengage_message(days))
+                if ok:
+                    sent += 1
+                    if state is None:
+                        state = UserBibleState(username=username, reengage_last_sent=today)
+                        session.add(state)
+                    else:
+                        state.reengage_last_sent = today
+                    session.commit()
+            except Exception as exc:
+                log.warning("[Bible] reengage for %s failed: %s", username, exc)
+    return sent
+
+
 def due_now(session: Session, now: datetime) -> list[tuple[str, dict]]:
     """Readers whose reminder time passed within ``WINDOW`` and who have not read today."""
     today = now.date().isoformat()
@@ -290,13 +455,20 @@ async def remind_once(engine, telemetry_url: str, secret: str, now: datetime | N
     return sent
 
 
-async def reminder_loop(engine_factory, telemetry_url: str, secret: str) -> None:
+async def reminder_loop(
+    engine_factory, telemetry_url: str, secret: str, identity_url: str | None = None
+) -> None:
     if not telemetry_url:
         log.warning("[Bible] TELEMETRY_SVC_URL is not resolved; reading reminders are off")
         return
     while True:
         await asyncio.sleep(INTERVAL_S)
+        now = datetime.now()
         try:
-            await remind_once(engine_factory(), telemetry_url, secret)
+            await remind_once(engine_factory(), telemetry_url, secret, now)
         except Exception as e:  # keep looping, but never fail silently
             log.warning(f"[Bible] reminder pass failed: {type(e).__name__}: {e}")
+        try:
+            await reengage_once(engine_factory(), telemetry_url, secret, identity_url, now)
+        except Exception as e:  # keep looping, but never fail silently
+            log.warning(f"[Bible] reengage pass failed: {type(e).__name__}: {e}")
