@@ -59,6 +59,11 @@ def _oui_path(path: Any = None) -> Path:
     env = os.getenv("OUI_FILE")
     if env:
         return Path(env)
+    data_dir = os.getenv("NETWORK_DATA_DIR")
+    if data_dir:
+        # The container mounts the network data at NETWORK_DATA_DIR (/data/network),
+        # not under the working directory.
+        return Path(data_dir) / "oui.csv"
     for cand in (Path("data/network/oui.csv"),
                  Path(__file__).resolve().parents[2] / "data/network/oui.csv"):
         if cand.exists():
@@ -72,16 +77,19 @@ _OUI_CACHE: dict[str, dict[str, str]] = {}
 def load_oui(path: Any = None) -> dict[str, str]:
     """Assignment prefix (6 hex) -> organization name. Empty when the file is missing."""
     p = _oui_path(path)
-    key = str(p)
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        # Not cached: a file added later (scripts/update_oui.sh) is read on the next pass.
+        if str(p) not in _MISSING_OUI_LOGGED:
+            _MISSING_OUI_LOGGED.add(str(p))
+            log.warning(f"[device-identity] OUI file missing: {p}; no vendor lookups")
+        return {}
+    key = f"{p}@{mtime}"
     if key in _OUI_CACHE:
         return _OUI_CACHE[key]
+    _OUI_CACHE.clear()  # one file at a time; a refreshed file replaces the old table
     result: dict[str, str] = {}
-    if not p.exists():
-        if key not in _MISSING_OUI_LOGGED:
-            _MISSING_OUI_LOGGED.add(key)
-            log.warning(f"[device-identity] OUI file missing: {p}; no vendor lookups")
-        _OUI_CACHE[key] = result
-        return result
     try:
         with p.open(newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
