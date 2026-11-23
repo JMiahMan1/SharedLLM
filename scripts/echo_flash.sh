@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Flash an Echo Dot 3 (donut) or Echo Show 8 1st gen (crown) into a HomeHub voice satellite.
 #
-#   scripts/echo_flash.sh donut|crown [--next] [--dry-run]
-#     --next     the next Echo of the same model (forgets the previous one's progress)
-#     --dry-run  walk the steps without running them
+#   scripts/echo_flash.sh donut|crown [--next] [--dry-run] [--from STEP]
+#     --next       the next Echo of the same model (forgets the previous one's progress)
+#     --dry-run    walk the steps without running them
+#     --from STEP  start at STEP, counting the earlier ones as done. An Echo you already unlocked, flashed
+#                  and rooted by hand: --from build (its first check stops if the firmware is not the one needed)
 #
 # Wraps the upstream echo-dot-assist guided setup at a pinned, tested commit. It never runs the unlock itself:
 # the unlock's author asks that it is only run by hand from the XDA thread, so the upstream setup stops there and
@@ -24,15 +26,18 @@ device=${1:-}
 shift || true
 case $device in
 donut | crown) ;;
-*) die "usage: scripts/echo_flash.sh donut|crown [--next] [--dry-run]   (donut = Echo Dot 3 D9N29T, crown = Echo Show 8 1st gen C7H6N3)" ;;
+*) die "usage: scripts/echo_flash.sh donut|crown [--next] [--dry-run] [--from STEP]   (donut = Echo Dot 3 D9N29T, crown = Echo Show 8 1st gen C7H6N3)" ;;
 esac
 args=("$device")
-for a in "$@"; do
-    case $a in
+while [ $# -gt 0 ]; do
+    case $1 in
     --next) args+=(--restart) ;;
     --dry-run) args+=(--dry-run) ;;
-    *) die "unknown option: $a" ;;
+    --from) [ $# -ge 2 ] || die "--from needs a step (e.g. --from build)"; args+=(--from "$2"); shift ;;
+    --from=*) args+=(--from "${1#--from=}") ;;
+    *) die "unknown option: $1" ;;
     esac
+    shift
 done
 
 [ "$(uname -s)" = Linux ] || die "run this on a Linux PC booted on the hardware (a live USB stick works), not macOS: the unlock needs direct USB"
