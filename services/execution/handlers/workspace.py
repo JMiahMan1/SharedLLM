@@ -367,13 +367,17 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
                 from services.execution.document_text import extract_document_text
 
                 content_str = await extract_document_text(abs_path)
-                # Cap document extracts at 300 lines with paging
+                source = "pdf-extract" if req.path.lower().endswith(".pdf") else "document-extract"
+                if not req.line_numbers:
+                    message = f"Read text from {req.path} ({len(content_str)} chars)"
+                    return _ok(message, {"content": content_str, "path": req.path, "source": source,
+                                         "total_lines": content_str.count("\n") + 1})
+                # The agent's read: numbered 300-line pages with next_offset
                 max_doc_lines = 300
                 all_lines = content_str.splitlines()
                 start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
                 end = min(start + max_doc_lines, len(all_lines))
                 page_lines = all_lines[start:end]
-                source = "pdf-extract" if req.path.lower().endswith(".pdf") else "document-extract"
                 total_doc_lines = len(all_lines)
                 numbered = "\n".join(f"{(start + i + 1):>6}| {line}" for i, line in enumerate(page_lines))
                 msg = f"Read text from {req.path} ({total_doc_lines} lines, offset={req.offset_lines})"
@@ -498,6 +502,13 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
 
         chunk = lines[start:end]
         total_lines = len(lines)
+
+        if not req.line_numbers:
+            msg = f"Read {len(chunk)} lines from {req.path} (offset={req.offset_lines})"
+            if end < total_lines:
+                msg += f" | TRUNCATED for context safety: file has {total_lines} lines total."
+            return _ok(msg, {"content": "".join(chunk), "path": req.path, "total_lines": total_lines,
+                             "start_line": start + 1})
 
         # Number every line: "  12| text"
         _nl = "\n"

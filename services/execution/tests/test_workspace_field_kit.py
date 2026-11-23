@@ -58,12 +58,14 @@ def _patch_req(tmp_path, path, chunks, commit_after=False):
     )
 
 
-def _read_req(tmp_path, path, offset_lines=0, limit_lines=300):
+def _read_req(tmp_path, path, offset_lines=0, limit_lines=300, line_numbers=True):
+    # The agent's read tool asks for numbered lines; other callers get plain text.
     return WorkspaceFileReadRequest(
         user_context=_user(),
         path=path,
         offset_lines=offset_lines,
         limit_lines=limit_lines,
+        line_numbers=line_numbers,
     )
 
 
@@ -345,3 +347,12 @@ async def test_shell_truncation_reports_file(tmp_ws):
         r = await handle_workspace_shell(_shell_req("bigcmd"))
     assert "full_output" in r.detail
     assert "last_output.txt" in r.detail["full_output"]
+
+
+@pytest.mark.asyncio
+async def test_plain_reads_stay_plain_for_other_callers(tmp_ws):
+    """Raven memory and other service reads must not get line numbers mixed into the text."""
+    (tmp_ws / "raven_memory.md").write_text("lesson one\nlesson two\n")
+    with patch("services.execution.handlers.workspace._resolve_workspace_info", _resolve(tmp_ws)):
+        r = await handle_workspace_read(_read_req(tmp_ws, "raven_memory.md", line_numbers=False))
+    assert r.detail["content"] == "lesson one\nlesson two\n"

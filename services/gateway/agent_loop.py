@@ -4619,6 +4619,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "ocrrequest", "imageeditrequest",
                     "podcastrenderrequest", "speakeridentifyrequest",
                 }
+                if lookup_action == "workspacefilereadrequest" and isinstance(payload, dict):
+                    # Field kit: the agent reads numbered 300-line windows so it can cite and
+                    # continue exact lines; other callers (Raven memory, MDM) get plain text.
+                    payload.setdefault("line_numbers", True)
+                    payload.setdefault("limit_lines", 300)
                 if workspace_id and isinstance(payload, dict) and lookup_action in _ws_actions:
                     payload["workspace_id"] = workspace_id
                     if _git_batch:

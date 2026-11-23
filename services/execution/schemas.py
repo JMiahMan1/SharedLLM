@@ -667,7 +667,8 @@ class WorkspaceFileReadRequest(BaseRequest):
     user_context: UserContext
     path: str = Field(..., alias="file_path", description="Path relative to workspace root (e.g. 'services/gateway/main.py')")
     offset_lines: int = Field(0, ge=0, description="Start reading from this line number (1-indexed)")
-    limit_lines: int = Field(300, ge=1, le=5000, description="Max lines to read (default 300)")
+    limit_lines: int = Field(1000, ge=1, le=5000, description="Max lines to read")
+    line_numbers: bool = Field(False, description="Prefix each line with its number ('  12| text') and report next_offset (the agent's read tool turns this on)")
     summary_only: bool = Field(False, description="If true, returns only class/function signatures and docstrings (semantic map)")
 
     @model_validator(mode="before")

@@ -164,7 +164,5 @@ def test_workspace_read_extracts_pdf_text(mocker, tmp_path, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "SUCCESS"
-    content = body["detail"]["content"]
-    assert "   1| Week 2: Scripture" in content
-    assert "   3| Psalm 139" in content
+    assert body["detail"]["content"] == "Week 2: Scripture\n\nPsalm 139"
     assert body["detail"]["source"] == "pdf-extract"
