@@ -512,6 +512,11 @@ class HAAuth:
                     existing_user = u
                     break
             if existing_user is None:
+                person_ids = {str(u.get("id") or "") for u in users
+                              if not u.get("service") and not u.get("system_generated")}
+                if any(normalize_username(c.get("username", "")) == norm and c.get("user_id") not in person_ids
+                       for c in self._blob()["credentials"]):
+                    raise AuthError("conflict", "username belongs to a service or system account", status=409)
                 uid = uuid.uuid4().hex
                 name = str(display_name or username).strip() or norm
                 users.append({

@@ -296,34 +296,40 @@ def _provision_nextcloud(session: Session, user: User, admin: User | None, raw_p
     }
 
     try:
-        # Create user (idempotent: 100=created, 102=already exists)
-        password = raw_password or secrets.token_urlsafe(18)
+        # Create the user (100 = created, 102 = already exists). Try their Jarvis password
+        # first; if Nextcloud's password policy refuses it, fall back to a random one.
         display_name = user.display_name or user.username
-        create_resp = _http_post_form(
-            f"{nc_url}/ocs/v1.php/cloud/users",
-            headers=headers,
-            data={
-                "userid": user.username,
-                "password": password,
-                "displayName": display_name,
-            },
-        )
-
-        ocs_status = create_resp.get("ocs", {}).get("meta", {}).get("statuscode")
+        candidates = [pw for pw in (raw_password, secrets.token_urlsafe(18)) if pw]
+        password = ""
+        ocs_status = None
+        for password in candidates:
+            create_resp = _http_post_form(
+                f"{nc_url}/ocs/v1.php/cloud/users",
+                headers=headers,
+                data={"userid": user.username, "password": password, "displayName": display_name},
+            )
+            ocs_status = create_resp.get("ocs", {}).get("meta", {}).get("statuscode")
+            if ocs_status in (100, 102):
+                break
         if ocs_status not in (100, 102):
             return {"status": "error", "detail": f"Nextcloud user creation returned statuscode {ocs_status}"}
 
         user_created = ocs_status == 100
         status = "created" if user_created else "existing"
+        if not user_created and not raw_password:
+            # Nextcloud has no admin route to mint another user's app password, and we do
+            # not know this existing account's password.
+            return {"status": "existing",
+                    "detail": "Nextcloud user already exists; link it in Accounts & Integrations"}
 
-        # Create app password (always create a new one for Jarvis)
-        app_pass_resp = _http_post_form(
-            f"{nc_url}/ocs/v1.php/cloud/users/{user.username}/app-passwords",
-            headers=headers,
-            data={"name": "jarvis-onboarding"},
+        # Nextcloud mints an app password only for the user signed in, so ask as the user.
+        user_auth = base64.b64encode(f"{user.username}:{password}".encode()).decode()
+        app_pass_resp = _http_get_json(
+            f"{nc_url}/ocs/v2.php/core/getapppassword",
+            headers={"Authorization": f"Basic {user_auth}", "OCS-APIRequest": "true",
+                     "Accept": "application/json"},
         )
-
-        app_password = app_pass_resp.get("ocs", {}).get("data", {}).get("password")
+        app_password = app_pass_resp.get("ocs", {}).get("data", {}).get("apppassword")
         if not app_password:
             return {"status": "error", "detail": "Nextcloud did not return app password"}
 

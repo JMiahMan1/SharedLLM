@@ -195,10 +195,15 @@ def test_ensure_person_user_skips_service_and_system_users(parts):
     ha._save({"credentials": [
         {"id": "c1", "user_id": "sys1", "username": "supervisor", "password": "x"}
     ]})
-    # Provisioning "supervisor" must create a new person user, not reuse the system one.
-    r = ha.ensure_person_user("supervisor", password="pass123")
+    # "supervisor" is the system user's login: a person may not get a second credential
+    # with the same username (logins look the credential up by username).
+    with pytest.raises(AuthError) as exc:
+        ha.ensure_person_user("supervisor", password="pass123")
+    assert exc.value.status == 409
+    # A fresh name still makes a person user, never reusing the service or system ones.
+    r = ha.ensure_person_user("newperson", password="pass123")
     assert r["created"] is True
     users = store.get_kv("users", []) or []
     person_users = [u for u in users if not u.get("service") and not u.get("system_generated")]
     assert len(person_users) == 1
-    assert person_users[0]["id"] != "sys1"
+    assert person_users[0]["id"] not in ("svc1", "sys1")

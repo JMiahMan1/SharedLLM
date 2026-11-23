@@ -140,7 +140,7 @@ def setup_full_mocks(mock_urllib, monkeypatch, abs_users=None, abs_created_user=
     # Nextcloud - create user (POST to /ocs/v1.php/cloud/users)
     mock_urllib.add_response("/ocs/v1.php/cloud/users", {"ocs": {"meta": {"statuscode": nc_statuscode}}}, method="POST")
     # Nextcloud - create app password (POST to /app-passwords)
-    mock_urllib.add_response("/app-passwords", {"ocs": {"data": {"password": nc_app_pass}}}, method="POST")
+    mock_urllib.add_response("/core/getapppassword", {"ocs": {"data": {"apppassword": nc_app_pass}}}, method="GET")
 
     # Music Assistant
     monkeypatch.setattr(music_assistant, "household_server", lambda fresh=False: {"url": "http://ma.example.test:8095", "error": None})
@@ -427,7 +427,7 @@ class TestAdminProvisionAccountsEndpoint:
         # NC: already exists
         mock_urllib.add_response("/cloud/users", {"ocs": {"meta": {"statuscode": 102}}}, method="POST")
         # NC app password still created
-        mock_urllib.add_response("/app-passwords", {"ocs": {"data": {"password": "nc-app-pass-123"}}}, method="POST")
+        mock_urllib.add_response("/core/getapppassword", {"ocs": {"data": {"apppassword": "nc-app-pass-123"}}}, method="GET")
         # MA
         monkeypatch.setattr(music_assistant, "household_server", lambda fresh=False: {"url": "http://ma.example.test:8095", "error": None})
         monkeypatch.setattr(music_assistant, "provision_account", lambda username, display_name=None: {"username": username, "user_id": f"u-{username}", "created": False, "token": f"ma-token-{username}"})
@@ -504,3 +504,15 @@ class TestOnboardingModuleDirectly:
         user = User(username="test", is_test_account=True)
         result = onboarding.provision_new_user_accounts(session, user)
         assert result == {}
+
+
+def test_nextcloud_app_password_is_requested_as_the_new_user(client, monkeypatch, session):
+    """Nextcloud has no admin route for another user's app password: the onboarding
+    asks core/getapppassword with the new account's own login."""
+    mock_urllib = client.mock_urllib
+    setup_full_mocks(mock_urllib, monkeypatch)
+    resp = client.post("/api/users", json={"username": "ncuser", "password": "Fake-Passw0rd-1"})
+    assert resp.status_code in (200, 201), resp.text
+    calls = [c for c in mock_urllib.call_log if "getapppassword" in c["url"]]
+    assert calls and calls[0]["method"] == "GET"
+    assert not [c for c in mock_urllib.call_log if "app-passwords" in c["url"]]
