@@ -110,9 +110,11 @@ describe('Admin System Health service updates', () => {
     expect(updateButtons).toHaveLength(2);
 
     await userEvent.setup().click(updateButtons[1]);
+    // The click goes through an async confirm dialog and a React Query mutation; a busy CI runner
+    // can take longer than waitFor's 1 s default.
     await waitFor(() => {
       expect(mockApi.pullAndRestart).toHaveBeenCalledWith('sharedllm_osrm_foot');
-    });
+    }, { timeout: 5000 });
     expect(mockApi.pullServiceImage).not.toHaveBeenCalled();
   });
 });
