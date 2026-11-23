@@ -7,7 +7,8 @@ import asyncio
 import logging
 from datetime import datetime
 
-from services.execution import abs_client, ha_client
+from services.common import ma_identity
+from services.execution import abs_client, abs_session_state, ha_client
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult
 from services.shared import ma_library
 from services.shared.ma_player import is_music_assistant_player
@@ -337,6 +338,71 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
     return await _play_book_session(abs_url, abs_key, req, book_id)
 
 
+def _session_chapters(media: dict) -> list[dict]:
+    """Chapters in the shape the enhanced transport commands need (ABS seconds)."""
+    out: list[dict] = []
+    for i, chapter in enumerate(media.get("chapters") or []):
+        if not isinstance(chapter, dict):
+            continue
+        start = chapter.get("start")
+        if start is None:
+            start = chapter.get("startTime", 0)
+        end = chapter.get("end")
+        try:
+            start = float(start or 0)
+        except (TypeError, ValueError):
+            start = 0.0
+        try:
+            end = float(end) if end is not None else None
+        except (TypeError, ValueError):
+            end = None
+        out.append({
+            "number": i + 1,
+            "title": chapter.get("title", ""),
+            "start": start,
+            "end": end,
+        })
+    return out
+
+
+def _resume_track(
+    current_time: float, audio_tracks: list, fallback_tracks: list, default_index: int
+) -> tuple[int, float, float]:
+    """Pick the track containing ``current_time`` and the seek inside it.
+
+    ABS playback sessions carry ``currentTime`` (book time) and ``audioTracks``
+    with ``startOffset``; the track that contains the position is the one the
+    player must be handed, and the seek is relative to that track's start.
+    Returns ``(track_index, track_start, seek_position)``.
+    """
+    if current_time <= 0:
+        return default_index, 0.0, 0.0
+    candidates = audio_tracks or fallback_tracks or []
+    for i, track in enumerate(candidates):
+        if not isinstance(track, dict):
+            continue
+        raw_start = track.get("startOffset")
+        if raw_start is None:
+            raw_start = track.get("startTime", track.get("start", 0))
+        try:
+            start = float(raw_start or 0)
+        except (TypeError, ValueError):
+            start = 0.0
+        raw_duration = track.get("duration")
+        try:
+            end = start + float(raw_duration) if raw_duration is not None else None
+        except (TypeError, ValueError):
+            end = None
+        if start <= current_time and (end is None or current_time < end):
+            index = track.get("index")
+            if not isinstance(index, int) or index < 1:
+                index = i + 1
+            return index, start, max(0.0, current_time - start)
+    # No offset data: seek within the default track rather than losing the
+    # resume point entirely.
+    return default_index, 0.0, current_time
+
+
 async def _play_book_session(abs_url: str, abs_key: str, req, book_id: str) -> ExecutionResult:
     """Start an ABS 2.x playback session for a book and play its first track.
 
@@ -385,10 +451,34 @@ async def _play_book_session(abs_url: str, abs_key: str, req, book_id: str) -> E
             service="audiobookshelf",
         )
 
+    raw_current = session.get("currentTime")
+    try:
+        current_time = float(raw_current or 0)
+    except (TypeError, ValueError):
+        current_time = 0.0
+    track_index, track_start, seek_position = _resume_track(
+        current_time, session.get("audioTracks") or [], tracks, track_index
+    )
+
     stream_url = abs_client.get_session_track_url(session["id"], ctx_user(req), track_index=track_index)
-    log.info(f"[abs] Book session started: item={book_id} track={track_index} session={session['id']}")
+    log.info(
+        f"[abs] Book session started: item={book_id} track={track_index} "
+        f"session={session['id']} resume={current_time:.1f}s seek={seek_position:.1f}s"
+    )
+    session_info = {
+        "session_id": session["id"],
+        "abs_url": abs_url,
+        "abs_key": abs_key,
+        "item_id": book_id,
+        "current_time": current_time,
+        "track_start": track_start,
+        "duration": float(media.get("duration") or item.get("duration") or 0),
+        "chapters": _session_chapters(media),
+        "seek_position": seek_position,
+    }
     return await _dispatch_stream(
-        stream_url, "application/x-mpegurl", req, title, abs_item_id=book_id
+        stream_url, "application/x-mpegurl", req, title,
+        abs_item_id=book_id, abs_session=session_info,
     )
 
 
@@ -460,11 +550,14 @@ async def _dispatch_stream(
     abs_item_id: str | None = None,
     search_title: str | None = None,
     ma_media_kind: str = "audiobook",
+    abs_session: dict | None = None,
 ) -> ExecutionResult:
     """Send media to a player (power-on, Roku, MA, or direct) and confirm it plays."""
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     ha_url = ctx_ha_url(req)
     ha_token = ctx_ha_token(req)
+    # A new play replaces whatever this player was doing before.
+    abs_session_state.forget(full_entity_id)
 
     state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
     if state and state.get("state") == "off":
@@ -498,7 +591,14 @@ async def _dispatch_stream(
             ha_url, ha_token,
             "music_assistant", "play_media",
             full_entity_id,
-            {"media_id": media_id, "enqueue": "play"},
+            {
+                "media_id": media_id,
+                "enqueue": "play",
+                # Impersonate this person on the household MA server so the
+                # book is filed under (and resumes from) their own provider,
+                # not the household account's.
+                **ma_identity.act_as(req.user_context),
+            },
         )
     else:
         result = await ha_client.call_service(
@@ -523,6 +623,23 @@ async def _dispatch_stream(
             message=f"'{title}' was accepted by {full_entity_id} but did not start: {detail}",
             service="audiobookshelf",
         )
+
+    # A plain URL player does not resume by itself: after playback is confirmed,
+    # move it to the track and position recorded in the ABS session, and keep
+    # the session id so pause / stop can write progress back. MA players resume
+    # through their own provider (with the person's identity), so skip both.
+    if abs_session and not is_ma:
+        session_fields = {k: v for k, v in abs_session.items() if k != "seek_position"}
+        abs_session_state.remember(full_entity_id, **session_fields)
+        seek_position = float(abs_session.get("seek_position") or 0)
+        if seek_position > 0:
+            seek_result = await ha_client.call_service(
+                ha_url, ha_token, "media_player", "media_seek", full_entity_id,
+                {"seek_position": seek_position},
+            )
+            if not seek_result.get("ok"):
+                log.warning(f"[abs] Resume seek failed on '{full_entity_id}': {seek_result.get('error')}")
+
     return ExecutionResult(status="SUCCESS", message=f"Now playing: {title}", service="audiobookshelf")
 
 
