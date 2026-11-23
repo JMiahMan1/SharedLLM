@@ -26,7 +26,7 @@ import os
 import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import aiohttp
@@ -52,6 +52,7 @@ from services.bible import (
     plans,
     provider_cache,
     providers,
+    quiz_nudges,
     reminders,
     study,
     study_ask,
@@ -113,6 +114,40 @@ log = logging.getLogger(__name__)
 _START_TIME = time.time()
 
 DEFAULT_DATABASE_URL = "sqlite:////data/bible.db"
+
+_QUIZ_NUDGE_TASKS: set[asyncio.Task] = set()
+
+
+def _discard_quiz_nudge_task(task: asyncio.Task) -> None:
+    _QUIZ_NUDGE_TASKS.discard(task)
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        log.warning("[Bible] quiz nudge task failed: %s", exc)
+
+
+async def _display_name(username: str) -> str | None:
+    """The player's display name from Identity's name roster; None when Identity cannot say."""
+    if not IDENTITY_SVC_URL:
+        return None
+    try:
+        async with aiohttp.ClientSession() as client, client.get(
+            f"{IDENTITY_SVC_URL}/api/internal/name-roster",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        ) as resp:
+            if resp.status >= 400:
+                return None
+            roster = await resp.json()
+    except Exception as exc:
+        log.warning("[Bible] name roster lookup errored: %s", type(exc).__name__)
+        return None
+    for row in roster if isinstance(roster, list) else []:
+        if isinstance(row, dict) and row.get("username") == username:
+            return str(row.get("display_name") or "") or None
+    return None
 
 
 # secret verification (same contract as every other service)
@@ -1764,6 +1799,26 @@ async def attempt_game(
         )
     )
     session.commit()
+    if counted:
+        try:
+            task = asyncio.create_task(
+                quiz_nudges.nudge_family(
+                    session.get_bind(),
+                    username,
+                    correct,
+                    len(questions),
+                    identity_url=IDENTITY_SVC_URL,
+                    telemetry_url=TELEMETRY_SVC_URL,
+                    secret=INTERNAL_SECRET,
+                    consent=_consent,
+                    display_name=_display_name,
+                    now=datetime.now(),
+                )
+            )
+            _QUIZ_NUDGE_TASKS.add(task)
+            task.add_done_callback(_discard_quiz_nudge_task)
+        except Exception as exc:
+            log.warning("[Bible] quiz nudge scheduling failed: %s", exc)
     _record_event(session, username, "quiz_played", ref=mode, value=len(questions))
     if correct:
         _record_event(session, username, "quiz_correct", ref=mode, value=correct)
