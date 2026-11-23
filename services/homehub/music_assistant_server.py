@@ -28,6 +28,20 @@ log = logging.getLogger("homehub.music_assistant_server")
 DOMAIN = "music_assistant"
 #: The entry keys that say where the server is and how to sign in to it.
 SERVER_KEYS = ("url", "token")
+#: hassmic's Sendspin provider listens on this TCP port on the satellite itself.
+SENDSPIN_PORT = 28928
+SENDSPIN_ENTITY_NAME = "Sendspin pairing token"
+SENDSPIN_OBJECT_ID = "sendspin_pairing_token"
+#: Music Assistant's provider config command that registers a Sendspin satellite.
+SENDSPIN_PAIR_COMMAND = "config/providers/sendspin/pair"
+
+
+class SendspinError(Exception):
+    """A Sendspin request the hub cannot answer; ``status`` is the HTTP status the API answers with."""
+
+    def __init__(self, message: str, status: int = 503) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def fold_entry(entry: Any) -> bool:
@@ -136,6 +150,170 @@ def _connection(hub: Any) -> Any:
     if conn is None or not getattr(conn, "connected", False):
         raise AccountError(server.get("error") or "HomeHub is not connected to Music Assistant", 503)
     return conn
+
+
+def _esphome_entry_for_device(hub: Any, device_id: str) -> tuple[Any | None, str | None]:
+    """The ESPHome ConfigEntry behind a device, or ``(None, why not)``."""
+    device = hub.devices.get(device_id)
+    if device is None:
+        return None, f"There is no device {device_id!r}. Choose an ESPHome satellite from Devices."
+    entry = next((hub.config_entries[eid] for eid in device.config_entries
+                  if eid in hub.config_entries and hub.config_entries[eid].domain == "esphome"), None)
+    if entry is None:
+        return None, "This device is not an ESPHome satellite, so it has no Sendspin pairing token."
+    return entry, None
+
+
+def _sendspin_entity(hub: Any, device_id: str) -> Any | None:
+    """The hassmic entity that carries the Sendspin pairing token, whatever its domain or state."""
+    for entity in hub.entities.values():
+        if entity.device_id != device_id:
+            continue
+        unique_id = str(entity.unique_id or "").lower()
+        object_id = entity.entity_id.split(".", 1)[-1].lower()
+        if (unique_id.endswith("/" + SENDSPIN_ENTITY_NAME.lower())
+                or SENDSPIN_OBJECT_ID in unique_id
+                or object_id == SENDSPIN_OBJECT_ID
+                or str(entity.original_name or "").lower() == SENDSPIN_ENTITY_NAME.lower()):
+            return entity
+    return None
+
+
+def find_sendspin_token(hub: Any, device_id: str) -> tuple[str | None, str | None]:
+    """``(token, host)`` for one ESPHome satellite, or ``(None, why not)``.
+
+    The token is hassmic's own, read from its disabled-by-default diagnostic entity. An unencrypted
+    node refuses to publish it, so a missing entity/state is reported as such instead of guessed.
+    """
+    entry, error = _esphome_entry_for_device(hub, device_id)
+    if error is not None:
+        return None, error
+    host = str((entry.data or {}).get("host") or "").strip()
+    if not host:
+        return None, "The ESPHome entry has no host address, so its Sendspin address is unknown."
+    entity = _sendspin_entity(hub, device_id)
+    if entity is None:
+        return None, (f"This satellite has no {SENDSPIN_ENTITY_NAME!r} entity. It needs the hassmic "
+                      "(echo-dot-assist) firmware that offers Music Assistant Sendspin.")
+    if entity.disabled_by:
+        reason = f"The {SENDSPIN_ENTITY_NAME!r} entity is disabled. Enable it in the hub, then try again."
+        if not str((entry.data or {}).get("noise_psk") or "").strip():
+            reason += (" The node is also not encrypted yet: hassmic only publishes the token once it "
+                       "has a Noise key, so add the node again with encryption provisioning.")
+        return None, reason
+    state = hub.states.get(entity.entity_id)
+    if state is None:
+        return None, (f"The satellite has not published its {SENDSPIN_ENTITY_NAME!r} yet. hassmic does that "
+                      "only once the node is encrypted; if it stays unknown, check the node is online.")
+    token = str(state.state or "").strip()
+    if not token or token.lower() in ("unknown", "unavailable", "none"):
+        return None, (f"The satellite has not published its {SENDSPIN_ENTITY_NAME!r} yet. hassmic does that "
+                      "only once the node is encrypted; if it stays unknown, check the node is online.")
+    return token, host
+
+
+def _reachable_music_assistant(hub: Any) -> dict[str, Any]:
+    """The household's configured, connected Music Assistant, or a clear SendspinError."""
+    server = household_server(hub)
+    if not server.get("configured"):
+        raise SendspinError("HomeHub has no Music Assistant integration. An admin can add it under "
+                            "Integrations > Music Assistant.")
+    if not server.get("url"):
+        raise SendspinError(server.get("error")
+                            or "HomeHub has no usable Music Assistant address. An admin can set it under "
+                               "Integrations > Music Assistant > Configure.")
+    if not server.get("connected"):
+        detail = server.get("error") or f"HomeHub is not connected to Music Assistant at {server['url']}."
+        raise SendspinError(f"{str(detail).rstrip('.')}. Check Integrations > Music Assistant.")
+    return server
+
+
+def _require_device(hub: Any, device_id: str) -> Any:
+    """The device, or a 404 that names it; a Sendspin request never answers 200 for a device that is not there."""
+    device = hub.devices.get(device_id)
+    if device is None:
+        raise SendspinError(f"There is no device {device_id!r}. Choose an ESPHome satellite from Devices.", 404)
+    return device
+
+
+async def sendspin_pairing_info(hub: Any, device_id: str, *, include_token: bool = False) -> dict[str, Any]:
+    """Where Music Assistant should reach one satellite's Sendspin provider, and whether its token is ready.
+
+    Fails loudly when Music Assistant is not configured or connected. The pairing token itself is only
+    put in the answer when an authenticated admin asks for it (``include_token=True``); it is never logged.
+    """
+    _require_device(hub, device_id)
+    server = _reachable_music_assistant(hub)
+    entry, _error = _esphome_entry_for_device(hub, device_id)
+    host = str(((entry.data or {}) if entry is not None else {}).get("host") or "").strip()
+    token, host_or_reason = find_sendspin_token(hub, device_id)
+    out: dict[str, Any] = {
+        "ok": token is not None,
+        "device_id": device_id,
+        "sendspin_address": f"{host}:{SENDSPIN_PORT}" if host else None,
+        "token_available": bool(token),
+        "music_assistant_url": server.get("url"),
+        "paired": False,
+        "manual_pairing_required": token is None,
+    }
+    if token is None and host_or_reason is not None:
+        out["error"] = host_or_reason
+    if include_token and token:
+        out["pairing_token"] = token
+    if token:
+        out["message"] = (f"Music Assistant can pair this satellite at {out['sendspin_address']} with its "
+                          "Sendspin pairing token.")
+    else:
+        out["message"] = out.get("error") or "This satellite has no Sendspin pairing token yet."
+    return out
+
+
+async def pair_sendspin_device(hub: Any, device_id: str) -> dict[str, Any]:
+    """Ask the connected Music Assistant to pair one satellite's ``<host>:28928`` Sendspin provider.
+
+    The token travels to Music Assistant only, never into logs or the answer. When Music Assistant
+    cannot register the provider itself, the answer says so and gives the address for manual pairing.
+    """
+    _require_device(hub, device_id)
+    server = _reachable_music_assistant(hub)
+    entry, error = _esphome_entry_for_device(hub, device_id)
+    host = str(((entry.data or {}) if entry is not None else {}).get("host") or "").strip()
+    token, host_or_reason = find_sendspin_token(hub, device_id)
+    address = f"{host}:{SENDSPIN_PORT}" if host else None
+    out: dict[str, Any] = {
+        "ok": False, "device_id": device_id, "sendspin_address": address,
+        "token_available": bool(token), "music_assistant_url": server.get("url"),
+        "paired": False, "manual_pairing_required": True,
+    }
+    if token is None:
+        out["error"] = host_or_reason or error or "This satellite has no Sendspin pairing token yet."
+        out["message"] = out["error"]
+        return out
+    driver = _driver_for(hub, server.get("entry_id") or "")
+    conn = getattr(driver, "conn", None)
+    if conn is None or not getattr(conn, "connected", False):
+        raise SendspinError(f"HomeHub is not connected to Music Assistant at {server.get('url')}. "
+                            "Check Integrations > Music Assistant.")
+    command = getattr(conn, "send_command", None) or getattr(conn, "command", None)
+    if command is None:
+        out["message"] = (f"Music Assistant cannot register Sendspin providers from HomeHub. Pair the "
+                          f"satellite manually at {address} with its Sendspin pairing token.")
+        return out
+    try:
+        result = await command(SENDSPIN_PAIR_COMMAND, address=address, token=token)
+    except Exception as exc:  # MA versions without a Sendspin provider command: say what to do instead
+        out["message"] = (f"Music Assistant did not register the satellite ({exc}). Pair it manually at "
+                          f"{address} with its Sendspin pairing token.")
+        return out
+    paired = result if isinstance(result, bool) else True
+    out.update({
+        "ok": True, "paired": paired, "manual_pairing_required": not paired,
+        "message": (f"Music Assistant paired the satellite at {address}." if paired
+                    else f"Pair the satellite manually at {address} with its Sendspin pairing token."),
+    })
+    if paired:
+        log.info("Music Assistant paired the Sendspin satellite %s at %s", device_id, address)
+    return out
 
 
 #: username -> lock: one account request per person at a time, so two arriving together cannot each

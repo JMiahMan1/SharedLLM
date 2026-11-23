@@ -780,6 +780,31 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
                                                             "history", "automations", "refresh_tokens")},
         }
 
+    @app.get("/hub/music_assistant/sendspin/{device_id}")
+    async def hub_sendspin_info(device_id: str, request: Request) -> Response:
+        """One satellite's Music Assistant Sendspin address and whether its pairing token is ready."""
+        admin(request)
+        from services.homehub import music_assistant_server
+
+        include = request.query_params.get("include_token", "").lower() in ("1", "true", "yes")
+        try:
+            body = await music_assistant_server.sendspin_pairing_info(runtime.hub, device_id, include_token=include)
+        except music_assistant_server.SendspinError as exc:
+            return _error(exc.status, str(exc))
+        return JSONResponse(body)
+
+    @app.post("/hub/music_assistant/sendspin/{device_id}/pair")
+    async def hub_sendspin_pair(device_id: str, request: Request) -> Response:
+        """Ask the connected Music Assistant to pair one satellite's Sendspin provider."""
+        admin(request)
+        from services.homehub import music_assistant_server
+
+        try:
+            body = await music_assistant_server.pair_sendspin_device(runtime.hub, device_id)
+        except music_assistant_server.SendspinError as exc:
+            return _error(exc.status, str(exc))
+        return JSONResponse(body)
+
     @app.post("/hub/import")
     async def hub_import(request: Request) -> dict[str, Any]:
         admin(request)
