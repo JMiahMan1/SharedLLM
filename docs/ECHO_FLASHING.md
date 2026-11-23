@@ -105,8 +105,6 @@ Tools: fine-tip soldering iron, flux, tweezers, precision driver set, a plastic 
 ## After flashing
 
 - The Echo boots dark and silent, locks itself down to the local network, and is a satellite about a minute later.
-- Keep `secrets/update.key` from the echo-dot-assist checkout: it signs later updates and opens adb over Wi-Fi
-  (`scripts/adb-wifi.sh <echo-ip>`). Back it up encrypted, not in git.
-- Updates later: `scripts/ota-push.sh <echo-ip>` from the echo-dot-assist checkout. No USB needed.
-- Bluetooth speaker: on by default on the Echo's settings page (`http://<echo-ip>:28931/`); the "Bluetooth
-  pairing" switch then shows up on the device in HomeHub.
+- Keep `secrets/update.key` from the echo-dot-assist checkout: it signs later updates and opens adb over Wi-Fi (`scripts/adb-wifi.sh <echo-ip>`). Back it up encrypted, not in git.
+- Every later update is over the air. HomeHub sets "Online updates" to release on adoption and installs updates one Echo at a time at 3am. The Echo needs to reach github.com for downloads (if the router blocks the Echo's internet, allow GitHub). The PC push (`scripts/ota-push.sh` in the echo-dot-assist checkout, signed with the backed-up `secrets/update.key`) is the fallback. No USB is needed after the first install.
+- Bluetooth speaker: on by default on the Echo's settings page (`http://<echo-ip>:28931/`); the "Bluetooth pairing" switch then shows up on the device in HomeHub.
