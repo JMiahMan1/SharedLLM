@@ -19488,7 +19488,7 @@ async def get_media_home(request: Request):
 
     results = await asyncio.gather(
         shelf("recent", "music/recently_played_items", {"limit": 20}, drop=_media_is_ma_audiobook),
-        shelf("continue", "music/in_progress_items", {"limit": 20}),
+        shelf("continue", "music/in_progress_items", {"limit": 20}, drop=_media_is_ma_audiobook),
         shelf("playlists", "music/playlists/library_items", {"limit": 20}),
         # Live-verified 2026-10-05: the library_items family accepts favorite=true.
         shelf("favorites", "music/tracks/library_items", {"limit": 20, "favorite": True}),

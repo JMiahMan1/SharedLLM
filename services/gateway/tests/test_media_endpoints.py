@@ -50,7 +50,7 @@ def test_home_merges_ma_shelves_with_abs_last_played(client, upstream, ma):
         {"uri": "library://track/1", "name": "Recent Song"}
     ]
     ma["responses"]["music/in_progress_items"] = [
-        {"uri": "library://audiobook/9", "name": "Continue Book", "media_type": "audiobook"}
+        {"uri": "library://podcast/9", "name": "Continue Podcast", "media_type": "podcast"}
     ]
     ma["responses"]["music/playlists/library_items"] = [
         {"uri": "library://playlist/6", "name": "Road Trip"}
@@ -77,7 +77,7 @@ def test_home_merges_ma_shelves_with_abs_last_played(client, upstream, ma):
     body = resp.json()
     assert [item["name"] for item in body["recent"]] == ["Recent Song", "Abs Book"]
     assert body["recent"][1]["uri"] == "abs://b1"
-    assert body["continue"][0]["name"] == "Continue Book"
+    assert body["continue"][0]["name"] == "Continue Podcast"
     assert body["playlists"][0]["name"] == "Road Trip"
     assert body["favorites"][0]["name"] == "Fav Song"
     assert body["radio"] == []
@@ -866,6 +866,7 @@ def test_search_and_home_drop_music_assistant_mirrored_audiobooks(client, upstre
         {"uri": "library://audiobook/7", "name": "Wild at Heart (Unabridged)", "media_type": "audiobook"},
     ]
     ma["responses"]["music/in_progress_items"] = [
+        {"uri": "library://audiobook/7", "name": "Wild at Heart (Unabridged)", "media_type": "audiobook"},
         {"uri": "library://podcast/9", "name": "Pod", "media_type": "podcast"},
     ]
     ma["responses"]["music/playlists/library_items"] = []
@@ -884,3 +885,4 @@ def test_search_and_home_drop_music_assistant_mirrored_audiobooks(client, upstre
     )
     home = client.get("/api/media/home").json()
     assert [i["uri"] for i in home["recent"]] == ["library://track/1", "abs://abs-wild-1"]
+    assert [i["uri"] for i in home["continue"]] == ["library://podcast/9"]
