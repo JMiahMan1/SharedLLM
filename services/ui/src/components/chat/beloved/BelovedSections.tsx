@@ -8,7 +8,9 @@ import { markPrayed, prayedCount, type DevotionRecord, type IdeaRecord, type Ope
 import type { ReminderState } from '../../../plugins/belovedReminders';
 import { stampLabel } from '../privateGalleryModel';
 import { errorText } from '../privateChatModel';
+import { hasRead } from '../../../lib/beloved/activity';
 import { Pomegranate, Vine } from './BelovedArt';
+import { ExpandableSpouseItem, ReadMarker } from './BelovedHighlights';
 import { Card, Field } from './BelovedUi';
 import { BelovedWeather } from './BelovedWeather';
 import { useVerse } from './useBeloved';
@@ -49,7 +51,8 @@ export function DaysSection({ data, days, reminders }: { data: BelovedData; days
     event.preventDefault();
     if (!name.trim() || !date) return;
     void run(async () => {
-      await data.save('day', { b: 'day', name: name.trim().slice(0, 120), date, yearly });
+      // A new special day is something the other spouse should hear about.
+      await data.save('day', { b: 'day', name: name.trim().slice(0, 120), date, yearly }, { notify: true });
       setName('');
       setDate('');
       toast.success('Added');
@@ -186,6 +189,7 @@ export function NotesSection({ data }: { data: BelovedData }) {
   const [answerText, setAnswerText] = useState('');
   const [busy, run] = useBusy();
   const spouseName = data.spouse?.display_name ?? 'your spouse';
+  const spouseUsername = data.spouse?.username ?? '';
   const open = data.view.prayers.filter((p) => !p.record.answeredAt);
   const answered = data.view.prayers.filter((p) => p.record.answeredAt);
 
@@ -216,7 +220,7 @@ export function NotesSection({ data }: { data: BelovedData }) {
 
   const markAnswered = (p: Opened<PrayerRecord>) =>
     run(async () => {
-      await data.save('prayer', { ...p.record, answeredAt: Math.floor(Date.now() / 1000), ...(answerText.trim() ? { answer: answerText.trim() } : {}) }, { id: p.id });
+      await data.save('prayer', { ...p.record, answeredAt: Math.floor(Date.now() / 1000), ...(answerText.trim() ? { answer: answerText.trim() } : {}) }, { id: p.id, notify: true });
       setAnswering(null);
       setAnswerText('');
       toast.success('Praise God!');
@@ -239,9 +243,16 @@ export function NotesSection({ data }: { data: BelovedData }) {
           {data.view.notes.slice(0, 30).map((n) => (
             <li key={n.id} data-testid="beloved-note"
               className={`min-w-0 rounded-2xl p-3 text-sm ${n.own ? 'ml-6 bg-gradient-to-br from-rose-600/40 to-fuchsia-600/30 text-white' : 'mr-6 border border-rose-300/15 bg-white/[0.04] text-slate-100'}`}>
-              <span className="block whitespace-pre-wrap break-words">{n.record.b === 'note' ? n.record.text : ''}</span>
+              {n.own ? (
+                <span className="block whitespace-pre-wrap break-words">{n.record.b === 'note' ? n.record.text : ''}</span>
+              ) : (
+                <ExpandableSpouseItem token={data.token} kind="note" recordId={n.id} testId="beloved-note-body">
+                  <span className="block whitespace-pre-wrap break-words">{n.record.b === 'note' ? n.record.text : ''}</span>
+                </ExpandableSpouseItem>
+              )}
               <span className="mt-1 flex items-center justify-between gap-2 text-[11px] text-slate-300">
                 <span className="min-w-0 truncate">{n.own ? 'You' : n.byName} · {stampLabel(n.at)}</span>
+                {n.own && <ReadMarker read={hasRead(data.activity, 'note', n.at, spouseUsername)} />}
                 {n.own && (
                   <button type="button" aria-label="Delete note" onClick={() => void run(() => data.remove('note', n.id), 'Could not delete')}
                     className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-white/10">
@@ -280,10 +291,19 @@ export function NotesSection({ data }: { data: BelovedData }) {
         <ul className="mt-3 space-y-2">
           {open.map((p) => (
             <li key={p.id} className="rounded-2xl border border-rose-300/10 bg-white/[0.04] p-3" data-testid="beloved-prayer">
-              <span className="block whitespace-pre-wrap break-words text-sm text-slate-100">{p.record.text}</span>
-              <span className="mt-1 block text-[11px] text-slate-400">
-                {p.own ? 'You' : p.byName}{whoFor(p.record) ? ` · for ${whoFor(p.record)}` : ' · for both of you'}
-                {prayedCount(p.record) > 0 && ` · prayed ${prayedCount(p.record)} ${prayedCount(p.record) === 1 ? 'time' : 'times'}`}
+              {p.own ? (
+                <span className="block whitespace-pre-wrap break-words text-sm text-slate-100">{p.record.text}</span>
+              ) : (
+                <ExpandableSpouseItem token={data.token} kind="prayer" recordId={p.id} testId="beloved-prayer-body">
+                  <span className="block whitespace-pre-wrap break-words text-sm text-slate-100">{p.record.text}</span>
+                </ExpandableSpouseItem>
+              )}
+              <span className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-400">
+                <span className="min-w-0 break-words">
+                  {p.own ? 'You' : p.byName}{whoFor(p.record) ? ` · for ${whoFor(p.record)}` : ' · for both of you'}
+                  {prayedCount(p.record) > 0 && ` · prayed ${prayedCount(p.record)} ${prayedCount(p.record) === 1 ? 'time' : 'times'}`}
+                </span>
+                {p.own && <ReadMarker read={hasRead(data.activity, 'prayer', p.at, spouseUsername)} />}
               </span>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button type="button" disabled={busy} onClick={() => void prayed(p)} data-testid="beloved-prayed" className={quiet}>
@@ -336,6 +356,7 @@ export function DatesSection({ data }: { data: BelovedData }) {
   const [custom, setCustom] = useState('');
   const [showAll, setShowAll] = useState(false);
   const spouseName = data.spouse?.display_name ?? 'your spouse';
+  const spouseUsername = data.spouse?.username ?? '';
   const suggested = data.view.ideas.filter((i) => !i.record.doneAt);
   const done = data.view.ideas.filter((i) => i.record.doneAt);
   const taken = new Set(suggested.map((i) => i.record.idea).filter(Boolean));
@@ -361,11 +382,20 @@ export function DatesSection({ data }: { data: BelovedData }) {
             {suggested.map((i) => (
               <li key={i.id} className="flex min-w-0 items-center gap-3 rounded-2xl border border-rose-300/15 bg-rose-500/10 p-3" data-testid="beloved-suggested">
                 <span className="min-w-0 flex-1">
-                  <span className="block break-words font-semibold text-white">{title(i.record)}</span>
-                  <span className="block text-xs text-slate-300">{i.own ? `You suggested it` : `${i.byName} suggested it`} · {stampLabel(i.at)}</span>
+                  {i.own ? (
+                    <span className="block break-words font-semibold text-white">{title(i.record)}</span>
+                  ) : (
+                    <ExpandableSpouseItem token={data.token} kind="idea" recordId={i.id} testId="beloved-idea-body">
+                      <span className="block break-words font-semibold text-white">{title(i.record)}</span>
+                    </ExpandableSpouseItem>
+                  )}
+                  <span className="flex flex-wrap items-center gap-x-2 text-xs text-slate-300">
+                    <span className="min-w-0 break-words">{i.own ? 'You suggested it' : `${i.byName} suggested it`} · {stampLabel(i.at)}</span>
+                    {i.own && <ReadMarker read={hasRead(data.activity, 'idea', i.at, spouseUsername)} />}
+                  </span>
                 </span>
                 <button type="button" disabled={busy} data-testid="beloved-idea-done" className={quiet}
-                  onClick={() => void run(() => data.save('idea', { ...i.record, doneAt: Math.floor(Date.now() / 1000) }, { id: i.id }).then(() => undefined), 'Could not save')}>
+                  onClick={() => void run(() => data.save('idea', { ...i.record, doneAt: Math.floor(Date.now() / 1000) }, { id: i.id, notify: true }).then(() => undefined), 'Could not save')}>
                   <Check size={14} aria-hidden /> Done
                 </button>
               </li>

@@ -24,6 +24,7 @@ import PrivateGallery from './PrivateGallery';
 import BelovedPage from './beloved/BelovedPage';
 import { Lily } from './beloved/BelovedArt';
 import { useLoveIndicator } from './beloved/useLoveIndicator';
+import { useSeenVisit } from './beloved/seen';
 import { canSeeBeloved } from '../../lib/beloved/access';
 import { noSave, usePrivatePicture } from './usePrivatePicture';
 import EnvelopeBody from './EnvelopeBody';
@@ -406,6 +407,8 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   const [videoSending, setVideoSending] = useState<{ done: number; count: number } | null>(null);
   // The gallery, opened on one picture (a comment's) or on the grid.
   const [gallery, setGallery] = useState<{ blob?: string } | null>(null);
+  // A couple's gallery is a reading signal (metadata only), never a page of content.
+  useSeenVisit(token, 'gallery', gallery !== null && belovedAllowed);
   // A heart or love note notice opens the chat with ?beloved=1: straight to Beloved once unlocked.
   const [beloved, setBeloved] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('beloved') === '1');
   // The heart on the bar: hearts and love notes from your spouse you have not seen in Beloved yet.
