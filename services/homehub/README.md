@@ -464,6 +464,24 @@ through the gateway (`/api/homehub/...`).
 | `POST /hub/discovered/{id}/ignore` | `{"ignored": false}` takes it back |
 | `POST /hub/matter/commission` | `{"code", "name"?, "area_id"?}` |
 
+### Device identity over mDNS
+
+Alongside the discovery browser, HomeHub also browses identity-only mDNS service
+types (`_device-info._tcp`, `_companion-link._tcp`, `_airplay._tcp`,
+`_raop._tcp`, `_ipp._tcp`, `_printer._tcp`, `_spotify-connect._tcp`,
+`_sonos._tcp`, `_smb._tcp`, `_workstation._tcp`, `_amzn-wplay._tcp`, and
+`md`/`fn` from `_googlecast._tcp`) and keeps a small in-memory table keyed by
+IPv4 address. Each entry records the instance names seen, the host name, the
+service types, and only these TXT keys when present: `model`, `manufacturer`,
+`am`, `md`, `fn`, `ty`, `usb_MFG`, `usb_MDL`. Values are decoded as text and
+capped at 120 characters; entries expire after 24 hours and the table is capped
+at 1000 addresses (oldest dropped). Nothing is written to disk, and
+identity-only services never create findings or notices.
+
+`GET /api/network/mdns` (admins only, same auth as `/hub/discovered`) returns
+`{"devices": {"<ipv4>": entry}, "count": N}`. HomeHub only hears the LAN
+segment it is on, unless the router reflects mDNS across VLANs.
+
 Discovery also reads the kernel's neighbour table after each sweep (DHCP/ARP: HA's
 manifest MAC prefixes and host names find Reolink, Roborock and Tasmota, and every
 finding gets its MAC), browses `_hap._udp` (HomeKit over Thread, paired over
