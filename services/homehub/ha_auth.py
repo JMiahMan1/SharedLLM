@@ -486,6 +486,62 @@ class HAAuth:
                 return str(cred["username"])
         return None
 
+    def ensure_person_user(self, username: str, display_name: str | None = None,
+                           password: str | None = None, is_admin: bool = False) -> dict[str, Any]:
+        """Create or reuse a person hub user with a login credential.
+
+        Idempotent: calling again with the same username returns the existing user
+        with ``created=False``. The returned dict never contains passwords or hashes.
+        """
+        norm = normalize_username(username)
+        if len(norm) < 2:
+            raise AuthError("invalid_request", "username must be at least 2 characters", status=400)
+        raw_pw = str(password or "")
+        with self._lock:
+            users = self.store.get_kv("users", []) or []
+            # Find an existing person user (non-service, non-system-generated).
+            existing_user = None
+            for u in users:
+                if u.get("service") or u.get("system_generated"):
+                    continue
+                uid = str(u.get("id") or "")
+                cred = next((c for c in self._blob()["credentials"]
+                             if c.get("user_id") == uid and normalize_username(c.get("username", "")) == norm),
+                            None)
+                if cred is not None:
+                    existing_user = u
+                    break
+            if existing_user is None:
+                uid = uuid.uuid4().hex
+                name = str(display_name or username).strip() or norm
+                users.append({
+                    "id": uid, "name": name, "is_owner": False, "is_active": True,
+                    "system_generated": False,
+                    "group_ids": ["system-admin"] if is_admin else ["system-users"],
+                    "service": False,
+                })
+                self.store.set_kv("users", users)
+                created = True
+            else:
+                uid = str(existing_user["id"])
+                created = False
+            blob = self._blob()
+            cred = next((c for c in blob["credentials"] if c.get("user_id") == uid
+                         and normalize_username(c.get("username", "")) == norm), None)
+            if cred is None:
+                import bcrypt
+                pw_source = raw_pw or secrets.token_urlsafe(24)
+                hashed = base64.b64encode(bcrypt.hashpw(pw_source.encode("utf-8")[:72], bcrypt.gensalt())).decode()
+                cred = {"id": uuid.uuid4().hex, "user_id": uid, "username": norm, "password": hashed}
+                blob["credentials"].append(cred)
+                self._save(blob)
+            elif raw_pw:
+                import bcrypt
+                cred["password"] = base64.b64encode(bcrypt.hashpw(raw_pw.encode("utf-8")[:72], bcrypt.gensalt())).decode()
+                self._save(blob)
+        return {"user_id": uid, "username": norm, "display_name": (display_name or username).strip(),
+                "created": created, "is_admin": bool(is_admin)}
+
     def set_password(self, user_id: str, username: str | None, password: str) -> None:
         """Give a hub user a login (or a new password), stored as HA stores one: base64 of a bcrypt hash."""
         import bcrypt

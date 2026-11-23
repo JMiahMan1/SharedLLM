@@ -132,6 +132,27 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
 
         return music_assistant_server.household_server(runtime.hub)
 
+    @router.post("/hub/auth/users")
+    async def ensure_person_user(request: Request) -> dict[str, Any]:
+        """``{"username", "display_name"?, "password"?, "is_admin"?}``: provision a person hub login.
+
+        Internal-secret only: the response never leaks the password.
+        """
+        token = request.headers.get("x-internal-secret") or bearer(request.headers.get("authorization"))
+        p = auth.authenticate(token)
+        if p is None or p.user_id != "internal":
+            raise HTTPException(401, detail="Unauthorized")
+        body = await request.json() or {}
+        try:
+            return ha.ensure_person_user(
+                str((body or {}).get("username") or ""),
+                (body or {}).get("display_name"),
+                (body or {}).get("password"),
+                bool((body or {}).get("is_admin", False)),
+            )
+        except AuthError as exc:
+            raise HTTPException(exc.status, detail=exc.description or exc.code) from exc
+
     @router.post("/hub/music_assistant/accounts")
     async def music_assistant_account(request: Request) -> dict[str, Any]:
         """``{"username", "display_name"?, "token_name"?}``: that person's own MA account and a new token.
