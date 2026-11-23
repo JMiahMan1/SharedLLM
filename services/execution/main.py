@@ -142,6 +142,7 @@ from services.execution.schemas import (
     WorkspaceFileReadRequest,
     WorkspaceFileWriteRequest,
     WorkspaceLintRequest,
+    WorkspaceListRequest,
     WorkspaceSearchRequest,
     WorkspaceShellRequest,
 )
@@ -1952,6 +1953,20 @@ async def execute_workspace_lint(request: Request):
 
     req = WorkspaceLintRequest(**body)
     return await workspace.handle_workspace_lint(req)
+
+
+@app.post("/execute/workspace_list", response_model=ExecutionResult)
+async def execute_workspace_list(request: Request):
+    """List files under a path in the workspace, honouring .gitignore."""
+    body = await request.json()
+    body = _normalize_llm_body(body)
+    if "user_context" not in body:
+        body["user_context"] = {"user": "", "is_admin": True}
+    req = WorkspaceListRequest(**body)
+    res = await workspace.handle_workspace_list(req)
+    if res.status == "FAILURE":
+        raise HTTPException(status_code=400, detail=res.message)
+    return res
 
 
 @app.post("/execute/discovery_sync", response_model=ExecutionResult)

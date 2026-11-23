@@ -64,6 +64,7 @@ def index_capabilities():
         "WorkspaceFilePatchRequest": "Surgically patches a file in the local Git workspace using old_text/new_text chunks. PREFERRED for small code edits.",
         "WorkspaceShellRequest": "Executes a shell command in the workspace root. Use for advanced CLI operations.",
         "WorkspaceSearchRequest": "Performs a codebase-wide search (grep/ripgrep) to find patterns or function definitions.",
+        "WorkspaceListRequest": "Lists files under a path in the workspace, honouring .gitignore.",
         "WorkspaceLintRequest": "Runs linters (black, flake8, eslint, etc.) on a specific file to ensure code quality.",
         "WorkspaceCreateRequest": "Creates a new isolated workspace environment (id, display_name, scope).",
         "WorkspaceSettingsUpdateRequest": "Updates an existing workspace's settings (repo_url, git_remote, default_branch, display_name, sync_mode, nextcloud_path).",

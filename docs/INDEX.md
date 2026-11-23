@@ -63,6 +63,7 @@
 ## Raven
 
 - `docs/RAVEN_LEARNING_MEMORY.md`: how Raven works, its tools and its learning memory
+- `docs/RAVEN_HARNESS.md`: the workspace field kit — exact patch, numbered reads, capped search, list-files, shell output file
 - `docs/JARVIS_TRAINER.md`: the trainer around the local model: the feature catalogue derived from the code, the evaluation curriculum (repairs, sermons, image edits, memory), self-repair proven by workspace tests, dreaming's improvement backlog, and the Lab's Training tab
 - `docs/WORKSPACE_STUDIO.md`: the Workspace as a build surface: project detection (Python, Node/Vite/Next, Go, Rust, Java, .NET, static), running and testing in the sandbox, dev-server previews with published ports, generated art and narration, self-contained slide decks and playable single-file games
 
