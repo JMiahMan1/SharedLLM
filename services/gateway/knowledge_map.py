@@ -43,6 +43,7 @@ TOOL_AREAS: dict[str, str] = {
     "LightControlRequest": "home", "ClimateRequest": "home", "SecurityRequest": "home",
     "HAServiceRequest": "home", "EntitySearchRequest": "home", "LogbookRequest": "home",
     "AnnouncementRequest": "home", "DocumentBroadcastRequest": "home", "NightModeRequest": "home",
+    "DropInRequest": "home",
     "TodoListRequest": "home",
     # family
     "CalendarRequest": "family", "ChoreRequest": "family", "TimerRequest": "family",
