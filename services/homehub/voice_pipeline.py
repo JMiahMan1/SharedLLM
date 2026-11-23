@@ -138,6 +138,12 @@ FOLLOW_UP_WINDOW_S = 120.0
 NO_WAKE_WORD = "No wake word"
 #: How long the node may take to report its wake words.
 WAKE_WORD_TIMEOUT_S = 10.0
+#: A satellite that does not answer the wake word request is reconnected after this long, at most
+#: WAKE_WORD_RECONNECTS times an hour. echo-dot-assist (hassmic) takes one voice subscriber: when an
+#: earlier connection (adoption, before the encryption key) still holds it, this one is ignored, the
+#: request goes unanswered and a wake word starts nothing; a fresh connection is heard again.
+WAKE_WORD_RECONNECT_S = 60.0
+WAKE_WORD_RECONNECTS = 3
 SATELLITE_FEATURE_ANNOUNCE, SATELLITE_FEATURE_START_CONVERSATION = 1, 2  # AssistSatelliteEntityFeature
 #: Audio chunk size and pace when streaming a reply to a node's own speaker.
 STREAM_CHUNK = 1024
@@ -986,6 +992,8 @@ class SatelliteVoice:
         self.active_wake_words: list[str] = []
         self.max_active_wake_words = 0
         self.wake_word_error: str | None = None
+        #: When this satellite was reconnected for an unanswered wake word request (the last hour's).
+        self._wake_reconnects: list[float] = []
         self.log = logging.getLogger(f"homehub.voice.{driver.device_name or driver.host}")
         self._restore_history()
 
@@ -1171,6 +1179,7 @@ class SatelliteVoice:
             self.wake_word_error = f"the node did not report its wake words: {exc}"
             self.log.warning("voice satellite %s: %s", self.name, self.wake_word_error)
             self._publish_wake_word_select()
+            self._spawn(self._reconnect_for_wake_words(client), "wake word reconnect")
             return
         self.wake_words = {str(w.id): str(w.wake_word) for w in (cfg.available_wake_words or [])}
         self.active_wake_words = [str(w) for w in (cfg.active_wake_words or [])]
@@ -1190,6 +1199,24 @@ class SatelliteVoice:
             self.log.warning("voice satellite %s: none of its wake words is active, so it will not wake; choose "
                              "one with its Wake word select", self.name)
         self._publish_wake_word_select()
+
+    async def _reconnect_for_wake_words(self, client: Any) -> None:
+        """Drop the connection that got no answer, so the driver reconnects and asks again (bounded)."""
+        now = time.monotonic()
+        self._wake_reconnects = [t for t in self._wake_reconnects if now - t < 3600]
+        if len(self._wake_reconnects) >= WAKE_WORD_RECONNECTS:
+            self.log.warning("voice satellite %s: still no wake words after %d reconnects this hour; leaving it",
+                             self.name, WAKE_WORD_RECONNECTS)
+            return
+        await asyncio.sleep(WAKE_WORD_RECONNECT_S)
+        if self.client is not client or not self.wake_word_error:
+            return  # it reconnected meanwhile, or the answer came
+        self._wake_reconnects.append(time.monotonic())
+        self.log.warning("voice satellite %s: reconnecting, since a node that ignores the wake word request "
+                         "also ignores its wake word (attempt %d of %d this hour)",
+                         self.name, len(self._wake_reconnects), WAKE_WORD_RECONNECTS)
+        with contextlib.suppress(Exception):
+            await client.disconnect()
 
     def _publish_wake_word_select(self) -> None:
         sel = self._local("wake_word")

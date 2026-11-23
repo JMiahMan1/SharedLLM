@@ -801,6 +801,78 @@ async def test_a_node_that_cannot_report_its_wake_words_says_so(env, monkeypatch
 
 
 
+async def _settle():
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+async def test_a_satellite_that_ignores_the_wake_word_request_is_reconnected(env, monkeypatch):
+    """hassmic takes one voice subscriber; a stale earlier one leaves ours unheard (no wake words, no wake)."""
+    import services.homehub.voice_pipeline as vp
+
+    monkeypatch.setattr(vp, "WAKE_WORD_RECONNECT_S", 0)
+    Backends().install(monkeypatch)
+    _hub, drv = make_driver()
+    original = drv._make_client
+    dropped: list[object] = []
+
+    def ignored(host, port=None):
+        c = original(host, port)
+        c.config_error = TimeoutError("Timeout waiting for VoiceAssistantConfigurationResponse after 10.0s")
+
+        async def disconnect(force=False):
+            dropped.append(c)
+        c.disconnect = disconnect
+        return c
+
+    drv._make_client = ignored  # type: ignore[method-assign]
+    await drv.async_setup()
+    await _settle()
+    assert len(dropped) == 1 and dropped[0] is drv.voice.client
+
+
+async def test_wake_word_reconnects_are_bounded(env, monkeypatch):
+    import services.homehub.voice_pipeline as vp
+
+    monkeypatch.setattr(vp, "WAKE_WORD_RECONNECT_S", 0)
+    Backends().install(monkeypatch)
+    _hub, drv = make_driver()
+    voice = drv.voice
+    voice.wake_word_error = "the node did not report its wake words: timeout"
+    calls = []
+
+    class Client:
+        async def disconnect(self, force=False):
+            calls.append(1)
+
+    for _ in range(vp.WAKE_WORD_RECONNECTS + 2):
+        client = Client()
+        voice.client = client
+        await voice._reconnect_for_wake_words(client)
+    assert len(calls) == vp.WAKE_WORD_RECONNECTS
+
+
+async def test_no_reconnect_when_the_answer_came_or_it_reconnected_meanwhile(env, monkeypatch):
+    import services.homehub.voice_pipeline as vp
+
+    monkeypatch.setattr(vp, "WAKE_WORD_RECONNECT_S", 0)
+    Backends().install(monkeypatch)
+    _hub, drv = make_driver()
+    voice = drv.voice
+    calls = []
+
+    class Client:
+        async def disconnect(self, force=False):
+            calls.append(1)
+
+    old = Client()
+    voice.client, voice.wake_word_error = Client(), "timeout"
+    await voice._reconnect_for_wake_words(old)          # a newer connection is already there
+    voice.client, voice.wake_word_error = old, None
+    await voice._reconnect_for_wake_words(old)          # the wake words arrived
+    assert calls == []
+
+
 async def test_a_wake_word_fixed_in_firmware_is_not_reported_as_missing(env, monkeypatch, caplog):
     Backends().install(monkeypatch)
     hub, drv = make_driver()
