@@ -19446,15 +19446,33 @@ def _media_abs_book_item(book: dict) -> dict:
     }
 
 
+def _media_is_ma_audiobook(entry: Any) -> bool:
+    """Whether an MA item is an audiobook mirrored from Audiobookshelf.
+
+    Audiobooks belong to the caller's own Audiobookshelf account (``abs://...``)
+    so per-user library scope, chapters, and resume positions apply. Music
+    Assistant's shared-account ``library://audiobook/...`` copies duplicate ABS
+    results and cannot open BookPage.
+    """
+    if not isinstance(entry, dict):
+        return False
+    inner = entry.get("media_item") if isinstance(entry.get("media_item"), dict) else entry
+    media_type = str(inner.get("media_type") or entry.get("media_type") or "").strip().lower()
+    if media_type == "audiobook":
+        return True
+    uri = str(inner.get("uri") or entry.get("uri") or "").strip().lower()
+    return "://audiobook/" in uri
+
+
 @app.get("/api/media/home")
 async def get_media_home(request: Request):
     """One call for Listen Now: MA shelves + ABS last played, 4s each, partial."""
     creds = await _resolve_identity_from_request(request)
     errors = MediaErrorInfo()
 
-    async def shelf(name: str, command: str, args: dict) -> tuple[str, list[dict]]:
+    async def shelf(name: str, command: str, args: dict, *, drop: Any = None) -> tuple[str, list[dict]]:
         try:
-            return name, await _media_ma_items(request, command, args)
+            return name, await _media_ma_items(request, command, args, drop=drop)
         except _MediaUpstreamError as e:
             if errors.ma is None:
                 errors.ma = str(e)
@@ -19469,7 +19487,7 @@ async def get_media_home(request: Request):
         return [_media_abs_book_item(b) for b in detail.get("books") or []]
 
     results = await asyncio.gather(
-        shelf("recent", "music/recently_played_items", {"limit": 20}),
+        shelf("recent", "music/recently_played_items", {"limit": 20}, drop=_media_is_ma_audiobook),
         shelf("continue", "music/in_progress_items", {"limit": 20}),
         shelf("playlists", "music/playlists/library_items", {"limit": 20}),
         # Live-verified 2026-10-05: the library_items family accepts favorite=true.
@@ -19533,6 +19551,12 @@ async def search_media(request: Request, q: str = "", types: str = "", limit: in
     if isinstance(ma_result, dict):
         for key, value in ma_result.items():
             bucket = str(key).lower()
+            if bucket == "audiobooks":
+                # Audiobooks come from this listener's own Audiobookshelf account
+                # (abs://...) with per-user library scope, chapters, and resume
+                # progress. MA's audiobooks bucket mirrors a shared account and
+                # duplicates ABS items with unopenable library://audiobook/ URIs.
+                continue
             if bucket in buckets and isinstance(value, list):
                 entries = value
                 if bucket == "artists":
@@ -19657,12 +19681,32 @@ async def _media_abs_item_detail(creds: Any, item_id: str) -> dict:
             )
     else:
         for index, chapter in enumerate(media.get("chapters") or []):
+            if not isinstance(chapter, dict):
+                continue
+            raw_start = chapter.get("start") if chapter.get("start") is not None else chapter.get("startTime")
+            raw_end = chapter.get("end")
+            raw_dur = chapter.get("duration")
+            try:
+                start_val = float(raw_start) if raw_start is not None else None
+            except (TypeError, ValueError):
+                start_val = None
+            try:
+                end_val = float(raw_end) if raw_end is not None else None
+            except (TypeError, ValueError):
+                end_val = None
+            try:
+                dur_val = float(raw_dur) if raw_dur is not None else None
+            except (TypeError, ValueError):
+                dur_val = None
+            if dur_val is None and start_val is not None and end_val is not None:
+                dur_val = max(0.0, end_val - start_val)
             children.append(
                 MediaItemChild(
                     uri=f"abs://{item_id}#chapter-{index}",
                     name=chapter.get("title") or "",
                     media_type="chapter",
-                    duration=chapter.get("duration"),
+                    duration=dur_val,
+                    start=start_val,
                     index=index,
                 )
             )

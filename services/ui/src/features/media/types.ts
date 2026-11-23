@@ -71,6 +71,7 @@ export interface MediaItemChild {
   album_uri: string
   image: string
   duration: number | null
+  start?: number | null
   index: number | null
 }
 

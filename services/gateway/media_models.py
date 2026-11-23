@@ -85,6 +85,7 @@ class MediaItemChild(BaseModel):
     album_uri: str = ""
     image: str = ""
     duration: float | None = None
+    start: float | None = None
     index: int | None = None
 
 

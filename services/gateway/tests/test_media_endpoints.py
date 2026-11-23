@@ -801,3 +801,86 @@ def test_an_audiobookshelf_cover_is_its_cover_url_not_its_path_on_disk():
     assert _media_abs_cover("p1", "/api/items/p1/cover?width=400") == "/api/items/p1/cover?width=400"
     assert _media_abs_cover("p1", "https://example.org/c.jpg") == "https://example.org/c.jpg"
     assert _media_abs_cover("p1", None) == ""
+
+
+def test_abs_item_detail_computes_chapter_start_and_duration_from_start_end(client, upstream):
+    """Real Audiobookshelf chapters send ``start`` and ``end`` (seconds) with no ``duration`` field."""
+    from conftest_media import TEST_ABS_URL
+
+    mock_upstream(
+        upstream,
+        "GET",
+        f"{TEST_ABS_URL}/api/items/wild-1",
+        payload={
+            "id": "wild-1",
+            "media": {
+                "duration": 5400.0,
+                "metadata": {"title": "Wild at Heart", "authorName": "John Eldredge"},
+                "chapters": [
+                    {"id": 0, "start": 0, "end": 1800.5, "title": "Chapter 1"},
+                    {"id": 1, "start": 1800.5, "end": 3900.0, "title": "Chapter 2"},
+                    {"id": 2, "start": 3900.0, "end": 5400.0, "title": "Chapter 3"},
+                ],
+            },
+        },
+    )
+    mock_upstream(upstream, "GET", f"{TEST_ABS_URL}/api/me/progress/wild-1", status=404, payload={})
+
+    resp = client.get("/api/media/item", params={"uri": "abs://wild-1"})
+    assert resp.status_code == 200, resp.text
+    children = resp.json()["children"]
+    assert [(c["name"], c["start"], c["duration"]) for c in children] == [
+        ("Chapter 1", 0.0, 1800.5),
+        ("Chapter 2", 1800.5, 2099.5),
+        ("Chapter 3", 3900.0, 1500.0),
+    ]
+
+
+def test_search_and_home_drop_music_assistant_mirrored_audiobooks(client, upstream, ma):
+    """Audiobooks come solely from the caller's Audiobookshelf account, never duplicated by MA."""
+    ma["responses"]["music/search"] = {
+        "tracks": [{"uri": "library://track/1", "name": "Wild Things"}],
+        "audiobooks": [
+            {"uri": "library://audiobook/7", "name": "Wild at Heart (Unabridged)", "media_type": "audiobook"},
+        ],
+    }
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [{"id": "abs-wild-1", "title": "Wild at Heart (Unabridged)", "author": "John Eldredge"}],
+                "podcasts": [],
+                "authors": [],
+            },
+        },
+    )
+    body = client.get("/api/media/search", params={"q": "Wild"}).json()
+    assert [b["uri"] for b in body["audiobooks"]] == ["abs://abs-wild-1"]
+
+    # Listen Now also strips MA's mirrored audiobooks from recent so ABS books are not duplicated.
+    ma["responses"]["music/recently_played_items"] = [
+        {"uri": "library://track/1", "name": "Song", "media_type": "track"},
+        {"uri": "library://audiobook/7", "name": "Wild at Heart (Unabridged)", "media_type": "audiobook"},
+    ]
+    ma["responses"]["music/in_progress_items"] = [
+        {"uri": "library://podcast/9", "name": "Pod", "media_type": "podcast"},
+    ]
+    ma["responses"]["music/playlists/library_items"] = []
+    ma["responses"]["music/tracks/library_items"] = []
+    ma["responses"]["music/radios/library_items"] = []
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [{"id": "abs-wild-1", "title": "Wild at Heart (Unabridged)", "author": "John Eldredge"}],
+            },
+        },
+    )
+    home = client.get("/api/media/home").json()
+    assert [i["uri"] for i in home["recent"]] == ["library://track/1", "abs://abs-wild-1"]

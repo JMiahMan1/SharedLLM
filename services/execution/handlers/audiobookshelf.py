@@ -128,6 +128,24 @@ async def _handle_update_progress(abs_url: str, abs_key: str, req) -> ExecutionR
     )
 
 
+def _is_unplayable_abs_book(item: dict) -> bool:
+    """True when an ABS book item cannot be played as audio (missing, invalid, or ebook-only)."""
+    if not isinstance(item, dict):
+        return True
+    if item.get("isMissing") is True or item.get("isInvalid") is True:
+        return True
+    media = item.get("media") if isinstance(item.get("media"), dict) else {}
+    duration = media.get("duration") or 0
+    if "numAudioFiles" in media and media.get("numAudioFiles") == 0 and not duration:
+        return True
+    return (
+        "audioFiles" in media
+        and isinstance(media.get("audioFiles"), list)
+        and len(media["audioFiles"]) == 0
+        and not duration
+    )
+
+
 async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if not req.query:
         return ExecutionResult(status="FAILURE", message="Search query is required.", service="audiobookshelf")
@@ -177,6 +195,8 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
         }
 
     def _add_book(item: dict) -> None:
+        if _is_unplayable_abs_book(item):
+            return
         info = _summary(item)
         if not info["id"] or info["id"] in seen_ids:
             return
@@ -734,6 +754,8 @@ async def _handle_list(abs_url: str, abs_key: str, req) -> ExecutionResult:
     items = result.get("results", [])
     summaries = []
     for item in items[:req.limit]:
+        if _is_unplayable_abs_book(item):
+            continue
         media = item.get("media", {})
         meta = media.get("metadata", {})
         # ABS returns the cover as `media.coverPath`; older builds nest it under
@@ -834,14 +856,25 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
             is_complete = bool(record.get("isFinished", False))
             pct = _progress_pct(record)
 
-            # Build chapters info
+            # Build chapters info (ABS uses start/end in seconds; keep startTime alias for compatibility)
             chapters = media.get("chapters", [])
             chapters_list = []
             if chapters and isinstance(chapters, list):
-                chapters_list = [
-                    {"title": c.get("title", ""), "startTime": c.get("startTime", 0)}
-                    for c in chapters if c
-                ]
+                for c in chapters:
+                    if not isinstance(c, dict):
+                        continue
+                    c_start = c.get("start") if c.get("start") is not None else c.get("startTime", 0)
+                    c_end = c.get("end")
+                    c_dur = c.get("duration")
+                    if c_dur is None and isinstance(c_start, (int, float)) and isinstance(c_end, (int, float)):
+                        c_dur = max(0.0, float(c_end) - float(c_start))
+                    chapters_list.append({
+                        "title": c.get("title", ""),
+                        "start": c_start,
+                        "end": c_end,
+                        "duration": c_dur,
+                        "startTime": c_start,
+                    })
 
             # Build full metadata
             books.append({

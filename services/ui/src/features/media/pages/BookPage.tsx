@@ -77,12 +77,21 @@ export default function BookPage() {
   const current = session?.itemId === id && session.outputId === target;
   const position = current ? (target ? remotePosition : player.position) : progress * duration;
 
-  // Chapters run back to back: each starts where the ones before it end.
+  // Chapters carry an explicit `start` from Audiobookshelf (`start`/`end` in
+  // seconds); fall back to summing durations for older gateways or fixtures.
   const starts: number[] = [];
   book.children.reduce((at, c) => {
-    starts.push(at);
-    return at + (c.duration ?? 0);
+    const start = typeof c.start === 'number' && Number.isFinite(c.start) && c.start >= 0 ? c.start : at;
+    starts.push(start);
+    return start + (c.duration ?? 0);
   }, 0);
+  const activeChapter = current
+    ? book.children.findIndex((c, i) => {
+      const start = starts[i];
+      const nextStart = i + 1 < starts.length ? starts[i + 1] : (c.duration ? start + c.duration : duration);
+      return position >= start && (i === book.children.length - 1 || position < nextStart);
+    })
+    : -1;
 
   const playFrom = async (seconds: number) => {
     // A book that is not on yet starts right at the chapter: on this device and
@@ -174,6 +183,11 @@ export default function BookPage() {
                 index={i + 1}
                 showArt={false}
                 subtitle={`Starts at ${formatDuration(starts[i])}`}
+                badge={i === activeChapter ? (
+                  <span className="rounded-full bg-[var(--site-accent)]/15 px-2 py-0.5 text-[11px] font-medium text-[var(--site-accent-text)]">
+                    Playing
+                  </span>
+                ) : undefined}
                 onPlay={() => void playFrom(starts[i])}
               />
             ))}
