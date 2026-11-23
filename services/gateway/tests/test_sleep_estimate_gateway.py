@@ -15,7 +15,11 @@ def client(monkeypatch):
     async def _resolve(_request):
         return {"user": "kid", "user_id": 7, "is_admin": False}
 
+    async def _device_agent_key(_request):
+        return None
+
     monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _resolve)
+    monkeypatch.setattr(gateway_main, "_device_agent_key", _device_agent_key)
     monkeypatch.setenv("TIMEZONE", "Etc/GMT+7")
     return TestClient(app, headers={"Authorization": "Bearer test-token"})
 

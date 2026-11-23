@@ -92,6 +92,7 @@ On the router (OpenWrt, nothing to install):
 
 ```
 uci set dhcp.@dnsmasq[0].logqueries='1'
+uci set dhcp.@dnsmasq[0].logdhcp='1'
 uci set system.@system[0].log_ip='<server address>'
 uci set system.@system[0].log_port='5514'
 uci set system.@system[0].log_proto='tcp'
@@ -166,6 +167,56 @@ In Redis, on the control plane:
 
 Per-device data use shows what each family member's devices use, so Admin >
 Network is for admins only.
+
+## Devices
+
+Jarvis keeps its own record for every device on the home network in the device
+registry (``data/network/router.db``, ``devices`` table). An admin can give a
+device an alias and details (kind, make, model, OS, owner, notes) in Admin >
+Network; those hand-set values are never overwritten by detection.
+
+Identification runs each monitor pass and fills in only what is missing:
+
+- **MAC (OUI):** a locally administered (private) MAC is flagged and not
+  guessed. Otherwise the OUI is looked up in the optional
+  ``data/network/oui.csv`` (download with ``scripts/update_oui.sh``; a missing
+  file disables the lookup). Common vendors map to a make.
+- **User-Agent:** the gateway records the latest User-Agent per private LAN
+  client IP in Redis (``network:ua``). The control plane maps IP to MAC with
+  the current leases and parses the UA (iPad/iPhone/iPod, Android phone vs
+  tablet from the ``Mobile`` token and the ``SM-...`` model code, Windows,
+  Macintosh, ChromeOS, smart TVs, consoles). Safari on an iPad sends a Mac
+  UA, so the Jarvis app sends ``X-Device-Hint: touch|no-touch`` and a Mac UA
+  with touch is read as an iPad. A write happens only when an address shows a
+  new UA or its last one is 5 minutes old; the check itself is in memory.
+- **mDNS (Bonjour):** HomeHub (host network) hears what devices announce and
+  serves it at ``GET /api/network/mdns``; the control plane reads it every
+  minute (``HOMEHUB_URL``). Apple devices send their model id (``iPad13,4``,
+  ``iPhone15,2``), Chromecasts their model, printers and Sonos theirs, with no
+  app or login, so this identifies guests too. Only the segment HomeHub is on
+  is heard unless the router reflects mDNS between VLANs.
+- **DHCP fingerprint:** with dnsmasq's ``logdhcp`` on, each request's vendor
+  class (``android-dhcp-14``, ``MSFT 5.0``, ``udhcp``) and requested option
+  list are kept per MAC (``dhcp_fingerprint`` in ``router.db``) and name the
+  OS family. Every device asks for an address, so this works for guests too.
+- **DNS:** a device's lookups over the last 24 hours suggest make/OS (Apple,
+  Android, Windows, Roku, Samsung TV, Amazon, Nintendo, PlayStation, Xbox).
+- **Hostname:** names like ``iPad``, ``iPhone``, ``Galaxy-Tab``, ``DESKTOP-``,
+  ``MacBook``, ``Chromecast``, ``Roku``, ``LGwebOSTV``, ``Samsung`` set
+  kind/make.
+
+``device_name`` resolves a device as alias, then ``<make> <model>``, then
+``<kind> (<make>)``, then the router's static host name, then the DHCP
+hostname, then the MAC. The alias is used everywhere the device is reported.
+
+A MAC seen for the first time is added to the registry and admins are notified
+once (``New device on the network``) with a link to Admin > Network and an
+``Add details`` action. At most three such notices an hour are sent
+individually; the rest are grouped into one (``and N more devices joined``).
+Set ``NETWORK_NEW_DEVICE_NOTICE=0`` to turn the notice off.
+
+API (admins only, proxied by the gateway): ``GET /api/network/devices``,
+``PUT /api/network/devices/{mac}``, ``DELETE /api/network/devices/{mac}``.
 
 ## Limits
 

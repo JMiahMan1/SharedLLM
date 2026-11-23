@@ -1269,6 +1269,9 @@ services:
       - GHCR_TOKEN=${GHCR_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - ROUTER_SYSLOG_PORT=${ROUTER_SYSLOG_PORT:-5514}
+      # Admin > Network reads HomeHub's mDNS table (GET /api/network/mdns) to identify
+      # devices with no Jarvis app; empty = that source is off.
+      - HOMEHUB_URL=${HOMEHUB_URL:-}
       - NETWORK_DATA_DIR=/data/network
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

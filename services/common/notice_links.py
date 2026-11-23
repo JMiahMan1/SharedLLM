@@ -144,7 +144,7 @@ ROUTES: dict[str, Route] = {
     "identity": _r("/identity", query=("spotify",), focus=("voice",),
                    choices={"spotify": ("linked", "failed", "cancelled")},
                    description="Accounts and integrations; voice recordings waiting for an answer"),
-    "admin": _r("/admin/{section}", query=("mission",), choices={"section": ADMIN_SECTIONS}, focus=("mission",),
+    "admin": _r("/admin/{section}", query=("mission", "device"), choices={"section": ADMIN_SECTIONS}, focus=("mission",),
                 guard="admin", description="An admin tab; Raven Ops opens a mission with ?mission="),
     "lab": _r("/lab", query=("tab",), choices={"tab": ("tests", "missions", "training")}, guard="admin",
               description="Jarvis Lab"),

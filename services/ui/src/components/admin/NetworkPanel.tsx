@@ -14,6 +14,7 @@ import {
   type NetworkUsage,
 } from '../../lib/network';
 import SitesSection from './SitesSection';
+import NetworkDevices from './NetworkDevices';
 
 /**
  * Admin > Network: the home router as Jarvis sees it (docs/NETWORK.md).
@@ -138,6 +139,8 @@ export const NetworkPanel: FC = () => {
           else toast.error(next.error || "Saved, but Jarvis can't reach the router yet");
         }} />}
       </section>
+
+      <NetworkDevices />
 
       {(s.events?.length ?? 0) > 0 && (
         <section className="glass-panel p-4 sm:p-5">

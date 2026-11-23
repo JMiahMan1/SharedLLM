@@ -67,7 +67,16 @@ CREATE TABLE IF NOT EXISTS router_log (
     msg TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS router_log_time ON router_log(time);
+CREATE TABLE IF NOT EXISTS dhcp_fingerprint (
+    mac TEXT PRIMARY KEY,
+    vendor TEXT NOT NULL DEFAULT '',
+    options TEXT NOT NULL DEFAULT '',
+    last REAL NOT NULL
+);
 """
+
+#: How long the parts of one DHCP exchange are waited for.
+DHCP_EXCHANGE_SECONDS = 30
 
 # "<30>Nov 12 20:51:02 router dnsmasq[1234]: query[A] example.com from 192.0.2.7"
 # logd sends RFC 3164; the hostname is optional and some senders put a version after the priority.
@@ -81,6 +90,37 @@ _QUERY = re.compile(r"^query\[(?P<type>[A-Z0-9]+)\] (?P<domain>\S+) from (?P<ip>
 # answer from a hosts file (any path).
 _DNS_CHATTER = re.compile(r"^(forwarded|reply|cached|cached-stale|config|validation|/\S+ \S+ is |DHCP|"
                           r"query\[|dnssec|NODATA|NXDOMAIN)")
+
+
+# With dnsmasq's ``logdhcp`` on, every line of one DHCP exchange starts with its transaction
+# number: "3612345678 vendor class: android-dhcp-14", "3612345678 requested options: 1:netmask,
+# 3:router, ...", "3612345678 DHCPREQUEST(br-lan) 192.0.2.50 02:00:00:00:00:01". The vendor class
+# and the list of options a client asks for identify its OS family without any app on it.
+_DHCP_XID = re.compile(r"^(?P<xid>\d{3,}) (?P<rest>.*)$")
+_DHCP_MAC = re.compile(r"^DHCP[A-Z]+\([^)]*\) (?:[0-9.]+ )?(?P<mac>[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\b")
+_DHCP_VENDOR = re.compile(r"^vendor class: (?P<v>.+)$")
+_DHCP_OPTIONS = re.compile(r"^requested options: (?P<o>.+)$")
+_DHCP_DETAIL = re.compile(r"^(vendor class|user class|requested options|client provides name|tags|"
+                          r"available DHCP|broadcast response|sent size|next server|bootfile|"
+                          r"server name|client MAC|\s*\d+ option)")
+
+
+def _parse_dhcp(msg: str) -> tuple[str, dict[str, Any] | None]:
+    """Strip a ``logdhcp`` transaction number; returns (message, fingerprint part or None)."""
+    m = _DHCP_XID.match(msg)
+    if not m:
+        return msg, None
+    xid, rest = m.group("xid"), m.group("rest").strip()
+    part: dict[str, Any] = {"xid": xid}
+    if mm := _DHCP_MAC.match(rest):
+        part["mac"] = mm.group("mac").lower()
+    elif mv := _DHCP_VENDOR.match(rest):
+        part["vendor"] = mv.group("v").strip()
+    elif mo := _DHCP_OPTIONS.match(rest):
+        part["options"] = [o.split(":", 1)[0].strip() for o in mo.group("o").split(",") if o.strip()]
+    if _DHCP_DETAIL.match(rest):
+        part["skip"] = True
+    return rest, part
 
 
 def parse(line: str) -> dict[str, Any] | None:
@@ -99,6 +139,13 @@ def parse(line: str) -> dict[str, Any] | None:
                           "ip": q.group("ip")}
         elif _DNS_CHATTER.match(msg):
             out["skip"] = True
+    elif tag == "dnsmasq-dhcp":
+        msg, part = _parse_dhcp(msg)
+        out["msg"] = msg
+        if part is not None:
+            out["dhcp"] = part
+            if part.pop("skip", False):
+                out["skip"] = True
     return out
 
 
@@ -129,10 +176,26 @@ class Store:
                 [(h, dev, ip, dom, n, last) for (h, dev, dom), (ip, n, last) in lookups.items()])
             db.executemany("INSERT INTO router_log(time, level, source, msg) VALUES (?,?,?,?)", lines)
 
+    def write_fingerprints(self, rows: list[tuple[str, str, str, float]]) -> None:
+        """(mac, vendor, options "1,3,6", time); an empty field keeps what is stored."""
+        with self._connect() as db:
+            db.executemany(
+                "INSERT INTO dhcp_fingerprint(mac, vendor, options, last) VALUES (?,?,?,?) "
+                "ON CONFLICT(mac) DO UPDATE SET "
+                "vendor = CASE WHEN excluded.vendor != '' THEN excluded.vendor ELSE vendor END, "
+                "options = CASE WHEN excluded.options != '' THEN excluded.options ELSE options END, "
+                "last = excluded.last", rows)
+
+    def fingerprints(self) -> dict[str, dict[str, Any]]:
+        with self._connect() as db:
+            return {mac: {"vendor": v, "options": o, "last": last}
+                    for mac, v, o, last in db.execute("SELECT mac, vendor, options, last FROM dhcp_fingerprint")}
+
     def prune(self, now: float) -> None:
         cutoff = now - RETENTION_DAYS * 86400
         with self._connect() as db:
             db.execute("DELETE FROM dns_hourly WHERE hour < ?", (_local_hour(cutoff),))
+            db.execute("DELETE FROM dhcp_fingerprint WHERE last < ?", (cutoff,))
             db.execute("DELETE FROM router_log WHERE time < ?", (cutoff,))
 
     # -- reads (Admin > Network) ---------------------------------------------------------------
@@ -177,6 +240,9 @@ class Receiver:
         self.q: queue.Queue[tuple[float, str]] = queue.Queue(maxsize=100_000)
         self.dropped = 0
         self.refused: set[str] = set()
+        # logdhcp transaction number -> {"mac", "vendor", "options", "t"}; the parts of one
+        # exchange can arrive in either order and across drains.
+        self.dhcp: dict[str, dict[str, Any]] = {}
 
     def accept(self, sender: str, line: str, now: float | None = None) -> None:
         allowed = self.allowed()
@@ -203,6 +269,15 @@ class Receiver:
                 break
             n += 1
             e = parse(raw)
+            if e is not None and e.get("dhcp"):
+                part = e["dhcp"]
+                cur = self.dhcp.setdefault(part["xid"], {"t": t})
+                cur["t"] = t
+                if "options" in part:
+                    cur.setdefault("options", []).extend(part["options"])
+                for key in ("mac", "vendor"):
+                    if key in part:
+                        cur[key] = part[key]
             if e is None or e.get("skip"):
                 continue
             dns = e.get("dns")
@@ -217,7 +292,21 @@ class Receiver:
             lookups[k] = [dns["ip"], (cur[1] if cur else 0) + 1, t]
         if lookups or lines:
             self.store.write(lookups, lines)
+        self._flush_dhcp(time.time())
         return n
+
+    def _flush_dhcp(self, now: float) -> None:
+        """Store each exchange's fingerprint once its MAC is known; forget stale exchanges."""
+        rows = []
+        for xid, cur in list(self.dhcp.items()):
+            if cur.get("mac") and (cur.get("vendor") or cur.get("options")):
+                rows.append((cur["mac"], cur.get("vendor", ""), ",".join(cur.get("options", [])), cur["t"]))
+            if now - cur["t"] > DHCP_EXCHANGE_SECONDS:
+                self.dhcp.pop(xid, None)
+        if len(self.dhcp) > 2000:
+            self.dhcp.clear()
+        if rows:
+            self.store.write_fingerprints(rows)
 
 
 class _Handler(socketserver.StreamRequestHandler):

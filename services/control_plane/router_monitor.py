@@ -35,6 +35,10 @@ import time
 from typing import Any
 
 from services.common import notice_links
+from services.common import notify as _notify_mod
+from services.control_plane import device_identity as di
+from services.control_plane import mdns_peers
+from services.control_plane import network_devices as nd
 from services.control_plane.admin_notice import notify_admins
 from services.control_plane.router_client import CertificateChanged, RouterClient, RouterError
 
@@ -302,22 +306,76 @@ def internet_up(probes=INTERNET_PROBES, timeout: float = 4) -> bool:
 # ---------------------------------------------------------------- analysing
 
 
-def device_name(mac: str, snap: dict[str, Any]) -> tuple[str, str | None]:
-    """The router's name for a device and its address, else its MAC."""
+_REGISTRY_CACHE: dict[str, Any] = {}
+
+
+def set_registry_cache(registry: Any) -> None:
+    global _REGISTRY_CACHE
+    out: dict[str, Any] = {}
+    if isinstance(registry, dict):
+        out = {str(k).lower(): v for k, v in registry.items()}
+    elif isinstance(registry, (list, tuple)):
+        for r in registry:
+            if isinstance(r, dict) and r.get("mac"):
+                out[str(r["mac"]).lower()] = r
+    _REGISTRY_CACHE = out
+
+
+def _registry_record(mac: str, registry: Any = None) -> dict[str, Any] | None:
+    reg = registry if registry is not None else _REGISTRY_CACHE
+    if isinstance(reg, dict):
+        return reg.get(mac.lower())
+    if isinstance(reg, (list, tuple)):
+        for r in reg:
+            if isinstance(r, dict) and str(r.get("mac", "")).lower() == mac.lower():
+                return r
+    return None
+
+
+def device_name(mac: str, snap: dict[str, Any], registry: Any = None) -> tuple[str, str | None]:
+    """The name for a device and its address.
+
+    Alias first, then a known make/model, then a kind with its make, then the
+    router's static host name, then the DHCP hostname, then the MAC.
+    """
     mac = mac.lower()
-    lease = next((le for le in snap.get("leases", []) if le["mac"] == mac), None)
-    name = snap.get("hosts", {}).get(mac) or (lease or {}).get("name") or mac
-    return name, (lease or {}).get("ip") or snap.get("host_ips", {}).get(mac)
+    rec = _registry_record(mac, registry)
+    name: str | None = None
+    if rec:
+        if rec.get("alias"):
+            name = rec["alias"]
+        elif rec.get("make") and rec.get("model"):
+            name = f"{rec['make']} {rec['model']}"
+        elif rec.get("kind") and rec.get("make"):
+            name = f"{rec['kind']} ({rec['make']})"
+    if not name:
+        static_name = (snap.get("hosts") or {}).get(mac)
+        lease = next((le for le in snap.get("leases", []) if le.get("mac") == mac), None)
+        dhcp_name = (lease or {}).get("name") or ""
+        if static_name:
+            name = static_name
+        elif dhcp_name:
+            name = dhcp_name
+        else:
+            name = mac
+    lease = next((le for le in snap.get("leases", []) if le.get("mac") == mac), None)
+    ip = (lease or {}).get("ip") or (snap.get("host_ips") or {}).get(mac)
+    return name, ip
 
 
-def _label(mac: str, snap: dict[str, Any]) -> str:
-    name, ip = device_name(mac, snap)
+def _label(mac: str, snap: dict[str, Any], registry: Any = None) -> str:
+    name, ip = device_name(mac, snap, registry)
     return f"{name} ({ip})" if ip and ip not in name else name
 
 
-def _notice(title: str, body: str, tag: str, priority: int = 3) -> dict[str, Any]:
-    return {"title": title, "body": body, "tag": tag, "priority": priority,
-            "data": {"link": notice_links.link("admin", section="network")}}
+def _notice(title: str, body: str, tag: str, priority: int = 3, actions: list[Any] | None = None,
+            link: Any = None) -> dict[str, Any]:
+    target = link if link is not None else notice_links.link("admin", section="network")
+    out: dict[str, Any] = {"title": title, "body": body, "tag": tag, "priority": priority,
+                           "data": {"link": target}}
+    if actions:
+        out["actions"] = actions
+    return out
 
 
 def _minutes(seconds: float) -> str:
@@ -357,7 +415,8 @@ def channel_load(prev: dict[str, Any] | None, snap: dict[str, Any], elapsed_s: f
     return list(by_phy.values())
 
 
-def airtime_notices(state: dict[str, Any], loads: list[dict[str, Any]], snap: dict[str, Any]) -> list[dict[str, Any]]:
+def airtime_notices(state: dict[str, Any], loads: list[dict[str, Any]], snap: dict[str, Any],
+                    registry: Any = None) -> list[dict[str, Any]]:
     notices = []
     windows = state.setdefault("airtime", {})
     for load in loads:
@@ -379,8 +438,8 @@ def airtime_notices(state: dict[str, Any], loads: list[dict[str, Any]], snap: di
             if busy >= HOG_BUSY_PCT and share >= HOG_SHARE_PCT and w["hog"] != mac:
                 w["hog"] = mac
                 notices.append(_notice(
-                    f"{device_name(mac, snap)[0]} is crowding the {load['band']} Wi-Fi",
-                    f"{_label(mac, snap)} used about {share:.0f}% of the airtime on {where} over the last "
+                    f"{device_name(mac, snap, registry)[0]} is crowding the {load['band']} Wi-Fi",
+                    f"{_label(mac, snap, registry)} used about {share:.0f}% of the airtime on {where} over the last "
                     f"{AIRTIME_WINDOW} minutes, and the channel was {busy:.0f}% busy. Other devices on it may "
                     f"lose their connection. A network cable, or moving it to 5 GHz, would fix it.",
                     f"admin:network:airtime:{load['phy']}", priority=4))
@@ -397,7 +456,7 @@ def airtime_notices(state: dict[str, Any], loads: list[dict[str, Any]], snap: di
     return notices
 
 
-def flap_notices(state: dict[str, Any], snap: dict[str, Any], now: float) -> list[dict[str, Any]]:
+def flap_notices(state: dict[str, Any], snap: dict[str, Any], now: float, registry: Any = None) -> list[dict[str, Any]]:
     """A device that reconnects to Wi-Fi again and again (from hostapd's log)."""
     seen = state.setdefault("connects", {})
     told = state.setdefault("flap_told", {})
@@ -415,8 +474,8 @@ def flap_notices(state: dict[str, Any], snap: dict[str, Any], now: float) -> lis
         if len(times) >= FLAP_CONNECTS and (mac not in told or now - told[mac] >= FLAP_REPEAT_S):
             told[mac] = now
             notices.append(_notice(
-                f"{device_name(mac, snap)[0]} keeps dropping off Wi-Fi",
-                f"{_label(mac, snap)} reconnected {len(times)} times in the last {FLAP_WINDOW_S // 60} "
+                f"{device_name(mac, snap, registry)[0]} keeps dropping off Wi-Fi",
+                f"{_label(mac, snap, registry)} reconnected {len(times)} times in the last {FLAP_WINDOW_S // 60} "
                 f"minutes. Weak signal or Wi-Fi power saving on the device are the usual causes; if it "
                 f"also has a cable, its Wi-Fi can be turned off.",
                 f"admin:network:flap:{mac}", priority=2))
@@ -524,7 +583,8 @@ def router_notices(state: dict[str, Any], snap: dict[str, Any] | None, now: floa
     return notices
 
 
-def status_view(snap: dict[str, Any], loads: list[dict[str, Any]], internet: bool, now: float) -> dict[str, Any]:
+def status_view(snap: dict[str, Any], loads: list[dict[str, Any]], internet: bool, now: float,
+                registry: Any = None) -> dict[str, Any]:
     """What Admin > Network shows: names resolved, numbers ready to display."""
     share = {(c["mac"], c["ssid"]): c["share_pct"] for load in loads for c in load["clients"]}
     busy = {load["phy"]: load["busy_pct"] for load in loads}
@@ -532,7 +592,7 @@ def status_view(snap: dict[str, Any], loads: list[dict[str, Any]], internet: boo
     for r in snap.get("radios", []):
         clients = []
         for c in r["clients"]:
-            name, ip = device_name(c["mac"], snap)
+            name, ip = device_name(c["mac"], snap, registry)
             clients.append({"mac": c["mac"], "name": name, "ip": ip, "signal": c["signal"],
                             "rx_mbps": round(c["rx_kbps"] / 1000, 1), "tx_mbps": round(c["tx_kbps"] / 1000, 1),
                             "airtime_pct": share.get((c["mac"], r["ssid"])),
@@ -554,18 +614,18 @@ def status_view(snap: dict[str, Any], loads: list[dict[str, Any]], internet: boo
         "conntrack": snap.get("conntrack", {}),
         # For data use: every device the router knows by name (wired too),
         # and each local network's address range.
-        "devices": _known_devices(snap),
+        "devices": _known_devices(snap, registry),
         "networks": [{"name": i["name"], "cidr": i["ipv4"][0]} for i in snap.get("interfaces", [])
                      if i["ipv4"] and not (i["name"] or "").startswith(("wan", "loopback"))],
     }
 
 
-def _known_devices(snap: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _known_devices(snap: dict[str, Any], registry: Any = None) -> dict[str, dict[str, Any]]:
     macs = {le["mac"] for le in snap.get("leases", []) if le["mac"]} | set(snap.get("hosts", {}))
     macs |= {c["mac"] for r in snap.get("radios", []) for c in r["clients"]}
     out = {}
     for mac in macs:
-        name, ip = device_name(mac, snap)
+        name, ip = device_name(mac, snap, registry)
         out[mac] = {"name": name, "ip": ip}
     return out
 
@@ -731,9 +791,158 @@ class Monitor:
             self._save(status)
             return status
 
+        # Device registry: identify and track every device seen this pass.
+        store = nd.store()
+        registry: dict[str, Any] = {}
+        new_macs: list[str] = []
+        if store is not None:
+            online_macs: set[str] = set()
+            for le in snap.get("leases", []) or []:
+                if le.get("mac"):
+                    online_macs.add(str(le["mac"]).lower())
+            for mac in (snap.get("hosts") or {}):
+                online_macs.add(str(mac).lower())
+            for r in snap.get("radios", []) or []:
+                for c in r.get("clients", []) or []:
+                    if c.get("mac"):
+                        online_macs.add(str(c["mac"]).lower())
+
+            for mac in online_macs:
+                existed = store.get(mac) is not None
+                store.ensure(mac, now, touch=True)
+                store.set_private_mac(mac, di.is_private_mac(mac))
+                if not existed:
+                    new_macs.append(mac)
+                if di.is_private_mac(mac):
+                    pass
+                else:
+                    updates: dict[str, Any] = {}
+                    mk = di.oui_make(mac)
+                    if mk:
+                        updates["make"] = mk
+                        kind = di.make_to_kind(mk)
+                        if kind:
+                            updates["kind"] = kind
+                    if updates:
+                        store.apply_detection(mac, updates, "oui")
+            # UA-based identification: map the captured per-IP UAs to MACs.
+            try:
+                ua_rows = self.r.hgetall("network:ua") or {}
+            except Exception:
+                ua_rows = {}
+            ip_to_mac: dict[str, str] = {}
+            for le in snap.get("leases", []) or []:
+                if le.get("ip") and le.get("mac"):
+                    ip_to_mac[str(le["ip"])] = str(le["mac"]).lower()
+            for ip, raw in ua_rows.items():
+                mac = ip_to_mac.get(str(ip))
+                if not mac or store.get(mac) is None:
+                    continue
+                try:
+                    data = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                parsed = di.parse_user_agent(data.get("ua"))
+                if parsed:
+                    store.apply_detection(mac, parsed, "user_agent")
+            # mDNS (Bonjour, through HomeHub): what a device says it is. Needs no app or
+            # login, so it covers guests; an Apple model id tells an iPad from an iPhone.
+            for ip, entry in mdns_peers.fetch().items():
+                mac = ip_to_mac.get(ip)
+                if mac and store.get(mac) is not None:
+                    inferred = di.infer_from_mdns(entry)
+                    if inferred:
+                        store.apply_detection(mac, inferred, "mdns")
+            # DHCP fingerprints (dnsmasq logdhcp): the OS family, fills only missing values.
+            try:
+                import services.control_plane.router_syslog as _rs_fp
+                fp_store = _rs_fp.store()
+                fingerprints = fp_store.fingerprints() if fp_store is not None else {}
+            except Exception:
+                log.debug("DHCP fingerprints unavailable", exc_info=True)
+                fingerprints = {}
+            for mac, fp in fingerprints.items():
+                if store.get(mac) is not None:
+                    inferred = di.infer_from_dhcp(fp.get("vendor"), fp.get("options"))
+                    if inferred:
+                        store.apply_detection(mac, inferred, "dhcp", only_if_missing=True)
+            # DNS-based identification (fills only missing values).
+            rsyslog_store = None
+            try:
+                import services.control_plane.router_syslog as _rs
+                rsyslog_store = _rs.store()
+            except Exception:
+                rsyslog_store = None
+            if rsyslog_store is not None:
+                try:
+                    sites = rsyslog_store.sites(now - 24 * 3600, None, 100000)
+                except Exception:
+                    sites = []
+                by_dev: dict[str, list[str]] = {}
+                for row in sites or []:
+                    by_dev.setdefault(str(row.get("device", "")).lower(), []).append(str(row.get("domain", "")))
+                for dev, domains in by_dev.items():
+                    if store.get(dev) is None:
+                        continue
+                    inferred = di.infer_from_dns(domains)
+                    if inferred:
+                        store.apply_detection(dev, inferred, "dns", only_if_missing=True)
+            # Hostname patterns (fills only missing values).
+            for mac in online_macs:
+                if store.get(mac) is None:
+                    continue
+                lease = next((le for le in snap.get("leases", []) or [] if str(le.get("mac", "")).lower() == mac), None)
+                host_name = (snap.get("hosts") or {}).get(mac)
+                name = host_name or ((lease or {}).get("name") if lease else None)
+                if name:
+                    inferred = di.infer_from_hostname(name)
+                    if inferred:
+                        store.apply_detection(mac, inferred, "hostname", only_if_missing=True)
+
+            registry = {r["mac"]: r for r in store.list()}
+            set_registry_cache(registry)
+
+            # New device notices.
+            new_device_notice = os.getenv("NETWORK_NEW_DEVICE_NOTICE", "1") != "0"
+            if new_device_notice and new_macs:
+                nd_state = self.state.setdefault("new_device_notices", {
+                    "hour": int(now // 3600), "individual": 0, "pending": [], "group_sent": False,
+                })
+                if nd_state.get("hour") != int(now // 3600):
+                    self.state["new_device_notices"] = {
+                        "hour": int(now // 3600), "individual": 0, "pending": [], "group_sent": False,
+                    }
+                    nd_state = self.state["new_device_notices"]
+                for mac in new_macs:
+                    if nd_state.get("individual", 0) < 3:
+                        nd_state["individual"] = nd_state.get("individual", 0) + 1
+                        rec = store.get(mac) or {}
+                        best_name = device_name(mac, snap, registry)[0]
+                        kind_guess = rec.get("kind") or "unknown device"
+                        link_obj = notice_links.link("admin", section="network", device=mac)
+                        notices.append(_notice(
+                            "New device on the network",
+                            f"{best_name} joined ({kind_guess}). Add its details so Jarvis knows it.",
+                            f"admin:network:new-device:{mac}",
+                            priority=3,
+                            actions=[_notify_mod.view_action(link_obj, "Add details")],
+                            link=link_obj,
+                        ))
+                    else:
+                        nd_state.setdefault("pending", []).append(mac)
+                if nd_state.get("pending") and not nd_state.get("group_sent"):
+                    nd_state["group_sent"] = True
+                    n = len(nd_state["pending"])
+                    notices.append(_notice(
+                        "New devices on the network",
+                        f"and {n} more devices joined. Add their details so Jarvis knows them.",
+                        "admin:network:new-device:group",
+                        priority=3,
+                    ))
+
         loads = channel_load(self.prev, snap, now - self.prev_at)
-        notices += airtime_notices(self.state, loads, snap)
-        notices += flap_notices(self.state, snap, now)
+        notices += airtime_notices(self.state, loads, snap, registry)
+        notices += flap_notices(self.state, snap, now, registry)
         notices += capacity_notices(self.state, snap)
         self._record(notices, now)
 
@@ -758,7 +967,7 @@ class Monitor:
 
         status = {"configured": True, "connected": True, "error": None, "usage_source": usage_source,
                   "usage_problem": snap.get("usage_problem"),
-                  **status_view(snap, loads, internet, now)}
+                  **status_view(snap, loads, internet, now, registry)}
         self.prev, self.prev_at = snap, now
         self._save(status)
         return status

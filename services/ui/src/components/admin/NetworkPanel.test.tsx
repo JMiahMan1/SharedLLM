@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import NetworkPanel from './NetworkPanel';
 import { api } from '../../services/api';
 import type { NetworkStatus } from '../../lib/network';
@@ -20,6 +21,10 @@ vi.mock('../../services/api', () => ({
       bucket: 'hour',
     })),
     getInternetOutages: vi.fn(async () => ({ days: 30, outages: [{ start: 1_792_000_000, end: 1_792_001_080, minutes: 18 }] })),
+    getNetworkDevices: vi.fn(async () => ({ devices: [] })),
+    updateNetworkDevice: vi.fn(async () => ({ status: 'ok' })),
+    forgetNetworkDevice: vi.fn(async () => ({ status: 'ok' })),
+    getUsers: vi.fn(async () => []),
   },
 }));
 
@@ -42,7 +47,7 @@ const HOGGED: NetworkStatus = {
 
 function renderPanel() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={qc}><NetworkPanel /></QueryClientProvider>);
+  return render(<QueryClientProvider client={qc}><MemoryRouter><NetworkPanel /></MemoryRouter></QueryClientProvider>);
 }
 
 describe('NetworkPanel', () => {

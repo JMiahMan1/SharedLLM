@@ -22364,3 +22364,21 @@ async def internal_llm_complete(request: Request):
     if not content:
         raise HTTPException(status_code=502, detail="The model returned an empty answer.")
     return {"content": content, "model": model}
+
+
+_NETWORK_UA_TASKS: set = set()
+
+
+@app.middleware("http")
+async def capture_network_user_agent(request: Request, call_next):
+    try:
+        from services.gateway import network_ua
+
+        hit = network_ua.due(request)
+        if hit:
+            task = asyncio.create_task(asyncio.to_thread(network_ua.write, *hit))
+            _NETWORK_UA_TASKS.add(task)
+            task.add_done_callback(_NETWORK_UA_TASKS.discard)
+    except Exception:
+        log.debug("network user-agent capture skipped", exc_info=True)
+    return await call_next(request)

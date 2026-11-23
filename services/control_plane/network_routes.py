@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from services.common.secrets import secret_matches
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, REDIS_URL
+from services.control_plane import network_devices as nd
 from services.control_plane import router_monitor as rm
 from services.control_plane import router_syslog
 
@@ -246,3 +247,71 @@ def outages(days: int = 30):
             break
         out.append({**o, "minutes": round((o["end"] - o["start"]) / 60)})
     return {"days": days, "outages": out}
+
+
+@router.get("/devices")
+def network_devices():
+    store = nd.store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Device registry unavailable")
+    current = json.loads(monitor().r.get(rm.STATUS_KEY) or "{}")
+    known = current.get("devices") or {}
+    band_by_mac: dict[str, str] = {}
+    for radio in current.get("radios", []) or []:
+        for c in radio.get("clients", []) or []:
+            if c.get("mac"):
+                band_by_mac[str(c["mac"]).lower()] = radio.get("band")
+    now = time.time()
+    out = []
+    for rec in store.list():
+        mac = rec["mac"]
+        info = known.get(mac) or {}
+        last_seen = rec.get("last_seen")
+        online = last_seen is not None and (now - float(last_seen)) <= 180
+        out.append({
+            "mac": mac,
+            "alias": rec.get("alias"),
+            "kind": rec.get("kind"),
+            "make": rec.get("make"),
+            "model": rec.get("model"),
+            "os": rec.get("os"),
+            "owner": rec.get("owner"),
+            "notes": rec.get("notes"),
+            "first_seen": rec.get("first_seen"),
+            "last_seen": last_seen,
+            "private_mac": bool(rec.get("private_mac")),
+            "kind_source": rec.get("kind_source"),
+            "make_source": rec.get("make_source"),
+            "model_source": rec.get("model_source"),
+            "os_source": rec.get("os_source"),
+            "ip": info.get("ip"),
+            "online": online,
+            "band": band_by_mac.get(mac),
+        })
+    return {"devices": out}
+
+
+@router.put("/devices/{mac}")
+def update_network_device(mac: str, body: dict[str, Any] | None = None):
+    mac = mac.lower()
+    store = nd.store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Device registry unavailable")
+    body = body or {}
+    fields: dict[str, Any] = {}
+    for key in ("alias", "kind", "make", "model", "os", "owner", "notes"):
+        if key in body:
+            fields[key] = body.get(key)
+    if "kind" in fields and fields["kind"] not in (None, "") and fields["kind"] not in nd.KINDS:
+        raise HTTPException(status_code=400, detail="Unknown device kind")
+    store.set_manual(mac, fields)
+    return {"status": "ok"}
+
+
+@router.delete("/devices/{mac}")
+def delete_network_device(mac: str):
+    store = nd.store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Device registry unavailable")
+    store.delete(mac.lower())
+    return {"status": "ok"}
