@@ -668,6 +668,7 @@ class WorkspaceFileReadRequest(BaseRequest):
     path: str = Field(..., alias="file_path", description="Path relative to workspace root (e.g. 'services/gateway/main.py')")
     offset_lines: int = Field(0, ge=0, description="Start reading from this line number (1-indexed)")
     limit_lines: int = Field(1000, ge=1, le=5000, description="Max lines to read")
+    line_numbers: bool = Field(False, description="Prefix each line with its number ('  12| text') and report next_offset (the agent's read tool turns this on)")
     summary_only: bool = Field(False, description="If true, returns only class/function signatures and docstrings (semantic map)")
 
     @model_validator(mode="before")
@@ -705,6 +706,7 @@ class ReplacementChunk(BaseModel):
     model_config = {"extra": "ignore", "populate_by_name": True}
     old_text: str = Field(..., alias="target_content", description="The exact text to be replaced")
     new_text: str = Field(..., alias="replacement_content", description="The replacement text")
+    replace_all: bool = Field(False, description="Replace all occurrences instead of requiring exactly one match")
 
     @model_validator(mode="before")
     @classmethod
@@ -819,6 +821,18 @@ class WorkspaceSearchRequest(BaseRequest):
     path: str = Field(".", description="Search directory relative to root")
     include: str | None = Field(None, description="Glob pattern to include (e.g. '*.py')")
     exclude: str | None = Field(None, description="Glob pattern to exclude (e.g. '**/tests/**')")
+    glob: str | None = Field(None, description="Glob pattern to filter result files (e.g. '*.py')")
+    max_results: int = Field(100, ge=1, le=1000, description="Total match cap (default 100)")
+
+class WorkspaceListRequest(BaseRequest):
+    """
+    Lists files under a path in the Git workspace.
+    Honours .gitignore via ripgrep's --files flag.
+    """
+    user_context: UserContext
+    path: str = Field(".", description="Directory to list relative to root")
+    glob: str | None = Field(None, description="Glob pattern to filter (e.g. '*.py')")
+    max_entries: int = Field(300, ge=1, le=5000, description="Max entries to return (default 300)")
 
 class WorkspaceLintRequest(BaseRequest):
     """

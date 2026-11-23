@@ -122,7 +122,8 @@ THINKING_PATTERNS = [
 WORKSPACE_TOOL_ACTIONS = {
     "workspacefilereadrequest", "workspacefilewriterequest",
     "workspacefilepatchrequest", "workspaceshellrequest",
-    "workspacesearchrequest", "workspacelintrequest",
+    "workspacesearchrequest", "workspacelistrequest",
+    "workspacelintrequest",
     "gitoperationrequest", "workspacebootstraprequest",
     "workspacesettingsupdaterequest", "workspaceportexposerequest",
 }
@@ -580,7 +581,8 @@ ALLOWED_TOOLS = {
     "volumeinventoryrequest", "workspacefilereadrequest",
     "workspacefilewriterequest", "workspacefilepatchrequest",
     "workspacelintrequest", "workspacesearchrequest",
-    "workspaceshellrequest", "storagefilereadrequest",
+    "workspaceshellrequest", "workspacelistrequest",
+    "storagefilereadrequest",
     "storagefilewriterequest", "storagelistrequest", "workspacebootstraprequest",
     "workspacecreaterequest", "workspacesettingsupdaterequest",
     "systemlearningrequest", "redisinspectrequest", "discoverysyncrequest", "storageindexrequest",
@@ -4234,6 +4236,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 regex_aliases = [
                     (r'.*workspace.*shell.*', "workspaceshellrequest"),
                     (r'.*workspace.*search.*', "workspacesearchrequest"),
+                    (r'.*workspace.*list.*', "workspacelistrequest"),
                     (r'.*workspace.*lint.*', "workspacelintrequest"),
                     (r'.*workspace.*read.*', "workspacefilereadrequest"),
                     (r'.*workspace.*write.*', "workspacefilewriterequest"),
@@ -4304,7 +4307,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 else:
                     # Build a helpful tool table for the LLM
                     tool_categories = {
-                        "Workspace Tools": ["workspacefilereadrequest", "workspacefilewriterequest", "workspacefilepatchrequest", "workspacelintrequest", "workspacesearchrequest", "workspaceshellrequest", "workspacebootstraprequest", "workspacecreaterequest", "workspacesettingsupdaterequest"],
+                        "Workspace Tools": ["workspacefilereadrequest", "workspacefilewriterequest", "workspacefilepatchrequest", "workspacelintrequest", "workspacesearchrequest", "workspacelistrequest", "workspacebootstraprequest", "workspacecreaterequest", "workspacesettingsupdaterequest"],
                         "Git Tools": ["gitoperationrequest"],
                         "Storage Tools": ["storagefilereadrequest", "storagefilewriterequest", "storagelistrequest", "storageindexrequest"],
                         "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest", "ttsrequest", "sttrequest", "audiobookregeneraterequest"],
@@ -4401,6 +4404,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "workspacefilepatchrequest": (EXECUTION_SVC, "/execute/workspace_file_patch"),
                 "workspacelintrequest": (EXECUTION_SVC, "/execute/workspace_lint"),
                 "workspacesearchrequest": (EXECUTION_SVC, "/execute/workspace_search"),
+                "workspacelistrequest": (EXECUTION_SVC, "/execute/workspace_list"),
                 "workspaceshellrequest": (EXECUTION_SVC, "/execute/workspace_shell"),
                 "workspacecreaterequest": (WORKSPACE_RUNTIME_SVC, "/workspaces"),
                 "workspacesettingsupdaterequest": (WORKSPACE_RUNTIME_SVC, "/workspaces/{workspace_id}"),
@@ -4608,12 +4612,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 _ws_actions = {
                     "workspacefilereadrequest", "workspacefilewriterequest",
                     "workspacefilepatchrequest", "workspaceshellrequest",
-                    "workspacesearchrequest", "workspacelintrequest",
+                    "workspacesearchrequest", "workspacelistrequest",
+                    "workspacelintrequest",
                     "gitoperationrequest", "workspacebootstraprequest",
                     "workspacesettingsupdaterequest",
                     "ocrrequest", "imageeditrequest",
                     "podcastrenderrequest", "speakeridentifyrequest",
                 }
+                if lookup_action == "workspacefilereadrequest" and isinstance(payload, dict):
+                    # Field kit: the agent reads numbered 300-line windows so it can cite and
+                    # continue exact lines; other callers (Raven memory, MDM) get plain text.
+                    payload.setdefault("line_numbers", True)
+                    payload.setdefault("limit_lines", 300)
                 if workspace_id and isinstance(payload, dict) and lookup_action in _ws_actions:
                     payload["workspace_id"] = workspace_id
                     if _git_batch:

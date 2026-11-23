@@ -127,6 +127,9 @@ class StorageStatusRequest(BaseModel):
 
 class WorkspaceFileReadRequest(BaseModel):
     path: str
+    offset_lines: int = 0
+    limit_lines: int = 300
+    summary_only: bool = False
 
 class WorkspaceFileWriteRequest(BaseModel):
     path: str
@@ -135,6 +138,7 @@ class WorkspaceFileWriteRequest(BaseModel):
 class PatchChunk(BaseModel):
     old_text: str = Field(..., alias="target_content", description="The exact text to find and replace")
     new_text: str = Field(..., alias="replacement_content", description="The new text to replace it with")
+    replace_all: bool = False
 
     model_config = {"populate_by_name": True}
 
@@ -148,6 +152,19 @@ class WorkspaceFilePatchRequest(BaseModel):
 
 class WorkspaceShellRequest(BaseModel):
     command: str
+
+class WorkspaceSearchRequest(BaseModel):
+    query: str
+    path: str = "."
+    include: str | None = None
+    exclude: str | None = None
+    glob: str | None = None
+    max_results: int = 100
+
+class WorkspaceListRequest(BaseModel):
+    path: str = "."
+    glob: str | None = None
+    max_entries: int = 300
 
 class GitOperationRequest(BaseModel):
     workspace_id: str | None = Field(None, description="Workspace ID (uses default if not specified)")
