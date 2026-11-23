@@ -587,7 +587,7 @@ ALLOWED_TOOLS = {
     "dockercomposerequest", "identityrequest", "identitymanagerequest", "controlplanerequest", "restart_service",
     "audiobookshelfrequest", "biblerequest", "calibrerequest", "llminforequest", "contextsearchrequest", "haconfigrequest",
     "entitysearchrequest", "logbookrequest", "executionlogrequest",
-    "documentbroadcastrequest", "nightmoderequest", "ttsrequest", "sttrequest", "storagetexttorequest",
+    "documentbroadcastrequest", "nightmoderequest", "dropinrequest", "ttsrequest", "sttrequest", "storagetexttorequest",
     "audiobookregeneraterequest",
     "aicapabilitiesrequest",
     # Advertised by tool_builder._Tool and dispatched by prose_tools, but absent
@@ -4238,6 +4238,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "executionlogrequest": (EXECUTION_SVC, "/execute/logs"),
                 "documentbroadcastrequest": (EXECUTION_SVC, "/execute/composite/broadcast"),
                 "nightmoderequest": (EXECUTION_SVC, "/execute/composite/night_mode"),
+                "dropinrequest": (EXECUTION_SVC, "/execute/drop_in"),
                 "ttsrequest": (EXECUTION_SVC, "/execute/tts"),
                 "sttrequest": (EXECUTION_SVC, "/execute/stt/transcribe_workspace"),
                 "audiobookregeneraterequest": (EXECUTION_SVC, "/execute/audiobook/regenerate"),

@@ -854,6 +854,7 @@ HUB_TOOLS: frozenset[str] = frozenset({
     "LogbookRequest",
     "DocumentBroadcastRequest",
     "NightModeRequest",
+    "DropInRequest",
 })
 
 #: Said in the tool guide in place of the hub tools while no hub is set up.

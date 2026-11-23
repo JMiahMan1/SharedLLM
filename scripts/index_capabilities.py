@@ -96,6 +96,7 @@ def index_capabilities():
         "SpeakerIdentifyRequest": "Identifies which enrolled household speaker is speaking in a workspace audio clip.",
         "ListVoicesRequest": "Lists enrolled speaker voice profiles and curated podcast host pairs.",
         "DocumentBroadcastRequest": "Reads a Nextcloud document and broadcasts it as TTS to a Home Assistant media player.",
+        "DropInRequest": "Starts, ends or lists Echo-to-Echo Drop In calls to a room or to the room a person is in.",
         "NightModeRequest": "Runs the composite night-mode scene across lights, climate, and media.",
         "StorageTextToAudioRequest": "Converts a text file in Nextcloud storage to an audio file using Kokoro narration.",
         "AudiobookRegenerateRequest": "Regenerates an audiobook chapter or full book from text files via TTS.",
