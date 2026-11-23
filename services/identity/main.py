@@ -1073,12 +1073,12 @@ def admin_provision_accounts(
             sync_ma_abs_fn=_sync_ma_abs,
         )
         # Audit account provisioning if any service ran (status != 'skipped')
-        ran_any = any(v.get("status") != "skipped" for v in provisioning_results.values())
+        ran_any = any(v.get("status") in ("created", "linked") for v in provisioning_results.values())
         if ran_any:
             changes = [
                 {"field": f"provisioning.{svc}", "change": "set", "to": result.get("status")}
                 for svc, result in provisioning_results.items()
-                if result.get("status") != "skipped"
+                if result.get("status") in ("created", "linked")
             ]
             _audit(request, session, "user.accounts_provisioned", target.username, actor=admin_user, changes=changes)
     except Exception as exc:
@@ -3083,12 +3083,12 @@ def create_user(body: UserCreate, request: Request, session: Session = Depends(g
             sync_ma_abs_fn=_sync_ma_abs,
         )
         # Audit account provisioning if any service ran (status != 'skipped')
-        ran_any = any(v.get("status") != "skipped" for v in provisioning_results.values())
+        ran_any = any(v.get("status") in ("created", "linked") for v in provisioning_results.values())
         if ran_any:
             changes = [
                 {"field": f"provisioning.{svc}", "change": "set", "to": result.get("status")}
                 for svc, result in provisioning_results.items()
-                if result.get("status") != "skipped"
+                if result.get("status") in ("created", "linked")
             ]
             _audit(request, session, "user.accounts_provisioned", user.username, actor=admin, changes=changes)
     except Exception as exc:

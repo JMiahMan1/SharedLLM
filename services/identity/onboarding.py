@@ -181,7 +181,7 @@ def _provision_audiobookshelf(session: Session, user: User, admin: User | None, 
             session.add(user)
             session.commit()
             session.refresh(user)
-            return {"status": "existing", "detail": "User already exists in Audiobookshelf, credentials updated"}
+            return {"status": "linked", "detail": "User already exists in Audiobookshelf, credentials updated"}
 
         # Create new user
         password = raw_password or secrets.token_urlsafe(18)
@@ -315,7 +315,7 @@ def _provision_nextcloud(session: Session, user: User, admin: User | None, raw_p
             return {"status": "error", "detail": f"Nextcloud user creation returned statuscode {ocs_status}"}
 
         user_created = ocs_status == 100
-        status = "created" if user_created else "existing"
+        status = "created" if user_created else "linked"
         if not user_created and not raw_password:
             # Nextcloud has no admin route to mint another user's app password, and we do
             # not know this existing account's password.
@@ -370,7 +370,8 @@ def provision_new_user_accounts(
 
     Returns:
         Dict mapping service name to provisioning result with 'status' and 'detail'.
-        Status is one of: 'created', 'existing', 'skipped', 'error'.
+        Status is one of: 'created', 'linked' (an existing account on that service, now saved here),
+        'existing' (already set up here, nothing changed), 'skipped', 'error'.
     """
     if _should_skip_onboarding(user):
         return {}
