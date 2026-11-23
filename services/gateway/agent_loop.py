@@ -2900,6 +2900,170 @@ class MissionEventStream:
             log.warning(f"Failed to stream event: {e}")
 
 
+# --- FUEL GAUGE (token-based context budgeting) ---
+# Estimate tokens from text length using 4 chars/token + 10% margin.
+# Matches the estimator in prompt_budget.py; no real tokenizer dependency exists.
+_FUEL_EST_CHARS_PER_TOKEN = 4
+_FUEL_TOKEN_MARGIN = 1.1
+
+# Context overflow error signatures (detected from provider error messages)
+_FUEL_CONTEXT_OVERFLOW_PATTERNS = (
+    "exceeds the available context size",
+    "exceed_context_size_error",
+    "context_length_exceeded",
+    "context length",
+)
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count from character length."""
+    if not text:
+        return 0
+    return int(len(text) / _FUEL_EST_CHARS_PER_TOKEN * _FUEL_TOKEN_MARGIN)
+
+
+def _conversation_token_budget(conv: list[dict]) -> int:
+    """Estimate total tokens in a conversation list."""
+    return sum(_estimate_tokens(m.get("content", "") or "") for m in conv)
+
+
+def _stub_old_turns(conv: list[dict]) -> list[dict]:
+    """Replace old assistant file writes and large tool results with stubs.
+
+    The most recent assistant turn stays whole; all prior assistant turns
+    have their content replaced with a concise summary. Large user tool
+    results (>3000 chars) are also stubbed to save context for later turns.
+    """
+    result = []
+    last_assistant_idx = None
+    last_user_idx = None
+    # The newest assistant turn and the newest user turn (the current tool result) stay whole.
+    for i in range(len(conv) - 1, -1, -1):
+        if last_assistant_idx is None and conv[i].get("role") == "assistant":
+            last_assistant_idx = i
+        if last_user_idx is None and conv[i].get("role") == "user":
+            last_user_idx = i
+        if last_assistant_idx is not None and last_user_idx is not None:
+            break
+
+    for i, m in enumerate(conv):
+        role = m.get("role", "")
+        content = m.get("content", "") or ""
+        if role == "assistant" and i != last_assistant_idx:
+            # Stub old assistant turns: preserve the action summary but drop file contents
+            stub_lines = []
+            for line in content.split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    continue
+                if stripped:
+                    stub_lines.append(stripped[:200])
+            stubbed = "\n".join(stub_lines)[:150]
+            if not stubbed:
+                stubbed = "assistant: [previous turn stubbed]"
+            result.append({"role": role, "content": stubbed})
+        elif role == "user" and i != last_user_idx and len(content) > 3000:
+            # Stub large tool results but keep the role and a hint
+            result.append({"role": role, "content": f"[tool result: {len(content)} chars, truncated for context]"})
+        else:
+            result.append(m)
+    return result
+
+
+def _is_context_overflow_error(error_msg: str) -> bool:
+    """Check if an error indicates the conversation exceeded the context window."""
+    lower = error_msg.lower()
+    return any(p in lower for p in _FUEL_CONTEXT_OVERFLOW_PATTERNS)
+
+
+def _compact_conversation(conv: list[dict], mission_vram_params: dict | None = None) -> list[dict]:
+    """Token-based conversation compaction with bounded mission log note.
+
+    Budget = num_ctx - num_predict - 1024-token reserve.
+    When system + messages exceed 70% of budget, older turns are compacted
+    into a single bounded "Mission log so far" note appended to system.
+    The most recent ~35% of budget is kept verbatim (at least 2 turns).
+    """
+    # Compute budget from VRAM params
+    if mission_vram_params:
+        num_ctx = int(mission_vram_params.get("num_ctx", 16384))
+        num_predict = int(mission_vram_params.get("num_predict", 3072))
+        budget = num_ctx - num_predict - 1024
+    else:
+        budget = 16384 - 3072 - 1024  # default fallback
+
+    if budget <= 0:
+        budget = 8192  # safety floor
+
+    total_tokens = _conversation_token_budget(conv)
+
+    # Check if compaction is needed (70% threshold)
+    if total_tokens <= int(budget * 0.70):
+        return conv
+
+    system_msgs = [m for m in conv if m.get("role") == "system"]
+    # Old file writes and big old tool results become short stubs before anything is dropped.
+    body = _stub_old_turns([m for m in conv if m.get("role") != "system"])
+
+    if len(body) < 2:
+        return conv
+
+    # Keep recent turns within ~35% of budget (at least last 2 turns)
+    keep_token_budget = int(budget * 0.35)
+
+    # Greedily keep recent turns until we hit the keep budget
+    kept_tokens = 0
+    recent = []
+    older = []
+    for m in reversed(body):
+        t = _estimate_tokens(m.get("content", "") or "")
+        if kept_tokens + t <= keep_token_budget and len(recent) < len(body):
+            recent.append(m)
+            kept_tokens += t
+        else:
+            older.append(m)
+
+    recent.reverse()  # restore original order
+    older.reverse()
+
+    # Build bounded mission log note (cap ~1500 tokens)
+    note_cap_tokens = 1500
+    note_lines = []
+    note_tokens = 0
+    # Newest first, so the entries closest to now survive the cap; shown oldest first.
+    for m in reversed(older):
+        role = m.get("role", "user")
+        content = m.get("content", "") or ""
+        t = _estimate_tokens(content)
+        if note_tokens + t > note_cap_tokens and note_lines:
+            break
+        # Truncate long entries to fit budget
+        max_chars = int((note_cap_tokens - note_tokens) * _FUEL_EST_CHARS_PER_TOKEN / _FUEL_TOKEN_MARGIN)
+        if len(content) > max_chars and max_chars > 50:
+            note_lines.append(f"[{role}] {content[:max_chars]}...")
+        else:
+            note_lines.append(f"[{role}] {content}")
+        note_tokens += t
+
+    note_lines.reverse()
+    compact_note = (
+        "MISSION LOG SO FAR (preserved learnings; do not re-derive):\n"
+        + "\n".join(note_lines)
+    )
+
+    # Replace system message with compacted version (never append repeatedly)
+    base_system = system_msgs[0]["content"] if system_msgs else ""
+    # Strip any previous compact note to avoid accumulation
+    base_system = re.sub(
+        r"\n\nMISSION LOG SO FAR.*",
+        "",
+        base_system,
+        flags=re.DOTALL,
+    )
+    new_system = {"role": "system", "content": base_system + "\n\n" + compact_note}
+    return [new_system, *recent]
+
+
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None, history_log: str | None = None) -> Any:
     full_audit_log: list[dict] = []
     events = MissionEventStream(mission_id, full_audit_log)
@@ -3232,36 +3396,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info(f"[AgentLoop] Context compressed: {len(older)} older entries summarized, {len(recent)} recent kept")
         return summary, recent_joined
 
-    def _compact_conversation(conv: list[dict], keep_last: int = 10, threshold: int = 48000) -> list[dict]:
-        """Keep a running, compacted conversation so the model retains learned context
-        across a long mission instead of only seeing the last tool result each turn.
-
-        When the total context exceeds `threshold`, older turns are folded into the
-        system prompt (preserved learnings) while the most recent `keep_last` turns are
-        kept verbatim. This prevents the model from 'forgetting' earlier decisions while
-        bounding token usage / llama.cpp cache thrashing.
-        """
-        total = sum(len(m.get("content", "")) for m in conv)
-        if total <= threshold:
-            return conv
-        system_msgs = [m for m in conv if m.get("role") == "system"]
-        body = [m for m in conv if m.get("role") != "system"]
-        if len(body) <= keep_last:
-            return conv
-        older = body[:-keep_last]
-        recent = body[-keep_last:]
-        note_lines = []
-        for m in older:
-            c = m.get("content", "") or ""
-            note_lines.append(f"[{m.get('role', 'user')}] {c[:240]}{'…' if len(c) > 240 else ''}")
-        compact_note = (
-            "COMPACTED EARLIER CONTEXT (preserved learnings; do not re-derive):\n"
-            + "\n".join(note_lines)
-        )
-        base_system = system_msgs[0]["content"] if system_msgs else ""
-        new_system = {"role": "system", "content": base_system + "\n\n" + compact_note}
-        return [new_system, *recent]
-
     async def _save_checkpoint(iter_num: int) -> None:
         if not mission_id:
             return
@@ -3562,8 +3696,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # Maintain a running, compacted conversation so the model retains learned
             # context across the mission instead of only seeing the last tool result.
             conversation.append({"role": "user", "content": user_content})
-            conversation = _compact_conversation(conversation)
+            conversation = _compact_conversation(conversation, mission_vram_params)
             ollama_payload["messages"] = conversation
+
+            # --- FUEL EVENT: record token budget per iteration ---
+            fuel_tokens = _conversation_token_budget(conversation)
+            num_ctx_val = int(mission_vram_params.get("num_ctx", 16384)) if mission_vram_params else 16384
+            num_predict_val = int(mission_vram_params.get("num_predict", 3072)) if mission_vram_params else 3072
+            fuel_budget = num_ctx_val - num_predict_val - 1024
+            await stream_event("fuel", {"fuel_used": fuel_tokens, "fuel_budget": fuel_budget})
 
             # --- RETRY LOGIC ---
             MAX_INFERENCE_RETRIES = 3
@@ -3621,8 +3762,58 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 except BackendUnavailable:
                     raise  # the machine is off: retrying in 5 and 10 s cannot help
                 except Exception as e:
+                    error_str = str(e)
+                    # Overflow recovery: if context exceeded, do NOT retry identical
+                    # messages. Compact hard (to 50% of budget) and retry once.
+                    if _is_context_overflow_error(error_str) and retry_count == 0:
+                        log.warning(
+                            f"[AgentLoop] Context overflow detected on attempt 1: {error_str[:200]}. "
+                            "Hard-compacting conversation and retrying once."
+                        )
+                        # Hard compact: keep only the last 2 turns within 50% of budget
+                        system_msgs = [m for m in conversation if m.get("role") == "system"]
+                        body_msgs = [m for m in conversation if m.get("role") != "system"]
+                        hard_keep_tokens = int(fuel_budget * 0.50)
+                        hard_kept = []
+                        hard_tokens = 0
+                        for m in reversed(body_msgs):
+                            t = _estimate_tokens(m.get("content", "") or "")
+                            if hard_tokens + t <= hard_keep_tokens:
+                                hard_kept.append(m)
+                                hard_tokens += t
+                            if len(hard_kept) >= 4:  # cap at 4 most recent turns
+                                break
+                        hard_kept.reverse()
+                        if not hard_kept and body_msgs:
+                            # The newest turn alone is too big: keep its tail so the current
+                            # tool result is never lost.
+                            newest = dict(body_msgs[-1])
+                            keep_chars = int(hard_keep_tokens * _FUEL_EST_CHARS_PER_TOKEN / _FUEL_TOKEN_MARGIN)
+                            newest["content"] = "[truncated]\n" + (newest.get("content", "") or "")[-keep_chars:]
+                            hard_kept = [newest]
+                        conversation = [system_msgs[0] if system_msgs else conversation[0], *hard_kept]
+                        ollama_payload["messages"] = conversation
+                        # Record the hard-compact fuel event
+                        fuel_tokens = _conversation_token_budget(conversation)
+                        await stream_event("fuel", {"fuel_used": fuel_tokens, "fuel_budget": fuel_budget, "compacted": True})
+                        # Retry once with compacted context
+                        wait_time = 5
+                        log.info(f"[AgentLoop] Retrying after hard-compact in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        continue
                     log.warning(f"[AgentLoop] Inference attempt {retry_count + 1} failed: {e}")
                     if retry_count < MAX_INFERENCE_RETRIES - 1:
+                        # If this was an overflow error, do NOT retry again (already retried once)
+                        if _is_context_overflow_error(error_str) and retry_count >= 1:
+                            log.error(
+                                "[AgentLoop] Context overflow persists after hard-compact retry. "
+                                "Ending mission."
+                            )
+                            await stream_event("system", "MISSION FAILED: Context window exceeded even after compaction. The mission was too complex for the available context.")
+                            heartbeat_stop.set()
+                            await hb_task
+                            await _clear_checkpoint()
+                            return "MISSION FAILED: Context window exceeded. The mission requirements exceeded the model's context capacity."
                         wait_time = 5 * (retry_count + 1)
                         log.info(f"[AgentLoop] Retrying in {wait_time}s...")
                         await asyncio.sleep(wait_time)
