@@ -231,7 +231,9 @@ def test_reengage_once_household(engine, monkeypatch):
         assert body["once"] == f"bible-reengage:{RENGAGE_TODAY}"
         assert body["category"] == "bible"
         # Every nudge carries what to show: a title, a warm body and a link back to the reader.
-        assert body["title"] == "Bible" and body["body"] and body["link"]
+        assert body["title"] == "Bible" and body["body"]
+        # The shape telemetry's notify accepts (the same as the daily reminder's).
+        assert "link" not in body and body["data"]["url"] == body["data"]["link"]["href"]
     # The reader with no state row got one, stamped today.
     with Session(engine) as session:
         assert session.get(UserBibleState, "reader-e").reengage_last_sent == RENGAGE_TODAY

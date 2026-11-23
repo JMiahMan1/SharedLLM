@@ -301,10 +301,13 @@ def reengage_message(days: int | None) -> dict:
     body = bodies[days % len(bodies)] if days is not None else bodies[0]
     verse = pick_daily_encouragement()
     body += f" {verse.text}: {verse.reference}"
+    deep_link = link("bible", tab="read")
+    # Same shape as message_for: telemetry's notify takes the link inside data (a top-level
+    # "link" key is refused with HTTP 422).
     return {
         "title": "Bible",
         "body": body,
-        "link": link("bible", tab="read"),
+        "data": {"link": deep_link, "url": deep_link["href"]},
     }
 
 
