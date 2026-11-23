@@ -184,6 +184,7 @@
 [data-theme-scheme="dark"] .text-rose-200\/70 { color: color-mix(in srgb, oklch(89.2% 0.058 10.001) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-rose-300\/30 { color: color-mix(in srgb, oklch(81% 0.117 11.638) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-rose-300\/40 { color: color-mix(in srgb, oklch(81% 0.117 11.638) 85%, transparent) !important; }
+[data-theme-scheme="dark"] .text-rose-300\/60 { color: color-mix(in srgb, oklch(81% 0.117 11.638) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-sky-300\/60 { color: color-mix(in srgb, oklch(82.8% 0.111 230.318) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-slate-600 { color: var(--site-text-muted) !important; }
 [data-theme-scheme="dark"] .text-slate-700 { color: var(--site-text-muted) !important; }
@@ -359,6 +360,7 @@
 [data-theme-scheme="light"] .hover\:border-white\/20:hover { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .hover\:border-white\/30:hover { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .hover\:border-white\/5:hover { border-color: var(--color-border-soft) !important; }
+[data-theme-scheme="light"] .hover\:text-amber-100:hover { color: oklch(55.5% 0.163 48.998) !important; }
 [data-theme-scheme="light"] .hover\:text-amber-200:hover { color: oklch(55.5% 0.163 48.998) !important; }
 [data-theme-scheme="light"] .hover\:text-amber-300:hover { color: oklch(55.5% 0.163 48.998) !important; }
 [data-theme-scheme="light"] .hover\:text-amber-400:hover { color: oklch(55.5% 0.163 48.998) !important; }
@@ -371,6 +373,7 @@
 [data-theme-scheme="light"] .hover\:text-red-200:hover { color: oklch(50.5% 0.213 27.518) !important; }
 [data-theme-scheme="light"] .hover\:text-red-300:hover { color: oklch(50.5% 0.213 27.518) !important; }
 [data-theme-scheme="light"] .hover\:text-red-400:hover { color: oklch(50.5% 0.213 27.518) !important; }
+[data-theme-scheme="light"] .hover\:text-rose-100:hover { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .hover\:text-rose-300:hover { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .hover\:text-sky-200:hover { color: oklch(50% 0.134 242.749) !important; }
 [data-theme-scheme="light"] .hover\:text-sky-300:hover { color: oklch(50% 0.134 242.749) !important; }
@@ -457,6 +460,7 @@
 [data-theme-scheme="light"] .text-rose-300 { color: oklch(51.4% 0.222 16.935) !important; }
 [data-theme-scheme="light"] .text-rose-300\/30 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 30%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-300\/40 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 40%, transparent) !important; }
+[data-theme-scheme="light"] .text-rose-300\/60 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 60%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-300\/80 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-300\/90 { color: color-mix(in srgb, oklch(51.4% 0.222 16.935) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-rose-400 { color: oklch(51.4% 0.222 16.935) !important; }

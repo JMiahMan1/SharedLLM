@@ -69,6 +69,31 @@ async def _routing_index(ha_url: str, ha_token: str, purpose: str):
     return await capability_index.routing_index(ha_url, ha_token, purpose)
 
 
+async def resolve_room_player(ctx, name, purpose) -> str | None:
+    """Resolve an area/device ``name`` to a player entity id, or None.
+
+    Uses the hub's capability index (area registry + per-area player choice).
+    Never invents an entity id; returns None when the room or a player cannot
+    be resolved.
+    """
+    if not name:
+        return None
+    ha_url = getattr(ctx, "ha_url", None)
+    ha_token = getattr(ctx, "ha_token", None)
+    try:
+        idx = await _routing_index(ha_url, ha_token, purpose or "room player")
+        states = await ha_client.get_states(ha_url, ha_token) or [] if ha_url else []
+        if idx is not None:
+            area_id = idx.area_in_text(name)
+            if area_id is not None:
+                picked = idx.pick_player(area_id, name, purpose, states)
+                if picked:
+                    return picked
+    except Exception as exc:
+        log.warning(f"[media/resolve_room_player] could not resolve {name!r}: {exc}")
+    return None
+
+
 async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, media_type: str | None = None,
                          may_use: Callable[[str], bool] | None = None) -> str:
     """Resolve entity_id from device_name if needed.
@@ -825,6 +850,22 @@ def transport_said(command: str, attrs: dict | None, entity_id: str) -> str:
 async def handle_media_transport(req) -> ExecutionResult:
     """Transport/remote commands: through HA, or straight to the device when HA is down."""
     ctx = req.user_context
+    # Resolve an area/device name to a player when the caller did not pin one
+    # (e.g. a voice satellite speaking for its room). Never invent an entity id.
+    if not req.entity_id and getattr(req, "device_name", None):
+        try:
+            req.entity_id = await resolve_room_player(ctx, req.device_name, None)
+        except Exception as exc:
+            log.warning(f"[media/transport] could not resolve device_name {req.device_name!r}: {exc}")
+            req.entity_id = None
+    if not req.entity_id and getattr(req, "device_name", None):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"I couldn't find a speaker in {req.device_name}.",
+            service="media_transport",
+        )
+    if not req.entity_id:
+        req.entity_id = ""
     if not ctx.ha_url or ha_health.is_down(ctx.ha_url):
         return await _transport_direct(req, "down" if ctx.ha_url else "not configured")
     result = await _transport_via_ha(req)
@@ -854,12 +895,12 @@ async def _transport_direct(req, why: str) -> ExecutionResult:
 
 #: Transport command -> the capability-index ability that means the entity serves it itself.
 _COMMAND_ABILITY = {
-    "pause": "pause", "seek": "seek", "volume_set": "volume", "volume_mute": "mute", "mute": "mute",
+    "pause": "pause", "seek": "seek", "volume_set": "volume", "volume_mute": "mute", "mute": "mute", "volume_unmute": "mute",
     "previous": "next_track", "next": "next_track", "stop": "stop", "volume_up": "volume_step",
     "volume_down": "volume_step", "play": "play", "resume": "play", "power_on": "power", "power_off": "power",
 }
 _FEATURE_BITS = {
-    "pause": 1, "seek": 2, "volume_set": 4, "volume_mute": 8, "mute": 8,
+    "pause": 1, "seek": 2, "volume_set": 4, "volume_mute": 8, "mute": 8, "volume_unmute": 8,
     "previous": 16, "next": 32, "stop": 4096, "volume_up": 1024,
     "volume_down": 1024, "play": 16384, "resume": 16384,
     "power_on": 128, "power_off": 256,
@@ -994,13 +1035,13 @@ async def _transport_via_ha(req) -> ExecutionResult:
         service_cmd = "volume_set"
         data = {"volume_level": req.volume_level}
 
-    if command in ("volume_mute", "mute"):
+    if command in ("volume_mute", "mute", "volume_unmute"):
         # HA's volume_mute service requires an explicit target state. Fall back
         # to "mute" when the caller did not say, which matches the old button
         # behaviour of muting on press.
         muted = getattr(req, "muted", None)
         if muted is None:
-            muted = req.volume_level in (None, 0)
+            muted = False if command == "volume_unmute" else req.volume_level in (None, 0)
         service_cmd = "volume_mute"
         data = {"is_volume_muted": bool(muted)}
 

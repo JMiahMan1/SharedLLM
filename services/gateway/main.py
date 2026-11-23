@@ -1432,10 +1432,42 @@ def is_likely_video_request(query: str) -> bool:
     return any(signal in q for signal in video_signals)
 
 
+def extract_volume_level(query: str) -> float | None:
+    """Parse a spoken volume level into 0..1, or None when the query sets no number."""
+    q = (query or "").strip().lower()
+    if not q:
+        return None
+    m = re.search(r"\b(?:volume|set\s+(?:the\s+)?volume\s+to|volume\s+to)\s*(\d{1,3})\s*(?:%|percent)?\b", q)
+    if not m:
+        # "volume to N percent" / "volume N percent" already covered; also handle "volume to N"
+        m = re.search(r"\bvolume\b[^\d]*(\d{1,3})", q)
+    if not m:
+        return None
+    try:
+        n = int(m.group(1))
+    except ValueError:
+        return None
+    if n <= 10:
+        return n / 10.0
+    return n / 100.0
+
+
 def extract_media_transport_command(query: str) -> str | None:
     q = (query or "").strip().lower()
     if not q:
       return None
+
+    # Volume commands must never be misclassified as pause/stop/etc.
+    if re.search(r"\b(?:volume\s+up|louder|turn\s+(?:it\s+)?up|turn\s+up\s+the\s+volume)\b", q):
+        return "volume_up"
+    if re.search(r"\b(?:volume\s+down|quieter|softer|turn\s+(?:it\s+)?down|turn\s+down\s+the\s+volume)\b", q):
+        return "volume_down"
+    if re.search(r"\bmute\b", q) and not re.search(r"\bunmute\b", q):
+        return "volume_mute"
+    if re.search(r"\bunmute\b", q):
+        return "volume_unmute"
+    if re.search(r"\bvolume\b.*\d", q) or re.search(r"\bset\s+(?:the\s+)?volume\s+to\b", q):
+        return "volume_set"
 
     command_patterns = (
       (r"\b(?:pause|hold)\b", "pause"),
@@ -4395,7 +4427,7 @@ async def chat_handler(request: Request, background_tasks=None):
         elif intent in ["turn_on", "turn_off"]:
             resolved_entity = engine.extract_entity(query, intent)
             if not asks_about_state(query):
-                light_set = fast_lights.choose(engine, query, intent, resolved_entity, media_entities)
+                light_set = fast_lights.choose(engine, query, intent, resolved_entity, media_entities, voice_context)
             if not resolved_entity and not light_set:
                 resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
@@ -4461,6 +4493,32 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(ans, selected_model, intent)
         return _make_ollama_response(ans, selected_model, intent)
 
+    # Bare stop/cancel from a voice satellite: if a timer is ringing there, stop it
+    # instead of the music.
+    _bare_stop = str(query or "").strip().lower().strip("?.!") in {"stop", "stop it", "cancel", "turn it off", "enough"}
+    _sat = (voice_context or {}).get("satellite") if isinstance(voice_context, dict) else None
+    if is_fast_path and intent in ("media_transport", "pause_media") and _bare_stop and _sat:
+        try:
+            async with shared_http_client() as _c:
+                _resp = await _c.post(
+                    f"{EXECUTION_SVC}/execute/timer",
+                    json={"action": "stop", "type": "timer", "target_device": _sat, "user_context": creds.model_dump()},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=30.0),
+                )
+                _data = await _resp.json()
+            _detail = _data.get("detail") or {}
+            _ringing = bool(_detail.get("ringing")) or bool(_detail.get("stopped_devices"))
+            if _ringing:
+                ans = _data.get("message", "Stopped.")
+                await update_history(user_id, "user", query)
+                await update_history(user_id, "assistant", ans)
+                if is_openai:
+                    return _make_openai_response(ans, selected_model, "timer_stop")
+                return _make_ollama_response(ans, selected_model, "timer_stop")
+        except Exception as _e:
+            log.warning(f"[FastPath] timer stop check failed: {_e}")
+
     if is_fast_path:
         # Execute immediate tool for simple intents
         endpoint_map = {
@@ -4499,35 +4557,79 @@ async def chat_handler(request: Request, background_tasks=None):
                 }
                 svc_base = EXECUTION_SVC
             elif intent == "play_media":
-                media_query, _ = extract_media_request(query)
+                media_query, named_device = extract_media_request(query)
+                # "read <title>" / "read me <title>"
+                m_read = re.match(r"^read(?:\s+me)?\s+(.+?)(?:\s+on\s+(.+))?$", query.strip(), flags=re.IGNORECASE)
+                if m_read and not media_query:
+                    media_query = m_read.group(1).strip()
+                    if m_read.group(2):
+                        named_device = m_read.group(2).strip()
+                q_lower = query.lower().strip()
+                resume_phrases = {"play my audiobook", "continue my book", "resume my audiobook", "keep reading", "continue reading"}
+                is_audiobook_resume = q_lower in resume_phrases
+
                 media_type = "video" if is_likely_video_request(query) else None
                 if not media_type:
-                    q_lower = query.lower()
                     if "podcast" in q_lower:
                         media_type = "podcast"
-                    elif any(w in q_lower for w in ["audiobook", "book", "audio book"]):
+                    elif any(w in q_lower for w in ["audiobook", "book", "audio book", "read "]):
                         media_type = "audiobook"
-                clean_q = media_query or query
-                if clean_q.lower().startswith("the "):
-                    clean_q = clean_q[4:].strip()
-                clean_q = re.sub(r'\bSaint\b', 'St.', clean_q, flags=re.IGNORECASE)
-                exec_payload = {
-                    "user_context": creds.model_dump(),
-                    "entity_id": resolved_entity,
-                    "query": clean_q,
-                    "media_content_type": media_type or "artist",
-                    "media_type": media_type,
-                }
-                svc_base = EXECUTION_SVC
+                # "play the book <title>" -> audiobook
+                if q_lower.startswith("play the book "):
+                    media_type = "audiobook"
+                    if not media_query or media_query.lower().startswith("the book"):
+                        media_query = query[len("play the book "):].strip() if q_lower.startswith("play the book ") else media_query
+
+                area = (voice_context or {}).get("area") if isinstance(voice_context, dict) else None
+                if not named_device and area:
+                    device_name = area
+                else:
+                    device_name = named_device
+
+                if is_audiobook_resume:
+                    exec_payload = {
+                        "user_context": creds.model_dump(),
+                        "action": "resume",
+                        "entity_id": resolved_entity,
+                        "device_name": device_name,
+                    }
+                    endpoint = "/execute/audiobookshelf"
+                    svc_base = EXECUTION_SVC
+                else:
+                    clean_q = media_query or query
+                    # strip leading "the book " / "the " for audiobook titles
+                    if media_type == "audiobook" and clean_q.lower().startswith("the book "):
+                        clean_q = clean_q[9:].strip()
+                    if clean_q.lower().startswith("the "):
+                        clean_q = clean_q[4:].strip()
+                    clean_q = re.sub(r'\bSaint\b', 'St.', clean_q, flags=re.IGNORECASE)
+                    exec_payload = {
+                        "user_context": creds.model_dump(),
+                        "entity_id": resolved_entity,
+                        "device_name": device_name,
+                        "query": clean_q,
+                        "media_content_type": media_type or "artist",
+                        "media_type": media_type,
+                    }
+                    svc_base = EXECUTION_SVC
             elif intent in ["pause_media", "media_transport"]:
                 transport_cmd = extract_media_transport_command(query) or "pause"
                 if transport_cmd == "resume":
                     transport_cmd = "play"
+                area = (voice_context or {}).get("area") if isinstance(voice_context, dict) else None
+                _, named_device = extract_media_request(query)
+                if not named_device and area:
+                    transport_device_name = area
+                else:
+                    transport_device_name = named_device
                 exec_payload = {
                     "user_context": creds.model_dump(),
                     "entity_id": resolved_entity,
+                    "device_name": transport_device_name,
                     "command": transport_cmd,
                 }
+                if transport_cmd == "volume_set":
+                    exec_payload["volume_level"] = extract_volume_level(query)
                 svc_base = EXECUTION_SVC
             else:
                 svc_base = EXECUTION_SVC

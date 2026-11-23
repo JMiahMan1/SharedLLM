@@ -44,6 +44,22 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
             service="audiobookshelf",
         )
 
+    # Resolve a room/device name to a player when no entity was pinned (voice satellite room).
+    # Never invent an entity id.
+    if not req.entity_id and getattr(req, "device_name", None):
+        try:
+            from . import media as _media
+            req.entity_id = await _media.resolve_room_player(ctx, req.device_name, "music")
+        except Exception as exc:
+            log.warning(f"[abs] could not resolve device_name {req.device_name!r}: {exc}")
+            req.entity_id = None
+    if not req.entity_id and getattr(req, "device_name", None):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"I couldn't find a speaker in {req.device_name}.",
+            service="audiobookshelf",
+        )
+
     action = req.action
     log.info(f"[abs] action={action} query={req.query} book_id={req.book_id}")
 

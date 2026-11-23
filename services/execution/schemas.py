@@ -236,10 +236,11 @@ class MediaPlayRequest(BaseRequest):
 
 class MediaTransportRequest(BaseRequest):
     user_context: UserContext
-    entity_id: str
+    entity_id: str | None = None
+    device_name: str | None = None
     command: Literal[
         "pause", "resume", "stop", "next", "previous",
-        "volume_up", "volume_down", "volume_set", "volume_mute", "mute",
+        "volume_up", "volume_down", "volume_set", "volume_mute", "mute", "volume_unmute",
         "home", "power_off", "power_on", "back", "play", "seek",
         "shuffle_set", "repeat_set", "join", "unjoin",
         # Remote-control keys (TV d-pad and menu), sent as remote key presses.
@@ -1168,6 +1169,7 @@ class AudiobookshelfRequest(BaseRequest):
     item_id: str | None = Field(None, description="ABS item ID for update_progress")
     episode_id: str | None = Field(None, description="ABS episode ID for play_podcast_episode and update_progress")
     entity_id: str | None = Field(None, description="Home Assistant media_player entity to play on")
+    device_name: str | None = Field(None, description="Room/area or device name to resolve to a player")
     library_id: str | None = Field(None, description="ABS library ID to browse")
     current_time: float | None = Field(None, ge=0, description="Playback position in seconds for update_progress")
     duration: float | None = Field(None, gt=0, description="Item duration in seconds for update_progress")
