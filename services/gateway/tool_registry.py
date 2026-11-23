@@ -597,6 +597,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("TimerRequest", SVC_EXECUTION, "POST", "/execute/timer", False,
      "Timers, alarms, and household reminders: create, list, pause, resume, reset, stop, cancel across one or multiple devices (speakers, ESPHome screens, mobile app).",
      "payload fields: action, type, id, query, title, duration_str, time_str, recurrence, target_device, target_devices, scope, emoji, sound, tts_enabled, esphome_script, flash_screen."),
+    ("DropInRequest", SVC_EXECUTION, "POST", "/execute/drop_in", False,
+     "Native Echo-to-Echo Drop In: drop in on a room or on the room a person is in, hang up, or list active Drop Ins.",
+     "payload fields: action, target_room, target_user_id, target_device, source_satellite. action is start, end or status; target_room may be 'room_of:<person>'."),
     ("TodoListRequest", SVC_EXECUTION, "POST", "/execute/todo", False,
      "The home's to-do lists (the hub's shopping list and reminder lists): add items (\"add milk to the shopping "
      "list\"), read what is on a list, tick an item off or back on, remove one, or name the lists. Every "
