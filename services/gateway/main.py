@@ -12608,7 +12608,9 @@ async def restart_service(service_name: str, request: Request):
     async with borrow_http_client() as client:
         resp = await client.post(
             f"{CONTROL_PLANE_URL}/api/restart/{service_name}",
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            # A recreate waits for the new container to be healthy before retiring the old one.
+            timeout=aiohttp.ClientTimeout(total=330.0),
         )
         if resp.status == 404:
             raise HTTPException(status_code=404, detail=f"Service {service_name} not found")
@@ -12666,7 +12668,8 @@ async def pull_and_restart_service(service_name: str, request: Request):
         resp = await client.post(
             f"{CONTROL_PLANE_URL}/api/containers/{service_name}/pull-and-restart",
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=aiohttp.ClientTimeout(total=120.0),
+            # Pull, then a recreate that waits for the new container to be healthy.
+            timeout=aiohttp.ClientTimeout(total=450.0),
         )
         return await _proxy_json_response(resp)
 

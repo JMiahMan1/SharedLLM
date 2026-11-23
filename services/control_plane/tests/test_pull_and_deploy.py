@@ -90,53 +90,37 @@ class TestPermissionsHandling:
         assert "chmod -R" in control_plane_code
 
     def test_recreate_calls_permission_fix(self, control_plane_code):
-        """_recreate_container should call _fix_volume_permissions before starting."""
+        """_recreate_container fixes volume permissions before the new container starts."""
         recreate_pos = control_plane_code.find("def _recreate_container")
-        # Search for the call (not the definition) after the function starts
         call_pos = control_plane_code.find("fixed_vols = _fix_volume_permissions(container)", recreate_pos)
         assert call_pos > recreate_pos, "_fix_volume_permissions should be called within _recreate_container"
+        assert "prepare=_prepare" in control_plane_code[recreate_pos:]
 
 
 class TestRecreateNetworkSafety:
-    """Recreate must snapshot config while healthy and survive self-update."""
+    """Recreate must snapshot config while healthy and survive self-update.
 
-    def test_snapshot_taken_before_stop(self, control_plane_code):
-        snap_at = control_plane_code.find("snap = _snapshot_container_config(container)")
-        stop_at = control_plane_code.find("container.stop(timeout=10)")
-        assert snap_at != -1, "must snapshot before mutating the container"
-        assert stop_at != -1
-        assert snap_at < stop_at, "snapshot must happen before stop (attrs clear NetworkSettings after stop)"
+    The behaviour (networks at create, carry-over, health gate, rollback) is
+    driven against a fake Docker in test_recreate.py.
+    """
 
-    def test_self_recreate_is_detached(self, control_plane_code):
-        """Self-recreate must not stop this process in-place (exit 137 left CP down)."""
+    def test_snapshot_taken_before_anything_changes(self, control_plane_code):
+        recreate_pos = control_plane_code.find("def _recreate_container")
+        body = control_plane_code[recreate_pos:]
+        snap_at = body.find("snap = _snapshot_container_config(container)")
+        swap_at = body.find("recreate_from_snapshot(")
+        assert -1 < snap_at < swap_at
+
+    def test_self_recreate_runs_outside_this_container(self, control_plane_code):
+        """Self-recreate must not stop this process in-place (exit 137 left CP down),
+        and a child process here would die with the container, so a helper container runs it."""
         assert "_is_self_container" in control_plane_code
         assert "_recreate_self_detached" in control_plane_code
-        assert "start_new_session=True" in control_plane_code
-
-    def test_network_connect_releases_backup_first(self, control_plane_code):
-        """Backup must release its IPv4 before the new container pins/connects."""
-        assert "release_from" in control_plane_code
-        recreate_path = os.path.join(os.path.dirname(__file__), "..", "recreate.py")
-        with open(recreate_path) as f:
-            recreate_code = f.read()
-        assert "disconnect" in recreate_code
-        assert "release_from" in recreate_code
-
-    def test_aliases_include_compose_service(self, control_plane_code):
-        # Alias/create/connect logic lives in services.control_plane.recreate
-        # and is shared with the detached self-recreate child.
-        recreate_path = os.path.join(
-            os.path.dirname(__file__), "..", "recreate.py",
-        )
-        assert "com.docker.compose.service" in control_plane_code
-        with open(recreate_path) as f:
-            recreate_code = f.read()
-        assert "_network_aliases" in control_plane_code
-        assert "network_aliases" in recreate_code
+        assert "control_plane_updater_" in control_plane_code
         assert "run_detached_self_recreate" in control_plane_code
-        assert "run_detached_self_recreate" in recreate_code
-        assert "create_from_snapshot" in recreate_code
-        assert "connect_container_networks" in recreate_code
+
+    def test_a_refused_update_is_a_409(self, control_plane_code):
+        assert control_plane_code.count("except _recreate.RecreateFailed") == 2
 
 
 class TestUpdateDetectionImprovements:

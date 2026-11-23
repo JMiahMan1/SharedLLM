@@ -404,13 +404,28 @@ def _download_kokoro_files() -> tuple[list[str], list[str]]:
     return results, failures
 
 
+async def _stop_background(tasks) -> None:
+    """Cancel background loops and wait for each, without letting their
+    CancelledError (a BaseException) abort the rest of shutdown."""
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        with suppress(Exception, asyncio.CancelledError):
+            await task
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import subprocess  # always available for startup shell setup (gh auth, git config)
 
-    # Resolve runtime config from Identity service
-    from services.config import resolve_runtime_config
-    await resolve_runtime_config()
+    # Resolve runtime config from Identity service. Bounded: identity can be away
+    # (an update swapping it), and while lifespan startup runs this service does
+    # not answer /health at all. If it is not back yet, keep serving on the .env
+    # seed values, report degraded, and keep retrying until it is.
+    from services.config import keep_resolving_runtime_config, resolve_runtime_config
+    config_task = None
+    if not await resolve_runtime_config(max_retries=2, retry_delay=2.0, timeout=5.0):
+        config_task = asyncio.create_task(keep_resolving_runtime_config())
 
     # Household time zone: logged once with its source; unset is reported and
     # each feature that needs it fails with the same message.
@@ -548,22 +563,14 @@ async def lifespan(app: FastAPI):
         log.warning(f"GitHub CLI startup auth setup failed (non-fatal): {_e}")
 
     yield
-    telemetry_task.cancel()
-    with suppress(Exception):
-        await telemetry_task
-    prune_task.cancel()
-    with suppress(Exception):
-        await prune_task
-    glance_task.cancel()
-    with suppress(Exception):
-        await glance_task
-    leave_by_task.cancel()
-    with suppress(Exception):
-        await leave_by_task
-    for task in [*reminder_tasks, voice_stt_task]:
-        task.cancel()
-        with suppress(Exception):
-            await task
+    # A cancelled task re-raises CancelledError (a BaseException, not an
+    # Exception) when awaited; suppress(Exception) let it escape, so shutdown
+    # failed ("Application shutdown failed. Exiting.") before stopping the rest,
+    # and docker had to kill the container after its 10 s grace.
+    background = [telemetry_task, prune_task, glance_task, leave_by_task, *reminder_tasks, voice_stt_task]
+    if config_task is not None:
+        background.append(config_task)
+    await _stop_background(background)
     with suppress(Exception):
         from services.execution.presence import get_presence_tracker
         await get_presence_tracker().stop()
@@ -3110,16 +3117,26 @@ async def health():
     if not redis_ok["healthy"]:
         overall_status = "degraded"
 
-    # Check Identity Service with retry
-    identity_ok = await _check_dependency(
-        "identity",
-        lambda: _check_service_health(IDENTITY_SVC_URL, "identity"),
-        max_retries=2,
-        retry_delay=0.5
-    )
+    # Identity: its own short connection, no retry, and reported rather than
+    # counted (like Home Assistant). On 2026-11-22 identity was away for three
+    # minutes during an update; this probe went through the shared pool with
+    # retries, /health itself stopped answering in time, and execution was
+    # treated as down although it was serving. Identity being away degrades
+    # execution; it does not make it unreachable.
+    from services import config as _runtime_config
+    from services.config import IDENTITY_SVC_URL as _identity_url
+
+    async def _identity_health_check():
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1.5)) as client:
+            r = await client.get(f"{_identity_url.rstrip('/')}/health")
+            return {"healthy": r.status == 200, "status": "ok" if r.status == 200 else f"status {r.status}"}
+
+    identity_ok = await _check_dependency("identity", _identity_health_check, max_retries=0, retry_delay=0)
     checks["identity"] = identity_ok["status"]
-    if not identity_ok["healthy"]:
-        overall_status = "unhealthy"
+    soft_degraded = not identity_ok["healthy"]
+    if not _runtime_config.RUNTIME_CONFIG_LOADED and not _runtime_config._is_testing():
+        checks["runtime_config"] = "pending (retrying identity)"
+        soft_degraded = True
 
     # Check RAG Service with a bounded SHORT timeout and NO retry. RAG is the service
     # the Raven worker hammers hardest, so under worker load its /health can lag.
@@ -3174,6 +3191,8 @@ async def health():
         checks["home_assistant_hosts"] = ha_hosts
 
     status_code = 200 if overall_status == "healthy" else 503
+    if soft_degraded and overall_status == "healthy":
+        overall_status = "degraded"  # still serving: 200, the reason is in checks
     return JSONResponse(
         status_code=status_code,
         content={
