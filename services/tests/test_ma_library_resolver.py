@@ -675,3 +675,54 @@ class TestNotYetInMALibrary:
         opened, _ = fake_connect({"auth": {"authenticated": True}, "music/search": _search_result()})
         await _resolve()
         assert "music/item_by_uri" not in [f["command"] for f in opened[0].sent]
+
+
+class TestPerUserProviderFilterIsolation:
+    async def test_ignores_other_users_abs_instance_and_queries_own_instance(self, fake_connect):
+        # Search returns a library item only backed by Jeremiah's ABS instance, while Zachary's
+        # MA auth reply scopes him to audiobookshelf--zach1.
+        zach_provider_item = {
+            "uri": f"audiobookshelf--zach1://audiobook/{NARNIA_ABS_ID}",
+            "name": "The Chronicles of Narnia",
+            "provider": "audiobookshelf--zach1",
+            "provider_mappings": [
+                {
+                    "item_id": NARNIA_ABS_ID,
+                    "provider_domain": "audiobookshelf",
+                    "provider_instance": "audiobookshelf--zach1",
+                    "available": True,
+                }
+            ],
+        }
+        opened, _ = fake_connect({
+            "auth": {
+                "authenticated": True,
+                "user": {
+                    "username": "zachary",
+                    "provider_filter": ["opensubsonic--m1", "audiobookshelf--zach1"],
+                },
+            },
+            "music/search": _search_result(),  # provider_instance is audiobookshelf--EpUcRzwM
+            "music/item_by_uri": zach_provider_item,
+            "music/library/add_item": {"uri": "library://audiobook/260", "name": "The Chronicles of Narnia"},
+        })
+        resolved = await _resolve()
+        assert resolved.ma_uri == "library://audiobook/260"
+        sent = [(f["command"], f.get("args")) for f in opened[0].sent]
+        assert ("music/item_by_uri", {"uri": f"audiobookshelf--zach1://audiobook/{NARNIA_ABS_ID}"}) in sent
+
+    async def test_user_with_shared_only_provider_filter_cannot_use_another_users_abs(self, fake_connect):
+        opened, _ = fake_connect({
+            "auth": {
+                "authenticated": True,
+                "user": {
+                    "username": "michele",
+                    "provider_filter": ["opensubsonic--m1", "radiobrowser--r1"],
+                },
+            },
+            "music/search": _search_result(),
+        })
+        with pytest.raises(MALibraryLookupError) as exc:
+            await _resolve()
+        assert exc.value.reason == "not_in_ma_library"
+        assert "music/item_by_uri" not in [f["command"] for f in opened[0].sent]

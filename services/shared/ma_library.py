@@ -154,15 +154,49 @@ def _iter_candidates(payload) -> list[dict]:
     return items
 
 
-def _match_by_abs_id(items: list[dict], abs_item_id: str) -> dict | None:
+def _allowed_abs_instances(auth_result) -> list[str] | None:
+    """Audiobookshelf provider instances permitted by the MA user's ``provider_filter``.
+
+    Returns:
+    * ``None`` when the MA user has no ``provider_filter`` (or the server did not return one).
+    * ``[]`` when the MA user has a non-empty ``provider_filter`` containing *no*
+      Audiobookshelf instance (so we must refuse to match or query another user's ABS).
+    * ``["audiobookshelf--..."]`` when scoped to specific ABS instance(s).
+    """
+    if not isinstance(auth_result, dict):
+        return None
+    user = auth_result.get("user")
+    if not isinstance(user, dict):
+        return None
+    raw_filter = user.get("provider_filter")
+    if not isinstance(raw_filter, list) or not raw_filter:
+        return None
+    return [
+        str(p).strip()
+        for p in raw_filter
+        if isinstance(p, str) and str(p).strip().lower().startswith("audiobookshelf")
+    ]
+
+
+def _match_by_abs_id(
+    items: list[dict],
+    abs_item_id: str,
+    *,
+    allowed_instances: list[str] | None = None,
+) -> dict | None:
     """The first item MA reports as backed by *this* Audiobookshelf item.
 
     Matches books and podcasts alike; both carry the ABS id in
     ``provider_mappings``. An empty ``abs_item_id`` matches nothing; guessing the
-    first available item would hand MA a URI for the wrong media.
+    first available item would hand MA a URI for the wrong media. When
+    ``allowed_instances`` is set (from the caller's MA ``provider_filter``),
+    only mappings belonging to those ABS provider instances may match.
     """
     target = (abs_item_id or "").strip().lower()
     if not target:
+        return None
+    allowed = None if allowed_instances is None else {i.strip().lower() for i in allowed_instances if i.strip()}
+    if allowed is not None and not allowed:
         return None
     for item in items:
         mappings = item.get("provider_mappings")
@@ -173,6 +207,10 @@ def _match_by_abs_id(items: list[dict], abs_item_id: str) -> dict | None:
                 continue
             if str(mapping.get("provider_domain", "")).strip().lower() != "audiobookshelf":
                 continue
+            if allowed is not None:
+                inst = str(mapping.get("provider_instance") or "").strip().lower()
+                if inst not in allowed:
+                    continue
             if str(mapping.get("item_id", "")).strip().lower() != target:
                 continue
             if mapping.get("available") is False:
@@ -188,10 +226,16 @@ def _match_by_abs_id(items: list[dict], abs_item_id: str) -> dict | None:
 _ABS_PROVIDER_MEDIA_TYPES = ("audiobook", "podcast")
 
 
-async def _from_abs_provider(ws, abs_item_id: str) -> ResolvedAudiobook | None:
+async def _from_abs_provider(
+    ws,
+    abs_item_id: str,
+    *,
+    allowed_instances: list[str] | None = None,
+) -> ResolvedAudiobook | None:
     """Look an ABS item up through MA's Audiobookshelf provider, not its library.
 
-    ``audiobookshelf://<type>/<abs id>`` names the item by its upstream id, so
+    ``audiobookshelf://<type>/<abs id>`` (or ``audiobookshelf--<instance>://<type>/<abs id>``
+    when scoped by ``provider_filter``) names the item by its upstream id, so
     there is nothing to guess: MA either has it (with a provider mapping for
     exactly this id) or answers an error. A found item is added to MA's library
     (``music/library/add_item``, what MA's own sync would do) so the caller gets
@@ -199,28 +243,36 @@ async def _from_abs_provider(ws, abs_item_id: str) -> ResolvedAudiobook | None:
     returned is played instead, which ``player_queues/play_media`` accepts.
     Returns None when the provider does not know the item either.
     """
-    for media_type in _ABS_PROVIDER_MEDIA_TYPES:
-        try:
-            item = await _rpc(ws, "music/item_by_uri", {"uri": f"audiobookshelf://{media_type}/{abs_item_id}"})
-        except MALibraryLookupError as e:
-            log.info("[ma_library] ABS provider has no %s %s: %s", media_type, abs_item_id, e)
-            continue
-        if not isinstance(item, dict) or _match_by_abs_id([item], abs_item_id) is None:
-            continue
-        provider_uri = str(item.get("uri") or "").strip()
-        name = str(item.get("name") or "").strip()
-        try:
-            added = await _rpc(ws, "music/library/add_item", {"item": provider_uri})
-        except MALibraryLookupError as e:
-            log.warning("[ma_library] Could not add %s to Music Assistant's library: %s", provider_uri, e)
-            added = None
-        library_uri = str((added or {}).get("uri") or "").strip() if isinstance(added, dict) else ""
-        if library_uri.startswith("library://"):
-            log.info("[ma_library] Added ABS item %s to Music Assistant's library as %s", abs_item_id, library_uri)
-            return ResolvedAudiobook(abs_item_id=abs_item_id, ma_uri=library_uri, title=str(added.get("name") or name).strip())
-        if provider_uri.startswith("audiobookshelf"):
-            log.info("[ma_library] Playing ABS item %s by its provider URI %s", abs_item_id, provider_uri)
-            return ResolvedAudiobook(abs_item_id=abs_item_id, ma_uri=provider_uri, title=name)
+    if allowed_instances is not None:
+        if not allowed_instances:
+            return None
+        provider_prefixes = list(allowed_instances)
+    else:
+        provider_prefixes = ["audiobookshelf"]
+
+    for prefix in provider_prefixes:
+        for media_type in _ABS_PROVIDER_MEDIA_TYPES:
+            try:
+                item = await _rpc(ws, "music/item_by_uri", {"uri": f"{prefix}://{media_type}/{abs_item_id}"})
+            except MALibraryLookupError as e:
+                log.info("[ma_library] ABS provider %s has no %s %s: %s", prefix, media_type, abs_item_id, e)
+                continue
+            if not isinstance(item, dict) or _match_by_abs_id([item], abs_item_id, allowed_instances=allowed_instances) is None:
+                continue
+            provider_uri = str(item.get("uri") or "").strip()
+            name = str(item.get("name") or "").strip()
+            try:
+                added = await _rpc(ws, "music/library/add_item", {"item": provider_uri})
+            except MALibraryLookupError as e:
+                log.warning("[ma_library] Could not add %s to Music Assistant's library: %s", provider_uri, e)
+                added = None
+            library_uri = str((added or {}).get("uri") or "").strip() if isinstance(added, dict) else ""
+            if library_uri.startswith("library://"):
+                log.info("[ma_library] Added ABS item %s to Music Assistant's library as %s", abs_item_id, library_uri)
+                return ResolvedAudiobook(abs_item_id=abs_item_id, ma_uri=library_uri, title=str(added.get("name") or name).strip())
+            if provider_uri.startswith("audiobookshelf"):
+                log.info("[ma_library] Playing ABS item %s by its provider URI %s", abs_item_id, provider_uri)
+                return ResolvedAudiobook(abs_item_id=abs_item_id, ma_uri=provider_uri, title=name)
     return None
 
 
@@ -244,7 +296,8 @@ async def _resolve_once(
         ping_timeout=WS_PING_TIMEOUT,
         open_timeout=WS_OPEN_TIMEOUT,
     ) as ws:
-        await _rpc(ws, "auth", {"token": mass_token})
+        auth_result = await _rpc(ws, "auth", {"token": mass_token})
+        allowed_abs = _allowed_abs_instances(auth_result)
         result = await _rpc(
             ws,
             "music/search",
@@ -255,7 +308,7 @@ async def _resolve_once(
             },
         )
         items = _iter_candidates(result)
-        match = _match_by_abs_id(items, abs_item_id)
+        match = _match_by_abs_id(items, abs_item_id, allowed_instances=allowed_abs)
         if match is None:
             # Not in MA's library *index* yet. MA only re-reads Audiobookshelf on
             # its periodic library sync, so a book added to ABS since then is
@@ -263,7 +316,7 @@ async def _resolve_once(
             # 19:08, MA's library still had 193 of ABS's 199 books, and the
             # player could not start it). MA's ABS provider can still look the
             # item up by its ABS id, so ask it directly and add it to the library.
-            fresh = await _from_abs_provider(ws, abs_item_id)
+            fresh = await _from_abs_provider(ws, abs_item_id, allowed_instances=allowed_abs)
             if fresh is not None:
                 return fresh
 
@@ -383,19 +436,27 @@ async def list_podcast_episodes(
         ping_timeout=WS_PING_TIMEOUT,
         open_timeout=WS_OPEN_TIMEOUT,
     ) as ws:
-        await _rpc(ws, "auth", {"token": mass_token})
+        auth_result = await _rpc(ws, "auth", {"token": mass_token})
+        allowed_abs = _allowed_abs_instances(auth_result)
         result = await _rpc(
             ws,
             "music/podcasts/podcast_episodes",
             {"item_id": library_id, "provider_instance_id_or_domain": "library"},
         )
 
+    allowed_prefixes = (
+        tuple(f"{inst.lower()}://" for inst in allowed_abs)
+        if allowed_abs is not None
+        else None
+    )
     episodes: list[dict] = []
     for item in result if isinstance(result, list) else []:
         if not isinstance(item, dict):
             continue
         uri = str(item.get("uri") or "").strip()
         if "://podcast_episode/" not in uri or not uri.startswith("audiobookshelf"):
+            continue
+        if allowed_prefixes is not None and not uri.lower().startswith(allowed_prefixes):
             continue
         episodes.append({
             "uri": uri,

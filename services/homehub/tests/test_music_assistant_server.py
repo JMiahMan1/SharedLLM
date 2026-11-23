@@ -233,3 +233,163 @@ async def test_configure_tries_a_changed_address_before_saving(monkeypatch):
     assert "did not answer" in str(err.value) and seen[0]["token"] == "hub-token"
     await entries._check_changes("music_assistant", {"title": "x"}, {"url": "u"})  # nothing it checks changed
     assert len(seen) == 1
+
+
+class AbsProviderConn(Conn):
+    """Fake MA connection that also supports config/providers, setup flows, and auth/user/update."""
+
+    def __init__(self, *, users=None, providers=None, fail_submit=None):
+        super().__init__(users=users)
+        self.providers = list(providers) if providers is not None else [
+            {"instance_id": "opensubsonic--m1", "domain": "opensubsonic", "type": "music", "enabled": True},
+            {"instance_id": "radiobrowser--r1", "domain": "radiobrowser", "type": "music", "enabled": True},
+            {"instance_id": "audiobookshelf--jer1", "domain": "audiobookshelf", "type": "music", "enabled": True, "name": "Audiobookshelf (jeremiah)"},
+            {"instance_id": "chromecast--p1", "domain": "chromecast", "type": "player", "enabled": True},
+        ]
+        self.fail_submit = fail_submit
+        self._flow_seq = 0
+        self._flows: dict[str, dict] = {}
+        self.saved_names: dict[str, str] = {}
+
+    async def command(self, command, **args):
+        if command == "config/providers":
+            self.sent.append((command, args))
+            return [dict(p) for p in self.providers]
+        if command == "config/providers/setup":
+            self.sent.append((command, args))
+            self._flow_seq += 1
+            fid = f"flow-{self._flow_seq}"
+            self._flows[fid] = {"mode": "setup", "domain": args["provider_domain"]}
+            return {"flow_id": fid, "type": "form"}
+        if command == "config/providers/reconfigure":
+            self.sent.append((command, args))
+            self._flow_seq += 1
+            fid = f"flow-{self._flow_seq}"
+            self._flows[fid] = {"mode": "reconfigure", "instance_id": args["instance_id"]}
+            return {"flow_id": fid, "type": "form"}
+        if command == "config/flows/submit":
+            self.sent.append((command, args))
+            if self.fail_submit:
+                return {"flow_id": args["flow_id"], "type": "form", "errors": {"base": self.fail_submit}}
+            flow = self._flows[args["flow_id"]]
+            if flow["mode"] == "setup":
+                iid = f"audiobookshelf--new{self._flow_seq}"
+                self.providers.append({
+                    "instance_id": iid,
+                    "domain": "audiobookshelf",
+                    "type": "music",
+                    "enabled": True,
+                    "name": None,
+                })
+                return {"flow_id": args["flow_id"], "type": "finish", "result": {"instance_id": iid}}
+            return {"flow_id": args["flow_id"], "type": "finish", "result": {"instance_id": flow["instance_id"]}}
+        if command == "config/flows/abort":
+            self.sent.append((command, args))
+            return None
+        if command == "config/providers/save":
+            self.sent.append((command, args))
+            iid = args["instance_id"]
+            if "name" in (args.get("values") or {}):
+                self.saved_names[iid] = args["values"]["name"]
+                for p in self.providers:
+                    if p["instance_id"] == iid:
+                        p["name"] = args["values"]["name"]
+            return {"instance_id": iid}
+        if command == "config/providers/remove":
+            self.sent.append((command, args))
+            self.providers = [p for p in self.providers if p["instance_id"] != args["instance_id"]]
+            return None
+        if command == "auth/user/update":
+            self.sent.append((command, args))
+            for u in self.users:
+                if u["user_id"] == args["user_id"]:
+                    u["provider_filter"] = list(args["provider_filter"])
+            return None
+        return await super().command(command, **args)
+
+
+async def test_new_ma_account_starts_with_shared_music_provider_filter_excluding_abs():
+    conn = AbsProviderConn(users=[])
+    hub, _ = hub_with(conn=conn)
+    out = await mas.provision_account(hub, "michele", "Michele")
+    assert out["created"] is True
+    create = next(a for c, a in conn.sent if c == "auth/user/create")
+    assert create["provider_filter"] == ["opensubsonic--m1", "radiobrowser--r1"]
+
+
+async def test_sync_user_abs_creates_dedicated_provider_and_scopes_filter_for_password_login():
+    conn = AbsProviderConn(users=[
+        {"user_id": "u-jer", "username": "jeremiah", "role": "admin", "provider_filter": ["audiobookshelf--jer1", "opensubsonic--m1", "radiobrowser--r1"]},
+        {"user_id": "u-zach", "username": "zachary", "role": "user", "provider_filter": []},
+    ])
+    hub, _ = hub_with(conn=conn)
+    out = await mas.sync_user_audiobookshelf_provider(
+        hub,
+        username="zachary",
+        display_name="Zachary",
+        abs_url="https://abs.example.test/",
+        abs_username="zachary",
+        abs_password="secret-pw",
+    )
+    assert out["action"] == "created"
+    assert out["abs_instance_id"] == "audiobookshelf--new1"
+    assert out["provider_filter"] == ["audiobookshelf--new1", "opensubsonic--m1", "radiobrowser--r1"]
+    assert "audiobookshelf--jer1" not in out["provider_filter"]
+    assert conn.saved_names["audiobookshelf--new1"] == "Audiobookshelf (zachary)"
+    submit = next(a for c, a in conn.sent if c == "config/flows/submit")
+    # Password auth MUST explicitly pass api_token=None because MA checks `if token_api is not None`.
+    assert submit["values"] == {
+        "url": "https://abs.example.test",
+        "verify_ssl": True,
+        "api_token": None,
+        "username": "zachary",
+        "password": "secret-pw",
+    }
+
+
+async def test_sync_user_abs_reconfigures_existing_owned_provider_without_duplicating():
+    conn = AbsProviderConn(users=[
+        {"user_id": "u-jer", "username": "jeremiah", "role": "admin", "provider_filter": ["audiobookshelf--jer1", "opensubsonic--m1", "spotify--personal"]},
+    ])
+    hub, _ = hub_with(conn=conn)
+    out = await mas.sync_user_audiobookshelf_provider(
+        hub,
+        username="jeremiah",
+        abs_url="https://abs.example.test",
+        abs_api_key="jer-api-key",
+    )
+    assert out["action"] == "updated"
+    assert out["abs_instance_id"] == "audiobookshelf--jer1"
+    # Preserves personal non-ABS providers like spotify--personal!
+    assert out["provider_filter"] == ["audiobookshelf--jer1", "opensubsonic--m1", "radiobrowser--r1", "spotify--personal"]
+    assert "config/providers/setup" not in [c for c, _ in conn.sent]
+    assert "config/providers/reconfigure" in [c for c, _ in conn.sent]
+
+
+async def test_sync_user_without_abs_credentials_strips_other_users_abs_from_filter():
+    conn = AbsProviderConn(users=[
+        {"user_id": "u-michele", "username": "michele", "role": "admin", "provider_filter": []},
+    ])
+    hub, _ = hub_with(conn=conn)
+    out = await mas.sync_user_audiobookshelf_provider(hub, username="michele")
+    assert out["action"] == "scoped"
+    assert out["abs_instance_id"] is None
+    assert out["provider_filter"] == ["opensubsonic--m1", "radiobrowser--r1"]
+    assert out["filter_updated"] is True
+
+
+async def test_sync_user_abs_aborts_flow_when_ma_refuses_credentials():
+    conn = AbsProviderConn(
+        users=[{"user_id": "u-zach", "username": "zachary", "role": "user", "provider_filter": []}],
+        fail_submit="login_failed",
+    )
+    hub, _ = hub_with(conn=conn)
+    with pytest.raises(mas.AccountError) as err:
+        await mas.sync_user_audiobookshelf_provider(
+            hub,
+            username="zachary",
+            abs_url="https://abs.example.test",
+            abs_api_key="bad-key",
+        )
+    assert err.value.status == 422
+    assert any(c == "config/flows/abort" for c, _ in conn.sent)

@@ -228,6 +228,7 @@ SCHEMA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("user", "mass_url", "ALTER TABLE user ADD COLUMN mass_url VARCHAR"),
     ("user", "mass_token_enc", "ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR"),
     ("user", "mass_user_id", "ALTER TABLE user ADD COLUMN mass_user_id VARCHAR"),
+    ("user", "mass_abs_provider_id", "ALTER TABLE user ADD COLUMN mass_abs_provider_id VARCHAR"),
     ("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1"),
     ("user", "skylight_url", "ALTER TABLE user ADD COLUMN skylight_url VARCHAR"),
     ("user", "avatar", "ALTER TABLE user ADD COLUMN avatar VARCHAR"),
@@ -2185,6 +2186,69 @@ def _redacted(update_data: dict) -> list[str]:
     return sorted(update_data)
 
 
+_ABS_CREDENTIAL_FIELDS = frozenset({
+    "audiobookshelf_url",
+    "audiobookshelf_user",
+    "audiobookshelf_pass",
+    "audiobookshelf_api_key",
+})
+
+
+def _sync_user_ma_audiobookshelf(
+    session: Session,
+    user: User,
+    *,
+    best_effort: bool = True,
+    remove_if_unconfigured: bool = False,
+    ma_username: str | None = None,
+) -> dict[str, Any] | None:
+    """Sync ``user``'s dedicated Audiobookshelf provider and provider_filter on the household MA.
+
+    Only uses ``user``'s *own* Audiobookshelf credentials (never a borrowed household grant), so
+    each person's MA account stays strictly bound to their own Audiobookshelf account.
+    """
+    if bool(getattr(user, "is_test_account", False)):
+        return None
+    # A person using their own separate MA server (not the household server) manages providers there.
+    if (user.mass_url or "").strip():
+        return None
+    if _is_system_default_user(user) and not ma_username:
+        return None
+
+    own_abs = _own_service_creds(user, "audiobookshelf")
+    target_ma_username = (ma_username or user.username).strip().lower()
+    try:
+        result = music_assistant.sync_audiobookshelf_provider(
+            username=target_ma_username,
+            display_name=user.display_name or user.username,
+            abs_url=own_abs.get("audiobookshelf_url"),
+            abs_api_key=own_abs.get("audiobookshelf_api_key"),
+            abs_username=own_abs.get("audiobookshelf_user"),
+            abs_password=own_abs.get("audiobookshelf_pass"),
+            existing_instance_id=user.mass_abs_provider_id,
+            remove_if_unconfigured=remove_if_unconfigured,
+        )
+    except music_assistant.HubUnavailable as exc:
+        if best_effort:
+            log.warning("[music_assistant] Could not sync Audiobookshelf provider for %s: %s", user.username, exc)
+            return None
+        raise
+
+    changed = False
+    new_inst = result.get("abs_instance_id")
+    if new_inst != user.mass_abs_provider_id:
+        user.mass_abs_provider_id = new_inst
+        changed = True
+    if result.get("user_id") and result["user_id"] != user.mass_user_id and not _is_system_default_user(user):
+        user.mass_user_id = str(result["user_id"])
+        changed = True
+    if changed:
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return result
+
+
 @app.patch("/api/users/me", response_model=UserRead)
 def update_me(body: UserUpdate, request: Request, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     update_data = body.model_dump(exclude_unset=True)
@@ -2210,6 +2274,14 @@ def update_me(body: UserUpdate, request: Request, session: Session = Depends(get
     session.commit()
     session.refresh(user)
     _audit(request, session, "user.self_update", user.username, actor=user, before=before, after=audit.snapshot(user))
+    touched_abs = bool(_ABS_CREDENTIAL_FIELDS.intersection(update_data.keys()) or _ABS_CREDENTIAL_FIELDS.intersection(clear_fields or []))
+    if touched_abs:
+        _sync_user_ma_audiobookshelf(
+            session,
+            user,
+            best_effort=True,
+            remove_if_unconfigured=bool(_ABS_CREDENTIAL_FIELDS.intersection(clear_fields or [])),
+        )
     return user
 
 @app.patch("/api/users/{username}", response_model=UserRead)
@@ -2238,6 +2310,14 @@ def update_user(username: str, body: UserUpdate, request: Request, session: Sess
     session.commit()
     session.refresh(user)
     _audit(request, session, "user.update", user.username, actor=admin, before=before, after=audit.snapshot(user))
+    touched_abs = bool(_ABS_CREDENTIAL_FIELDS.intersection(update_data.keys()) or _ABS_CREDENTIAL_FIELDS.intersection(clear_fields or []))
+    if touched_abs:
+        _sync_user_ma_audiobookshelf(
+            session,
+            user,
+            best_effort=True,
+            remove_if_unconfigured=bool(_ABS_CREDENTIAL_FIELDS.intersection(clear_fields or [])),
+        )
     return user
 
 
@@ -3912,6 +3992,82 @@ def music_assistant_clear_stale_urls(body: dict, request: Request, session: Sess
            changes=[{"field": r["username"], "change": f"cleared {r['host']}"} for r in cleared])
     return {"retired_hosts": hosts, "cleared": cleared}
 
+
+def _ma_audiobookshelf_plan(session: Session) -> list[dict[str, Any]]:
+    """Dry run: what per-user MA Audiobookshelf provider & filter reconciliation would do."""
+    rows: list[dict[str, Any]] = []
+    for u in session.exec(select(User)).all():
+        if _ma_never_provisioned(u):
+            continue
+        own_abs = _own_service_creds(u, "audiobookshelf")
+        has_abs = bool(
+            (own_abs.get("audiobookshelf_url") or "").strip()
+            and (
+                (own_abs.get("audiobookshelf_api_key") or "").strip()
+                or ((own_abs.get("audiobookshelf_user") or "").strip() and (own_abs.get("audiobookshelf_pass") or "").strip())
+            )
+        )
+        if (u.mass_url or "").strip():
+            action = "own_server"
+        elif has_abs:
+            action = "update_provider" if u.mass_abs_provider_id else "create_provider"
+        else:
+            action = "scope_shared_only"
+        rows.append({
+            "username": u.username,
+            "has_abs_credentials": has_abs,
+            "mass_abs_provider_id": u.mass_abs_provider_id,
+            "action": action,
+        })
+    return sorted(rows, key=lambda r: r["username"])
+
+
+@app.get("/api/admin/music-assistant/audiobookshelf")
+def music_assistant_audiobookshelf_plan(session: Session = Depends(get_session),
+                                        _: Any = Depends(require_admin_or_internal)):
+    """Dry run: each person's dedicated MA Audiobookshelf provider status and planned action."""
+    return {"users": _ma_audiobookshelf_plan(session), "household": music_assistant.household_server()}
+
+
+@app.post("/api/admin/music-assistant/audiobookshelf")
+def music_assistant_audiobookshelf_sync(body: dict, request: Request, session: Session = Depends(get_session),
+                                        _: Any = Depends(require_admin_or_internal)):
+    """``{"confirm": true, "usernames"?: [...], "remove_if_unconfigured"?: false}``:
+    reconcile per-user Audiobookshelf providers and provider_filters on the household MA.
+    """
+    if body.get("confirm") is not True:
+        raise HTTPException(status_code=400, detail="Send confirm: true after reviewing the dry run (GET).")
+    wanted = {str(n).strip().lower() for n in (body.get("usernames") or []) if str(n).strip()} or None
+    remove_unconfigured = bool(body.get("remove_if_unconfigured", False))
+    results: list[dict[str, Any]] = []
+    for row in _ma_audiobookshelf_plan(session):
+        if wanted is not None and row["username"] not in wanted:
+            continue
+        if row["action"] == "own_server":
+            results.append({**row, "result": "skipped_own_server"})
+            continue
+        u = session.exec(select(User).where(User.username == row["username"])).first()
+        if u is None:
+            continue
+        try:
+            synced = _sync_user_ma_audiobookshelf(
+                session,
+                u,
+                best_effort=False,
+                remove_if_unconfigured=remove_unconfigured,
+            )
+            results.append({
+                "username": u.username,
+                "result": (synced or {}).get("action", "unchanged"),
+                "abs_instance_id": (synced or {}).get("abs_instance_id"),
+                "filter_updated": (synced or {}).get("filter_updated"),
+            })
+        except music_assistant.HubUnavailable as exc:
+            results.append({"username": u.username, "result": "failed", "message": str(exc)})
+    _audit(request, session, "music_assistant.audiobookshelf_synced", None,
+           changes=[{"field": r["username"], "change": str(r["result"])} for r in results])
+    return {"users": results}
+
 # Credential Seeding
 
 SEEDABLE_CREDENTIALS = {
@@ -4478,6 +4634,8 @@ async def create_service_token(
         if not abs_url:
             raise HTTPException(status_code=422, detail="Audiobookshelf is not configured (set audiobookshelf_url first)")
         token = await _exchange_audiobookshelf_token(abs_url, body.get("source_username") or target.username, password)
+        if not target.audiobookshelf_url:
+            target.audiobookshelf_url = normalize_abs_url(abs_url)
         target.audiobookshelf_api_key_enc = encrypt(token)
     else:  # nextcloud
         nc_username = body.get("source_username") or target.nextcloud_user or target.username
@@ -4489,6 +4647,9 @@ async def create_service_token(
     session.commit()
     _audit(request, session, "credential.service_token", target.username, actor=admin,
            changes=[{"field": f"{service}_token", "change": "set", "secret": True}])
+    if service == "audiobookshelf":
+        session.refresh(target)
+        _sync_user_ma_audiobookshelf(session, target, best_effort=True)
 
     return {
         "success": True,

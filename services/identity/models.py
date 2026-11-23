@@ -59,6 +59,8 @@ class User(SQLModel, table=True):  # type: ignore
     mass_url: str | None = None
     #: Their account id on the household Music Assistant (set when Jarvis made or checked the account).
     mass_user_id: str | None = None
+    #: Their dedicated Audiobookshelf provider instance_id on the household Music Assistant (e.g. audiobookshelf--xxxx).
+    mass_abs_provider_id: str | None = None
     skylight_url: str | None = None
     skylight_email: str | None = None
     skylight_enabled: bool = Field(default=True)

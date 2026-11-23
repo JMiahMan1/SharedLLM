@@ -152,4 +152,33 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         except music_assistant_server.AccountError as exc:
             raise HTTPException(exc.status, detail=str(exc)) from exc
 
+    @router.post("/hub/music_assistant/audiobookshelf")
+    async def music_assistant_audiobookshelf(request: Request) -> dict[str, Any]:
+        """Provision/sync one person's dedicated Audiobookshelf provider instance and MA provider_filter.
+
+        Internal secret only: the request body may carry the user's Audiobookshelf API token or password.
+        """
+        token = request.headers.get("x-internal-secret") or bearer(request.headers.get("authorization"))
+        p = auth.authenticate(token)
+        if p is None or p.user_id != "internal":
+            raise HTTPException(401, detail="Unauthorized")
+        from services.homehub import music_assistant_server
+
+        body = await request.json() or {}
+        try:
+            return await music_assistant_server.sync_user_audiobookshelf_provider(
+                runtime.hub,
+                username=str(body.get("username") or ""),
+                display_name=body.get("display_name"),
+                abs_url=body.get("abs_url"),
+                abs_api_key=body.get("abs_api_key"),
+                abs_username=body.get("abs_username"),
+                abs_password=body.get("abs_password"),
+                verify_ssl=bool(body.get("verify_ssl", True)),
+                existing_instance_id=body.get("existing_instance_id"),
+                remove_if_unconfigured=bool(body.get("remove_if_unconfigured", False)),
+            )
+        except music_assistant_server.AccountError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from exc
+
     return router
