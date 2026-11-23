@@ -80,7 +80,7 @@ def driver(monkeypatch, event_infos=None, update_infos=None, entities=None, opti
     ent_specs = list(entities or [])
     hub, entry = make_hub("esphome", dict(DATA), ent_specs, options=options or {})
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: FakeClient()  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: FakeClient()  # type: ignore[method-assign]
     hub.drivers[entry.entry_id] = drv
     monkeypatch.setattr("services.homehub.drivers.esphome.COMMAND_SETTLE", 0.05)
     return hub, drv

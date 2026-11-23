@@ -57,7 +57,7 @@ def make_builder(hub, *, nodes=None, results=None, gate: asyncio.Event | None = 
 def node(monkeypatch):
     hub, entry = make_hub("esphome", dict(DATA), [*ENTITIES, {"entity_id": FIRMWARE, "unique_id": MAC}])
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: VersionedClient()  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: VersionedClient()  # type: ignore[method-assign]
     hub.drivers[entry.entry_id] = drv
     monkeypatch.setattr(esphome, "COMMAND_SETTLE", 0.05)
     return hub, drv

@@ -51,6 +51,11 @@ export interface EchoDeviceSummary {
   whisperEnabled: boolean;
   /** False when the drop-in or satellite entity says the node is unavailable. */
   online: boolean;
+  /** Bluetooth speaker entity IDs and state. */
+  btPairingEntityId: string | null;
+  btPairingOn: boolean;
+  btDisconnectEntityId: string | null;
+  btConnectedDevice: string | null;
 }
 
 const DROP_IN_STATES: readonly DropInState[] = ['idle', 'calling', 'ringing', 'connected', 'unknown'];
@@ -219,6 +224,7 @@ function assign(group: Group, purpose: string, state: EchoState): void {
  */
 export function extractEchoFleet(states: EchoState[]): EchoDeviceSummary[] {
   const groups = new Map<string, Group>();
+  const byId = new Map(states.map((state) => [state.entity_id.toLowerCase(), state]));
 
   for (const state of states) {
     const anchor = anchorNode(state);
@@ -289,6 +295,13 @@ export function extractEchoFleet(states: EchoState[]): EchoDeviceSummary[] {
         .filter((state): state is EchoState => Boolean(state))
         .every((state) => state.state !== 'unavailable' && state.state !== 'unknown');
 
+      // Bluetooth speaker entities hassmic publishes for this node, read from the states themselves.
+      const bt = (domain: string, suffix: string): EchoState | undefined =>
+        byId.get(`${domain}.${node}_${suffix}`);
+      const pairing = bt('switch', 'bluetooth_pairing') ?? bt('switch', 'pairing');
+      const disconnect = bt('button', 'bluetooth_disconnect');
+      const connected = usefulState(bt('sensor', 'bluetooth_device'));
+
       return {
         node,
         name: dropInName(named) || prettyName(node),
@@ -322,6 +335,11 @@ export function extractEchoFleet(states: EchoState[]): EchoDeviceSummary[] {
         lastReply: usefulState(group.lastReply),
         whisperEnabled: Boolean(group.whisper),
         online,
+        // Bluetooth speaker fields
+        btPairingEntityId: pairing?.entity_id ?? null,
+        btPairingOn: on(pairing?.state),
+        btDisconnectEntityId: disconnect?.entity_id ?? null,
+        btConnectedDevice: connected,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));

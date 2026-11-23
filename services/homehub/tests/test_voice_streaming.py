@@ -160,7 +160,7 @@ async def test_an_adopted_satellite_gets_its_announce_target_and_settings(env, m
     from services.homehub.drivers.esphome import ESPHomeDriver
 
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: VoiceClient(int(F.VOICE_ASSISTANT | F.API_AUDIO | F.ANNOUNCE))  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: VoiceClient(int(F.VOICE_ASSISTANT | F.API_AUDIO | F.ANNOUNCE))  # type: ignore[method-assign]
     hub.drivers[entry.entry_id] = drv
     await drv.async_setup()
     mine = {e.unique_id: e for e in hub.entities.values() if e.config_entry_id == entry.entry_id}

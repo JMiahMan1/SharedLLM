@@ -84,7 +84,7 @@ def _driver(formats):
 
     hub, entry = make_hub("esphome", dict(fake.DATA), fake.ENTITIES, options={"allow_service_calls": True})
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: Node()  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: Node()  # type: ignore[method-assign]
 
     async def _no_mdns(host, timeout):
         return None

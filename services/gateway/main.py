@@ -93,6 +93,7 @@ from services.gateway import (
     discovery_routes,
     drawing,
     echo_dropin_routes,
+    echo_tunnel_routes,
     email_routes,
     family_safety,
     fast_garden,
@@ -960,6 +961,7 @@ app.include_router(image_routes.router)
 app.include_router(camera_live_routes.router)  # Real-time camera video (go2rtc)
 app.include_router(discovery_routes.router)  # New devices
 app.include_router(echo_dropin_routes.router)  # Echo Drop-In status, hangup, and WebSocket audio proxy
+app.include_router(echo_tunnel_routes.router)  # Echo Reverse WSS Tunnel
 app.include_router(hub_registry_routes.router)  # Areas, floors, labels, zones, persons
 app.include_router(light_group_routes.router)  # Light groups (parents and admins)
 app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sensors
@@ -3924,6 +3926,81 @@ async def _fast_drop_in_answer(query: str, creds: dict, voice_context: dict | No
     return "Could not reach Drop In right now."
 
 
+async def _fast_echo_bluetooth_answer(query: str, creds: dict, voice_context: dict | None) -> str | None:
+    """Tier-1 Bluetooth command for an Echo, without waiting on an LLM turn.
+
+    Every hub call uses the caller's own hub login, so it only sees and switches the Echos
+    that person may use.
+    """
+    from services.gateway import fast_echo_bluetooth
+
+    cmd = fast_echo_bluetooth.match_echo_bluetooth(query)
+    if cmd is None:
+        return None
+    unreachable = "Could not reach that Echo right now."
+    try:
+        status, body = await automation_routes._hub("GET", "/api/states", creds=creds)
+    except Exception as exc:
+        log.warning("[FastPath] bt states failed: %s", type(exc).__name__)
+        return unreachable
+    if status != 200:
+        log.warning("[FastPath] bt states answered %s", status)
+        return unreachable
+
+    if isinstance(body, list):
+        entity_ids = [str(e.get("entity_id")) for e in body if isinstance(e, dict) and e.get("entity_id")]
+    elif isinstance(body, dict):
+        entity_ids = [str(k) for k in body]
+    else:
+        entity_ids = []
+    # Echos are the nodes that have a Bluetooth pairing switch.
+    echo_nodes = [m.group(1) for eid in entity_ids
+                  if (m := re.match(r"^switch\.(.+?)_bluetooth_pairing$", eid))]
+
+    node = None
+    if cmd.target_room:
+        room_slug = cmd.target_room.lower().strip().replace(" ", "_")
+        node = next((n for n in echo_nodes if room_slug in n), None)
+    else:
+        satellite = str((voice_context or {}).get("satellite") or "")
+        if "." in satellite:
+            heard = satellite.split(".", 1)[1].removesuffix("_assist_satellite")
+            node = heard if heard in echo_nodes else None
+    if node is None:
+        return "Which Echo? Say the room, like turn on Bluetooth pairing in the kitchen."
+
+    ents = fast_echo_bluetooth.resolve_bt_entities(body, node)
+    calls = {
+        "pair_on": ("switch/turn_on", ents["pairing_switch"],
+                    "Bluetooth pairing is on for two minutes. Pick the Echo in your phone's Bluetooth settings."),
+        "pair_off": ("switch/turn_off", ents["pairing_switch"], "Bluetooth pairing is off."),
+        "disconnect": ("button/press", ents["disconnect_button"], "Disconnected."),
+    }
+    if cmd.action in calls:
+        service, entity_id, reply = calls[cmd.action]
+        if not entity_id:
+            return "That Echo does not offer Bluetooth audio."
+        try:
+            status, _ = await automation_routes._hub(
+                "POST", f"/api/services/{service}", creds=creds, json={"entity_id": entity_id})
+        except Exception as exc:
+            log.warning("[FastPath] bt %s failed: %s", cmd.action, type(exc).__name__)
+            return unreachable
+        if status != 200:
+            log.warning("[FastPath] bt %s answered %s", cmd.action, status)
+            return unreachable
+        return reply
+    if cmd.action == "status":
+        device_entity = ents["connected_device"]
+        if device_entity:
+            states = fast_echo_bluetooth._normalize_states(body) if isinstance(body, list) else (body or {})
+            device = str(states.get(device_entity) or "")
+            if device and device not in ("unknown", "unavailable", "none", "None"):
+                return f"{device} is connected."
+        return "Nothing is connected over Bluetooth."
+    return None
+
+
 async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
     """A voice satellite's answer as NDJSON: safe sentences as they are written, then what is left.
 
@@ -4159,6 +4236,14 @@ async def chat_handler(request: Request, background_tasks=None):
             if is_openai:
                 return _make_openai_response(drop_in_reply, selected_model, "fast_drop_in")
             return _make_ollama_response(drop_in_reply, selected_model, "fast_drop_in")
+
+        bt_reply = await _fast_echo_bluetooth_answer(str(query), creds, voice_context)
+        if bt_reply is not None:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", bt_reply)
+            if is_openai:
+                return _make_openai_response(bt_reply, selected_model, "fast_echo_bluetooth")
+            return _make_ollama_response(bt_reply, selected_model, "fast_echo_bluetooth")
 
     # The watch's weather and calendar buttons must not wait on a 35-75 s LLM
     # turn (and the small model can overflow its 8k context with RAG context).

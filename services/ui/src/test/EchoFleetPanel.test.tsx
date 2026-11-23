@@ -123,6 +123,27 @@ describe('EchoFleetPanel', () => {
     });
   });
 
+  it('reads the Bluetooth speaker entities and their real states', () => {
+    const paired = extractEchoFleet([
+      state('sensor.crown_drop_in', 'idle'),
+      state('switch.crown_bluetooth_pairing', 'on'),
+      state('button.crown_bluetooth_disconnect', 'unknown'),
+      state('sensor.crown_bluetooth_device', 'Pixel'),
+    ]);
+    expect(paired[0]).toMatchObject({
+      btPairingEntityId: 'switch.crown_bluetooth_pairing',
+      btPairingOn: true,
+      btDisconnectEntityId: 'button.crown_bluetooth_disconnect',
+      btConnectedDevice: 'Pixel',
+    });
+    const idle = extractEchoFleet([
+      state('sensor.crown_drop_in', 'idle'),
+      state('switch.crown_bluetooth_pairing', 'off'),
+      state('sensor.crown_bluetooth_device', 'unavailable'),
+    ]);
+    expect(idle[0]).toMatchObject({ btPairingOn: false, btConnectedDevice: null, btDisconnectEntityId: null });
+  });
+
   it('accepts only http(s) URLs for the settings link and blocks javascript:', () => {
     expect(isSafeHttpUrl('https://crown.local:28931')).toBe(true);
     expect(isSafeHttpUrl('javascript:alert(1)')).toBe(false);
