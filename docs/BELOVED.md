@@ -81,13 +81,85 @@ Beloved uses the private chat's end-to-end encryption unchanged
   (the private chat's `FLAG_SECURE`).
 - **Deleted with the chat**: deleting the private chat removes the `beloved`
   folder with everything else.
-- **Notices carry no content**: "Sam is thinking of you", "Sam left you a love
-  note", "Sam shared a prayer request with you", "Sam has a date night idea for
+- **Notices carry no content**: "Sam is thinking of you", "Sam left you a
+  love note", "Sam shared a prayer request with you", "Sam has a date night idea for
   you". They use the private chat's `nudge` category (the heartbeat vibration,
   and the heart over the screen when Jarvis is open) and carry no chat token,
   so they never add an unread count to the thread. One notice per kind per
   sender per minute (hearts) or 30 seconds (others); a heart sent sooner is
   still kept, just not announced again.
+
+## Activity and read signals
+
+The page can tell the other spouse, in a few words and never any content, when
+something is read or looked at. It is the same metadata-only idea as the
+notices above: the server learns only what was looked at, who looked and when.
+
+- **Reading signals** (`POST /api/private-chat/chats/{token}/beloved/seen`,
+  body `{"what": "gallery" | "note" | "prayer" | "idea" | "page"}`):
+  - `gallery`: "Sam is looking through your photos", at most once per 30 minutes
+    per viewer.
+  - `note`: "Sam read your love note"; `prayer`: "Sam read your prayer request";
+    `idea`: "Sam saw your date night idea". At most once per 10 minutes per kind
+    per viewer.
+  - `page`: no notice. A visit to the page is only recorded, for the
+    encouragements below.
+- **Each spouse controls their own sharing**: a per-user preference
+  `share_activity` (default true). With it off, `/seen` records nothing visible
+  and sends nothing.
+- **Activity log** (`GET /api/private-chat/chats/{token}/beloved/activity`):
+  the last 50 entries, each `{who, what, at}` and newest first, kept as metadata
+  only (what, who and when, never any content) in the Beloved store directory
+  next to the records, capped at the last 200 entries per couple. It powers the
+  "Today with <spouse>" line in the UI and is visible only to the couple.
+
+## Encouragements
+
+A gentle daily line inside Beloved, chosen from metadata alone and sent at most
+once per local day, inside the spouse's chosen hour and never in the quiet hours
+(22:00 to 07:00). It runs in the gateway's background worker
+(`services/gateway/beloved_encouragements.py`, a new `_beloved_encouragements_loop`
+modelled exactly on the private chat's reply-reminder loop: env flag
+`BELOVED_ENCOURAGEMENTS` default on, a look every 300 seconds, the job queue
+lease). A `once` key per user per day means a restart never sends twice.
+
+Only an enrolled Beloved couple (the two members of a private chat who pass
+`private_chat.is_couple`: one father and one mother) is ever encouraged, the
+same check the routes use. For each spouse with encouragements on, the line is
+chosen in this order, from metadata only:
+
+a. no heart or note from this spouse in two days or more: "Send Sam a little
+   love today: a heart takes one tap."
+b. the other spouse sent something in the last day this one has not answered:
+   "Sam reached out today. Send something back?"
+c. no visit (`page` activity) in three days or more: "Today's verse and question
+   are waiting in Beloved. Talk it over tonight?"
+d. otherwise a rotating feature tip, one per day, cycling a list of ten and
+   deterministic per couple per day (plan an evening, add a prayer request, pick
+   a date night idea, leave a love note, answer today's question, mark a day,
+   add the children's birthdays, change the cover photo, read the devotion, send
+   a heart before bed).
+
+The wording is warm, never guilt-trippy, names no content and never mentions how
+long since they wrote in a shaming way. It is a `nudge` titled "Beloved" that
+links to the page, exactly like the other Beloved notices. The pure decision
+function (`decide`) takes the metadata, now and preferences and returns the
+message or None, so every rule is unit tested without a network.
+
+## Preferences
+
+Each spouse has their own Beloved preferences, for the caller only
+(`GET`/`PUT /api/private-chat/chats/{token}/beloved/prefs`):
+
+- `share_activity` (default true): whether this spouse's reading signals are
+  shared with the other, as above.
+- `encouragements` (default true): whether this spouse receives the daily
+  encouragement.
+- `encourage_hour` (integer 7 to 21, default 19): the local hour the
+  encouragement may arrive.
+
+They are stored per user per couple in the Beloved store directory
+(`prefs.json`, not secret and not sealed) and are never carried in a record.
 
 ## Reminders
 
@@ -201,8 +273,10 @@ except reminders, and Our details says the app needs an update for them.
 
 ## Files
 
-- Server: `services/gateway/beloved.py`, `private_chat.is_couple`, tests in
-  `services/gateway/tests/test_beloved.py`.
+- Server: `services/gateway/beloved.py`, `private_chat.is_couple`,
+  `services/gateway/beloved_encouragements.py`, tests in
+  `services/gateway/tests/test_beloved.py` and
+  `services/gateway/tests/test_beloved_encouragements.py`.
 - App: `services/ui/src/lib/beloved/` (dates, days, content, records,
   reminders, access, with `beloved.test.ts`),
   `services/ui/src/components/chat/beloved/`, `plugins/belovedReminders.ts`,

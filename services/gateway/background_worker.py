@@ -196,6 +196,7 @@ class RavenWorker:
         self._admin_alerts_task = None
         self._songs_task = None
         self._reminders_task = None
+        self._beloved_task = None
         self._trainer_task = None
         self._teacher_task = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -370,6 +371,7 @@ class RavenWorker:
         self._admin_alerts_task = self._loop.create_task(self._admin_alerts_loop())
         self._songs_task = self._loop.create_task(self._songs_loop())
         self._reminders_task = self._loop.create_task(self._private_chat_reminders_loop())
+        self._beloved_task = self._loop.create_task(self._beloved_encouragements_loop())
         self._trainer_task = self._loop.create_task(self._trainer_loop())
         self._teacher_task = self._loop.create_task(self._teacher_loop())
         log.info(
@@ -393,7 +395,7 @@ class RavenWorker:
     async def _shutdown(self):
         for t in (self._health_task, self._inference_task, self._talk_task,
                   self._chat_notify_task, self._cleanup_task, self._admin_alerts_task, self._songs_task,
-                  self._reminders_task, self._trainer_task, self._teacher_task):
+                  self._reminders_task, self._beloved_task, self._trainer_task, self._teacher_task):
             if t is not None:
                 t.cancel()
         # The inference loop cancels and awaits its in-flight jobs in its own
@@ -886,6 +888,28 @@ class RavenWorker:
                 raise
             except Exception as e:
                 log.warning(f"Private chat reminders: {type(e).__name__}: {e}")
+
+    async def _beloved_encouragements_loop(self):
+        """One gentle encouragement a day inside Beloved, the couple's page
+        (services/gateway/beloved_encouragements.py): metadata only."""
+        from services.gateway import beloved_encouragements as encourage
+
+        if not encourage.ENABLED:
+            log.info("Beloved encouragements are off (BELOVED_ENCOURAGEMENTS=0).")
+            return
+        while self.is_running:
+            await asyncio.sleep(encourage.CHECK_S)
+            try:
+                if not await self.job_queue.claim_loop(
+                    "beloved_encouragements", self._lease_token, max(120, encourage.CHECK_S * 3)
+                ):
+                    continue
+                async with _shared_http_client() as client:
+                    await encourage.check_once(client, identity=IDENTITY_SVC, secret=INTERNAL_SECRET)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning(f"Beloved encouragements: {type(e).__name__}: {e}")
 
     async def _check_talk_once(self, r):
         """Perform a single poll of Nextcloud Talk."""
