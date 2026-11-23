@@ -3780,7 +3780,14 @@ export const api = {
     return resp.data;
   },
 
-  async getEntities(): Promise<{ entity_id: string; friendly_name: string; state: string; domain: string }[]> {
+  async getEntities(): Promise<{
+    entity_id: string;
+    friendly_name: string;
+    state: string;
+    domain: string;
+    /** Present when the hub includes raw states (e.g. media volume, hassmic drop-in details). */
+    attributes?: Record<string, unknown>;
+  }[]> {
     const resp = await apiClient.get('/api/entities');
     // A FAILURE body (no Home Assistant credentials) used to return an empty
     // list, so the dropdown said "No entities found" instead of naming the
