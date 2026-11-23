@@ -332,15 +332,24 @@ async def tasmota_status(host: str, password: str | None) -> dict[str, Any]:
     """``Status 0`` from the device; NeedsInput when it wants its web password."""
     import aiohttp
 
-    from services.homehub.drivers.tasmota import cm_params, needs_password, safe_error
+    from services.homehub.drivers.tasmota import asks_for_login, basic_auth, cm_params, needs_password, safe_error
 
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session, \
-                session.get(f"http://{host}/cm", params=cm_params("Status 0", password)) as resp:
-            body = None if resp.status == 401 else await resp.json(content_type=None)
-            status = resp.status
-    except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
-        raise FlowError(f"The Tasmota device at {host} did not answer: {safe_error(exc, password)}", 502) from None
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session:
+        try:
+            async with session.get(f"http://{host}/cm", params=cm_params("Status 0", password),
+                                   auth=basic_auth(password)) as resp:
+                body = None if resp.status == 401 else await resp.json(content_type=None)
+                status = resp.status
+        except aiohttp.ServerDisconnectedError as exc:
+            # Some firmwares close /cm without a word when it lacks the web password; their
+            # pages then answer 401 with a Basic challenge. That is a password, not an outage.
+            if await asks_for_login(session, host):
+                status, body = 401, None
+            else:
+                raise FlowError(f"The Tasmota device at {host} did not answer: {safe_error(exc, password)}",
+                                502) from None
+        except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
+            raise FlowError(f"The Tasmota device at {host} did not answer: {safe_error(exc, password)}", 502) from None
     if needs_password(status, body):
         raise NeedsInput([TASMOTA_PASSWORD_REQUIRED], "This Tasmota device asks for its web password.",
                          "The password was not accepted." if password else None)
