@@ -951,14 +951,28 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
 
         elif action == "stop":
             user_id = req.user_context.user
-            stopped_devs = await stop_ringing_devices(
-                r,
-                timer_id=req.id,
-                user_id=user_id,
-                device_name=req.target_device,
-                ha_url=req.user_context.ha_url,
-                ha_token=req.user_context.ha_token,
-            )
+            satellite = satellite_timers.valid_satellite(req.target_device)
+            fired_records = await fired_satellites_for(r, req.target_device) if satellite else []
+            ringing = bool(fired_records) or (req.target_device is not None and not satellite)
+            # For a voice satellite, only act when a timer actually fired on it.
+            if satellite and not fired_records:
+                ringing = False
+            if ringing:
+                stopped_devs = await stop_ringing_devices(
+                    r,
+                    timer_id=req.id,
+                    user_id=user_id,
+                    device_name=req.target_device,
+                    ha_url=req.user_context.ha_url,
+                    ha_token=req.user_context.ha_token,
+                )
+                # Clear the remembered fired timers for this satellite.
+                for rec in fired_records:
+                    await r.delete(_fired_key(rec.get("id")))
+                    with contextlib.suppress(Exception):
+                        await _tell_satellite(rec, "cancelled", req)
+            else:
+                stopped_devs = []
             # If a one-off timer is still in Redis, delete it; leave recurring alarms scheduled.
             told = False
             if req.id or req.title:
@@ -973,11 +987,18 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 fired = await _take_fired_satellite(r, req.id, user_id)
                 if fired is not None and not told:
                     await _tell_satellite(fired, "cancelled", req)
+            if satellite and not ringing:
+                return ExecutionResult(
+                    status="SUCCESS",
+                    message="No timer ringing.",
+                    service="timer_stop",
+                    detail={"stopped_devices": [], "ringing": False},
+                )
             return ExecutionResult(
                 status="SUCCESS",
                 message="Stopped.",
                 service="timer_stop",
-                detail={"stopped_devices": stopped_devs},
+                detail={"stopped_devices": stopped_devs, "ringing": ringing or bool(stopped_devs)},
             )
 
         elif action == "pause":
@@ -1163,6 +1184,27 @@ async def _take_fired_satellite(r, timer_id: str | None, user_id: str | None) ->
 async def _forget_fired_satellite(r, timer_id: str | None) -> None:
     if timer_id:
         await r.delete(_fired_key(timer_id))
+
+
+async def fired_satellites_for(r, satellite: str) -> list[dict]:
+    """Fired timer records remembered for ``satellite`` (still ringing on it)."""
+    out = []
+    try:
+        keys = await r.keys("timer_fired_satellite:*")
+    except Exception:
+        keys = []
+    for raw_k in keys:
+        key = raw_k.decode() if isinstance(raw_k, bytes) else raw_k
+        raw = await r.get(key)
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        if rec.get("satellite") == satellite:
+            out.append(rec)
+    return out
 
 
 def _targets(timer: dict, req) -> bool:

@@ -637,8 +637,16 @@ class IntentEngine:
         if re.search(r"^(?:volume\s+(?:up|down)|turn\s+(?:it\s+)?(?:up|down)|louder|quieter|mute|unmute)\b", q):
             return "media_transport", 1.0
 
+        # Audiobook resume phrases -> play_media (handled as audiobook resume in main)
+        if q in {"play my audiobook", "continue my book", "resume my audiobook", "keep reading", "continue reading"}:
+            return "play_media", 1.0
+
         # Media Play: "play <content>", "listen to <content>", "put on <content>", "stream <content>"
         if re.search(r"^(?:play|listen to|put on|stream|start playing)\b", q) and not re.search(r"^(?:play\s+(?:a\s+game|roles|dumb))\b", q):
+            return "play_media", 1.0
+
+        # "read <title>" / "read me <title>" only when followed by a title
+        if re.search(r"^read(?:\s+me)?\s+(?!my\s+(?:notifications|messages)\b|the\s+news\b)\S", q):
             return "play_media", 1.0
 
         # Lights & Switches
