@@ -47,6 +47,7 @@ from services.execution.handlers import (
     climate,
     composite,
     diagnostics,
+    drop_in,
     esphome,
     groups,
     learning,
@@ -1089,6 +1090,20 @@ async def execute_activity(req: ActivityRequest):
 @app.post("/execute/timer", response_model=ExecutionResult)
 async def execute_timer(req: TimerRequest):
     return await timer.handle_timer(req)
+
+@app.post("/execute/drop_in", response_model=ExecutionResult)
+async def execute_drop_in(req: dict, x_internal_secret: str = Header(None)):
+    """Start, end, or report native Echo-to-Echo Drop In calls."""
+    await _check_internal_secret(x_internal_secret)
+    from services.execution.schemas import UserContext
+    from services.execution.schemas_drop_in import DropInRequest
+
+    context = req.get("user_context")
+    if not isinstance(context, dict) or not context:
+        return ExecutionResult.fail("Drop In needs the caller's user context.", service="drop_in")
+    user_context = UserContext(**context)
+    parsed = DropInRequest(**req)
+    return await drop_in.handle_drop_in(parsed, user_context)
 
 @app.post("/execute/todo", response_model=ExecutionResult)
 async def execute_todo(req: TodoListRequest):

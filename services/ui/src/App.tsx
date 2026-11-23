@@ -61,6 +61,7 @@ const Garden = lazy(() => import('./pages/Garden'));
 const PlantDetail = lazy(() => import('./pages/Garden').then((m) => ({ default: m.PlantDetail })));
 const Guardian = lazy(() => import('./pages/Guardian'));
 const Devices = lazy(() => import('./pages/Devices'));
+const DisplayKiosk = lazy(() => import('./pages/DisplayKiosk'));
 const FamilyMember = lazy(() => import('./pages/FamilyMember'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Bible = lazy(() => import('./pages/Bible'));
@@ -214,6 +215,8 @@ function App() {
                 opens that child's family member page. */}
             <Route path="/guardian" element={<ProtectedRoute isMobile={isMobile}><Guardian /></ProtectedRoute>} />
             <Route path="/devices" element={<ProtectedRoute isMobile={isMobile}><Devices /></ProtectedRoute>} />
+            {/* Echo Show kiosk (`kiosk-satellite`) in the browser; hassmic keeps wake word/audio. */}
+            <Route path="/display" element={<ProtectedRoute isMobile={isMobile}><DisplayKiosk /></ProtectedRoute>} />
             <Route path="/bible" element={<ProtectedRoute isMobile={isMobile}><Bible /></ProtectedRoute>} />
             {/* Historic alias for the same page. Redirecting rather than
                 mounting a second copy keeps one URL per page, so the query

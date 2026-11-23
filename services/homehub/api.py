@@ -780,6 +780,31 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
                                                             "history", "automations", "refresh_tokens")},
         }
 
+    @app.get("/hub/music_assistant/sendspin/{device_id}")
+    async def hub_sendspin_info(device_id: str, request: Request) -> Response:
+        """One satellite's Music Assistant Sendspin address and whether its pairing token is ready."""
+        admin(request)
+        from services.homehub import music_assistant_server
+
+        include = request.query_params.get("include_token", "").lower() in ("1", "true", "yes")
+        try:
+            body = await music_assistant_server.sendspin_pairing_info(runtime.hub, device_id, include_token=include)
+        except music_assistant_server.SendspinError as exc:
+            return _error(exc.status, str(exc))
+        return JSONResponse(body)
+
+    @app.post("/hub/music_assistant/sendspin/{device_id}/pair")
+    async def hub_sendspin_pair(device_id: str, request: Request) -> Response:
+        """Ask the connected Music Assistant to pair one satellite's Sendspin provider."""
+        admin(request)
+        from services.homehub import music_assistant_server
+
+        try:
+            body = await music_assistant_server.pair_sendspin_device(runtime.hub, device_id)
+        except music_assistant_server.SendspinError as exc:
+            return _error(exc.status, str(exc))
+        return JSONResponse(body)
+
     @app.post("/hub/import")
     async def hub_import(request: Request) -> dict[str, Any]:
         admin(request)
@@ -857,6 +882,77 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map
     app.include_router(helpers_api.build_router(runtime, auth))  # HA's helpers
     app.include_router(light_groups_api.build_router(runtime, auth))  # light groups
+
+    from services.homehub import echo_dropin_bridge as _echo_dropin_bridge
+
+    bridge = _echo_dropin_bridge.EchoDropInBridge()
+    app.state.echo_dropin_bridge = bridge
+
+    def _ws_authenticate(websocket: WebSocket) -> Principal | None:
+        token = bearer(websocket.headers.get("authorization")) or websocket.headers.get("x-internal-secret")
+        if not token:
+            token = websocket.query_params.get("token")
+        return auth.authenticate(token)
+
+    @app.get("/hub/echo_dropin/status")
+    async def echo_dropin_status(request: Request) -> dict[str, Any]:
+        admin(request)
+        return bridge.status()
+
+    @app.post("/hub/echo_dropin/hangup/{call_id}")
+    async def echo_dropin_hangup(call_id: str, request: Request) -> dict[str, Any]:
+        admin(request)
+        try:
+            session = await bridge.end_call(call_id)
+        except KeyError:
+            raise HTTPException(404, detail="Unknown call_id") from None
+        return {
+            "call_id": session.call_id.hex(),
+            "state": session.state,
+            "reason": session.reason,
+        }
+
+    @app.websocket("/hub/echo_dropin/ws/{node}")
+    async def echo_dropin_ws(websocket: WebSocket, node: str) -> None:
+        principal = _ws_authenticate(websocket)
+        if principal is None:
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
+        await websocket.accept()
+        try:
+            try:
+                bridge.require_network_key()
+            except _echo_dropin_bridge.DropInBridgeError as exc:
+                await websocket.close(code=1011, reason=str(exc)[:120])
+                return
+            try:
+                peer = bridge.get_peer(node)
+            except _echo_dropin_bridge.DropInBridgeError as exc:
+                await websocket.close(code=1008, reason=str(exc)[:120])
+                return
+            transport = _echo_dropin_bridge.WebSocketOpusTransport(websocket)
+            try:
+                session = await bridge.start_call(node, transport)
+            except _echo_dropin_bridge.DropInBridgeError as exc:
+                msg = str(exc)
+                code = 1008 if "busy" in msg or "unknown" in msg else 1011
+                await websocket.close(code=code, reason=msg[:120])
+                with contextlib.suppress(Exception):
+                    await transport.close()
+                return
+            await websocket.send_json({"type": "connected", "call_id": session.call_id.hex(), "node": peer.node})
+            try:
+                await session.wait_ended()
+            finally:
+                with contextlib.suppress(Exception):
+                    if session.state != "ended":
+                        await session.hangup("websocket_closed")
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:
+            log.exception("echo drop-in websocket failed for node %s", node)
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011, reason=f"echo drop-in failed: {type(exc).__name__}"[:120])
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

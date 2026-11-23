@@ -28,8 +28,10 @@ The device transports are module functions so the tests can replace them.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import logging
+import os
 import re
 import uuid
 from typing import Any
@@ -290,6 +292,29 @@ async def esphome_probe(host: str, port: int, noise_psk: str | None, password: s
             await asyncio.wait_for(client.disconnect(), 3)
 
 
+async def esphome_provision_noise_psk(host: str, port: int, password: str = "") -> str | None:
+    """Set a fresh Noise PSK on a plaintext ESPHome node at runtime.
+
+    ``echo-dot-assist`` (``hassmic``) starts unencrypted and expects the controller to give it a key; it
+    only syncs its clock and publishes its Sendspin pairing token once encrypted. The node keeps the key,
+    so a node that cannot provision one at runtime (ordinary plaintext ESPHome firmware) answers False and
+    ``None`` is returned: the caller adds it unencrypted. The key is never logged.
+    """
+    from aioesphomeapi import APIClient
+
+    psk = base64.b64encode(os.urandom(32)).decode("ascii")
+    client = APIClient(host, port, password, client_info="homehub", noise_psk=None)
+    try:
+        await asyncio.wait_for(client.connect(login=True), 10)
+        ok = await asyncio.wait_for(client.noise_encryption_set_key(psk.encode("ascii")), 10)
+        if not ok:
+            return None
+        return psk
+    finally:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(client.disconnect(), 3)
+
+
 async def roku_device_info(host: str) -> dict[str, str]:
     import xml.etree.ElementTree as ET
 
@@ -515,6 +540,32 @@ async def adopt_esphome(runtime: Any, finding: dict[str, Any], name: str | None,
                          ) from exc
     except (APIConnectionError, OSError, TimeoutError) as exc:
         raise FlowError(f"The ESPHome node at {host} did not answer: {exc or type(exc).__name__}", 502) from exc
+
+    # hassmic (echo-dot-assist) starts plaintext and asks the controller for its Noise key. A node that
+    # cannot take one at runtime answers None and is added unencrypted; a node that takes one is probed
+    # again with it, so its ConfigEntry only ever holds a key the node itself has accepted.
+    project = str(getattr(device_info, "project_name", "") or "").lower()
+    auto_key = (bool(getattr(device_info, "api_encryption_supported", False))
+                or bool(getattr(device_info, "api_encryption_provisionable", False))
+                or int(getattr(device_info, "voice_assistant_feature_flags", 0) or 0) > 0
+                or "hassmic" in project or "echo-dot-assist" in project
+                or bool(user_input.get("provision_encryption")))
+    if psk is None and auto_key:
+        try:
+            new_psk = await esphome_provision_noise_psk(host, port, password)
+        except (APIConnectionError, OSError, TimeoutError) as exc:
+            raise FlowError(f"Failed to provision encryption key on {label}: "
+                            f"{exc or type(exc).__name__}", 502) from exc
+        if new_psk is not None:
+            try:
+                device_info, infos = await esphome_probe(host, port, new_psk, password)
+            except Exception as exc:
+                raise FlowError(
+                    f"{label} accepted a new encryption key but did not reconnect with it. Power-cycle the "
+                    "node and add it again; if it keeps answering unencrypted, add it without a key.", 502
+                ) from exc
+            psk = new_psk
+
     mac_colon = str(device_info.mac_address or "").upper()
     mac = norm_mac(mac_colon)
     if mac is None:
