@@ -1,4 +1,4 @@
-"""Fast Echo Bluetooth command matcher — matches natural phrases without a model.
+"""Fast Echo Bluetooth command matcher - matches natural phrases without a model.
 
 Pure matcher: match_echo_bluetooth(text: str) -> EchoBluetoothCommand | None
 with action in ('pair_on', 'pair_off', 'disconnect', 'status') and optional
@@ -185,7 +185,7 @@ def resolve_bt_entities(
 
     Looks up entities in the Home Hub state dict by entity_id pattern.
     Returns a dict with keys: pairing_switch, disconnect_button,
-    connected_device, connected_sensor — each set to the entity_id string
+    connected_device, connected_sensor - each set to the entity_id string
     (or None when the entity is absent).
 
     Entity patterns (hassmic/echo-dot-assist conventions):

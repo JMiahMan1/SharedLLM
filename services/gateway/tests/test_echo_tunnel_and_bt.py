@@ -1,5 +1,5 @@
 """Unit tests for services/gateway/echo_tunnel_routes.py and
-services/gateway/fast_echo_bluetooth.py — tunnel routes + BT matcher."""
+services/gateway/fast_echo_bluetooth.py - tunnel routes + BT matcher."""
 
 from __future__ import annotations
 

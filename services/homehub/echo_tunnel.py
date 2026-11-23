@@ -1,10 +1,10 @@
-"""Echo Reverse WSS Tunnel — manages outbound WebSocket-over-HTTPS tunnels
+"""Echo Reverse WSS Tunnel - manages outbound WebSocket-over-HTTPS tunnels
 that multiplex TCP connections (e.g. ESPHome API) over a single binary WS link.
 
 Protocol (binary frames, 1-byte type header):
-  0x01 OPEN  — conn_id: 4 bytes big-endian  (starts multiplexing on a new TCP session)
-  0x02 DATA  — conn_id: 4 bytes + payload    (pipe data on that TCP session)
-  0x03 CLOSE — conn_id: 4 bytes              (close that TCP session)
+  0x01 OPEN  - conn_id: 4 bytes big-endian  (starts multiplexing on a new TCP session)
+  0x02 DATA  - conn_id: 4 bytes + payload    (pipe data on that TCP session)
+  0x03 CLOSE - conn_id: 4 bytes              (close that TCP session)
   0x04 PING                              (keep-alive)
   0x05 PONG                              (respond to PING)
 """

@@ -1,4 +1,4 @@
-"""Unit tests for services/homehub/echo_tunnel.py — EchoTunnelManager frame encode/decode and e2e multiplexing."""
+"""Unit tests for services/homehub/echo_tunnel.py - EchoTunnelManager frame encode/decode and e2e multiplexing."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ MAC = "02:00:00:00:01:02"
 DATA = {"host": "192.0.2.127", "port": 6053, "password": "", "noise_psk": "not-a-real-key",
         "device_name": "smart-speaker"}
 
-# ——— Frame encode/decode ———
+# --- Frame encode/decode ---
 
 def test_encode_decode_frame():
     """Round-trip encode/decode of all frame types."""
@@ -75,7 +75,7 @@ def test_decode_frame_too_short():
         decode_frame(b"")
 
 
-# ——— local_endpoint ———
+# --- local_endpoint ---
 
 
 def test_local_endpoint_unknown_node():
@@ -103,7 +103,7 @@ async def test_local_endpoint_registered_node():
     assert manager.local_endpoint("testnode") is None
 
 
-# ——— EchoTunnelManager status ———
+# --- EchoTunnelManager status ---
 
 async def test_status_empty():
     """status() returns empty active tunnels dict."""
@@ -122,7 +122,7 @@ async def test_status_with_tunnel():
     assert status == {"active_tunnels": []}
 
 
-# ——— Mock WebSocket for testing ———
+# --- Mock WebSocket for testing ---
 
 class MockWebSocket:
     """Mock WebSocket that captures sent frames and provides a receive queue."""
@@ -172,7 +172,7 @@ class MockWebSocket:
         self._handler_task = asyncio.create_task(handler_loop())
 
 
-# ——— End-to-end loopback TCP <-> mock WS test ———
+# --- End-to-end loopback TCP <-> mock WS test ---
 
 async def test_tunnel_e2e_loopback_tcp_ws():
     """Real loopback test: TCP client <-> mock WS through EchoTunnelManager.
@@ -449,7 +449,7 @@ async def test_tunnel_disconnect_sends_close_to_all_active():
     assert status["active_tunnels"] == []
 
 
-# ——— Route tests ———
+# --- Route tests ---
 
 
 def test_status_route_returns_json():
@@ -500,7 +500,7 @@ def test_disconnect_route_returns_json():
     assert body == {"disconnected": False}
 
 
-# ——— Per-device tunnel tokens ———
+# --- Per-device tunnel tokens ---
 
 _ADMIN = {"authorization": "Bearer s"}
 

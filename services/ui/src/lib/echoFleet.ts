@@ -224,6 +224,7 @@ function assign(group: Group, purpose: string, state: EchoState): void {
  */
 export function extractEchoFleet(states: EchoState[]): EchoDeviceSummary[] {
   const groups = new Map<string, Group>();
+  const byId = new Map(states.map((state) => [state.entity_id.toLowerCase(), state]));
 
   for (const state of states) {
     const anchor = anchorNode(state);
@@ -294,87 +295,12 @@ export function extractEchoFleet(states: EchoState[]): EchoDeviceSummary[] {
         .filter((state): state is EchoState => Boolean(state))
         .every((state) => state.state !== 'unavailable' && state.state !== 'unknown');
 
-      // --- Resolve Bluetooth entities for this node ---
-      // Collect all sensor/button/switch entities that match *<node>* suffixes
-      let pairingSwitch: string | null = null;
-      let disconnectButton: string | null = null;
-      let connectedDevice: string | null = null;
-      let connectedSensor: string | null = null;
-
-      // Helper to check an entity id string
-      function matchesSuffix(entityId: string, suffix: string): boolean {
-        const lower = entityId.toLowerCase();
-        return lower.endsWith(suffix);
-      }
-
-      // Check all group entity attributes
-      for (const g of [group.dropIn, group.satellite, group.endDropIn]) {
-        if (!g) continue;
-        for (const eid of Object.keys(attrs(g))) {
-          if (matchesSuffix(eid, `_${node}_bluetooth_pairing`)
-              || matchesSuffix(eid, `_${node}_pairing`)) {
-            pairingSwitch = eid;
-          }
-          if (matchesSuffix(eid, `_${node}_bluetooth_disconnect`)) {
-            disconnectButton = eid;
-          }
-          if (matchesSuffix(eid, `_${node}_bluetooth_device`)) {
-            connectedDevice = eid;
-          }
-          if (matchesSuffix(eid, `_${node}_bluetooth_connected`)) {
-            connectedSensor = eid;
-          }
-        }
-      }
-
-      // Also check attributes of the dropIn entity for Bluetooth entities
-      // (some hassmic setups expose them as attributes rather than separate entities)
-      for (const g of [group.dropIn, group.satellite]) {
-        if (!g) continue;
-        const gAttrs = attrs(g);
-        for (const [key, value] of Object.entries(gAttrs)) {
-          if (typeof value === 'string') {
-            const eid = value;
-            if (matchesSuffix(eid, `_${node}_bluetooth_pairing`)
-                || matchesSuffix(eid, `_${node}_pairing`)) {
-              pairingSwitch = eid;
-            }
-            if (matchesSuffix(eid, `_${node}_bluetooth_disconnect`)) {
-              disconnectButton = eid;
-            }
-            if (matchesSuffix(eid, `_${node}_bluetooth_device`)) {
-              connectedDevice = eid;
-            }
-            if (matchesSuffix(eid, `_${node}_bluetooth_connected`)) {
-              connectedSensor = eid;
-            }
-          }
-        }
-      }
-
-      // btPairingOn is true only when pairing switch state === 'on'
-      let btPairingOn = false;
-      if (pairingSwitch) {
-        // Find the pairing switch state
-        for (const g of [group.dropIn, group.satellite, group.endDropIn]) {
-          if (!g) continue;
-          const gAttrs = attrs(g);
-          for (const [key, value] of Object.entries(gAttrs)) {
-            if (typeof value === 'string' && value === pairingSwitch) {
-              // This attribute key might be the entity_id, check if it matches
-              if (key === pairingSwitch) {
-                // The state of the pairing switch entity is in the group
-                // We need to find the actual entity state
-                // For now, check if there's a matching entity in states
-              }
-            }
-          }
-        }
-        // Simpler: check if any entity in the group has this entity_id and state 'on'
-        // Since we don't have all states here, we'll infer from the entity_id presence
-        // The actual state check should be done by the UI component
-        btPairingOn = true; // Will be overridden by UI if needed
-      }
+      // Bluetooth speaker entities hassmic publishes for this node, read from the states themselves.
+      const bt = (domain: string, suffix: string): EchoState | undefined =>
+        byId.get(`${domain}.${node}_${suffix}`);
+      const pairing = bt('switch', 'bluetooth_pairing') ?? bt('switch', 'pairing');
+      const disconnect = bt('button', 'bluetooth_disconnect');
+      const connected = usefulState(bt('sensor', 'bluetooth_device'));
 
       return {
         node,
@@ -410,10 +336,10 @@ export function extractEchoFleet(states: EchoState[]): EchoDeviceSummary[] {
         whisperEnabled: Boolean(group.whisper),
         online,
         // Bluetooth speaker fields
-        btPairingEntityId: pairingSwitch,
-        btPairingOn: false, // Will be computed by UI based on actual entity state
-        btDisconnectEntityId: disconnectButton,
-        btConnectedDevice: connectedDevice ?? connectedSensor ?? null,
+        btPairingEntityId: pairing?.entity_id ?? null,
+        btPairingOn: on(pairing?.state),
+        btDisconnectEntityId: disconnect?.entity_id ?? null,
+        btConnectedDevice: connected,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
