@@ -1074,6 +1074,7 @@ class SatelliteVoice:
     LOCAL_ENTITIES: ClassVar[dict[str, tuple[str, str | None, str | None]]] = {
         "assist_satellite": ("assist_satellite", None, None),
         "wake_word": ("select", "Wake word", "config"),
+        "wake_word_2": ("select", "Wake word 2", "config"),
         "vad_sensitivity": ("select", "Finished speaking detection", "config"),
         "speech_detection": ("select", "Speech detection", "config"),
     }
@@ -1226,22 +1227,41 @@ class SatelliteVoice:
             self.hub.publish(sel, UNAVAILABLE, {"reason": self.wake_word_error or (
                 "the wake word is fixed in this satellite's firmware; there is none to choose")})
             return
-        active = next((self.wake_words[w] for w in self.active_wake_words if w in self.wake_words), NO_WAKE_WORD)
-        self.hub.publish(sel, active, {"options": [*self.wake_words.values(), NO_WAKE_WORD]})
+        options = {"options": [*self.wake_words.values(), NO_WAKE_WORD]}
+        active = [self.wake_words[w] for w in self.active_wake_words if w in self.wake_words]
+        self.hub.publish(sel, active[0] if active else NO_WAKE_WORD, options)
+        second = self._local("wake_word_2")
+        if second is not None:
+            if self.max_active_wake_words < 2:
+                self.hub.publish(second, UNAVAILABLE, {"reason": "this satellite listens for one wake word at a time"})
+            else:
+                self.hub.publish(second, active[1] if len(active) > 1 else NO_WAKE_WORD, options)
 
-    async def set_wake_word(self, phrase: str) -> None:
-        """Make the node listen for ``phrase`` (one of its own wake words), or none."""
+    async def set_wake_word(self, phrase: str, slot: int = 0) -> None:
+        """Make the node listen for ``phrase`` (one of its own wake words), or none.
+
+        ``slot`` 0 is the "Wake word" select, 1 is "Wake word 2": a satellite that listens for two at once
+        (``max_active_wake_words`` >= 2, hassmic's Echos) hears both, each starting its own run. The other
+        slot's word is kept; picking the same word in both leaves one.
+        """
         if self.client is None:
             raise DeviceUnavailable(f"ESPHome {self.name} is not connected")
-        if phrase == NO_WAKE_WORD:
-            ids: list[str] = []
-        else:
+        if slot and self.max_active_wake_words < 2:
+            raise HubError(f"{self.name} listens for one wake word at a time")
+        wid = None
+        if phrase != NO_WAKE_WORD:
             wid = next((i for i, w in self.wake_words.items() if w == phrase), None)
             if wid is None:
                 raise HubError(f"{phrase!r} is not one of {self.name}'s wake words: {list(self.wake_words.values())}")
-            ids = [wid]
+        slots = [w for w in self.active_wake_words if w in self.wake_words][:2]
+        slots += [None] * (2 - len(slots))
+        slots[slot] = wid
+        ids: list[str] = []
+        for w in slots:
+            if w is not None and w not in ids:
+                ids.append(w)
         await self.client.set_voice_assistant_configuration(ids)
-        self.log.info("voice satellite %s: wake word set to %r", self.name, phrase)
+        self.log.info("voice satellite %s: wake word%s set to %r", self.name, " 2" if slot else "", phrase)
         await self.load_wake_words()
 
     def detach(self) -> None:

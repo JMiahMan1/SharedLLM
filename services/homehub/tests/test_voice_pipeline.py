@@ -21,7 +21,7 @@ from services.homehub.core import UNAVAILABLE, HubError, ServiceNotFound
 from services.homehub.drivers import esphome
 from services.homehub.drivers.esphome import ESPHomeDriver
 from services.homehub.tests.conftest import make_hub
-from services.homehub.voice_pipeline import EnergyVAD, PipelineError, VoiceSettings
+from services.homehub.voice_pipeline import NO_WAKE_WORD, EnergyVAD, PipelineError, VoiceSettings
 
 REAL_CURRENT_SETTINGS = voice_pipeline.current_settings
 
@@ -58,6 +58,8 @@ class VoiceClient:
         self.available_wake_words = [("okay_nabu", "Okay Nabu"), ("hey_jarvis", "Hey Jarvis")]
         self.active_wake_words = ["okay_nabu"]
         self.config_error: Exception | None = None
+        self.max_active = 1
+        self.configured: list[list[str]] = []
         VoiceClient.instances.append(self)
 
     async def get_voice_assistant_configuration(self, timeout, external_wake_words=None):
@@ -66,10 +68,11 @@ class VoiceClient:
         return SimpleNamespace(
             available_wake_words=[SimpleNamespace(id=i, wake_word=w, trained_languages=["en"])
                                   for i, w in self.available_wake_words],
-            active_wake_words=list(self.active_wake_words), max_active_wake_words=1)
+            active_wake_words=list(self.active_wake_words), max_active_wake_words=self.max_active)
 
     async def set_voice_assistant_configuration(self, active_wake_words):
         self.active_wake_words = list(active_wake_words)
+        self.configured.append(list(active_wake_words))
 
     async def connect(self, on_stop=None, login=False):
         self.on_stop = on_stop
@@ -923,3 +926,48 @@ async def test_a_node_that_asks_for_flac_fetches_the_reply_through_the_ffmpeg_pr
     assert streamed == [URL]  # the original clip, for the hub's own stream
     await drv.async_unload()
     esphome_audio.reset()
+
+
+WAKE2 = "select.test_device_wake_word_2"  # registered by the hub, under the device's own name
+
+
+async def _two_word_driver(monkeypatch, max_active=2):
+    Backends().install(monkeypatch)
+    hub, drv = make_driver()
+    original = drv._make_client
+
+    def two(host, port=None):
+        c = original(host, port)
+        c.max_active = max_active
+        return c
+
+    drv._make_client = two  # type: ignore[method-assign]
+    await drv.async_setup()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    return hub, drv
+
+
+async def test_a_second_wake_word_listens_beside_the_first(env, monkeypatch):
+    hub, drv = await _two_word_driver(monkeypatch)
+    st = hub.states.get(WAKE2)
+    assert st.state == NO_WAKE_WORD and st.attributes["options"] == ["Okay Nabu", "Hey Jarvis", NO_WAKE_WORD]
+    await drv.async_call(hub.entities[WAKE2], "select", "select_option", {"option": "Hey Jarvis"})
+    client = drv.voice.client
+    assert client.configured[-1] == ["okay_nabu", "hey_jarvis"]
+    assert hub.states.get(WAKE).state == "Okay Nabu" and hub.states.get(WAKE2).state == "Hey Jarvis"
+    # changing the first keeps the second
+    await drv.async_call(hub.entities[WAKE], "select", "select_option", {"option": "Hey Jarvis"})
+    assert client.configured[-1] == ["hey_jarvis"]  # the same word in both is one
+    await drv.async_call(hub.entities[WAKE2], "select", "select_option", {"option": "Okay Nabu"})
+    assert client.configured[-1] == ["hey_jarvis", "okay_nabu"]
+    await drv.async_call(hub.entities[WAKE2], "select", "select_option", {"option": NO_WAKE_WORD})
+    assert client.configured[-1] == ["hey_jarvis"]
+
+
+async def test_a_satellite_with_one_wake_word_shows_the_second_unavailable(env, monkeypatch):
+    hub, drv = await _two_word_driver(monkeypatch, max_active=1)
+    st = hub.states.get(WAKE2)
+    assert st.state == UNAVAILABLE and "one wake word at a time" in st.attributes["reason"]
+    with pytest.raises(HubError, match="one wake word at a time"):
+        await drv.voice.set_wake_word("Hey Jarvis", slot=1)

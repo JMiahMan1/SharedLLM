@@ -1202,6 +1202,8 @@ class ESPHomeDriver(Driver):
             raise DeviceUnavailable(f"ESPHome {self.device_name}: {exc}") from exc
 
     def _local_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
+        if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word_2"):
+            return self.voice.set_wake_word(str(data.get("option")), slot=1)  # the node's second wake word
         if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word"):
             return self.voice.set_wake_word(str(data.get("option")))  # the node's own setting (awaited below)
         key = (entity.unique_id or "").rsplit("-", 1)[-1]
