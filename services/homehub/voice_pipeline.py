@@ -186,6 +186,8 @@ class VoiceSettings:
     jarvis_url: str = ""
     language: str = "en"
     tts_voice: str | None = None
+    whisper_volume: float = 0.22
+    whisper_tts_voice: str | None = None
     max_seconds: float = 15.0
     no_speech_seconds: float = 8.0
     stt_timeout: float = 30.0
@@ -210,6 +212,8 @@ class VoiceSettings:
             jarvis_url=os.getenv("HOMEHUB_VOICE_JARVIS_URL", "").strip().rstrip("/"),
             language=os.getenv("HOMEHUB_VOICE_LANGUAGE", "").strip() or "en",
             tts_voice=os.getenv("HOMEHUB_VOICE_TTS_VOICE", "").strip() or None,
+            whisper_volume=_whisper_volume_env(),
+            whisper_tts_voice=os.getenv("HOMEHUB_VOICE_WHISPER_TTS_VOICE", "").strip() or None,
             max_seconds=_float_env("HOMEHUB_VOICE_MAX_S", 15.0),
             no_speech_seconds=_float_env("HOMEHUB_VOICE_NO_SPEECH_S", 8.0),
             stt_timeout=_float_env("HOMEHUB_VOICE_STT_TIMEOUT_S", 30.0),
@@ -240,7 +244,8 @@ class VoiceSettings:
 
     def public(self) -> dict[str, Any]:
         return {"stt": self.stt or None, "jarvis_url": self.jarvis_url or None, "language": self.language,
-                "tts_voice": self.tts_voice, "max_seconds": self.max_seconds,
+                "tts_voice": self.tts_voice, "whisper_volume": self.whisper_volume,
+                 "whisper_tts_voice": self.whisper_tts_voice, "max_seconds": self.max_seconds,
                 "no_speech_seconds": self.no_speech_seconds, "stt_timeout_s": self.stt_timeout,
                 "jarvis_timeout_s": self.jarvis_timeout, "continue_conversation": self.continue_conversation,
                 "vad_min_rms": self.vad_min_rms,
@@ -256,6 +261,20 @@ def _gain_env(name: str) -> float | None:
     if raw in ("", "auto"):
         return None
     return _float_env(name, 1.0)
+
+
+def _whisper_volume_env() -> float:
+    raw = os.getenv("HOMEHUB_VOICE_WHISPER_VOLUME")
+    if raw is None or str(raw).strip() == "":
+        return 0.22
+    raw = str(raw).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise HubError(f"HOMEHUB_VOICE_WHISPER_VOLUME must be a number, not {raw!r}") from exc
+    if not (0.0 < value <= 1.0):
+        raise HubError(f"HOMEHUB_VOICE_WHISPER_VOLUME must be > 0 and <= 1, not {raw!r}")
+    return value
 
 
 def _settings_at_startup() -> VoiceSettings | HubError:
@@ -840,7 +859,8 @@ class Run:
     reply_mode: str | None = None
     #: Sentences spoken before the whole answer was in.
     streamed_sentences: int = 0
-
+    #: Whether the person spoke quietly (whispered) for this run.
+    whispered: bool = False
     def mark(self, name: str) -> None:
         self.marks.setdefault(name, time.monotonic())
 
@@ -863,6 +883,7 @@ class Run:
                 "continue_conversation": self.continue_conversation, "speech_ms": self.speech_ms,
                 "heard": self.heard, "levels": self.levels, "follow_up": self.follow_up,
                 "reply_mode": self.reply_mode, "streamed_sentences": self.streamed_sentences,
+                 "whispered": self.whispered,
                 "timings_ms": self.timings_ms()}
 
 
@@ -1353,6 +1374,7 @@ class SatelliteVoice:
             run.mark("listen")
             await self._listen(run, settings, stt)
             run.mark("listened")
+            run.whispered = self._is_whispered()
             try:
                 async with asyncio.timeout(settings.stt_timeout):
                     text = await stt.finish()
@@ -1366,36 +1388,42 @@ class SatelliteVoice:
             self.log.debug("voice satellite %s run %s heard: %s", self.name, run.id, text)
             self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_END, {"text": text})
 
-            self._publish_satellite("processing")
-            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_START, {})
-            run.mark("intent")
-            try:
-                async with asyncio.timeout(settings.jarvis_timeout + JARVIS_GUARD_S):
-                    if speaker is not None and BACKENDS.ask_stream is not None:
-                        speaker.default_voice = settings.tts_voice
-                        reply = await BACKENDS.ask_stream(settings, text, self._context(run), speaker.say)
-                    else:
-                        reply = await BACKENDS.ask(settings, text, self._context(run))
-            except TimeoutError as exc:
-                raise PipelineError("intent-timeout",
-                                    f"Jarvis did not answer within {settings.jarvis_timeout:g} s") from exc
-            run.mark("answered")
-            self.log.debug("voice satellite %s run %s reply: %s", self.name, run.id, reply)
-            run.continue_conversation = settings.continue_conversation and reply.rstrip().endswith("?")
-            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_END, {
-                "conversation_id": run.conversation_id,
-                "continue_conversation": "1" if run.continue_conversation else "0"})
+            whisper_voice = settings.whisper_tts_voice if getattr(run, "whispered", False) and settings.whisper_tts_voice else None
+            async with self._whisper_volume(run, settings):
+                self._publish_satellite("processing")
+                self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_START, {})
+                run.mark("intent")
+                try:
+                    async with asyncio.timeout(settings.jarvis_timeout + JARVIS_GUARD_S):
+                        if speaker is not None and BACKENDS.ask_stream is not None:
+                            speaker.default_voice = whisper_voice or settings.tts_voice
+                            async def _on_sentence(text: str, voice: str | None) -> None:
+                                if whisper_voice is not None:
+                                    voice = whisper_voice
+                                await speaker.say(text, voice)
+                            reply = await BACKENDS.ask_stream(settings, text, self._context(run), _on_sentence)
+                        else:
+                            reply = await BACKENDS.ask(settings, text, self._context(run))
+                except TimeoutError as exc:
+                    raise PipelineError("intent-timeout",
+                                        f"Jarvis did not answer within {settings.jarvis_timeout:g} s") from exc
+                run.mark("answered")
+                self.log.debug("voice satellite %s run %s reply: %s", self.name, run.id, reply)
+                run.continue_conversation = settings.continue_conversation and reply.rstrip().endswith("?")
+                self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_END, {
+                    "conversation_id": run.conversation_id,
+                    "continue_conversation": "1" if run.continue_conversation else "0"})
 
-            self._publish_satellite("responding")
-            self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": reply})
-            run.mark("tts")
-            if speaker is not None and speaker.sentences:
-                await self._finish_streamed_reply(run, reply, speaker)
-            else:
-                if speaker is not None:
-                    await speaker.abort()  # nothing was streamed (a shortcut answer): the whole reply, as before
-                await self._speak_whole_reply(run, settings, reply)
-            run.outcome = "ok"
+                self._publish_satellite("responding")
+                self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": reply})
+                run.mark("tts")
+                if speaker is not None and speaker.sentences:
+                    await self._finish_streamed_reply(run, reply, speaker, settings)
+                else:
+                    if speaker is not None:
+                        await speaker.abort()  # nothing was streamed (a shortcut answer): the whole reply, as before
+                    await self._speak_whole_reply(run, settings, reply)
+                run.outcome = "ok"
         except asyncio.CancelledError:
             # Superseded, stopped by the node or disconnected: the node is no longer in this run, and a
             # RUN_END now would end the run it is in.
@@ -1439,13 +1467,24 @@ class SatelliteVoice:
             return None
         return clip_stream, self._node_url(url)
 
-    async def _finish_streamed_reply(self, run: Run, reply: str, speaker: _StreamSpeaker) -> None:
+    async def _finish_streamed_reply(self, run: Run, reply: str, speaker: _StreamSpeaker, settings: Any = None) -> None:
         """The first sentences are playing already: say the rest into the same stream, then end it."""
         run.reply_mode = "stream"
         run.streamed_sentences = speaker.sentences
         rest = getattr(reply, "rest", None)
         if rest:
-            await speaker.say(rest, getattr(reply, "voice", None))
+            voice = getattr(reply, "voice", None)
+            wtv = None
+            if settings is not None:
+                wtv = getattr(settings, "whisper_tts_voice", None)
+            if wtv is None and getattr(run, "whispered", False):
+                try:
+                    wtv = current_settings().whisper_tts_voice
+                except HubError:
+                    wtv = None
+            voice = (wtv if getattr(run, "whispered", False) and wtv
+                     else voice or (settings.tts_voice if settings is not None else None))
+            await speaker.say(rest, voice)
         await speaker.finish()
         run.mark("spoken")
         # Firmware that started the stream on INTENT_PROGRESS does not play this again; older firmware
@@ -1457,7 +1496,10 @@ class SatelliteVoice:
         try:
             # The person's own voice when the gateway chose one, else the hub's
             # setting, else (None) Jarvis's.
-            url = await BACKENDS.speak(reply, getattr(reply, "voice", None) or settings.tts_voice)
+            voice = getattr(reply, "voice", None)
+            voice = (settings.whisper_tts_voice if getattr(run, "whispered", False) and settings.whisper_tts_voice
+                     else voice or settings.tts_voice)
+            url = await BACKENDS.speak(reply, voice)
         except (HubError, OSError) as exc:
             raise PipelineError("tts-failed", f"Jarvis's voice could not speak the reply: {exc}") from exc
         run.mark("spoken")
@@ -1571,6 +1613,116 @@ class SatelliteVoice:
                       "detector": vad.engine, "not_speech_ms": vad.rejected_frames * EnergyVAD.FRAME_MS}
         self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_VAD_END, {})
 
+    def _satellite_device_id(self) -> str | None:
+        ent = self.satellite_entity()
+        if ent is not None and getattr(ent, "device_id", None):
+            return ent.device_id
+        for e in self.driver.entities:
+            if getattr(e, "device_id", None):
+                return e.device_id
+        return None
+
+    def _is_whispered(self) -> bool:
+        dev = self._satellite_device_id()
+        for ent in self.hub.entities.values():
+            if dev is not None and getattr(ent, "device_id", None) != dev:
+                continue
+            if ent.domain != "binary_sensor":
+                continue
+            fields = " ".join(str(x or "") for x in (getattr(ent, "unique_id", None),
+                                                     ent.entity_id, getattr(ent, "original_name", None),
+                                                     getattr(ent, "name", None))).lower()
+            if "last_request_whispered" not in fields and "last request whispered" not in fields:
+                continue
+            st = self.hub.states.get(ent.entity_id)
+            if st is not None and str(st.state).lower() == "on":
+                return True
+        return False
+
+    def _whisper_volume_target(self) -> tuple[Any, float | None, float, Any]:
+        dev = self._satellite_device_id()
+        candidates = []
+        for ent in self.hub.entities.values():
+            if dev is not None and getattr(ent, "device_id", None) != dev:
+                continue
+            if ent.domain not in ("number", "media_player"):
+                continue
+            fields = " ".join(str(x or "") for x in (getattr(ent, "unique_id", None),
+                                                     ent.entity_id, getattr(ent, "original_name", None),
+                                                     getattr(ent, "name", None))).lower()
+            if ent.domain == "number":
+                if "assistant_volume" not in fields and "assistant volume" not in fields:
+                    continue
+                candidates.append(("number", ent))
+            else:
+                candidates.append(("media", ent))
+        # prefer assistant_volume number if available
+        number_ent = None
+        media_ent = None
+        for kind, ent in candidates:
+            if kind == "number" and number_ent is None:
+                number_ent = ent
+            if kind == "media" and media_ent is None:
+                media_ent = ent
+        ent = number_ent if number_ent is not None else media_ent
+        if ent is None:
+            return None, None, 1.0, None
+        if ent.domain == "media_player":
+            st = self.hub.states.get(ent.entity_id)
+            attrs = dict(st.attributes or {}) if st is not None else {}
+            raw = attrs.get("volume_level")
+            try:
+                cur = float(raw) if raw is not None else None
+            except (TypeError, ValueError):
+                cur = None
+            return ent, cur, 1.0, cur
+        st = self.hub.states.get(ent.entity_id)
+        if st is None:
+            return ent, None, 1.0, None
+        try:
+            val = float(st.state)
+        except (TypeError, ValueError):
+            return ent, None, 1.0, None
+        attrs = dict(getattr(st, "attributes", None) or {})
+        max_attr = attrs.get("max")
+        try:
+            max_val = float(max_attr) if max_attr is not None else None
+        except (TypeError, ValueError):
+            max_val = None
+        scale = 100.0 if ((max_val is not None and max_val > 1) or val > 1) else 1.0
+        normalized = val / scale if scale else val
+        return ent, normalized, scale, val
+
+    async def _apply_volume(self, entity: Any, value: float) -> None:
+        if entity.domain == "number":
+            await self.hub.call_service("number", "set_value",
+                                        {"entity_id": entity.entity_id, "value": value})
+        else:
+            await self.hub.call_service("media_player", "volume_set",
+                                        {"entity_id": entity.entity_id, "volume_level": value})
+
+    @contextlib.asynccontextmanager
+    async def _whisper_volume(self, run: Run, settings: Any) -> Any:
+        if not getattr(run, "whispered", False):
+            yield
+            return
+        entity, current, scale, raw_original = self._whisper_volume_target()
+        lowered = False
+        if entity is not None and current is not None and current > settings.whisper_volume:
+            try:
+                await self._apply_volume(entity, round(settings.whisper_volume * scale, 2))
+                lowered = True
+            except Exception as exc:
+                self.log.warning("voice satellite %s: could not duck volume for whisper: %s", self.name, exc)
+        try:
+            yield
+        finally:
+            if lowered:
+                try:
+                    await self._apply_volume(entity, raw_original if raw_original is not None else current)
+                except Exception as exc:
+                    self.log.warning("voice satellite %s: could not restore volume after whisper: %s", self.name, exc)
+
     def _context(self, run: Run) -> dict[str, Any]:
         ent = self.satellite_entity()
         area_id, area = self.area()
@@ -1588,6 +1740,8 @@ class SatelliteVoice:
             self._pending = None
             if time.monotonic() - at <= PENDING_CONTEXT_S:
                 ctx.update(extra)
+        if getattr(run, "whispered", False):
+            ctx["whispered"] = True
         return ctx
 
     def _node_url(self, url: str) -> str:
