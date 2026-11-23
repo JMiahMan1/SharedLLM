@@ -1098,9 +1098,27 @@ class DiscoveryManager:
         addrs = [a for a in info.parsed_addresses() if ":" not in a] or info.parsed_addresses()
         self.handle_mdns(service_type, name, addrs[0] if addrs else None, info.port, info.properties, info.server)
 
+    def _retry_reappeared(self, host: str | None, service_type: str) -> None:
+        """A device announcing itself again at an entry's address that is failing: retry that entry now.
+
+        Unplugged for a while (an Echo taken apart and put back), a device waits out a retry gap that
+        has grown to minutes; its mDNS announcement on boot says it is back.
+        """
+        runtime = self.runtime
+        if runtime is None or not host or not hasattr(runtime, "retry_now"):
+            return
+        from services.homehub import address_follow
+
+        for entry in list(self.hub.config_entries.values()):
+            if entry.entry_id not in getattr(runtime, "next_retry", {}):
+                continue
+            if any(ip == host for _where, ip in address_follow.addresses(entry).values()):
+                runtime.retry_now(entry.entry_id, f"{entry.title} announced itself over mDNS ({service_type.rstrip('.')})")
+
     def handle_mdns(self, service_type: str, name: str, host: str | None, port: int | None,
                     properties: dict[Any, Any] | None, server: str | None) -> dict[str, Any] | None:
         """One resolved service (the browser's callback, and the tests' entry point)."""
+        self._retry_reappeared(host, service_type)
         try:
             self.record_mdns_identity(service_type, name, host, properties, server)
         except Exception:

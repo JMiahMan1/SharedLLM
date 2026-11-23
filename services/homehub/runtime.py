@@ -66,6 +66,8 @@ class Runtime:
         self.failing_since: dict[str, datetime] = {}
         #: When the next setup attempt for each failing entry is due (this run of the hub).
         self.next_retry: dict[str, datetime] = {}
+        #: Cuts a failing entry's wait short (``retry_now``): a device that is back announces itself.
+        self._retry_wake: dict[str, asyncio.Event] = {}
         self._unsub_record = None
         self.recorder: Any = None  # recorder.Recorder, from start_recording
         self.automations: Any = None  # set by main once the engine is loaded
@@ -212,7 +214,10 @@ class Runtime:
                 with contextlib.suppress(Exception):
                     await driver.async_unload()
                 first.set()
-                await asyncio.sleep(delay)
+                wake = self._retry_wake.setdefault(entry.entry_id, asyncio.Event())
+                wake.clear()
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(wake.wait(), delay)
                 continue
             self.hub.drivers[entry.entry_id] = driver
             entry.state, entry.reason, entry.needs = "loaded", None, None
@@ -308,6 +313,19 @@ class Runtime:
         driver.mark_unavailable()
         with contextlib.suppress(Exception):
             await driver.async_unload()
+
+    def retry_now(self, entry_id: str, why: str) -> bool:
+        """Try a failing entry's setup now instead of at its next retry (True if one was waiting).
+
+        Discovery calls this when a device that is failing announces itself again: unplugged
+        for a few minutes, it would otherwise wait out a retry gap that has grown to minutes.
+        """
+        wake = self._retry_wake.get(entry_id)
+        if entry_id not in self.next_retry or wake is None or wake.is_set():
+            return False
+        log.info("%s: retrying now (%s)", entry_id, why)
+        wake.set()
+        return True
 
     def next_retry_at(self, entry_id: str) -> datetime | None:
         """When the next setup attempt for an entry is due; None while it works or is parked."""
