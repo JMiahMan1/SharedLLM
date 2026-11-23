@@ -649,6 +649,10 @@ services:
         - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
         - SERVICE_NAME=${SERVICE_NAME:-ui}
     container_name: sharedllm_ui
+    labels:
+      # Stateless (static files from the image, tmpfs only): the control plane may start the new
+      # container beside the old one on an update (services/control_plane/recreate.py).
+      sharedllm.update: start-first
     restart: unless-stopped
     mem_limit: 256m
     # nginx serves the app as the host user. It needs a writable cache (proxy
@@ -828,6 +832,10 @@ services:
   osrm:
     image: ghcr.io/jmiahman1/sharedllm-osrm:latest
     container_name: sharedllm_osrm
+    labels:
+      # Stateless (routing graph baked into the image, no volumes): the control plane may start the new
+      # container beside the old one on an update (services/control_plane/recreate.py).
+      sharedllm.update: start-first
     restart: unless-stopped
     mem_limit: 1536m
     networks:
@@ -837,6 +845,10 @@ services:
   osrm-foot:
     image: ghcr.io/jmiahman1/sharedllm-osrm-foot:latest
     container_name: sharedllm_osrm_foot
+    labels:
+      # Stateless (routing graph baked into the image, no volumes): the control plane may start the new
+      # container beside the old one on an update (services/control_plane/recreate.py).
+      sharedllm.update: start-first
     restart: unless-stopped
     # The foot graph is bigger than the road one (paths, sidewalks): ~1.2 GB idle
     mem_limit: 2g

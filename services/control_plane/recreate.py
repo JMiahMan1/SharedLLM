@@ -15,11 +15,17 @@ How a container is replaced (incident 2026-11-22, identity):
   (``NetworkingConfig``). Connecting them after create left a window where
   the compose name ("identity") did not resolve, Caddy could not proxy to it
   and execution, which reaches identity through Caddy, failed its startup.
-* Start-first when it is safe: the new container starts beside the old one,
-  serving the same aliases, and the old one is stopped only once the new one
-  is healthy. Containers that cannot run twice (host network, published host
-  ports, a static IP, or the ``sharedllm.update=stop-first`` label) stop the
-  old one first, then create the new one.
+* Stop-first by default: the old container stops, then the new one is
+  created and started. Most services keep SQLite or other on-disk state, and
+  two copies on the same files risk concurrent startup migrations, duplicated
+  background jobs and database locks. Because the networks and aliases are
+  attached at create, the name resolves the moment the new container starts.
+* Start-first only for a service that opts in with the label
+  ``sharedllm.update=start-first`` (stateless: no writable state, no startup
+  migrations, no singleton background loops) and that can run twice (bridge
+  network, no published host ports, no static IP). The new container then
+  starts beside the old one on the same aliases, and the old one is retired
+  once the new one is healthy.
 * After create the new container is checked against the old one (ports,
   network mode, networks and aliases, mounts, env, restart policy,
   healthcheck...) and must become healthy. Otherwise it is removed, the old
@@ -42,8 +48,9 @@ import docker
 
 log = logging.getLogger("control_plane.recreate")
 
-#: Label a service can carry to never run two copies at once (e.g. a single-writer store).
-STOP_FIRST_LABEL = "sharedllm.update"
+#: Label a stateless service carries to be updated start-first ("start-first").
+UPDATE_LABEL = "sharedllm.update"
+START_FIRST = "start-first"
 
 #: Config keys an image supplies. When the old container's value is the old
 #: image's own, it is dropped so the new image's value applies.
@@ -175,11 +182,8 @@ def _endpoint(snap: dict, net: dict) -> dict:
     return endpoint
 
 
-def stop_first_reason(snap: dict) -> str | None:
-    """Why the old container must stop before the new one starts, or None."""
-    labels = (snap.get("config") or {}).get("Labels") or {}
-    if labels.get(STOP_FIRST_LABEL) == "stop-first":
-        return f"label {STOP_FIRST_LABEL}=stop-first"
+def start_first_blocker(snap: dict) -> str | None:
+    """Why the old and new container could not run side by side, or None."""
     mode = _network_mode(snap)
     if mode == "host":
         return "host network"
@@ -191,6 +195,17 @@ def stop_first_reason(snap: dict) -> str | None:
     if any(net.get("IPv4Address") or net.get("IPv6Address") for net in _attached_networks(snap).values()):
         return "static IP"
     return None
+
+
+def choose_strategy(snap: dict) -> tuple[str, str]:
+    """("stop-first" | "start-first", why). Stop-first unless the service opted in and can run twice."""
+    labels = (snap.get("config") or {}).get("Labels") or {}
+    if labels.get(UPDATE_LABEL) != START_FIRST:
+        return "stop-first", "default (state may be shared; no start-first opt-in)"
+    blocker = start_first_blocker(snap)
+    if blocker:
+        return "stop-first", f"opted in to start-first but {blocker}"
+    return "start-first", f"label {UPDATE_LABEL}={START_FIRST}"
 
 
 # --- create ----------------------------------------------------------------
@@ -429,9 +444,8 @@ def recreate_from_snapshot(
     """
     name = snap["name"]
     stamp = int(time.time())
-    reason = "requested" if force_stop_first else stop_first_reason(snap)
-    strategy = "stop-first" if reason else "start-first"
-    _say(f"{name} -> {new_image_id[:19]} ({strategy}{': ' + reason if reason else ''})")
+    strategy, why_strategy = ("stop-first", "requested") if force_stop_first else choose_strategy(snap)
+    _say(f"{name} -> {new_image_id[:19]} ({strategy}: {why_strategy})")
 
     def check(new) -> None:
         problems = verify_carried_over(snap, new.attrs or {})
@@ -478,7 +492,8 @@ def recreate_from_snapshot(
         _say(f"{name} now runs {new_image_id[:19]}")
         return {"recreated": True, "container": new, "strategy": strategy}
 
-    # stop-first: the old one cannot run beside the new one.
+    # stop-first: the old one stops before the new one starts; the new one's
+    # networks and aliases were set at create, so its name resolves at start.
     backup = f"{name}_backup_{stamp}"
     _say(f"stopping {name}")
     container.stop(timeout=_stop_timeout(snap))

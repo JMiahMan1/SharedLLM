@@ -313,17 +313,57 @@ def test_values_the_old_image_baked_in_give_way_to_the_new_image(daemon):
     assert new.attrs["Config"]["Labels"]["org.opencontainers.image.revision"] == "new"
 
 
-def test_a_bridge_service_starts_first_and_the_old_one_serves_until_the_new_one_is_healthy(daemon):
+START_FIRST = {"sharedllm.update": "start-first"}
+
+
+def _first(events, kind, name=None):
+    return next(i for i, e in enumerate(events) if e[0] == kind and (name is None or e[1] == name))
+
+
+def test_by_default_the_old_container_stops_before_the_new_one_is_created(daemon):
+    """Two copies of a stateful service on the same SQLite file risk concurrent
+    migrations, duplicated background jobs and DB locks: stop-first is the default."""
     old = _add_old(daemon)
+    result, _ = _run(daemon, old)
+    assert result["strategy"] == "stop-first"
+    events = daemon.events
+    assert events.index(("stop", "sharedllm_identity")) < _first(events, "create") < _first(events, "start")
+    assert _first(events, "create") == events.index(("create", "sharedllm_identity"))
+    assert old.id not in daemon.containers
+
+
+def test_a_stateful_service_is_never_started_first(daemon):
+    for name, service in (("sharedllm_identity", "identity"), ("sharedllm_bible", "bible"),
+                          ("sharedllm_garden", "garden"), ("sharedllm_storage", "storage")):
+        d = FakeDocker()
+        old = _add_old(d, name=name, service=service)
+        assert recreate.choose_strategy(recreate.snapshot_container(old))[0] == "stop-first"
+        result, _ = _run(d, old)
+        assert result["strategy"] == "stop-first"
+        assert d.events.index(("stop", name)) < _first(d.events, "start")
+
+
+def test_an_opted_in_stateless_service_starts_first_and_the_old_one_serves_until_the_new_one_is_healthy(daemon):
+    old = _add_old(daemon, name="sharedllm_ui", service="ui", labels=START_FIRST)
     result, _ = _run(daemon, old)
     assert result["strategy"] == "start-first"
     events = daemon.events
-    new_start = next(i for i, e in enumerate(events) if e[0] == "start")
-    old_stop = events.index(("stop", "sharedllm_identity"))
-    assert new_start < old_stop, events
-    assert events[0][0] == "create" and events[0][1].startswith("sharedllm_identity_next_")
-    assert ("remove", next(e[2] for e in events if e[0] == "rename" and e[1] == "sharedllm_identity")) in events
+    assert events[0][0] == "create" and events[0][1].startswith("sharedllm_ui_next_")
+    assert _first(events, "start") < events.index(("stop", "sharedllm_ui")), events
+    assert ("remove", next(e[2] for e in events if e[0] == "rename" and e[1] == "sharedllm_ui")) in events
+    assert _current(daemon, "sharedllm_ui") is result["container"]
     assert old.id not in daemon.containers
+
+
+@pytest.mark.parametrize("kwargs, blocker", [
+    ({"network_mode": "host"}, "host network"),
+    ({"port_bindings": {"8008/tcp": [{"HostIp": "", "HostPort": "8008"}]}}, "publishes host ports"),
+    ({"static_ip": "172.26.0.250"}, "static IP"),
+])
+def test_an_opt_in_that_cannot_run_twice_still_stops_first(daemon, kwargs, blocker):
+    old = _add_old(daemon, name="sharedllm_ui", service="ui", labels=START_FIRST, **kwargs)
+    strategy, why = recreate.choose_strategy(recreate.snapshot_container(old))
+    assert strategy == "stop-first" and blocker in why
 
 
 def test_published_ports_are_kept_and_the_old_one_stops_first(daemon):
@@ -409,14 +449,26 @@ def test_the_rollback_notice_goes_to_the_admins(daemon):
     assert "ExtraHosts" in notices[0]["body"]
 
 
-def test_an_unhealthy_new_container_never_replaces_the_old_one(daemon):
+def test_an_unhealthy_start_first_container_never_replaces_the_old_one(daemon):
     daemon.health[NEW_IMAGE] = "unhealthy"
-    old = _add_old(daemon)
+    old = _add_old(daemon, name="sharedllm_ui", service="ui", labels=START_FIRST)
     with pytest.raises(recreate.RecreateFailed, match="unhealthy"):
         _run(daemon, old)
-    assert ("stop", "sharedllm_identity") not in daemon.events  # old one served throughout
-    assert _current(daemon, "sharedllm_identity") is old
+    assert ("stop", "sharedllm_ui") not in daemon.events  # old one served throughout
+    assert _current(daemon, "sharedllm_ui") is old
     assert len(daemon.containers) == 1
+
+
+def test_an_unhealthy_stop_first_container_is_rolled_back_to_the_old_one(daemon):
+    daemon.health[NEW_IMAGE] = "unhealthy"
+    old = _add_old(daemon)
+    notices = []
+    with pytest.raises(recreate.RecreateFailed, match="unhealthy"):
+        recreate.recreate_container(Client(daemon), old, NEW_IMAGE, notify=notices.append, sleep=lambda s: None)
+    assert _current(daemon, "sharedllm_identity") is old
+    assert old.attrs["State"]["Status"] == "running" and old.attrs["Image"] == OLD_IMAGE
+    assert len(daemon.containers) == 1
+    assert len(notices) == 1
 
 
 def test_a_stop_first_container_that_crashes_is_restored(daemon):
@@ -438,12 +490,6 @@ def test_a_new_container_that_never_turns_healthy_times_out(daemon):
             Client(daemon), old, NEW_IMAGE, sleep=lambda s: None, clock=lambda: next(ticks),
         )
     assert _current(daemon, "sharedllm_identity") is old
-
-
-def test_the_stop_first_label_is_honoured(daemon):
-    old = _add_old(daemon, labels={"sharedllm.update": "stop-first"})
-    result, _ = _run(daemon, old)
-    assert result["strategy"] == "stop-first"
 
 
 def test_the_health_wait_comes_from_the_containers_own_healthcheck():
