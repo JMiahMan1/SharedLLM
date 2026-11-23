@@ -4,29 +4,15 @@
 
 This guide covers upcycling two Amazon Echo devices into Home Hub voice satellites using `echo-dot-assist` (`hassmic`), while keeping Home Assistant supported as an **optional** integration:
 
-- **Echo Dot 3rd Gen** — codename `donut`, Model `D9N29T`
-- **Echo Show 8 1st Gen** — codename `crown`, Model `C7H6N3`
+- **Echo Dot 3rd Gen** - codename `donut`, Model `D9N29T`
+- **Echo Show 8 1st Gen** - codename `crown`, Model `C7H6N3`
 
 Home Hub is the primary control plane. Home Assistant remains an optional integration alongside it (see `services/homehub/ha_ws_compat.py`).
 
-## Hardware Notes & Warnings
+## Flashing and hardware
 
-### Echo Dot 3 (`donut`, `D9N29T` only — NOT `C78MP8` or `36EBT3`)
-
-- Keep the device offline from Amazon.
-- Check `Gamer92000/echo-dot-assist#112` before unlocking multiple units.
-- Power: the Dot 3 stays powered by its **12 V / 1.25 A barrel jack**. The USB-C modification below must **not** supply VBUS.
-
-### Bottom USB-C Female Port Mod
-
-- Pinout: `GND -> TM3`, `D- -> TM4`, `D+ -> TM5`. **`VBUS` (+5 V) MUST remain disconnected.**
-- The USB-C female breakout board MUST include **dual 5.1 kΩ pull-down resistors on `CC1`/`CC2`** (e.g. Adafruit PID 4090 or Treedix/HiLetgo 6-pin 5.1 kΩ boards) so USB-C-to-C cables enumerate properly.
-
-### Echo Show 8 1st Gen (`crown`, `C7H6N3`)
-
-- Built-in micro-USB port — no soldering required.
-- Pair with `kiosk-satellite` pointed at Jarvis `/display`.
-- Leave `kiosk-satellite`'s own voice assistant **disabled** so `hassmic` retains the microphone.
+How to flash both models, what to solder on the Dot 3, the USB-C port mod and its parts list:
+[ECHO_FLASHING.md](ECHO_FLASHING.md) (`scripts/echo_flash.sh donut|crown`).
 
 ## Home Hub & Jarvis Software Capabilities
 
@@ -46,7 +32,7 @@ No hardcoded defaults or secrets are documented here; set these in your environm
 
 | Variable | Purpose |
 |---|---|
-| `HOMEHUB_VOICE_WHISPER_VOLUME` | Whisper Mode ducking volume (0–1] for an Echo satellite's assistant volume. |
+| `HOMEHUB_VOICE_WHISPER_VOLUME` | Whisper Mode ducking volume (0 to 1] for an Echo satellite's assistant volume. |
 | `HOMEHUB_VOICE_WHISPER_TTS_VOICE` | TTS voice used when a run is whispered. |
 | `HOMEHUB_ECHO_MESH_KEY` | Shared key for the encrypted UDP Opus Drop-In Bridge between phone/web and Echo Dot. |
 | `HA_URL` | Optional Home Assistant URL (only when HA is used as an optional integration). |
