@@ -8598,6 +8598,12 @@ _TAMPER_EVENTS = {
     "guard_disabled": "turned off Jarvis's screen guard",
     "guard_missing": "is running without Jarvis's screen guard",
     "uninstall_attempt": "tried to remove Jarvis",
+    "jarvis_settings_page": "opened Jarvis's app settings",
+    "device_admin": "tried to turn off Jarvis's device admin",
+    "guard_accessibility": "tried to turn off Jarvis's screen guard",
+    "vpn_disconnect": "tried to disconnect Jarvis's web filter",
+    "factory_reset_or_users": "tried to factory reset the device or add another user",
+    "jarvis_install": "tried to install or update Jarvis",
     "offline_unlock": "was unlocked with a parent's offline code",
     "filter_disabled": "turned off Jarvis's web filter",
     # Ways around the web filter the guard found (FilterBypass on the phone).

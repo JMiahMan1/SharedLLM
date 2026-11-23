@@ -344,6 +344,7 @@ final class DeviceOwnerGuard {
      * committed.
      */
     static boolean installApkSilently(Context context, File apk) {
+        InstallGrace.record(context);
         if (!isOwner(context) || apk == null || !apk.exists()) return false;
         PackageInstaller.Session session = null;
         try {
