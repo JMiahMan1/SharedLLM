@@ -27,6 +27,9 @@ NO_MODEL_TOOLS = {
 }
 
 NON_EXECUTION_TOOLS = {
+    # Handled inside the agent loop (services/gateway/mission_discipline.py).
+    "MissionObjectivesRequest",
+    "MissionCompleteRequest",
     "WorkspaceCreateRequest",
     "WorkspaceSettingsUpdateRequest",
     "WorkspaceBootstrapRequest",

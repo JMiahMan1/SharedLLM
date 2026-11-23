@@ -160,9 +160,34 @@ All cases are covered by
 | `test_shell_full_dump` | Full output saved to `.raven/last_output.txt` |
 | `test_pdf_read_numbered` | PDFs are read in numbered-line format |
 
+## Mission discipline
+
+A mission used to end when the model's reply contained a completion phrase, or when it went quiet
+after a verified write. Two runtime-checked tools now make the end explicit
+(`services/gateway/mission_discipline.py`, handled inside the agent loop, never offered to
+single-turn chat):
+
+- **MissionObjectivesRequest** sets the checklist, replacing it each time:
+  `{objectives: [{id, text, status: pending|in_progress|done|dropped, note}]}`. At most 12 items,
+  text up to 200 characters, and a dropped item needs a note saying why. A bad list is refused and
+  the old one kept. Every turn the model sees it as one line (at most 600 characters):
+  `OBJECTIVES 1/3 done: [x] o1 read config, [>] o2 add route, [ ] o3 tests`.
+- **MissionCompleteRequest** is the debrief: `{summary, verification}`. It is accepted only when
+  every objective is done or dropped, and every file the mission wrote has been linted or tested
+  by the loop's own tracking (`pending_verification`); the model cannot declare files verified.
+  A refusal names what is missing. An accepted debrief ends the mission: the summary, the
+  verification and an objectives recap are the answer. After three refusals it is accepted
+  anyway, prefixed `Debrief not verified:` with the reasons, so a debrief can never loop.
+
+While objectives are open, a completion phrase or a quiet stall does not end the mission; the model
+is told which objectives remain. The `MAX_IDLE_NUDGES` runaway guard still applies. A mission that
+never sets objectives finishes by the old paths. The checklist and refusal count are saved in the
+checkpoint, so a resumed mission keeps them.
+
+Tests: `services/gateway/tests/test_mission_discipline.py`.
+
 ## Next
 
-Field kit (exact unique edits with diffs, numbered reads, capped search and output), then mission
-discipline (a live objectives checklist, a verified MissionComplete debrief, waypoint checkpoints
-with rollback, cancel and retry on a hung inference). A harness benchmark compares Raven missions
-with opencode on the same tasks so progress is measured.
+Done: fuel gauge, field kit, mission discipline. Remaining: waypoint checkpoints with rollback,
+cancel and retry on a hung inference, then a harness benchmark that runs the same tasks as Raven
+missions and through opencode on kat-coder, so progress is measured.

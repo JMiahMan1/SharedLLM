@@ -44,6 +44,9 @@ TOOL_GARDEN_LOG_HARVEST = "garden_log_harvest"
 TOOL_GARDEN_RECIPE_MATCHES = "garden_recipe_matches"
 TOOL_GARDEN_PRESERVATION_GUIDE = "garden_preservation_guide"
 TOOL_GARDEN_PLAN_SUGGEST = "garden_plan_suggest"
+# Mission discipline (R3): explicit objectives tracking and verified debrief.
+TOOL_MISSION_OBJECTIVES = "missionobjectivesrequest"
+TOOL_MISSION_COMPLETE = "missioncompleterequest"
 
 # Service identifiers used by the resolver / proxy layer.
 SVC_EXECUTION = "execution"
@@ -796,6 +799,15 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("BrowserAutomationRequest", SVC_EXECUTION, "POST", "/execute/browser", False,
      "Open a real page, click/type through it, and return visible text plus a screenshot.",
      "payload fields: url, actions, screenshot, full_page, timeout_ms."),
+    # Mission discipline (R3): gateway-local. No execution endpoint.
+    ("MissionObjectivesRequest", SVC_GATEWAY, "POST", "/gateway/local", False,
+     "Set the mission's objective checklist at the start of a multi-step mission and update it as you go. "
+     "Replaces the whole list (at most 12). A dropped objective needs a note saying why.",
+     "payload fields: objectives (list of {id, text, status: pending|in_progress|done|dropped, note})."),
+    ("MissionCompleteRequest", SVC_GATEWAY, "POST", "/gateway/local", False,
+     "Finish the mission with a debrief. Accepted only when every objective is done or dropped with a note and "
+     "every file you wrote has been linted or tested; a refusal says what is missing. The summary is the answer.",
+     "payload fields: summary (what was done), verification (how you checked it, e.g. the test command and result)."),
 )
 
 
@@ -835,6 +847,8 @@ SINGLE_TURN_EXCLUDED: dict[str, str] = {
     "WorkspaceSettingsUpdateRequest": "a PATCH to a templated path; the single-turn executor only POSTs",
     "ControlPlaneRequest": "the single-turn executor has a dedicated branch for it",
     "StorageListRequest": "no service serves /execute/storage_list; it would always 404",
+    "MissionObjectivesRequest": "a Raven mission's own checklist, handled inside the agent loop",
+    "MissionCompleteRequest": "ends a Raven mission; handled inside the agent loop",
 }
 
 

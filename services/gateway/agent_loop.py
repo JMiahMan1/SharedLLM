@@ -32,6 +32,7 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
+from services.gateway.mission_discipline import Discipline
 from services.gateway.llm_providers import (
     BaseLLMProvider,
     StreamingThinkingFilter,
@@ -619,6 +620,8 @@ ALLOWED_TOOLS = {
     "ghrequest",
     "ravenrecallrequest",
     "workspaceportexposerequest", "workspace_expose_port", "expose_port", "port_expose",
+    # Mission discipline: the objectives checklist and the debrief (services/gateway/mission_discipline.py).
+    "missionobjectivesrequest", "missioncompleterequest",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -3276,6 +3279,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # caught even when the literal command string varies between iterations.
     _recent_shell_runs: list[tuple[str, str]] = []
     _written_files: set[str] = set()
+    # Mission discipline: the objectives checklist and the runtime-checked debrief.
+    _discipline = Discipline()
+    _debrief_answer: str | None = None
     _verified_files: set[str] = set()
     _verification_nudge_sent = False
     _stagnation_nudge_sent = False
@@ -3338,6 +3344,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 _cp_files = cp.get("written_files")
                 if isinstance(_cp_files, list):
                     _written_files.update(_cp_files)
+                _discipline.restore(cp)
                 log.info(f"[AgentLoop] Resuming mission {mission_id} from iteration {start_iteration} (restored {len(action_log)} action log entries)")
             # NOTE: do NOT close r_cp; it is the module-level shared singleton
             # returned by _get_redis_cmd(). Closing it here would set the
@@ -3415,6 +3422,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # workspace_id could leak into payloads.
                 "workspace_id": workspace_id,
                 "written_files": sorted(_written_files),
+                **_discipline.to_checkpoint(),
                 "updated_at": asyncio.get_event_loop().time(),
             }
             await r_cp.setex(
@@ -3694,6 +3702,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             )
             if _guidance:
                 user_content += "\n\n" + _guidance
+            _objectives_line = _discipline.line()
+            if _objectives_line:
+                user_content += "\n\n" + _objectives_line
 
             # Maintain a running, compacted conversation so the model retains learned
             # context across the mission instead of only seeing the last tool result.
@@ -3988,7 +3999,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # MAX_IDLE_NUDGES turns.
             if successful_tool_calls > 0 and ans:
                 _ans_l = ans.lower()
-                if any(ind in _ans_l for ind in COMPLETION_INDICATORS):
+                _still_open = _discipline.open_objectives()
+                if any(ind in _ans_l for ind in COMPLETION_INDICATORS) and _still_open:
+                    # Objectives were set and are not all done: words alone do not end it.
+                    log.info(f"[AgentLoop] Completion phrase with open objectives {_still_open}; asking for the debrief.")
+                    action_log.append(
+                        f"ITERATION {iter_num}: You said the mission is complete, but these objectives are not "
+                        f"done or dropped: {', '.join(_still_open)}. Finish them (or drop them with a note via "
+                        f"MissionObjectivesRequest), then call MissionCompleteRequest."
+                    )
+                elif any(ind in _ans_l for ind in COMPLETION_INDICATORS):
                     log.info(f"[AgentLoop] Completion signal detected in text reply after {successful_tool_calls} tool call(s). Terminating mission as complete.")
                     await _clear_checkpoint()
                     break
@@ -4109,6 +4129,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                         log.warning(f"[AgentLoop] Media validation of {_me_path} failed: {_me_e}")
                         except Exception as _ge:
                             log.warning(f"[AgentLoop] Workspace listing check failed on stall: {_ge}")
+                    if _gate_ok and _discipline.open_objectives():
+                        # A verified stall is not the end while objectives are open; the
+                        # MAX_IDLE_NUDGES guard below still ends a mission that never moves.
+                        _gate_ok = False
+                        action_log.append(
+                            f"ITERATION {iter_num}: Objectives still open: {', '.join(_discipline.open_objectives())}. "
+                            f"Finish them or drop them with a note, then call MissionCompleteRequest."
+                        )
                     if _gate_ok:
                         log.info(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} successful tool call(s) with a verified artifact and nothing queued; treating as completion.")
                         await _clear_checkpoint()
@@ -4234,6 +4262,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # Tier 2: Regex patterns for common hallucinations
             if action_name not in ALLOWED_TOOLS:
                 regex_aliases = [
+                    (r'.*mission.*objective.*', "missionobjectivesrequest"),
+                    (r'.*mission.*(complete|debrief).*', "missioncompleterequest"),
                     (r'.*workspace.*shell.*', "workspaceshellrequest"),
                     (r'.*workspace.*search.*', "workspacesearchrequest"),
                     (r'.*workspace.*list.*', "workspacelistrequest"),
@@ -4636,6 +4666,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # workspace. If Raven attempts `gh repo create` (or similar) there, fail
                 # loudly so it creates a workspace first instead of polluting a shared one.
                 _skip_post = False
+
+                # Mission discipline: the checklist and the debrief are handled here,
+                # against the loop's own write/verify tracking (mission_discipline.py).
+                if lookup_action == "missionobjectivesrequest":
+                    exec_data = _discipline.set_objectives(payload)
+                    _skip_post = True
+                elif lookup_action == "missioncompleterequest":
+                    exec_data, _debrief_answer = _discipline.review_debrief(
+                        payload, pending_verification(_written_files, _verified_files)
+                    )
+                    _skip_post = True
 
                 # Workspace Studio: the same handlers as /api/studio/*, run here as
                 # the mission's user. A failed step (tests failing, nothing ran) is
@@ -5503,6 +5544,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await stream_event("result_error", str(e))
             log.error(f"[AgentLoop] Tool execution failed: {e}")
             exec_data = {"status": "ERROR", "message": str(e)}
+
+        # --- MISSION DISCIPLINE: an accepted debrief ends the mission with its summary ---
+        if _debrief_answer is not None:
+            log.info(f"[AgentLoop] Debrief accepted after {successful_tool_calls} tool call(s); mission complete.")
+            ans = _debrief_answer
+            await _clear_checkpoint()
+            break
 
         # --- STAGNATION ESCALATION (OpenCode: stop blind retries, re-plan/ASK) ---
         # If the same step keeps failing, nudge once to change approach; if it
