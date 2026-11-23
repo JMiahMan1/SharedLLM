@@ -244,6 +244,7 @@ public class ApkInstallPlugin extends Plugin {
     }
 
     private static void launchInstaller(Context context, File apk) {
+        InstallGrace.record(context);
         if (DeviceOwnerGuard.isOwner(context) && DeviceOwnerGuard.installApkSilently(context, apk)) {
             return;
         }
@@ -389,6 +390,7 @@ public class ApkInstallPlugin extends Plugin {
     }
 
     private void openInstallSettings() {
+        InstallGrace.record(getContext());
         try {
             Intent i = new Intent(
                 android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,

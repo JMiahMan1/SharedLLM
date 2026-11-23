@@ -141,6 +141,7 @@ final class SelfUpdate {
             Intent status = new Intent(context, Receiver.class).setAction(ACTION_STATUS);
             PendingIntent pi = PendingIntent.getBroadcast(context, sessionId, status, flags);
             open(context);
+            InstallGrace.record(context);
             GuardApi.prefs(context).edit().putString(KEY_PATH, path).apply();
             session.commit(pi.getIntentSender());
             session.close();
@@ -196,6 +197,7 @@ final class SelfUpdate {
             }
             close(context);
             if (status == PackageInstaller.STATUS_SUCCESS) {
+                InstallGrace.record(context);
                 GuardApi.prefs(context).edit().remove(KEY_NEEDS_OK).remove(KEY_PLAY_PROTECT).apply();
                 Log.i(TAG, "updated");
             } else {
