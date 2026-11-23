@@ -64,6 +64,7 @@ TOOL_AREAS: dict[str, str] = {
     "OcrRequest": "workspace", "STTRequest": "workspace", "CodeSearchRequest": "workspace",
     "GhRequest": "workspace", "GitOperationRequest": "workspace", "ImageEditRequest": "workspace",
     "RavenMissionRequest": "workspace",
+    "MissionObjectivesRequest": "workspace", "MissionCompleteRequest": "workspace",
     # system
     "DockerLogsRequest": "system", "DockerComposeRequest": "system", "DeploymentRequest": "system",
     "CapabilityIndexRequest": "system", "VolumeInventoryRequest": "system",
