@@ -388,6 +388,9 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
         return json(registry.body, registry.status);
       }
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
+      if (/^\/api\/network\/devices\/[^/]+$/.test(p) && (method === 'PUT' || method === 'DELETE')) {
+        return json({ status: method === 'PUT' ? 'updated' : 'forgotten' });
+      }
       if (method === 'POST' && p === '/api/garden/profile/detect-zone') {
         return json({ zone: '6b', zone_source: 'auto', latitude: 36, longitude: -86.8,
           last_spring_frost_mmdd: '04-15', first_fall_frost_mmdd: '10-15',
@@ -599,6 +602,24 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (p === '/api/network/usage') return json({ hours: 24, devices: [], networks: [], series: [], bucket: 'hour', source: 'nlbw' });
     if (p === '/api/network/log') return json({ lines: [], source: 'forwarded' });
     if (p === '/api/network/outages') return json({ days: 30, outages: [] });
+    // The device registry behind Admin > Network's Devices list and editor.
+    if (p === '/api/network/devices') {
+      const nowSeconds = NOW.getTime() / 1000;
+      return json({ devices: [
+        { mac: '02:00:00:00:00:01', alias: 'Desk lamp', kind: 'smart_home', make: 'Example Make', model: 'Model A', os: null,
+          owner: 'parent', notes: null, first_seen: nowSeconds - 30 * 86400, last_seen: nowSeconds - 20, private_mac: false,
+          kind_source: 'manual', make_source: 'dns', model_source: 'dns', os_source: null,
+          ip: '192.168.10.11', online: true, band: '2.4 GHz' },
+        { mac: '02:00:00:00:00:02', alias: null, kind: 'phone', make: 'Test Make', model: 'Handset', os: 'TestOS',
+          owner: null, notes: null, first_seen: nowSeconds - 2 * 86400, last_seen: nowSeconds - 600, private_mac: true,
+          kind_source: 'user_agent', make_source: 'user_agent', model_source: 'user_agent', os_source: 'dns',
+          ip: '192.168.10.12', online: false, band: null },
+        { mac: '02:00:00:00:00:03', alias: null, kind: null, make: null, model: null, os: null,
+          owner: null, notes: null, first_seen: nowSeconds - 3 * 86400, last_seen: null, private_mac: false,
+          kind_source: null, make_source: null, model_source: null, os_source: null,
+          ip: null, online: false, band: null },
+      ] });
+    }
     if (p === '/api/network/sites/devices') {
       const now = Date.now() / 1000;
       return json({ hours: Number(url.searchParams.get('hours') || 24), receiving: true, devices: [

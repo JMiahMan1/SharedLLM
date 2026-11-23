@@ -467,6 +467,7 @@
     "admin": {
       "path": "/admin/{section}",
       "query": [
+        "device",
         "mission"
       ],
       "hashes": [],

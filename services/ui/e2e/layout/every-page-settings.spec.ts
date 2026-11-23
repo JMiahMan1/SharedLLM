@@ -149,6 +149,9 @@ test.describe('settings, admin, identity and remote on every form factor', () =>
       await page.waitForTimeout(500);
       await check(page, info, run, main, `admin ${label.toLowerCase()}`);
     }
+    // The device list's editor is a sheet on phones and a panel on larger screens.
+    await expect(main.getByRole('button', { name: 'Edit Desk lamp' })).toBeVisible();
+    await checkDialog(page, info, run, main.getByRole('button', { name: 'Edit Desk lamp' }), 'admin network device editor', 'Edit device');
     finish(run);
   });
 

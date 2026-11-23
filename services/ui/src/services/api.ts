@@ -1,5 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
-import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
+import type {
+  InternetOutage, NetworkDevice, NetworkDeviceFields, NetworkStatus, NetworkUsage, RouterLogLine,
+} from '../lib/network';
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
 import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel, TtsVoices } from '../types/api';
 import type {
@@ -484,6 +486,16 @@ const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
 });
 
 /**
+ * A short, non-identifying hint for Admin > Network device identification.
+ * Safari on an iPad sends a Mac User-Agent, so the gateway cannot tell the two
+ * apart without knowing the screen takes touch.
+ */
+export function deviceHint(): string {
+  if (typeof navigator === 'undefined') return '';
+  return (navigator.maxTouchPoints || 0) > 1 ? 'touch' : 'no-touch';
+}
+
+/**
  * Base URL and auth headers for a request that bypasses `apiClient` -- one that
  * needs its own timeout, or a streamed body `fetch` can read but axios cannot.
  */
@@ -493,7 +505,7 @@ export function directRequestConfig(): { baseURL: string; headers: Record<string
     const serverUrl = storageGetSync('jarvis_server_url');
     if (serverUrl) baseURL = serverUrl;
   }
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Device-Hint': deviceHint() };
   const token = storageGetSync('jarvis_api_key');
   if (token) headers.Authorization = `Bearer ${token}`;
   return { baseURL, headers };
@@ -679,6 +691,7 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  config.headers['X-Device-Hint'] = deviceHint();
   // In the Android app a binary download must come through the native plugin as bytes
   // (see lib/nativeBinary.ts); the WebView's own requests hand it back as corrupted text.
   if (wantsNativeBinary(config)) {
@@ -1284,6 +1297,17 @@ export const api = {
   },
   async getInternetOutages(days = 30): Promise<{ days: number; outages: InternetOutage[] }> {
     return (await apiClient.get('/api/network/outages', { params: { days } })).data;
+  },
+  /** Every device Jarvis keeps a record for, with the monitor's live IP and online flag. */
+  async getNetworkDevices(): Promise<{ devices: NetworkDevice[] }> {
+    return (await apiClient.get('/api/network/devices')).data;
+  },
+  /** Send only the fields the admin actually changed; '' returns a field to detection. */
+  async updateNetworkDevice(mac: string, fields: NetworkDeviceFields): Promise<{ status: string }> {
+    return (await apiClient.put(`/api/network/devices/${encodeURIComponent(mac)}`, fields)).data;
+  },
+  async forgetNetworkDevice(mac: string): Promise<{ status: string }> {
+    return (await apiClient.delete(`/api/network/devices/${encodeURIComponent(mac)}`)).data;
   },
   async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {
     // Runs before/independently of auth, so a 401 must not log the user out.
