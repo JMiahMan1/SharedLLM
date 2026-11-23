@@ -742,7 +742,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
 
 
 async def handle_workspace_list(req: WorkspaceListRequest) -> ExecutionResult:
-    """List files under a path in the workspace, honoiring .gitignore."""
+    """List files under a path in the workspace, honouring .gitignore when ripgrep is there."""
     try:
         workspace_id = getattr(req, "workspace_id", None)
         user_ctx = getattr(req, "user_context", None)
@@ -759,16 +759,27 @@ async def handle_workspace_list(req: WorkspaceListRequest) -> ExecutionResult:
             cmd.extend(["-g", req.glob])
 
         log.info(f"Listing files in {abs_path}: {' '.join(cmd)}")
-        rc, stdout, stderr = await _sandbox_run(workspace_id, ws_root, cmd, cwd=abs_path, timeout=15.0)
+        try:
+            rc, stdout, stderr = await _sandbox_run(workspace_id, ws_root, cmd, cwd=abs_path, timeout=15.0)
+            if rc == -1 and "Executable or directory not found" in stderr:
+                raise FileNotFoundError()
+        except FileNotFoundError:
+            # Same fallback as search: no ripgrep, so find (without .gitignore, but skipping .git).
+            log.info("ripgrep (rg) not found, falling back to find")
+            cmd = ["find", ".", "-type", "f", "-not", "-path", "./.git/*"]
+            if getattr(req, "glob", None):
+                cmd.extend(["-name", req.glob])
+            rc, stdout, stderr = await _sandbox_run(workspace_id, ws_root, cmd, cwd=abs_path, timeout=15.0)
 
         if rc not in (0, 1):
             return _fail(f"List failed: {stderr.strip()}")
 
         entries = []
+        root_real = os.path.realpath(ws_root)
         for line in stdout.splitlines():
             p = line.strip()
             if p:
-                rel = os.path.relpath(os.path.normpath(os.path.join(abs_path, p)), ws_root)
+                rel = os.path.relpath(os.path.realpath(os.path.join(abs_path, p)), root_real)
                 entries.append(rel)
                 if len(entries) >= req.max_entries:
                     break
