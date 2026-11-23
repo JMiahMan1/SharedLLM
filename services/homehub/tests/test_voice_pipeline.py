@@ -207,7 +207,7 @@ def env(monkeypatch):
 def make_driver(flags: int = FULL, options: dict | None = None):
     hub, entry = make_hub("esphome", dict(DATA), ENTITIES, options=options or {})
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: VoiceClient(flags)  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: VoiceClient(flags)  # type: ignore[method-assign]
     hub.drivers[entry.entry_id] = drv
     return hub, drv
 
@@ -841,7 +841,7 @@ async def test_a_node_that_asks_for_flac_fetches_the_reply_through_the_ffmpeg_pr
     streamed = []
     monkeypatch.setattr(voice_pipeline.BACKENDS, "clip_audio", lambda url: streamed.append(url) or _wav(24000, 0.1))
     _hub, drv = make_driver(flags=FULL | int(F.SPEAKER))
-    drv._make_client = lambda host: Node(FULL | int(F.SPEAKER))  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: Node(FULL | int(F.SPEAKER))  # type: ignore[method-assign]
     await drv.async_setup()
     client = drv._client
     await run_turn(drv, client, [_silence(0.3), _tone(1.0), _silence(1.0)])

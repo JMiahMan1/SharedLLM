@@ -50,7 +50,7 @@ class Clock:
 async def _node(env, options=None):
     node = Node()
     hub, drv = env.build(node, options=options)
-    drv._make_client = lambda host: DumpClient(node)  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: DumpClient(node)  # type: ignore[method-assign]
     await drv.async_setup()
     return node, hub, drv
 

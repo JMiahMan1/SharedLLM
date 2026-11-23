@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import json
 import logging
 import re
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -62,6 +65,14 @@ HA_VERSION = "2026.11.0"
 MAX_RECORDING_RANGE = timedelta(days=7)
 _BOUNDARY = "frame"
 _NO_STORE = {"Cache-Control": "no-store"}
+_ECHO_TUNNEL_NODE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+#: Where the hub keeps each Echo's own tunnel token, stored as ``{node: sha256hex}`` (never the token itself).
+ECHO_TUNNEL_TOKENS_KV = "echo_tunnel_tokens"
+
+
+def _echo_tunnel_token_hash(token: str) -> str:
+    """The sha256 hex the hub stores for a device tunnel token, so the token itself never sits in the store."""
+    return hashlib.sha256(token.encode()).hexdigest()
 #: HA's history SIGNIFICANT_DOMAINS: attribute-only changes count as significant for these.
 SIGNIFICANT_DOMAINS = frozenset({"climate", "device_tracker", "humidifier", "thermostat", "water_heater"})
 #: HA's logbook leaves these domains out entirely: they change all the time and none of it reads as an event.
@@ -888,6 +899,11 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     bridge = _echo_dropin_bridge.EchoDropInBridge()
     app.state.echo_dropin_bridge = bridge
 
+    from services.homehub.echo_tunnel import EchoTunnelManager
+
+    runtime.hub.echo_tunnels = EchoTunnelManager()
+    app.state.echo_tunnel_manager = runtime.hub.echo_tunnels
+
     def _ws_authenticate(websocket: WebSocket) -> Principal | None:
         token = bearer(websocket.headers.get("authorization")) or websocket.headers.get("x-internal-secret")
         if not token:
@@ -953,6 +969,127 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             log.exception("echo drop-in websocket failed for node %s", node)
             with contextlib.suppress(Exception):
                 await websocket.close(code=1011, reason=f"echo drop-in failed: {type(exc).__name__}"[:120])
+
+    # ---- Echo Tunnel Routes ----
+
+    def _echo_tunnel_stored_hash(node: str) -> str | None:
+        """The stored sha256 hex for this node's device token, or None when it has none."""
+        tokens = runtime.store.get_kv(ECHO_TUNNEL_TOKENS_KV, {})
+        if isinstance(tokens, dict):
+            value = tokens.get(node)
+            return value if isinstance(value, str) else None
+        return None
+
+    @app.post("/hub/echo_tunnel/tokens/{node}")
+    async def echo_tunnel_token_create(node: str, request: Request) -> dict[str, Any]:
+        """Mint this Echo's own tunnel token, returned once and stored only as a sha256 hex.
+
+        The only time the token leaves the hub; replaces any previous token for the node.
+        """
+        admin(request)
+        if not _ECHO_TUNNEL_NODE_RE.match(node or ""):
+            raise HTTPException(404, detail="Unknown node")
+        token = secrets.token_urlsafe(32)
+        tokens = runtime.store.get_kv(ECHO_TUNNEL_TOKENS_KV, {})
+        if not isinstance(tokens, dict):
+            tokens = {}
+        tokens[node] = _echo_tunnel_token_hash(token)
+        runtime.store.set_kv(ECHO_TUNNEL_TOKENS_KV, tokens)
+        return {"node": node, "token": token}
+
+    @app.delete("/hub/echo_tunnel/tokens/{node}")
+    async def echo_tunnel_token_delete(node: str, request: Request) -> dict[str, Any]:
+        """Revoke this node's device token."""
+        admin(request)
+        tokens = runtime.store.get_kv(ECHO_TUNNEL_TOKENS_KV, {})
+        if not isinstance(tokens, dict):
+            tokens = {}
+        revoked = node in tokens
+        if revoked:
+            del tokens[node]
+            runtime.store.set_kv(ECHO_TUNNEL_TOKENS_KV, tokens)
+        return {"revoked": revoked}
+
+    @app.get("/hub/echo_tunnel/tokens")
+    async def echo_tunnel_token_list(request: Request) -> dict[str, Any]:
+        """The nodes that have a device token; never the tokens or their hashes."""
+        admin(request)
+        tokens = runtime.store.get_kv(ECHO_TUNNEL_TOKENS_KV, {})
+        nodes = sorted(tokens.keys()) if isinstance(tokens, dict) else []
+        return {"nodes": nodes}
+
+    @app.get("/hub/echo_tunnel/status")
+    async def echo_tunnel_status(request: Request) -> dict[str, Any]:
+        """Admin/internal status of active echo tunnels."""
+        admin(request)
+        return await app.state.echo_tunnel_manager.status()
+
+    @app.post("/hub/echo_tunnel/disconnect/{node}")
+    async def echo_tunnel_disconnect(node: str, request: Request) -> dict[str, Any]:
+        """Admin/internal disconnect a tunnel by node name."""
+        admin(request)
+        ok = await app.state.echo_tunnel_manager.disconnect(node)
+        return {"disconnected": ok}
+
+    @app.websocket("/hub/echo_tunnel/ws/{node}")
+    async def echo_tunnel_ws(websocket: WebSocket, node: str) -> None:
+        """WebSocket endpoint for the echo reverse WSS tunnel.
+
+        Auth: an admin/internal principal (as elsewhere), OR a per-device token whose sha256
+        matches the hash stored for this node. Device tokens come only from the Authorization
+        header, never ``?token=``; a token for another node, a revoked token, or none closes 1008.
+        Protocol: binary frames with 1-byte type header (0x01=OPEN, 0x02=DATA, 0x03=CLOSE,
+        0x04=PING, 0x05=PONG). Multiplexes TCP connections on 127.0.0.1:local_port
+        over this WS link, exposing ESPHome API (:26053) over HTTPS/WSS 443.
+        """
+        principal = _ws_authenticate(websocket)
+        if not (principal is not None and principal.is_admin):
+            header_token = bearer(websocket.headers.get("authorization"))
+            stored = _echo_tunnel_stored_hash(node)
+            if not (header_token and stored
+                    and hmac.compare_digest(_echo_tunnel_token_hash(header_token), stored)):
+                await websocket.close(code=1008, reason="Unauthorized")
+                return
+
+        # Validate node name regex
+        if not _ECHO_TUNNEL_NODE_RE.match(node or ""):
+            await websocket.close(code=1008, reason="Invalid node name")
+            return
+
+        await websocket.accept()
+
+        manager: EchoTunnelManager = app.state.echo_tunnel_manager
+
+        try:
+            # Register the tunnel (binds TCP server, sends OPEN frame)
+            local_port = await manager.register_tunnel(node, websocket)
+            log.info("Echo tunnel WS accepted for node=%s local_port=%s", node, local_port)
+
+            # Handle incoming frames in a loop
+            while True:
+                data = await websocket.receive_bytes()
+                try:
+                    manager.decode_frame(data)
+                except Exception as exc:
+                    log.warning("Failed to decode tunnel frame: %s", exc)
+                    await websocket.close(code=1008, reason="Malformed frame")
+                    return
+
+                # Handle the frame
+                status = await manager.handle_ws_frame(data, node)
+                if status == "error":
+                    await websocket.close(code=1008, reason="Frame processing error")
+                    return
+
+        except Exception as exc:
+            log.exception("Echo tunnel WS failed for node %s", node)
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011, reason=f"tunnel failed: {type(exc).__name__}"[:120])
+        finally:
+            # Ensure cleanup on disconnect
+            await manager.disconnect(node)
+            with contextlib.suppress(Exception):
+                await websocket.close()
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

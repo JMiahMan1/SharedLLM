@@ -314,6 +314,42 @@ export default function EchoFleetPanel({ states: providedStates, onDropIn }: Ech
                     Echo Settings URL is not published or is not a safe http(s) address.
                   </p>
                 )}
+
+                {device.btPairingEntityId && (
+                  <div className={`${TOUCH} flex items-center justify-between gap-2 rounded-xl bg-slate-800/70 px-3 pt-2 pb-1 text-xs text-slate-300`}
+                      aria-label={`Bluetooth speaker for ${device.name}`}>
+                    <span>Bluetooth Speaker</span>
+                    {device.btPairingOn ? (
+                      <span className="text-emerald-300">Paired</span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Pair Bluetooth on ${device.name}`}
+                        onClick={() => api.callHaService('switch', 'turn_on', device.btPairingEntityId!)}
+                        className={`${TOUCH} rounded-lg border border-slate-600 px-2 text-xs font-semibold disabled:opacity-50 ${
+                          device.btPairingOn ? 'bg-amber-500/25 text-amber-200' : 'bg-slate-700 text-slate-300'
+                        }`}
+                      >
+                        Pair
+                      </button>
+                    )}
+                    {device.btDisconnectEntityId && (
+                      <button
+                        type="button"
+                        aria-label={`Disconnect Bluetooth on ${device.name}`}
+                        onClick={() => api.callHaService('button', 'press', device.btDisconnectEntityId!)}
+                        className={`${TOUCH} rounded-lg border border-slate-600 px-2 text-xs font-semibold disabled:opacity-50`}
+                      >
+                        Disconnect
+                      </button>
+                    )}
+                    {device.btConnectedDevice && (
+                      <span className="text-[11px] text-slate-400">
+                       Connected: {device.btConnectedDevice}
+                      </span>
+                    )}
+                  </div>
+                )}
               </article>
             );
           })}

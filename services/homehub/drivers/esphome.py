@@ -361,9 +361,9 @@ class ESPHomeDriver(Driver):
                                and re.match(r"^[0-9A-Fa-f:]{17}-", e.unique_id or "")]
 
     # -- connection -----------------------------------------------------------
-    def _make_client(self, host: str) -> Any:
+    def _make_client(self, host: str, port: int | None = None) -> Any:
         # ``host`` is an address: a ``.local`` name was resolved by mDNS first (``_address_for``).
-        return APIClient(host, self.port, self.password, client_info="homehub",
+        return APIClient(host, port or self.port, self.password, client_info="homehub",
                          noise_psk=self.noise_psk, expected_name=self.device_name or None)
 
     @property
@@ -386,8 +386,13 @@ class ESPHomeDriver(Driver):
             raise DeviceUnavailable(f"{host}:{self.port}: not found by mDNS")
         return address
 
-    async def _try_connect(self, host: str) -> tuple[Any, Any, list[Any], list[Any]]:
-        client = self._make_client(await self._address_for(host))
+    async def _try_connect(self, host: str, port: int | None = None) -> tuple[Any, Any, list[Any], list[Any]]:
+        used_port = port or self.port
+        if host == "127.0.0.1":
+            resolved = host
+        else:
+            resolved = await self._address_for(host)
+        client = self._make_client(resolved, used_port)
         try:
             await asyncio.wait_for(client.connect(on_stop=self._on_stop, login=True), CONNECT_TIMEOUT)
             device_info, infos, services = await asyncio.wait_for(
@@ -395,21 +400,30 @@ class ESPHomeDriver(Driver):
         except (APIConnectionError, OSError, TimeoutError) as exc:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(client.disconnect(force=True), 2)
-            raise DeviceUnavailable(f"{host}:{self.port}: {exc or type(exc).__name__}") from exc
+            raise DeviceUnavailable(f"{host}:{used_port}: {exc or type(exc).__name__}") from exc
         return client, device_info, infos, services
 
     async def _connect(self) -> None:
-        # The address that worked last goes first, so a fallback that answered
-        # keeps being used and the stale one is only retried after it.
+        # The tunnel endpoint first when one is registered for this node (its mobile
+        # relay), then the address that worked last, then the node's mDNS fallback.
         order = [self.host] + [h for h in self.candidates if h != self.host]
+        attempts: list[tuple[str, int | None]] = []
+        tunnel = getattr(self.hub, "echo_tunnels", None)
+        endpoint = tunnel.local_endpoint(self.device_name) if tunnel and self.device_name else None
+        if endpoint is not None:
+            attempts.append(endpoint)
+        attempts.extend((host, None) for host in order)
         errors = []
-        for host in order:
+
+        for host, port in attempts:
             try:
-                client, device_info, infos, services = await self._try_connect(host)
+                client, device_info, infos, services = await self._try_connect(host, port)
             except DeviceUnavailable as exc:
                 errors.append(str(exc))
                 continue
-            if host != self.host:
+            if port is not None:  # a tunnel endpoint, not one of the node's own addresses
+                self.log.info("ESPHome %s connected through its mobile tunnel", self.device_name)
+            elif host != self.host:
                 self.log.warning("ESPHome %s answered at %s, not %s; using that address from now on",
                                  self.device_name, host, self.host)
                 self.host = host

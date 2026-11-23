@@ -32,10 +32,18 @@ def member(monkeypatch):
     async def not_admin(request):
         raise __import__("fastapi").HTTPException(status_code=403, detail="Admin only")
 
-    monkeypatch.setattr(gateway_main, "_require_admin", not_admin)
+    monkeypatch.setattr(automation_routes, "_admin", not_admin)
 
 
-def test_status_forwards_for_admin(client, hub):
+@pytest.fixture
+def admin(monkeypatch):
+    async def _always_admin(request):
+        return True
+
+    monkeypatch.setattr(automation_routes, "_admin", _always_admin)
+
+
+def test_status_forwards_for_admin(client, hub, admin):
     seen, _ = hub
     resp = client.get("/api/homehub/echo_dropin/status")
     assert resp.status_code == 200
@@ -60,7 +68,7 @@ def test_hangup_validates_hex(client, hub):
     assert seen == []
 
 
-def test_hangup_forwards_valid_hex(client, hub):
+def test_hangup_forwards_valid_hex(client, hub, admin):
     seen, _ = hub
     resp = client.post("/api/homehub/echo_dropin/hangup/abc123")
     assert resp.status_code == 200

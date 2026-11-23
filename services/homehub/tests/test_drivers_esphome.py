@@ -179,7 +179,7 @@ def driver(monkeypatch):
     FakeClient.instances.clear()
     hub, entry = make_hub("esphome", dict(DATA), ENTITIES, options={"allow_service_calls": True})
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: FakeClient()  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: FakeClient()  # type: ignore[method-assign]
 
     async def _no_mdns(host, timeout):  # a test never asks the network: a real lookup waits up to 3 s on CI
         return None
@@ -342,7 +342,7 @@ async def test_reconnect_keeps_trying_and_poll_restarts_a_stopped_loop(driver, m
     await drv.async_setup()
     attempts = {"n": 0}
 
-    def flaky(host):
+    def flaky(host, port=None):
         attempts["n"] += 1
         return FakeClient(fail=attempts["n"] < 3)
 
@@ -362,7 +362,7 @@ async def test_reconnect_keeps_trying_and_poll_restarts_a_stopped_loop(driver, m
 
 async def test_setup_raises_when_the_node_is_unreachable(driver):
     _hub, drv = driver
-    drv._make_client = lambda host: FakeClient(fail=True)  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: FakeClient(fail=True)  # type: ignore[method-assign]
     with pytest.raises(DeviceUnavailable, match="unreachable"):
         await drv.async_setup()
     assert drv._unsub_bus is None
@@ -441,7 +441,7 @@ async def test_stale_ip_falls_back_to_mdns_and_keeps_it(caplog, monkeypatch):
     hub, drv = _driver_with()
     tried: list[str] = []
 
-    def factory(host):
+    def factory(host, port=None):
         tried.append(host)
         return FakeClient(fail=host != "192.0.2.200", host=host)
 
@@ -461,7 +461,7 @@ async def test_stale_ip_falls_back_to_mdns_and_keeps_it(caplog, monkeypatch):
 
 async def test_both_addresses_failing_names_both():
     _, drv = _driver_with()
-    drv._make_client = lambda host: FakeClient(fail=True, host=host)  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: FakeClient(fail=True, host=host)  # type: ignore[method-assign]
     with pytest.raises(DeviceUnavailable) as err:
         await drv.async_setup()
     assert "192.0.2.127" in str(err.value) and "smart-speaker.local" in str(err.value)
@@ -471,7 +471,7 @@ async def test_options_host_overrides_everything():
     _, drv = _driver_with(options={"host": "192.0.2.250"})
     tried: list[str] = []
 
-    def factory(host):
+    def factory(host, port=None):
         tried.append(host)
         return FakeClient(fail=True, host=host)
 
@@ -499,7 +499,7 @@ async def test_camera_snapshot_comes_from_a_single_image_request(monkeypatch):
     hub, entry = make_hub("esphome", dict(DATA), [*ENTITIES, {"entity_id": "camera.garage_door_garage_camera",
                                                                "unique_id": f"{MAC}/0/camera/Garage Camera"}])
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: CamClient()  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: CamClient()  # type: ignore[method-assign]
     await drv.async_setup()
     ent = hub.entities["camera.garage_door_garage_camera"]
     st = hub.states.get(ent.entity_id)
@@ -528,7 +528,7 @@ async def test_live_video_streams_over_the_api_and_stops_when_the_viewer_leaves(
     hub, entry = make_hub("esphome", dict(DATA), [*ENTITIES, {"entity_id": "camera.garage_door_garage_camera",
                                                                "unique_id": f"{MAC}/0/camera/Garage Camera"}])
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: Streamer()  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: Streamer()  # type: ignore[method-assign]
     await drv.async_setup()
     ctype, body = await drv.async_open_mjpeg_stream(hub.entities["camera.garage_door_garage_camera"])
     assert ctype.startswith("multipart/x-mixed-replace; boundary=")
@@ -555,7 +555,7 @@ async def test_live_video_ends_when_the_camera_goes_quiet(monkeypatch):
     hub, entry = make_hub("esphome", dict(DATA), [*ENTITIES, {"entity_id": "camera.garage_door_garage_camera",
                                                                "unique_id": f"{MAC}/0/camera/Garage Camera"}])
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: Quiet()  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: Quiet()  # type: ignore[method-assign]
     await drv.async_setup()
     _ctype, body = await drv.async_open_mjpeg_stream(hub.entities["camera.garage_door_garage_camera"])
     assert [chunk async for chunk in body] == []
@@ -577,7 +577,7 @@ async def test_camera_snapshot_times_out_cleanly(monkeypatch):
     hub, entry = make_hub("esphome", dict(DATA), [*ENTITIES, {"entity_id": "camera.garage_door_garage_camera",
                                                                "unique_id": f"{MAC}/0/camera/Garage Camera"}])
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: Silent()  # type: ignore[method-assign]
+    drv._make_client = lambda host, port=None: Silent()  # type: ignore[method-assign]
     await drv.async_setup()
     with pytest.raises(DeviceUnavailable):
         await drv.async_camera_image(hub.entities["camera.garage_door_garage_camera"])
@@ -714,7 +714,7 @@ async def test_a_local_name_is_looked_up_by_mdns_and_never_handed_to_aioesphomea
     _, drv = _driver_with()
     handed: list[str] = []
 
-    def factory(host):
+    def factory(host, port=None):
         handed.append(host)
         return FakeClient(fail=True, host=host)
 
@@ -729,7 +729,7 @@ async def test_a_node_mdns_cannot_find_is_not_tried_at_all():
     _, drv = _driver_with(data={"device_name": "gone-node"})
     handed: list[str] = []
 
-    def factory(host):
+    def factory(host, port=None):
         handed.append(host)
         return FakeClient(fail=True, host=host)
 

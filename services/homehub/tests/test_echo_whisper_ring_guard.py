@@ -55,7 +55,7 @@ async def test_whisper_on_ducks_and_restores(monkeypatch):
     from services.homehub.drivers.esphome import ESPHomeDriver
     hub, entry = make_hub("esphome", dict(DATA), _entities_with_whisper(), options={})
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: VoiceClient(FULL)
+    drv._make_client = lambda host, port=None: VoiceClient(FULL)
     hub.drivers[entry.entry_id] = drv
     await drv.async_setup()
     hub.publish("binary_sensor.test_satellite_last_request_whispered", "on", {})
@@ -87,7 +87,7 @@ async def test_whisper_off_leaves_volume(monkeypatch):
     from services.homehub.drivers.esphome import ESPHomeDriver
     hub, entry = make_hub("esphome", dict(DATA), [dict(e) for e in ENTITIES], options={})
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: VoiceClient(FULL)
+    drv._make_client = lambda host, port=None: VoiceClient(FULL)
     hub.drivers[entry.entry_id] = drv
     await drv.async_setup()
     client = VoiceClient.instances[-1]
@@ -125,7 +125,7 @@ async def test_context_includes_whispered():
     from services.homehub.drivers.esphome import ESPHomeDriver
     hub, entry = make_hub("esphome", dict(DATA), [dict(e) for e in ENTITIES], options={})
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: VoiceClient(FULL)
+    drv._make_client = lambda host, port=None: VoiceClient(FULL)
     hub.drivers[entry.entry_id] = drv
     run = voice_pipeline.Run(id="r", conversation_id="c", wake_word=None)
     run.whispered = True
@@ -253,7 +253,7 @@ async def test_whisper_volume_percentage_scale(monkeypatch):
     hub.entities[spec1["entity_id"]] = EntityEntry(**spec1)
     hub.entities[spec2["entity_id"]] = EntityEntry(**spec2)
     drv = ESPHomeDriver(hub, entry)
-    drv._make_client = lambda host: VoiceClient(FULL)
+    drv._make_client = lambda host, port=None: VoiceClient(FULL)
     hub.drivers[entry.entry_id] = drv
     await drv.async_setup()
     hub.publish("binary_sensor.test_satellite_last_request_whispered", "on", {})
