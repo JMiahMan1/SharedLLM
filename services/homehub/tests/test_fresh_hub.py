@@ -265,7 +265,7 @@ async def fresh(tmp_path, monkeypatch):
     monkeypatch.setattr(importer, "import_history", no_import)
     bulb = FakeBulb()
     monkeypatch.setattr(wiz_mod, "udp_request", bulb.request)
-    monkeypatch.setattr(ESPHomeDriver, "_make_client", lambda self, host: FakeNode())
+    monkeypatch.setattr(ESPHomeDriver, "_make_client", lambda self, host, port=None: FakeNode())
     monkeypatch.setattr(esphome_mod, "COMMAND_SETTLE", 0.01)
 
     async def esphome_probe(host, port, psk, password=""):

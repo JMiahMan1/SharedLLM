@@ -146,14 +146,16 @@ def test_echo_tunnel_status_route_registered():
     assert len(gateway_main.app.routes) > 0
 
 
-def test_echo_tunnel_status_forbidden(client, hub):
+def test_echo_tunnel_status_forbidden(client, hub, monkeypatch):
     """GET /api/homehub/echo_tunnel/status returns 403 without admin."""
     seen, _ = hub
+
     async def _never_admin(request):
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Admin only")
 
-    monkeypatch = pytest.MonkeyPatch()
+    # The fixture undoes this after the test; a bare MonkeyPatch() leaked the fake into
+    # every later test in the shard (test_helper_routes saw "Admin only").
     monkeypatch.setattr(automation_routes, "_admin", _never_admin)
 
     resp = client.get("/api/homehub/echo_tunnel/status")
