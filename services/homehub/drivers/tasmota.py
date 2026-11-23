@@ -176,6 +176,29 @@ def cm_params(command: str, password: str | None) -> dict[str, str]:
     return params
 
 
+def basic_auth(password: str | None) -> Any:
+    """HTTP Basic credentials for the web password (user ``admin``), or None.
+
+    Stock Tasmota reads the password from ``/cm``'s ``user``/``password`` arguments, but some
+    builds and Tasmota-compatible firmwares put every page, ``/cm`` included, behind HTTP Basic
+    login and close the connection on a ``/cm`` without it. Sending both works for either.
+    """
+    return aiohttp.BasicAuth("admin", password) if password else None
+
+
+async def asks_for_login(session: Any, host: str) -> bool:
+    """Whether the device's web page wants a login (401 with a Basic challenge).
+
+    Used after ``/cm`` closed the connection without a reply: a password-protected
+    device does that on some firmwares, where an unreachable one never answers at all.
+    """
+    try:
+        async with session.get(f"http://{host}/") as resp:
+            return resp.status == 401 and "basic" in resp.headers.get("WWW-Authenticate", "").lower()
+    except (aiohttp.ClientError, TimeoutError):
+        return False
+
+
 def safe_error(exc: BaseException, password: str | None) -> str:
     """An error's text for logs and the entry's reason, without the password (a URL in it carries the query)."""
     text = str(exc) or type(exc).__name__
@@ -363,12 +386,17 @@ class TasmotaDriver(Driver):
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT))
         pw = str(self.entry.data.get("password") or "")
         try:
-            async with self._session.get(f"http://{self.host}/cm", params=cm_params(command, pw)) as resp:
+            async with self._session.get(f"http://{self.host}/cm", params=cm_params(command, pw),
+                                         auth=basic_auth(pw)) as resp:
                 if resp.status == 401:
                     raise self._auth_failure()
                 if resp.status != 200:
                     raise DeviceUnavailable(f"Tasmota {self.host} answered HTTP {resp.status} to {command!r}")
                 body = await resp.json(content_type=None)
+        except aiohttp.ServerDisconnectedError as exc:
+            if await asks_for_login(self._session, self.host):
+                raise self._auth_failure() from None
+            raise DeviceUnavailable(f"Tasmota {self.host} unreachable: {safe_error(exc, pw)}") from None
         except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
             raise DeviceUnavailable(f"Tasmota {self.host} unreachable: {safe_error(exc, pw)}") from None
         if needs_password(200, body):
