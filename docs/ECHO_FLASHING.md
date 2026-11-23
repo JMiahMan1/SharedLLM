@@ -36,6 +36,10 @@ scripts/echo_flash.sh donut      # Echo Dot 3
 scripts/echo_flash.sh crown      # Echo Show 8 1st gen
 ```
 
+Already unlocked, flashed and rooted by hand (`adb shell id -u` says 0 on Fire OS)? Start at the build:
+`scripts/echo_flash.sh donut --from build`. Its first check (`probe.sh`) stops if the Echo runs a different
+firmware than the one echo-dot-assist needs; then redo the flash with `--from flash` (it wipes the Echo).
+
 It fetches echo-dot-assist at the pinned, tested commit, checks the tools, warns about #112 for a Dot, runs the
 upstream guided setup (`scripts/setup.sh <device>`, which waits while you unlock by hand), and at the end prints
 the Echo's IP address. Then adopt it: **Jarvis > Devices > Add device > ESPHome**, the Echo's IP, port **26053**,
