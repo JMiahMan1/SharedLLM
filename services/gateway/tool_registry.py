@@ -547,8 +547,10 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Play media via Music Assistant / HA (playlists, favorites, stream).",
      "payload fields: entity_id, device_name, query, media_type, media_content_id, media_content_type, enqueue, volume."),
     ("MediaTransportRequest", SVC_EXECUTION, "POST", "/execute/media/transport", False,
-     "Media transport controls: play, pause, stop, next, previous, volume.",
-     "payload fields: entity_id, command, volume_level, position, muted."),
+     "Media transport controls: play, pause, stop, next, previous, volume, and audiobook controls "
+     "(seek_relative, chapter_next, chapter_previous, chapter_goto, speed, sleep).",
+     "payload fields: entity_id, command, volume_level, position, seconds, chapter, rate, minutes, "
+     "end_of_chapter, muted."),
     ("MediaStatusRequest", SVC_EXECUTION, "POST", "/execute/media/status", False,
      "Query current media player status/state.",
      "payload fields: area, entity_id."),

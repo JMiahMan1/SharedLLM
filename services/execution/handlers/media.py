@@ -7,7 +7,7 @@ from typing import cast
 
 from services.common import ma_identity
 from services.config import MASS_CONFIG_ENTRY_ID
-from services.execution import activity, ha_client, ha_health
+from services.execution import abs_session_state, activity, ha_client, ha_health
 from services.execution.media_links import media_file_url
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult, MediaPlayRequest
 from services.shared.ma_player import is_music_assistant_player
@@ -847,6 +847,160 @@ def transport_said(command: str, attrs: dict | None, entity_id: str) -> str:
     return f"{done} on {name}." if done else f"Sent {command} to {name}."
 
 
+# Audiobook controls that need the ABS session (position, chapters) rather than
+# a plain media_player button. Handled before brand fallbacks so a TV entity
+# cannot swallow them.
+_ABS_ENHANCED_COMMANDS = frozenset({
+    "seek_relative", "chapter_next", "chapter_previous", "chapter_goto", "speed", "sleep",
+})
+
+
+def _player_position(attrs: dict | None) -> float:
+    """The player's position inside the current track, in seconds."""
+    try:
+        return max(0.0, float((attrs or {}).get("media_position") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _chapter_index(chapters: list[dict], absolute_time: float) -> int:
+    for i, chapter in enumerate(chapters):
+        start = float(chapter.get("start") or 0)
+        end = chapter.get("end")
+        end = float(end) if end is not None else None
+        if absolute_time >= start and (end is None or absolute_time < end):
+            return i
+    return -1
+
+
+async def _abs_on_pause_or_stop(entity_id: str, attrs: dict | None, *, stop: bool) -> None:
+    """Write ABS progress back when the person pauses or stops a player we started a book on."""
+    position = _player_position(attrs)
+    if stop:
+        abs_session_state.cancel_sleep(entity_id)
+        await abs_session_state.close(entity_id, position)
+    else:
+        await abs_session_state.sync_position(entity_id, position)
+
+
+async def _audiobook_transport(
+    req, command: str, entity_id: str, attrs: dict | None, state: dict | None
+) -> ExecutionResult:
+    """Handle seek_relative / chapter_* / speed / sleep for a player."""
+    ctx = req.user_context
+    info = abs_session_state.active(entity_id)
+    chapters = (info or {}).get("chapters") or []
+    track_start = float((info or {}).get("track_start") or 0)
+
+    if command == "seek_relative":
+        seconds = getattr(req, "seconds", None)
+        delta = 30.0 if seconds is None else float(seconds)
+        target = max(0.0, _player_position(attrs) + delta)
+        result = await ha_client.call_service(
+            ctx.ha_url, ctx.ha_token, "media_player", "media_seek", entity_id,
+            {"seek_position": target},
+        )
+        if result.get("ok"):
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"Moved {'forward' if delta >= 0 else 'back'} {abs(delta):.0f} seconds.",
+                service="media_transport",
+            )
+        return ExecutionResult(status="FAILURE", message=f"Seek failed: {result.get('error')}", service="media_transport")
+
+    if command in ("chapter_next", "chapter_previous", "chapter_goto"):
+        if not chapters:
+            return ExecutionResult(
+                status="FAILURE",
+                message="Chapter information is not available for this playback.",
+                service="media_transport",
+            )
+        index = _chapter_index(chapters, track_start + _player_position(attrs))
+        if command == "chapter_goto":
+            wanted = getattr(req, "chapter", None)
+            if not wanted or not 1 <= wanted <= len(chapters):
+                return ExecutionResult(
+                    status="FAILURE",
+                    message=f"Chapter {wanted} is out of range (1 to {len(chapters)}).",
+                    service="media_transport",
+                )
+            index = wanted - 1
+        elif command == "chapter_next":
+            index = min(len(chapters) - 1, max(0, index + 1))
+        else:
+            index = max(0, index - 1)
+        chapter = chapters[index]
+        target = max(0.0, float(chapter.get("start") or 0) - track_start)
+        result = await ha_client.call_service(
+            ctx.ha_url, ctx.ha_token, "media_player", "media_seek", entity_id,
+            {"seek_position": target},
+        )
+        if result.get("ok"):
+            label = chapter.get("title") or f"chapter {index + 1}"
+            return ExecutionResult(status="SUCCESS", message=f"Went to {label}.", service="media_transport")
+        return ExecutionResult(status="FAILURE", message=f"Chapter change failed: {result.get('error')}", service="media_transport")
+
+    if command == "speed":
+        rate = getattr(req, "rate", None)
+        if rate is None:
+            return ExecutionResult(
+                status="FAILURE", message="Speed requires a rate between 0.5 and 3.0.", service="media_transport"
+            )
+        rate = float(rate)
+        if is_music_assistant_player(attrs or {}, entity_id) and ctx.mass_url and ctx.mass_token:
+            from . import mass_client
+
+            queue_id = (
+                (attrs or {}).get("active_queue")
+                or (attrs or {}).get("queue_id")
+                or entity_id.split(".", 1)[-1]
+            )
+            try:
+                await mass_client.ma_command(
+                    ctx.mass_url, ctx.mass_token, "player_queues/set_speed",
+                    {"queue_id": queue_id, "speed": rate},
+                )
+                return ExecutionResult(
+                    status="SUCCESS", message=f"Playback speed set to {rate:g}x.", service="media_transport"
+                )
+            except Exception as e:
+                log.warning(f"[media/transport] Could not set MA queue speed: {e}")
+        return ExecutionResult(
+            status="FAILURE",
+            message="Speed is not supported on this speaker.",
+            service="media_transport",
+        )
+
+    # command == "sleep"
+    end_of_chapter = bool(getattr(req, "end_of_chapter", False))
+    minutes = getattr(req, "minutes", None)
+    if end_of_chapter:
+        absolute = track_start + _player_position(attrs)
+        index = _chapter_index(chapters, absolute)
+        end = chapters[index].get("end") if 0 <= index < len(chapters) else None
+        delay = max(1.0, float(end) - absolute) if end is not None else 30 * 60
+        when = "at the end of the chapter"
+    elif minutes:
+        delay = max(0.0, float(minutes) * 60)
+        when = f"in {float(minutes):g} minutes"
+    else:
+        return ExecutionResult(
+            status="FAILURE",
+            message="Sleep requires minutes or end_of_chapter.",
+            service="media_transport",
+        )
+
+    async def _pause_player() -> None:
+        await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "media_pause", entity_id)
+
+    abs_session_state.schedule_sleep(entity_id, delay, _pause_player)
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Sleep timer set: playback will pause {when}.",
+        service="media_transport",
+    )
+
+
 async def handle_media_transport(req) -> ExecutionResult:
     """Transport/remote commands: through HA, or straight to the device when HA is down."""
     ctx = req.user_context
@@ -942,6 +1096,15 @@ async def _transport_via_ha(req) -> ExecutionResult:
     # entity cannot serve the command (and for remote-only actions like home/back/power).
     supported_features = int(attrs.get("supported_features", 0) or 0)
     standard_supported = _standard_supported(idx, full_entity_id, command, supported_features)
+
+    # Pause / stop close the loop on an ABS session this handler started: write
+    # the player's current position back to Audiobookshelf (and close it on
+    # stop). Enhanced audiobook controls need the session's chapters, so handle
+    # them here, before the TV brand fallbacks can swallow them.
+    if command in ("pause", "stop"):
+        await _abs_on_pause_or_stop(full_entity_id, attrs, stop=(command == "stop"))
+    if command in _ABS_ENHANCED_COMMANDS:
+        return await _audiobook_transport(req, command, full_entity_id, attrs, state)
 
     # A TV or cast speaker playing Music Assistant's stream has its queue on
     # MA's own entity for the same device ("Den TV": the Cast entity

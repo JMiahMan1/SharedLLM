@@ -243,11 +243,18 @@ class MediaTransportRequest(BaseRequest):
         "volume_up", "volume_down", "volume_set", "volume_mute", "mute", "volume_unmute",
         "home", "power_off", "power_on", "back", "play", "seek",
         "shuffle_set", "repeat_set", "join", "unjoin",
+        # Audiobook transport: relative seek, chapter navigation, speed, sleep timer.
+        "seek_relative", "chapter_next", "chapter_previous", "chapter_goto", "speed", "sleep",
         # Remote-control keys (TV d-pad and menu), sent as remote key presses.
         "up", "down", "left", "right", "select", "menu",
     ]
     volume_level: float | None = Field(None, ge=0.0, le=1.0)
     position: float | None = Field(None, ge=0.0, description="Seek target in seconds (command='seek')")
+    seconds: float | None = Field(None, description="Relative seek seconds; negative rewinds (command='seek_relative')")
+    chapter: int | None = Field(None, ge=1, description="1-based chapter number (command='chapter_goto')")
+    rate: float | None = Field(None, ge=0.5, le=3.0, description="Playback speed 0.5..3.0 (command='speed')")
+    minutes: float | None = Field(None, gt=0, description="Sleep timer length in minutes (command='sleep')")
+    end_of_chapter: bool | None = Field(None, description="Pause at the end of the current chapter (command='sleep')")
     muted: bool | None = Field(None, description="Mute target state (command='volume_mute')")
     shuffle: bool | None = Field(None, description="Shuffle target state (command='shuffle_set')")
     repeat: Literal["off", "one", "all"] | None = Field(None, description="Repeat mode (command='repeat_set')")

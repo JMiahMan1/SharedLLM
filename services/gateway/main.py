@@ -1454,22 +1454,68 @@ def extract_volume_level(query: str) -> float | None:
     return n / 100.0
 
 
-def extract_media_transport_command(query: str) -> str | None:
+# Audiobook transport phrases handled entirely by FastPath. Their payload
+# (seconds / chapter / rate / minutes) is passed on to the execution service.
+_ENHANCED_FASTPATH_COMMANDS = frozenset({
+    "seek_relative", "chapter_next", "chapter_previous", "chapter_goto", "speed", "sleep",
+})
+
+
+def _media_transport_match(query: str) -> tuple[str | None, dict]:
     q = (query or "").strip().lower()
     if not q:
-      return None
+        return None, {}
+
+    # Specific audiobook phrases first: they must not be swallowed by the
+    # generic "skip" / "back" / "stop" patterns below.
+    skip_back = re.search(
+        r"\b(?:skip|go|jump)\s+(?:back|backward|backwards)\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*(?:seconds?|secs?)?\b",
+        q,
+    )
+    if skip_back:
+        return "seek_relative", {"seconds": -float(skip_back.group(1))}
+    skip_forward = re.search(
+        r"\b(?:skip|go|jump)\s+(?:ahead|forward|forwards)\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*(?:seconds?|secs?)?\b",
+        q,
+    )
+    if skip_forward:
+        return "seek_relative", {"seconds": float(skip_forward.group(1))}
+    if re.search(r"\bnext\s+chapter\b", q):
+        return "chapter_next", {}
+    if re.search(r"\b(?:previous|prev|prior)\s+chapter\b", q):
+        return "chapter_previous", {}
+    goto_chapter = re.search(r"\b(?:go\s+to|jump\s+to)\s+chapter\s+(\d+)\b", q)
+    if goto_chapter:
+        return "chapter_goto", {"chapter": int(goto_chapter.group(1))}
+    set_speed = re.search(r"\b(?:set\s+(?:the\s+)?speed\s+(?:to\s+)?|speed\s+)(\d+(?:\.\d+)?)\b", q)
+    if set_speed:
+        return "speed", {"rate": float(set_speed.group(1))}
+    if re.search(r"\bplay\s+faster\b", q):
+        return "speed", {"rate": 1.5}
+    if re.search(r"\bplay\s+slower\b", q):
+        return "speed", {"rate": 0.5}
+    if re.search(r"\bstop\s+at\s+the\s+end\s+of\s+the\s+chapter\b", q):
+        return "sleep", {"end_of_chapter": True}
+    # Only real sleep phrasing ("sleep timer", "stop playing in 30 minutes"): a plain "set a
+    # timer for 10 minutes" is a kitchen timer and must not pause the book.
+    if re.search(r"\bsleep\b", q) or re.search(r"\bstop\s+(?:playing\s+|reading\s+|the\s+book\s+)?in\s+\d", q):
+        minutes = re.search(r"(\d+(?:\.\d+)?)\s*(?:minutes?|mins?)\b", q)
+        if minutes:
+            return "sleep", {"minutes": float(minutes.group(1))}
+        if "end of the chapter" in q:
+            return "sleep", {"end_of_chapter": True}
 
     # Volume commands must never be misclassified as pause/stop/etc.
     if re.search(r"\b(?:volume\s+up|louder|turn\s+(?:it\s+)?up|turn\s+up\s+the\s+volume)\b", q):
-        return "volume_up"
+        return "volume_up", {}
     if re.search(r"\b(?:volume\s+down|quieter|softer|turn\s+(?:it\s+)?down|turn\s+down\s+the\s+volume)\b", q):
-        return "volume_down"
+        return "volume_down", {}
     if re.search(r"\bmute\b", q) and not re.search(r"\bunmute\b", q):
-        return "volume_mute"
+        return "volume_mute", {}
     if re.search(r"\bunmute\b", q):
-        return "volume_unmute"
+        return "volume_unmute", {}
     if re.search(r"\bvolume\b.*\d", q) or re.search(r"\bset\s+(?:the\s+)?volume\s+to\b", q):
-        return "volume_set"
+        return "volume_set", {}
 
     command_patterns = (
       (r"\b(?:pause|hold)\b", "pause"),
@@ -1480,8 +1526,19 @@ def extract_media_transport_command(query: str) -> str | None:
     )
     for pattern, command in command_patterns:
       if re.search(pattern, q, flags=re.IGNORECASE):
-          return command
-    return None
+          return command, {}
+    return None, {}
+
+
+def extract_media_transport_command(query: str) -> str | None:
+    command, _ = _media_transport_match(query)
+    return command
+
+
+def extract_media_transport_payload(query: str) -> dict:
+    """Numbers spoken with an audiobook command (seconds / chapter / rate / minutes)."""
+    _, payload = _media_transport_match(query)
+    return payload
 
 
 _MEDIA_NOUNS = re.compile(
@@ -1502,8 +1559,11 @@ def is_plain_media_command(query: str) -> bool:
     den TV") or is the bare command ("skip", "pause please"). "Stop the
     timer" and "pause the vacuum" are not.
     """
-    if not extract_media_transport_command(query):
+    command = extract_media_transport_command(query)
+    if not command:
         return False
+    if command in _ENHANCED_FASTPATH_COMMANDS:
+        return True
     return bool(_MEDIA_NOUNS.search(query or "") or _BARE_MEDIA_COMMAND.match(query or ""))
 
 
@@ -4629,6 +4689,7 @@ async def chat_handler(request: Request, background_tasks=None):
                     "entity_id": resolved_entity,
                     "device_name": transport_device_name,
                     "command": transport_cmd,
+                    **extract_media_transport_payload(query),
                 }
                 if transport_cmd == "volume_set":
                     exec_payload["volume_level"] = extract_volume_level(query)
