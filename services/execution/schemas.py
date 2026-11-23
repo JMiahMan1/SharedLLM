@@ -1451,6 +1451,22 @@ class DropInRequest(BaseRequest):
     to ``user_context.voice_satellite``.
     """
 
+    @model_validator(mode="before")
+    @classmethod
+    def map_action_aliases(cls, data: Any) -> Any:
+        """Map common LLM action aliases to the canonical Literal values."""
+        if isinstance(data, dict):
+            data = dict(data)
+            action = data.get("action")
+            if action is not None:
+                if action in ("hang_up", "hangup", "hang up", "stop", "end_call", "leave"):
+                    data["action"] = "end"
+                elif action in ("begin", "call", "drop_in", "start_call"):
+                    data["action"] = "start"
+                elif action in ("list", "active"):
+                    data["action"] = "status"
+        return data
+
     action: Literal["start", "end", "status"] = Field(
         "start", description="start a Drop In, end the active one, or list active Drop Ins."
     )
