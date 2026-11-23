@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import toast from 'react-hot-toast';
 import {
-  Activity, Bell, BookOpen, Check, Clock, Cpu, Download, GraduationCap, History, KeyRound, Lightbulb, Loader2, Lock, Mic, Monitor, Pause, Play, Radio, RefreshCw, RotateCw, ShieldAlert, Smartphone, Speaker, Square, Tablet, Trash2, Unlock, Upload, Volume2, VolumeX, Watch, X,
+  Activity, Bell, BookOpen, Check, Clock, Cpu, Download, GraduationCap, History, KeyRound, Lightbulb, Loader2, Lock, Mic, MicOff, Monitor, Phone, Pause, Play, Radio, RefreshCw, RotateCw, ShieldAlert, Smartphone, Speaker, Square, Tablet, Trash2, Unlock, Upload, Volume2, VolumeX, Watch, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../services/api';
@@ -25,6 +25,8 @@ import { DeviceDetailSheet } from '../components/settings/DeviceDetailSheet';
 import NotificationLockCard from '../components/guardian/NotificationLockCard';
 import NewDevicesPanel from '../components/devices/NewDevicesPanel';
 import EchoFleetPanel from '../components/devices/EchoFleetPanel';
+import { EchoDropInClient } from '../lib/echoDropInClient';
+import { storageGetSync } from '../lib/storage';
 import WindowsGuardPanel from '../components/devices/WindowsGuardPanel';
 import PageHeader from '../components/ui/PageHeader';
 import { CardSkeletons } from '../components/ui/StateViews';
@@ -1477,6 +1479,76 @@ export default function Devices() {
   const files = useQuery({ queryKey: ['mdm-files'], queryFn: () => api.getMdmFiles(), enabled: isAdmin, retry: false });
   const family = useQuery({ queryKey: ['family-roster'], queryFn: () => api.getFamily(), enabled: isAdmin, retry: false, staleTime: 10 * 60 * 1000 });
 
+  // Active Phone/Web <-> Echo Dot Drop-In session, managed from the fleet panel.
+  const dropInClientRef = useRef<EchoDropInClient | null>(null);
+  const [dropInNode, setDropInNode] = useState<string | null>(null);
+  const [dropInMuted, setDropInMuted] = useState(false);
+  const [dropInError, setDropInError] = useState<string | null>(null);
+  const [dropInBusy, setDropInBusy] = useState(false);
+
+  useEffect(() => () => {
+    dropInClientRef.current?.disconnect();
+    dropInClientRef.current = null;
+  }, []);
+
+  const endDropInSession = (): void => {
+    dropInClientRef.current?.disconnect();
+    dropInClientRef.current = null;
+    setDropInNode(null);
+    setDropInMuted(false);
+    setDropInBusy(false);
+    setDropInError(null);
+  };
+
+  const handleDropIn = async (device: { node: string; name: string }): Promise<void> => {
+    if (dropInNode && dropInNode !== device.node) {
+      setDropInError(`End the active Drop-In on ${dropInNode} first.`);
+      return;
+    }
+    setDropInError(null);
+    setDropInBusy(true);
+    const token = storageGetSync('jarvis_api_key');
+    if (!token) {
+      setDropInBusy(false);
+      setDropInError('No API key found. Sign in again to use Drop-In.');
+      return;
+    }
+    const client = new EchoDropInClient({
+      node: device.node,
+      token,
+      onStateChange: (state) => {
+        if (state === 'connected') {
+          setDropInBusy(false);
+          setDropInNode(device.node);
+          setDropInMuted(client.isMuted());
+          dropInClientRef.current = client;
+        } else if (state === 'error' || state === 'idle') {
+          setDropInBusy(false);
+          dropInClientRef.current = null;
+          setDropInNode(null);
+          setDropInMuted(false);
+        }
+      },
+      onError: (error) => {
+        setDropInBusy(false);
+        dropInClientRef.current = null;
+        setDropInNode(null);
+        setDropInMuted(false);
+        setDropInError(error.message || 'Drop-In failed.');
+      },
+    });
+    dropInClientRef.current = client;
+    try {
+      await client.connect();
+    } catch (error) {
+      setDropInBusy(false);
+      dropInClientRef.current = null;
+      setDropInNode(null);
+      setDropInMuted(false);
+      setDropInError(error instanceof Error ? error.message : 'Drop-In failed.');
+    }
+  };
+
   if (!isAdmin) {
     return (
       <div className={PAGE}>
@@ -1624,7 +1696,50 @@ export default function Devices() {
         <div id="devices-tab-devices" role="tabpanel" className="space-y-4">
           <div id="devices-hardware" className="scroll-mt-4"><HardwarePanel onAdd={() => openTab('add')} /></div>
           <div id="devices-echo-fleet" className="glass-panel scroll-mt-4 rounded-2xl border border-white/10 p-3 sm:p-4">
-            <EchoFleetPanel />
+            <EchoFleetPanel onDropIn={handleDropIn} />
+            {dropInNode && (
+              <div className="mt-3 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-3" data-testid="devices-drop-in-banner">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-semibold text-indigo-200">Drop-In active</span>
+                  <span className="text-xs text-slate-400">· {dropInNode}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    aria-label={dropInMuted ? 'Unmute Drop-In microphone' : 'Mute Drop-In microphone'}
+                    disabled={dropInBusy}
+                    onClick={() => {
+                      const client = dropInClientRef.current;
+                      if (!client) return;
+                      const next = !dropInMuted;
+                      client.setMuted(next);
+                      setDropInMuted(next);
+                    }}
+                    className={`flex min-h-11 min-w-11 items-center justify-center rounded-lg px-2 text-sm transition disabled:opacity-50 ${
+                      dropInMuted
+                        ? 'bg-amber-500/20 text-amber-300'
+                        : 'bg-white/[0.08] text-slate-100 hover:bg-white/[0.14]'
+                    }`}
+                  >
+                    {dropInMuted ? <MicOff size={15} className="text-amber-300" /> : <Mic size={15} />}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="End Drop-In call"
+                    disabled={dropInBusy}
+                    onClick={endDropInSession}
+                    className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-red-500/20 px-3 text-sm font-semibold text-red-200 hover:bg-red-500/30 disabled:opacity-50"
+                  >
+                    <Phone size={14} className="text-red-200" /> End Call
+                  </button>
+                </div>
+              </div>
+            )}
+            {dropInError && (
+              <p className="mt-2 text-xs text-red-300" data-testid="devices-drop-in-error">
+                {dropInError}
+              </p>
+            )}
           </div>
           <div id="devices-light-groups" className="scroll-mt-4"><LightGroupsPanel /></div>
           <div id="devices-duplicates" className="scroll-mt-4"><DuplicatesPanel /></div>

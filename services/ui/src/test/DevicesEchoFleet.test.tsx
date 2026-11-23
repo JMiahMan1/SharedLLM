@@ -3,6 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import Devices from '../pages/Devices';
+import { EchoDropInClient } from '../lib/echoDropInClient';
 import { renderWithProviders } from './render';
 import { server } from './setup';
 
@@ -79,6 +80,11 @@ describe('Devices > Echo fleet', () => {
       calls.push((await request.json()) as HaServiceCall);
       return HttpResponse.json({ status: 'SUCCESS' });
     }));
+    // The Drop-In button used to trigger an esphome HA service call; that path
+    // was intentionally replaced by the WebSocket EchoDropInClient, so this
+    // asserts the button now starts that client instead.
+    const connectSpy = vi.spyOn(EchoDropInClient.prototype, 'connect').mockResolvedValue(undefined);
+    localStorage.setItem('jarvis_api_key', 'test-token');
     renderWithProviders(<Devices />);
 
     const dnd = await screen.findByRole('switch', { name: 'Do Not Disturb for Kitchen Echo' });
@@ -90,10 +96,11 @@ describe('Devices > Echo fleet', () => {
     })));
 
     await user.click(screen.getByRole('button', { name: 'Drop In on Kitchen Echo' }));
-    await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({
-      domain: 'esphome', service: 'kitchen_echo_drop_in', entity_id: 'sensor.kitchen_echo_drop_in',
-      service_data: { target: 'kitchen_echo' },
-    })));
+    await waitFor(() => expect(connectSpy).toHaveBeenCalledTimes(1));
+    // No esphome drop-in service call is issued anymore.
+    expect(calls).not.toContainEqual(expect.objectContaining({
+      domain: 'esphome', service: 'kitchen_echo_drop_in',
+    }));
   });
 
   it('falls back to the Family tab without a fleet when Home Hub is disabled', async () => {
