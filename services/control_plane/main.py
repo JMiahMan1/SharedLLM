@@ -15,11 +15,8 @@ from services.common.logging_utils import redact_secrets, secret_env_values
 from services.common.secrets import secret_matches
 from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
 from services.control_plane import disk_alerts, network_routes, osrm_map, registry
-from services.control_plane.recreate import connect_container_networks as _connect_container_networks
-from services.control_plane.recreate import create_from_snapshot as _create_from_snapshot
-from services.control_plane.recreate import (
-    network_aliases as _network_aliases,  # noqa: F401 - test_pull_and_deploy checks the source for this name
-)
+from services.control_plane import recreate as _recreate
+from services.control_plane.admin_notice import notify_admins
 from services.shared.info_endpoint import info_router
 
 logging.basicConfig(level=logging.INFO)
@@ -569,44 +566,9 @@ def _verify_sharedllm_container(container) -> bool:
 
 
 def _snapshot_container_config(container) -> dict:
-    """Capture Config/HostConfig/network membership while the container is still up.
-
-    attrs after stop/rename can have empty NetworkSettings (None Aliases/IP),
-    which previously left recreated containers with Networks={}.
-    """
-    container.reload()
-    attrs = container.attrs or {}
-    config = dict(attrs.get("Config") or {})
-    host_config = dict(attrs.get("HostConfig") or {})
-    networks_raw = (attrs.get("NetworkSettings") or {}).get("Networks") or {}
-    networks: dict[str, dict] = {}
-    for net_name, net_config in networks_raw.items():
-        if not isinstance(net_config, dict):
-            continue
-        networks[net_name] = {
-            "Aliases": list(net_config.get("Aliases") or []),
-            "IPv4Address": (
-                (net_config.get("IPAMConfig") or {}).get("IPv4Address")
-                or net_config.get("IPAddress")
-                or ""
-            ),
-        }
-    labels = config.get("Labels") or {}
-    compose_service = labels.get("com.docker.compose.service") or ""
-    return {
-        "name": container.name,
-        "id": container.id,
-        "config": config,
-        "host_config": host_config,
-        "networks": networks,
-        "exposed_ports": config.get("ExposedPorts"),
-        "compose_service": compose_service,
-        "env": config.get("Env") or [],
-        "cmd": config.get("Cmd"),
-        "entrypoint": config.get("Entrypoint"),
-        "user": config.get("User"),
-        "working_dir": config.get("WorkingDir"),
-    }
+    """Capture Config/HostConfig/network membership while the container is still up
+    (see services.control_plane.recreate.snapshot_container)."""
+    return _recreate.snapshot_container(container)
 
 
 def _is_self_container(container) -> bool:
@@ -624,121 +586,91 @@ def _is_self_container(container) -> bool:
 
 
 def _recreate_self_detached(snap: dict, new_image_id: str) -> dict:
-    """Recreate this container from a detached child so we can finish the HTTP response.
+    """Recreate this container from outside it, so we can finish the HTTP response.
 
     Stopping ourselves in-process previously SIGKILL'd mid-recreate (exit 137)
-    and left control_plane down with no new container. The child uses the same
-    services.control_plane.recreate helpers as the in-process path.
+    and left control_plane down with no new container. A child process in this
+    container dies with it too (`docker stop` kills the whole container), so
+    the swap runs in a short-lived helper container started from our own
+    image, with the Docker socket, running the same
+    services.control_plane.recreate code (checks and rollback included).
     """
     import json
     import subprocess
     import sys
 
-    backup_name = f"{snap['name']}_backup_{int(time.time())}"
-    payload = json.dumps({"snap": snap, "new_image_id": new_image_id, "backup_name": backup_name})
-    # Detached: survives parent exit when we stop ourselves.
+    stamp = int(time.time())
+    payload = json.dumps({"snap": snap, "new_image_id": new_image_id})
+    code = (
+        "import os,sys; from services.control_plane.recreate import run_detached_self_recreate; "
+        "sys.exit(0 if run_detached_self_recreate(os.environ['RECREATE_PAYLOAD']) else 1)"
+    )
+    host_config = snap.get("host_config") or {}
+    sock = next(
+        (b.split(":")[0] for b in host_config.get("Binds") or [] if ":/var/run/docker.sock" in b),
+        None,
+    )
+    helper = f"control_plane_updater_{stamp}"
+    if client and sock:
+        try:
+            client.containers.run(
+                snap.get("image_id") or snap["config"].get("Image") or new_image_id,
+                command=["python", "-c", code],
+                name=helper,
+                detach=True,
+                auto_remove=True,
+                environment={**_env_dict(snap["config"].get("Env")), "RECREATE_PAYLOAD": payload},
+                volumes={sock: {"bind": "/var/run/docker.sock", "mode": "rw"}},
+                network_mode=host_config.get("NetworkMode") or None,
+                user=snap["config"].get("User") or None,
+                group_add=host_config.get("GroupAdd") or None,
+            )
+            log.warning(f"[recreate] Self-update of {snap['name']} -> {new_image_id[:19]} handed to {helper}")
+            return {"recreated": True, "pending": True, "container_name": snap["name"], "helper": helper}
+        except Exception as e:
+            log.error(f"[recreate] Could not start updater container ({e}); falling back to a detached process")
     subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "import json,sys; from services.control_plane.recreate import run_detached_self_recreate; "
-            "sys.exit(0 if run_detached_self_recreate(sys.argv[1]) else 1)",
-            payload,
-        ],
+        [sys.executable, "-c", code],
+        env={**os.environ, "RECREATE_PAYLOAD": payload},
         start_new_session=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
     )
-    log.info(f"[recreate] Scheduled detached self-recreate for {snap['name']} -> {new_image_id}")
-    return {"recreated": True, "pending": True, "container_name": snap["name"], "backup_name": backup_name}
+    log.warning(f"[recreate] Scheduled detached self-recreate for {snap['name']} -> {new_image_id[:19]}")
+    return {"recreated": True, "pending": True, "container_name": snap["name"]}
+
+
+def _env_dict(env: list[str] | None) -> dict[str, str]:
+    return dict(e.split("=", 1) for e in env or [] if "=" in e)
 
 
 def _recreate_container(container, new_image_id: str):
-    """
-    Recreates a container with the new image, preserving ports, volumes, env,
-    and custom networks/aliases.
+    """Recreate a container on a new image, keeping its full config, networks and aliases.
 
-    Config is snapshotted BEFORE stop. Self-recreate (control_plane updating
-    itself) is handed off to a detached child so the API process is not killed
-    mid-flight (previously exit 137 with the stack left down).
+    Config is snapshotted BEFORE anything changes. The replacement is created
+    with its networks attached, checked against the old container and must be
+    healthy before the old one is retired; otherwise the old one keeps serving
+    and the admins are told (services.control_plane.recreate). Self-recreate
+    (control_plane updating itself) is handed off to a detached child so the
+    API process is not killed mid-flight (previously exit 137 with the stack left down).
     """
-    import time
     if not client:
         raise ValueError("Docker client not initialized")
 
     snap = _snapshot_container_config(container)
-    old_name = snap["name"]
-    backup_name = f"{old_name}_backup_{int(time.time())}"
-
     if _is_self_container(container):
         return _recreate_self_detached(snap, new_image_id)
 
-    # 1. Stop the old container
-    log.info(f"[recreate] Stopping old container {old_name}...")
-    container.stop(timeout=10)
-
-    # 2. Rename old container to backup name
-    log.info(f"[recreate] Renaming {old_name} to {backup_name}...")
-    container.rename(backup_name)
-
-    new_container = None
-    try:
-        # 3. Create new container from the pre-stop snapshot
-        log.info(f"[recreate] Creating new container {old_name} with image {new_image_id}...")
-        if not client:
-            raise ValueError("Docker client not initialized")
-        new_container = _create_from_snapshot(client, snap, new_image_id, old_name)
-
-        # 4. Free the backup's network endpoints, then attach the new container
-        #    with original aliases/IPs (snapshot already captured while healthy).
-        _connect_container_networks(client, new_container, snap, release_from=container)
-
-        # 5b. Fix volume permissions before starting (mirrors deploy.sh guard)
+    def _prepare():
+        # Fix volume permissions before the new container starts (mirrors deploy.sh guard)
         fixed_vols = _fix_volume_permissions(container)
         if fixed_vols:
-            log.info(f"[recreate] Fixed permissions for volumes: {fixed_vols}")
+            log.warning(f"[recreate] Fixed permissions for volumes: {fixed_vols}")
 
-        # 6. Start the new container
-        log.info(f"[recreate] Starting new container {new_container.name}...")
-        new_container.start()
-
-        # Verify we actually landed on the intended networks
-        new_container.reload()
-        attached = (new_container.attrs.get("NetworkSettings") or {}).get("Networks") or {}
-        if snap.get("networks") and not any(
-            (attached.get(n) or {}).get("IPAddress")
-            for n in snap["networks"]
-            if n not in ("bridge", "host")
-        ):
-            log.warning(f"[recreate] {old_name} started with no network IP; reconnecting...")
-            _connect_container_networks(client, new_container, snap, release_from=None)
-
-        # 7. Success: remove backup container
-        log.info(f"[recreate] Recreate successful. Removing backup container {backup_name}...")
-        try:
-            container.remove(force=True)
-        except Exception as re:
-            log.warning(f"[recreate] Failed to remove backup container {backup_name}: {re}")
-
-        return {"recreated": True, "container": new_container}
-
-    except Exception as e:
-        log.error(f"[recreate] Failed to recreate container {old_name}: {e}. Falling back to old container...")
-        # Clean up new container if it was created
-        if new_container:
-            with suppress(Exception):
-                new_container.remove(force=True)
-        # Restore backup container
-        try:
-            container.rename(old_name)
-            container.start()
-            if client:
-                _connect_container_networks(client, container, snap, release_from=None)
-            log.info(f"[recreate] Fallback successful. Old container {old_name} restored and started.")
-        except Exception as fe:
-            log.critical(f"[recreate] Critical failure: Could not restore backup container {backup_name}: {fe}")
-        raise e
+    return _recreate.recreate_from_snapshot(
+        client, container, snap, new_image_id, prepare=_prepare, notify=notify_admins,
+    )
 
 
 @app.post("/api/restart/{service_name}", dependencies=[Depends(verify_internal_secret)])
@@ -782,6 +714,8 @@ def restart_service(service_name: str, recreate: bool = False):
         else:
             container.restart()
             return {"status": "SUCCESS", "message": f"Container {container.name} restarted successfully"}
+    except _recreate.RecreateFailed as e:
+        raise HTTPException(status_code=409, detail=f"Update rolled back, the old container is still running: {e}") from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -1052,11 +986,8 @@ def pull_and_restart(service_name: str):
                 "new_image_id": new_image_id,
             }
 
-        # Fix volume permissions before recreating (mirrors deploy.sh guard)
-        fixed_vols = _fix_volume_permissions(container)
-        log.info(f"[pull-and-restart] Fixed permissions for volumes: {fixed_vols}")
-
-        _recreate_container(container, new_image_id)
+        # Volume permissions are fixed inside _recreate_container, before the new one starts.
+        result = _recreate_container(container, new_image_id)
 
         return {
             "service": service_name,
@@ -1065,8 +996,11 @@ def pull_and_restart(service_name: str):
             "updated": True,
             "current_image_id": current_image_id,
             "new_image_id": new_image_id,
-            "volumes_fixed": fixed_vols,
+            "strategy": result.get("strategy"),
+            "pending": bool(result.get("pending")),
         }
+    except _recreate.RecreateFailed as e:
+        raise HTTPException(status_code=409, detail=f"Update rolled back, the old container is still running: {e}") from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 

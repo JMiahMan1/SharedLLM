@@ -6440,9 +6440,10 @@ export const api = {
   },
 
   async pullAndRestart(serviceName: string): Promise<PullAndRestartResult> {
-    // Pull + recreate can exceed the default 15s axios timeout (gateway allows 120s).
+    // Pull + recreate (which waits for the new container to be healthy) can take
+    // minutes; the gateway allows 450s.
     const resp = await apiClient.post(`/api/admin/services/${serviceName}/pull-and-restart`, undefined, {
-      timeout: 130000,
+      timeout: 460000,
     });
     return resp.data;
   },
@@ -6454,7 +6455,8 @@ export const api = {
   },
 
   async restartService(serviceName: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post(`/api/admin/services/${serviceName}/restart`);
+    // A restart onto a new image waits for the new container to be healthy (gateway allows 330s).
+    const resp = await apiClient.post(`/api/admin/services/${serviceName}/restart`, undefined, { timeout: 340000 });
     return resp.data;
   },
 
