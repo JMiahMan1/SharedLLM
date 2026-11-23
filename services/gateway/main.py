@@ -3889,7 +3889,7 @@ def _voice_context_note(ctx: dict) -> str:
     return ("\n\n[Voice context]\n" + "\n".join(lines)) if lines else ""
 
 
-async def _fast_drop_in_answer(query: str, creds: dict, voice_context: dict | None) -> str | None:
+async def _fast_drop_in_answer(query: str, creds: Any, voice_context: dict | None) -> str | None:
     """Tier-1 Drop-In command dispatch without waiting on an LLM turn."""
     from services.gateway import fast_drop_in
 
@@ -3897,14 +3897,13 @@ async def _fast_drop_in_answer(query: str, creds: dict, voice_context: dict | No
     if not match:
         return None
     payload = dict(match.get("payload") or {})
+    # Forward what execution's UserContext reads, including who is asking and how
+    # (identified_by / via limit a voice request to the entities exposed to voice).
     user_context = {
-        "user": creds.get("user", ""),
-        "role": creds.get("role", "user"),
-        "family_role": creds.get("family_role", ""),
-        "ha_url": creds.get("ha_url", ""),
-        "ha_token": creds.get("ha_token", ""),
-        "voice_satellite": (voice_context or {}).get("satellite") or creds.get("voice_satellite"),
+        field: getattr(creds, field, None)
+        for field in ("user", "is_admin", "identified_by", "via", "ha_url", "ha_token")
     }
+    user_context["voice_satellite"] = (voice_context or {}).get("satellite") or getattr(creds, "voice_satellite", None)
     try:
         async with (
             borrow_http_client() as client,

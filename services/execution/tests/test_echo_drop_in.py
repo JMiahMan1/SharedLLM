@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
 from services.execution import capability_index, ha_client, hardware_router, room_presence
 from services.execution.handlers import drop_in
@@ -307,3 +308,30 @@ def test_room_satellite_through_the_index_never_falls_back_to_another_room():
     empty = _FakeIndex([])
     assert resolve_room_satellite([], "den", "assist_satellite.kitchen_echo", empty) is None
     assert resolve_room_satellite([], "", "assist_satellite.kitchen_echo", empty) == "assist_satellite.kitchen_echo"
+
+
+@pytest.mark.parametrize(
+    ("action_in", "action_out"),
+    [
+        ("hang_up", "end"),
+        ("hangup", "end"),
+        ("hang up", "end"),
+        ("stop", "end"),
+        ("end_call", "end"),
+        ("leave", "end"),
+        ("begin", "start"),
+        ("call", "start"),
+        ("drop_in", "start"),
+        ("start_call", "start"),
+        ("list", "status"),
+        ("active", "status"),
+    ],
+)
+def test_action_alias_mapping(action_in: str, action_out: str):
+    req = DropInRequest(action=action_in)
+    assert req.action == action_out
+
+
+def test_unknown_action_still_raises():
+    with pytest.raises(ValidationError):
+        DropInRequest(action="jump")
