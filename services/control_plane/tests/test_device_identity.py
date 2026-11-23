@@ -130,3 +130,18 @@ def test_bonjour_other_announcements():
     assert di.infer_from_mdns({"services": ["_companion-link._tcp"], "txt": {}}) == {"make": "Apple"}
     assert di.infer_from_mdns({"services": ["_smb._tcp"]}) == {}
     assert di.infer_from_mdns(None) == {}
+
+
+def test_the_oui_file_is_read_from_the_network_data_dir(monkeypatch, tmp_path):
+    monkeypatch.delenv("OUI_FILE", raising=False)
+    monkeypatch.setenv("NETWORK_DATA_DIR", str(tmp_path))
+    assert di._oui_path() == tmp_path / "oui.csv"
+    monkeypatch.setenv("OUI_FILE", str(tmp_path / "other.csv"))
+    assert di._oui_path() == tmp_path / "other.csv"
+
+
+def test_an_oui_file_added_later_is_read_without_a_restart(tmp_path):
+    csv_path = tmp_path / "late.csv"
+    assert di.load_oui(csv_path) == {}
+    csv_path.write_text("Registry,Assignment,Organization Name,Organization Address\nMA-L,001122,Apple Inc,x\n")
+    assert di.load_oui(csv_path) == {"001122": "Apple Inc"}
