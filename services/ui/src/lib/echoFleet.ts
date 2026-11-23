@@ -121,10 +121,18 @@ function objectIdOf(entityId: string): string {
   return dot < 0 ? entityId : entityId.slice(dot + 1);
 }
 
+/** True when the text holds an ASCII control character (U+0000 to U+001F). */
+function hasControlChars(raw: string): boolean {
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw.charCodeAt(i) < 0x20) return true;
+  }
+  return false;
+}
+
 /** Only absolute http(s) URLs are safe to put in `href`/`src`; never `javascript:`. */
 export function isSafeHttpUrl(value: unknown): value is string {
   const raw = text(value);
-  if (!raw || /[\u0000-\u001f]/.test(raw)) return false;
+  if (!raw || hasControlChars(raw)) return false;
   let parsed: URL;
   try {
     parsed = new URL(raw);

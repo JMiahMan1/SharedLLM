@@ -185,7 +185,7 @@ describe('EchoFleetPanel', () => {
   it('uses an onDropIn callback for idle Drop-In when supplied', async () => {
     const user = userEvent.setup();
     const calls = await captureHaServices();
-    const onDropIn = vi.fn(async (_device: EchoDeviceSummary) => {});
+    const onDropIn = vi.fn<(device: EchoDeviceSummary) => Promise<void>>(async () => {});
     renderPanel(CROWN, onDropIn);
 
     await user.click(screen.getByRole('button', { name: 'Drop In on Echo Show Crown' }));

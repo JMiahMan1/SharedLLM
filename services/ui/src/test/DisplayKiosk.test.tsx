@@ -23,7 +23,7 @@ const callState = vi.hoisted(() => ({
   activeCalls: [] as ActiveCall[],
   muted: false,
   cameraOn: false,
-  startCall: vi.fn(async (_room: string, _name: string, _options?: unknown) => {}),
+  startCall: vi.fn<(room: string, name: string, options?: unknown) => Promise<void>>(async () => {}),
   endCall: vi.fn(),
   toggleMute: vi.fn(),
   toggleCamera: vi.fn(async () => {}),
@@ -39,11 +39,11 @@ const forecast: WeatherResponse = {
   units: { system: 'metric', temp: '°C', wind: 'km/h', precip: 'mm' },
   current: {
     ts: 0, temp: 21.4, feels_like: 20, humidity: 50, precip: 0, code: 2,
-    label: 'Partly cloudy', icon: 'partly-cloudy', wind: 5, gust: 8, is_day: true,
+    label: 'Partly cloudy', icon: 'partly_cloudy', wind: 5, gust: 8, is_day: true,
   },
   hourly: [],
   daily: [],
-  fetched_at: '2026-01-01T00:00:00Z',
+  fetched_at: 1767225600,
 };
 
 const ENTITIES = [
@@ -124,7 +124,7 @@ describe('DisplayKiosk', () => {
   it('lists Echo rooms for Drop-In and starts an audio call', async () => {
     const user = userEvent.setup();
     callState.activeCalls = [{
-      token: 'family-room', name: 'Family', started_at: '2026-01-01T00:00:00Z', participants: [],
+      token: 'family-room', name: 'Family', started_at: 1767225600, participants: [],
     }];
     renderKiosk();
 
@@ -161,7 +161,7 @@ describe('DisplayKiosk', () => {
 
   it('shows the camera/privacy-shutter alert on the Drop-In bar when Answer Video fails', async () => {
     callState.activeCalls = [{
-      token: 'family-room', name: 'Family', started_at: '2026-01-01T00:00:00Z', participants: [],
+      token: 'family-room', name: 'Family', started_at: 1767225600, participants: [],
     }];
     callState.startCall.mockRejectedValueOnce(new Error('NotAllowedError: camera blocked'));
     const user = userEvent.setup();
@@ -188,7 +188,7 @@ describe('DisplayKiosk', () => {
 
   it('names the camera gap before starting video or enabling the camera', async () => {
     callState.activeCalls = [{
-      token: 'family-room', name: 'Family', started_at: '2026-01-01T00:00:00Z', participants: [],
+      token: 'family-room', name: 'Family', started_at: 1767225600, participants: [],
     }];
     Object.defineProperty(window.navigator, 'mediaDevices', { writable: true, value: undefined });
     const user = userEvent.setup();

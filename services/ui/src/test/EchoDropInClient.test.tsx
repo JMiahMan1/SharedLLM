@@ -63,7 +63,7 @@ class MockAudioContext {
   destination = {};
   createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }));
   createMediaStreamDestination = vi.fn(() => ({ stream: new MediaStream(), connect: vi.fn() }));
-  createBuffer = vi.fn((channels: number, frames: number, sampleRate: number) => ({
+  createBuffer = vi.fn((...[, frames, sampleRate]: [number, number, number]) => ({
     getChannelData: () => new Float32Array(frames),
     duration: frames / sampleRate,
   }));

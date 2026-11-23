@@ -167,7 +167,6 @@ export class EchoDropInClient {
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private captureNode: AudioWorkletNode | null = null;
   private captureGain: GainNode | null = null;
-  private processor: TrackProcessorLike | null = null;
   private captureReader: TrackProcessorReader | null = null;
   private processorCtor: TrackProcessorCtor | null = null;
   private encoder: AudioEncoder | null = null;
@@ -386,7 +385,6 @@ export class EchoDropInClient {
   private startTrackProcessor(track: MediaStreamTrack, Processor: TrackProcessorCtor): void {
     try {
       const processor = new Processor({ track });
-      this.processor = processor;
       const reader = processor.readable.getReader();
       this.captureReader = reader;
       const pump = async () => {
@@ -481,7 +479,7 @@ export class EchoDropInClient {
         numberOfFrames: samples.length,
         numberOfChannels: OPUS_CHANNELS,
         timestamp: this.captureTimestamp,
-        data: samples,
+        data: samples as Float32Array<ArrayBuffer>,
       });
       this.captureTimestamp += FRAME_TIMESTAMP_US;
       encoder.encode(data);
@@ -605,7 +603,6 @@ export class EchoDropInClient {
       }
       this.captureReader = null;
     }
-    this.processor = null;
     if (this.captureNode) {
       try {
         this.captureNode.disconnect();

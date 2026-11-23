@@ -40,7 +40,7 @@ function formatDate(date: Date, options: Intl.DateTimeFormatOptions, zone?: stri
 }
 
 function callRoom(target: CallInfo | ActiveCall): string {
-  return ('room' in target && target.room) ? target.room : target.token;
+  return 'room' in target ? target.room : target.token;
 }
 
 function CameraPopup({ onClose }: { onClose: () => void }) {
