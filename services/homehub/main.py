@@ -27,9 +27,11 @@ from services.homehub import (
     builtin,
     camera_recording,
     conversation,
+    echo_ring,
     light_cluster_move,
     recorder_statistics,
     registries,
+    sound_guard,
     time_date,
     tts,
 )
@@ -103,6 +105,7 @@ class Service:
         self.runtime.loop_monitor = LoopMonitor()
         self._lock = asyncio.Lock()
         self._bg: list[asyncio.Task] = []
+        self._unsub_sound_guard: Any = None
 
     async def start(self) -> None:
         self._bg.append(asyncio.create_task(self.runtime.loop_monitor.run(), name="loop-monitor"))
@@ -118,6 +121,10 @@ class Service:
         self.runtime.start_recording()
         builtin.register(self.hub)
         tts.register(self.hub)
+        echo_ring.register_services(self.hub)
+        if self._unsub_sound_guard is not None:
+            self._unsub_sound_guard()
+        self._unsub_sound_guard = sound_guard.attach_to_hub(self.hub)
         await self._start_helpers()  # before the automations: they name the helpers
         conversation.register(self.hub)  # conversation.process and ai_task.generate_data, answered by Jarvis
         # HA's time_date sensors on every hub, imported or not (services/homehub/time_date.py).
@@ -227,6 +234,9 @@ class Service:
                 helpers.release_events()  # the timer events held since startup, now that triggers listen
 
     async def stop(self) -> None:
+        if self._unsub_sound_guard is not None:
+            self._unsub_sound_guard()
+            self._unsub_sound_guard = None
         helpers = getattr(self.runtime, "helpers", None)
         if helpers is not None:
             self.runtime.helpers = None

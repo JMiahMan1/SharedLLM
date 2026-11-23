@@ -92,6 +92,7 @@ from services.gateway import (
     dashboard_routes,
     discovery_routes,
     drawing,
+    echo_dropin_routes,
     email_routes,
     family_safety,
     fast_garden,
@@ -958,6 +959,7 @@ from services.gateway import image_routes  # noqa: E402  (image entities: a vacu
 app.include_router(image_routes.router)
 app.include_router(camera_live_routes.router)  # Real-time camera video (go2rtc)
 app.include_router(discovery_routes.router)  # New devices
+app.include_router(echo_dropin_routes.router)  # Echo Drop-In status, hangup, and WebSocket audio proxy
 app.include_router(hub_registry_routes.router)  # Areas, floors, labels, zones, persons
 app.include_router(light_group_routes.router)  # Light groups (parents and admins)
 app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sensors
@@ -3808,6 +3810,8 @@ def _voice_context_from(request: Request, body: dict) -> dict | None:
     # The satellite's entity: a timer set by voice shows and rings there (execution satellite_timers.py).
     satellite = text("satellite")
     out["satellite"] = satellite if satellite and re.fullmatch(r"assist_satellite\.[a-z0-9_]+", satellite) else None
+    if raw.get("whispered") is True:
+        out["whispered"] = True
     return {k: v for k, v in out.items() if v}
 
 
@@ -3876,9 +3880,48 @@ def _voice_context_note(ctx: dict) -> str:
                      "ask which room they mean when it matters.")
     if ctx.get("asked"):
         lines.append(f"You had just asked them: {ctx['asked']!r}. Their words answer that.")
+    if ctx.get("whispered"):
+        lines.append("The person whispered. Keep your reply short, calm, and quiet (whisper mode).")
     if ctx.get("extra_system_prompt"):
         lines.append(ctx["extra_system_prompt"])
     return ("\n\n[Voice context]\n" + "\n".join(lines)) if lines else ""
+
+
+async def _fast_drop_in_answer(query: str, creds: dict, voice_context: dict | None) -> str | None:
+    """Tier-1 Drop-In command dispatch without waiting on an LLM turn."""
+    from services.gateway import fast_drop_in
+
+    match = fast_drop_in.parse_drop_in_command(query)
+    if not match:
+        return None
+    payload = dict(match.get("payload") or {})
+    user_context = {
+        "user": creds.get("user", ""),
+        "role": creds.get("role", "user"),
+        "family_role": creds.get("family_role", ""),
+        "ha_url": creds.get("ha_url", ""),
+        "ha_token": creds.get("ha_token", ""),
+        "voice_satellite": (voice_context or {}).get("satellite") or creds.get("voice_satellite"),
+    }
+    try:
+        async with (
+            borrow_http_client() as client,
+            client.post(
+                f"{EXECUTION_SVC}/execute/drop_in",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                json={**payload, "user_context": user_context},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            ) as resp,
+        ):
+            if resp.status == 200:
+                data = await resp.json(content_type=None)
+                msg = str((data or {}).get("message") or "").strip()
+                if msg:
+                    return msg
+            log.warning("[FastPath] drop_in execution returned %s", resp.status)
+    except Exception as exc:
+        log.warning("[FastPath] drop_in execution failed: %s", type(exc).__name__)
+    return "Could not reach Drop In right now."
 
 
 async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
@@ -4108,6 +4151,14 @@ async def chat_handler(request: Request, background_tasks=None):
             if is_openai:
                 return _make_openai_response(handled["response"], selected_model, "sentence_trigger")
             return _make_ollama_response(handled["response"], selected_model, "sentence_trigger")
+
+        drop_in_reply = await _fast_drop_in_answer(str(query), creds, voice_context)
+        if drop_in_reply is not None:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", drop_in_reply)
+            if is_openai:
+                return _make_openai_response(drop_in_reply, selected_model, "fast_drop_in")
+            return _make_ollama_response(drop_in_reply, selected_model, "fast_drop_in")
 
     # The watch's weather and calendar buttons must not wait on a 35-75 s LLM
     # turn (and the small model can overflow its 8k context with RAG context).

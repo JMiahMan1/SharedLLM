@@ -24,6 +24,7 @@ import SharedFilesPanel from '../components/mdm/SharedFilesPanel';
 import { DeviceDetailSheet } from '../components/settings/DeviceDetailSheet';
 import NotificationLockCard from '../components/guardian/NotificationLockCard';
 import NewDevicesPanel from '../components/devices/NewDevicesPanel';
+import EchoFleetPanel from '../components/devices/EchoFleetPanel';
 import WindowsGuardPanel from '../components/devices/WindowsGuardPanel';
 import PageHeader from '../components/ui/PageHeader';
 import { CardSkeletons } from '../components/ui/StateViews';
@@ -1437,7 +1438,7 @@ function AuditLogPanel() {
 
 /** The admin's tabs, and which old "#devices-..." link opens which. */
 const DEVICE_TABS = [
-  { id: 'devices', label: 'Your devices', anchors: ['devices-hardware', 'devices-light-groups', 'devices-duplicates'] },
+  { id: 'devices', label: 'Your devices', anchors: ['devices-hardware', 'devices-echo-fleet', 'devices-light-groups', 'devices-duplicates'] },
   { id: 'add', label: 'Add devices', anchors: ['devices-new', 'add-fix'] },
   { id: 'places', label: 'Rooms & places', anchors: ['devices-areas', 'devices-labels', 'devices-zones'] },
   { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-persons', 'devices-logins', 'devices-rooms', 'devices-archived'] },
@@ -1622,6 +1623,9 @@ export default function Devices() {
       {user?.is_admin && tab === 'devices' && (
         <div id="devices-tab-devices" role="tabpanel" className="space-y-4">
           <div id="devices-hardware" className="scroll-mt-4"><HardwarePanel onAdd={() => openTab('add')} /></div>
+          <div id="devices-echo-fleet" className="glass-panel scroll-mt-4 rounded-2xl border border-white/10 p-3 sm:p-4">
+            <EchoFleetPanel />
+          </div>
           <div id="devices-light-groups" className="scroll-mt-4"><LightGroupsPanel /></div>
           <div id="devices-duplicates" className="scroll-mt-4"><DuplicatesPanel /></div>
         </div>

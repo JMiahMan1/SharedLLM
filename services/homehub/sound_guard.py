@@ -4,7 +4,10 @@ Stateful processor for ``event.*_sound`` states reported by Echo satellites.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -180,3 +183,96 @@ class SoundGuard:
             flash_rings=True,
             drop_in_room=None,
         )
+
+
+def attach_to_hub(
+    hub: Any,
+    guard: SoundGuard | None = None,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+) -> Callable[[], None]:
+    """Subscribe a ``SoundGuard`` to ``hub.bus`` ``state_changed`` events.
+
+    Returns a cleanup callable that unsubscribes from the bus and cancels any
+    in-flight alert action tasks.
+    """
+    from services.homehub import echo_ring
+
+    sg = guard or SoundGuard()
+    tasks: set[asyncio.Task[Any]] = set()
+
+    async def _handle_alert(alert: SoundAlert) -> None:
+        if alert.flash_rings:
+            try:
+                await echo_ring.flash_all(hub, color="red", repeat=8)
+            except Exception as exc:
+                log.warning("sound guard could not flash Echo rings: %s", exc)
+        if ("persistent_notification", "create") in getattr(hub, "services", {}):
+            try:
+                await hub.call_service("persistent_notification", "create", {
+                    "notification_id": f"sound_guard_{alert.event_type}",
+                    "title": alert.title,
+                    "message": alert.body,
+                })
+            except Exception as exc:
+                log.warning("sound guard could not create notification: %s", exc)
+
+    def _spawn(coro: Any) -> None:
+        task = asyncio.create_task(coro, name="sound-guard-alert")
+        tasks.add(task)
+
+        def _done(done_task: asyncio.Task[Any]) -> None:
+            tasks.discard(done_task)
+            if not done_task.cancelled():
+                exc = done_task.exception()
+                if exc is not None:
+                    log.warning("sound guard alert action failed: %r", exc)
+
+        task.add_done_callback(_done)
+
+    def _on_state_changed(_event_type: str, data: dict[str, Any]) -> None:
+        entity_id = str((data or {}).get("entity_id") or "")
+        new_state = (data or {}).get("new_state")
+        sound_type = extract_sound_event(entity_id, new_state)
+        if sound_type is None:
+            return
+        entry = hub.entities.get(entity_id)
+        device_id = (entry.device_id if entry is not None and entry.device_id else None) or entity_id
+        room = hub.area_name(entity_id)
+        persons = hub.states.all("person")
+        nobody_home = bool(persons) and not any(
+            str(p.state or "").strip().lower() == "home" for p in persons
+        )
+        alert = sg.evaluate(
+            device_id=device_id,
+            entity_id=entity_id,
+            room=room,
+            event_type=sound_type,
+            now=clock(),
+            nobody_home=nobody_home,
+        )
+        if alert is None:
+            return
+        hub.bus.fire("echo_sound_alert", {
+            "event_type": alert.event_type,
+            "priority": alert.priority,
+            "corroborated": alert.corroborated,
+            "devices": list(alert.devices),
+            "rooms": list(alert.rooms),
+            "title": alert.title,
+            "body": alert.body,
+            "flash_rings": alert.flash_rings,
+            "drop_in_room": alert.drop_in_room,
+        })
+        _spawn(_handle_alert(alert))
+
+    unsub = hub.bus.subscribe(_on_state_changed, "state_changed")
+
+    def detach() -> None:
+        unsub()
+        for t in list(tasks):
+            t.cancel()
+        tasks.clear()
+
+    detach.tasks = tasks  # type: ignore[attr-defined]
+    return detach
