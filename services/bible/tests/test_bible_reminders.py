@@ -1,6 +1,7 @@
 """The daily reading reminder: only after the chosen time, only if unread, once a day."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from sqlmodel import Session
 
 from services.bible import main as bible_main
 from services.bible import reminders
+from services.bible.models import ReadingEvent, UserBibleState
 
 
 def _now(hhmm: str) -> datetime:
@@ -128,3 +130,178 @@ def test_the_plan_link_is_url_encoded(loaded_client: TestClient):
     assert lnk["route"] == "bible"
     assert lnk["query"] == {"tab": "read", "ref": "John 1:1", "verse": "1"}
     assert lnk["hash"] == "v1"
+
+RENGAGE_NOW = datetime(2026, 2, 10, 10, 0)
+RENGAGE_TODAY = "2026-02-10"
+
+
+class _HouseholdResponse:
+    def __init__(self, status, payload):
+        self.status = status
+        self._payload = payload or {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def json(self):
+        return self._payload
+
+
+class _HouseholdSession:
+    def __init__(self, payload, fail=False):
+        self._payload = payload
+        self.fail = fail
+        self.calls = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def get(self, url, headers=None, timeout=None):
+        self.calls += 1
+        if self.fail:
+            return _HouseholdResponse(500, {})
+        return _HouseholdResponse(200, self._payload)
+
+
+def _seed(engine, states, events):
+    with Session(engine) as session:
+        for username, fields in states.items():
+            session.add(UserBibleState(username=username, **fields))
+        for username, day, kind in events:
+            session.add(ReadingEvent(username=username, day=day, kind=kind))
+        session.commit()
+
+
+def test_reengage_due_steps():
+    today = "2026-02-10"
+    assert reminders.reengage_due("2026-02-07", "", today) is True  # step 3 reached
+    assert reminders.reengage_due("2026-02-07", today, today) is False  # never twice a day
+    assert reminders.reengage_due("2026-02-07", "2026-02-09", today) is True  # nudged before the step date
+    assert reminders.reengage_due("2026-02-03", "", today) is True  # step 7
+    assert reminders.reengage_due("2026-01-27", "", today) is True  # step 14
+    assert reminders.reengage_due("2026-01-11", "", today) is True  # step 30
+    assert reminders.reengage_due("2026-01-11", today, today) is False  # already nudged at step 30
+    assert reminders.reengage_due("2025-12-12", "", today) is True  # step 60: every 30 after 30
+    assert reminders.reengage_due("2026-02-08", "", today) is False  # step 3 not reached yet
+    assert reminders.reengage_due(None, "", today) is True  # never read: first check is day 3
+    assert reminders.reengage_due(None, today, today) is False
+
+
+def test_reengage_once_household(engine, monkeypatch):
+    states = {
+        "reader-a": {"reengage": True, "reminder_time": ""},   # read 10 days ago: due (step 7)
+        "reader-b": {"reengage": True, "reminder_time": ""},   # read today: skip
+        "reader-c": {"reengage": False, "reminder_time": ""},  # reengage off: skip
+        "reader-d": {"reengage": True, "reminder_time": "07:00"},  # reminder set: skip
+        "reader-f": {"reengage": True, "reminder_time": ""},   # read yesterday: not due yet
+    }
+    events = [
+        ("reader-a", "2026-01-31", "chapter_complete"),
+        ("reader-b", RENGAGE_TODAY, "chapter_complete"),
+        ("reader-f", "2026-02-09", "chapter_complete"),
+    ]
+    _seed(engine, states, events)
+
+    bodies = []
+
+    async def fake_notify(body, telemetry=None, secret=None):
+        bodies.append(body)
+        return True
+
+    household = _HouseholdSession({"usernames": ["reader-a", "reader-b", "reader-c", "reader-d", "reader-e", "reader-f"]})
+    monkeypatch.setattr(reminders.aiohttp, "ClientSession", lambda *a, **k: household)
+    monkeypatch.setattr(reminders.notify, "send", fake_notify)
+
+    n = asyncio.run(
+        reminders.reengage_once(
+            engine, "http://telemetry:11438", "s3", "http://identity:11439", now=RENGAGE_NOW
+        )
+    )
+    assert n == 2
+    assert [body["user"] for body in bodies] == ["reader-a", "reader-e"]
+    for body in bodies:
+        assert body["kind"] == "bible_reengage"
+        assert body["tag"] == "bible:reengage"
+        assert body["once"] == f"bible-reengage:{RENGAGE_TODAY}"
+        assert body["category"] == "bible"
+        # Every nudge carries what to show: a title, a warm body and a link back to the reader.
+        assert body["title"] == "Bible" and body["body"] and body["link"]
+    # The reader with no state row got one, stamped today.
+    with Session(engine) as session:
+        assert session.get(UserBibleState, "reader-e").reengage_last_sent == RENGAGE_TODAY
+
+    # Same hour again: nobody nudged twice.
+    bodies.clear()
+    n = asyncio.run(
+        reminders.reengage_once(
+            engine, "http://telemetry:11438", "s3", "http://identity:11439", now=RENGAGE_NOW
+        )
+    )
+    assert n == 0
+    assert bodies == []
+
+    # Outside REENGAGE_HOUR: nothing sent, identity never consulted.
+    household.calls = 0
+    bodies.clear()
+    n = asyncio.run(
+        reminders.reengage_once(
+            engine, "http://telemetry:11438", "s3", "http://identity:11439",
+            now=datetime(2026, 2, 10, 9, 0),
+        )
+    )
+    assert n == 0
+    assert bodies == []
+    assert household.calls == 0
+
+    # Identity unreachable: nothing sent, warning logged.
+    bodies.clear()
+    broken = _HouseholdSession(None, fail=True)
+    monkeypatch.setattr(reminders.aiohttp, "ClientSession", lambda *a, **k: broken)
+    n = asyncio.run(
+        reminders.reengage_once(
+            engine, "http://telemetry:11438", "s3", "http://identity:11439", now=RENGAGE_NOW
+        )
+    )
+    assert n == 0
+    assert bodies == []
+
+
+def test_reminder_loop_runs_reengage_after_remind(monkeypatch):
+    calls = []
+
+    async def fake_remind_once(*_a):
+        calls.append("remind")
+
+    async def fake_reengage_once(*_a):
+        calls.append("reengage")
+        return 0
+
+    monkeypatch.setattr(reminders, "remind_once", fake_remind_once)
+    monkeypatch.setattr(reminders, "reengage_once", fake_reengage_once)
+
+    class _Stop(Exception):
+        pass
+
+    sleeps = {"n": 0}
+
+    async def fake_sleep(_s):
+        sleeps["n"] += 1
+        if sleeps["n"] > 1:
+            raise _Stop
+
+    monkeypatch.setattr(reminders.asyncio, "sleep", fake_sleep)
+    import pytest
+
+    with pytest.raises(_Stop):
+        asyncio.run(
+            reminders.reminder_loop(
+                lambda: None, "http://telemetry:11438", "s", "http://identity:11439"
+            )
+        )
+    assert calls == ["remind", "reengage"]

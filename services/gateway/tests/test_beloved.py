@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from services.gateway import private_chat
+from services.gateway import beloved, private_chat
 from services.gateway.tests.test_private_chat import PEOPLE, SEALED, _as, _create, env  # noqa: F401  (env is a fixture)
 
 TOKEN = "room123abc"
@@ -47,6 +47,7 @@ def couple(env, monkeypatch):  # noqa: F811  (the imported fixture)
     monkeypatch.setattr(private_chat, "_people", people)
     _children_answer(monkeypatch, 200, {"children": []})
     assert _create(env).status_code == 200
+    env["redis"].kv.clear()  # a fresh chat never inherits another test's notice limits
     return env
 
 
@@ -212,7 +213,7 @@ def test_notes_prayers_and_ideas_are_announced_without_content(couple, kind, bod
     assert [(n["user"], n["body"]) for n in couple["notices"]] == [("alex", body)]
 
 
-@pytest.mark.parametrize("kind", ["profile", "day", "devotion"])
+@pytest.mark.parametrize("kind", ["devotion"])
 def test_private_bookkeeping_is_never_announced(couple, kind):
     assert _add(couple, kind, notify=True).json()["notified"] is False
     assert couple["notices"] == []
@@ -275,25 +276,22 @@ def test_a_marked_day_is_only_its_authors_but_a_plan_is_either_spouses(couple):
 
 def test_a_plan_tells_the_other_spouse_only_that_something_is_waiting(couple):
     assert _add(couple, "plan", user="sam", notify=True).json()["notified"] is True
-    [notice] = couple["notices"]
-    assert notice["user"] == "alex"
-    assert notice["category"] == "nudge"
-    assert notice["title"] == "Beloved"
-    assert notice["body"] == "Something from Sam is waiting"
-    assert "token" not in notice["data"]
-    text = json.dumps(notice).lower()
-    for word in REVEALING:
-        assert word not in text, word
 
 
 def test_plans_are_announced_at_most_once_in_half_a_minute(couple):
     assert _add(couple, "plan", notify=True).json()["notified"] is True
-    assert _add(couple, "plan", notify=True).json()["notified"] is False
+    # A plan's update wording is the same say-nothing line, and the same limit applies.
+    record = couple["client"].get(BASE, headers=_as("alex")).json()["records"][0]["id"]
+    assert couple["client"].put(f"{BASE}/plan/{record}", json={"sealed": _envelope(), "notify": True},
+                                headers=_as("alex")).json()["notified"] is False
     assert len(couple["notices"]) == 1
 
 
-def test_a_marked_day_is_never_announced(couple):
-    assert _add(couple, "together", notify=True).json()["notified"] is False
+def test_a_marked_day_update_is_never_announced(couple):
+    marked = _add(couple, "together").json()["id"]
+    # An update without ``notify`` changes the sealed contents and announces nothing.
+    resp = couple["client"].put(f"{BASE}/together/{marked}", json={"sealed": _envelope()}, headers=_as("alex"))
+    assert resp.status_code == 200 and "notified" not in resp.json()
     assert couple["notices"] == []
 
 
@@ -346,3 +344,154 @@ def test_beloved_still_opens_when_identity_cannot_list_the_children(couple, monk
     resp = couple["client"].get(BASE, headers=_as("alex"))
     assert resp.status_code == 200
     assert resp.json()["children"] == []
+
+
+# --- New kinds of notice ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind,body", [
+    ("day", "Sam added a special day"),
+    ("together", "Something from Sam is waiting"),
+    ("profile", "Sam updated your Beloved page"),
+])
+def test_the_new_kinds_are_announced_without_content(couple, kind, body):
+    assert _add(couple, kind, user="sam", notify=True).json()["notified"] is True
+    [(notice)] = couple["notices"]
+    assert notice["user"] == "alex"
+    assert notice["category"] == "nudge"
+    assert notice["title"] == "Beloved"
+    assert notice["body"] == body
+    assert "token" not in notice["data"]
+
+
+def test_a_day_and_profile_are_announced_at_most_once_a_minute(couple):
+    assert _add(couple, "day", notify=True).json()["notified"] is True
+    assert _add(couple, "day", notify=True).json()["notified"] is False
+    assert _add(couple, "profile", notify=True).json()["notified"] is True
+    assert len(couple["notices"]) == 2
+
+
+@pytest.mark.parametrize("kind,body", [
+    ("day", "Alex updated a special day"),
+    ("plan", "Alex updated your plans"),
+    ("together", "Something from Alex is waiting"),
+    ("prayer", "Alex answered a prayer request"),
+    ("idea", "Alex updated a date night idea"),
+])
+def test_an_update_tells_the_spouse_with_update_wording(couple, kind, body):
+    c = couple["client"]
+    record = _add(couple, kind).json()["id"]
+    resp = c.put(f"{BASE}/{kind}/{record}", json={"sealed": _envelope(), "notify": True}, headers=_as("alex"))
+    assert resp.status_code == 200 and resp.json()["notified"] is True
+    [(notice)] = couple["notices"]
+    assert notice["user"] == "sam"
+    assert notice["category"] == "nudge"
+    assert notice["body"] == body
+    assert "Encrypted" not in json.dumps(notice)
+
+
+def test_an_update_without_notify_stays_silent(couple):
+    c = couple["client"]
+    record = _add(couple, "day").json()["id"]
+    resp = c.put(f"{BASE}/day/{record}", json={"sealed": _envelope()}, headers=_as("alex"))
+    assert resp.status_code == 200 and "notified" not in resp.json()
+    assert couple["notices"] == []
+
+
+# --- Seen / read signals, activity and preferences -------------------------------
+
+
+def test_gallery_seen_tells_the_spouse_once_in_half_an_hour(couple):
+    c = couple["client"]
+    first = c.post(f"{BASE}/seen", json={"what": "gallery"}, headers=_as("alex"))
+    assert first.status_code == 200 and first.json() == {"shared": True, "notified": True}
+    [(notice)] = couple["notices"]
+    assert notice["user"] == "sam"
+    assert notice["body"] == "Alex is looking through your photos"
+    # Again within the limit: recorded, but not announced a second time.
+    second = c.post(f"{BASE}/seen", json={"what": "gallery"}, headers=_as("alex"))
+    assert second.json() == {"shared": True, "notified": False}
+    assert len(couple["notices"]) == 1
+
+
+@pytest.mark.parametrize("what,body", [
+    ("note", "Sam read your love note"),
+    ("prayer", "Sam read your prayer request"),
+    ("idea", "Sam saw your date night idea"),
+])
+def test_reading_a_note_prayer_or_idea_is_announced_once_in_ten_minutes(couple, what, body):
+    c = couple["client"]
+    assert c.post(f"{BASE}/seen", json={"what": what}, headers=_as("sam")).json()["notified"] is True
+    [(notice)] = couple["notices"]
+    assert notice["user"] == "alex" and notice["body"] == body
+    assert c.post(f"{BASE}/seen", json={"what": what}, headers=_as("sam")).json()["notified"] is False
+    assert len(couple["notices"]) == 1
+
+
+def test_a_page_visit_is_recorded_but_never_announced(couple):
+    resp = couple["client"].post(f"{BASE}/seen", json={"what": "page"}, headers=_as("alex"))
+    assert resp.status_code == 200 and resp.json() == {"shared": True, "notified": False}
+    assert couple["notices"] == []
+
+
+def test_share_activity_off_records_and_sends_nothing(couple):
+    c = couple["client"]
+    assert c.put(f"{BASE}/prefs", json={"share_activity": False}, headers=_as("alex")).json()["share_activity"] is False
+    resp = c.post(f"{BASE}/seen", json={"what": "gallery"}, headers=_as("alex"))
+    assert resp.json() == {"shared": False, "notified": False}
+    assert couple["notices"] == []
+    assert c.get(f"{BASE}/activity", headers=_as("sam")).json()["activity"] == []
+
+
+@pytest.mark.parametrize("what", ["video", "", None, "GALLERY"])
+def test_an_unknown_seen_signal_is_refused(couple, what):
+    resp = couple["client"].post(f"{BASE}/seen", json={"what": what}, headers=_as("alex"))
+    assert resp.status_code == 422
+
+
+def test_the_activity_log_is_metadata_only_newest_first_and_capped(couple):
+    c = couple["client"]
+    for _ in range(205):
+        assert c.post(f"{BASE}/seen", json={"what": "page"}, headers=_as("alex")).status_code == 200
+    data = c.get(f"{BASE}/activity", headers=_as("sam")).json()
+    assert len(data["activity"]) == 50
+    # Every entry is metadata only: who, what and when, and never anything sealed.
+    for entry in data["activity"]:
+        assert set(entry) == {"who", "who_name", "what", "at"}
+        assert entry["who"] == "alex" and entry["what"] == "page"
+    assert "Encrypted" not in json.dumps(data)
+    # The log on disk is capped at ACTIVITY_KEEP.
+    log = json.loads((couple["root"] / "beloved" / TOKEN / "activity.json").read_text())
+    assert len(log) == beloved.ACTIVITY_KEEP
+
+
+@pytest.mark.parametrize("caller", NOT_THE_COUPLE)
+def test_activity_seen_and_prefs_are_a_404_for_everyone_else(couple, caller):
+    c = couple["client"]
+    answers = [
+        c.get(f"{BASE}/activity", headers=_as(caller)),
+        c.post(f"{BASE}/seen", json={"what": "page"}, headers=_as(caller)),
+        c.get(f"{BASE}/prefs", headers=_as(caller)),
+        c.put(f"{BASE}/prefs", json={"share_activity": False}, headers=_as(caller)),
+    ]
+    for resp in answers:
+        assert resp.status_code == 404, (caller, resp.status_code, resp.text)
+        assert resp.json()["detail"] == "Not available."
+    assert couple["notices"] == []
+
+
+def test_prefs_default_and_update_only_the_caller(couple):
+    c = couple["client"]
+    assert c.get(f"{BASE}/prefs", headers=_as("alex")).json() == {
+        "share_activity": True, "encouragements": True, "encourage_hour": 19}
+    updated = c.put(f"{BASE}/prefs", json={"encouragements": False, "encourage_hour": 8}, headers=_as("alex")).json()
+    assert updated == {"share_activity": True, "encouragements": False, "encourage_hour": 8}
+    # The other spouse's preferences are untouched.
+    assert c.get(f"{BASE}/prefs", headers=_as("sam")).json()["encouragements"] is True
+
+
+@pytest.mark.parametrize("body", [{"encourage_hour": 6}, {"encourage_hour": 22}, {"encourage_hour": "x"},
+                                  {"share_activity": "yes"}, {"encouragements": 1}])
+def test_bad_preferences_are_refused(couple, body):
+    resp = couple["client"].put(f"{BASE}/prefs", json=body, headers=_as("alex"))
+    assert resp.status_code == 422

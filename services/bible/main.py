@@ -62,10 +62,10 @@ from services.bible import (
 )
 from services.bible import books as book_table
 from services.bible import meaning as meaning_mod
-from services.bible import search as verse_search
 from services.bible import (
     narration as narration_mod,
 )
+from services.bible import search as verse_search
 from services.bible.corpus import CorpusError
 from services.bible.devotionals import registry as devotional_registry
 from services.bible.models import (
@@ -87,8 +87,11 @@ from services.bible.models import (
 )
 from services.bible.providers import ProviderError, ProviderUnavailable
 from services.bible.refs import ReferenceError, format_reference, parse_reference
+from services.common.notify import family_or_none as _family_or_none
+from services.common.notify import notice as _notice
+from services.common.notify import send as _notify_send
+from services.common.notify import view_action as _view_action
 from services.common.secrets import secret_matches
-from services.common.notify import notice as _notice, send as _notify_send, view_action as _view_action, family_or_none as _family_or_none
 from services.common.sqlite import apply_sqlite_pragmas
 from services.config import (
     BIBLE_DATABASE_URL,
@@ -161,7 +164,9 @@ async def lifespan(app: FastAPI):
         bool(BIBLE_DEVOTIONAL_DIR),
         bool(BLB_BASE_URL),
     )
-    reminder_task = asyncio.create_task(reminders.reminder_loop(_db, TELEMETRY_SVC_URL, INTERNAL_SECRET))
+    reminder_task = asyncio.create_task(
+        reminders.reminder_loop(_db, TELEMETRY_SVC_URL, INTERNAL_SECRET, IDENTITY_SVC_URL)
+    )
     tagged_task = asyncio.create_task(_tagged_sync_loop())
     context_task = asyncio.create_task(
         verse_context.ensure_daily_loop(_db, GATEWAY_INTERNAL_URL, INTERNAL_SECRET)
@@ -1327,6 +1332,9 @@ class StatePayload(BaseModel):
     theme: str | None = Field(default=None, pattern="^(serif|sans)$")
     page: str | None = Field(default=None, pattern="^(dark|sepia|light)$")
     reminder_time: str | None = Field(default=None, pattern="^$|^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    # Whether reengagement nudges may be sent to this reader. Defaults on; the
+    # reader (or the reminder time they set) may turn it off.
+    reengage: bool | None = None
     read_aloud_voice: str | None = None
     split_view: str | None = Field(default=None, pattern="^(compare|parallel)$")
     layout: str | None = Field(default=None, pattern="^(flow|verses)$")
@@ -1338,6 +1346,7 @@ class StatePayload(BaseModel):
     study_book_id: int | None = Field(default=None, ge=1)
     study_section_ordinal: int | None = Field(default=None, ge=1)
     study_scroll_fraction: float | None = Field(default=None, ge=0, le=1)
+    quiz_nudges: bool | None = None
 
 
 @app.get("/state")
@@ -1389,6 +1398,7 @@ def _default_preferences(session: Session) -> dict:
         "theme": "serif",
         "page": "dark",
         "reminder_time": "",
+        "reengage": True,
         "read_aloud_voice": "",
         "split_view": "compare",
         "layout": "flow",
@@ -1398,6 +1408,7 @@ def _default_preferences(session: Session) -> dict:
         "study_book_id": 0,
         "study_section_ordinal": 0,
         "study_scroll_fraction": 0.0,
+        "quiz_nudges": True,
     }
 
 
@@ -1414,6 +1425,7 @@ def _preferences(state: UserBibleState) -> dict:
         "theme": state.theme,
         "page": state.page,
         "reminder_time": state.reminder_time,
+        "reengage": state.reengage,
         "read_aloud_voice": state.read_aloud_voice,
         "split_view": state.split_view,
         "layout": state.layout,
@@ -1423,6 +1435,7 @@ def _preferences(state: UserBibleState) -> dict:
         "study_book_id": state.last_study_book_id,
         "study_section_ordinal": state.last_study_section_ordinal,
         "study_scroll_fraction": state.last_study_scroll_fraction,
+        "quiz_nudges": state.quiz_nudges,
     }
 
 
@@ -1514,7 +1527,7 @@ def put_state(
             state.compare_version = _require_version(session, payload.compare_version)
     if payload.cross_version_notes is not None:
         state.cross_version_notes = payload.cross_version_notes
-    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "reminder_time", "read_aloud_voice", "split_view", "layout", "devotional_work", "plan_id", "plan_day", "study_book_id", "study_section_ordinal", "study_scroll_fraction"):
+    for attr in ("show_notes", "font_scale", "line_height", "theme", "page", "reminder_time", "reengage", "read_aloud_voice", "split_view", "layout", "devotional_work", "plan_id", "plan_day", "study_book_id", "study_section_ordinal", "study_scroll_fraction", "quiz_nudges"):
         value = getattr(payload, attr)
         if value is not None:
             if attr == "plan_id":
