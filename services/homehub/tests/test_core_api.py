@@ -395,6 +395,9 @@ async def test_a_device_that_stays_off_is_reported_once_not_on_every_retry(tmp_p
 
     monkeypatch.setattr(rt, "driver_class", lambda domain: Off)
     monkeypatch.setattr(rt, "RETRY_DELAYS", (0.001,))
+    # With a one-element sequence, retry_delay() doubles past it (0.002, 0.004, ...),
+    # so cap the cap too: this test needs 20 quick retries, not 20 exponential waits.
+    monkeypatch.setattr(rt, "RETRY_MAX_S", 0.001)
     hub = Hub()
     hub.config_entries["x"] = ConfigEntry("x", "esphome")
     runtime = Runtime(hub, Store(str(tmp_path / "h.db"), Fernet.generate_key().decode()))
