@@ -38,6 +38,11 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
                 "If requests start failing with 401, check the ABS username/password.",
                 username,
             )
+    if username and password:
+        # Sessions started for this request can log in again if their token expires mid-listen.
+        abs_session_state.current_relogin.set(
+            lambda: abs_client.abs_login(abs_url, username, password, force=True)
+        )
     if not abs_key:
         return ExecutionResult(
             status="FAILURE",

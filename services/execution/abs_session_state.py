@@ -13,6 +13,7 @@ the audiobookshelf and media handlers.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -25,6 +26,13 @@ log = logging.getLogger("execution.abs_session_state")
 # entity_id -> everything needed to sync / close an ABS session and to resolve
 # chapter positions for the enhanced transport commands.
 _SESSIONS: dict[str, dict[str, Any]] = {}
+
+#: Set by the Audiobookshelf handler for the request it is serving: how to get a fresh token when
+#: the person has a username and password (login tokens can expire before a long listen ends).
+#: None when only a stored API key exists.
+current_relogin: contextvars.ContextVar[Callable[[], Awaitable[str | None]] | None] = contextvars.ContextVar(
+    "abs_relogin", default=None
+)
 # entity_id -> the asyncio task implementing the current sleep timer.
 _SLEEP_TASKS: dict[str, asyncio.Task] = {}
 
@@ -43,6 +51,7 @@ def remember(
 ) -> dict[str, Any]:
     """Record the session we just started on ``entity_id`` (replacing any old one)."""
     info: dict[str, Any] = {
+        "relogin": current_relogin.get(),
         "session_id": session_id,
         "abs_url": abs_url,
         "abs_key": abs_key,
@@ -80,6 +89,21 @@ def _absolute_position(info: dict[str, Any], media_position: float | None) -> fl
     return float(info["track_start"]) + max(0.0, float(media_position or 0))
 
 
+async def _with_fresh_token(info: dict[str, Any], call: Callable[[str], Awaitable[Any]]) -> Any:
+    """Run ``call(token)``; on a 401 log in again (when the person has a login) and retry once."""
+    result = await call(info["abs_key"])
+    refused = isinstance(result, dict) and "ABS returned 401" in str(result.get("error", ""))
+    relogin = info.get("relogin")
+    if refused and relogin is not None:
+        fresh = await relogin()
+        if fresh:
+            info["abs_key"] = fresh
+            result = await call(fresh)
+        else:
+            log.warning("[abs] token refused and the login did not come back; progress not saved")
+    return result
+
+
 async def sync_position(entity_id: str, media_position: float | None = None) -> bool:
     """POST the current position to ABS when the person pauses the player."""
     info = _SESSIONS.get(entity_id)
@@ -87,10 +111,9 @@ async def sync_position(entity_id: str, media_position: float | None = None) -> 
         return False
     current = _absolute_position(info, media_position)
     listened = max(0.0, time.monotonic() - float(info["started_at"]))
-    await abs_client.sync_session_position(
-        info["abs_url"], info["abs_key"], info["session_id"],
-        current, listened, info["duration"],
-    )
+    await _with_fresh_token(info, lambda key: abs_client.sync_session_position(
+        info["abs_url"], key, info["session_id"], current, listened, info["duration"],
+    ))
     info["current_time"] = current
     return True
 
@@ -102,10 +125,9 @@ async def close(entity_id: str, media_position: float | None = None) -> bool:
         return False
     current = _absolute_position(info, media_position)
     try:
-        await abs_client.close_session(
-            info["abs_url"], info["abs_key"], info["session_id"],
-            current, info["duration"] or None,
-        )
+        await _with_fresh_token(info, lambda key: abs_client.close_session(
+            info["abs_url"], key, info["session_id"], current, info["duration"] or None,
+        ))
     finally:
         forget(entity_id)
     return True

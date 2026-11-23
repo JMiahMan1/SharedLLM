@@ -373,3 +373,53 @@ class TestSleepTimer:
 
         assert task.cancelled()
         assert abs_session_state.sleep_task(ENTITY) is None
+
+
+def test_a_login_only_listener_whose_token_expired_still_saves_their_place(monkeypatch):
+    """A person with only an Audiobookshelf username and password: the token from the login can
+    expire during a long listen, so a refused save logs in again and retries once."""
+    import asyncio
+
+    from services.execution import abs_client, abs_session_state
+
+    calls = []
+
+    async def fake_sync(url, key, session_id, current, listened, duration):
+        calls.append(key)
+        return {"error": "ABS returned 401: Unauthorized"} if key == "old-token" else {"ok": True}
+
+    async def relogin():
+        return "fresh-token"
+
+    monkeypatch.setattr(abs_client, "sync_session_position", fake_sync)
+    abs_session_state.current_relogin.set(relogin)
+    abs_session_state.remember("media_player.den_speaker", session_id="s1", abs_url="http://abs.test",
+                               abs_key="old-token", item_id="i1", duration=3600.0)
+    try:
+        asyncio.run(abs_session_state.sync_position("media_player.den_speaker", 120.0))
+        assert calls == ["old-token", "fresh-token"]
+    finally:
+        abs_session_state.current_relogin.set(None)
+        abs_session_state.forget("media_player.den_speaker")
+
+
+def test_a_key_only_listener_is_not_retried(monkeypatch):
+    import asyncio
+
+    from services.execution import abs_client, abs_session_state
+
+    calls = []
+
+    async def fake_sync(url, key, session_id, current, listened, duration):
+        calls.append(key)
+        return {"error": "ABS returned 401: Unauthorized"}
+
+    monkeypatch.setattr(abs_client, "sync_session_position", fake_sync)
+    abs_session_state.current_relogin.set(None)
+    abs_session_state.remember("media_player.den_speaker", session_id="s1", abs_url="http://abs.test",
+                               abs_key="api-key", item_id="i1", duration=3600.0)
+    try:
+        asyncio.run(abs_session_state.sync_position("media_player.den_speaker", 10.0))
+        assert calls == ["api-key"]
+    finally:
+        abs_session_state.forget("media_player.den_speaker")
