@@ -24,7 +24,7 @@ vi.mock('../context/AuthContext', () => ({
 vi.mock('../hooks/useIntegrations', () => ({
   useIntegrations: () => ({ anyHub: true, homehub: true, homeAssistant: false, hubs: { homehub: true, homeAssistant: false }, settled: true }),
 }));
-vi.mock('../components/ui/ConfirmDialog', () => ({
+vi.mock('../components/ui/confirmDialog', () => ({
   confirmDialog: vi.fn().mockResolvedValue(true),
 }));
 vi.mock('react-hot-toast', () => ({

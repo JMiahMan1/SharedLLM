@@ -40,7 +40,7 @@ function formatDate(date: Date, options: Intl.DateTimeFormatOptions, zone?: stri
 }
 
 function callRoom(target: CallInfo | ActiveCall): string {
-  return ('room' in target && target.room) ? target.room : target.token;
+  return 'room' in target ? target.room : target.token;
 }
 
 function CameraPopup({ onClose }: { onClose: () => void }) {
@@ -381,7 +381,7 @@ export default function DisplayKiosk() {
                     className={`${TOUCH} flex items-center gap-2 rounded-xl bg-slate-700 px-4 text-sm font-semibold text-white hover:bg-slate-600`}
                   ><Pause size={16} aria-hidden /> Pause</button>
                 </div>
-                <label className="mt-3 block text-xs text-slate-300">
+                <div className="mt-3 block text-xs text-slate-300">
                   <span className="flex items-center gap-2"><Volume2 size={15} aria-hidden /> Volume</span>
                   {reportedVolume === null ? (
                     <>
@@ -408,7 +408,7 @@ export default function DisplayKiosk() {
                       className={`${TOUCH} w-full accent-indigo-400`}
                     />
                   )}
-                </label>
+                </div>
               </>
             ) : (
               <p role="status" className="mt-2 text-sm text-slate-400">

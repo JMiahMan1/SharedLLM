@@ -199,6 +199,7 @@
 [data-theme-scheme="light"] .bg-\[\#1a1f2e\] { background-color: var(--ht-surface) !important; }
 [data-theme-scheme="light"] .bg-\[\#1e293b\] { background-color: var(--ht-surface) !important; }
 [data-theme-scheme="light"] .bg-amber-950\/10 { background-color: color-mix(in srgb, oklch(96.2% 0.059 95.617) 60%, transparent) !important; }
+[data-theme-scheme="light"] .bg-amber-950\/40 { background-color: color-mix(in srgb, oklch(96.2% 0.059 95.617) 60%, transparent) !important; }
 [data-theme-scheme="light"] .bg-amber-950\/70 { background-color: color-mix(in srgb, oklch(96.2% 0.059 95.617) 70%, transparent) !important; }
 [data-theme-scheme="light"] .bg-black\/10 { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .bg-black\/15 { background-color: var(--site-card-bg) !important; }
@@ -221,6 +222,8 @@
 [data-theme-scheme="light"] .bg-red-950\/15 { background-color: color-mix(in srgb, oklch(93.6% 0.032 17.717) 60%, transparent) !important; }
 [data-theme-scheme="light"] .bg-red-950\/20 { background-color: color-mix(in srgb, oklch(93.6% 0.032 17.717) 60%, transparent) !important; }
 [data-theme-scheme="light"] .bg-red-950\/30 { background-color: color-mix(in srgb, oklch(93.6% 0.032 17.717) 60%, transparent) !important; }
+[data-theme-scheme="light"] .bg-red-950\/50 { background-color: color-mix(in srgb, oklch(93.6% 0.032 17.717) 60%, transparent) !important; }
+[data-theme-scheme="light"] .bg-red-950\/60 { background-color: color-mix(in srgb, oklch(93.6% 0.032 17.717) 60%, transparent) !important; }
 [data-theme-scheme="light"] .bg-rose-900\/90 { background-color: color-mix(in srgb, oklch(94.1% 0.03 12.58) 90%, transparent) !important; }
 [data-theme-scheme="light"] .bg-sky-950\/70 { background-color: color-mix(in srgb, oklch(95.1% 0.026 236.824) 70%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-600 { background-color: var(--ht-surface) !important; }
@@ -233,6 +236,8 @@
 [data-theme-scheme="light"] .bg-slate-800 { background-color: var(--ht-surface) !important; }
 [data-theme-scheme="light"] .bg-slate-800\/40 { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .bg-slate-800\/50 { background-color: var(--site-card-bg) !important; }
+[data-theme-scheme="light"] .bg-slate-800\/60 { background-color: color-mix(in srgb, var(--ht-surface) 60%, transparent) !important; }
+[data-theme-scheme="light"] .bg-slate-800\/70 { background-color: color-mix(in srgb, var(--ht-surface) 70%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-800\/80 { background-color: color-mix(in srgb, var(--ht-surface) 80%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-800\/90 { background-color: color-mix(in srgb, var(--ht-surface) 90%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-800\/95 { background-color: color-mix(in srgb, var(--ht-surface) 95%, transparent) !important; }
@@ -284,6 +289,7 @@
 [data-theme-scheme="light"] .border-slate-700\/40 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-slate-700\/50 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-slate-700\/60 { border-color: var(--color-border-soft) !important; }
+[data-theme-scheme="light"] .border-slate-700\/70 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-slate-700\/80 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-slate-800 { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .border-slate-800\/40 { border-color: var(--color-border-soft) !important; }
