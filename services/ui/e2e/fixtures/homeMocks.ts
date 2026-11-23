@@ -498,6 +498,9 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (p === '/api/info') return json({ service: 'jarvis-ui', version: 'e2e', git_sha: 'e2e' });
 
     // The home pages.
+    // The Devices page's Echo fleet card (EchoFleetPanel) reads the hub's entity list; no Echo
+    // nodes are adopted in this made-up house, so the card shows its empty state.
+    if (p === '/api/entities') return json({ entities: [] });
     if (p === '/api/dashboard/rooms') return json(rooms);
     if (p === '/api/dashboard/climate') return json({ thermostats: [DASH_THERMOSTAT] });
     if (p === '/api/dashboard/history') return json({ series: {} });
