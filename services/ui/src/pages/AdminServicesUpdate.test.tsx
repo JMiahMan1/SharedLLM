@@ -24,7 +24,7 @@ vi.mock('../context/AuthContext', () => ({
 vi.mock('../hooks/useIntegrations', () => ({
   useIntegrations: () => ({ anyHub: true, homehub: true, homeAssistant: false, hubs: { homehub: true, homeAssistant: false }, settled: true }),
 }));
-vi.mock('../components/ui/ConfirmDialog', () => ({
+vi.mock('../components/ui/confirmDialog', () => ({
   confirmDialog: vi.fn().mockResolvedValue(true),
 }));
 vi.mock('react-hot-toast', () => ({
@@ -110,11 +110,9 @@ describe('Admin System Health service updates', () => {
     expect(updateButtons).toHaveLength(2);
 
     await userEvent.setup().click(updateButtons[1]);
-    // The click goes through an async confirm dialog and a React Query mutation; a busy CI runner
-    // can take longer than waitFor's 1 s default.
     await waitFor(() => {
       expect(mockApi.pullAndRestart).toHaveBeenCalledWith('sharedllm_osrm_foot');
-    }, { timeout: 5000 });
+    });
     expect(mockApi.pullServiceImage).not.toHaveBeenCalled();
   });
 });
