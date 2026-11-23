@@ -364,7 +364,7 @@ const DeviceEditor: FC<{ device: NetworkDevice; users: UserProfile[]; onClose: (
         <p className="break-all text-[11px] text-slate-500">{device.mac}</p>
         {field('alias', 'Alias', (
           <input
-            id="network-device-alias"
+            id="network-device-alias" aria-label="Alias"
             className={inputClass}
             value={text(draft.alias)}
             onChange={(e) => set('alias', e.target.value)}
@@ -373,7 +373,7 @@ const DeviceEditor: FC<{ device: NetworkDevice; users: UserProfile[]; onClose: (
         ))}
         {field('kind', 'Kind', (
           <select
-            id="network-device-kind"
+            id="network-device-kind" aria-label="Kind"
             className={inputClass}
             value={text(draft.kind)}
             onChange={(e) => set('kind', e.target.value as NetworkDeviceKind | '')}
@@ -386,20 +386,20 @@ const DeviceEditor: FC<{ device: NetworkDevice; users: UserProfile[]; onClose: (
         ), source('kind'))}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {field('make', 'Make', (
-            <input id="network-device-make" className={inputClass} value={text(draft.make)}
+            <input id="network-device-make" aria-label="Make" className={inputClass} value={text(draft.make)}
               onChange={(e) => set('make', e.target.value)} />
           ), source('make'))}
           {field('model', 'Model', (
-            <input id="network-device-model" className={inputClass} value={text(draft.model)}
+            <input id="network-device-model" aria-label="Model" className={inputClass} value={text(draft.model)}
               onChange={(e) => set('model', e.target.value)} />
           ), source('model'))}
         </div>
         {field('os', 'OS', (
-          <input id="network-device-os" className={inputClass} value={text(draft.os)}
+          <input id="network-device-os" aria-label="OS" className={inputClass} value={text(draft.os)}
             onChange={(e) => set('os', e.target.value)} />
         ), source('os'))}
         {field('owner', 'Owner', (
-          <select id="network-device-owner" className={inputClass} value={text(draft.owner)}
+          <select id="network-device-owner" aria-label="Owner" className={inputClass} value={text(draft.owner)}
             onChange={(e) => set('owner', e.target.value)}>
             <option value="">Nobody yet</option>
             {ownerMissing && <option value={draft.owner ?? ''}>{draft.owner}</option>}
@@ -409,7 +409,7 @@ const DeviceEditor: FC<{ device: NetworkDevice; users: UserProfile[]; onClose: (
           </select>
         ))}
         {field('notes', 'Notes', (
-          <textarea id="network-device-notes" className={`${inputClass} min-h-20 py-2`}
+          <textarea id="network-device-notes" aria-label="Notes" className={`${inputClass} min-h-20 py-2`}
             value={text(draft.notes)} onChange={(e) => set('notes', e.target.value)}
             placeholder="Anything that helps tell it apart" />
         ))}
