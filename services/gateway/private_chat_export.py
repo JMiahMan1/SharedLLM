@@ -353,7 +353,8 @@ def _has_data(token: str) -> dict[str, int]:
         folder = root / ("blobs" if kind == "pictures" else kind) / token
         counts[kind] = sum(1 for p in folder.glob(pattern) if p.is_file() and not p.name.endswith(".tmp")) if folder.is_dir() else 0
     folder = root / "beloved" / token
-    counts["beloved"] = sum(1 for p in folder.glob("*/*.json") if p.is_file()) if folder.is_dir() else 0
+    # Only the couple's own records, never their preferences or activity log.
+    counts["beloved"] = sum(1 for p in folder.glob("*/*.json") if p.is_file() and p.parent.name in beloved.KINDS) if folder.is_dir() else 0
     return counts
 
 
