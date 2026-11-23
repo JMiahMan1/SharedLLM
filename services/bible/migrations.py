@@ -47,6 +47,8 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("userbiblestate", "show_notes", "INTEGER", "0"),
     ("userbiblestate", "page", "TEXT", "'dark'"),
     ("userbiblestate", "reminder_time", "TEXT", "''"),
+    ("userbiblestate", "reengage", "INTEGER", "1"),
+    ("userbiblestate", "reengage_last_sent", "TEXT", "''"),
     ("gamescore", "answers", "TEXT", "''"),
     ("narrationaudio", "chunk_index", "INTEGER", "0"),
     ("importedbook", "cadence", "TEXT", "'day'"),
@@ -66,6 +68,7 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("userbiblestate", "last_study_book_id", "INTEGER", "0"),
     ("userbiblestate", "last_study_section_ordinal", "INTEGER", "0"),
     ("userbiblestate", "last_study_scroll_fraction", "REAL", "0"),
+    ("userbiblestate", "quiz_nudges", "INTEGER", "1"),
 )
 
 
