@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Download, FileText, Loader2, Mic, Play, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { formatBytes, type TalkParameter } from './chatModel';
 import { cachedUrl } from '../../lib/blobUrlCache';
+import { showsFileItself, talkFileKey } from '../../lib/animatedImage';
+import AnimatedImage from './AnimatedImage';
 
 type FileParameter = TalkParameter;
 
@@ -29,18 +31,20 @@ function ImageAttachment({ file }: { file: FileParameter }) {
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState<string | null>(null);
 
+  const itself = showsFileItself(file);
   useEffect(() => {
     let live = true;
-    previewUrl(file, 640)
+    (itself ? fileUrl(file) : previewUrl(file, 640))
       .then((url) => live && setSrc(url))
       .catch(() => live && setFailed(true));
     return () => {
       live = false;
     };
-  }, [file]);
+  }, [file, itself]);
 
   useEffect(() => {
-    if (!open || full) return;
+    // A GIF shown as itself is already the full file.
+    if (!open || full || itself) return;
     let live = true;
     // The full image only when someone actually opens it.
     (file.path ? fileUrl(file) : previewUrl(file, 2048))
@@ -49,28 +53,45 @@ function ImageAttachment({ file }: { file: FileParameter }) {
     return () => {
       live = false;
     };
-  }, [open, full, file, src]);
+  }, [open, full, file, src, itself]);
 
   if (failed) return <FileCard file={file} />;
+  const mediaKey = talkFileKey(file);
+  const whole = itself ? src : full;
+  // The bubble's picture is the file itself only for a GIF or WebP; a preview is always a still.
+  const shownMime = itself ? file.mimetype : undefined;
+  const opener = (media: ReactNode) => (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        setOpen(true);
+      }}
+      className="block overflow-hidden rounded-2xl bg-black/30"
+      aria-label={`Open photo ${file.name || ''}`}
+    >
+      {media}
+    </button>
+  );
   return (
     <>
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          setOpen(true);
-        }}
-        className="block overflow-hidden rounded-2xl bg-black/30"
-        aria-label={`Open photo ${file.name || ''}`}
-      >
-        {src ? (
-          <img src={src} alt={file.name || 'Photo'} className="max-h-72 w-auto max-w-full object-cover" loading="lazy" />
-        ) : (
+      {src ? (
+        <AnimatedImage
+          src={src}
+          mediaKey={mediaKey}
+          mime={shownMime}
+          alt={file.name || 'Photo'}
+          className="max-h-72 w-auto max-w-full object-cover"
+          imgProps={{ loading: 'lazy', 'data-testid': 'chat-picture' }}
+          wrap={opener}
+        />
+      ) : (
+        opener(
           <span className="flex h-40 w-56 items-center justify-center">
             <Loader2 size={20} className="animate-spin text-slate-400" />
-          </span>
-        )}
-      </button>
+          </span>,
+        )
+      )}
       {open && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
@@ -83,14 +104,22 @@ function ImageAttachment({ file }: { file: FileParameter }) {
           <button type="button" aria-label="Close photo" className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white" onClick={() => setOpen(false)}>
             <X size={20} />
           </button>
-          {full || src ? (
-            <img src={full || src || ''} alt={file.name || 'Photo'} className="max-h-full max-w-full object-contain" />
+          {whole || src ? (
+            <AnimatedImage
+              src={whole || src || ''}
+              mediaKey={mediaKey}
+              mime={whole ? file.mimetype : shownMime}
+              alt={file.name || 'Photo'}
+              className="max-h-full max-w-full object-contain"
+              wrapperClassName="flex h-full w-full items-center justify-center"
+              toggleClassName="absolute left-4 top-4"
+            />
           ) : (
             <Loader2 className="animate-spin text-white" />
           )}
-          {full && (
+          {whole && (
             <a
-              href={full}
+              href={whole}
               download={file.name || 'photo'}
               onClick={(event) => event.stopPropagation()}
               className="absolute bottom-6 right-6 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm text-white"
