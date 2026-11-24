@@ -12,6 +12,11 @@ COPY . .
 EXPOSE 8005
 ENV PYTHONUNBUFFERED=1
 
+# PDF books: reading a Calibre PDF (chapters, fetch_text) and indexing it need pypdf. The
+# image never installs requirements.txt (only CI does), so without this every PDF book
+# failed with "No module named 'pypdf'". The import check fails the build, not the reads.
+RUN pip install --no-cache-dir "pypdf==6.21.4" && python -c "import pypdf"
+
 # Storage-specific: WebDAV/network debugging
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
