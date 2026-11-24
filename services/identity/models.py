@@ -367,6 +367,21 @@ class UserActivitySharing(SQLModel, table=True):  # type: ignore
     data: str = Field(default="{}")
 
 
+class UserProfileSharing(SQLModel, table=True):  # type: ignore
+    """Which areas of a person's profile stats page the family may see.
+
+    Private by default. Only the areas that have no sharing switch of their
+    own live here (``PROFILE_SHARE_AREAS`` in main.py: garden, recipes,
+    Jarvis use). Health, activity, Wander and Bible keep the switches they
+    already have (HealthShare, UserActivitySharing): this table never
+    duplicates them. data JSON keys:
+      - areas: list[str] subset of PROFILE_SHARE_AREAS
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+
+
 # ---------------------------------------------------------------------------
 # User Panel: device registry and telemetry
 #

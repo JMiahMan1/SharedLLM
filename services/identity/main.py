@@ -59,6 +59,7 @@ from services.identity import (
     device_archive,
     music_assistant,
     onboarding,
+    profile_sharing,
     push,
     roles,
     sign_in_reset,
@@ -96,6 +97,7 @@ from services.identity.models import (
     UserAvatarImage,
     UserCalendarSetting,
     UserCredentialShare,
+    UserProfileSharing,
     UserRole,
     UserThemeSetting,
     UserWeatherSetting,
@@ -1154,6 +1156,9 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
 
 # Push topics, notification preferences, UnifiedPush (docs/PUSH.md)
 app.include_router(push.build_router(get_session, require_api_key, require_internal))
+
+# Profile stats: the areas the family may see, and the admin's usage read (docs/PROFILE_STATS.md)
+app.include_router(profile_sharing.build_router(get_session, require_api_key, require_internal))
 
 
 def _require_admin_user(user: User = Depends(require_api_key)) -> User:
@@ -2663,6 +2668,7 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     for model, column in (
         (UserWidget, UserWidget.username),
         (UserActivitySharing, UserActivitySharing.username),
+        (UserProfileSharing, UserProfileSharing.username),
         (ScreenRules, ScreenRules.username),
         (DeviceEvent, DeviceEvent.username),
         (Device, Device.owner_username),
