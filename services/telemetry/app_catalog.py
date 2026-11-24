@@ -807,7 +807,8 @@ async def refresh_review(rc, session, package: str) -> dict[str, Any] | None:
     }
     try:
         content = await llm.local_chat_content(
-            session, f"{url.rstrip('/')}/v1/chat/completions", payload, APP_REVIEW_TIMEOUT_S, what="the local model"
+            session, f"{url.rstrip('/')}/v1/chat/completions", payload, APP_REVIEW_TIMEOUT_S, what="the local model",
+            background=True,
         )
         parsed = app_review.parse(content, listing)
     except BackendUnavailable:

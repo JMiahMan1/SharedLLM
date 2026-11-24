@@ -255,7 +255,7 @@ def test_media_scan_detects_concern_and_pages_parents(wired, monkeypatch):
     client, _fake, sent = wired
     async def _vision_settings(_session):
         return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "qwen2.5-vl:7b"}
-    async def _vision_chat(_session, url, payload, timeout):
+    async def _vision_chat(_session, url, payload, timeout, headers=None):
         return '{"concern": true, "category": "sexual", "level": "severe", "description": "Suggestive photo detected", "reason": "Contains explicit nudity"}'
     monkeypatch.setattr(guardian, "_model_settings", _vision_settings)
     monkeypatch.setattr("services.telemetry.llm.chat_content", _vision_chat)
@@ -285,7 +285,7 @@ def test_media_scan_clean_image_leaves_no_concern(wired, monkeypatch):
     client, _fake, sent = wired
     async def _vision_settings(_session):
         return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "qwen2.5-vl:7b"}
-    async def _vision_chat(_session, url, payload, timeout):
+    async def _vision_chat(_session, url, payload, timeout, headers=None):
         return '{"concern": false, "reason": "clean scenery photo"}'
     monkeypatch.setattr(guardian, "_model_settings", _vision_settings)
     monkeypatch.setattr("services.telemetry.llm.chat_content", _vision_chat)
@@ -332,7 +332,7 @@ def test_a_media_concern_image_is_encrypted_for_export_and_can_be_reviewed(wired
     async def _vision_settings(_session):
         return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "qwen2.5-vl:7b"}
 
-    async def _vision_chat(_session, url, payload, timeout):
+    async def _vision_chat(_session, url, payload, timeout, headers=None):
         return (
             '{"concern": true, "category": "sexual", "level": "high", '
             '"description": "Suggestive photo detected", "reason": "Contains explicit content"}'
@@ -421,7 +421,7 @@ def test_each_parent_hears_at_the_level_they_chose(wired, monkeypatch):
     async def _vision_settings(_session):
         return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "vl"}
 
-    async def _vision_chat(_session, url, payload, timeout):
+    async def _vision_chat(_session, url, payload, timeout, headers=None):
         return '{"concern": true, "category": "sexual", "level": "high", "description": "Suggestive photo", "reason": "nudity"}'
 
     monkeypatch.setattr(guardian, "children", _children)
@@ -472,7 +472,7 @@ def test_a_photo_the_model_could_not_check_is_sent_back_not_passed_as_clean(wire
     client, _fake, sent = wired
     async def _vision_settings(_session):
         return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "qwen2.5-vl:7b"}
-    async def _vision_chat(_session, url, payload, timeout):
+    async def _vision_chat(_session, url, payload, timeout, headers=None):
         assert timeout == guardian.MEDIA_MODEL_TIMEOUT_SECONDS
         raise failure
     monkeypatch.setattr(guardian, "_model_settings", _vision_settings)

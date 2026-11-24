@@ -48,8 +48,15 @@ async def local_chat_content(
     payload: dict[str, Any],
     timeout_s: float,
     what: str = "the model",
+    *,
+    background: bool = False,
 ) -> str:
     """``chat_content`` for the household's GPU box, through ``LOCAL_MODEL``'s breaker.
+
+    Every call names itself to alpaca-proxy (``X-Request-Source``); without it the proxy
+    saw ``unknown-origin`` at normal priority, so a phone's photo backlog swapped the
+    household's chat model out from under voice questions. ``background`` marks work
+    that can wait (``X-Priority: low``): voice pre-empts it and it queues behind people.
 
     Raises ``BackendUnavailable`` at once while the machine is known to be off,
     and when this call could not connect (which marks it off, logged once). Any
@@ -57,11 +64,14 @@ async def local_chat_content(
     """
     LOCAL_MODEL.set_url(url.split("/v1/", 1)[0])
     LOCAL_MODEL.check()
+    headers = {"X-Request-Source": "shared-llm/guardian"}
+    if background:
+        headers["X-Priority"] = "low"
     try:
         if what == "the model":
-            content = await chat_content(session, url, payload, timeout_s)
+            content = await chat_content(session, url, payload, timeout_s, headers=headers)
         else:
-            content = await chat_content(session, url, payload, timeout_s, what=what)
+            content = await chat_content(session, url, payload, timeout_s, what=what, headers=headers)
     except Exception as exc:
         if LOCAL_MODEL.record_failure(exc):
             raise LOCAL_MODEL.unavailable() from exc
