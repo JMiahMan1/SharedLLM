@@ -1,6 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { CollectorHealth } from '../lib/collectorHealth';
 import type { ProfileStats, SharingState, ShareArea } from '../lib/profileStats';
+import type { AdminPersonStats } from '../lib/adminPeople';
 import type {
   InternetOutage, NetworkDevice, NetworkDeviceFields, NetworkStatus, NetworkUsage, RouterLogLine,
 } from '../lib/network';
@@ -1368,6 +1369,12 @@ export const api = {
   /** One person's profile stats as the caller may see them (docs/PROFILE_STATS.md). */
   async getProfileStats(username: string, fresh = false): Promise<ProfileStats> {
     const resp = await apiClient.get(`/api/profile/stats/${encodeURIComponent(username || 'me')}`, { params: fresh ? { fresh: 1 } : undefined });
+    return resp.data;
+  },
+
+  /** Admin > People: one person's stats without the opt-in (admins only, refused on the server otherwise). */
+  async getAdminPersonStats(username: string, fresh = false): Promise<AdminPersonStats> {
+    const resp = await apiClient.get(`/api/profile/admin/${encodeURIComponent(username)}`, { params: fresh ? { fresh: 1 } : undefined });
     return resp.data;
   },
 

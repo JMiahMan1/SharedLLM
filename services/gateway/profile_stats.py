@@ -545,7 +545,8 @@ def _collector(health: Any) -> dict:
     devices = [d for d in ((health or {}).get("devices") or []) if isinstance(d, dict)]
     return {
         "devices": [{"device_name": d.get("device_name"), "app_version": d.get("app_version"),
-                     "reported_at": d.get("reported_at"), "problems": d.get("problems") or []} for d in devices],
+                     "reported_at": d.get("reported_at") or d.get("received_at"),
+                     "problems": d.get("problems") or []} for d in devices],
         "staleness": (health or {}).get("staleness") or {},
         "problem_count": sum(len(d.get("problems") or []) for d in devices),
     }
