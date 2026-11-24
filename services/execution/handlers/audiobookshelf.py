@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 
 from services.common import ma_identity
-from services.execution import abs_client, abs_session_state, ha_client
+from services.execution import abs_client, abs_session_state, ha_client, media_vocabulary
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult
 from services.shared import ma_library
 from services.shared.ma_player import is_music_assistant_player
@@ -75,6 +75,9 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
 
         elif action == "play":
             return await _handle_play(abs_url, abs_key, req)
+
+        elif action == "play_by":
+            return await _handle_play_by(abs_url, abs_key, req)
 
         elif action == "play_podcast_episode":
             return await _handle_play_podcast_episode(abs_url, abs_key, req)
@@ -331,6 +334,14 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
         book_id = req.book_id
     elif req.query:
         search = await abs_client.search_library(abs_url, abs_key, req.query, limit=1)
+        if "error" not in search and not search.get("results"):
+            # A misheard title or author ("Ginny B. Jones"): the library name it most likely was.
+            corrected = await _corrected_book_query(abs_url, abs_key, req.query)
+            if corrected:
+                kind, name = corrected
+                if kind == "author":
+                    return await _handle_play_by(abs_url, abs_key, _with(req, author=name, series=None))
+                search = await abs_client.search_library(abs_url, abs_key, name, limit=1)
         if "error" in search or not search.get("results"):
             return ExecutionResult(status="FAILURE", message=f"No audiobook found for '{req.query}'.", service="audiobookshelf")
         book = search["results"][0]
@@ -767,6 +778,108 @@ async def _handle_play_podcast_episode(abs_url: str, abs_key: str, req) -> Execu
         search_title=podcast_title,
         ma_media_kind="podcast",
     )
+
+
+def _with(req, **changes):
+    """A shallow copy of a request-like object with ``changes`` (the media handler passes plain objects)."""
+    import copy
+
+    clone = copy.copy(req)
+    for key, value in changes.items():
+        setattr(clone, key, value)
+    return clone
+
+
+def _authors_of(item: dict) -> list[str]:
+    meta = (item.get("media") or {}).get("metadata") or {}
+    names = [a.get("name", "") if isinstance(a, dict) else str(a) for a in meta.get("authors") or []]
+    if not names and meta.get("authorName"):
+        names = [n.strip() for n in str(meta["authorName"]).split(",")]
+    return [n for n in names if n]
+
+
+def _series_of(item: dict) -> list[str]:
+    meta = (item.get("media") or {}).get("metadata") or {}
+    names = [s.get("name", "") if isinstance(s, dict) else str(s) for s in meta.get("series") or []]
+    if not names and meta.get("seriesName"):
+        # "Series Name #3, Other Series #1"
+        names = [n.split(" #")[0].strip() for n in str(meta["seriesName"]).split(",")]
+    return [n for n in names if n]
+
+
+def _learn_names(items: list) -> None:
+    """Keep the library's authors, series and titles for speech-to-text hints and misheard names."""
+    playable = [i for i in items if isinstance(i, dict)]
+    media_vocabulary.remember("author", (a for i in playable for a in _authors_of(i)))
+    media_vocabulary.remember("series", (s for i in playable for s in _series_of(i)))
+    media_vocabulary.remember("title", (((i.get("media") or {}).get("metadata") or {}).get("title") for i in playable))
+
+
+async def _corrected_book_query(abs_url: str, abs_key: str, query: str) -> tuple[str, str] | None:
+    """("author" | "title" | "series", library name) a misheard ``query`` most likely meant, or None."""
+    items = await abs_client.get_book_library_items(abs_url, abs_key)
+    if isinstance(items, dict):
+        return None
+    _learn_names(items)
+    for kind, pool in (("author", {a for i in items for a in _authors_of(i)}),
+                       ("title", {((i.get("media") or {}).get("metadata") or {}).get("title") or "" for i in items}),
+                       ("series", {s for i in items for s in _series_of(i)})):
+        hit = media_vocabulary.best_match(query, pool)
+        if hit:
+            log.info(f"[abs] no audiobook for '{query}'; the library has the {kind} '{hit}'")
+            return kind, hit
+    return None
+
+
+def _published(item: dict) -> tuple:
+    meta = (item.get("media") or {}).get("metadata") or {}
+    date = str(meta.get("publishedDate") or "")
+    try:
+        year = int(str(meta.get("publishedYear") or date[:4] or 0))
+    except ValueError:
+        year = 0
+    return (year, date, item.get("addedAt") or 0)
+
+
+async def _handle_play_by(abs_url: str, abs_key: str, req) -> ExecutionResult:
+    """A book by an author or in a series: the one in progress, else (or with ``latest``) the newest.
+
+    The spoken name is matched to the library's own names, so a misheard author
+    ("Ginny B. Jones") still finds their books; the correction is logged.
+    """
+    if not req.entity_id:
+        return ExecutionResult(status="FAILURE", message="entity_id is required to play.", service="audiobookshelf")
+    author = (getattr(req, "author", None) or "").strip()
+    series = (getattr(req, "series", None) or "").strip()
+    if not author and not series:
+        return ExecutionResult(status="FAILURE", message="author or series is required.", service="audiobookshelf")
+    items = await abs_client.get_book_library_items(abs_url, abs_key)
+    if isinstance(items, dict):
+        return ExecutionResult(status="FAILURE", message=items.get("error") or "Audiobookshelf error.",
+                               service="audiobookshelf")
+    items = [i for i in items if isinstance(i, dict) and not _is_unplayable_abs_book(i)]
+    _learn_names(items)
+    kind, wanted, names_of = ("series", series, _series_of) if series else ("author", author, _authors_of)
+    pool = {n for i in items for n in names_of(i)}
+    name = media_vocabulary.best_match(wanted, pool)
+    if not name:
+        return ExecutionResult(status="FAILURE", service="audiobookshelf",
+                               message=f"I couldn't find an audiobook {'in the series' if series else 'by'} '{wanted}'.")
+    if media_vocabulary.squash(name) != media_vocabulary.squash(wanted):
+        log.info(f"[abs] heard {kind} '{wanted}', playing from '{name}'")
+    books = [i for i in items if any(media_vocabulary.squash(n) == media_vocabulary.squash(name) for n in names_of(i))]
+    pick = None
+    if not getattr(req, "latest", False):
+        progress = await _all_progress_by_item(abs_url, abs_key)
+        started = [(progress[i["id"]].get("lastUpdate") or 0, i) for i in books
+                   if i.get("id") in progress and not progress[i["id"]].get("isFinished")]
+        if started:
+            pick = max(started, key=lambda pair: pair[0])[1]
+    if pick is None:
+        pick = max(books, key=_published)
+    title = ((pick.get("media") or {}).get("metadata") or {}).get("title") or "the book"
+    log.info(f"[abs] {kind} '{name}': playing '{title}' ({pick.get('id')})")
+    return await _play_book_session(abs_url, abs_key, req, pick["id"])
 
 
 async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:

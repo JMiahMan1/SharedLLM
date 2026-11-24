@@ -1770,6 +1770,14 @@ class SatelliteVoice:
                 except Exception as exc:
                     self.log.warning("voice satellite %s: could not restore volume after whisper: %s", self.name, exc)
 
+    def own_media_player(self) -> str | None:
+        """The satellite's own speaker (a ``media_player`` on the same device), when it has one."""
+        dev = self._satellite_device_id()
+        players = [e for e in self.driver.entities if e.domain == "media_player"]
+        same = [e for e in players if dev is not None and getattr(e, "device_id", None) == dev]
+        pick = (same or players or [None])[0]
+        return pick.entity_id if pick is not None else None
+
     def _context(self, run: Run) -> dict[str, Any]:
         ent = self.satellite_entity()
         area_id, area = self.area()
@@ -1782,6 +1790,10 @@ class SatelliteVoice:
             "conversation_id": run.conversation_id,
             "wake_word": run.wake_word,
         }
+        # "Play music" with no device named plays here, on the satellite's own speaker (gateway fast path).
+        player = self.own_media_player()
+        if player:
+            ctx["media_player"] = player
         if self._pending is not None:
             at, extra = self._pending
             self._pending = None

@@ -659,6 +659,8 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "speech_server_url", "value": "", "description": "alpaca's audio server (http://<gpu-host>:8082) that speaks every voice Jarvis uses, Kokoro and Piper; empty uses KOKORO_GPU_URL from .env. Edit in Admin > Raven > Spoken replies."},
 
     # --- VOICE SATELLITES ---
+    {"key": "voice_satellite_playback", "value": "this_device", "description": "Where media asked for at a voice satellite plays when no device is named: this_device (the satellite's own speaker) or last_used (the last player the household used). A device named in the request always wins."},
+    {"key": "voice_default_music", "value": "", "description": "What 'play music' plays when no artist, song or playlist is named: a Music Assistant URI, or a playlist or artist name to search. Empty shuffles a library playlist, else library tracks."},
     {"key": "household_device_access", "value": "unlocked", "description": "What a voice satellite or kiosk may control when it does not recognise who is speaking: unlocked (every device that is not locked) or none. Edit in Admin > Users & Devices > Voice satellites."},
 
     # --- GATEWAY & ROUTING ---

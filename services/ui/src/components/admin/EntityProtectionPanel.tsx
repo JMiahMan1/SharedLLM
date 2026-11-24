@@ -28,34 +28,49 @@ const formatWhen = (iso?: string | null) => {
   return Number.isNaN(parsed) ? iso : new Date(parsed).toLocaleString();
 };
 
+type Choice = { readonly value: string; readonly label: string };
+
 /** What a voice satellite may control when it does not recognise who is speaking. */
-const HOUSEHOLD_CHOICES = [
+const HOUSEHOLD_CHOICES: readonly Choice[] = [
   { value: 'unlocked', label: "Every device that isn't locked" },
   { value: 'none', label: 'Nothing' },
-] as const;
+];
 
-const HouseholdAccess: FC = () => {
+/** Where media asked for at a voice satellite plays when no device is named (gateway fast path). */
+const PLAYBACK_CHOICES: readonly Choice[] = [
+  { value: 'this_device', label: 'On the satellite itself' },
+  { value: 'last_used', label: 'On the last device used' },
+];
+
+/** One global setting as a row of radio buttons, saved as soon as one is picked. */
+const SettingChoice: FC<{
+  settingKey: string;
+  fallback: string;
+  choices: readonly Choice[];
+  label: string;
+  note: string;
+  testId: string;
+}> = ({ settingKey, fallback, choices, label, note, testId }) => {
   const queryClient = useQueryClient();
   const { data: settings, isError } = useQuery({ queryKey: ['global-settings'], queryFn: () => api.getSettings() });
-  const current = settings?.find((s) => s.key === 'household_device_access')?.value ?? 'unlocked';
+  const current = settings?.find((s) => s.key === settingKey)?.value || fallback;
   const save = useMutation({
-    mutationFn: (value: string) => api.updateSetting('household_device_access', value),
+    mutationFn: (value: string) => api.updateSetting(settingKey, value),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['global-settings'] });
       toast.success('Saved');
     },
     onError: () => toast.error('Not saved. Try again.'),
   });
+  const labelId = `${testId}-label`;
   return (
-    <div className="mb-4 rounded-lg border border-white/5 bg-black/20 p-3" data-testid="household-access">
-      <p id="household-access-label" className="text-sm text-slate-200">
-        When a voice satellite doesn&apos;t recognise who is speaking, it may control
-      </p>
+    <div className="mb-4 rounded-lg border border-white/5 bg-black/20 p-3" data-testid={testId}>
+      <p id={labelId} className="text-sm text-slate-200">{label}</p>
       {isError ? (
         <p className="mt-2 text-xs text-amber-300" role="alert">This setting could not be loaded.</p>
       ) : (
-        <div role="radiogroup" aria-labelledby="household-access-label" className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {HOUSEHOLD_CHOICES.map((choice) => (
+        <div role="radiogroup" aria-labelledby={labelId} className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {choices.map((choice) => (
             <button
               key={choice.value}
               type="button"
@@ -74,12 +89,32 @@ const HouseholdAccess: FC = () => {
           ))}
         </div>
       )}
-      <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-        Locked devices always need someone it recognises. A person it recognises can use what their account allows.
-      </p>
+      <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{note}</p>
     </div>
   );
 };
+
+const HouseholdAccess: FC = () => (
+  <SettingChoice
+    settingKey="household_device_access"
+    fallback="unlocked"
+    choices={HOUSEHOLD_CHOICES}
+    label="When a voice satellite doesn't recognise who is speaking, it may control"
+    note="Locked devices always need someone it recognises. A person it recognises can use what their account allows."
+    testId="household-access"
+  />
+);
+
+const SatellitePlayback: FC = () => (
+  <SettingChoice
+    settingKey="voice_satellite_playback"
+    fallback="this_device"
+    choices={PLAYBACK_CHOICES}
+    label="Music, audiobooks and other media asked for at a voice satellite play"
+    note="Naming a device always wins: 'play jazz on the den TV' plays on the den TV whichever is picked here."
+    testId="satellite-playback"
+  />
+);
 
 const bypassesLocks = (u: UserProfile) =>
   u.is_admin || u.username.toLowerCase() === 'default' || Boolean(u.permissions?.includes('devices.use_locked'));
@@ -171,6 +206,7 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
       </p>
 
       <HouseholdAccess />
+      <SatellitePlayback />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
         <EntitySearchDropdown

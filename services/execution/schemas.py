@@ -1184,8 +1184,11 @@ class AudiobookshelfRequest(BaseRequest):
     Interacts with Audiobookshelf (ABS) for searching, playing, and tracking audiobooks.
     """
     user_context: UserContext
-    action: Literal["search", "play", "play_podcast_episode", "resume", "progress", "libraries", "list", "get_book", "last_played", "update_progress"]
+    action: Literal["search", "play", "play_by", "play_podcast_episode", "resume", "progress", "libraries", "list", "get_book", "last_played", "update_progress"]
     query: str | None = Field(None, description="Search query or book title")
+    author: str | None = Field(None, description="play_by: the author whose book to play (misheard names are matched to the library)")
+    series: str | None = Field(None, description="play_by: the series whose book to play")
+    latest: bool = Field(False, description="play_by: the newest book (by publication) rather than the one in progress")
     book_id: str | None = Field(None, description="ABS item ID for play/resume/progress")
     item_id: str | None = Field(None, description="ABS item ID for update_progress")
     episode_id: str | None = Field(None, description="ABS episode ID for play_podcast_episode and update_progress")
