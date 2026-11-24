@@ -8,6 +8,7 @@ background, so Jarvis and the Fasting card see it without a full crawl.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -19,7 +20,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from services.storage import book_lookup
+from services.storage import book_chapters, book_lookup
 from services.storage.artifacts_api import require_internal_secret
 from services.storage.calibre_writer import MAX_BOOK_BYTES, LibraryWriteError, LibraryWriter
 from services.storage.models import IndexScanRequest, ProviderConfig
@@ -130,6 +131,78 @@ async def list_tags(req: LibraryRef):
             counts[tag] += 1
     tags = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))
     return {"tags": [{"name": name, "books": n} for name, n in tags]}
+
+
+class ChapterQuery(BaseModel):
+    library_path: str
+    chapter: str = Field(default="", max_length=200)
+    part: int = Field(default=1, ge=1, le=1000)
+    max_chars: int = Field(default=book_chapters.DEFAULT_PART_CHARS, ge=500, le=200000)
+
+
+#: Formats whose chapters can be read, best first.
+_CHAPTER_FORMATS = ("EPUB", "PDF", "TXT")
+
+
+async def _book_file(library_path: str, book_id: int) -> tuple[dict[str, Any], str, bytes]:
+    """The book's row, the format chosen for chapters, and that file's bytes."""
+    try:
+        async with _opened(library_path) as provider:
+            book = (await provider._load_catalog(refresh=True)).get(book_id)
+            if book is None:
+                raise HTTPException(status_code=404, detail=f"No book with id {book_id} in the library.")
+            files = {f["format"]: f["path"] for f in _files(book)}
+            fmt = next((f for f in _CHAPTER_FORMATS if f in files), None)
+            if fmt is None:
+                stored = ", ".join(book.get("formats") or []) or "no file"
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{book['title']} is stored only as {stored}, which has no chapter reader here. "
+                    "Converting it to EPUB in Calibre makes its chapters readable.",
+                )
+            data = await provider.client.get_file_bytes(files[fmt], timeout=provider.download_timeout)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("[library] book %s file read failed: %s", book_id, exc)
+        raise HTTPException(status_code=502, detail="The book file could not be read from the library.") from exc
+    if not data:
+        raise HTTPException(status_code=502, detail=f"The {fmt} file of {book['title']} could not be downloaded.")
+    return book, fmt, data
+
+
+def chapter_payload(book: dict[str, Any], fmt: str, data: bytes, *, chapter: str = "", part: int = 1,
+                    max_chars: int = book_chapters.DEFAULT_PART_CHARS) -> dict[str, Any]:
+    """The book's contents and, when ``chapter`` is named, that chapter's text (one part of it)."""
+    try:
+        source, chapters = book_chapters.read_book_chapters(data, fmt)
+    except book_chapters.ChapterError as exc:
+        raise HTTPException(status_code=422, detail=f"{book['title']}: {exc}") from exc
+    out: dict[str, Any] = {
+        "book": _row(book), "format": fmt, "source": source,
+        "chapters": [c.row(i) for i, c in enumerate(chapters)], "chapter": None,
+    }
+    if not str(chapter or "").strip():
+        return out
+    try:
+        index = book_chapters.find_chapter(chapters, chapter)
+    except book_chapters.ChapterError as exc:
+        raise HTTPException(status_code=404, detail=f"{book['title']}: {exc}") from exc
+    found = chapters[index]
+    parts = book_chapters.split_parts(found.text, max_chars)
+    if part > len(parts):
+        raise HTTPException(status_code=422, detail=f"{book['title']}, {found.title}: there are only {len(parts)} parts.")
+    out["chapter"] = {**found.row(index), "part": part, "parts": len(parts), "text": parts[part - 1]}
+    return out
+
+
+@router.post("/books/{book_id}/chapters")
+async def book_chapter_list(book_id: int, req: ChapterQuery):
+    """A book's chapters (from its contents, outline or headings), and one chapter's text if named."""
+    book, fmt, data = await _book_file(req.library_path, book_id)
+    return await asyncio.to_thread(
+        chapter_payload, book, fmt, data, chapter=req.chapter, part=req.part, max_chars=req.max_chars,
+    )
 
 
 _NOISE = re.compile(

@@ -1363,6 +1363,14 @@ async def select_model_for_query(query: str) -> str:
     return await get_assistant_model()
 
 
+def _is_assistant_instruction(system: str) -> bool:
+    """Whether ``system`` is the assistant instruction, the one the household persona rides on."""
+    try:
+        return system == load_prompt_sync("assistant_system_instruction")
+    except ValueError:
+        return False
+
+
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     q = (query or "").lower()
     if any(token in q for token in TTS_SIGNALS):
@@ -5043,6 +5051,9 @@ async def chat_handler(request: Request, background_tasks=None):
         # The system stays one of a few fixed texts, so the model server can keep it
         # warm; what belongs to this one request goes with the question (turn_note).
         "system": body.get("system") or default_sys,
+        # The household persona rides on the assistant instruction only: not on a
+        # caller's own system prompt, the code helper or the Raven protocols.
+        "persona": not body.get("system") and _is_assistant_instruction(default_sys),
         "turn_note": (
             ("" if body.get("system") else storage_directive.strip())
             + (_voice_context_note(voice_context) if voice_context else "")
@@ -12402,7 +12413,8 @@ async def get_resources(request: Request, topic: str, q: str = ""):
         listing = {}
     passages: list[dict] = []
     if q.strip():
-        # Calibre books are indexed under the Nextcloud account that crawled them.
+        # Calibre books are indexed under the shared "default" owner, which every
+        # user's search includes; older crawls filed them under the crawling account.
         owners = list(dict.fromkeys([str(creds.get("nextcloud_user") or user).lower(), user]))
         for owner in owners:
             try:
@@ -12443,9 +12455,10 @@ async def get_storage_stats(request: Request):
 
         breakdown = base.get("breakdown", {})
         for k, v in extra.get("breakdown", {}).items():
-            if k.startswith("system_"):
-                # System-wide collections (stored under "default"): both
-                # answers already carry the same rows; adding them doubled them.
+            if k.startswith("system_") or k == "calibre_files":
+                # System-wide collections and the shared Calibre library (stored
+                # under "default"): both answers already carry the same rows;
+                # adding them doubled them.
                 continue
             base["total_chunks"] = base.get("total_chunks", 0) + v.get("chunks", 0)
             base["total_documents"] = base.get("total_documents", 0) + v.get("documents", 0)

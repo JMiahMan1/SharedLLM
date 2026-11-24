@@ -13,7 +13,7 @@ import aiohttp
 from services.common.backend_health import BackendUnavailable
 from services.common.circuit_breaker import CircuitOpenError, get_breaker
 from services.common.rag_collections import HOME_DEVICES, canonical_collection
-from services.gateway import context_router, prompt_budget, tool_cache
+from services.gateway import context_router, library_names, prompt_budget, tool_cache
 from services.gateway.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
@@ -36,7 +36,7 @@ from services.gateway.intent_engine import is_raven_intent
 from services.gateway.knowledge_map import knowledge_map_for
 from services.gateway.llm_providers import get_provider
 from services.gateway.location_query import parse_location_query
-from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
+from services.gateway.prompts import PROMPT_ASSISTANT_PERSONA, PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.studio import actions as studio_actions
 from services.gateway.studio import tools as studio_tools
@@ -724,9 +724,87 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         from services.gateway.messaging import infer_priority_from_payload
 
         job_priority = infer_priority_from_payload(job_payload)
-        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat", priority=job_priority)
+        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat", priority=job_priority, persona=bool(job_payload.get("persona")))
 
     return ans
+
+#: Heads the note that replaces other books' passages when the question names a
+#: book or author the library does not hold (``library_names``).
+LIBRARY_NOT_INDEXED_HEADER = "LIBRARY: THE BOOK LIBRARY WAS SEARCHED FOR THIS QUESTION"
+
+
+def _above_floor(hits: list, floor: float | None, collection: str) -> list:
+    """Keep only hits whose cosine ``similarity`` clears ``floor``.
+
+    ``/rag/search`` applies the floor itself; this is the same rule on the
+    gateway's side, so no pre-fetch path can put a passage under the floor into a
+    prompt (an older RAG that ignores ``min_similarity``, a caller that forgot to
+    send it). The floor is compared with ``similarity``, never with ``score``:
+    ``score`` is a reciprocal-rank fusion (about 1/61 for a top hit) and says
+    nothing about relevance. A hit RAG kept as a whole-query keyword match
+    (``phrase_match``) stays, as it does there. A hit with no ``similarity`` at
+    all cannot be checked here; it is kept on RAG's word and logged.
+    """
+    if floor is None:
+        return list(hits)
+    kept: list = []
+    unchecked = 0
+    for hit in hits:
+        sim = hit.get("similarity") if isinstance(hit, dict) else None
+        if sim is None:
+            unchecked += 1
+            kept.append(hit)
+        elif hit.get("phrase_match") or float(sim) >= floor:
+            kept.append(hit)
+    if unchecked:
+        log.warning("[RAG prefetch] %d %s hit(s) carried no similarity; the %.2f floor was not re-checked",
+                    unchecked, collection, floor)
+    dropped = len(hits) - len(kept)
+    if dropped:
+        log.info("[RAG prefetch] dropped %d %s hit(s) under the %.2f similarity floor", dropped, collection, floor)
+    return kept
+
+
+async def _passages_from_named_works(
+    client, rag_svc: str, user_id: str, named: list[str], hits: list, k: int, floor: float | None,
+) -> list:
+    """Only passages from the book or author the question names.
+
+    When none of the question's hits is from it, each name is looked up on its own
+    (a title or an author is a phrase the book's rows carry), so a named book that
+    is indexed but was outranked still answers. An empty result means the library
+    does not hold it, and the caller says so instead of quoting other books.
+    """
+    own = [h for h in hits if library_names.hit_is_from(_as_meta_dict(h.get("metadata")), named)]
+    if own:
+        return own
+    found: list = []
+    seen: set[str] = set()
+    for name in named:
+        body: dict[str, Any] = {"collection_name": "calibre_files", "query": name, "user_id": user_id, "k": k}
+        if floor is not None:
+            body["min_similarity"] = floor
+        try:
+            resp = await client.post(
+                f"{rag_svc}/rag/search", json=body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if resp.status != 200:
+                continue
+            results = (await resp.json()).get("results", [])
+        except Exception as exc:  # RAG is optional context
+            log.warning("[RAG prefetch] library lookup for %r failed: %s", name, exc)
+            continue
+        for hit in _above_floor(results, floor, "calibre_files"):
+            meta = _as_meta_dict(hit.get("metadata"))
+            key = str(hit.get("content"))
+            if meta.get("is_metadata") or key in seen or not library_names.hit_is_from(meta, named):
+                continue
+            seen.add(key)
+            found.append(hit)
+    return found[:k]
+
 
 async def _fetch_rag_context(
     query: str,
@@ -843,7 +921,16 @@ async def _fetch_rag_context(
                     log.warning("RAG search failed; continuing without context: %s", exc)
                     break
                 if resp.status == 200:
-                    hits = (await resp.json()).get("results", [])
+                    hits = _above_floor((await resp.json()).get("results", []), min_similarity, coll)
+                    if coll == "calibre_files" and (named := library_names.named_works(query)):
+                        hits = await _passages_from_named_works(
+                            client, rag_svc, user_id, named, hits, MAX_HITS_PER_COLL, min_similarity,
+                        )
+                        if not hits:
+                            note = library_names.not_indexed_note(named)
+                            rag_context += f"\n[{LIBRARY_NOT_INDEXED_HEADER}]\n{note}"
+                            total_chars += len(note)
+                            log.info("[RAG prefetch] named work(s) %s not in the indexed library", named)
                     if hits:
                         # For home devices, enrich with live state from the hub
                         if coll == HOME_DEVICES and creds:
@@ -1968,7 +2055,23 @@ def _speaker_line(creds: ResolvedCredentials | None) -> str:
     return f"Speaker: {user}{how}."
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None) -> str:
+_PERSONA_WARNED = False
+
+
+def _assistant_persona() -> str:
+    """The editable ``assistant_persona`` prompt (Settings), or "" with one warning per process."""
+    global _PERSONA_WARNED
+    try:
+        return load_prompt_sync(PROMPT_ASSISTANT_PERSONA).strip()
+    except ValueError:
+        if not _PERSONA_WARNED:
+            _PERSONA_WARNED = True
+            log.warning("[_single_turn_inference] setting %r is missing or empty; answering without the persona",
+                        PROMPT_ASSISTANT_PERSONA)
+        return ""
+
+
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None, persona: bool = False) -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
 
     The system message carries the knowledge map (``knowledge_map``): where every
@@ -2028,6 +2131,13 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             "it to Raven as a mission."
         )
     ws_chars = len(system) - before_workspace
+    if persona:
+        # Last on purpose: at the top of a ~20K-character system message the model
+        # followed the tool guide and ignored the character ("I don't have a favorite
+        # color"). Same text for every question, so the cached prefix still holds.
+        persona_text = _assistant_persona()
+        if persona_text:
+            system += f"\n\n{persona_text}"
     context_parts = [f"Current Date/Time: {now}", _speaker_line(creds)]
     if turn_note.strip():
         context_parts.append(turn_note.strip())
