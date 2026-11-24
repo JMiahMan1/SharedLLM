@@ -205,6 +205,32 @@ async def book_chapter_list(book_id: int, req: ChapterQuery):
     )
 
 
+class BookTextQuery(BaseModel):
+    library_path: str
+    max_chars: int = Field(default=20000, ge=500, le=200000)
+
+
+def text_payload(book: dict[str, Any], fmt: str, data: bytes, *, max_chars: int = 20000) -> dict[str, Any]:
+    """A whole book's text, cut at ``max_chars`` (the format with no shelf text, like PDF)."""
+    try:
+        text = book_chapters.read_book_text(data, fmt)
+    except book_chapters.ChapterError as exc:
+        raise HTTPException(status_code=422, detail=f"{book['title']}: {exc}") from exc
+    if not text.strip():
+        raise HTTPException(status_code=422, detail=f"{book['title']}: its {fmt} file has no extractable text "
+                            "(a scanned book needs OCR).")
+    total = len(text)
+    return {"book": _row(book), "format": fmt, "text": text[:max_chars], "total_chars": total,
+            "truncated": total > max_chars}
+
+
+@router.post("/books/{book_id}/text")
+async def book_text(book_id: int, req: BookTextQuery):
+    """A book's whole text from its EPUB, PDF or TXT file (PDF has no text on the shelf)."""
+    book, fmt, data = await _book_file(req.library_path, book_id)
+    return await asyncio.to_thread(text_payload, book, fmt, data, max_chars=req.max_chars)
+
+
 _NOISE = re.compile(
     r"\((?:[^)]*)\)|\[(?:[^\]]*)\]|\b(?:annotated|illustrated|unabridged|abridged|revised|updated|complete|"
     r"edition|ed\.|ebook|e-book|kindle|epub|pdf|\d+(?:st|nd|rd|th))\b",

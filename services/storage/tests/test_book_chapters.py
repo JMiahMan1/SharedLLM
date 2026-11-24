@@ -311,3 +311,32 @@ def test_the_route_returns_one_chapter_in_parts(monkeypatch):
 def test_a_format_without_a_chapter_reader_is_refused():
     with pytest.raises(ChapterError, match="MOBI"):
         book_chapters.read_book_chapters(b"x", "MOBI")
+
+
+# --- The whole text of a book the shelf has no text for (a PDF) ----------------------
+
+
+def test_a_pdfs_whole_text_is_its_pages_in_order():
+    text = book_chapters.read_book_text(outline_pdf(), "PDF")
+    assert text.index("Copyright page") < text.index("Chapter page 1") < text.index("Chapter five continues")
+
+
+def test_the_text_route_reads_a_pdf_and_cuts_it_honestly(monkeypatch):
+    from services.storage.main import app
+
+    _fake_file(monkeypatch, outline_pdf(), fmt="PDF")
+    client = TestClient(app)
+    whole = client.post("/calibre/books/7/text", json={"library_path": "/B"}, headers=H).json()
+    assert whole["format"] == "PDF" and "Chapter page 3" in whole["text"]
+    assert whole["truncated"] is False and whole["total_chars"] == len(whole["text"])
+    cut = library_api.text_payload(BOOK, "PDF", outline_pdf(), max_chars=20)
+    assert cut["text"] == whole["text"][:20]
+    assert cut["truncated"] is True and cut["total_chars"] == whole["total_chars"]
+
+
+def test_the_text_route_refuses_a_format_it_cannot_read(monkeypatch):
+    from services.storage.main import app
+
+    _fake_file(monkeypatch, b"x", fmt="MOBI")
+    resp = TestClient(app).post("/calibre/books/7/text", json={"library_path": "/B"}, headers=H)
+    assert resp.status_code == 422 and "No text reader" in resp.json()["detail"]
