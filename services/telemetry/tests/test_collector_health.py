@@ -196,3 +196,12 @@ def test_the_route_flags_a_phone_that_stopped_sending_texts(client, rc):
     got = client.get("/api/telemetry/device_health/kiddo", headers=HEADERS).json()
     assert got["staleness"]["comms"]["stale"] is True
     assert got["staleness"]["comms"]["sms_last_at"] == old
+
+
+def test_a_missing_bluetooth_permission_is_kept_and_reported():
+    """Without Nearby devices the phone cannot say which linked car a trip was in."""
+    from services.telemetry import collector_health as ch
+
+    report = ch.clean_report({"device_id": "dev-1", "permissions": {"bluetooth": False, "location": True}})
+    assert report["permissions"] == {"bluetooth": False, "location": True}
+    assert {"kind": "permission", "what": "bluetooth"} in ch.problems(report)

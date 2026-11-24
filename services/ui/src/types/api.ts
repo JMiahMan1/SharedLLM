@@ -2202,6 +2202,10 @@ export interface Trip {
   user_name: string;
   vehicle_id?: string;
   vehicle_name?: string;
+  /** Where the vehicle came from: the person's default, a linked Bluetooth device, or chosen by hand. */
+  vehicle_source?: 'default' | 'bluetooth' | 'manual';
+  /** The vehicle Bluetooth detected, kept when the owner chose another by hand (so it can be put back). */
+  bt_vehicle_id?: string;
   fuel_type?: string;
   mpg: number;
   cost_per_gallon: number;
@@ -2227,6 +2231,8 @@ export interface Trip {
 }
 
 export interface TripUpdatePayload {
+  /** Put back the vehicle Bluetooth detected, undoing a choice made by hand. */
+  vehicle_auto?: boolean;
   vehicle_id?: string;
   vehicle_name?: string;
   fuel_type?: string;

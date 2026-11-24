@@ -49,6 +49,9 @@ import {
 } from '../lib/wanderQueries';
 import { buildFamilyCards, groupByPlace, motionLabel, roomLabel, type FamilyMemberStatus, type MemberGroup, type Place } from '../lib/familyCards';
 import PlacesPanel from '../components/wander/PlacesPanel';
+import VehicleBluetoothPanel from '../components/wander/VehicleBluetoothPanel';
+import BluetoothDiagnostics from '../components/wander/BluetoothDiagnostics';
+import { vehicleSourceLabel } from '../lib/vehicleBluetooth';
 import toast from 'react-hot-toast';
 import { errorText } from '../lib/errorText';
 import {
@@ -407,6 +410,26 @@ const Wander = () => {
     }
   };
 
+  // Undo a vehicle chosen by hand: back to the one a linked car's Bluetooth detected.
+  const handleUseDetectedVehicle = async () => {
+    if (!editingTrip) return;
+    setIsSavingTrip(true);
+    try {
+      const updated = await api.updateTrip(editingTrip.id, { vehicle_auto: true });
+      queryClient.setQueryData<TripsResponse>(tripsQueryKey(), (prev) =>
+        prev
+          ? { ...prev, trips: prev.trips.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)) }
+          : prev,
+      );
+      toast.success(`Back to ${updated.vehicle_name ?? 'the detected car'}`);
+      setEditingTrip(null);
+    } catch (err: unknown) {
+      toast.error(errorText(err, 'Could not change the vehicle'));
+    } finally {
+      setIsSavingTrip(false);
+    }
+  };
+
   // Save Trip updates (vehicle, fuel, activity type, notes)
   const handleSaveTrip = async () => {
     if (!editingTrip) return;
@@ -682,6 +705,20 @@ const Wander = () => {
                         <Car size={14} className="text-purple-400 shrink-0" />
                         <span>{trip.vehicle_name || 'Assigned Vehicle'}</span>
                       </div>
+
+                      {/* How the vehicle was decided: a linked car's Bluetooth, or by hand */}
+                      {vehicleSourceLabel(trip.vehicle_source) && (
+                        <span
+                          data-testid="trip-vehicle-source"
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                            trip.vehicle_source === 'bluetooth'
+                              ? 'bg-sky-500/15 text-sky-200 border-sky-500/30'
+                              : 'bg-white/5 text-slate-300 border-white/10'
+                          }`}
+                        >
+                          {vehicleSourceLabel(trip.vehicle_source)}
+                        </span>
+                      )}
 
                       {/* Fuel Type Badge */}
                       <span
@@ -1025,6 +1062,15 @@ const Wander = () => {
           isAdmin={Boolean(user?.is_admin)}
           onSaved={() => void queryClient.invalidateQueries({ queryKey: geoZonesQueryKey() })}
         />
+
+        <VehicleBluetoothPanel
+          vehicles={vehiclesQuery.data?.vehicles ?? []}
+          currentUser={currentUsername}
+          isAdmin={Boolean(user?.is_admin)}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: vehiclesQueryKey() })}
+        />
+
+        {user?.is_admin && <BluetoothDiagnostics />}
       </div>
 
       {/* Aggregate Statistics Ribbon */}
@@ -1348,6 +1394,21 @@ const Wander = () => {
                 ))}
               </select>
             </div>
+            {editingTrip.vehicle_source === 'manual' && editingTrip.bt_vehicle_id && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-100" data-testid="trip-vehicle-detected">
+                <span>
+                  Bluetooth saw {vehicles.find((v) => v.id === editingTrip.bt_vehicle_id)?.name ?? 'a linked car'} on this trip.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleUseDetectedVehicle()}
+                  disabled={isSavingTrip}
+                  className="min-h-11 rounded-lg px-3 font-semibold text-sky-200 underline disabled:opacity-50"
+                >
+                  Use the detected car
+                </button>
+              </div>
+            )}
 
             {/* Vehicle Name input */}
             <div className="space-y-1.5">

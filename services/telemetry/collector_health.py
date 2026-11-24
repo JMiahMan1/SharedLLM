@@ -39,7 +39,9 @@ ARRIVALS_PREFIX = "tel:arrivals:"
 #: Most devices kept per person; the oldest report goes first.
 MAX_DEVICES = 10
 
-PERMISSIONS = ("read_sms", "read_call_log", "usage_access", "notification_listener", "location")
+#: ``bluetooth`` is Android 12's Nearby devices (BLUETOOTH_CONNECT): without it
+#: Wander cannot tell which linked vehicle a trip was in.
+PERMISSIONS = ("read_sms", "read_call_log", "usage_access", "notification_listener", "location", "bluetooth")
 WORKERS = ("comms_sync", "usage_sync", "photo_scan")
 #: ``listener`` is a comms run the notification listener started when a text or call came in.
 COLLECTORS = ("comms", "usage", "listener")

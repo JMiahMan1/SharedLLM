@@ -59,6 +59,7 @@ from services.geo import (
     place_reminders,
     safety,
     step_history,
+    vehicle_bluetooth,
     visits,
     workout_import,
 )
@@ -964,6 +965,7 @@ async def record_point(
     activity: str | None = None,
     device: str | None = None,
     status: dict | None = None,
+    bt: list[str] | None = None,
 ):
     r = await get_redis()
     if not r:
@@ -975,6 +977,8 @@ async def record_point(
     clean_id = entity_id.split(".")[-1].lower()
     if await _is_impossible_jump(r, clean_id, lat, lon, ts):
         return
+    # Which linked vehicle the phone was connected to, by hardware address.
+    vehicle_hint = await _vehicle_from_bluetooth(r, bt) if bt else None
     point = {
         "t": ts,
         "lat": lat,
@@ -985,6 +989,7 @@ async def record_point(
         "bat": battery,
         **({"act": activity} if activity else {}),
         **({"dev": device[:12]} if device else {}),
+        **({"veh": vehicle_hint} if vehicle_hint else {}),
         **(status or {}),
     }
     encoded = json.dumps(point)
@@ -998,7 +1003,7 @@ async def record_point(
             log.warning(f"[Geo] Failed to record point to Redis ({k}): {e}")
 
     try:
-        await process_trip_point(clean_id, lat, lon, speed, ts, accuracy, activity)
+        await process_trip_point(clean_id, lat, lon, speed, ts, accuracy, activity, vehicle_hint=vehicle_hint)
     except Exception as e:
         log.warning(f"[Geo] Failed to process trip point: {e}")
     # Arrivals and departures, off the upload path (HA zones, ETAs, pushes).
@@ -1778,6 +1783,10 @@ class LocationUpdate(BaseModel):
     charger_type: str | None = None
     next_alarm_ms: int | None = None
     next_alarm_package: str | None = None
+    #: The hardware addresses of linked vehicle Bluetooth devices the phone
+    #: was connected to when it took the fix (newer app builds only; see
+    #: vehicle_bluetooth). Never a name.
+    bt: list[str] | None = None
 
     def status(self) -> dict:
         return phone_status(self.charging, self.battery_state, self.charger_type, self.next_alarm_ms,
@@ -1819,6 +1828,7 @@ async def post_see(
         activity=update.activity,
         device=update.device,
         status=update.status(),
+        bt=update.bt,
     )
     await _save_phone_status(r_steps, entity_id, update.status(), update.timestamp)
 
@@ -1876,6 +1886,7 @@ async def post_record(
         activity=update.activity,
         device=update.device,
         status=update.status(),
+        bt=update.bt,
     )
     await _save_phone_status(r_steps, entity_id, update.status(), update.timestamp)
     return {"status": "ok", "entity_id": entity_id}
@@ -2419,6 +2430,42 @@ class VehicleAssignPayload(BaseModel):
     vehicle_id: str | None = None
 
 
+class VehicleBluetoothPayload(BaseModel):
+    """Link a Bluetooth device to a vehicle, by its hardware address.
+
+    ``kind`` is what the phone saw: ``classic`` (a paired head unit),
+    ``le_public`` or ``le_static``. ``name`` is shown only; it is never the key.
+    """
+    address: str
+    kind: str = vehicle_bluetooth.KIND_CLASSIC
+    name: str = ""
+    user: str = ""
+
+
+async def _all_vehicles(r) -> list[dict]:
+    out: list[dict] = []
+    for raw in (await r.hgetall("geo:vehicles") or {}).values():
+        try:
+            v = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(v, dict) and v.get("id"):
+            out.append(v)
+    return out
+
+
+async def _vehicle_from_bluetooth(r, addresses: list[str] | None) -> str | None:
+    """The vehicle whose linked device the phone was connected to, or None."""
+    reported = vehicle_bluetooth.clean_reported(addresses)
+    if not reported:
+        return None
+    try:
+        return vehicle_bluetooth.vehicle_for(vehicle_bluetooth.address_index(await _all_vehicles(r)), reported)
+    except Exception as e:
+        log.warning(f"[Geo] Could not read the vehicles for a Bluetooth match: {e}")
+        return None
+
+
 @app.get("/vehicles")
 async def get_vehicles():
     """List all user-configured vehicles (no mock data)."""
@@ -2448,8 +2495,70 @@ async def save_vehicle(
     r = await get_redis()
     if not r:
         raise HTTPException(status_code=503, detail="Redis unavailable")
-    await r.hset("geo:vehicles", vehicle.id, json.dumps(vehicle.model_dump()))
-    return {"status": "ok", "vehicle": vehicle.model_dump()}
+    saved = vehicle.model_dump()
+    # Bluetooth links are made and removed only through their own routes; an
+    # edit from the vehicle form (which knows nothing of them) keeps them.
+    raw = await r.hget("geo:vehicles", vehicle.id)
+    if raw:
+        with contextlib.suppress(TypeError, ValueError):
+            saved["bluetooth"] = vehicle_bluetooth.links_of(json.loads(raw))
+    await r.hset("geo:vehicles", vehicle.id, json.dumps(saved))
+    return {"status": "ok", "vehicle": saved}
+
+
+@app.post("/vehicles/{vehicle_id}/bluetooth")
+async def link_vehicle_bluetooth(
+    vehicle_id: str,
+    body: VehicleBluetoothPayload,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    """Link a Bluetooth device to a vehicle by its hardware address (409 when
+    another vehicle already has it, 422 when the address is not a stable one)."""
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    vehicles = await _all_vehicles(r)
+    vehicle = next((v for v in vehicles if v.get("id") == vehicle_id), None)
+    if vehicle is None:
+        raise HTTPException(status_code=404, detail="No such vehicle")
+    try:
+        addr = vehicle_bluetooth.normalise_address(body.address)
+        if vehicle_bluetooth.owner_of([v for v in vehicles if v.get("id") != vehicle_id], addr):
+            other = vehicle_bluetooth.owner_of(vehicles, addr) or {}
+            raise HTTPException(status_code=409,
+                                detail=f"That device is already linked to {other.get('name') or 'another vehicle'}")
+        updated = vehicle_bluetooth.add_link(vehicle, vehicles, body.address, body.kind, body.name,
+                                             body.user.split(".")[-1].lower())
+    except vehicle_bluetooth.LinkError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    await r.hset("geo:vehicles", vehicle_id, json.dumps(updated))
+    return {"status": "ok", "vehicle": updated}
+
+
+@app.delete("/vehicles/{vehicle_id}/bluetooth/{address}")
+async def unlink_vehicle_bluetooth(
+    vehicle_id: str,
+    address: str,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    raw = await r.hget("geo:vehicles", vehicle_id)
+    if not raw:
+        raise HTTPException(status_code=404, detail="No such vehicle")
+    try:
+        updated, removed = vehicle_bluetooth.remove_link(json.loads(raw), address)
+    except vehicle_bluetooth.LinkError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if not removed:
+        raise HTTPException(status_code=404, detail="That device is not linked to this vehicle")
+    await r.hset("geo:vehicles", vehicle_id, json.dumps(updated))
+    return {"status": "ok", "vehicle": updated}
 
 
 @app.delete("/vehicles/{vehicle_id}")
@@ -2507,6 +2616,8 @@ async def assign_vehicle(
 # ---------------------------------------------------------------------------
 
 class TripUpdatePayload(BaseModel):
+    #: True puts back the vehicle Bluetooth detected (undoing a manual choice).
+    vehicle_auto: bool | None = None
     vehicle_id: str | None = None
     vehicle_name: str | None = None
     fuel_type: str | None = None
@@ -3195,6 +3306,7 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
         "end_location": trip.get("end_location"),
         "vehicle_id": trip.get("vehicle_id"),
         "vehicle_name": trip.get("vehicle_name"),
+        "vehicle_source": trip.get("vehicle_source") or vehicle_bluetooth.SOURCE_DEFAULT,
         "fuel_type": trip.get("fuel_type", "gasoline"),
         "mpg": mpg,
         "cost_per_gallon": cpg,
@@ -3205,6 +3317,8 @@ async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -
         "updated_at": now_ts,
         "updated_by": None,
     }
+    if trip.get("bt_vehicle_id"):
+        completed["bt_vehicle_id"] = trip["bt_vehicle_id"]
     if road:
         completed["distance_source"] = "road"
         completed["road_match_confidence"] = round(road["confidence"], 2)
@@ -3425,13 +3539,34 @@ async def _estimate_speed_from_history(r, clean_user: str, lat: float, lon: floa
 DRIVING_TRIP_START_MPH = 5.0
 
 
+async def _bt_vote(r, trip: dict, vehicle_hint: str | None) -> dict:
+    """Count this fix's linked vehicle on the trip and settle the trip's vehicle.
+
+    A fix with no linked device connected changes nothing (the phone may be
+    a passenger's, or Bluetooth may be off): only a connection says anything."""
+    if not vehicle_hint:
+        return trip
+    vehicle_bluetooth.vote(trip, vehicle_hint)
+    try:
+        by_id = {v["id"]: v for v in await _all_vehicles(r)}
+    except Exception as e:
+        log.warning(f"[Geo] Could not read the vehicles to settle a trip's vehicle: {e}")
+        return trip
+    return vehicle_bluetooth.settle(trip, by_id)
+
+
 async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: float | None, timestamp: float,
-                             accuracy: float | None = None, activity: str | None = None):
+                             accuracy: float | None = None, activity: str | None = None,
+                             vehicle_hint: str | None = None):
     """Detect and record trips when speeds over 10 MPH are reached.
 
     ``speed_mps`` None means the fix had no speed (a network fix); one is then
     worked out from the previous fix where that can be trusted. A reported 0
-    from an older app means the same thing."""
+    from an older app means the same thing.
+
+    ``vehicle_hint`` is the vehicle whose linked Bluetooth device the phone was
+    connected to for this fix (vehicle_bluetooth); the trip takes the vehicle
+    seen on most of its fixes, unless its owner chose one by hand."""
     r = await get_redis()
     if not r:
         return
@@ -3506,8 +3641,11 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                 "fuel_type": veh.get("fuel_type", "gasoline"),
                 "mpg": float(veh.get("mpg", 25.0)),
                 "cost_per_gallon": float(veh.get("cost_per_gallon", 3.65)),
+                "vehicle_source": vehicle_bluetooth.SOURCE_DEFAULT,
                 "status": "in_progress",
             }
+            active_trip = await _bt_vote(r, active_trip, vehicle_hint)
+            veh = {"name": active_trip.get("vehicle_name")}
             await r.set(active_key, json.dumps(active_trip), ex=86400)
             log.info(f"[Geo] Started new trip for {clean_user} at {spd_mph} mph (Vehicle: {veh.get('name')})")
         else:
@@ -3548,6 +3686,7 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                     if prev_end.get("address"):
                         end_loc["address"] = prev_end["address"]
                     trip["end_location"] = end_loc
+                trip = await _bt_vote(r, trip, vehicle_hint)
                 await r.set(active_key, json.dumps(trip), ex=86400)
             except Exception as e:
                 log.warning(f"[Geo] Error updating active trip: {e}")
@@ -3587,6 +3726,7 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                     if prev_end.get("address"):
                         end_loc["address"] = prev_end["address"]
                     trip["end_location"] = end_loc
+                trip = await _bt_vote(r, trip, vehicle_hint)
                 await r.set(active_key, json.dumps(trip), ex=86400)
         except Exception as e:
             log.warning(f"[Geo] Error recording a stopped trip point: {e}")
@@ -3831,9 +3971,20 @@ async def update_trip(
         )
 
     # Allowed updates: vehicle, vehicle_name, fuel_type, mpg, cost_per_gallon, activity, notes
-    if update.vehicle_id is not None:
+    # A vehicle chosen by hand is never replaced by the Bluetooth match; the
+    # edit sheet sends the vehicle with every save, so only a change counts.
+    if update.vehicle_auto:
+        detected = trip.get("bt_vehicle_id")
+        raw_veh = await r.hget("geo:vehicles", detected) if detected else None
+        if not raw_veh:
+            raise HTTPException(status_code=409, detail="No vehicle was detected by Bluetooth on this trip")
+        vehicle_bluetooth.apply_vehicle(trip, json.loads(raw_veh), vehicle_bluetooth.SOURCE_BLUETOOTH)
+    elif (update.vehicle_id is not None and update.vehicle_id != trip.get("vehicle_id")) or (
+            update.vehicle_name is not None and update.vehicle_name != trip.get("vehicle_name")):
+        trip["vehicle_source"] = vehicle_bluetooth.SOURCE_MANUAL
+    if update.vehicle_id is not None and not update.vehicle_auto:
         trip["vehicle_id"] = update.vehicle_id
-    if update.vehicle_name is not None:
+    if update.vehicle_name is not None and not update.vehicle_auto:
         trip["vehicle_name"] = update.vehicle_name
     if update.fuel_type is not None:
         trip["fuel_type"] = update.fuel_type

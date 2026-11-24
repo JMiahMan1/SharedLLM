@@ -1,3 +1,4 @@
+import type { VehicleBtLink } from '../lib/vehicleBluetooth';
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { CollectorHealth } from '../lib/collectorHealth';
 import type {
@@ -2101,13 +2102,30 @@ export const api = {
   },
 
   // Life360 & Vehicle Telemetry
-  async getVehicles(): Promise<{ vehicles: Array<{ id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type: string; fuel_price_location?: string; fuel_price_source?: string; fuel_price_updated_at?: string }> }> {
+  async getVehicles(): Promise<{ vehicles: Array<{ id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type: string; fuel_price_location?: string; fuel_price_source?: string; fuel_price_updated_at?: string; bluetooth?: VehicleBtLink[] }> }> {
     const resp = await apiClient.get('/api/geo/vehicles');
     return resp.data;
   },
 
   async saveVehicle(vehicle: { id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type?: string; fuel_price_location?: string }): Promise<{ status: string; vehicle: Record<string, unknown> }> {
     const resp = await apiClient.post('/api/geo/vehicles', vehicle);
+    return resp.data;
+  },
+
+  /** Link a Bluetooth device to a vehicle by its hardware address (the name is display only). */
+  async linkVehicleBluetooth(vehicleId: string, link: { address: string; kind?: string | null; name?: string }): Promise<{ status: string; vehicle: { id: string; name: string; bluetooth?: VehicleBtLink[] } }> {
+    const resp = await apiClient.post(`/api/geo/vehicles/${encodeURIComponent(vehicleId)}/bluetooth`, {
+      address: link.address,
+      kind: link.kind ?? 'classic',
+      name: link.name ?? '',
+    });
+    return resp.data;
+  },
+
+  async unlinkVehicleBluetooth(vehicleId: string, address: string): Promise<{ status: string; vehicle: { id: string; name: string; bluetooth?: VehicleBtLink[] } }> {
+    const resp = await apiClient.delete(
+      `/api/geo/vehicles/${encodeURIComponent(vehicleId)}/bluetooth/${encodeURIComponent(address)}`,
+    );
     return resp.data;
   },
 
