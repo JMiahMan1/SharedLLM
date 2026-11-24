@@ -12402,7 +12402,8 @@ async def get_resources(request: Request, topic: str, q: str = ""):
         listing = {}
     passages: list[dict] = []
     if q.strip():
-        # Calibre books are indexed under the Nextcloud account that crawled them.
+        # Calibre books are indexed under the shared "default" owner, which every
+        # user's search includes; older crawls filed them under the crawling account.
         owners = list(dict.fromkeys([str(creds.get("nextcloud_user") or user).lower(), user]))
         for owner in owners:
             try:
@@ -12443,9 +12444,10 @@ async def get_storage_stats(request: Request):
 
         breakdown = base.get("breakdown", {})
         for k, v in extra.get("breakdown", {}).items():
-            if k.startswith("system_"):
-                # System-wide collections (stored under "default"): both
-                # answers already carry the same rows; adding them doubled them.
+            if k.startswith("system_") or k == "calibre_files":
+                # System-wide collections and the shared Calibre library (stored
+                # under "default"): both answers already carry the same rows;
+                # adding them doubled them.
                 continue
             base["total_chunks"] = base.get("total_chunks", 0) + v.get("chunks", 0)
             base["total_documents"] = base.get("total_documents", 0) + v.get("documents", 0)

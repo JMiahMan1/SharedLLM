@@ -755,9 +755,9 @@ def _hybrid_search(
             fused[doc_id] = vec_scores.get(doc_id, 0.0) + bm25_scores.get(doc_id, 0.0)
 
     ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)
+    # A keyword hit matched the whole query as a phrase, which is evidence enough.
+    phrase_hits = {doc_id for doc_id, _ in bm25_res}
     if min_similarity is not None:
-        # A keyword hit matched the whole query as a phrase, which is evidence enough.
-        phrase_hits = {doc_id for doc_id, _ in bm25_res}
         ranked = [
             (doc_id, score) for doc_id, score in ranked
             if doc_id in phrase_hits or similarities.get(doc_id, -1.0) >= min_similarity
@@ -791,6 +791,7 @@ def _hybrid_search(
                     metadata=meta,
                     score=score,
                     similarity=round(similarities[doc_id], 4) if doc_id in similarities else None,
+                    phrase_match=doc_id in phrase_hits,
                 )
             )
     # Honest reuse accounting:
@@ -1036,8 +1037,9 @@ async def get_stats(user_id: str = "default"):
 
         for name in collections:
             # Capabilities and Raven lessons are system-wide (stored under
-            # "default"), as /rag/learning lists them.
-            target_user = "default" if name in ("system_capabilities", "system_learnings") else user_id
+            # "default"), as /rag/learning lists them, and so is the family's
+            # Calibre library (storage indexes it under SHARED_LIBRARY_OWNER).
+            target_user = "default" if name in ("system_capabilities", "system_learnings", "calibre_files") else user_id
             rows = _conn().execute(
                 "SELECT metadata FROM rag_items WHERE collection_name = ? AND user_id = ?",
                 [name, target_user],
@@ -2079,6 +2081,24 @@ async def get_indexed_paths(user_id: str = "default", collection_name: str = "ne
     except Exception as e:
         log.error(f"Failed to fetch indexed paths: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.get("/rag/owners", dependencies=[Depends(require_internal)])
+async def get_collection_owners(collection_name: str):
+    """Every ``user_id`` holding rows in one collection, with its row count.
+
+    The storage indexer asks this after a whole-library Calibre crawl: the library
+    is shared and indexed under ``default``, and copies an older crawl filed under
+    one person's account (which only that person's searches could see) are purged
+    once the shared copy is complete.
+    """
+    collection_name = canonical_collection(collection_name) or collection_name
+    rows = _conn().execute(
+        "SELECT user_id, COUNT(*) AS n FROM rag_items WHERE collection_name = ? GROUP BY user_id",
+        [collection_name],
+    ).fetchall()
+    return {"status": "SUCCESS", "collection_name": collection_name,
+            "owners": {r["user_id"]: int(r["n"]) for r in rows}}
 
 
 @app.post("/rag/sync/files", dependencies=[Depends(require_internal)])
