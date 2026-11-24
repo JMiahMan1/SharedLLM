@@ -1363,6 +1363,14 @@ async def select_model_for_query(query: str) -> str:
     return await get_assistant_model()
 
 
+def _is_assistant_instruction(system: str) -> bool:
+    """Whether ``system`` is the assistant instruction, the one the household persona rides on."""
+    try:
+        return system == load_prompt_sync("assistant_system_instruction")
+    except ValueError:
+        return False
+
+
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
     q = (query or "").lower()
     if any(token in q for token in TTS_SIGNALS):
@@ -5043,6 +5051,9 @@ async def chat_handler(request: Request, background_tasks=None):
         # The system stays one of a few fixed texts, so the model server can keep it
         # warm; what belongs to this one request goes with the question (turn_note).
         "system": body.get("system") or default_sys,
+        # The household persona rides on the assistant instruction only: not on a
+        # caller's own system prompt, the code helper or the Raven protocols.
+        "persona": not body.get("system") and _is_assistant_instruction(default_sys),
         "turn_note": (
             ("" if body.get("system") else storage_directive.strip())
             + (_voice_context_note(voice_context) if voice_context else "")

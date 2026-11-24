@@ -114,6 +114,9 @@ def _search_finding(name, uri):
     return answer
 
 
+_real_resolve = media_handler.resolve_mass_entity
+
+
 def _patch_music(monkeypatch, calls, library=None, default=""):
     monkeypatch.setattr(media_handler, "MASS_CONFIG_ENTRY_ID", "entry-1")
     monkeypatch.setattr(media_handler, "resolve_mass_entity", AsyncMock(return_value="media_player.ma_den_satellite"))
@@ -213,6 +216,72 @@ async def test_a_satellite_speaker_is_not_swapped_for_the_rooms_tv(monkeypatch):
                            {}, [{"area_id": "den", "name": "Den", "aliases": []}])
     monkeypatch.setattr(media_handler, "_routing_index", AsyncMock(return_value=idx2))
     assert await media_handler.resolve_mass_entity(ctx, SPEAKER) == SPEAKER
+
+
+SAT_SPEAKER = "media_player.office_satellite_media_player"
+SAT_MA = "media_player.echo_dot_3_abc123"
+
+
+def _sat_index(with_ma: bool):
+    """The hub's view of a satellite that connected itself to Music Assistant over Sendspin.
+
+    HomeHub puts MA's universal player (named after the node, no IP or MAC) on the satellite's
+    ESPHome device; the hidden Sendspin protocol player gets no entity. A TV's MA player is in the room.
+    """
+    from services.execution.capability_index import CapabilityIndex
+
+    def cap(eid, integration, device):
+        return {"entity_id": eid, "domain": "media_player", "integration": integration, "platform": integration,
+                "area_id": "office", "device_id": device, "available": True, "abilities": ["play_media"],
+                "details": {}, "services": []}
+
+    caps = [cap(SAT_SPEAKER, "esphome", "dev_sat"), cap("media_player.office_tv_ma", "music_assistant", "dev_tv")]
+    if with_ma:
+        caps.append(cap(SAT_MA, "music_assistant", "dev_sat"))
+    states = [{"entity_id": SAT_SPEAKER, "state": "idle", "attributes": {"friendly_name": "Office Satellite"}},
+              {"entity_id": "media_player.office_tv_ma", "state": "off",
+               "attributes": {"friendly_name": "Office TV", "mass_player_type": "player", "active_queue": None}}]
+    if with_ma:
+        states.append({"entity_id": SAT_MA, "state": "idle",
+                       "attributes": {"friendly_name": "Echo Dot 3 abc123", "mass_player_type": "player",
+                                      "mass_player_id": "up0000000abc", "active_queue": None}})
+    return CapabilityIndex(caps, {}, [{"area_id": "office", "name": "Office", "aliases": []}]), states
+
+
+async def test_the_satellites_own_speaker_resolves_to_its_music_assistant_player(monkeypatch):
+    idx, states = _sat_index(with_ma=True)
+    monkeypatch.setattr(media_handler, "_routing_index", AsyncMock(return_value=idx))
+    monkeypatch.setattr(media_handler.ha_client, "get_states", AsyncMock(return_value=states))
+    ctx = type("C", (), {"ha_url": HA_URL, "ha_token": "t"})()
+    # The names differ ("Office Satellite" vs MA's "Echo Dot 3 abc123"): the shared device is the link.
+    assert await media_handler.resolve_mass_entity(ctx, SAT_SPEAKER) == SAT_MA
+
+
+async def test_music_on_a_satellite_with_its_music_assistant_player_plays_there(monkeypatch):
+    idx, states = _sat_index(with_ma=True)
+    calls = _Calls({})
+    _patch_music(monkeypatch, calls, library={"playlist": [{"name": "Made Up Mix", "uri": "library://playlist/3"}]})
+    monkeypatch.setattr(media_handler, "resolve_mass_entity", _real_resolve)
+    monkeypatch.setattr(media_handler, "_routing_index", AsyncMock(return_value=idx))
+    monkeypatch.setattr(media_handler.ha_client, "get_states", AsyncMock(return_value=states))
+    req = MediaPlayRequest(user_context=_ctx(), entity_id=SAT_SPEAKER, query=None, media_type="music")
+    result = await media_handler.play_music(req, SAT_SPEAKER, _ctx())
+    assert result.status == "SUCCESS"
+    assert [c[2] for c in calls.of("play_media")] == [SAT_MA]
+
+
+async def test_music_on_a_satellite_not_connected_to_music_assistant_says_so(monkeypatch):
+    idx, states = _sat_index(with_ma=False)
+    calls = _Calls({})
+    _patch_music(monkeypatch, calls, library={"playlist": [{"name": "Made Up Mix", "uri": "library://playlist/3"}]})
+    monkeypatch.setattr(media_handler, "resolve_mass_entity", _real_resolve)
+    monkeypatch.setattr(media_handler, "_routing_index", AsyncMock(return_value=idx))
+    monkeypatch.setattr(media_handler.ha_client, "get_states", AsyncMock(return_value=states))
+    req = MediaPlayRequest(user_context=_ctx(), entity_id=SAT_SPEAKER, query=None, media_type="music")
+    result = await media_handler.play_music(req, SAT_SPEAKER, _ctx())
+    assert result.status == "FAILURE"
+    assert result.message.startswith("Office Satellite is not connected to Music Assistant")
+    assert calls.of("play_media") == [] and calls.of("search") == []  # never the TV, never a raw 400
 
 
 # --------------------------------------------------------------------------- audiobooks
