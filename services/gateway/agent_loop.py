@@ -1323,13 +1323,20 @@ def _payload_signature_digest(payload: dict) -> str:
     Used as the signature tail for tools keyed by something other than the
     known path/command/query fields (e.g. WebReadRequest keyed by `url`).
     Volatile and per-call keys are dropped first so two calls that differ only
-    in them produce identical signatures.
+    in them produce identical signatures. A payload left with nothing (missing,
+    empty, or only volatile keys) has the empty tail, as it did before.
     """
     cleaned = {
         k: v
         for k, v in payload.items()
-        if k not in _SIG_VOLATILE_KEYS and not str(k).startswith("_")
+        if k not in _SIG_VOLATILE_KEYS
+        and not str(k).startswith("_")
+        and v not in (None, "", [], {})
     }
+    if not cleaned:
+        # Nothing identifies the call, so there is nothing to tell it apart by:
+        # keep the empty tail every such call had before the digest existed.
+        return ""
     canonical = json.dumps(cleaned, sort_keys=True, default=str)
     return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:12]
 

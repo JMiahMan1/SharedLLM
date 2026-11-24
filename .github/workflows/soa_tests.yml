@@ -17,7 +17,9 @@ on:
       - 'pytest.ini'
       - '.github/workflows/soa_tests.yml'
   pull_request:
-    branches: [ main, master ]
+    # microservices too: every change reaches it by pull request, and without this
+    # a test broken by one only showed on the push after the merge.
+    branches: [ main, master, microservices ]
     paths:
       - 'services/**'
       - '!services/ui/**'

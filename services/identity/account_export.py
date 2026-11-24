@@ -83,6 +83,9 @@ PROFILE_FIELDS = frozenset(
         "skylight_enabled",
         "git_url",
         "git_user",
+        # The book catalogue choices (on/off, order, Open Library contact email).
+        # The Google Books key is google_books_key_enc: a secret, never exported.
+        "book_metadata",
     }
 )
 
