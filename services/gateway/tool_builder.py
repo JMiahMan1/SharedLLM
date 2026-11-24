@@ -90,9 +90,10 @@ _TOOLS: tuple[_Tool, ...] = (
     _Tool(
         "CalibreRequest",
         "Browse, search and read books from the Calibre library "
-        "(list/search/get_book/fetch_text; read-only).",
+        "(list/search/get_book/chapters/fetch_text with a chapter; read-only).",
         ("search books", "find a book", "list books", "read the book",
-         "fetch book text", "book library", "calibre", "ebook"),
+         "fetch book text", "book library", "calibre", "ebook",
+         "book chapter"),
         3,
     ),
     _Tool(

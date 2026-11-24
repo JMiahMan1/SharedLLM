@@ -80,3 +80,13 @@ def test_tool_builder_advertises_it_so_it_is_never_scaffolded():
     names = {tool.name for tool in _TOOLS}
     assert "CalibreRequest" in names
     assert "calibrerequest" in ALLOWED_TOOLS
+
+
+def test_the_row_teaches_one_call_chapter_reading():
+    row = next(row for row in _RAVEN_TOOL_TABLE if row[0] == "CalibreRequest")
+    description, hint = row[5], row[6]
+    for field in ("chapter", "part", "query"):
+        assert f" {field}," in hint or f" {field}." in hint
+    assert "action=chapters" in description
+    assert "single call" in description and "discussion" in description
+    assert "part=2" in description
