@@ -304,6 +304,22 @@ async def _keep_take(redis, text: str, verdict: dict | None) -> None:
         log.warning("[voice] could not keep the take for teaching: %s", e)
 
 
+async def _keep_candidate(redis, text: str, verdict: dict) -> None:
+    """Keep an unrecognised but close command's signature for a few seconds, so the
+    gateway can offer it as a candidate sample when its satellite is assigned to
+    one person (identity decides; an admin approves). Never logged."""
+    if not voice_speaker.worth_offering(verdict):
+        return
+    key = voice_speaker.candidate_key(text)
+    take = voice_enroll.encode_take(verdict)
+    if not key or not take:
+        return
+    try:
+        await redis.set(key, take, ex=voice_speaker.TTL_SECONDS)
+    except Exception as e:  # a candidate is optional
+        log.warning("[voice] could not keep a candidate sample: %s", e)
+
+
 async def _connect_upstream():
     """(reader, writer) of the first speech-to-text server that answers, else None."""
     for i, upstream in enumerate(UPSTREAMS):
@@ -354,16 +370,19 @@ async def _handle(ha_reader, ha_writer, redis) -> None:
                 if teaching:
                     await _keep_take(redis, text, verdict)
                 key = voice_speaker.key(text)
-                if verdict and verdict.get("matched") and key:
+                if verdict and key and not verdict.get("nobody_enrolled") and not verdict.get("error"):
+                    # Matched or not, so the gateway can log the decision and the two best scores.
+                    matched = verdict.get("matched_username") if verdict.get("matched") else None
                     await redis.set(
                         key,
-                        voice_speaker.encode(verdict["matched_username"], verdict.get("score")),
+                        voice_speaker.encode(matched, verdict.get("score"), verdict),
                         ex=voice_speaker.TTL_SECONDS,
                     )
-                    if verdict.get("embedding"):
-                        task = asyncio.create_task(_learn(redis, verdict))
-                        _LEARNING_TASKS.add(task)
-                        task.add_done_callback(_LEARNING_TASKS.discard)
+                    await _keep_candidate(redis, text, verdict)
+                if verdict and verdict.get("matched") and key and verdict.get("embedding"):
+                    task = asyncio.create_task(_learn(redis, verdict))
+                    _LEARNING_TASKS.add(task)
+                    task.add_done_callback(_LEARNING_TASKS.discard)
             ha_writer.write(event.raw)
             await ha_writer.drain()
 

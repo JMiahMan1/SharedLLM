@@ -1,5 +1,6 @@
 # services/execution/main.py
 import asyncio
+import functools
 import base64
 import hashlib
 import logging
@@ -1221,7 +1222,8 @@ async def voice_signature(file: UploadFile = File(...), x_internal_secret: str =
 
     audio = await file.read(voiceprint.MAX_AUDIO_BYTES + 1)
     try:
-        return await asyncio.to_thread(voiceprint.embed, audio)
+        # Enrollment and the household's voice check: refuse noisy or clipped takes (voiceprint.check_quality).
+        return await asyncio.to_thread(functools.partial(voiceprint.embed, audio, enrollment=True))
     except voiceprint.VoiceprintError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
 

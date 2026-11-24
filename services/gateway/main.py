@@ -2461,13 +2461,18 @@ async def decompose_command_query(query: str) -> list[str]:
     parts = re.split(r'\s+(?:and|then)\s+', query, flags=re.IGNORECASE)
     return [p.strip() for p in parts if p.strip()]
 
-async def resolve_identity(body: dict) -> Any:
+async def resolve_identity(body: dict, *, voice_device_checked: bool = False) -> Any:
     from services.gateway.cache import get_cached_identity
 
     # No caller gets the administrator just by saying nothing. Callers that
     # mean the shared household account must ask for it explicitly; everyone
     # else resolves as anonymous unless they present a real identifier.
     payload = dict(body)
+    # A satellite names its assigned person only when the chat handler set it
+    # from an internal caller's voice context (apply_voice_identity); a client
+    # body that names one anywhere else is ignored.
+    if not voice_device_checked:
+        payload.pop("voice_device", None)
     if (
         "anonymous" not in payload
         and "household" not in payload
@@ -3535,8 +3540,11 @@ def _mission_requires_github_auth(query: str) -> bool:
     return any(sig in q for sig in _GITHUB_AUTH_SIGNALS)
 
 
-async def _recognised_speaker(query: str) -> str | None:
-    """Who said ``query`` at a voice satellite just now (services/common/voice_speaker)."""
+async def _speaker_record(query: str) -> dict | None:
+    """What speech to text heard for ``query`` at a voice satellite just now: who
+    (if anyone was recognised), the two best scores and the speech length
+    (services/common/voice_speaker). Used once: a second request with the same
+    words is not this one."""
     from services.common import voice_speaker
     from services.gateway.cache import get_redis
 
@@ -3544,12 +3552,97 @@ async def _recognised_speaker(query: str) -> str | None:
     if not key:
         return None
     try:
-        # Used once: a second request with the same words is not this one.
         raw = await asyncio.to_thread(get_redis().getdel, key)
     except Exception as e:  # recognition is optional
         log.warning(f"[ChatHandler] voice speaker lookup failed: {e}")
         return None
-    return voice_speaker.decode(raw)
+    return voice_speaker.decode_record(raw)
+
+
+async def _recognised_speaker(query: str) -> str | None:
+    """Who said ``query`` at a voice satellite just now (services/common/voice_speaker)."""
+    record = await _speaker_record(query)
+    return record.get("username") if record else None
+
+
+def apply_voice_identity(body: dict, record: dict | None, voice_context: dict | None) -> str | None:
+    """Name who a request is from, in the fixed order, for identity's resolve.
+
+    1. The speaker the voice identified (``voice_id``).
+    2. Else, at a voice satellite, the satellite itself (``voice_device``):
+       identity answers with the person an admin assigned it to, if any.
+    3. Else nothing: the request goes on as the household (the default user).
+
+    A client never names itself: ``voice_device`` is dropped from the body and
+    set only from an internal caller's voice context. An API key outranks all
+    of this (the caller leaves ``record`` None). Returns the identified speaker.
+    """
+    body.pop("voice_device", None)
+    if body.get("api_key"):
+        return None
+    speaker = record.get("username") if record else None
+    if speaker:
+        body["voice_id"] = speaker
+    elif voice_context and voice_context.get("satellite"):
+        body["voice_device"] = voice_context["satellite"]
+    return speaker
+
+
+def voice_decision(identified_by: str | None, user: str | None, satellite: str | None,
+                   record: dict | None) -> tuple[str, str]:
+    """How a spoken request was attributed, and the one log line that says so.
+
+    The order is fixed (docs/VOICE_RECOGNITION.md): the identified speaker, else the person
+    the satellite is assigned to, else the default user. The line carries the
+    two best scores and the speech length, never the signature, so accuracy can
+    be measured from the logs.
+    """
+    decision = {"voice": "identified", "device": "device-assigned"}.get(identified_by or "", "default")
+    record = record or {}
+    top = [c for c in record.get("top") or [] if isinstance(c, dict)]
+
+    def score(i: int) -> str:
+        return f"{top[i].get('username')} {top[i].get('score')}" if len(top) > i else "-"
+
+    speech = record.get("speech_seconds")
+    line = (
+        f"[VoiceDecision] decision={decision} user={user} satellite={satellite or '-'} "
+        f"top={score(0)} second={score(1)} threshold={record.get('threshold', '-')} "
+        f"margin={record.get('margin', '-')} speech={f'{speech}s' if speech is not None else '-'}"
+    )
+    return decision, line
+
+
+async def _offer_voice_candidate(query: str, satellite: str) -> None:
+    """Offer an unrecognised command heard at a satellite assigned to one person
+    as a candidate sample of that person's voice. Identity decides whether it
+    qualifies (and whose it would be, from the satellite's own assignment);
+    an admin approves it before it is ever used. Background work: never fatal."""
+    from services.common import voice_enroll, voice_speaker
+    from services.gateway.cache import get_redis
+
+    key = voice_speaker.candidate_key(query)
+    if not key:
+        return
+    try:
+        take = voice_enroll.decode_take(await asyncio.to_thread(get_redis().getdel, key))
+        if take is None:
+            return
+        resp = await get_http_client().post(
+            f"{IDENTITY_SVC}/api/voice/candidate",
+            json={"satellite": satellite, "embedding": take["embedding"],
+                  "speech_seconds": take.get("speech_seconds"), "model": take.get("model")},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        body = await resp.json(content_type=None)
+        if isinstance(body, dict):
+            log.info(f"[VoiceCandidate] {body.get('status')}: {body.get('reason') or 'waiting for an admin'}")
+    except Exception as e:
+        log.warning(f"[VoiceCandidate] not offered: {type(e).__name__}: {e}")
+
+
+_VOICE_CANDIDATE_TASKS: set[asyncio.Task] = set()
 
 
 #: Things a person says to refresh their own voice profile from a satellite.
@@ -3826,11 +3919,10 @@ async def _voice_teaching_reply(query: str, creds: ResolvedCredentials, satellit
         if owner is None:
             return "I couldn't check who this satellite belongs to just now. Try again in a moment."
         if not owner.get("username"):
-            if int(owner.get("owners") or 0) > 1:
+            if owner.get("known"):
                 return (
-                    f"This satellite is shared by {owner['owners']} people, so I can't tell whose voice to learn "
-                    "here. Assign it to just one person in Admin, Users and Devices, or record your samples "
-                    "in Settings, Vocal Signature."
+                    "This satellite is shared, so I can't tell whose voice to learn here. Assign it to one "
+                    "person in Admin, Users and Devices, or record your samples in Settings, Vocal Signature."
                 )
             return (
                 "This satellite isn't assigned to anyone, so I don't know whose voice to learn here. "
@@ -4373,11 +4465,8 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
     body.pop("rag_user", None)
     body.pop("anonymous", None)
     body.pop("household", None)
-    voice_speaker_name = None
-    if not body.get("api_key"):
-        voice_speaker_name = await _recognised_speaker(query)
-        if voice_speaker_name:
-            body["voice_id"] = voice_speaker_name
+    speaker_record = None if body.get("api_key") else await _speaker_record(query)
+    voice_speaker_name = apply_voice_identity(body, speaker_record, voice_context)
 
     # A kiosk or voice satellite has no personal API key. It may act as the
     # non-admin household, with the shared home credentials, but only when it
@@ -4386,7 +4475,7 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         body["household"] = True
 
     try:
-        creds_data = await resolve_identity(body)
+        creds_data = await resolve_identity(body, voice_device_checked=True)
         creds = ResolvedCredentials(**creds_data)
         # Everything this chat turn controls is Jarvis acting: only entities exposed to voice (exposure.py).
         creds.via = "assistant"
@@ -4397,6 +4486,13 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
             log.info(f"[ChatHandler] Answering as {user_id}, recognised by voice")
         if voice_context and voice_context.get("satellite"):
             creds.voice_satellite = voice_context["satellite"]
+            decision, line = voice_decision(creds.identified_by, user_id, voice_context["satellite"], speaker_record)
+            log.info(line)
+            voice_outcomes.set_identity(decision)
+            if decision == "device-assigned" and speaker_record and speaker_record.get("top"):
+                task = asyncio.create_task(_offer_voice_candidate(str(query), voice_context["satellite"]))
+                _VOICE_CANDIDATE_TASKS.add(task)
+                task.add_done_callback(_VOICE_CANDIDATE_TASKS.discard)
         if voice_context:
             # The voice the satellite should answer in: whoever it recognised,
             # else whoever the satellite is assigned to, else Jarvis's (None).

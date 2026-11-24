@@ -99,6 +99,7 @@ describe('Admin > People', () => {
       latency: { buckets: {}, p50_ms: 2000, p90_ms: 8000 },
       per_day: [{ day: '2026-11-23', total: 20, ok: 15, failed: 5 }, { day: '2026-11-24', total: 20, ok: 15, failed: 5 }],
       tools: [{ tool: 'set_oven', failures: 4, calls: 5 }], slow_hours: [{ hour: 7, slow: 3, total: 6 }],
+      identity: { identified: 6, 'device-assigned': 9, default: 0 },
     } } } });
     renderAt('/admin/people/kit');
     const card = await screen.findByTestId('admin-voice');
@@ -107,6 +108,10 @@ describe('Admin > People', () => {
     expect(card.textContent).toMatch(/Waited in line: 5/);
     expect(card.textContent).toMatch(/set_oven/);
     expect(card.textContent).toMatch(/07:00 \(3 of 6 slow\)/);
+    const identity = screen.getByTestId('admin-voice-identity');
+    expect(identity.textContent).toMatch(/Recognised by voice: 6/);
+    expect(identity.textContent).toMatch(/By their satellite: 9/);
+    expect(identity.textContent).not.toMatch(/default user/);
   });
 
   it('picks the first person when none is named', async () => {
