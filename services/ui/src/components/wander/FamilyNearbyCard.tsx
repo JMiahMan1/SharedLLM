@@ -4,18 +4,7 @@ import { Radio } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Proximity, { type ProximityDiagnostics } from '../../plugins/proximity';
 import { errorText } from '../../lib/errorText';
-
-/** One line on what Family nearby is doing on this device now. */
-export function nearbyStatusLine(d: ProximityDiagnostics): string {
-  if (!d.enabled) return 'Off on this device.';
-  if (!d.scanPermission) return 'Waiting for Nearby devices to be allowed for Jarvis.';
-  if (!d.bluetoothOn) return 'Bluetooth is off; it starts again when Bluetooth is on.';
-  if (!d.configured) return 'Getting the family key; this needs the internet once.';
-  if (d.advertising === 'unsupported') {
-    return 'On, listening only: this device cannot send the Bluetooth signal, so it sees family phones but they do not see it.';
-  }
-  return 'On. Family phones nearby are noticed without Wi-Fi or data.';
-}
+import { nearbyStatusLine } from '../../lib/proximity';
 
 /**
  * Wander's "Find family nearby" for this Android device. Turning it on is the

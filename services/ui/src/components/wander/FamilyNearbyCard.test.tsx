@@ -11,7 +11,8 @@ vi.mock('@capacitor/core', async (orig) => {
 const plugin = vi.hoisted(() => ({ getDiagnostics: vi.fn(), enable: vi.fn(), disable: vi.fn() }));
 vi.mock('../../plugins/proximity', () => ({ default: plugin }));
 
-import FamilyNearbyCard, { nearbyStatusLine } from './FamilyNearbyCard';
+import FamilyNearbyCard from './FamilyNearbyCard';
+import { nearbyStatusLine } from '../../lib/proximity';
 
 const base: ProximityDiagnostics = {
   enabled: false, scanPermission: false, advertisePermission: false, bluetoothOn: true, running: false,

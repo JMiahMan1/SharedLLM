@@ -3,6 +3,8 @@
  * who a trip was taken with. Bands, never metres.
  */
 
+import type { ProximityDiagnostics } from '../plugins/proximity';
+
 export type ProximityBand = 'next_to' | 'same_room' | 'nearby';
 
 export interface TripCompanion {
@@ -56,4 +58,16 @@ export function togetherLine(
 export function nearOf(near: NearPerson[] | undefined, userId: string): NearPerson | undefined {
   const id = userId.replace(/^(person|user)\./, '').toLowerCase();
   return near?.find((n) => n.user_id === id);
+}
+
+/** One line on what Family nearby is doing on this device now. */
+export function nearbyStatusLine(d: ProximityDiagnostics): string {
+  if (!d.enabled) return 'Off on this device.';
+  if (!d.scanPermission) return 'Waiting for Nearby devices to be allowed for Jarvis.';
+  if (!d.bluetoothOn) return 'Bluetooth is off; it starts again when Bluetooth is on.';
+  if (!d.configured) return 'Getting the family key; this needs the internet once.';
+  if (d.advertising === 'unsupported') {
+    return 'On, listening only: this device cannot send the Bluetooth signal, so it sees family phones but they do not see it.';
+  }
+  return 'On. Family phones nearby are noticed without Wi-Fi or data.';
 }
