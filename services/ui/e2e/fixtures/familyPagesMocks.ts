@@ -446,6 +446,12 @@ function memberAnswer(p: string, url: URL): unknown {
         detail: { direction: 'out', number: '+15555550102', body: `see you at practice ${LONG_URL}` } },
     ] };
   }
+  // Whether the phone is still collecting: the Calls & messages banner, with a long line on purpose.
+  if (p.startsWith('/api/guardian/collector-health/')) {
+    return { status: 'SUCCESS', devices: [{ device_id: 'jordan-phone', device_name: 'Pixel 7a', problems: [
+      { kind: 'permission', what: 'read_sms' }, { kind: 'permission', what: 'notification_listener' },
+    ] }], staleness: { comms: { stale: true, last_at: ago(30 * 60) }, usage: { stale: false } } };
+  }
   if (/^\/api\/family\/member\/[^/]+\/devices$/.test(p)) return MEMBER_DEVICES;
   return undefined;
 }

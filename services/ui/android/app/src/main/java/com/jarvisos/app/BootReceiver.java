@@ -38,6 +38,9 @@ public class BootReceiver extends BroadcastReceiver {
             StepSyncService.resumeIfEnabled(app);
             PushService.start(app);
             BleBeacon.ensure(app);
+            // The collecting workers, in case a sign-out cancelled them and the
+            // sign-in after it never put them back (BackgroundWork).
+            BackgroundWork.ensureScheduled(app);
         } catch (Exception e) {
             Log.w(TAG, "could not resume background work after " + a, e);
         }

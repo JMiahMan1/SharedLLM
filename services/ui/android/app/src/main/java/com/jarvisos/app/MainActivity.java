@@ -91,14 +91,12 @@ registerPlugin(CommsPlugin.class);
         maybeOpenPath(getIntent());
         // Signed in already: keep notifications flowing.
         PushService.start(this);
-        // Screen time keeps reporting while the app is closed (a no-op until
-        // usage access is on and someone is signed in).
-        UsageSyncWorker.schedule(this);
-        // Calls and texts the same way (a no-op without their permissions).
-        CommsSyncWorker.schedule(this);
-        // New photos and videos on a protected child's phone (a no-op until
-        // the media permission is on and a parent keeps scanning enabled).
-        PhotoScanWorker.schedule(this);
+        // Screen time, calls and texts, and new photos keep collecting while
+        // the app is closed (only when someone is signed in; BackgroundWork).
+        if (BackgroundWork.ensureScheduled(this)) {
+            // How collection is going on this phone, for the parents.
+            DeviceHealth.reportAsync(this);
+        }
         // New APKs install themselves while the app is closed (NativeUpdater).
         AppUpdateWorker.schedule(this);
     }

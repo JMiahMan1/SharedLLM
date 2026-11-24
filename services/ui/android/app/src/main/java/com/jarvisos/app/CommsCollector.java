@@ -59,12 +59,22 @@ final class CommsCollector {
         int calls = 0;
         int sms = 0;
         boolean ok = true;
+        // How this run went, for the parents' health report (CollectorStatus):
+        // a run that silently did nothing is what hid a stopped phone before.
+        String outcome = "ok";
+        String message;
+        Exception failure = null;
         WidgetApi.ensureCredentials(app);
         String key = WidgetApi.apiKey(app);
-        if (key != null && !key.isEmpty()) {
+        boolean callPerm = hasPerm(app, Manifest.permission.READ_CALL_LOG);
+        boolean smsPerm = hasPerm(app, Manifest.permission.READ_SMS);
+        if (key == null || key.isEmpty()) {
+            outcome = "signed_out";
+            message = "Not signed in on this phone";
+        } else {
             try {
-                if (hasPerm(app, Manifest.permission.READ_CALL_LOG)) calls = sendCalls(app);
-                if (hasPerm(app, Manifest.permission.READ_SMS)) {
+                if (callPerm) calls = sendCalls(app);
+                if (smsPerm) {
                     sms = sendSms(app);
                     sms += sendMms(app);
                     // After the store is read, so a text that is there is not
@@ -75,11 +85,26 @@ final class CommsCollector {
                 // Offline or a server error: the cursor stays on the first
                 // row not taken, and the next run starts there.
                 ok = false;
+                outcome = "upload_failed";
+                failure = e;
                 Log.w(TAG, "comms upload stopped: " + e.getMessage());
             }
+            if (ok && !callPerm && !smsPerm) outcome = "no_permission";
+            // WidgetApi.problem words the failure (never the response body or a row).
+            if (failure != null) {
+                message = "Upload stopped: " + WidgetApi.problem(failure);
+            } else if ("no_permission".equals(outcome)) {
+                message = "Call log and SMS permissions are off";
+            } else {
+                message = calls + " calls, " + sms + " texts sent";
+            }
         }
+        // Signed out or without either permission nothing is collected: that
+        // counts as stopped, so the parents see why.
+        CollectorStatus.record(app, "comms", "ok".equals(outcome), outcome, message);
         try {
             out.put("ok", ok);
+            out.put("outcome", outcome);
             out.put("calls", calls);
             out.put("sms", sms);
         } catch (Exception ignored) {

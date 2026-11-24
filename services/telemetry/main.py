@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse
 
 from services.common import jarvis_use, notice_links
 from services.common.secrets import secret_matches
-from services.telemetry import app_catalog, guardian, llm, notices, push, spotify_sync, store
+from services.telemetry import app_catalog, collector_health, guardian, llm, notices, push, spotify_sync, store
 from services.telemetry.alpaca import is_busy
 from services.telemetry.config import (
     BUSY_DEFER_SECONDS,
@@ -777,7 +777,41 @@ def create_app():
         }
         rc = _redis()
         merged = await store.merge_usage(rc, user, entry)
+        await collector_health.note_arrival(rc, user, collector_health.USAGE_KIND)
         return {"status": "SUCCESS", "usage": merged}
+
+    @application.post("/api/telemetry/device_health")
+    async def record_device_health(body: dict = Body(...), _: bool = Depends(require_internal)):
+        """A phone's own word on whether it is still collecting (the gateway
+        names the signed-in person): permissions, scheduled workers and each
+        collector's last run. Only the allow-listed states are kept."""
+        user = str(body.get("user") or "").strip().lower()
+        if not user:
+            raise HTTPException(status_code=422, detail="user required")
+        try:
+            report = collector_health.clean_report(body)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        rc = _redis()
+        stored = await collector_health.save_report(rc, user, report)
+        return {"status": "SUCCESS", "device": stored}
+
+    @application.get("/api/telemetry/device_health/{user}")
+    async def get_device_health(user: str, _: bool = Depends(require_internal)):
+        """Every device's latest health report with what is wrong on it, and
+        the server's own staleness check (works for phones too old to report)."""
+        rc = _redis()
+        user = user.strip().lower()
+        devices = []
+        for report in await collector_health.list_reports(rc, user):
+            devices.append({**report, "problems": collector_health.problems(report)})
+        seen = collector_health.last_seen(
+            await rc.hgetall(f"{collector_health.ARRIVALS_PREFIX}{user}"),
+            await store.list_activity(rc, user, store.ACTIVITY_MAX),
+            await store.get_usage(rc, user, 7),
+        )
+        return {"status": "SUCCESS", "user": user, "devices": devices,
+                "staleness": collector_health.staleness(seen)}
 
     @application.get("/api/telemetry/usage/{user}")
     async def get_usage_days(
