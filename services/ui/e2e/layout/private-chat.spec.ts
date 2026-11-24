@@ -7,6 +7,7 @@ import { screenFindings, settle, shot, quietHotReload, type Allowed } from '../f
 import JSZip from 'jszip';
 import { deriveKey, encryptBytes, encryptVideo, makeVerifier, openMessage, openRecord, randomBytes, sealMessage, sealRecord, toBase64, PBKDF2_ITERATIONS, type PrivatePayload } from '../../src/lib/privateChatCrypto';
 import { fakeJpeg } from '../../src/test/fakes/fakeJpeg';
+import { fakeGif } from '../../src/test/fakes/fakeGif';
 import { TINY_WEBM_BASE64 } from '../fixtures/tinyVideo';
 
 const expect = baseExpect.configure({ timeout: 20_000 });
@@ -1164,6 +1165,108 @@ test.describe('private chat on every form factor', () => {
     expect(await page.evaluate((data) => window.__jarvisKeyboardMedia!({ mime: 'image/gif', data }), GIF.toString('base64'))).toBe(false);
     await expect(page.getByText('GIFs and stickers can only be sent in a chat message.')).toBeVisible();
     expect(server.uploads).toHaveLength(1);
+    done(run);
+  });
+
+  test('an animated GIF pauses on its frame, stays paused through a lock, a reload and the viewer, and plays in a new session', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    // Two frames a fifth of a second each: red, then blue.
+    const moving = Buffer.from(fakeGif(160, 100, [[220, 38, 38], [37, 99, 235]], 20));
+    const blobId = 'cd'.repeat(16);
+    server.blobs[blobId] = Buffer.from(await encryptBytes(key, new Uint8Array(moving)));
+    server.messages.push({ id: 2, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 120,
+      message_type: 'comment', message: await sealMessage(key, { t: 'image', blob: blobId, mime: 'image/gif', name: 'dance.gif' }) });
+    const blobReads: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes(`/blobs/${blobId}`)) blobReads.push(req.url());
+    });
+    const run = await open(page, server);
+    const unlockChat = async () => {
+      await page.getByRole('button', { name: /Private chat/ }).first().click();
+      await unlockWith(page, PASSWORD);
+      await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+    };
+    await unlockChat();
+    const feed = page.getByTestId('private-feed');
+    const toggle = feed.getByRole('button', { name: 'Pause animation' });
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    const box = (await toggle.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    await expect(feed.getByTestId('private-picture')).toBeVisible();
+    await check(page, info, run, 'private gif playing', page.getByTestId('chat-thread'), await overPanel(page, /^private gif playing$/));
+
+    // Paused: the frame on screen is drawn on a canvas and stays put; nothing is asked of the server.
+    const reads = blobReads.length;
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    const still = feed.getByTestId('animation-still');
+    await expect(still).toBeVisible();
+    await expect(feed.getByTestId('private-picture')).toBeHidden();
+    const pixel = () => still.evaluate((c: HTMLCanvasElement) => Array.from(c.getContext('2d')!.getImageData(80, 50, 1, 1).data.slice(0, 3)));
+    const frozen = await pixel();
+    expect([[220, 38, 38], [37, 99, 235]].some((rgb) => rgb.every((v, i) => Math.abs(v - frozen[i]) < 12))).toBe(true);
+    await page.waitForTimeout(700);
+    expect(await pixel()).toEqual(frozen);
+    expect(blobReads.length).toBe(reads);
+    await check(page, info, run, 'private gif paused', page.getByTestId('chat-thread'), await overPanel(page, /^private gif paused$/));
+
+    // The keyboard works it too.
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await page.keyboard.press('Space');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+    // Tapping the picture still opens the viewer, which shows it paused too, with its own control.
+    await feed.getByRole('button', { name: 'View picture' }).click();
+    const viewer = page.getByRole('dialog', { name: 'dance.gif' });
+    await expect(viewer).toBeVisible();
+    await expect(viewer.getByRole('button', { name: 'Pause animation' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(viewer.getByTestId('animation-still')).toBeVisible();
+    await check(page, info, run, 'private gif viewer paused', viewer);
+    await viewer.getByRole('button', { name: 'Close picture' }).click();
+    await expect(viewer).toHaveCount(0);
+
+    // Locked and opened again: decrypted again into a new object URL, still paused (the choice is the picture's, not the URL's).
+    const firstUrl = await feed.getByTestId('private-picture').getAttribute('src');
+    await page.getByTestId('private-lock-now').click();
+    await expect(page.getByTestId('private-lock')).toBeVisible();
+    await unlockWith(page, PASSWORD);
+    await expect(feed.getByTestId('animation-still')).toBeVisible();
+    await expect(feed.getByRole('button', { name: 'Pause animation' })).toHaveAttribute('aria-pressed', 'true');
+    expect(await feed.getByTestId('private-picture').getAttribute('src')).not.toBe(firstUrl);
+    // Nothing about the picture is stored: one id and one word.
+    const stored = await page.evaluate(() => window.sessionStorage.getItem('jarvis_animated_paused_v1'));
+    expect(JSON.parse(stored!)).toEqual({ [`private:${TOKEN}:${blobId}`]: 'paused' });
+
+    // A reload in the same session: still paused.
+    await page.reload();
+    await expect(page.getByText('Camping trip planning').first()).toBeVisible();
+    await unlockChat();
+    await expect(feed.getByRole('button', { name: 'Pause animation' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(feed.getByTestId('animation-still')).toBeVisible();
+
+    // A new session plays again.
+    await page.evaluate(() => window.sessionStorage.clear());
+    await page.reload();
+    await expect(page.getByText('Camping trip planning').first()).toBeVisible();
+    await unlockChat();
+    await expect(feed.getByRole('button', { name: 'Pause animation' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(feed.getByTestId('animation-still')).toHaveCount(0);
+
+    // Asking for reduced motion starts it paused, until play is pressed this session.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.evaluate(() => window.sessionStorage.clear());
+    await page.reload();
+    await expect(page.getByText('Camping trip planning').first()).toBeVisible();
+    await unlockChat();
+    const reduced = feed.getByRole('button', { name: 'Pause animation' });
+    await expect(reduced).toHaveAttribute('aria-pressed', 'true');
+    await reduced.click();
+    await expect(reduced).toHaveAttribute('aria-pressed', 'false');
+    await expect(feed.getByTestId('private-picture')).toBeVisible();
     done(run);
   });
 

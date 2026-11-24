@@ -122,6 +122,9 @@ function finish(run: Run) {
 }
 
 test.describe('the abuse.ch key in Accounts & Integrations', () => {
+  // The Admin dialog audits every integration's fieldset (Google Books joined it): ~50 s on a small phone.
+  test.describe.configure({ timeout: 90_000 });
+
   test('a person without their own key uses the household key, and can add their own', async ({ page }, info) => {
     const run = await mockServer(page, person(7, 'kim'), [person(1, 'default', { is_system_default: true, is_admin: true,
       saved_credentials: ['malwarebazaar_key'], abuse_ch_status: 'own' })]);

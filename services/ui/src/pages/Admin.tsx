@@ -147,6 +147,7 @@ type UserFormState = {
   mass_url: string;
   mass_token: string;
   malwarebazaar_key: string;
+  google_books_key: string;
 };
 
 const emptyUserForm: UserFormState = {
@@ -172,6 +173,7 @@ const emptyUserForm: UserFormState = {
   mass_url: '',
   mass_token: '',
   malwarebazaar_key: '',
+  google_books_key: '',
 };
 
 const toUserForm = (user?: UserProfile | null): UserFormState => ({
@@ -197,6 +199,7 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   mass_url: String(user?.mass_url ?? ''),
   mass_token: '',
   malwarebazaar_key: '',
+  google_books_key: '',
 });
 
 const NO_SERVICE_DEFAULTS = { urls: {} as Record<string, string | null>, source: {} as Record<string, string> };
