@@ -1,8 +1,8 @@
 """Gateway routes for family phones near each other: always the signed-in person."""
-from services.gateway.tests.test_vehicle_bluetooth_routes import _patch_geo, as_user  # noqa: F401
 from fastapi.testclient import TestClient
 
 from services.gateway.main import app
+from services.gateway.tests.test_vehicle_bluetooth_routes import _patch_geo, as_user  # noqa: F401
 
 
 def test_sightings_are_filed_under_the_signed_in_person(monkeypatch, as_user):  # noqa: F811
