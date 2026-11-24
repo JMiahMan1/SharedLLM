@@ -578,6 +578,17 @@ class WakeModelCache:
     def _paths(self, model_id: str) -> tuple[str, str]:
         return (os.path.join(self.directory, f"{model_id}.json"), os.path.join(self.directory, f"{model_id}.tflite"))
 
+    def _digest_path(self, model_id: str) -> str:
+        return os.path.join(self.directory, f"{model_id}.sha256")
+
+    def forget(self, model_id: str) -> None:
+        """Drop a cached model (the Echo refused it): the next ``get`` downloads it again."""
+        if not MODEL_ID.match(model_id):
+            return
+        for path in (*self._paths(model_id), self._digest_path(model_id)):
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(path)
+
     async def _fetch(self, url: str) -> bytes:
         import aiohttp
 
@@ -623,9 +634,14 @@ class WakeModelCache:
                 manifest = await asyncio.to_thread(_read, jpath)
                 model = await asyncio.to_thread(_read, mpath)
                 validate_manifest(model_id, manifest)
-                if is_tflite(model) and len(model) <= MODEL_MAX_BYTES:
+                # Only a model recorded as downloaded whole: a truncated file keeps the TFL3 header, so the
+                # header alone proves nothing (a cut-off hey_mycroft passed it and the Echo refused it).
+                digest_path = self._digest_path(model_id)
+                recorded = (await asyncio.to_thread(_read, digest_path)).decode().strip() \
+                    if os.path.isfile(digest_path) else ""
+                if recorded and recorded == hashlib.sha256(model).hexdigest() and is_tflite(model):
                     return manifest, model
-                log.warning("hassmic: the cached wake word model %s is not a whole model; downloading it again",
+                log.warning("hassmic: the cached wake word model %s is not one recorded whole; downloading it again",
                             model_id)
             manifest = await self._fetch(f"{self.base_url}/{model_id}.json")
             validate_manifest(model_id, manifest)
@@ -636,6 +652,8 @@ class WakeModelCache:
             os.makedirs(self.directory, exist_ok=True)
             await asyncio.to_thread(self._write, mpath, model)
             await asyncio.to_thread(self._write, jpath, manifest)
+            await asyncio.to_thread(self._write, self._digest_path(model_id),
+                                    hashlib.sha256(model).hexdigest().encode())
             log.info("hassmic: downloaded wake word model %s (%d bytes)", model_id, len(model))
             return manifest, model
 
@@ -1170,8 +1188,13 @@ class HassmicManager:
                     continue
                 manifest, model = await self._cache().get(model_id)
                 body = str(len(manifest)).encode() + b"\n" + manifest + model
-                doc = await web.json("POST", f"/api/mww/add/{model_id}", body, timeout=UPLOAD_TIMEOUT_S)
+                try:
+                    doc = await web.json("POST", f"/api/mww/add/{model_id}", body, timeout=UPLOAD_TIMEOUT_S)
+                except HassmicError:
+                    self._cache().forget(model_id)  # whatever it refused is not kept for the next try
+                    raise
                 if not (isinstance(doc, dict) and doc.get("ok")):
+                    self._cache().forget(model_id)
                     raise HassmicError(f"the Echo did not take wake word model {model_id}")
                 added.append(model_id)
                 self.log.info("hassmic %s: installed wake word model %s", self.name, model_id)
