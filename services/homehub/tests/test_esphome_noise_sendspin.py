@@ -366,16 +366,18 @@ async def test_sendspin_info_reports_the_address_and_hides_the_token_by_default(
     assert "error" not in admin and admin.get("error") is None
 
 
-async def test_pairing_registers_the_satellite_and_never_returns_the_token():
+async def test_pairing_is_automatic_sends_no_command_and_never_returns_the_token():
+    # Music Assistant 2.10 has no "pair" command (it answered "Invalid command"); it pairs
+    # through HomeHub's sendspin/* WebSocket commands by itself.
     hub, _entry, conn = sendspin_hub()
 
     out = await mas.pair_sendspin_device(hub, "sat1")
 
-    assert out["ok"] is True and out["paired"] is True
+    assert out["ok"] is True and out["automatic"] is True and out["manual_pairing_required"] is False
     assert "error" not in out and out.get("error") is None
     assert out["sendspin_address"] == "192.0.2.60:28928"
-    assert conn.sent == [(mas.SENDSPIN_PAIR_COMMAND,
-                          {"address": "192.0.2.60:28928", "token": PAIRING_TOKEN})]
+    assert "by itself" in out["message"]
+    assert conn.sent == []
     assert PAIRING_TOKEN not in str(out)
 
 
@@ -422,7 +424,7 @@ async def test_a_missing_device_is_a_404_and_a_missing_token_explains_why():
     assert "not published" in (out["error"] or "").lower()
 
     paired = await mas.pair_sendspin_device(hub, "sat1")
-    assert paired["ok"] is False and paired["paired"] is False and paired["manual_pairing_required"] is True
+    assert paired["ok"] is False and paired["paired"] is False and paired["manual_pairing_required"] is False
     assert "not published" in (paired["error"] or "").lower()
     assert conn.sent == []
 
