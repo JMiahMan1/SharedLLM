@@ -30,17 +30,17 @@ export default function BluetoothDiagnostics() {
   const [vehicle, setVehicle] = useState<VehicleBtDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setVehicle(await VehicleBluetooth.getDiagnostics());
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not read this phone');
-    }
+  const load = useCallback(() => {
+    VehicleBluetooth.getDiagnostics()
+      .then((v) => {
+        setVehicle(v);
+        setError(null);
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not read this phone'));
   }, []);
 
   useEffect(() => {
-    if (android) void load();
+    if (android) load();
   }, [android, load]);
 
   if (!android) return null;
@@ -72,7 +72,7 @@ export default function BluetoothDiagnostics() {
             </dl>
           </section>
         )}
-        <button type="button" onClick={() => void load()} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-purple-300 hover:bg-white/10">
+        <button type="button" onClick={load} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-purple-300 hover:bg-white/10">
           <RefreshCw size={13} /> Refresh
         </button>
       </div>
