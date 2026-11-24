@@ -93,6 +93,22 @@ describe('Admin > People', () => {
     expect(screen.getByTestId('profile-card-garden')).toBeTruthy();
   });
 
+  it('shows how requests went: failures, waits, the tools that failed and the slow hours', async () => {
+    vi.mocked(api.getAdminPersonStats).mockResolvedValue({ ...STATS, sections: { ...STATS.sections, voice: { state: 'ok', data: {
+      days: 30, total: 40, outcomes: { ok: 30, timeout: 4, offline: 2, tool_failure: 4, queued: 5 },
+      latency: { buckets: {}, p50_ms: 2000, p90_ms: 8000 },
+      per_day: [{ day: '2026-11-23', total: 20, ok: 15, failed: 5 }, { day: '2026-11-24', total: 20, ok: 15, failed: 5 }],
+      tools: [{ tool: 'set_oven', failures: 4, calls: 5 }], slow_hours: [{ hour: 7, slow: 3, total: 6 }],
+    } } } });
+    renderAt('/admin/people/kit');
+    const card = await screen.findByTestId('admin-voice');
+    expect(card.textContent).toMatch(/10 \(25%\)/);
+    expect(card.textContent).toMatch(/Fell back: AI offline: 2/);
+    expect(card.textContent).toMatch(/Waited in line: 5/);
+    expect(card.textContent).toMatch(/set_oven/);
+    expect(card.textContent).toMatch(/07:00 \(3 of 6 slow\)/);
+  });
+
   it('picks the first person when none is named', async () => {
     renderAt('/admin/people');
     await screen.findByTestId('admin-person-stats');

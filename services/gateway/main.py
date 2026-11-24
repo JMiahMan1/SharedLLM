@@ -121,6 +121,7 @@ from services.gateway import (
     recipe_images,
     room_presence,
     todo_routes,
+    voice_outcomes,
     weather_routes,
 )
 from services.gateway import beloved as beloved_routes
@@ -473,6 +474,7 @@ def _offline_chat_reply(model: str, is_openai: bool, *, voice: bool, user: str |
     """The answer to a question that needs the local AI while it is known to be offline:
     at once, in plain words, 503. Typed chat is promised a notice when it is back."""
     exc = local_ai.LLM.unavailable()
+    voice_outcomes.note_outcome("offline")
     body = local_ai.offline_body(exc, voice=voice)
     if not voice:
         local_ai.remember_waiting(user)
@@ -4249,6 +4251,25 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
+    """Answer one request to Jarvis, and count how it went for the admin page
+    (voice_outcomes: counts and timings only, written off this path)."""
+    record = voice_outcomes.begin("chat")  # "voice" once the handler sees a satellite's room
+    try:
+        response = await _chat_handler_impl(request, background_tasks)
+    except HTTPException as exc:
+        if exc.status_code >= 500:
+            voice_outcomes.finish(record, "timeout" if exc.status_code == 504 else "error")
+        raise
+    except TimeoutError:
+        voice_outcomes.finish(record, "timeout")
+        raise
+    except Exception:
+        voice_outcomes.finish(record, "error")
+        raise
+    return voice_outcomes.finish_response(record, response)
+
+
+async def _chat_handler_impl(request: Request, background_tasks=None):
     log.info("Chat handler entered")
     client = get_http_client()
     # 1. Resolve Identity
@@ -4269,6 +4290,10 @@ async def chat_handler(request: Request, background_tasks=None):
             return JSONResponse(status_code=401, content={"error": {"message": msg, "type": "unauthorized"}})
         return JSONResponse(status_code=401, content={"error": msg})
     voice_context = _voice_context_from(request, body)
+    if voice_context:
+        record = voice_outcomes.current()
+        if record is not None:
+            record.source = "voice"
 
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -4366,6 +4391,7 @@ async def chat_handler(request: Request, background_tasks=None):
         # Everything this chat turn controls is Jarvis acting: only entities exposed to voice (exposure.py).
         creds.via = "assistant"
         user_id = creds.user
+        voice_outcomes.set_user(user_id)
         if voice_speaker_name and creds.user == voice_speaker_name:
             creds.identified_by = "voice"
             log.info(f"[ChatHandler] Answering as {user_id}, recognised by voice")
@@ -5195,6 +5221,10 @@ async def chat_handler(request: Request, background_tasks=None):
         # streamed (speech_stream.py), and the end of the stream says what is left to say.
         "speech_stream": speech_stream,
     }
+    # How this request goes is counted when its job ends (voice_outcomes).
+    carried = voice_outcomes.defer()
+    if carried:
+        job_payload["_outcome"] = carried
 
     assert job_queue is not None, "Job queue not initialized"
     job_id = await job_queue.enqueue_job(user_id, job_payload)

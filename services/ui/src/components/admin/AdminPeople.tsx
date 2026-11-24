@@ -152,13 +152,13 @@ function Kv({ label, value }: { label: string; value: ReactNode }) {
 }
 
 const OUTCOME_WORDS: Record<string, string> = {
-  ok: 'Answered', timeout: 'Timed out', error: 'Failed', tool_failure: 'A tool failed', fallback: 'Fell back', queued: 'Waited in line',
+  ok: 'Answered', timeout: 'Timed out', error: 'Failed', tool_failure: 'A tool failed', offline: 'Fell back: AI offline', queued: 'Waited in line',
 };
 
 function VoiceCard({ section }: { section: Section<AdminVoice | null> }) {
   const { error, data } = sectionState(section);
   const total = data?.total ?? 0;
-  const failed = data ? (data.outcomes.timeout ?? 0) + (data.outcomes.error ?? 0) + (data.outcomes.tool_failure ?? 0) : 0;
+  const failed = data ? (data.outcomes.timeout ?? 0) + (data.outcomes.error ?? 0) + (data.outcomes.tool_failure ?? 0) + (data.outcomes.offline ?? 0) : 0;
   return (
     <MemberCard title="Requests to Jarvis" icon={Mic} tone="text-purple-300" testId="admin-voice" wide error={error}
       empty={!error && (!data || !total) ? 'No requests recorded yet.' : null}
@@ -173,7 +173,7 @@ function VoiceCard({ section }: { section: Section<AdminVoice | null> }) {
           </div>
           <ul className="flex flex-wrap gap-1.5 text-[11px]">
             {Object.entries(data.outcomes).filter(([, n]) => n > 0).map(([k, n]) => (
-              <li key={k} className={`rounded-full border px-2 py-0.5 ${k === 'ok' ? 'border-emerald-400/30 text-emerald-200' : 'border-amber-400/30 text-amber-200'}`}>
+              <li key={k} className={`rounded-full border px-2 py-0.5 ${k === 'ok' ? 'border-emerald-400/30 text-emerald-200' : k === 'queued' ? 'border-sky-400/30 text-sky-200' : 'border-amber-400/30 text-amber-200'}`}>
                 {OUTCOME_WORDS[k] ?? k}: {n}
               </li>
             ))}

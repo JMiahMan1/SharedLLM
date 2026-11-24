@@ -507,9 +507,22 @@ async def sharing_state(username: str) -> dict:
 # --------------------------------------------------------------------------- the admin page
 
 
-def _flags(profile_cards: dict[str, dict], usage: Any, screen: Any) -> list[dict]:
+#: Share of a person's requests that may fail before the admin page flags it.
+VOICE_FAILURE_FLAG = float(os.getenv("PROFILE_STATS_VOICE_FAILURE_FLAG", "0.1"))
+
+
+def _flags(profile_cards: dict[str, dict], usage: Any, screen: Any, voice: Any = None) -> list[dict]:
     """Plain trend signals for the admin: what changed, said once."""
     flags: list[dict] = []
+    if isinstance(voice, dict) and _int(voice.get("total")) >= 10:
+        outcomes = voice.get("outcomes") or {}
+        failed = sum(_int(outcomes.get(k)) for k in ("timeout", "error", "tool_failure", "offline"))
+        total = _int(voice.get("total"))
+        if failed / total >= VOICE_FAILURE_FLAG:
+            worst = (voice.get("tools") or [{}])[0].get("tool")
+            flags.append({"area": "jarvis", "level": "fix",
+                          "text": f"{round(failed * 100 / total)}% of requests to Jarvis did not go through"
+                                  + (f" (most often {worst})." if worst else ".")})
     bible = (profile_cards.get("bible") or {}).get("data") or {}
     if bible and not bible.get("streak_current") and _int(bible.get("streak_longest")) >= 3:
         flags.append({"area": "bible", "level": "watch",
@@ -617,7 +630,8 @@ async def build_admin(subject: str) -> dict:
     return {
         "username": subject,
         "profile": profile,
-        "flags": _flags(by_area, usage if usage_ok else None, screen if screen_ok else None),
+        "flags": _flags(by_area, usage if usage_ok else None, screen if screen_ok else None,
+                        got["voice"][1] if got["voice"][0] else None),
         "sections": {
             "usage": section("usage", lambda v: {k: v.get(k) for k in ("devices", "features", "capability_gaps", "conversations",
                                                                         "events", "app_opens_per_day")} if isinstance(v, dict) else {}),

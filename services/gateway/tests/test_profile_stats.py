@@ -102,6 +102,11 @@ def wired(monkeypatch):
     monkeypatch.setattr(gateway_main, "_arcade_url", lambda: "http://arcade.test")
     monkeypatch.setattr(ps, "http_get", http_get)
     monkeypatch.setattr(ps, "SOURCE_TIMEOUT_S", 0.5)
+
+    async def no_outcomes(subject):
+        return None
+
+    monkeypatch.setattr(ps, "voice_outcomes", no_outcomes)
     return {"client": TestClient(app, headers={"Authorization": "Bearer key"}), "who": who,
             "answers": answers, "calls": calls}
 
@@ -272,3 +277,30 @@ def test_nothing_on_these_pages_reads_the_private_chat():
     source = inspect.getsource(ps)
     assert "private_chat" not in source
     assert "PRIVATE_CHAT" not in source
+
+
+def test_the_admin_page_shows_request_outcomes_and_flags_a_high_failure_rate(wired, monkeypatch):
+    wired["who"].update(user="pat", is_admin=True)
+
+    async def outcomes(subject):
+        assert subject == "kit"
+        return {"days": 30, "total": 40, "outcomes": {"ok": 30, "timeout": 6, "tool_failure": 4},
+                "latency": {"buckets": {}, "p50_ms": 2000, "p90_ms": 8000}, "per_day": [],
+                "tools": [{"tool": "set_oven", "failures": 4, "calls": 5}], "slow_hours": []}
+
+    monkeypatch.setattr(ps, "voice_outcomes", outcomes)
+    body = wired["client"].get("/api/profile/admin/kit").json()
+    assert body["sections"]["voice"]["data"]["total"] == 40
+    assert any("25% of requests to Jarvis did not go through (most often set_oven)" in f["text"] for f in body["flags"])
+
+
+def test_nothing_recorded_yet_is_an_empty_voice_section(wired, monkeypatch):
+    wired["who"].update(user="pat", is_admin=True)
+
+    async def none(subject):
+        return None
+
+    monkeypatch.setattr(ps, "voice_outcomes", none)
+    body = wired["client"].get("/api/profile/admin/kit").json()
+    assert body["sections"]["voice"] == {"state": "ok", "data": None}
+    assert not any("requests to Jarvis" in f["text"] for f in body["flags"])
