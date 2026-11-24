@@ -135,6 +135,9 @@ def _bounded(key: str, default: float, lo: float, hi: float, cast=float):
 RAG_PREFETCH_MAX_CHARS = _bounded("RAG_PREFETCH_MAX_CHARS", 1500, 0, 20000, int)
 #: The same for a spoken question: every token read is time the person stands waiting.
 RAG_PREFETCH_VOICE_MAX_CHARS = _bounded("RAG_PREFETCH_VOICE_MAX_CHARS", 800, 0, 20000, int)
+#: Characters of a book chapter the gateway reads for a question that names one
+#: ("chapter 4 of <Title> by <Author>"), fetched before the model runs.
+CHAPTER_PREFETCH_MAX_CHARS = _bounded("CHAPTER_PREFETCH_MAX_CHARS", 24000, 1000, 100000, int)
 #: Hits pre-fetched per collection.
 RAG_PREFETCH_K = _bounded("RAG_PREFETCH_K", 3, 1, 3, int)
 #: Cosine floor for a pre-fetched hit. Measured with nomic-embed-text-v1.5 on household
