@@ -732,8 +732,15 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("CalibreRequest", SVC_EXECUTION, "POST", "/execute/calibre", False,
      "Calibre library, as its librarian: list or search the shelf, fetch one "
      "book's metadata or text, list tags, books by tag, audit for copies and "
-     "gaps; add/remove tags (admins). No delete action exists.",
-     "payload fields: action, query, book_id, path, limit, max_chars, tag, untagged, add_tags, remove_tags."),
+     "gaps; add/remove tags (admins). action=chapters lists a book's chapters "
+     "(the author's numbering; front matter is not counted). action=fetch_text "
+     "with query (title and/or author, e.g. 'Wild at Heart John Eldredge') and "
+     "chapter (4, 'four' or a title) finds the book AND returns that one "
+     "chapter in a single call, no search first: use it to read a chapter "
+     "aloud, summarise it, or make discussion or study questions. A long "
+     "chapter comes in parts ('part 1 of 3'); ask for the next with part=2. "
+     "If two books match, it names both: ask which. No delete action exists.",
+     "payload fields: action, query, book_id, path, chapter, part, limit, max_chars, tag, untagged, add_tags, remove_tags."),
     ("LLMInfoRequest", SVC_EXECUTION, "POST", "/execute/llm/info", False,
      "LLM backend info: loaded models, VRAM, Ollama state.",
      "payload fields: (none required)."),
@@ -1288,7 +1295,7 @@ FRESHNESS: dict[str, Freshness] = {
         household_public=True, tags=("bible",),
     ),
     "CalibreRequest": Freshness(
-        reads={"list": DAILY, "search": DAILY, "get_book": STATIC, "fetch_text": STATIC,
+        reads={"list": DAILY, "search": DAILY, "get_book": STATIC, "chapters": STATIC, "fetch_text": STATIC,
                "tags": DAILY, "by_tag": DAILY, "audit": DAILY},
         tags=("library",),
     ),

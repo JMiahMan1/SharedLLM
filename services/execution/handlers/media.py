@@ -244,6 +244,28 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
     # No MA variant found, return original (may still work for non-MA players)
     return original_entity
 
+async def _not_on_music_assistant(ctx, entity_id: str) -> ExecutionResult | None:
+    """A plain answer when ``entity_id`` has no Music Assistant player, instead of the hub's 400.
+
+    Only with the hub's capability index, which says which integration a player belongs to: a voice
+    satellite's own speaker (an ESPHome media_player) plays music only through the Music Assistant
+    player on its device, which exists once the satellite has connected to Music Assistant.
+    """
+    idx = await _routing_index(ctx.ha_url, ctx.ha_token, "Music Assistant player check")
+    if idx is None or entity_id not in idx or idx.integration(entity_id) == "music_assistant":
+        return None
+    states = await ha_client.get_states(ctx.ha_url, ctx.ha_token) or []
+    name = next((str((s.get("attributes") or {}).get("friendly_name") or "") for s in states
+                 if s.get("entity_id") == entity_id), "") or entity_id
+    log.info(f"[media/play] {entity_id} has no Music Assistant player; not asking for music there")
+    return ExecutionResult(
+        status="FAILURE", service="media_play",
+        message=f"{name} is not connected to Music Assistant, so I can't play music on it. "
+                "Once it shows up as a player in Music Assistant, ask again, or name another speaker.",
+        detail={"route": "none", "reason": "no_music_assistant_player", "entity_id": entity_id},
+    )
+
+
 def _plain_name(name: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).split())
 
@@ -365,6 +387,10 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx, correct
 
     mass_entity = await resolve_mass_entity(ctx, entity_id)
     log.info(f"[media/play] play_music configuration: entity_id={entity_id}, mass_entity={mass_entity}, mass_entry={mass_entry}, is_samsung={is_samsung}")
+    if mass_entity == entity_id and not is_samsung:
+        not_on_ma = await _not_on_music_assistant(ctx, entity_id)
+        if not_on_ma:
+            return not_on_ma
 
     if req.query:
         # Check if the query is already a direct Music Assistant URI

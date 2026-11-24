@@ -264,6 +264,9 @@ BLB_BASE_URL = os.getenv("BLB_BASE_URL")
 # rather than guessing a shelf, because a wrong guess reports itself as an
 # empty library and reads like "we have no Bibles".
 CALIBRE_LIBRARY_PATH = os.getenv("CALIBRE_LIBRARY_PATH")
+# Characters of one chapter returned by CalibreRequest fetch_text with a chapter;
+# a longer chapter comes back in numbered parts.
+CALIBRE_CHAPTER_MAX_CHARS = int(os.getenv("CALIBRE_CHAPTER_MAX_CHARS") or 60000)
 BIBLE_DEVOTIONAL_DIR = os.getenv("BIBLE_DEVOTIONAL_DIR")
 # The translation whose verses are embedded for meaning search. Unset: the
 # installed translation whose wording is most modern (see bible/meaning.py).

@@ -234,7 +234,9 @@ async def test_sync_adds_music_assistant_players_the_driver_found(env):
     entry.state, entry.reason = "loaded", None
     hub.drivers["ma1"] = SimpleNamespace(players={
         "up000000000001": {"player_id": "up000000000001", "display_name": "Kitchen speaker",
-                           "device_info": {"manufacturer": "Example", "model": "Speaker"}}})
+                           "device_info": {"manufacturer": "Example", "model": "Speaker"}},
+        # The hidden Sendspin leg of a universal player: never an entity of its own.
+        "Ip_000000000001": {"player_id": "Ip_000000000001", "type": "protocol", "name": "Kitchen speaker"}})
     out = await hardware.sync_entities(rt, "ma1")
     assert out["entities"] == ["media_player.kitchen_speaker"]
     ent = hub.entities["media_player.kitchen_speaker"]

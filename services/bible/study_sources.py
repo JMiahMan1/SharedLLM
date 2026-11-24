@@ -40,6 +40,10 @@ MAX_LIBRARY_PASSAGES = 4
 MAX_LIBRARY_CHARACTERS = 900
 MAX_WEB_RESULTS = 6
 LIBRARY_TIMEOUT = 15.0
+#: The cosine floor a library passage must clear, the gateway pre-fetch's
+#: (RAG_PREFETCH_MIN_SIMILARITY): without it the nearest passages of whatever
+#: book the library holds were offered as commentary on any verse.
+LIBRARY_MIN_SIMILARITY = 0.53
 WEB_TIMEOUT = 15.0
 SUGGEST_TIMEOUT = 60.0
 
@@ -135,7 +139,7 @@ async def _library(rag_url: str, headers: dict, user: str, reference: str, quest
     if not rag_url:
         return []
     body = {"user_id": user, "query": f"{reference} {question}"[:400], "collection_name": "calibre_files",
-            "k": MAX_LIBRARY_PASSAGES}
+            "k": MAX_LIBRARY_PASSAGES, "min_similarity": LIBRARY_MIN_SIMILARITY}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=LIBRARY_TIMEOUT)) as s, \
                 s.post(f"{rag_url.rstrip('/')}/rag/search", json=body, headers=headers) as resp:

@@ -1234,7 +1234,9 @@ class BibleRequest(BaseRequest):
 class CalibreRequest(BaseRequest):
     """The family's Calibre library, for Jarvis as its librarian.
 
-    Reads: list, search, get_book, fetch_text, tags (every tag and its count),
+    Reads: list, search, get_book, chapters (a book's chapters from its own
+    contents), fetch_text (the whole book, or one chapter with ``chapter``,
+    long chapters in ``part``s), tags (every tag and its count),
     by_tag (the books with one tag, or untagged ones), audit (copies, other
     editions, books with no file or no readable text, untagged books).
 
@@ -1246,13 +1248,23 @@ class CalibreRequest(BaseRequest):
     """
 
     user_context: UserContext
-    action: Literal["list", "search", "get_book", "fetch_text", "tags", "by_tag", "audit", "tag"]
-    query: str | None = Field(None, description="Words from a title, author or tag; required for action=search")
+    action: Literal["list", "search", "get_book", "chapters", "fetch_text", "tags", "by_tag", "audit", "tag"]
+    query: str | None = Field(
+        None,
+        description="Words from a title, author or tag; required for action=search. For chapters and "
+        "fetch_text, the book's title and/or author (e.g. 'Wild at Heart John Eldredge') in place of book_id",
+    )
+    chapter: str | int | None = Field(
+        None,
+        description="fetch_text: read only this chapter, by number (4, 'four', 'IV') or title; the "
+        "author's numbering, front matter not counted",
+    )
+    part: int = Field(1, ge=1, le=1000, description="fetch_text with chapter: which part of a long chapter (1 first)")
     tag: str | None = Field(None, description="The tag for action=by_tag (e.g. fasting); omit with untagged=true")
     untagged: bool = Field(False, description="action=by_tag: list books with no tags at all")
     add_tags: list[str] = Field(default_factory=list, max_length=20, description="action=tag: tags to add to book_id")
     remove_tags: list[str] = Field(default_factory=list, max_length=20, description="action=tag: tags to remove from book_id")
-    book_id: int | None = Field(None, description="Calibre book id; preferred locator for get_book and fetch_text")
+    book_id: int | None = Field(None, description="Calibre book id; preferred locator for get_book, chapters and fetch_text")
     path: str | None = Field(None, description="Shelf path locator (ends in ' (<id>).txt'); alternative to book_id")
     limit: int = Field(20, ge=1, le=100, description="Max books returned by list and search")
     max_chars: int = Field(20000, ge=500, le=100000, description="Characters of text returned by fetch_text before honest truncation")

@@ -429,3 +429,142 @@ async def test_gone_entities_are_only_players_music_assistant_no_longer_lists():
                                         "button.study_speaker_favorite_current_song"}
     made["c"].connected = False
     assert drv.gone_entities() == {}
+
+
+
+# -- a satellite that connects itself to Music Assistant (Sendspin) -----------------------------------
+# The live shape (MA 2.10.9): the universal player and its hidden Sendspin protocol player share the
+# satellite's name and report neither MAC nor IP. Names here are made up.
+SAT_UP = "up0000000abc"
+SAT_PROTO = "Ip_0000000abc"
+SAT_INFO = {"model": "Echo Dot 3 (hassmic)", "manufacturer": "Amazon", "mac_address": None, "ip_address": None}
+
+
+def sat_players(name="Echo Dot 3 abc123"):
+    return [player(SAT_UP, name, provider="universal_player", type="player", device_info=dict(SAT_INFO),
+                   output_protocols=[{"output_protocol_id": SAT_PROTO, "protocol_domain": "sendspin"}]),
+            player(SAT_PROTO, name, provider="sendspin", type="protocol", device_info=dict(SAT_INFO),
+                   active_source=SAT_UP)]
+
+
+def add_esphome_node(hub, dev_id, node, *, name=None, host="10.0.0.21", entry_id=None):
+    """An ESPHome node's entry, device and media_player, as the ESPHome integration registers them."""
+    from services.homehub.core import ConfigEntry, DeviceEntry, EntityEntry
+
+    entry = ConfigEntry(entry_id=entry_id or f"esphome_{dev_id}", domain="esphome", title=node,
+                        data={"host": host, "port": 6053, "device_name": node})
+    hub.config_entries[entry.entry_id] = entry
+    hub.devices[dev_id] = DeviceEntry(id=dev_id, name=name or node, area_id="office",
+                                      config_entries=[entry.entry_id], manufacturer="Espressif",
+                                      model="hassmic")
+    eid = f"media_player.{dev_id}_media_player"
+    hub.entities[eid] = EntityEntry(entity_id=eid, unique_id=f"{dev_id}-media_player", platform="esphome",
+                                    config_entry_id=entry.entry_id, device_id=dev_id)
+    return hub.devices[dev_id]
+
+
+def build_sat(players):
+    """A Music Assistant entry with no players registered yet, listing ``players``."""
+    hub, entry = make_hub("music_assistant", {"url": "http://ma.example.test:8095", "token": TOKEN})
+    del hub.devices["dev1"]
+    drv = MusicAssistantDriver(hub, entry)
+    made = {}
+
+    def factory(*a):
+        conn = FakeConn(*a)
+        conn.players, conn.queues = players, []
+        made["c"] = conn
+        return conn
+    drv.connection_factory = factory
+    hub.drivers[entry.entry_id] = drv
+    return hub, drv, made
+
+
+def ma_entities(hub, drv):
+    return {e.unique_id: e for e in hub.entities.values() if e.config_entry_id == drv.entry.entry_id}
+
+
+async def test_a_satellites_universal_player_joins_its_esphome_device_by_name():
+    hub, drv, _ = build_sat(sat_players())
+    node = add_esphome_node(hub, "dev_sat", "echo-dot-3-abc123", name="Office Satellite")
+    await drv.async_setup()
+    ents = ma_entities(hub, drv)
+    assert set(ents) == {SAT_UP}  # the hidden Sendspin protocol player gets no entity
+    ent = ents[SAT_UP]
+    assert ent.device_id == "dev_sat"
+    assert drv.entry.entry_id in node.config_entries
+    st = hub.states.get(ent.entity_id)
+    assert st.attributes["mass_player_id"] == SAT_UP and st.attributes["mass_player_type"] == "player"
+    # The node's own maker and model stay: MA's guess about the hardware does not replace them.
+    assert (node.manufacturer, node.model) == ("Espressif", "hassmic")
+    assert len(hub.devices) == 1
+
+
+async def test_a_player_whose_name_fits_two_esphome_devices_links_to_neither():
+    hub, drv, _ = build_sat(sat_players())
+    add_esphome_node(hub, "dev_a", "echo-dot-3-abc123", host="10.0.0.21")
+    add_esphome_node(hub, "dev_b", "Echo Dot 3 ABC123", host="10.0.0.22")
+    await drv.async_setup()
+    ent = ma_entities(hub, drv)[SAT_UP]
+    assert ent.device_id not in ("dev_a", "dev_b")
+    own = hub.devices[ent.device_id]
+    assert own.config_entries == [drv.entry.entry_id] and ["music_assistant", SAT_UP] in own.identifiers
+
+
+async def test_a_player_with_no_esphome_namesake_gets_a_device_of_its_own():
+    hub, drv, _ = build_sat([player("up0000000def", "Kitchen Speaker", type="player")])
+    add_esphome_node(hub, "dev_sat", "echo-dot-3-abc123")
+    await drv.async_setup()
+    ent = ma_entities(hub, drv)["up0000000def"]
+    assert ent.device_id != "dev_sat"
+    assert hub.devices[ent.device_id].name == "Kitchen Speaker"
+
+
+async def test_a_player_links_by_ip_before_name():
+    players = sat_players()
+    players[0]["device_info"] = {**SAT_INFO, "ip_address": "10.0.0.31"}
+    hub, drv, _ = build_sat(players)
+    add_esphome_node(hub, "dev_by_name", "echo-dot-3-abc123", host="10.0.0.30")
+    add_esphome_node(hub, "dev_by_ip", "office-node", host="10.0.0.31")
+    await drv.async_setup()
+    assert ma_entities(hub, drv)[SAT_UP].device_id == "dev_by_ip"
+
+
+async def test_a_player_ma_adds_later_gets_its_entity_and_moves_onto_the_node_once_seen():
+    hub, drv, made = build_sat([])
+    await drv.async_setup()
+    assert ma_entities(hub, drv) == {}
+    up, proto = sat_players()
+    made["c"].on_event({"event": "player_added", "object_id": SAT_PROTO, "data": proto})
+    assert ma_entities(hub, drv) == {}
+    made["c"].on_event({"event": "player_added", "object_id": SAT_UP, "data": up})
+    ent = ma_entities(hub, drv)[SAT_UP]
+    assert hub.states.get(ent.entity_id).state == "idle"
+    own = ent.device_id
+    # The ESPHome node is adopted afterwards: the next change of the player's info links it.
+    add_esphome_node(hub, "dev_sat", "echo-dot-3-abc123")
+    made["c"].on_event({"event": "player_updated", "object_id": SAT_UP,
+                        "data": {**up, "device_info": {**SAT_INFO, "software_version": "2.0"}}})
+    assert ent.device_id == "dev_sat" and own != "dev_sat"
+    # Unavailable in MA is unavailable here.
+    made["c"].on_event({"event": "player_updated", "object_id": SAT_UP, "data": {**up, "available": False}})
+    assert hub.states.get(ent.entity_id).state == "unavailable"
+
+
+async def test_player_updated_with_unchanged_info_does_no_registry_work(monkeypatch):
+    hub, drv, made = build_sat(sat_players())
+    add_esphome_node(hub, "dev_sat", "echo-dot-3-abc123")
+    await drv.async_setup()
+    ent = ma_entities(hub, drv)[SAT_UP]
+    calls = []
+    monkeypatch.setattr(drv, "_player_device", lambda *a, **k: calls.append(a))
+    saves = []
+    monkeypatch.setattr(hub, "_save", lambda *a, **k: saves.append(a))
+    up = sat_players()[0]
+    for vol in (10, 20, 30):
+        made["c"].on_event({"event": "player_updated", "object_id": SAT_UP, "data": {**up, "volume_level": vol}})
+    assert hub.states.get(ent.entity_id).attributes["volume_level"] == 0.3
+    await drv.async_poll()  # the 15 s poll relists every player: no registry work either
+    assert calls == [] and [s for s in saves if s[0] in ("device", "entity")] == []
+    made["c"].on_event({"event": "player_updated", "object_id": SAT_UP, "data": {**up, "name": "Renamed"}})
+    assert len(calls) == 1
