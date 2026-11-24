@@ -880,3 +880,37 @@ async def test_a_cut_off_model_with_a_good_header_is_not_trusted_from_the_cache(
     assert again == whole and len(fetched) == 2
     cache.forget("hey_test")  # the Echo refused it: gone, downloaded next time
     assert not (cache_dir / "hey_test.tflite").exists() and not (cache_dir / "hey_test.sha256").exists()
+
+
+async def test_a_gzipped_model_download_is_not_mistaken_for_a_short_one(tmp_path):
+    """Live: GitHub sent hey_mycroft.json gzipped (264 bytes on the wire, 390 decoded)."""
+    import gzip
+
+    from aiohttp import web
+
+    model = bytes(4) + b"TFL3" + bytes(range(256)) * 100
+    manifest = json.dumps({"type": "micro", "wake_word": "Hey Test", "model": "hey_test.tflite", "version": 2,
+                           "micro": {"probability_cutoff": 0.9, "sliding_window_size": 5,
+                                     "feature_step_size": 10}}).encode()
+    seen_encodings = []
+
+    async def handler(request):
+        seen_encodings.append(request.headers.get("Accept-Encoding"))
+        body = manifest if request.match_info["name"].endswith(".json") else model
+        packed = gzip.compress(body)
+        return web.Response(body=packed, headers={"Content-Encoding": "gzip", "Content-Length": str(len(packed))})
+
+    app = web.Application()
+    app.router.add_get("/m/{name}", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    try:
+        got_manifest, got_model = await hassmic.WakeModelCache(
+            str(tmp_path / "c"), base_url=f"http://127.0.0.1:{port}/m").get("hey_test")
+        assert got_manifest == manifest and got_model == model
+        assert set(seen_encodings) == {"identity"}
+    finally:
+        await runner.cleanup()

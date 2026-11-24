@@ -627,7 +627,8 @@ class WakeModelCache:
 
         try:
             async with aiohttp.ClientSession() as session, \
-                    session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    session.get(url, timeout=aiohttp.ClientTimeout(total=60),
+                                headers={"Accept-Encoding": "identity"}) as resp:
                 if resp.status != 200:
                     raise HassmicError(f"{url} answered {resp.status}")
                 # content.read(n) returns what has arrived, often one chunk: read to the end (capped).
@@ -642,7 +643,9 @@ class WakeModelCache:
                         raise HassmicError(f"{url} is over {MODEL_MAX_BYTES} bytes")
                     parts.append(chunk)
                 data = b"".join(parts)
-                expected = resp.content_length
+                # Content-Length counts the bytes on the wire: compare only an unencoded body (GitHub gzips
+                # unless asked not to; aiohttp hands back the decompressed bytes).
+                expected = resp.content_length if not resp.headers.get("Content-Encoding") else None
                 if expected is not None and expected != len(data):
                     raise HassmicError(f"{url} ended after {len(data)} of {expected} bytes")
         except (aiohttp.ClientError, OSError, TimeoutError) as exc:
