@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import PasswordField from '../components/ui/PasswordField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -2114,20 +2115,20 @@ const Admin = () => {
           </div>
 
           {!editingUser && (
-            <label className="space-y-2">
-              <span className="text-xs font-black uppercase tracking-widest text-slate-500">
+            <div className="space-y-2">
+              <label htmlFor="admin-create-user-password" className="block text-xs font-black uppercase tracking-widest text-slate-500">
                 Password <span className="text-red-400">*</span>
-              </span>
-              <input
-                type="password"
+              </label>
+              <PasswordField
+                id="admin-create-user-password"
                 value={userForm.password}
                 aria-label="Password"
                 onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))}
-                className="glass-input w-full"
+                className="glass-input min-h-11 w-full"
                 placeholder="Required for new users"
               />
               <p className="text-[10px] text-slate-500">New users must have a password to log in.</p>
-            </label>
+            </div>
           )}
 
           <label className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/5 p-4">
@@ -2275,17 +2276,17 @@ const Admin = () => {
           <p className="text-sm text-slate-400">
             Enter a new password for this user. They will be able to log in with this immediately.
           </p>
-          <label className="block space-y-2">
-            <span className="text-xs font-black uppercase tracking-widest text-slate-500">New Password</span>
-            <input
-              type="password"
+          <div className="block space-y-2">
+            <label htmlFor="admin-new-password" className="block text-xs font-black uppercase tracking-widest text-slate-500">New Password</label>
+            <PasswordField
+              id="admin-new-password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              className="glass-input w-full"
+              className="glass-input min-h-11 w-full"
               placeholder="••••••••"
               autoFocus
             />
-          </label>
+          </div>
           <div className="flex gap-3">
              <button
               onClick={() => setPasswordModalUser(null)}

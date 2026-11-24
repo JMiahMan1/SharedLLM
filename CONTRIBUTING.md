@@ -39,6 +39,20 @@ form is done too.
 - Verify both forms: check the narrow layout (or the native app) before calling a UI
   change finished.
 
+### Password fields
+
+Every password, PIN, key or other masked field lets the person see what they typed
+before sending it. Use `components/ui/PasswordField` (an eye button with `aria-label`
+"Show password"/"Hide password", `aria-pressed` and a 44px target) instead of a bare
+`type="password"` input; put margins on `wrapperClassName`, and label it with
+`htmlFor`/`id` rather than a wrapping `<label>`, so the eye does not join the field's
+name. The eye only shows what is in the box: a saved secret shown as a placeholder or a
+`***` mask stays hidden. A field with its own toggle (Login, `SecretInput`) carries a
+`// password-toggle: <reason>` comment on its `type=` line, and the generated offline
+pages (`lib/privateChatKeepsakePage.js`, `lib/accountExport/page.ts`) have their own
+inline show/hide button. `src/test/passwordFields.test.ts` fails on any field that
+breaks this rule.
+
 ## Fail fast; never fall back to a hardcoded value
 
 When a value is missing, wrong or stale, fail loudly at the point of use. Never

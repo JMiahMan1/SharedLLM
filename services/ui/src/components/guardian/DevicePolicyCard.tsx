@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Cpu, Plus, Shield, Trash2, Wifi } from 'lucide-react';
 import Toggle from '../ui/Toggle';
@@ -314,9 +315,8 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
             </div>
             {newSecurity !== 'open' && <div>
               <label htmlFor="new-wifi-password" className="sr-only">Password</label>
-              <input
+              <PasswordField
                 id="new-wifi-password"
-                type="password"
                 placeholder="Password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}

@@ -187,7 +187,7 @@ const Login = () => {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                 <input 
                   id="login-password"
-                  type={showPassword ? 'text' : 'password'}
+                  type={showPassword ? 'text' : 'password'} // password-toggle: its own eye below, beside the lock icon
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="glass-input w-full pl-10 pr-12"

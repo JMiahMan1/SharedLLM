@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { 
   Cpu, 
   Cloud, 
@@ -158,9 +159,9 @@ const LLMSettings: React.FC = () => {
               <div>
                 <label htmlFor="llm-cloud-api-key" className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Cloud API Key</label>
                 <div className="relative">
-                  <Key className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                  <input id="llm-cloud-api-key" 
-                    type="password" 
+                  <Key className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-slate-500" size={14} />
+                  {/* The eye shows only what is in the box: a saved key arrives masked ("***") and stays masked. */}
+                  <PasswordField id="llm-cloud-api-key"
                     value={getSetting('llm_cloud_api_key')} 
                     onChange={e => setDrafts({...drafts, llm_cloud_api_key: e.target.value})}
                     onFocus={(e) => {
@@ -168,7 +169,7 @@ const LLMSettings: React.FC = () => {
                         setDrafts({...drafts, llm_cloud_api_key: ''});
                       }
                     }}
-                    className="glass-input w-full text-xs pl-10"
+                    className="glass-input min-h-11 w-full text-xs pl-10"
                     placeholder="sk-••••••••••••••••"
                   />
                 </div>

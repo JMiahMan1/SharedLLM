@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { BellRing, Camera, Heart, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, Pencil, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
@@ -328,10 +329,10 @@ function LockScreen({
           </>
         ) : (
           <>
-            <label className="mt-4 block text-left">
-              <span className="mb-1 block text-xs font-semibold text-slate-300">Password</span>
-              <input
-                type="password"
+            <div className="mt-4 block text-left">
+              <label htmlFor="private-password-input" className="mb-1 block text-xs font-semibold text-slate-300">Password</label>
+              <PasswordField
+                id="private-password-input"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="off"
@@ -343,7 +344,7 @@ function LockScreen({
                 data-testid="private-password"
                 className="glass-input min-h-11 w-full text-base sm:text-sm"
               />
-            </label>
+            </div>
             {wrong && (
               <p className="mt-2 text-left text-sm text-rose-200" role="alert" data-testid="private-wrong">
                 {wrong}
