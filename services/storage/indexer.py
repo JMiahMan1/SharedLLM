@@ -266,9 +266,23 @@ def _checkpoint_stamp(item: ContentIndexItem) -> str:
 async def extract_and_chunk_contents(
     provider: StorageProvider,
     items: list[ContentIndexItem],
-    checkpoint: CheckpointManager | None = None
+    checkpoint: CheckpointManager | None = None,
+    pending_marks: list[tuple[str, str]] | None = None,
 ) -> list[dict]:
+    """Chunks for ``items``: each item's metadata row, and its text when the provider indexes text.
+
+    A provider with ``index_full_text = False`` (the Calibre library) contributes
+    one row per item, its ``catalogue_card`` when it has one; its text is read on
+    demand, never embedded.
+
+    With ``pending_marks`` the checkpoint is not written here: each extracted
+    item's ``(path, stamp)`` is appended for the caller to mark once its chunks
+    are in the index. Marking at extraction recorded a book as indexed before it
+    was synced, so a crawl stopped in between lost it for good.
+    """
     chunks = []
+    full_text = bool(getattr(provider, "index_full_text", True))
+    card_of = getattr(provider, "catalogue_card", None)
     for position, item in enumerate(items, start=1):
         # Checkpoint skip
         if checkpoint and item.mtime and checkpoint.is_indexed(item.path, _checkpoint_stamp(item)):
@@ -281,9 +295,17 @@ async def extract_and_chunk_contents(
 
         log.info(f"Indexing metadata for: {item.path}")
         # Always index the metadata/skeleton of the item
+        card = None
+        if callable(card_of) and not item.is_dir:
+            try:
+                card = await card_of(item.path)
+            except Exception as exc:
+                log.warning("Catalogue card for %s failed (%s: %s); indexed by its metadata",
+                            item.path, type(exc).__name__, exc)
         chunks.append({
-            "content": _skeleton_content(item),
+            "content": card or _skeleton_content(item),
             "metadata": {
+                **({"catalogue": True} if card else {}),
                 **_scalar_metadata(item.metadata),
                 "path": item.path,
                 "name": item.name,
@@ -299,7 +321,7 @@ async def extract_and_chunk_contents(
         # Optionally index full text. One unreadable book (a malformed archive,
         # a download that times out) is logged and keeps its metadata row; it
         # must never stop the crawl, which used to lose every other book with it.
-        if not item.is_dir and "full_text" in item.extractable_capabilities:
+        if full_text and not item.is_dir and "full_text" in item.extractable_capabilities:
             log.info(f"Extracting full text for: {item.path}")
             try:
                 chunks.extend(await _text_chunks(provider, item))
@@ -307,7 +329,11 @@ async def extract_and_chunk_contents(
                 log.warning("Could not extract text from %s (%s: %s); indexed by its metadata only",
                             item.path, type(exc).__name__, exc)
 
-        if checkpoint and item.mtime:
+        if item.mtime and pending_marks is not None:
+            # Recorded even on a forced crawl (no checkpoint to skip by), so the
+            # crawl after it does not read everything again.
+            pending_marks.append((item.path, _checkpoint_stamp(item)))
+        elif checkpoint and item.mtime:
             checkpoint.mark_indexed(item.path, _checkpoint_stamp(item))
             checkpoint.save()
 

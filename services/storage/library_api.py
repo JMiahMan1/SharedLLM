@@ -437,6 +437,16 @@ def _list(value: str) -> list[str]:
     return [part.strip() for part in re.split(r"[;,]", value) if part.strip()]
 
 
+async def _tag_usage(library_path: str) -> tuple[list[str], dict[str, int]]:
+    """The library's tags, and how many books use each (empty when it cannot be read)."""
+    usage: dict[str, int] = defaultdict(int)
+    with suppress(HTTPException):
+        for book in (await _catalog(library_path)).values():
+            for tag in book["tags"]:
+                usage[tag] += 1
+    return sorted(usage), dict(usage)
+
+
 @router.post("/books/inspect")
 async def inspect_book(
     library_path: str = Form(...),
@@ -448,10 +458,8 @@ async def inspect_book(
     if not data or len(data) > MAX_BOOK_BYTES:
         raise HTTPException(status_code=422, detail=f"Choose a book file under {MAX_BOOK_BYTES // (1024 * 1024)} MB.")
     # Suggestions without the library's own tags are still suggestions.
-    existing: list[str] = []
-    with suppress(HTTPException):
-        existing = sorted({t for book in (await _catalog(library_path)).values() for t in book["tags"]})
-    return await book_lookup.inspect(data, file.filename or "book", existing, online=online)
+    existing, usage = await _tag_usage(library_path)
+    return await book_lookup.inspect(data, file.filename or "book", existing, online=online, usage=usage)
 
 
 @router.post("/books/add")
@@ -469,20 +477,156 @@ async def add_book(
     isbn: str = Form(default=""),
     language: str = Form(default=""),
     cover_url: str = Form(default=""),
+    # A string, not a bool: an absent bool form field reads as False, which turned
+    # the catalogue lookup off for every caller that did not send it.
+    online: str = Form(default="true"),
 ):
+    """Add a book, filled in the way Calibre's "Download metadata" does it.
+
+    What the person typed always wins. Every field left empty is filled from the
+    file itself (EPUB OPF, PDF info), then from Google Books and Open Library (only
+    an answer that is the same book: ``book_lookup.same_book``), and the tags from
+    the library's most used tags that the book's subjects name. The reply says what
+    was filled in, or that the book could not be identified.
+    """
     data = await file.read(MAX_BOOK_BYTES + 1)
-    cover = await book_lookup.fetch_cover(cover_url) if cover_url else None
+    filename = file.filename or "book"
+    given = {
+        "title": title, "authors": [a for a in re.split(r"\s*(?:&|;)\s*", authors) if a.strip()],
+        "tags": _list(tags), "series": series, "comments": comments, "publisher": publisher,
+        "published": published, "isbn": isbn, "language": language,
+    }
+    existing, usage = await _tag_usage(library_path)
+    found = await book_lookup.lookup(
+        book_lookup.file_details(data, filename) if data and len(data) <= MAX_BOOK_BYTES else book_lookup._blank(),
+        filename, existing, online=online.strip().lower() not in ("false", "0", "no"), usage=usage,
+        known={"title": title, "authors": given["authors"], "isbn": isbn},
+    )
+    merged, filled = book_lookup.merge(given, found)
+    cover = None
+    if cover_url:
+        cover = await book_lookup.fetch_cover(cover_url)
+    elif not found.get("cover") and found.get("cover_url"):
+        cover = await book_lookup.fetch_cover(found["cover_url"])
+        if cover:
+            filled["cover"] = str((found.get("sources") or {}).get("cover") or "a catalogue")
     async with _opened(library_path) as provider:
         writer = LibraryWriter(provider.client, library_path)
         try:
             result = await writer.add_book(
-                data, file.filename or "book", title=title, authors=[a for a in re.split(r"\s*(?:&|;)\s*", authors) if a.strip()],
-                tags=_list(tags), series=series, comments=comments, publisher=publisher, published=published,
-                isbn=isbn, language=language, cover=cover,
+                data, filename, title=merged["title"], authors=merged["authors"],
+                tags=merged["tags"], series=merged["series"], comments=merged["comments"],
+                publisher=merged["publisher"], published=merged["published"], isbn=merged["isbn"],
+                language=merged["language"], cover=cover, file_subjects_as_tags=False,
             )
         except LibraryWriteError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:
             forget_catalog_checks()
+    identified = bool(found.get("identified"))
+    result.update({
+        "identified": identified,
+        "filled": filled,
+        "message": book_lookup.report(result.get("title") or merged["title"], identified, filled,
+                                      found.get("rejected") or []),
+    })
+    log.info("[library] added book %s (%s): identified=%s filled=%s", result.get("book_id"),
+             result.get("title"), identified, sorted(filled))
     background.add_task(_index_folder, library_path, result["path"])
     return {"status": "SUCCESS", **result}
+
+
+# --- Filling in books already on the shelf -----------------------------------------
+
+
+class EnrichRequest(BaseModel):
+    library_path: str
+    #: True (the default) only reports: nothing is written.
+    dry_run: bool = True
+    #: Books looked up (and, without dry_run, written) in this call.
+    limit: int = Field(default=10, ge=0, le=200)
+    online: bool = True
+    book_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
+def _missing(book: dict[str, Any]) -> list[str]:
+    """Which of title, authors and tags a catalogue row lacks."""
+    out = []
+    if not book_lookup._given(book.get("title")):
+        out.append("title")
+    if not book_lookup._given(book.get("authors")):
+        out.append("authors")
+    if not book.get("tags"):
+        out.append("tags")
+    return out
+
+
+def _known(book: dict[str, Any]) -> dict[str, Any]:
+    """What the library already holds for a book: never replaced by a lookup."""
+    pubdate = str(book.get("pubdate") or "")
+    return {
+        "title": book.get("title") or "", "authors": list(book.get("authors") or []),
+        "tags": list(book.get("tags") or []), "series": book.get("series") or "",
+        "publisher": book.get("publisher") or "", "comments": book.get("description") or "",
+        "published": "" if not pubdate or pubdate.startswith("0101") else pubdate[:10],
+    }
+
+
+async def _proposal(provider, book: dict[str, Any], existing: list[str], usage: dict[str, int],
+                    online: bool) -> dict[str, Any]:
+    known = _known(book)
+    base = book_lookup._blank()
+    if ("title" in _missing(book) or "authors" in _missing(book)) and book.get("text_path"):
+        # Without a title or author to search by, the file's own details come first.
+        data = await provider.client.get_file_bytes(book["text_path"], timeout=provider.download_timeout)
+        if data:
+            base = book_lookup.file_details(data, book["text_path"].rsplit("/", 1)[-1])
+    found = await book_lookup.lookup(base, str(book.get("text_path") or "book").rsplit("/", 1)[-1],
+                                     existing, online=online, usage=usage, known=known)
+    merged, filled = book_lookup.merge(known, found)
+    fields = {key: merged[key] for key in filled if key in merged}
+    return {"book_id": book["id"], "title": book.get("title"), "missing": _missing(book),
+            "identified": bool(found.get("identified")), "fill": fields,
+            "rejected": found.get("rejected") or []}
+
+
+@router.post("/books/enrich")
+async def enrich_books(req: EnrichRequest):
+    """Fill in books that lack a title, an author or tags, the way an added book is filled in.
+
+    ``dry_run`` (the default) writes nothing: it counts the books that lack each
+    field and shows what ``limit`` of them would get. Without it, up to ``limit``
+    books are filled in one version-checked write (``LibraryWriter.fill_missing``),
+    and only fields that are empty in the library at that moment are written.
+    """
+    catalog = await _catalog(req.library_path)
+    wanted = set(req.book_ids)
+    candidates = [b for b in sorted(catalog.values(), key=lambda b: b["id"])
+                  if _missing(b) and (not wanted or b["id"] in wanted)]
+    counts = {field: sum(1 for b in candidates if field in _missing(b)) for field in ("title", "authors", "tags")}
+    existing, usage = await _tag_usage(req.library_path)
+    proposals = []
+    async with _opened(req.library_path) as provider:
+        for book in candidates[:req.limit]:
+            try:
+                proposals.append(await _proposal(provider, book, existing, usage, req.online))
+            except Exception as exc:  # one unreadable book is reported, never stops the rest
+                proposals.append({"book_id": book["id"], "title": book.get("title"), "error": str(exc)})
+        out: dict[str, Any] = {"status": "SUCCESS", "dry_run": req.dry_run, "books_missing": len(candidates),
+                               "missing": counts, "looked_up": len(proposals),
+                               "identified": sum(1 for p in proposals if p.get("identified")),
+                               "proposals": proposals}
+        writes = {p["book_id"]: p["fill"] for p in proposals if p.get("fill")}
+        if req.dry_run or not writes:
+            return out
+        writer = LibraryWriter(provider.client, req.library_path)
+        try:
+            result = await writer.fill_missing(writes)
+        except LibraryWriteError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            forget_catalog_checks()
+    out["written"] = {str(k): v for k, v in result["written"].items() if v}
+    out["backup"] = result.get("backup")
+    log.info("[library] filled in %d of %d books missing title/author/tags", len(out["written"]), len(candidates))
+    return out

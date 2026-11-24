@@ -145,10 +145,17 @@ function AddBook({ onDone }: { onDone: () => void }) {
       if (file) form.append('file', file);
       for (const [key, value] of Object.entries(fields)) form.append(key, value);
       if (found?.cover_url && !found.cover_preview) form.append('cover_url', found.cover_url);
+      // The server fills any field left empty (file, catalogues, library tags) unless auto-fill is off.
+      form.append('online', autoFill ? 'true' : 'false');
       return api.libraryAddBook(form);
     },
     onSuccess: (out) => {
-      toast.success(`Added “${out.title}”${out.tags.length ? ` with ${out.tags.join(', ')}` : ''}. Jarvis is indexing it now.`);
+      if (out.identified === false && out.message) {
+        // Added, but the catalogues did not know it: the person should check the title.
+        toast(out.message, { duration: 10_000 });
+      } else {
+        toast.success(`Added “${out.title}”${out.tags.length ? ` with ${out.tags.join(', ')}` : ''}. Jarvis is indexing it now.`);
+      }
       void queryClient.invalidateQueries({ queryKey: ['library'] });
       onDone();
     },

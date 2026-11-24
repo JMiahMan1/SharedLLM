@@ -3401,7 +3401,11 @@ export const api = {
   },
 
   /** Add a book to the library (admins): the file, with title, authors, tags, series and comments. */
-  async libraryAddBook(form: FormData): Promise<{ book_id: number; title: string; tags: string[]; path: string }> {
+  /** The reply says what Jarvis filled in, or (identified false) that it could not identify the book. */
+  async libraryAddBook(form: FormData): Promise<{
+    book_id: number; title: string; tags: string[]; path: string;
+    identified?: boolean; filled?: Record<string, string>; message?: string;
+  }> {
     const resp = await apiClient.post('/api/library/books', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600_000 });
     return resp.data;
   },

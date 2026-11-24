@@ -16,6 +16,7 @@ dependency), so the parsing is tested without a library or a network.
 from __future__ import annotations
 
 import io
+import logging
 import posixpath
 import re
 import threading
@@ -33,6 +34,8 @@ from services.common.epub_text import (
     _spine,
     markup_text,
 )
+
+log = logging.getLogger("storage.book_chapters")
 
 _OPF_NS = "{http://www.idpf.org/2007/opf}"
 _NCX_NS = "{http://www.daisy.org/z3986/2005/ncx/}"
@@ -844,3 +847,36 @@ def read_book_text(data: bytes, fmt: str) -> str:
     if fmt == "EPUB":
         return "\n\n".join(c.text.strip() for c in epub_chapters(data)[1] if c.text.strip())
     raise ChapterError(f"No text reader for {fmt} files; convert the book to EPUB in Calibre.")
+
+
+# --- Contents only (the catalogue card) ---
+
+
+def contents_titles(data: bytes, fmt: str) -> list[str]:
+    """The titles in a book's own table of contents, without reading its text.
+
+    An EPUB's nav document or NCX, or a PDF's bookmarks: what the search index
+    shows of a book's structure (``CalibreStorageProvider.catalogue_card``).
+    Reading the chapters themselves would parse every page; this reads one small
+    document. A book whose contents cannot be read has none (an empty list),
+    never an error: its card is still written without them.
+    """
+    fmt = str(fmt or "").upper()
+    labels: list[str] = []
+    try:
+        if fmt == "PDF":
+            head = read_pdf_pages(data, max_chars=0)
+            labels = [title for _page, title in _outline_starts(head.reader)]
+        elif fmt == "EPUB":
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                _source, _path, entries = _epub_toc(archive)
+            labels = [entry.label for entry in _flatten(entries)]
+    except Exception as exc:  # a broken file is a card without contents
+        log.info("Contents of a %s could not be read: %s", fmt or "book", exc)
+        return []
+    titles: list[str] = []
+    for label in labels:
+        title = _norm_space(str(label or ""))
+        if title and (not titles or titles[-1] != title):
+            titles.append(title)
+    return titles
