@@ -116,6 +116,7 @@ from services.gateway import (
     private_chat_messages,
     private_chat_preview,
     private_chat_reminders,
+    profile_stats,
     push_routes,
     recipe_images,
     room_presence,
@@ -948,6 +949,7 @@ app.include_router(info_router)
 app.include_router(family_safety.router)
 app.include_router(app_vetting_routes.router)
 app.include_router(collector_health_routes.router)
+app.include_router(profile_stats.router)  # Profile stats pages: each person's, and the admin's (docs/PROFILE_STATS.md)
 app.include_router(push_routes.router)
 app.include_router(network_routes.router)
 app.include_router(weather_routes.router)
