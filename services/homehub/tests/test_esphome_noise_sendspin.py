@@ -88,6 +88,8 @@ class FakeAPIClient:
     instances: ClassVar[list[FakeAPIClient]] = []
     accepts_key: ClassVar[bool] = True
     fail_set_key: ClassVar[bool] = False
+    #: Whether a connection with the all-zero PSK is answered (hassmic: yes; ordinary firmware: no).
+    zero_psk_ok: ClassVar[bool] = True
 
     def __init__(self, host: str, port: int, password: str, *, client_info: str | None = None,
                  noise_psk: str | None = None) -> None:
@@ -98,7 +100,8 @@ class FakeAPIClient:
         FakeAPIClient.instances.append(self)
 
     async def connect(self, login: bool = True) -> None:
-        pass
+        if self.noise_psk is not None and not FakeAPIClient.zero_psk_ok:
+            raise APIConnectionError("the node does not speak Noise")
 
     async def noise_encryption_set_key(self, key: bytes) -> bool:
         self.key = key
@@ -124,8 +127,24 @@ async def test_provision_helper_makes_a_fresh_32_byte_base64_key(monkeypatch):
     assert psk is not None and len(base64.b64decode(psk)) == 32
     client = FakeAPIClient.instances[-1]
     assert client.key == psk.encode("ascii")
-    assert client.client_info == "homehub" and client.noise_psk is None
-    assert client.disconnected
+    # hassmic takes a first key only over a zero-PSK connection, never over plaintext
+    assert client.client_info == "homehub" and client.noise_psk == flows.ZERO_NOISE_PSK
+    assert client.disconnected and len(FakeAPIClient.instances) == 1
+
+
+async def test_provision_helper_falls_back_to_plaintext_for_ordinary_firmware(monkeypatch):
+    import aioesphomeapi
+
+    FakeAPIClient.instances = []
+    FakeAPIClient.accepts_key = True
+    monkeypatch.setattr(FakeAPIClient, "zero_psk_ok", False)
+    monkeypatch.setattr(aioesphomeapi, "APIClient", FakeAPIClient)
+
+    psk = await flows.esphome_provision_noise_psk("192.0.2.60", 6053)
+
+    assert psk is not None
+    assert [c.noise_psk for c in FakeAPIClient.instances] == [flows.ZERO_NOISE_PSK, None]
+    assert FakeAPIClient.instances[-1].key == psk.encode("ascii")
 
 
 async def test_provision_helper_returns_none_when_the_node_declines(monkeypatch):
@@ -136,7 +155,7 @@ async def test_provision_helper_returns_none_when_the_node_declines(monkeypatch)
     monkeypatch.setattr(aioesphomeapi, "APIClient", FakeAPIClient)
 
     assert await flows.esphome_provision_noise_psk("192.0.2.60", 6053) is None
-    assert FakeAPIClient.instances[-1].disconnected
+    assert all(c.disconnected for c in FakeAPIClient.instances)
 
 
 # -- adoption -------------------------------------------------------------------------------
@@ -168,7 +187,7 @@ async def test_an_echo_node_is_given_a_key_and_saved_with_only_the_verified_one(
     assert saved and saved[0].data["noise_psk"] == key
 
 
-async def test_an_echo_node_that_declines_a_key_is_added_plaintext(rt, monkeypatch):
+async def test_an_echo_node_that_declines_a_key_is_not_added_unencrypted(rt, monkeypatch):
     info, infos = hassmic_device()
     probes: list[str | None] = []
     provisioned: list[str] = []
@@ -184,10 +203,10 @@ async def test_an_echo_node_that_declines_a_key_is_added_plaintext(rt, monkeypat
     monkeypatch.setattr(flows, "esphome_probe", probe)
     monkeypatch.setattr(flows, "esphome_provision_noise_psk", provision)
 
-    result = await flows.adopt(rt, esphome_finding(), {})
+    with pytest.raises(flows.FlowError, match="did not accept an encryption key"):
+        await flows.adopt(rt, esphome_finding(), {})
 
-    assert rt.hub.config_entries[result["entry_id"]].data["noise_psk"] == ""
-    assert probes == [None]  # no pointless encrypted reconnect
+    assert not [e for e in rt.hub.config_entries.values() if e.domain == "esphome"]
     assert provisioned == ["192.0.2.60"]
 
 
