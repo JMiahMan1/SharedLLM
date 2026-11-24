@@ -866,6 +866,8 @@ async def play_candidate(cand: Candidate, req: MediaPlayRequest, entity_id: str,
         return ExecutionResult.fail(f"I can't play {cand.title} from {cand.source}.", service=SERVICE)
     detail = {**(result.detail or {}), "found": cand.as_pick()}
     if result.status != "SUCCESS":
+        if (result.detail or {}).get("playback") == "not_started":
+            return result.model_copy(update={"detail": detail})  # already says it plainly
         return result.model_copy(update={"detail": detail, "message": failed_message(cand, result.message, player)})
     if cand.source == "web_video":
         said = f"the video {cand.title}" if cand.extra.get("title_known") else f"a video of {cand.title}"
