@@ -43,6 +43,7 @@ CREATE INDEX IF NOT EXISTS history_time ON history(last_updated);
 CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, kind TEXT NOT NULL, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS refresh_tokens (id TEXT PRIMARY KEY, doc TEXT NOT NULL, secret BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS blobs (name TEXT PRIMARY KEY, secret BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS tasmota_measured (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS state_attributes (
     attributes_id INTEGER PRIMARY KEY AUTOINCREMENT,
     hash TEXT NOT NULL UNIQUE,
@@ -237,8 +238,19 @@ class Store:
 
     def count(self, table: str) -> int:
         assert table in {"config_entries", "devices", "entities", "areas", "history", "automations",
-                         "refresh_tokens", "last_states", "blobs"}
+                         "refresh_tokens", "last_states", "blobs", "tasmota_measured"}
         return self._exec(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
+    # -- Tasmota templates measured in this household (tasmota_measured.py) ----
+    def save_measured_template(self, rec: dict[str, Any]) -> None:
+        self._exec("INSERT OR REPLACE INTO tasmota_measured(id, doc) VALUES (?, ?)",
+                   (rec["id"], json.dumps(rec, default=str)))
+
+    def load_measured_templates(self) -> list[dict[str, Any]]:
+        return [json.loads(r[0]) for r in self._exec("SELECT doc FROM tasmota_measured ORDER BY id").fetchall()]
+
+    def delete_measured_template(self, rec_id: str) -> bool:
+        return self._exec("DELETE FROM tasmota_measured WHERE id=?", (rec_id,)).rowcount > 0
 
     # -- automations / scripts / scenes ---------------------------------------
     def save_automation(self, item_id: str, kind: str, doc: dict[str, Any]) -> None:
