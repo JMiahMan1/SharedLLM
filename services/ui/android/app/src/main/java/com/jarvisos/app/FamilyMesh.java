@@ -172,6 +172,22 @@ final class FamilyMesh {
         return item.id;
     }
 
+    /** Keep items made on this phone or fetched for it (requests, commands, cached information). */
+    static void addAll(Context context, List<MeshRules.Item> items) {
+        Context c = context.getApplicationContext();
+        boolean any = false;
+        synchronized (LOCK) {
+            MeshRules.Store s = store(c);
+            long nowS = System.currentTimeMillis() / 1000L;
+            for (MeshRules.Item i : items) any |= s.add(i, nowS);
+            if (any) save(c, s);
+        }
+        if (any) {
+            Proximity.mailChanged();
+            changed();
+        }
+    }
+
     /** Every message this phone holds, opened, for the chat sheet (oldest first). */
     static JSONArray list(Context context) {
         Context c = context.getApplicationContext();
@@ -181,6 +197,7 @@ final class FamilyMesh {
         List<MeshRules.Item> items = new ArrayList<>(store(c).items.values());
         items.sort((a, b) -> Long.compare(a.receivedAtMs, b.receivedAtMs));
         for (MeshRules.Item i : items) {
+            if (!MeshRules.T_CHAT.equals(i.type)) continue;
             JSONObject p = MeshRules.open(cfg.chatKey, i.env);
             if (p == null) continue;
             try {
@@ -569,6 +586,7 @@ final class FamilyMesh {
         if (s.received > 0) e.putLong(KEY_LAST_RECEIVED, t);
         e.apply();
         if (s.received > 0) {
+            OfflineMode.onMeshChanged(c);
             Proximity.mailChanged();
             changed();
         }
@@ -595,9 +613,14 @@ final class FamilyMesh {
                 WidgetApi.ensureCredentials(c);
                 String key = WidgetApi.apiKey(c);
                 if (key == null || key.isEmpty()) return;
+                // Online: keys, the household snapshot, then everything carried for the server.
+                OfflineMode.onlineUpkeep(c);
                 MeshRules.Store s = store(c);
                 List<String> done = new ArrayList<>();
-                List<MeshRules.Item> mine = s.unsyncedMine();
+                done.addAll(submitRequests(c, s));
+                done.addAll(OfflineMode.reportCommands(c, s));
+                List<MeshRules.Item> mine = new ArrayList<>();
+                for (MeshRules.Item i : s.unsyncedMine()) if (MeshRules.T_CHAT.equals(i.type)) mine.add(i);
                 if (!mine.isEmpty()) {
                     JSONArray items = new JSONArray();
                     for (MeshRules.Item i : mine) items.put(i.wire());
@@ -605,7 +628,9 @@ final class FamilyMesh {
                     done.addAll(MeshRules.postedIds(answer));
                 }
                 List<String> others = new ArrayList<>();
-                for (MeshRules.Item i : s.items.values()) if (!i.synced && !i.mine) others.add(i.id);
+                for (MeshRules.Item i : s.items.values()) {
+                    if (!i.synced && !i.mine && MeshRules.T_CHAT.equals(i.type)) others.add(i.id);
+                }
                 if (!others.isEmpty()) {
                     JSONObject answer = WidgetApi.post(c, "/api/family-mesh/synced",
                             new JSONObject().put("ids", new JSONArray(others)));
@@ -626,6 +651,43 @@ final class FamilyMesh {
                 Log.i(TAG, "server sync: " + e.getMessage());
             }
         }, "family-mesh-sync").start();
+    }
+
+    /**
+     * Hand the Jarvis requests this phone carries (its own and other people's) to
+     * the gateway, which acts as each request's sender; keep each answer as an
+     * item that travels back to the sender. Returns the request ids now done.
+     */
+    private static List<String> submitRequests(Context c, MeshRules.Store s) throws Exception {
+        List<String> done = new ArrayList<>();
+        JSONArray batch = new JSONArray();
+        long nowS = System.currentTimeMillis() / 1000L;
+        for (MeshRules.Item i : s.items.values()) {
+            if (MeshRules.T_REQUEST.equals(i.type) && !i.synced && i.meta != null && i.expiresS > nowS) {
+                batch.put(OfflineMode.wireRequest(i));
+            }
+        }
+        if (batch.length() == 0) return done;
+        JSONObject answer = WidgetApi.post(c, "/api/offline-relay/submit", new JSONObject().put("requests", batch));
+        JSONObject results = answer.optJSONObject("results");
+        List<MeshRules.Item> answers = new ArrayList<>();
+        long nowMs = System.currentTimeMillis();
+        for (java.util.Iterator<String> it = results == null ? null : results.keys(); it != null && it.hasNext(); ) {
+            String id = it.next();
+            JSONObject r = results.optJSONObject(id);
+            String status = r == null ? "" : r.optString("status");
+            if ("in_progress".equals(status) || status.isEmpty()) continue;
+            done.add(id);
+            if ("answered".equals(status)) {
+                MeshRules.Item a = OfflineMode.answerItem(id, r, nowMs);
+                if (a != null) answers.add(a);
+            }
+        }
+        if (!answers.isEmpty()) {
+            addAll(c, answers);
+            OfflineMode.noteRelayed(c);
+        }
+        return done;
     }
 
     // -- diagnostics ----------------------------------------------------------------------

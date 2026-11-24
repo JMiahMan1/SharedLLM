@@ -53,6 +53,7 @@ import VehicleBluetoothPanel from '../components/wander/VehicleBluetoothPanel';
 import BluetoothDiagnostics from '../components/wander/BluetoothDiagnostics';
 import FamilyNearbyCard from '../components/wander/FamilyNearbyCard';
 import OfflineChatCard from '../components/wander/OfflineChatCard';
+import OfflineModePanel from '../components/wander/OfflineModePanel';
 import { bandLabel, nearOf, togetherLine } from '../lib/proximity';
 import { vehicleSourceLabel } from '../lib/vehicleBluetooth';
 import toast from 'react-hot-toast';
@@ -195,6 +196,18 @@ const Wander = () => {
     ...houseConfigQueryOptions,
   });
   const peopleDirectory = useFamilyDirectory();
+  // A parent's children, for locking or unlocking their phones over Bluetooth when offline.
+  const isParent = ['mother', 'father'].includes(String((user as { family_role?: string } | null)?.family_role ?? ''));
+  const rosterQuery = useQuery({
+    queryKey: ['family-roster'],
+    queryFn: () => api.getFamily(),
+    enabled: isParent,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const myChildren = (rosterQuery.data ?? [])
+    .filter((m) => ['child', 'teen'].includes(String(m.family_role ?? '')))
+    .map((m) => ({ username: m.username.toLowerCase(), name: m.display_name || m.username }));
   // Family phones near mine lately (Bluetooth LE), within the family's location sharing.
   const nearQuery = useQuery({
     queryKey: ['geo-proximity-near'],
@@ -1094,6 +1107,8 @@ const Wander = () => {
         />
 
         <FamilyNearbyCard />
+
+        <OfflineModePanel kids={myChildren} />
 
         <OfflineChatCard
           me={currentUsername}

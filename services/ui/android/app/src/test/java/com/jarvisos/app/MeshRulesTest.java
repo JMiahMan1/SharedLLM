@@ -89,7 +89,7 @@ public class MeshRulesTest {
         // A message at the hop limit is kept but not passed on.
         MeshRules.Item last = new MeshRules.Item(MeshRules.newId(random), NOW_S + 60, MeshRules.HOP_LIMIT, m.env);
         s.add(last, NOW_S);
-        assertFalse(s.missingFrom(Collections.emptySet(), NOW_S).contains(last));
+        assertFalse(s.missingFrom(Collections.emptyMap(), NOW_S).contains(last));
     }
 
     @Test

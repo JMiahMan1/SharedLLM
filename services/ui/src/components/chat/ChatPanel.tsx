@@ -1,3 +1,5 @@
+import OfflineChatCard from '../wander/OfflineChatCard';
+import { useOfflineMode } from '../../hooks/useOfflineMode';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
@@ -123,6 +125,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const keyboardHeight = useKeyboardSafeHeight(threadRef);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
+  const { offline } = useOfflineMode();
   const isAdmin = Boolean(me?.is_admin);
   const people = useFamilyDirectory();
   const myActorIds = useMemo(
@@ -783,6 +786,12 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     >
       {/* Inbox */}
       <aside className={`min-h-0 min-w-0 flex-col border-white/5 p-3 lg:flex lg:border-r ${showThread ? 'hidden' : 'flex'}`}>
+        {/* No server: the family chat goes through nearby family phones instead (Android). */}
+        {offline && (
+          <div className="mb-3 max-h-[60vh] overflow-y-auto" data-testid="chat-offline">
+            <OfflineChatCard me={(me?.username ?? '').toLowerCase()} room={me?.chat_default_token} />
+          </div>
+        )}
         {conversationsError && conversations.length > 0 && (
           <div className="mb-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100" role="status">
             <span className="font-semibold">Couldn't refresh chats.</span>{' '}
