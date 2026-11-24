@@ -247,6 +247,10 @@ import type {
   LibraryBook,
   LibraryAudit,
   BookInspection,
+  BookCatalogueId,
+  BookCatalogueReport,
+  BookCatalogues,
+  BookCatalogueTest,
   HealthCycleSummary,
   HealthCyclePeriod,
   HealthCycleLog,
@@ -3429,9 +3433,21 @@ export const api = {
   /** The reply says what Jarvis filled in, or (identified false) that it could not identify the book. */
   async libraryAddBook(form: FormData): Promise<{
     book_id: number; title: string; tags: string[]; path: string;
-    identified?: boolean; filled?: Record<string, string>; message?: string;
+    identified?: boolean; filled?: Record<string, string>; message?: string; catalogues?: BookCatalogueReport;
   }> {
     const resp = await apiClient.post('/api/library/books', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600_000 });
+    return resp.data;
+  },
+
+  /** The book catalogues (Google Books, Open Library) as they apply to the caller, with each one's last answer. */
+  async libraryCatalogues(): Promise<BookCatalogues> {
+    const resp = await apiClient.get('/api/library/catalogues', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** The Test button on a book catalogue card: one lookup with the typed (else saved) key or email. */
+  async testBookCatalogue(body: { source: BookCatalogueId; api_key?: string; contact_email?: string }): Promise<BookCatalogueTest> {
+    const resp = await apiClient.post('/api/users/me/book-metadata/test', body, { timeout: 30_000 });
     return resp.data;
   },
 

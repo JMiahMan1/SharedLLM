@@ -198,6 +198,8 @@ const STATS = (): BibleStats => ({
   position: { book: 'Ps', chapter: 23, verse: 1, fraction: 0 },
   last_read_at: '2026-10-03T06:00:00',
   window: {},
+  chapters_window: {},
+  last_plan_id: null,
 });
 
 const ACHIEVEMENTS = (): BibleAchievementsResponse => ({

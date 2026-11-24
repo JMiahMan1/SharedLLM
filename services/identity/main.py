@@ -32,7 +32,7 @@ from pydantic import Field as PydField
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from services.common import app_vetting, device_noun, ha_redirect, video_calls
+from services.common import app_vetting, book_metadata, device_noun, ha_redirect, video_calls
 from services.common import concern_monitor as concern_levels
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import (
@@ -55,6 +55,7 @@ from services.identity import (
     abuse_ch,
     audit,
     battery_alerts,
+    book_metadata_check,
     device_archive,
     music_assistant,
     onboarding,
@@ -259,6 +260,8 @@ SCHEMA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR"),
     ("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR"),
     ("user", "malwarebazaar_key_enc", "ALTER TABLE user ADD COLUMN malwarebazaar_key_enc VARCHAR"),
+    ("user", "google_books_key_enc", "ALTER TABLE user ADD COLUMN google_books_key_enc VARCHAR"),
+    ("user", "book_metadata", "ALTER TABLE user ADD COLUMN book_metadata VARCHAR"),
     ("user", "is_test_account", "ALTER TABLE user ADD COLUMN is_test_account BOOLEAN NOT NULL DEFAULT 0"),
     ("apikey", "key_hash", "ALTER TABLE apikey ADD COLUMN key_hash VARCHAR"),
     ("apikey", "key_prefix", "ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR"),
@@ -394,8 +397,9 @@ SHARED_CREDENTIAL_SERVICES = (
 # Services whose system default user's credentials are the household default:
 # every user who has not set their own uses them, with no admin grant. Only
 # the abuse.ch Auth-Key app vetting looks app file hashes up with
-# (services/identity/abuse_ch.py): a lookup key, not a personal account.
-HOUSEHOLD_DEFAULT_SERVICES = (abuse_ch.SERVICE,)
+# (services/identity/abuse_ch.py) and the Google Books key the library looks
+# books up with (services/common/book_metadata.py): lookup keys, not personal accounts.
+HOUSEHOLD_DEFAULT_SERVICES = (abuse_ch.SERVICE, book_metadata.KEY_SERVICE)
 
 
 #: The identity a kiosk or voice satellite acts as when it names no person
@@ -493,6 +497,8 @@ def _own_service_creds(user: User, service: str) -> dict[str, str | None]:
         }
     if service == abuse_ch.SERVICE:
         return {abuse_ch.FIELD: _decrypt_field(user.malwarebazaar_key_enc)}
+    if service == book_metadata.KEY_SERVICE:
+        return {book_metadata.KEY_FIELD: _decrypt_field(user.google_books_key_enc)}
     raise ValueError(f"Unknown credential service: {service}")
 
 
@@ -522,6 +528,31 @@ def abuse_ch_status(session: Session, user: User) -> str:
         return "own"
     default_user = None if _is_system_default_user(user) else _system_default_user(session)
     return abuse_ch.status_for(None, default_user.malwarebazaar_key_enc if default_user else None)
+
+
+def book_metadata_for(session: Session, user: User) -> dict:
+    """The book catalogue integrations as they apply to ``user``, the Google Books key included.
+
+    Each choice is the user's own, else the system default user's (the household
+    default), else book_metadata's default; the key the same way, with no grant.
+    """
+    values, source = _resolve_household_default_creds(session, user, book_metadata.KEY_SERVICE)
+    default_user = None if _is_system_default_user(user) else _system_default_user(session)
+    return book_metadata.resolve(user.book_metadata, default_user.book_metadata if default_user else None,
+                                 key=values.get(book_metadata.KEY_FIELD), key_source=source)
+
+
+def _merge_book_metadata(user: User, update_data: dict) -> None:
+    """Turn a book_metadata update into the JSON stored on the row, merged over what is saved."""
+    if "book_metadata" not in update_data:
+        return
+    update = update_data.pop("book_metadata")
+    if update is None:
+        return
+    try:
+        user.book_metadata = book_metadata.clean_update(update, user.book_metadata)
+    except book_metadata.SettingsError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 def _check_abuse_ch_key(update_data: dict) -> None:
@@ -1373,6 +1404,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             decrypt(user.huggingface_token_enc) if user.huggingface_token_enc else None
         ),
         malwarebazaar_key=household_default[abuse_ch.SERVICE][abuse_ch.FIELD],
+        book_metadata=book_metadata_for(session, user),
         skylight_url=skylight_user.skylight_url if skylight_user else None,
         skylight_email=(skylight_user.skylight_email if skylight_user else None) or user.username,
         skylight_pass=(
@@ -1461,6 +1493,7 @@ def get_me(user: User = Depends(require_api_key), session: Session = Depends(get
     me = _user_read(session, user)
     me.skylight_status = skylight_status(session, user)
     me.abuse_ch_status = abuse_ch_status(session, user)
+    me.book_metadata_status = book_metadata.public(book_metadata_for(session, user))
     return me
 
 
@@ -2332,6 +2365,7 @@ def update_me(body: UserUpdate, request: Request, session: Session = Depends(get
 
     _check_abuse_ch_key(update_data)
     before = audit.snapshot(user)
+    _merge_book_metadata(user, update_data)
     _apply_user_update(user, update_data, clear_fields)
     session.add(user)
     session.commit()
@@ -2346,6 +2380,28 @@ def update_me(body: UserUpdate, request: Request, session: Session = Depends(get
             remove_if_unconfigured=bool(_ABS_CREDENTIAL_FIELDS.intersection(clear_fields or [])),
         )
     return user
+
+@app.post("/api/users/me/book-metadata/test")
+def test_book_metadata(body: dict, user: User = Depends(require_api_key), session: Session = Depends(get_session)):
+    """The Test button on the Google Books / Open Library cards: one lookup, the exact outcome.
+
+    ``{"source": "google_books" | "open_library"}``, plus the ``api_key`` or
+    ``contact_email`` being typed, which take the place of the saved (or
+    household) ones. Nothing is saved. The answer never carries the key.
+    """
+    source = str((body or {}).get("source") or "")
+    if source not in book_metadata.SOURCES:
+        raise HTTPException(status_code=422, detail=f"source must be one of {', '.join(book_metadata.SOURCES)}")
+    resolved = book_metadata_for(session, user)["sources"]
+    typed_key = str((body or {}).get("api_key") or "").strip()
+    typed_email = str((body or {}).get("contact_email") or "").strip()
+    log.info("[book_metadata] %s tests %s (typed key: %s)", user.username, source, bool(typed_key))
+    return book_metadata_check.test_source(
+        source,
+        api_key=typed_key or resolved[book_metadata.GOOGLE_BOOKS].get("api_key"),
+        contact_email=typed_email or resolved[book_metadata.OPEN_LIBRARY].get("contact_email") or "",
+    )
+
 
 @app.patch("/api/users/{username}", response_model=UserRead)
 def update_user(username: str, body: UserUpdate, request: Request, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
@@ -2368,6 +2424,7 @@ def update_user(username: str, body: UserUpdate, request: Request, session: Sess
         user, is_admin=update_data.get("is_admin"), is_system_default=update_data.get("is_system_default"),
     )
     before = audit.snapshot(user)
+    _merge_book_metadata(user, update_data)
     _apply_user_update(user, update_data, clear_fields)
     session.add(user)
     session.commit()

@@ -28,6 +28,8 @@ import { useLoveIndicator } from './beloved/useLoveIndicator';
 import { useSeenVisit } from './beloved/seen';
 import { canSeeBeloved } from '../../lib/beloved/access';
 import { noSave, usePrivatePicture } from './usePrivatePicture';
+import AnimatedImage from './AnimatedImage';
+import { privatePictureKey } from '../../lib/animatedImage';
 import EnvelopeBody from './EnvelopeBody';
 import {
   dayLabel,
@@ -429,7 +431,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   const [nudgeSent, setNudgeSent] = useState(false);
   const { trigger } = useHaptics();
   const [selected, setSelected] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<{ url: string; name: string; message: TalkMessage; own: boolean } | null>(null);
+  const [viewing, setViewing] = useState<{ url: string; name: string; mediaKey: string; mime: string; message: TalkMessage; own: boolean } | null>(null);
   const [watching, setWatching] = useState<{ video: VideoPayload; message: TalkMessage; own: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
@@ -1072,7 +1074,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
                       token={token}
                       payload={payload}
                       vault={vault}
-                      onOpen={(url) => setViewing({ url, name: payload.name || 'Picture', message, own })}
+                      onOpen={(url) => setViewing({ url, name: payload.name || 'Picture', mediaKey: privatePictureKey(token, payload.blob), mime: payload.mime, message, own })}
                     />
                   ) : payload.t === 'video' ? (
                     <PrivateVideoBubble token={token} video={payload} vault={vault} onOpen={() => setWatching({ video: payload, message, own })} />
@@ -1299,6 +1301,8 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
         <PictureViewer
           url={viewing.url}
           name={viewing.name}
+          mediaKey={viewing.mediaKey}
+          mime={viewing.mime}
           onClose={() => setViewing(null)}
           mine={new Set((typeof viewing.message.id === 'number' ? marks[viewing.message.id]?.reactions ?? [] : []).filter((r) => r.own).map((r) => r.emoji))}
           onReact={
@@ -1368,16 +1372,23 @@ function PrivatePicture({
     );
   }
   return (
-    <button type="button" onClick={() => onOpen(url)} className="block cursor-zoom-in text-left" aria-label="View picture">
-      <img
+    <span className="block">
+      {/* An animated picture's pause control sits over its corner, beside (never inside) the button that opens it. */}
+      <AnimatedImage
         src={url}
+        mediaKey={privatePictureKey(token, payload.blob)}
+        mime={payload.mime}
         alt={payload.caption || 'Encrypted picture'}
-        {...noSave}
+        imgProps={{ ...noSave, 'data-testid': 'private-picture' }}
         className="pointer-events-none max-h-72 w-60 max-w-full select-none rounded-2xl object-cover [-webkit-touch-callout:none] [-webkit-user-drag:none]"
-        data-testid="private-picture"
+        wrap={(media) => (
+          <button type="button" onClick={() => onOpen(url)} className="block cursor-zoom-in text-left" aria-label="View picture">
+            {media}
+            {payload.caption && <span className="mt-1 block">{payload.caption}</span>}
+          </button>
+        )}
       />
-      {payload.caption && <span className="mt-1 block">{payload.caption}</span>}
-    </button>
+    </span>
   );
 }
 
@@ -1385,6 +1396,8 @@ function PrivatePicture({
 function PictureViewer({
   url,
   name,
+  mediaKey,
+  mime,
   onClose,
   onDelete,
   onReact,
@@ -1392,6 +1405,8 @@ function PictureViewer({
 }: {
   url: string;
   name: string;
+  mediaKey: string;
+  mime: string;
   onClose: () => void;
   onDelete?: () => void;
   /** React to the picture (either parent's); the viewer closes so its bubble can play the animation. */
@@ -1433,11 +1448,15 @@ function PictureViewer({
           )}
         </div>
       )}
-      <img
+      <AnimatedImage
         src={url}
+        mediaKey={mediaKey}
+        mime={mime}
         alt={name}
-        {...noSave}
+        imgProps={noSave}
         className="pointer-events-none max-h-full max-w-full select-none object-contain [-webkit-touch-callout:none] [-webkit-user-drag:none]"
+        wrapperClassName="flex h-full w-full items-center justify-center"
+        toggleClassName="absolute left-3 top-[max(0.75rem,var(--safe-top))]"
       />
     </div>
   );
