@@ -122,6 +122,38 @@ _NUM_ONES = [
 _NUM_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
 
 
+_NUM = r"(\d+(?:\.\d+)?)"
+#: A minus sign that starts a number, not a range ("10-15") or a word ("x-5").
+_MINUS = r"(?:(?<![\w.)])(-|\u2212))?"
+_TEMP_UNITS = {"F": "Fahrenheit", "C": "Celsius"}
+
+
+def speak_units(text: str) -> str:
+    """Spell units and symbols that follow a number the way a person says them.
+
+    "72°F" was read as "72 F". Temperatures need a number before them: "grade F",
+    "F sharp" and "Fahrenheit 451" are left alone. A minus sign counts only where a
+    number starts ("-5°F"), never inside a range ("10-15°F").
+    """
+
+    def temp(m: re.Match[str]) -> str:
+        sign = "minus " if m.group(1) else ""
+        return f"{sign}{m.group(2)} degrees {_TEMP_UNITS[m.group(3).upper()]}"
+
+    # 72°F, 72 °F, 72 degrees F, 72 deg F, 72F, 72 F (a lone F or C right after a number)
+    text = re.sub(
+        _MINUS + _NUM + r"\s?(?:°\s?|deg(?:rees?)?\.?\s|degrees\s)?([FC])(?![A-Za-z])",
+        temp, text)
+    # A bare degree sign after a number: 90° -> 90 degrees
+    text = re.sub(_MINUS + _NUM + r"\s?°", lambda m: f"{'minus ' if m.group(1) else ''}{m.group(2)} degrees", text)
+    text = re.sub(_NUM + r"\s?mph\b", r"\1 miles per hour", text, flags=re.IGNORECASE)
+    text = re.sub(_NUM + r"\s?(?:km/h|kph)\b", r"\1 kilometers per hour", text, flags=re.IGNORECASE)
+    text = re.sub(_NUM + r"\s?%", r"\1 percent", text)
+    # 5'10" -> 5 feet 10 inches
+    text = re.sub(r"(\d+)'\s?(\d+)(?:\"|'')", r"\1 feet \2 inches", text)
+    return text
+
+
 def _num_to_words(n: int) -> str:
     """Convert an integer (0-9999) into spoken English words."""
     if n < 0 or n > 9999:
@@ -385,6 +417,9 @@ class KokoroTTSEngine:
             # and \b after a period won't match if followed by a space.
             pattern = pattern.rstrip(r"\b")
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+        # Units and symbols after numbers, before numbers become words ("72°F").
+        text = speak_units(text)
 
         # Scripture references, years, then remaining small numbers.
         text = self._expand_scripture_refs(text)

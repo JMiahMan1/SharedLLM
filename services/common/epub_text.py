@@ -409,3 +409,15 @@ def read_text(data: bytes, separator: str = "\n\n") -> str:
         parts.append(chapter.label)
         parts.append(chapter.text)
     return separator.join(part for part in parts if part)
+
+
+def markup_text(markup: str) -> str:
+    """The prose of one piece of (x)html, headings kept as their own paragraphs.
+
+    Used for slices of a spine document (a chapter that starts at an anchor in
+    the middle of a file), which is why it never needs a well-formed tree.
+    """
+    prose = _Prose()
+    prose.feed(markup)
+    prose.close()
+    return _BLANK_LINES.sub("\n\n", "\n\n".join(text for _depth, text in prose.blocks)).strip()

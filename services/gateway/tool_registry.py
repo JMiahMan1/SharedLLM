@@ -645,8 +645,10 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Web search for current/external information.",
      "payload fields: query, max_results."),
     ("WebReadRequest", SVC_EXECUTION, "POST", "/execute/web_read", False,
-     "Fetch and extract readable text from a URL.",
-     "payload fields: url."),
+     "Read a URL: a web page's main text, a PDF's text page by page (says which pages, e.g. "
+     "'pages 1-6 of 23'; continue with start_page), or a text file. save: true also keeps the "
+     "downloaded file (PDF or other) in the user's Downloads folder.",
+     "payload fields: url, start_page, save."),
     ("CodeSearchRequest", SVC_EXECUTION, "POST", "/execute/code_search", False,
      "Semantic search over indexed workspace code.",
      "payload fields: query, workspace_id, max_results."),
@@ -696,8 +698,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Clone/pull a workspace's git repo and prime its directory.",
      "payload fields: workspace_id, repo_url, branch."),
     ("StorageFileReadRequest", SVC_EXECUTION, "POST", "/execute/storage_file_read", False,
-     "Read a file from SharedLLM storage volumes.",
-     "payload fields: path."),
+     "Read a file from SharedLLM storage volumes; a PDF comes back as its text page by page "
+     "(says which pages, e.g. 'pages 1-6 of 23'; continue with start_page).",
+     "payload fields: path, start_page."),
     ("StorageFileWriteRequest", SVC_EXECUTION, "POST", "/execute/storage_file_write", False,
      "Write a file into SharedLLM storage volumes.",
      "payload fields: path, content."),
@@ -729,8 +732,15 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("CalibreRequest", SVC_EXECUTION, "POST", "/execute/calibre", False,
      "Calibre library, as its librarian: list or search the shelf, fetch one "
      "book's metadata or text, list tags, books by tag, audit for copies and "
-     "gaps; add/remove tags (admins). No delete action exists.",
-     "payload fields: action, query, book_id, path, limit, max_chars, tag, untagged, add_tags, remove_tags."),
+     "gaps; add/remove tags (admins). action=chapters lists a book's chapters "
+     "(the author's numbering; front matter is not counted). action=fetch_text "
+     "with query (title and/or author, e.g. 'Wild at Heart John Eldredge') and "
+     "chapter (4, 'four' or a title) finds the book AND returns that one "
+     "chapter in a single call, no search first: use it to read a chapter "
+     "aloud, summarise it, or make discussion or study questions. A long "
+     "chapter comes in parts ('part 1 of 3'); ask for the next with part=2. "
+     "If two books match, it names both: ask which. No delete action exists.",
+     "payload fields: action, query, book_id, path, chapter, part, limit, max_chars, tag, untagged, add_tags, remove_tags."),
     ("LLMInfoRequest", SVC_EXECUTION, "POST", "/execute/llm/info", False,
      "LLM backend info: loaded models, VRAM, Ollama state.",
      "payload fields: (none required)."),
@@ -1285,7 +1295,7 @@ FRESHNESS: dict[str, Freshness] = {
         household_public=True, tags=("bible",),
     ),
     "CalibreRequest": Freshness(
-        reads={"list": DAILY, "search": DAILY, "get_book": STATIC, "fetch_text": STATIC,
+        reads={"list": DAILY, "search": DAILY, "get_book": STATIC, "chapters": STATIC, "fetch_text": STATIC,
                "tags": DAILY, "by_tag": DAILY, "audit": DAILY},
         tags=("library",),
     ),

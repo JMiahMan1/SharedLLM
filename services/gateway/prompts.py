@@ -36,6 +36,8 @@ from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
 # Prompt key constants (settings DB lookup keys)
 # =============================================================================
 PROMPT_ASSISTANT_SYSTEM_INSTRUCTION = "assistant_system_instruction"
+#: Jarvis's character and how he sounds; appended LAST to the assistant's system message.
+PROMPT_ASSISTANT_PERSONA = "assistant_persona"
 PROMPT_LIBRARIAN_SYSTEM_INSTRUCTION = "librarian_system_instruction"
 PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION = "code_helper_system_instruction"
 PROMPT_MEDIA_TROUBLESHOOTING = "media_troubleshooting_prompt"

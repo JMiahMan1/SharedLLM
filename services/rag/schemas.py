@@ -77,6 +77,10 @@ class SearchResultItem(BaseModel):
     #: Cosine similarity to the query (None when the row has no stored vector).
     #: ``score`` is a rank fusion and says nothing about relevance on its own.
     similarity: float | None = None
+    #: The row matched the whole query as a keyword phrase (BM25), which keeps it past
+    #: ``min_similarity`` whatever its cosine. A caller re-checking the floor needs this
+    #: to tell such a hit from one that slipped under the floor.
+    phrase_match: bool = False
 
 class SearchResponse(BaseModel):
     results: list[SearchResultItem]

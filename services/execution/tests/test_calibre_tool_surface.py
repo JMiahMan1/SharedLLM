@@ -259,7 +259,7 @@ async def test_a_storage_failure_keeps_its_status(monkeypatch):
 
 async def test_the_action_set_is_reads_and_tagging_never_a_delete():
     annotation = CalibreRequest.model_fields["action"].annotation
-    assert set(typing.get_args(annotation)) == {"list", "search", "get_book", "fetch_text", "tags", "by_tag", "audit", "tag"}
+    assert set(typing.get_args(annotation)) == {"list", "search", "get_book", "chapters", "fetch_text", "tags", "by_tag", "audit", "tag"}
 
 
 async def test_delete_is_not_a_nameable_action():
