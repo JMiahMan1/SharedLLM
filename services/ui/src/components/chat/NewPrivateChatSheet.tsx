@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { FolderOpen, KeyRound, Loader2, Lock, TriangleAlert } from 'lucide-react';
 import { newChatSecrets } from '../../lib/privateChatCrypto';
 import { api } from '../../services/api';
@@ -27,6 +28,8 @@ export default function NewPrivateChatSheet({
   const [partner, setPartner] = useState(partners.length === 1 ? partners[0].username : '');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const passwordId = useId();
+  const confirmId = useId();
   const [understood, setUnderstood] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -93,10 +96,10 @@ export default function NewPrivateChatSheet({
           </p>
         )}
 
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold text-slate-300">Password</span>
-          <input
-            type="password"
+        <div>
+          <label htmlFor={passwordId} className="mb-1 block text-xs font-semibold text-slate-300">Password</label>
+          <PasswordField
+            id={passwordId}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="new-password"
@@ -105,11 +108,11 @@ export default function NewPrivateChatSheet({
             data-testid="private-new-password"
             className="glass-input min-h-11 w-full text-base sm:text-sm"
           />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold text-slate-300">Type it again</span>
-          <input
-            type="password"
+        </div>
+        <div>
+          <label htmlFor={confirmId} className="mb-1 block text-xs font-semibold text-slate-300">Type it again</label>
+          <PasswordField
+            id={confirmId}
             value={confirm}
             onChange={(event) => setConfirm(event.target.value)}
             autoComplete="new-password"
@@ -118,7 +121,7 @@ export default function NewPrivateChatSheet({
             data-testid="private-confirm-password"
             className="glass-input min-h-11 w-full text-base sm:text-sm"
           />
-        </label>
+        </div>
         {password && problem && (
           <p className="text-xs text-amber-200" role="status">
             {problem}

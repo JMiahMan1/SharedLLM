@@ -63,6 +63,15 @@ const PAGE_SCRIPT = String.raw`
 (function () {
   var form = document.getElementById('unlock'), out = document.getElementById('out'), msg = document.getElementById('msg');
   var PAGE = 25, PREVIEW = 6;
+  // The show/hide eye: it only ever shows what was typed into the box.
+  var pwBox = document.getElementById('pw'), eye = document.getElementById('pw-toggle');
+  function setShown(shown) {
+    pwBox.type = shown ? 'text' : 'password';
+    eye.textContent = shown ? 'Hide' : 'Show';
+    eye.setAttribute('aria-label', shown ? 'Hide password' : 'Show password');
+    eye.setAttribute('aria-pressed', shown ? 'true' : 'false');
+  }
+  eye.addEventListener('click', function () { setShown(pwBox.type === 'password'); });
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; }
   function itemCard(item) {
     var a = el('article', 'item'), head = el('div', 'head');
@@ -133,7 +142,7 @@ const PAGE_SCRIPT = String.raw`
     var pw = document.getElementById('pw'); msg.textContent = 'Opening…';
     var raw = document.getElementById('jarvis-export-data').textContent.replace(/\s+/g, '');
     var b = atob(raw), bytes = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) bytes[i] = b.charCodeAt(i);
-    jarvisOpenExport(bytes, pw.value).then(function (text) { pw.value = ''; msg.textContent = ''; form.hidden = true; render(text); })
+    jarvisOpenExport(bytes, pw.value).then(function (text) { pw.value = ''; setShown(false); msg.textContent = ''; form.hidden = true; render(text); })
       .catch(function (e) { msg.textContent = e && e.message ? e.message : 'Could not open this file.'; });
   });
 })();`;
@@ -148,6 +157,9 @@ form{background:var(--card);border-radius:16px;padding:16px;display:grid;gap:12p
 input,button{font:inherit;min-height:44px;border-radius:12px;padding:0 12px}
 input{border:1px solid var(--muted);background:transparent;color:inherit}
 button{border:0;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+.pwbox{position:relative}.pwbox input{width:100%;box-sizing:border-box;padding-right:76px}
+.pwbox .eye{position:absolute;top:0;right:0;height:100%;min-width:64px;background:transparent;color:inherit;border-radius:0 12px 12px 0}
+.pwbox .eye:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 button.more{width:100%;background:var(--inner);color:inherit;font-size:13px;margin-top:8px}
 .muted{color:var(--muted);font-size:13px;margin:2px 0}
 h3{margin:24px 0 8px}
@@ -175,7 +187,8 @@ export function buildEncryptedPage(file: Uint8Array, title = 'Jarvis export'): s
 <body><main>
 <h1>${safeTitle}</h1>
 <p class="muted">This page holds an encrypted copy of a Jarvis account. It opens only with the password chosen when it was made, and nothing leaves this page.</p>
-<form id="unlock"><label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password" required>
+<form id="unlock"><label for="pw">Password</label>
+<div class="pwbox"><input id="pw" type="password" autocomplete="current-password" required><button type="button" id="pw-toggle" class="eye" aria-label="Show password" aria-pressed="false" aria-controls="pw">Show</button></div>
 <button type="submit">Open</button><p id="msg" class="muted" role="status"></p></form>
 <div id="out"></div>
 </main>

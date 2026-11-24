@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { BellRing, ChevronRight, Download, Fingerprint, FolderOpen, KeyRound, Link2, Loader2, MessageCircleQuestionMark, Timer, TriangleAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
@@ -17,7 +18,7 @@ type Mode = 'menu' | 'password' | 'phone' | 'preview' | 'backup' | 'open';
 
 const inputClass = 'glass-input min-h-11 w-full text-base sm:text-sm';
 
-function PasswordField({ label, value, onChange, testId, autoComplete, autoFocus }: {
+function ChatPasswordField({ label, value, onChange, testId, autoComplete, autoFocus }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -25,11 +26,12 @@ function PasswordField({ label, value, onChange, testId, autoComplete, autoFocus
   autoComplete: string;
   autoFocus?: boolean;
 }) {
+  const id = useId();
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-semibold text-slate-300">{label}</span>
-      <input
-        type="password"
+    <div>
+      <label htmlFor={id} className="mb-1 block text-xs font-semibold text-slate-300">{label}</label>
+      <PasswordField
+        id={id}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         autoComplete={autoComplete}
@@ -39,7 +41,7 @@ function PasswordField({ label, value, onChange, testId, autoComplete, autoFocus
         data-testid={testId}
         className={inputClass}
       />
-    </label>
+    </div>
   );
 }
 
@@ -274,9 +276,9 @@ export default function PrivateChatSecurity({
           <p className="text-sm leading-relaxed text-slate-300">
             Everything already in the chat stays readable. {partnerName} will need the new password the next time they unlock it.
           </p>
-          <PasswordField label="Current password" value={current} onChange={setCurrent} testId="private-current-password" autoComplete="current-password" autoFocus />
-          <PasswordField label="New password" value={password} onChange={setPassword} testId="private-next-password" autoComplete="new-password" />
-          <PasswordField label="Type the new one again" value={confirm} onChange={setConfirm} testId="private-next-confirm" autoComplete="new-password" />
+          <ChatPasswordField label="Current password" value={current} onChange={setCurrent} testId="private-current-password" autoComplete="current-password" autoFocus />
+          <ChatPasswordField label="New password" value={password} onChange={setPassword} testId="private-next-password" autoComplete="new-password" />
+          <ChatPasswordField label="Type the new one again" value={confirm} onChange={setConfirm} testId="private-next-confirm" autoComplete="new-password" />
           {password && problem && (
             <p className="text-xs text-amber-200" role="status">
               {problem}
@@ -340,7 +342,7 @@ export default function PrivateChatSecurity({
               says "New private message".
             </p>
           </div>
-          <PasswordField label="Chat password" value={current} onChange={setCurrent} testId="private-preview-password" autoComplete="current-password" autoFocus />
+          <ChatPasswordField label="Chat password" value={current} onChange={setCurrent} testId="private-preview-password" autoComplete="current-password" autoFocus />
           {error && (
             <p className="text-sm text-rose-200" role="alert" data-testid="private-preview-error">
               {error}
@@ -373,7 +375,7 @@ export default function PrivateChatSecurity({
             Enter the chat password once more. After that, your fingerprint, face or screen lock opens the chat on this phone. The
             password still works, and changing it does not turn this off.
           </p>
-          <PasswordField label="Chat password" value={current} onChange={setCurrent} testId="private-phone-password" autoComplete="current-password" autoFocus />
+          <ChatPasswordField label="Chat password" value={current} onChange={setCurrent} testId="private-phone-password" autoComplete="current-password" autoFocus />
           {error && (
             <p className="text-sm text-rose-200" role="alert" data-testid="private-phone-error">
               {error}

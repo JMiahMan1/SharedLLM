@@ -51,7 +51,7 @@ export default function SecretInput({ value, onChange, saved, onReveal, label, p
   return (
     <div className="relative">
       <input
-        type={visible ? 'text' : 'password'}
+        type={visible ? 'text' : 'password'} // password-toggle: its own eye, which can also fetch a saved secret
         value={shown}
         aria-label={label}
         disabled={disabled}

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Loader2, Save } from 'lucide-react';
@@ -107,6 +108,7 @@ function CameraCard({ camera, value, limits, onChange }: {
 export default function MotionRecordingSettings() {
   const queryClient = useQueryClient();
   const settings = useQuery({ queryKey: QUERY_KEY, queryFn: getMotionRecordingSettings, retry: false });
+  const passwordId = useId();
   const [form, setForm] = useState<AccountForm>({
     account: 'household', url: '', username: '', password: '', folder: '', enabled: true,
   });
@@ -203,11 +205,12 @@ export default function MotionRecordingSettings() {
               <input className={FIELD} value={form.username} autoComplete="off"
                 onChange={(e) => setForm({ ...form, username: e.target.value })} />
             </label>
-            <label className="text-xs text-slate-400 sm:col-span-2">App password
-              <input className={FIELD} type="password" value={form.password} autoComplete="new-password"
+            <div className="text-xs text-slate-400 sm:col-span-2">
+              <label htmlFor={passwordId}>App password</label>
+              <PasswordField id={passwordId} className={FIELD} value={form.password} autoComplete="new-password"
                 placeholder={s.has_password && s.account === 'custom' ? 'Saved; type to change' : ''}
                 onChange={(e) => setForm({ ...form, password: e.target.value })} />
-            </label>
+            </div>
           </div>
         )}
         <label className="block text-xs text-slate-400">Folder

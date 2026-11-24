@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
@@ -164,9 +165,14 @@ function HelperControls({ row, busy, call }: {
     case 'input_text':
       return (
         <>
-          <input className={`${INPUT} min-w-0 flex-1`} aria-label={`New text for ${name}`} value={draft}
-            type={a.mode === 'password' ? 'password' : 'text'}
-            maxLength={typeof a.max === 'number' ? a.max : undefined} onChange={(e) => setDraft(e.target.value)} />
+          {a.mode === 'password' ? (
+            <PasswordField wrapperClassName="min-w-0 flex-1" className={INPUT} aria-label={`New text for ${name}`} value={draft}
+              maxLength={typeof a.max === 'number' ? a.max : undefined} onChange={(e) => setDraft(e.target.value)} />
+          ) : (
+            <input className={`${INPUT} min-w-0 flex-1`} aria-label={`New text for ${name}`} value={draft}
+              type="text"
+              maxLength={typeof a.max === 'number' ? a.max : undefined} onChange={(e) => setDraft(e.target.value)} />
+          )}
           <button type="button" className={BUTTON} disabled={busy} onClick={() => { call('set_value', { value: draft }); setDraft(''); }}>Set</button>
         </>
       );

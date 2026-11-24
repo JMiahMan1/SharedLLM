@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Bluetooth, BluetoothOff, Loader2, Wifi } from 'lucide-react';
@@ -136,12 +137,12 @@ export default function MatterWifiSettings({ embedded = false }: { embedded?: bo
             <input id={`${id}-ssid`} className={input} value={ssid} onChange={(e) => setSsid(e.target.value)}
               autoComplete="off" spellCheck={false} />
           </label>
-          <label htmlFor={`${id}-password`} className="block text-xs text-slate-400">
-            Password
-            <input id={`${id}-password`} className={input} type="password" value={password}
+          <div className="block text-xs text-slate-400">
+            <label htmlFor={`${id}-password`}>Password</label>
+            <PasswordField id={`${id}-password`} wrapperClassName="mt-1" className={input.replace('mt-1 ', '')} value={password}
               onChange={(e) => setPassword(e.target.value)} autoComplete="new-password"
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} />
-          </label>
+          </div>
           {problem && <p className="text-xs text-amber-300" role="alert">{problem}</p>}
           <span className="flex flex-wrap justify-end gap-2">
             {wifi?.configured && (

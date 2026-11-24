@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import PasswordField from '../ui/PasswordField';
 import {
   X,
   Folder,
@@ -2902,13 +2903,12 @@ export default function WorkspaceIDE({
 
               <div>
                 <label htmlFor="ws-flash-password-input" className="block text-slate-400 mb-1">OTA Password (optional)</label>
-                <input
+                <PasswordField
                   id="ws-flash-password-input"
-                  type="password"
                   value={flashPassword}
                   onChange={(e) => setFlashPassword(e.target.value)}
                   placeholder="Leave blank if no OTA password"
-                  className="w-full glass-input bg-black/40 px-3 py-2 text-xs text-slate-200"
+                  className="w-full min-h-11 glass-input bg-black/40 px-3 py-2 text-xs text-slate-200"
                   data-testid="ws-flash-password-input"
                 />
               </div>

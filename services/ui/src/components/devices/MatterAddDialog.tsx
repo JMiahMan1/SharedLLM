@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { useQuery } from '@tanstack/react-query';
 import { Bluetooth, Network } from 'lucide-react';
 import AdoptDeviceDialog from './AdoptDeviceDialog';
@@ -101,11 +102,11 @@ export default function MatterAddDialog({ areas, onDone, onClose }: {
                 <input id={`${id}-ssid`} className={input} value={ssid} onChange={(e) => setSsid(e.target.value)}
                   autoComplete="off" spellCheck={false} />
               </label>
-              <label htmlFor={`${id}-password`} className="block text-xs text-slate-400">
-                Network password
-                <input id={`${id}-password`} className={input} type="password" value={password}
+              <div className="block text-xs text-slate-400">
+                <label htmlFor={`${id}-password`}>Network password</label>
+                <PasswordField id={`${id}-password`} wrapperClassName="mt-1" className={input.replace('mt-1 ', '')} value={password}
                   onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-              </label>
+              </div>
             </div>
           )}
         </div>
