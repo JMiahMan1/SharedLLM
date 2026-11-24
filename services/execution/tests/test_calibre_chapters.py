@@ -159,6 +159,15 @@ async def test_fetch_text_with_query_and_chapter_is_one_tool_call(monkeypatch):
     assert result.detail["chapter"]["number"] == 4 and result.detail["chapter"]["parts"] == 3
 
 
+async def test_a_reader_asking_for_smaller_parts_gets_them_never_larger_than_the_bound(monkeypatch):
+    chapter = {**CHAPTER_LIST[5], "part": 1, "parts": 9, "text": "Every man carries a wound."}
+    fake = _install(monkeypatch, _identity(), _shelf(), _chapters(chapter))
+    await calibre_handler.handle_calibre(_request("fetch_text", book_id=7, chapter=4, max_chars=6000))
+    assert fake.calls[-1]["json"]["max_chars"] == 6000
+    await calibre_handler.handle_calibre(_request("fetch_text", book_id=7, chapter=4, max_chars=100000))
+    assert fake.calls[-1]["json"]["max_chars"] == calibre_handler._chapter_max_chars()
+
+
 async def test_the_last_part_says_it_is_the_last(monkeypatch):
     chapter = {**CHAPTER_LIST[5], "part": 3, "parts": 3, "text": "The end of it."}
     _install(monkeypatch, _identity(), _shelf(), _chapters(chapter))
