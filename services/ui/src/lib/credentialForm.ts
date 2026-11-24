@@ -106,6 +106,14 @@ export const INTEGRATIONS: Integration[] = [
     help: "Free at auth.abuse.ch. Only the fingerprints (SHA-256) of app files on children's devices are sent to abuse.ch.",
     householdDefault: true,
   },
+  {
+    id: 'google_books',
+    name: 'Google Books',
+    fields: [{ key: 'google_books_key', label: 'Google Books API key', secret: true, writeOnly: true }],
+    complete: [['google_books_key']],
+    help: 'Free in Google Cloud Console (turn on the Books API, then create an API key). The family library fills in book details with it; turn Google Books on in Settings > Accounts & Integrations.',
+    householdDefault: true,
+  },
 ];
 
 /** Where the abuse.ch key a person's app checks use comes from (identity's abuse_ch_status). */
