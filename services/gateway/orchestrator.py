@@ -13,7 +13,7 @@ import aiohttp
 from services.common.backend_health import BackendUnavailable
 from services.common.circuit_breaker import CircuitOpenError, get_breaker
 from services.common.rag_collections import HOME_DEVICES, canonical_collection
-from services.gateway import context_router, prompt_budget, tool_cache
+from services.gateway import context_router, library_names, prompt_budget, tool_cache
 from services.gateway.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
@@ -728,6 +728,84 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
 
     return ans
 
+#: Heads the note that replaces other books' passages when the question names a
+#: book or author the library does not hold (``library_names``).
+LIBRARY_NOT_INDEXED_HEADER = "LIBRARY: THE BOOK LIBRARY WAS SEARCHED FOR THIS QUESTION"
+
+
+def _above_floor(hits: list, floor: float | None, collection: str) -> list:
+    """Keep only hits whose cosine ``similarity`` clears ``floor``.
+
+    ``/rag/search`` applies the floor itself; this is the same rule on the
+    gateway's side, so no pre-fetch path can put a passage under the floor into a
+    prompt (an older RAG that ignores ``min_similarity``, a caller that forgot to
+    send it). The floor is compared with ``similarity``, never with ``score``:
+    ``score`` is a reciprocal-rank fusion (about 1/61 for a top hit) and says
+    nothing about relevance. A hit RAG kept as a whole-query keyword match
+    (``phrase_match``) stays, as it does there. A hit with no ``similarity`` at
+    all cannot be checked here; it is kept on RAG's word and logged.
+    """
+    if floor is None:
+        return list(hits)
+    kept: list = []
+    unchecked = 0
+    for hit in hits:
+        sim = hit.get("similarity") if isinstance(hit, dict) else None
+        if sim is None:
+            unchecked += 1
+            kept.append(hit)
+        elif hit.get("phrase_match") or float(sim) >= floor:
+            kept.append(hit)
+    if unchecked:
+        log.warning("[RAG prefetch] %d %s hit(s) carried no similarity; the %.2f floor was not re-checked",
+                    unchecked, collection, floor)
+    dropped = len(hits) - len(kept)
+    if dropped:
+        log.info("[RAG prefetch] dropped %d %s hit(s) under the %.2f similarity floor", dropped, collection, floor)
+    return kept
+
+
+async def _passages_from_named_works(
+    client, rag_svc: str, user_id: str, named: list[str], hits: list, k: int, floor: float | None,
+) -> list:
+    """Only passages from the book or author the question names.
+
+    When none of the question's hits is from it, each name is looked up on its own
+    (a title or an author is a phrase the book's rows carry), so a named book that
+    is indexed but was outranked still answers. An empty result means the library
+    does not hold it, and the caller says so instead of quoting other books.
+    """
+    own = [h for h in hits if library_names.hit_is_from(_as_meta_dict(h.get("metadata")), named)]
+    if own:
+        return own
+    found: list = []
+    seen: set[str] = set()
+    for name in named:
+        body: dict[str, Any] = {"collection_name": "calibre_files", "query": name, "user_id": user_id, "k": k}
+        if floor is not None:
+            body["min_similarity"] = floor
+        try:
+            resp = await client.post(
+                f"{rag_svc}/rag/search", json=body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if resp.status != 200:
+                continue
+            results = (await resp.json()).get("results", [])
+        except Exception as exc:  # RAG is optional context
+            log.warning("[RAG prefetch] library lookup for %r failed: %s", name, exc)
+            continue
+        for hit in _above_floor(results, floor, "calibre_files"):
+            meta = _as_meta_dict(hit.get("metadata"))
+            key = str(hit.get("content"))
+            if meta.get("is_metadata") or key in seen or not library_names.hit_is_from(meta, named):
+                continue
+            seen.add(key)
+            found.append(hit)
+    return found[:k]
+
+
 async def _fetch_rag_context(
     query: str,
     user_id: str,
@@ -843,7 +921,16 @@ async def _fetch_rag_context(
                     log.warning("RAG search failed; continuing without context: %s", exc)
                     break
                 if resp.status == 200:
-                    hits = (await resp.json()).get("results", [])
+                    hits = _above_floor((await resp.json()).get("results", []), min_similarity, coll)
+                    if coll == "calibre_files" and (named := library_names.named_works(query)):
+                        hits = await _passages_from_named_works(
+                            client, rag_svc, user_id, named, hits, MAX_HITS_PER_COLL, min_similarity,
+                        )
+                        if not hits:
+                            note = library_names.not_indexed_note(named)
+                            rag_context += f"\n[{LIBRARY_NOT_INDEXED_HEADER}]\n{note}"
+                            total_chars += len(note)
+                            log.info("[RAG prefetch] named work(s) %s not in the indexed library", named)
                     if hits:
                         # For home devices, enrich with live state from the hub
                         if coll == HOME_DEVICES and creds:

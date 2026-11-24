@@ -282,22 +282,16 @@ async def extract_and_chunk_contents(
             }
         })
 
-        # Optionally index full text
+        # Optionally index full text. One unreadable book (a malformed archive,
+        # a download that times out) is logged and keeps its metadata row; it
+        # must never stop the crawl, which used to lose every other book with it.
         if not item.is_dir and "full_text" in item.extractable_capabilities:
             log.info(f"Extracting full text for: {item.path}")
-            sections = await _provider_sections(provider, item.path)
-            if sections:
-                chunks.extend(_section_chunks(item, sections))
-            else:
-                res = provider.get_content(item.path)
-                content = await res if inspect.isawaitable(res) else res
-                if content:
-                    file_chunks = chunk_text(content)
-                    for i, text in enumerate(file_chunks):
-                        chunks.append({
-                            "content": text,
-                            "metadata": _chunk_metadata(item, i)
-                        })
+            try:
+                chunks.extend(await _text_chunks(provider, item))
+            except Exception as exc:
+                log.warning("Could not extract text from %s (%s: %s); indexed by its metadata only",
+                            item.path, type(exc).__name__, exc)
 
         if checkpoint and item.mtime:
             checkpoint.mark_indexed(item.path, item.mtime)
@@ -306,6 +300,16 @@ async def extract_and_chunk_contents(
         crawl_phase("extracting", position, len(items))
 
     return chunks
+
+async def _text_chunks(provider: StorageProvider, item: ContentIndexItem) -> list[dict]:
+    sections = await _provider_sections(provider, item.path)
+    if sections:
+        return _section_chunks(item, sections)
+    res = provider.get_content(item.path)
+    content = await res if inspect.isawaitable(res) else res
+    if not content:
+        return []
+    return [{"content": text, "metadata": _chunk_metadata(item, i)} for i, text in enumerate(chunk_text(content))]
 
 async def _provider_sections(provider: StorageProvider, path: str) -> list:
     """Ask a provider for the document's real structure, tolerating its absence."""
