@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import PasswordField from '../components/ui/PasswordField';
 import { useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
@@ -856,13 +857,13 @@ function EsphomeDeviceSection({
             className="border-t border-white/10 pt-2 flex flex-wrap items-center gap-2"
             data-testid={`mdm-esphome-ota-box-${device.device_key}`}
           >
-            <input
-              type="password"
+            <PasswordField
               aria-label={`OTA password for ${device.label || target}`}
               value={otaPassword}
               onChange={(e) => setOtaPassword(e.target.value)}
               placeholder="OTA password (optional)"
-              className="glass-input w-44 bg-black/30 px-2.5 py-1 text-xs"
+              wrapperClassName="w-56 max-w-full"
+              className="glass-input min-h-11 w-full bg-black/30 px-2.5 py-1 text-xs"
               data-testid={`mdm-esphome-ota-pass-${device.device_key}`}
             />
             <label

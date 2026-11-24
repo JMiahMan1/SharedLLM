@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { KeyRound } from 'lucide-react';
 import { isAxiosError } from 'axios';
@@ -40,15 +41,15 @@ export default function OfflineCodeSetting() {
           : 'For when a child’s phone, tablet or PC has no connection: 6 to 12 digits, yours only. A device learns it the next time it is online.'}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="password"
+        <PasswordField
           inputMode="numeric"
           autoComplete="new-password"
           aria-label="New offline unlock code"
           placeholder={data.set ? 'New code' : '6-12 digits'}
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 12))}
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100 sm:w-32"
+          wrapperClassName="w-full sm:w-44"
+          className="min-h-11 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100"
         />
         <button
           type="button"

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { KeyRound, Plus, RefreshCw } from 'lucide-react';
@@ -95,6 +96,7 @@ function UserRow({ user, onChanged }: { user: HubUser; onChanged: () => void }) 
 
 function NewUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
   const [body, setBody] = useState<NewHubUser>({ name: '', username: '', password: '', is_admin: false });
+  const passwordId = useId();
   const add = useMutation({
     mutationFn: () => createHubUser({ ...body, name: body.name.trim(), username: body.username.trim().toLowerCase() }),
     onSuccess: (u) => { toast.success(`${u.name} can now log in to the hub.`); onDone(); },
@@ -111,10 +113,11 @@ function NewUserForm({ onDone, onCancel }: { onDone: () => void; onCancel: () =>
           <input className={INPUT} value={body.username} autoCapitalize="none" autoComplete="off"
             onChange={(e) => setBody({ ...body, username: e.target.value })} />
         </label>
-        <label className="text-xs text-slate-400">Password
-          <input className={INPUT} type="password" value={body.password} autoComplete="new-password"
+        <div className="text-xs text-slate-400">
+          <label htmlFor={passwordId}>Password</label>
+          <PasswordField id={passwordId} className={INPUT} value={body.password} autoComplete="new-password"
             placeholder="8 characters or more" onChange={(e) => setBody({ ...body, password: e.target.value })} />
-        </label>
+        </div>
       </div>
       <label className="inline-flex min-h-11 items-center gap-2 text-xs text-slate-200">
         <input type="checkbox" className="h-11 w-5 shrink-0" checked={body.is_admin}

@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { Archive, Check, ChevronDown, ChevronRight, Download, FileLock2, FolderOpen, KeyRound, Loader2, RotateCcw, TriangleAlert } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import ChatSheet from '../chat/Sheet';
@@ -87,6 +88,8 @@ export function ExportSheet({ onClose, person }: { onClose: () => void; person?:
   const { user } = useAuth();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const exportPasswordId = useId();
+  const exportConfirmId = useId();
   const [understood, setUnderstood] = useState(false);
   const [phase, setPhase] = useState<'form' | 'working' | 'done'>('form');
   const [bytes, setBytes] = useState(0);
@@ -173,10 +176,10 @@ export function ExportSheet({ onClose, person }: { onClose: () => void; person?:
               <li>Other people's data, even on shared lists, places and trips.</li>
             </ul>
           </details>
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-300">Password for the file</span>
-            <input
-              type="password"
+          <div>
+            <label htmlFor={exportPasswordId} className="mb-1 block text-xs font-semibold text-slate-300">Password for the file</label>
+            <PasswordField
+              id={exportPasswordId}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="new-password"
@@ -186,7 +189,7 @@ export function ExportSheet({ onClose, person }: { onClose: () => void; person?:
               data-testid="account-export-password"
               className="glass-input min-h-11 w-full text-base sm:text-sm"
             />
-          </label>
+          </div>
           {password && (
             <div className="space-y-1" data-testid="account-export-strength">
               <div className="flex gap-1" aria-hidden>
@@ -200,10 +203,10 @@ export function ExportSheet({ onClose, person }: { onClose: () => void; person?:
               <p className="text-xs text-slate-400">{strength.label}</p>
             </div>
           )}
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-300">Type it again</span>
-            <input
-              type="password"
+          <div>
+            <label htmlFor={exportConfirmId} className="mb-1 block text-xs font-semibold text-slate-300">Type it again</label>
+            <PasswordField
+              id={exportConfirmId}
               value={confirm}
               onChange={(event) => setConfirm(event.target.value)}
               autoComplete="new-password"
@@ -213,7 +216,7 @@ export function ExportSheet({ onClose, person }: { onClose: () => void; person?:
               data-testid="account-export-confirm"
               className="glass-input min-h-11 w-full text-base sm:text-sm"
             />
-          </label>
+          </div>
           {password && confirm && problem && (
             <p className="text-xs text-amber-200" role="status">
               {problem}
@@ -258,6 +261,7 @@ type RestoreResult = { service: string; counts: Counts; error?: string };
 export function OpenExportSheet({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
   const [file, setFile] = useState<File | null>(null);
+  const openPasswordId = useId();
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -359,10 +363,10 @@ export function OpenExportSheet({ onClose }: { onClose: () => void }) {
               }}
             />
           </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-300">Password</span>
-            <input
-              type="password"
+          <div>
+            <label htmlFor={openPasswordId} className="mb-1 block text-xs font-semibold text-slate-300">Password</label>
+            <PasswordField
+              id={openPasswordId}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
@@ -371,7 +375,7 @@ export function OpenExportSheet({ onClose }: { onClose: () => void }) {
               data-testid="account-open-password"
               className="glass-input min-h-11 w-full text-base sm:text-sm"
             />
-          </label>
+          </div>
           {error && (
             <p className="text-sm text-rose-200" role="alert" data-testid="account-open-error">
               {error}

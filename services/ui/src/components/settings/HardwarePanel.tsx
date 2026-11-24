@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Cpu, Plus, Trash2, Save, Radio, Zap, Link2 } from 'lucide-react';
@@ -158,11 +159,10 @@ const HardwarePanel: React.FC = () => {
                 placeholder="Port"
                 aria-label={`${device.name} port`}
               />
-              <input
-                type="password"
+              <PasswordField
                 value={device.noise_psk ?? ''}
                 onChange={e => handleFieldChange(device.name, 'noise_psk', e.target.value)}
-                className="glass-input w-full text-xs"
+                className="glass-input min-h-11 w-full text-xs"
                 placeholder="Noise PSK (optional)"
                 aria-label={`${device.name} noise psk`}
               />
@@ -210,11 +210,10 @@ const HardwarePanel: React.FC = () => {
             placeholder="Port"
             aria-label="New device port"
           />
-          <input
-            type="password"
+          <PasswordField
             value={newDevice.noise_psk ?? ''}
             onChange={e => setNewDevice({ ...newDevice, noise_psk: e.target.value })}
-            className="glass-input w-full text-xs"
+            className="glass-input min-h-11 w-full text-xs"
             placeholder="Noise PSK"
             aria-label="New device noise psk"
           />

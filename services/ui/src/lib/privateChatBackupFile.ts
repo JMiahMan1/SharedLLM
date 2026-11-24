@@ -227,7 +227,9 @@ main{max-width:720px;margin:0 auto;padding:24px 16px calc(32px + env(safe-area-i
 h1{font-size:22px;margin:8px 0 4px}h2{font-size:17px;margin:28px 0 8px;border-bottom:1px solid var(--line);padding-bottom:6px}
 p{margin:6px 0}.muted{color:var(--muted);font-size:14px}.lock{max-width:420px;margin:12vh auto 0;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px}
 label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:12px 0 4px}
-input[type=password]{width:100%;min-height:44px;font-size:16px;padding:8px 12px;border-radius:12px;border:1px solid #334155;background:#020617;color:var(--text)}
+#keepsake-password{width:100%;min-height:44px;font-size:16px;padding:8px 76px 8px 12px;border-radius:12px;border:1px solid #334155;background:#020617;color:var(--text)}
+.pwbox{position:relative}.pwbox .eye{position:absolute;top:0;right:0;height:100%;min-width:64px;padding:0 12px;background:transparent;color:var(--text);border-radius:0 12px 12px 0;font-size:14px}
+.pwbox .eye:focus-visible{outline:2px solid var(--rose-soft);outline-offset:-2px}
 button{min-height:44px;min-width:44px;padding:8px 16px;border-radius:12px;border:0;background:var(--rose);color:#fff;font-weight:600;font-size:15px;cursor:pointer}
 button.quiet{background:transparent;border:1px solid #334155;color:var(--text)}
 .error{color:#fda4af;font-size:14px}.day{text-align:center;color:var(--muted);font-size:13px;margin:18px 0 6px}

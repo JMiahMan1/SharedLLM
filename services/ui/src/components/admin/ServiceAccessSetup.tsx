@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PasswordField from '../ui/PasswordField';
 import { KeyRound, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
@@ -119,14 +120,14 @@ export default function ServiceAccessSetup({
             void submit(asking);
           }}
         >
-          <input
-            type="password"
+          <PasswordField
             autoFocus
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             placeholder={`${username}'s password (used once, not stored)`}
             aria-label={`${asking} password`}
-            className="glass-input flex-1 px-2.5 py-1.5 text-[11px]"
+            wrapperClassName="min-w-0 flex-1"
+            className="glass-input min-h-11 w-full px-2.5 py-1.5 text-[11px]"
           />
           <button type="submit" disabled={pending === asking} className="glass-button min-h-11 px-2.5 py-1.5 text-[11px]">
             {pending === asking ? <Loader2 size={12} className="animate-spin" /> : 'Create token'}
