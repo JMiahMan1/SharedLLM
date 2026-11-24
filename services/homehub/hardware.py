@@ -583,8 +583,8 @@ def _has_unique(hub: Any, entry_id: str, domain: str, unique_id: str) -> bool:
 def _sync_music_assistant(runtime: Any, entry: Any, driver: Any) -> Any:
     plan = _plan_for(runtime, entry)
     for pid, p in sorted((getattr(driver, "players", None) or {}).items()):
-        if _has_unique(runtime.hub, entry.entry_id, "media_player", pid):
-            continue
+        if p.get("type") == "protocol" or _has_unique(runtime.hub, entry.entry_id, "media_player", pid):
+            continue  # a protocol player is a hidden leg of a universal player, never a player of its own
         info = p.get("device_info") if isinstance(p.get("device_info"), dict) else {}
         name = str(p.get("display_name") or p.get("name") or pid)
         dev = plan.add_device(name, manufacturer=info.get("manufacturer") or None, model=info.get("model") or None,

@@ -53,6 +53,14 @@ wake word:
    ``TTS_END``. ``HOMEHUB_VOICE_STREAM=0`` turns streaming off. Each run logs
    ``stt``, ``first_audio`` (end of the command to the reply's first audio) and
    ``total``.
+   A slow answer is held: after ``INTENT_START`` the node hears nothing until the
+   first reply audio, and an Echo (hassmic) turns its light ring off and goes
+   quiet before a long answer arrives. So when no reply audio has started
+   ``HOMEHUB_VOICE_HOLD_AFTER_S`` after ``INTENT_START`` (6 s; 0 turns it off), a
+   short phrase (``HOMEHUB_VOICE_HOLD_PHRASE``, "One moment.") is spoken as the
+   first part of the streamed reply; the answer follows in the same stream. It is
+   synthesised once per voice and cached, never played after the answer's first
+   audio, and logged as ``hold`` (ms after ``INTENT_START``). Streamed replies only.
 
 Each stage sends HA's ``VoiceAssistantEventType`` sequence (``RUN_START``,
 ``STT_START``, ``STT_VAD_START``/``END``, ``STT_END`` with the text,
@@ -131,6 +139,8 @@ SPEECH_DETECTION = {
 #: A follow-up listen (after a reply that asked a question, or a start_conversation) begins right after the
 #: satellite spoke: its first moments are not listened to, and the gate is this much higher until speech starts.
 FOLLOW_UP_HOLDOFF_S = 0.5
+#: How long after the holding phrase a still unanswered run logs that it is waiting (once).
+HOLD_STILL_WAITING_S = 30.0
 FOLLOW_UP_THRESHOLD_FACTOR = 1.5
 #: A run is a follow-up when the satellite's conversation asked to continue this recently.
 FOLLOW_UP_WINDOW_S = 120.0
@@ -204,6 +214,11 @@ class VoiceSettings:
     input_gain: float | None = None
     #: Speak the reply as the gateway writes it (a growing stream), not only after the whole answer.
     stream_replies: bool = True
+    #: Seconds after INTENT_START with no reply audio before ``hold_phrase`` is spoken as the reply's
+    #: first part, so the node does not go dark on a slow answer; 0 turns it off. Streamed replies only:
+    #: with ``stream_replies`` off (or a node that is sent its audio over the API) nothing is held.
+    hold_after_s: float = 6.0
+    hold_phrase: str = "One moment."
     #: How long the start of a follow-up listen is not listened to (the end of the reply, the chime).
     followup_holdoff_s: float = FOLLOW_UP_HOLDOFF_S
     #: "auto" adds WebRTC's speech detector to the loudness gate when it is installed; "energy" never does.
@@ -228,6 +243,8 @@ class VoiceSettings:
             vad_min_rms=_float_env("HOMEHUB_VOICE_VAD_MIN_RMS", 40.0),
             input_gain=_gain_env("HOMEHUB_VOICE_INPUT_GAIN"),
             stream_replies=_flag_env("HOMEHUB_VOICE_STREAM", True),
+            hold_after_s=_float_env("HOMEHUB_VOICE_HOLD_AFTER_S", 6.0, zero_ok=True),
+            hold_phrase=os.getenv("HOMEHUB_VOICE_HOLD_PHRASE", "").strip() or "One moment.",
             followup_holdoff_s=_float_env("HOMEHUB_VOICE_FOLLOWUP_HOLDOFF_S", FOLLOW_UP_HOLDOFF_S, zero_ok=True),
             vad_engine=_vad_engine_env(),
             internal_secret=os.getenv("INTERNAL_SECRET", "").strip(),
@@ -257,6 +274,7 @@ class VoiceSettings:
                 "vad_min_rms": self.vad_min_rms,
                 "input_gain": "auto" if self.input_gain is None else self.input_gain,
                 "stream_replies": self.stream_replies, "followup_holdoff_s": self.followup_holdoff_s,
+                "hold_after_s": self.hold_after_s, "hold_phrase": self.hold_phrase,
                 "vad_engine": self.vad_engine,
                 "speech_detector": "webrtc+energy" if speech_classifier(self.vad_engine, 2) else "energy",
                 "problems": self.problems()}
@@ -732,6 +750,20 @@ def _clip_bytes(url: str) -> bytes | None:
 
 BACKENDS = Backends(ask_stream=ask_jarvis_stream, synth=synthesize_speech, open_stream=open_reply_stream)
 
+#: The holding phrase's audio per (phrase, voice): made once, then free.
+_HOLD_AUDIO: dict[tuple[str, str | None], bytes] = {}
+
+
+async def _hold_audio(phrase: str, voice: str | None) -> bytes:
+    key = (phrase, voice)
+    audio = _HOLD_AUDIO.get(key)
+    if audio is None:
+        synth = BACKENDS.synth
+        assert synth is not None
+        audio = await synth(phrase, voice)
+        _HOLD_AUDIO[key] = audio
+    return audio
+
 
 # -- audio helpers ------------------------------------------------------------------
 def _gain(pcm: bytes, multiplier: float) -> bytes:
@@ -875,7 +907,8 @@ class Run:
         what the person waits through, and ``total`` the whole run."""
         m, out = self.marks, {}
         spans = (("listen", "listen", "listened"), ("stt", "listened", "transcribed"),
-                 ("intent", "intent", "answered"), ("tts", "tts", "spoken"), ("first_audio", "listened", "first_audio"))
+                 ("intent", "intent", "answered"), ("tts", "tts", "spoken"), ("first_audio", "listened", "first_audio"),
+                 ("hold", "intent", "hold"))
         for name, a, b in spans:
             if a in m and b in m:
                 out[name] = round((m[b] - m[a]) * 1000)
@@ -908,8 +941,56 @@ class _StreamSpeaker:
         self.default_voice: str | None = None
         self.sentences = 0  # given by the gateway (the rest at the end is not counted)
         self._queue: asyncio.Queue[tuple[str, str | None] | None] = asyncio.Queue()
-        self._started = False
+        self._started = False  # the node was told to play the stream (holding phrase or reply)
+        self.held = False  # the holding phrase is in the stream
+        self._hold_task: asyncio.Task[None] | None = None
         self._task = asyncio.get_running_loop().create_task(self._work(), name=f"voice:{satellite.name}:speak")
+
+    def _start_playing(self) -> None:
+        if not self._started:
+            self._started = True
+            self.satellite._event(self.run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_PROGRESS,
+                                  {"tts_start_streaming": "1"})
+
+    def start_hold(self, after_s: float, phrase: str, voice: str | None) -> None:
+        """Speak ``phrase`` first if no reply audio has started ``after_s`` seconds from now (once per run)."""
+        if after_s > 0 and phrase and self._hold_task is None:
+            self._hold_task = asyncio.get_running_loop().create_task(
+                self._hold(after_s, phrase, voice), name=f"voice:{self.satellite.name}:hold")
+
+    async def _hold(self, after_s: float, phrase: str, voice: str | None) -> None:
+        await asyncio.sleep(after_s)
+        if self._started or self.sentences or self.stream.closed:
+            return
+        try:
+            audio = await _hold_audio(phrase, voice)
+            # The answer got there while the phrase was made: it is never said after (or instead of) it.
+            # No await between this check and the append, so the order cannot change in between.
+            if self._started or self.sentences or self.stream.closed:
+                return
+            self.stream.append(audio)
+            self.held = True
+            self.run.mark("hold")
+            self._start_playing()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # the holding phrase is a courtesy: it never fails the run
+            self.satellite.log.warning("voice satellite %s run %s: the holding phrase could not be said: %s",
+                                       self.satellite.name, self.run.id, exc)
+            return
+        await asyncio.sleep(HOLD_STILL_WAITING_S)
+        if "first_audio" not in self.run.marks and "answered" not in self.run.marks:
+            waited = time.monotonic() - self.run.marks.get("intent", self.run.started)
+            self.satellite.log.info("voice satellite %s run %s: still waiting for Jarvis after %d s",
+                                    self.satellite.name, self.run.id, round(waited))
+
+    async def stop_hold(self) -> None:
+        """The answer is in: no holding phrase from now on (one already in the stream stays)."""
+        task = self._hold_task
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
 
     async def say(self, text: str, voice: str | None) -> None:
         """One sentence from the gateway (``on_sentence``), or the rest of the reply at the end."""
@@ -929,11 +1010,9 @@ class _StreamSpeaker:
                 self.stream.append(audio)
             except (HubError, OSError) as exc:
                 raise PipelineError("tts-failed", f"Jarvis's voice could not speak the reply: {exc}") from exc
-            if not self._started:
-                self._started = True
+            if "first_audio" not in self.run.marks:
                 self.run.mark("first_audio")
-                self.satellite._event(self.run, VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_PROGRESS,
-                                      {"tts_start_streaming": "1"})
+                self._start_playing()  # already playing when the holding phrase went first
                 self.satellite._publish_satellite("responding")
 
     async def finish(self) -> None:
@@ -945,6 +1024,7 @@ class _StreamSpeaker:
             self.stream.close()
 
     async def abort(self) -> None:
+        await self.stop_hold()
         if not self._task.done():
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -1448,7 +1528,11 @@ class SatelliteVoice:
                                 if whisper_voice is not None:
                                     voice = whisper_voice
                                 await speaker.say(text, voice)
-                            reply = await BACKENDS.ask_stream(settings, text, self._context(run), _on_sentence)
+                            speaker.start_hold(settings.hold_after_s, settings.hold_phrase, speaker.default_voice)
+                            try:
+                                reply = await BACKENDS.ask_stream(settings, text, self._context(run), _on_sentence)
+                            finally:
+                                await speaker.stop_hold()
                         else:
                             reply = await BACKENDS.ask(settings, text, self._context(run))
                 except TimeoutError as exc:
@@ -1464,7 +1548,8 @@ class SatelliteVoice:
                 self._publish_satellite("responding")
                 self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": reply})
                 run.mark("tts")
-                if speaker is not None and speaker.sentences:
+                if speaker is not None and (speaker.sentences or speaker.held):
+                    # Also when only the holding phrase streamed: the node is playing that stream already.
                     await self._finish_streamed_reply(run, reply, speaker, settings)
                 else:
                     if speaker is not None:
@@ -1519,6 +1604,8 @@ class SatelliteVoice:
         run.reply_mode = "stream"
         run.streamed_sentences = speaker.sentences
         rest = getattr(reply, "rest", None)
+        if not speaker.sentences and not rest:
+            rest = str(reply)  # only the holding phrase is in the stream: the whole answer follows it
         if rest:
             voice = getattr(reply, "voice", None)
             wtv = None

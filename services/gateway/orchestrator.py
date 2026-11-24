@@ -36,7 +36,7 @@ from services.gateway.intent_engine import is_raven_intent
 from services.gateway.knowledge_map import knowledge_map_for
 from services.gateway.llm_providers import get_provider
 from services.gateway.location_query import parse_location_query
-from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
+from services.gateway.prompts import PROMPT_ASSISTANT_PERSONA, PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.studio import actions as studio_actions
 from services.gateway.studio import tools as studio_tools
@@ -724,7 +724,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         from services.gateway.messaging import infer_priority_from_payload
 
         job_priority = infer_priority_from_payload(job_payload)
-        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat", priority=job_priority)
+        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat", priority=job_priority, persona=bool(job_payload.get("persona")))
 
     return ans
 
@@ -1968,7 +1968,23 @@ def _speaker_line(creds: ResolvedCredentials | None) -> str:
     return f"Speaker: {user}{how}."
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None) -> str:
+_PERSONA_WARNED = False
+
+
+def _assistant_persona() -> str:
+    """The editable ``assistant_persona`` prompt (Settings), or "" with one warning per process."""
+    global _PERSONA_WARNED
+    try:
+        return load_prompt_sync(PROMPT_ASSISTANT_PERSONA).strip()
+    except ValueError:
+        if not _PERSONA_WARNED:
+            _PERSONA_WARNED = True
+            log.warning("[_single_turn_inference] setting %r is missing or empty; answering without the persona",
+                        PROMPT_ASSISTANT_PERSONA)
+        return ""
+
+
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None, persona: bool = False) -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
 
     The system message carries the knowledge map (``knowledge_map``): where every
@@ -2028,6 +2044,13 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             "it to Raven as a mission."
         )
     ws_chars = len(system) - before_workspace
+    if persona:
+        # Last on purpose: at the top of a ~20K-character system message the model
+        # followed the tool guide and ignored the character ("I don't have a favorite
+        # color"). Same text for every question, so the cached prefix still holds.
+        persona_text = _assistant_persona()
+        if persona_text:
+            system += f"\n\n{persona_text}"
     context_parts = [f"Current Date/Time: {now}", _speaker_line(creds)]
     if turn_note.strip():
         context_parts.append(turn_note.strip())

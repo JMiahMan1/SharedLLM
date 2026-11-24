@@ -1942,11 +1942,59 @@ async def get_dynamic_llm_settings() -> dict:
         log.error(f"[AgentLoop] Failed to fetch dynamic LLM settings: {e}")
     return {}
 
+# The local server's live context per (url, model): (n_ctx, monotonic time).
+# Only a reported value is kept, so a model that is not loaded yet is asked again.
+_LIVE_CTX_TTL_S = 60.0
+_live_ctx_cache: dict[tuple[str, str], tuple[int, float]] = {}
+
+
+async def _live_local_ctx(local_url: str, model: str) -> tuple[int | None, str]:
+    """Ask the local server (alpaca-proxy GET /admin/context) for the model's live context.
+
+    Returns (n_ctx_per_slot, or n_ctx when per-slot is null; reason). The value is
+    None when the endpoint is missing (older proxy, 404), the model is not loaded,
+    or the call failed; the reason says which. The endpoint never loads a model.
+    """
+    key = (local_url.rstrip("/"), model)
+    hit = _live_ctx_cache.get(key)
+    if hit is not None and time.monotonic() - hit[1] < _LIVE_CTX_TTL_S:
+        return hit[0], "cached"
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(f"{key[0]}/admin/context", params={"model": model},
+                                    timeout=aiohttp.ClientTimeout(total=3.0, sock_connect=2.5))
+            if resp.status == 404:
+                return None, "the server has no /admin/context (404)"
+            if resp.status != 200:
+                return None, f"/admin/context answered HTTP {resp.status}"
+            data = json.loads((await resp.text()).strip() or "{}")
+    except Exception as e:
+        if local_ai.LLM.record_failure(e):
+            return None, "unreachable"  # logged once by the breaker
+        return None, f"/admin/context failed ({e!r})"
+    per_slot, total = data.get("n_ctx_per_slot"), data.get("n_ctx")
+    live = per_slot if per_slot is not None else total
+    if not data.get("loaded") or live is None:
+        return None, f"{model} is not loaded on the server yet"
+    try:
+        live = int(live)
+    except (TypeError, ValueError):
+        return None, f"/admin/context reported a bad n_ctx ({live!r})"
+    if live <= 0:
+        return None, f"/admin/context reported a bad n_ctx ({live!r})"
+    _live_ctx_cache[key] = (live, time.monotonic())
+    return live, "n_ctx_per_slot" if per_slot is not None else "n_ctx"
+
+
 async def get_vram_safe_params(model: str, settings: dict) -> dict:
     """Dynamically checks VRAM pressure using DB constraints."""
     local_url = settings.get("llm_local_url", "")
-    max_ctx = int(settings.get("llm_local_max_ctx", "16384"))
-    # P1: ALWAYS honor the configured context as the baseline. The previous
+    # llm_local_max_ctx is an optional CAP on the server's live context; when the
+    # live context is unknown it is the context, else 16384.
+    cap_setting = str(settings.get("llm_local_max_ctx") or "").strip()
+    cap = int(cap_setting) if cap_setting else None
+    max_ctx = cap if cap is not None else 16384
+    # P1: ALWAYS honor a known context (live, capped, or configured) as the baseline. The previous
     # behaviour only set num_ctx inside the successful /api/ps branch, so any
     # transient failure to reach Ollama silently fell back to Ollama's tiny
     # default context (context starvation -> 40-60 iterations). Now num_ctx is
@@ -1985,6 +2033,17 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         # The breaker already knows the machine is off: no 3-second timeout (and
         # no warning) on every request just to learn it again.
         return params
+    live_ctx, why = await _live_local_ctx(local_url, model)
+    if live_ctx is not None:
+        max_ctx = min(live_ctx, cap) if cap is not None else live_ctx
+        params["num_ctx"] = max_ctx
+        log.info(f"[AgentLoop] {model}: live context {live_ctx} ({why}), cap {cap if cap is not None else 'none'}"
+                 f" -> num_ctx={max_ctx}")
+    elif local_ai.LLM.is_down():
+        return params  # the /admin/context call just opened the breaker; it logged once
+    else:
+        log.warning(f"[AgentLoop] {model}: live context unknown ({why}); using "
+                    f"{'llm_local_max_ctx' if cap is not None else 'the default'} num_ctx={max_ctx}")
     try:
         async with shared_http_client() as client:
             resp = await client.get(f"{local_url.rstrip('/')}/api/ps",
@@ -2002,14 +2061,14 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
                         safe_ctx = max(4096, max_ctx // 2)
                         params["num_ctx"] = safe_ctx
                         log.info(f"[AgentLoop] VRAM PRESSURE. Scaling context down to {safe_ctx}.")
-                    # else: keep the configured max_ctx baseline
+                    # else: keep the max_ctx baseline
                 except json.JSONDecodeError:
-                    log.warning(f"[AgentLoop] Failed to parse VRAM status (api/ps) from {local_url}; using configured num_ctx={max_ctx}")
+                    log.warning(f"[AgentLoop] Failed to parse VRAM status (api/ps) from {local_url}; using num_ctx={max_ctx}")
     except Exception as e:
         # Never let a transient VRAM check drop the context to Ollama's default.
         if local_ai.LLM.record_failure(e):
             return params  # logged once by the breaker, not on every request
-        log.warning(f"[AgentLoop] VRAM status check failed ({e!r}); using configured num_ctx={max_ctx}")
+        log.warning(f"[AgentLoop] VRAM status check failed ({e!r}); using num_ctx={max_ctx}")
     return params
 
 
