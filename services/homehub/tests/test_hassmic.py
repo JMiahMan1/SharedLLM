@@ -561,7 +561,8 @@ async def test_switching_to_microwakeword_installs_the_models_first(env):
     assert st.state == "hey_jarvis, okay_nabu" and st.attributes["missing"] == []
     # cached once in HomeHub's data dir
     assert sorted(os.listdir(os.path.join(hub.data_dir, "hassmic_wake_models"))) == [
-        "hey_jarvis.json", "hey_jarvis.tflite", "okay_nabu.json", "okay_nabu.tflite"]
+        "hey_jarvis.json", "hey_jarvis.sha256", "hey_jarvis.tflite",
+        "okay_nabu.json", "okay_nabu.sha256", "okay_nabu.tflite"]  # each with the digest of its whole download
     await hub.call_service("select", "select_option", {"entity_id": eid, "option": "Amazon"})
     assert env.echo.settings["wake_engine"] == "amazon" and hub.states.get(eid).state == "Amazon"
 
@@ -852,3 +853,30 @@ async def test_a_truncated_cached_model_is_downloaded_again(tmp_path, monkeypatc
     _, model = await hassmic.WakeModelCache(str(cache_dir)).get("hey_test")
     assert model == whole and len(fetched) == 2
     assert not hassmic.is_tflite(b"x" * 100) and hassmic.is_tflite(whole)
+
+
+async def test_a_cut_off_model_with_a_good_header_is_not_trusted_from_the_cache(tmp_path, monkeypatch):
+    """The live case: the first 5512 bytes of a 57248 byte model keep its TFL3 header."""
+    whole = bytes(4) + b"TFL3" + bytes(range(256)) * 200
+    manifest = json.dumps({"type": "micro", "wake_word": "Hey Test", "model": "hey_test.tflite", "version": 2,
+                           "micro": {"probability_cutoff": 0.9, "sliding_window_size": 5,
+                                     "feature_step_size": 10}}).encode()
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "hey_test.json").write_bytes(manifest)
+    (cache_dir / "hey_test.tflite").write_bytes(whole[:5512])  # passes is_tflite, but is not whole
+    assert hassmic.is_tflite(whole[:5512])
+    fetched = []
+
+    async def fetch(self, url):
+        fetched.append(url)
+        return manifest if url.endswith(".json") else whole
+
+    monkeypatch.setattr(hassmic.WakeModelCache, "_fetch", fetch)
+    cache = hassmic.WakeModelCache(str(cache_dir))
+    _, model = await cache.get("hey_test")
+    assert model == whole and len(fetched) == 2
+    _, again = await cache.get("hey_test")  # now recorded whole: served from the cache
+    assert again == whole and len(fetched) == 2
+    cache.forget("hey_test")  # the Echo refused it: gone, downloaded next time
+    assert not (cache_dir / "hey_test.tflite").exists() and not (cache_dir / "hey_test.sha256").exists()
