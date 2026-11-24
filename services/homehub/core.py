@@ -505,18 +505,21 @@ class Driver:
                      and str(e.unique_id).lower() == want), None)
 
     def ensure_device(self, name: str, *, identifiers: list[list[str]] | None = None,
-                      connections: list[list[str]] | None = None, **info: Any) -> DeviceEntry:
+                      connections: list[list[str]] | None = None, reuse_single: bool = True,
+                      **info: Any) -> DeviceEntry:
         """The device this entry's entities belong to, registering it the first time (HA's device_info).
 
         A device of this entry sharing one of the ``identifiers`` or ``connections`` is reused, else
-        the entry's only device, else (as HA's device registry merges them) another integration's
-        device with one of those ``connections``, which this entry then joins. ``info`` (manufacturer,
-        model...) is confirmed as the device's own.
+        the entry's only device (unless ``reuse_single`` is False), else (as HA's device registry
+        merges them) another integration's device with one of those ``connections``, which this entry
+        then joins. ``info`` (manufacturer, model...) is confirmed as the device's own.
+        ``reuse_single=False`` is for an integration with several devices: a new player with no
+        identifier of its own must not be folded into whichever device the entry happened to have.
         """
         pairs = {tuple(map(str, p)) for p in (identifiers or []) + (connections or [])}
         mine = [d for d in self.hub.devices.values() if self.entry.entry_id in d.config_entries]
         dev = next((d for d in mine if pairs & {tuple(map(str, p)) for p in d.identifiers + d.connections}), None)
-        if dev is None and len(mine) == 1:
+        if dev is None and reuse_single and len(mine) == 1:
             dev = mine[0]
         conns = {tuple(map(str, p)) for p in connections or []}
         if dev is None and conns:
