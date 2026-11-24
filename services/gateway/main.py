@@ -1599,17 +1599,32 @@ async def build_time_or_date_response(query: str) -> str:
         log.error("time answer: %s", exc)
         return ("I don't know the household's time zone yet. An admin can set it in "
                 "Settings > Household time zone, or as TZ in the server's .env.")
-    now = datetime.now(ZoneInfo(tz_name))
+    return spoken_time_answer(query, datetime.now(ZoneInfo(tz_name)))
 
+
+def _ordinal(day: int) -> str:
+    """1st, 2nd, 3rd, 4th ... 11th, 12th, 13th ... 21st."""
+    suffix = "th" if 10 <= day % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def spoken_time_answer(query: str, now: datetime) -> str:
+    """The time or date the way a person says it, for a reply that is read aloud.
+
+    The household's own zone is implied, so it is never named ("America/Phoenix" was read out
+    as "America slash Phoenix"), the hour has no leading zero ("07:29" was "oh seven"), and the
+    date is "Monday, November 23rd" without the year.
+    """
     q = (query or "").strip().lower()
     wants_time = any(token in q for token in ("time", "clock"))
     wants_date = "date" in q or "day" in q or "today" in q
-
+    clock = f"{now.hour % 12 or 12}:{now.minute:02d} {'AM' if now.hour < 12 else 'PM'}"
+    day = f"{now.strftime('%A, %B')} {_ordinal(now.day)}"
     if wants_time and wants_date:
-        return f"It is {now.strftime('%I:%M %p')} on {now.strftime('%A, %B %d, %Y')} ({tz_name})."
+        return f"It's {clock} on {day}."
     if wants_date and not wants_time:
-        return f"Today is {now.strftime('%A, %B %d, %Y')} ({tz_name})."
-    return f"It is {now.strftime('%I:%M %p')} ({tz_name})."
+        return f"Today is {day}."
+    return f"It's {clock}."
 
 
 def has_explicit_action_request(query: str) -> bool:

@@ -88,3 +88,19 @@ async def test_the_time_answer_names_how_to_set_a_missing_zone(gw, monkeypatch):
     monkeypatch.setattr("services.gateway.orchestrator.get_all_settings", AsyncMock(return_value={}))
     answer = await gw.build_time_or_date_response("what time is it")
     assert "Household time zone" in answer and "TZ" in answer
+
+
+def test_the_time_answer_is_said_the_way_a_person_says_it(gw):
+    from datetime import datetime
+    evening = datetime(2026, 11, 23, 19, 29)
+    assert gw.spoken_time_answer("what time is it", evening) == "It's 7:29 PM."
+    assert gw.spoken_time_answer("what's the date today", evening) == "Today is Monday, November 23rd."
+    assert gw.spoken_time_answer("what time and day is it", evening) == "It's 7:29 PM on Monday, November 23rd."
+    assert gw.spoken_time_answer("what time is it", datetime(2026, 11, 1, 0, 5)) == "It's 12:05 AM."
+    assert gw.spoken_time_answer("what time is it", datetime(2026, 11, 1, 12, 0)) == "It's 12:00 PM."
+
+
+def test_ordinal_days():
+    from services.gateway.main import _ordinal
+    assert [_ordinal(d) for d in (1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 31)] == [
+        "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "31st"]
