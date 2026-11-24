@@ -5,7 +5,8 @@ import toast from 'react-hot-toast';
 import { BookPlus, ClipboardCheck, FileCheck, Library, Loader2, Plus, Search, Tag, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
-import type { BookCatalogueReport, BookCatalogues, BookInspection, LibraryAuditGroup, LibraryAuditList, LibraryBook } from '../../types/api';
+import type { BookInspection, LibraryAuditGroup, LibraryAuditList, LibraryBook } from '../../types/api';
+import { catalogueReportLines, cataloguesSummary } from '../../lib/bookCatalogues';
 
 /** Topics the app's features read (Fasting, Bible, Health); offered first when tagging. */
 const TOPICS = ['fasting', 'prayer', 'lent', 'bible-study', 'health', 'early-church'];
@@ -105,20 +106,6 @@ function sourcesLine(sources: Record<string, string>): string {
   return [...bySource.entries()].map(([source, fields]) => `${fields.join(', ')} from ${source}`).join('; ');
 }
 
-/** Which catalogues fill in books for this person, and why any is not used (GET /api/library/catalogues). */
-export function cataloguesSummary(catalogues: BookCatalogues): { using: string[]; notUsed: string[]; problems: string[] } {
-  const using: string[] = [];
-  const notUsed: string[] = [];
-  const problems: string[] = [];
-  for (const id of catalogues.order) {
-    const source = catalogues.sources[id];
-    if (!source) continue;
-    if (source.ready) using.push(source.name);
-    else notUsed.push(source.reason || `${source.name}: not set up`);
-    if (source.ready && source.last && !source.last.ok && source.last.error) problems.push(`Last lookup: ${source.last.error}`);
-  }
-  return { using, notUsed, problems };
-}
 
 /** The line under "Add a book": where details come from, and a way to change it. */
 function CataloguesNote() {
@@ -149,15 +136,6 @@ function CataloguesNote() {
   );
 }
 
-/** One lookup's catalogues, said plainly: asked, skipped and why, errors. */
-export function catalogueReportLines(report: BookCatalogueReport | undefined): { text: string; problem: boolean }[] {
-  if (!report) return [];
-  return [
-    ...(report.asked.length ? [{ text: `Asked ${report.asked.join(' and ')}.`, problem: false }] : []),
-    ...report.errors.map((e) => ({ text: e.error, problem: true })),
-    ...report.skipped.map((s) => ({ text: `Skipped ${s.reason.startsWith(s.source) ? s.reason : `${s.source}: ${s.reason}`}.`, problem: false })),
-  ];
-}
 
 function splitTags(value: string): string[] {
   return value.split(',').map((t) => t.trim()).filter(Boolean);

@@ -4,17 +4,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { UserProfile } from '../../services/api';
-import type { BookCatalogueId, BookCatalogueSource, BookCatalogueTest, BookCatalogues } from '../../types/api';
+import type { BookCatalogueId, BookCatalogueTest, BookCatalogues } from '../../types/api';
 import { errorText } from '../../lib/errorText';
 import Modal from '../ui/Modal';
 import PasswordField from '../ui/PasswordField';
 import HelpTooltip from '../ui/HelpTooltip';
 import { Toggle } from '../ui/Toggle';
+import { CATALOGUE_NAMES, catalogueLine } from '../../lib/bookCatalogues';
 
-export const CATALOGUE_NAMES: Record<BookCatalogueId, string> = {
-  google_books: 'Google Books',
-  open_library: 'Open Library',
-};
 
 const KEY_FIELD = 'google_books_key';
 
@@ -28,19 +25,6 @@ const FALLBACK: BookCatalogues = {
   },
 };
 
-/** The one line a catalogue card shows, and whether it is a problem. */
-export function catalogueLine(id: BookCatalogueId, source: BookCatalogueSource | undefined): { text: string; problem: boolean } {
-  if (!source) return { text: 'Not set up', problem: false };
-  if (source.ready) {
-    if (id === 'google_books') {
-      return { text: source.key_source === 'household' ? 'On, with the household key' : 'On, with your own key', problem: false };
-    }
-    return { text: 'On', problem: false };
-  }
-  if (source.enabled) return { text: 'On, but no API key is set', problem: true };
-  if (id === 'google_books' && !source.key_set) return { text: 'Not set up', problem: false };
-  return { text: 'Off', problem: false };
-}
 
 /**
  * Google Books or Open Library in Accounts & Integrations (docs/INTEGRATIONS.md).
