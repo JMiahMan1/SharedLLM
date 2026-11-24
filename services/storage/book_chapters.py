@@ -650,3 +650,22 @@ def read_book_chapters(data: bytes, fmt: str) -> tuple[str, list[BookChapter]]:
     if fmt == "TXT":
         return "headings", text_chapters(data.decode("utf-8", "replace"))
     raise ChapterError(f"No chapter reader for {fmt} files; convert the book to EPUB in Calibre.")
+
+
+def read_book_text(data: bytes, fmt: str) -> str:
+    """A whole book's text, for a format read here (PDF pages in order, EPUB chapters, TXT)."""
+    fmt = fmt.upper()
+    if fmt == "PDF":
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(io.BytesIO(data))
+            pages = [(page.extract_text() or "").strip() for page in reader.pages]
+        except Exception as exc:
+            raise ChapterError(f"not a readable PDF: {exc}") from exc
+        return "\n\n".join(p for p in pages if p)
+    if fmt == "TXT":
+        return data.decode("utf-8", "replace")
+    if fmt == "EPUB":
+        return "\n\n".join(c.text.strip() for c in epub_chapters(data)[1] if c.text.strip())
+    raise ChapterError(f"No text reader for {fmt} files; convert the book to EPUB in Calibre.")
