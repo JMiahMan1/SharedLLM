@@ -112,6 +112,49 @@ def test_is_document_pdf_epub_docx():
 
 
 @pytest.mark.asyncio
+async def test_a_pdf_is_read_with_pypdf_when_pdftotext_is_missing(mocker, tmp_path):
+    """No converter binary is never a reason to refuse a PDF."""
+    from services.execution.document_text import extract_document_text
+    from services.execution.tests.pdf_fixtures import make_pdf
+
+    mocker.patch("services.execution.document_text.shutil.which", return_value=None)
+    pdf = tmp_path / "some.pdf"
+    pdf.write_bytes(make_pdf(["In the beginning", "", "was the Word"]))
+
+    text = await extract_document_text(str(pdf))
+    assert text == "In the beginning\n\nwas the Word"
+    assert "--- Page" not in text, "text that may be read aloud carries no page markers"
+
+
+@pytest.mark.asyncio
+async def test_a_pdf_pdftotext_cannot_read_falls_back_to_pypdf(mocker, tmp_path):
+    from services.execution import document_text
+    from services.execution.tests.pdf_fixtures import make_pdf
+
+    mocker.patch("services.execution.document_text.shutil.which", return_value="/usr/bin/pdftotext")
+
+    async def broken(cmd):
+        raise RuntimeError("'pdftotext' failed (1)")
+
+    mocker.patch.object(document_text, "_run", broken)
+    pdf = tmp_path / "odd.pdf"
+    pdf.write_bytes(make_pdf(["Still readable"]))
+    assert await document_text.extract_document_text(str(pdf)) == "Still readable"
+
+
+@pytest.mark.asyncio
+async def test_a_scanned_pdf_points_at_ocr(mocker, tmp_path):
+    from services.execution.document_text import extract_document_text
+    from services.execution.tests.pdf_fixtures import make_pdf
+
+    mocker.patch("services.execution.document_text.shutil.which", return_value=None)
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(make_pdf(["", ""]))
+    with pytest.raises(RuntimeError, match="OcrRequest"):
+        await extract_document_text(str(pdf))
+
+
+@pytest.mark.asyncio
 async def test_extract_missing_converter_raises_clear_error(mocker):
     from services.execution.document_text import extract_document_text
 
@@ -119,8 +162,8 @@ async def test_extract_missing_converter_raises_clear_error(mocker):
     mocker.patch("services.execution.document_text.os.path.exists", return_value=True)
     mocker.patch("services.execution.document_text.os.path.getsize", return_value=2048)
 
-    with pytest.raises(RuntimeError, match="pdftotext is not installed"):
-        await extract_document_text("/ws/some.pdf")
+    with pytest.raises(RuntimeError, match="pandoc is not installed"):
+        await extract_document_text("/ws/some.epub")
 
 
 def test_workspace_read_extracts_pdf_text(mocker, tmp_path, monkeypatch):

@@ -185,10 +185,12 @@ FILE_RULES = {
         "item_type": "document",
         "subtype": "pdf",
         "role": "rich document",
-        "capabilities": ["metadata_only"],
-        "tools": [],
-        "restrictions": ["no_text_extractor"],
-        "usage": "Static documents and reports. Metadata only until a PDF text extractor runs in the storage image.",
+        # The provider reads the text layer (pdf_index): chapters from the
+        # bookmarks, else one section per page. A scan with no text layer keeps
+        # its metadata row and is logged as one.
+        "capabilities": ["full_text", "semantic_search"],
+        "tools": ["rag"],
+        "usage": "Documents, reports and books: indexed by their text, by chapter (bookmarks) or by page.",
     },
     ".docx": {
         "item_type": "document",
@@ -249,6 +251,18 @@ def build_content_index(entries: list[StorageEntry]) -> list[ContentIndexItem]:
         item.related_items = _related_items(item.path, item_map, child_map)
     return items
 
+#: Bumped when the way a format is read changes, so files indexed before (a PDF
+#: indexed as metadata only, by an image with no PDF reader) are read again once
+#: even though their mtime has not changed.
+_EXTRACTOR_VERSIONS = {"pdf": "pdf-text-1"}
+
+
+def _checkpoint_stamp(item: ContentIndexItem) -> str:
+    """What the checkpoint records for an item: its mtime, plus its reader's version."""
+    version = _EXTRACTOR_VERSIONS.get(item.subtype)
+    return f"{item.mtime}|{version}" if version and item.mtime else str(item.mtime or "")
+
+
 async def extract_and_chunk_contents(
     provider: StorageProvider,
     items: list[ContentIndexItem],
@@ -257,7 +271,7 @@ async def extract_and_chunk_contents(
     chunks = []
     for position, item in enumerate(items, start=1):
         # Checkpoint skip
-        if checkpoint and item.mtime and checkpoint.is_indexed(item.path, item.mtime):
+        if checkpoint and item.mtime and checkpoint.is_indexed(item.path, _checkpoint_stamp(item)):
             crawl_phase("extracting", position, len(items))
             continue
 
@@ -294,7 +308,7 @@ async def extract_and_chunk_contents(
                             item.path, type(exc).__name__, exc)
 
         if checkpoint and item.mtime:
-            checkpoint.mark_indexed(item.path, item.mtime)
+            checkpoint.mark_indexed(item.path, _checkpoint_stamp(item))
             checkpoint.save()
 
         crawl_phase("extracting", position, len(items))
@@ -305,6 +319,10 @@ async def _text_chunks(provider: StorageProvider, item: ContentIndexItem) -> lis
     sections = await _provider_sections(provider, item.path)
     if sections:
         return _section_chunks(item, sections)
+    if item.subtype == "pdf":
+        # The provider has already read the PDF and found no text (a scan) or
+        # could not open it; reading it as text would only decode its bytes.
+        return []
     res = provider.get_content(item.path)
     content = await res if inspect.isawaitable(res) else res
     if not content:

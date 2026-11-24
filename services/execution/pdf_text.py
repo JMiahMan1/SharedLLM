@@ -2,9 +2,10 @@
 """Text out of a PDF, page by page, within a character budget.
 
 One reader for every tool that hands a PDF to the model (WebReadRequest,
-StorageFileReadRequest): each page is marked ``--- Page N ---`` and the result
-says which pages it holds ("pages 1-6 of 23"), so the model knows there is
-more and can ask again with ``start_page``.
+StorageFileReadRequest, OcrRequest): each page is marked ``--- Page N ---`` and
+the result says which pages it holds ("pages 1-6 of 23"), so the model knows
+there is more and can ask again with ``start_page``. ``render_pdf_pages`` turns
+pages into images for vision OCR, for a scan with no text layer.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ DEFAULT_MAX_CHARS = 15000
 
 SCANNED_NOTE = (
     "This PDF is a scanned image with no text layer, so there is no text to read. "
-    "It would need OCR."
+    "OcrRequest reads a PDF's pages as images (a workspace file or inline bytes)."
 )
 
 
@@ -156,3 +157,91 @@ def extract_pdf_text(
         truncated=truncated,
         scanned=not any_text,
     )
+
+
+#: Dots per inch a page is rendered at for vision OCR: enough for body text,
+#: small enough that a page image stays a few hundred KB.
+RENDER_DPI = 150
+
+
+def _pdftoppm_pages(data: bytes, out_dir: str, first: int, last: int, dpi: int) -> list[tuple[int, str]]:
+    import glob
+    import os
+    import re
+    import shutil
+    import subprocess
+
+    binary = shutil.which("pdftoppm")
+    if not binary:
+        return []
+    source = os.path.join(out_dir, "source.pdf")
+    with open(source, "wb") as handle:
+        handle.write(data)
+    prefix = os.path.join(out_dir, "page")
+    try:
+        subprocess.run(
+            [binary, "-r", str(dpi), "-f", str(first), "-l", str(last), "-png", source, prefix],
+            check=True, capture_output=True, timeout=180,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        log.warning("pdftoppm could not render pages %d-%d: %s", first, last, exc)
+        return []
+    pages = []
+    for path in glob.glob(prefix + "-*.png"):
+        match = re.search(r"-(\d+)\.png$", path)
+        if match:
+            pages.append((int(match.group(1)), path))
+    return sorted(pages)
+
+
+def _embedded_page_images(reader, out_dir: str, first: int, last: int) -> list[tuple[int, str]]:
+    """Each page's largest embedded image: what a scanned page is, when pdftoppm is missing."""
+    import os
+
+    pages = []
+    for number in range(first, last + 1):
+        try:
+            images = list(reader.pages[number - 1].images)
+        except Exception as exc:
+            log.warning("pdf page %d images could not be read: %s", number, exc)
+            continue
+        if not images:
+            continue
+        image = max(images, key=lambda img: len(img.data or b""))
+        suffix = os.path.splitext(str(image.name or ""))[1] or ".png"
+        path = os.path.join(out_dir, f"page-{number}{suffix}")
+        with open(path, "wb") as handle:
+            handle.write(image.data)
+        pages.append((number, path))
+    return pages
+
+
+def render_pdf_pages(
+    data: bytes, out_dir: str, *, first_page: int = 1, max_pages: int = 5, dpi: int = RENDER_DPI
+) -> tuple[list[tuple[int, str]], int]:
+    """Page images of a PDF for vision OCR: ``([(page number, image path)], page_count)``.
+
+    pdftoppm (poppler, in the base image) renders each page; without it, each
+    page's own embedded image is used, which is what a scanned page is. Raises
+    :class:`PdfReadError` for a PDF that cannot be opened and ``ValueError`` for
+    a ``first_page`` past the end.
+    """
+    from pypdf import PdfReader
+
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise PdfReadError("The PDF is encrypted with a password, so its pages cannot be read.")
+        page_count = len(reader.pages)
+    except PdfReadError:
+        raise
+    except Exception as exc:
+        raise PdfReadError(f"The file is not a readable PDF ({exc}).") from exc
+    if page_count == 0:
+        raise PdfReadError("The PDF has no pages.")
+    first = max(1, int(first_page or 1))
+    if first > page_count:
+        raise ValueError(f"start_page {first} is past the end: the PDF has {page_count} pages.")
+    last = min(page_count, first + max(1, int(max_pages)) - 1)
+    pages = _pdftoppm_pages(data, out_dir, first, last, dpi) or _embedded_page_images(reader, out_dir, first, last)
+    return pages, page_count

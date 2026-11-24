@@ -9,6 +9,7 @@ from typing import Any
 from services.common.epub_text import EpubTextError, read_chapters
 from services.storage.models import ContentSection, StorageEntry
 from services.storage.nextcloud_client import NextCloudClient
+from services.storage.pdf_index import default_max_chars, pdf_index_sections
 from services.storage.providers import StorageProvider
 
 log = logging.getLogger("storage.calibre")
@@ -28,9 +29,12 @@ _BOOK_COLUMNS = {
     "timestamp": str,
 }
 _FALLBACK_FORMAT_ORDER = ("EPUB", "AZW3", "MOBI", "FB2", "DOCX", "PDF", "TXT", "HTMLZ", "RTF")
-# Formats read_chapters cannot open. Their books stay in the index as metadata
-# so they remain discoverable, but their text is never fabricated.
-_TEXT_FORMATS = {"EPUB", "AZW3", "MOBI", "FB2"}
+# Formats this provider reads text from: the e-book formats through read_chapters,
+# and PDF through pdf_index (its bookmarks, else its pages). A book in none of
+# them stays in the index as metadata so it remains discoverable, but its text is
+# never fabricated. EPUB still wins when a book has both, because the order above
+# puts it first.
+_TEXT_FORMATS = {"EPUB", "AZW3", "MOBI", "FB2", "PDF"}
 _BOOK_ID_IN_PATH = re.compile(r"\((?P<book_id>\d+)\)\.txt$")
 
 
@@ -62,8 +66,12 @@ class CalibreStorageProvider(StorageProvider):
         library_path = str(settings["library_path"])
         self.library_path = "/" + library_path.strip("/")
         self.download_timeout = float(settings.get("download_timeout", download_timeout))
+        self.pdf_max_chars = int(settings.get("pdf_max_chars") or default_max_chars())
         self._catalog: dict[int, dict[str, Any]] = {}
         self._catalog_digest: str | None = None
+        # PDF books already found to have no text (a scan) in this catalogue, so
+        # the indexer's get_content fallback does not download and parse them twice.
+        self._no_text: set[int] = set()
 
     @property
     def metadata_db_path(self) -> str:
@@ -135,9 +143,10 @@ class CalibreStorageProvider(StorageProvider):
         The shelf entry *is* a ``.txt`` document, so its raw bytes are the
         book's extracted prose -- that is what makes ``/providers/fetch`` a
         plain byte fetch for callers like Raven's ``fetch_text`` without a
-        second content route. A PDF-only book has no text to give, and
-        returning ``None`` keeps storage's honest "cannot read as bytes"
-        refusal instead of an empty file.
+        second content route. A PDF-only book gives its pages' text. A book
+        with no text to give (a scan with no text layer, a format with no
+        reader) returns ``None``, which keeps storage's honest "cannot read as
+        bytes" refusal instead of an empty file.
         """
         text = await self.get_content(path)
         if text is None:
@@ -190,16 +199,33 @@ class CalibreStorageProvider(StorageProvider):
                 ", ".join(book["formats"]) or "no format",
             )
             return None
+        if int(book["id"]) in self._no_text:
+            return None
         remote = book["text_path"]
         data = await self.client.get_file_bytes(remote, timeout=self.download_timeout)
         if not data:
             log.warning("Calibre could not fetch %s for book %s (%s)", remote, book["title"], book["id"])
             return None
+        if book["text_format"] == "PDF":
+            sections = await self._read_pdf_sections(book, remote, data)
+            if sections is None:
+                self._no_text.add(int(book["id"]))
+            return sections
         try:
             return read_chapters(data)
         except EpubTextError as exc:
             log.warning("Could not read %s for book %s (%s): %s", remote, book["title"], book["id"], exc)
             return None
+
+    async def _read_pdf_sections(self, book: dict[str, Any], remote: str, data: bytes) -> list | None:
+        """A PDF book's sections: its bookmarked chapters, else its pages (``pdf_index``).
+
+        A scan with no text layer is logged as one, by name, and keeps its
+        metadata row; reading stops at ``pdf_max_chars`` of text.
+        """
+        return await pdf_index_sections(
+            data, max_chars=self.pdf_max_chars, what=f"Book {book['title']} ({book['id']}) at {remote}"
+        )
 
     async def _load_catalog(self, refresh: bool = False) -> dict[int, dict[str, Any]]:
         """Fetch and parse ``metadata.db``, at most once per index run.
@@ -226,6 +252,7 @@ class CalibreStorageProvider(StorageProvider):
             return self._catalog
         self._catalog = _parse_catalog(data, self.library_path)
         self._catalog_digest = digest
+        self._no_text.clear()
         log.info(
             "Calibre catalogue: %d books from %s", len(self._catalog), self.metadata_db_path
         )
@@ -354,11 +381,12 @@ def _read_formats(conn: sqlite3.Connection) -> dict[int, dict[str, dict[str, Any
 def _pick_text_format(formats: dict[str, dict[str, Any]]) -> str | None:
     """Choose the format this provider can actually read, or ``None``.
 
-    Returning a format we have no reader for -- a PDF, say -- would be a lie
-    with a confusing consequence: the caller would hand PDF bytes to the EPUB
-    reader and report "not a zip archive" for every one of those books, instead
-    of the honest "indexed as metadata, add a converter". ``None`` routes those
-    books to the metadata-only path, where they are still discoverable.
+    Returning a format we have no reader for -- a DJVU, say -- would be a lie
+    with a confusing consequence: the caller would hand its bytes to a reader
+    that reports "not a zip archive" for every one of those books, instead of
+    the honest "indexed as metadata, add a converter". ``None`` routes those
+    books to the metadata-only path, where they are still discoverable. A PDF
+    is read (``_read_pdf_sections``), but only when no e-book format exists.
     """
     for candidate in _FALLBACK_FORMAT_ORDER:
         if candidate in formats and candidate in _TEXT_FORMATS:

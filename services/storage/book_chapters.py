@@ -456,16 +456,67 @@ def epub_chapters(data: bytes) -> tuple[str, list[BookChapter]]:
 # --- PDF ---
 
 
-def pdf_chapters(data: bytes) -> tuple[str, list[BookChapter]]:
-    """A PDF's chapters from its outline (bookmarks), else from its headings."""
+class PdfNoTextLayer(ChapterError):
+    """A PDF whose pages carry no text at all: a scan with no OCR layer."""
+
+
+@dataclass
+class PdfPages:
+    """The text of a PDF's pages, read in order up to a character budget."""
+
+    #: One string per page read, in order (``pages[0]`` is page 1).
+    pages: list[str]
+    page_count: int
+    #: True when reading stopped at the budget before the last page.
+    truncated: bool
+    reader: object = None
+
+    @property
+    def has_text(self) -> bool:
+        return any(p.strip() for p in self.pages)
+
+
+def read_pdf_pages(data: bytes, max_chars: int | None = None) -> PdfPages:
+    """Read a PDF's pages in order, stopping once ``max_chars`` of text is held.
+
+    One page is extracted at a time and nothing past the budget is kept, so a
+    2,000-page PDF costs no more memory than its first ``max_chars`` of text. A
+    page pypdf cannot read is an empty page, not a failed book. An encrypted PDF
+    that opens with the empty password (most "protected" ebooks) is read.
+    """
     try:
         from pypdf import PdfReader
 
         reader = PdfReader(io.BytesIO(data))
-        pages = [page.extract_text() or "" for page in reader.pages]
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise ChapterError("the PDF is encrypted with a password, so its text cannot be read")
+        page_count = len(reader.pages)
+    except ChapterError:
+        raise
     except Exception as exc:
         raise ChapterError(f"not a readable PDF: {exc}") from exc
+    budget = None if max_chars is None else max(int(max_chars), 0)
+    pages: list[str] = []
+    used = 0
+    truncated = False
+    for index in range(page_count):
+        if budget is not None and used >= budget:
+            truncated = True
+            break
+        try:
+            text = reader.pages[index].extract_text() or ""
+        except Exception:
+            text = ""
+        if budget is not None and used + len(text) > budget:
+            text = text[: budget - used]
+            truncated = True
+        pages.append(text)
+        used += len(text)
+    return PdfPages(pages=pages, page_count=page_count, truncated=truncated, reader=reader)
 
+
+def _outline_starts(reader) -> list[tuple[int, str]]:
+    """``(page index, title)`` for each chapter-level bookmark, in page order."""
     starts: list[tuple[int, str]] = []
 
     def walk(items: list) -> None:
@@ -492,16 +543,62 @@ def pdf_chapters(data: bytes) -> tuple[str, list[BookChapter]]:
     try:
         walk(list(reader.outline or []))
     except Exception:
-        starts = []
+        return []
     starts.sort(key=lambda s: s[0])
-    if len(starts) < 2:
-        return "headings", text_chapters("\n\n".join(pages))
+    return starts
+
+
+def _outline_chapters(pages: list[str], starts: list[tuple[int, str]]) -> list[BookChapter]:
     chapters: list[BookChapter] = []
     for i, (page, label) in enumerate(starts):
         end = max(starts[i + 1][0] if i + 1 < len(starts) else len(pages), page + 1)
         text = "\n\n".join(p.strip() for p in pages[page:end] if p.strip())
         chapters.append(BookChapter(label=label, text=text))
-    return "pdf-outline", number_chapters(chapters)
+    return number_chapters(chapters)
+
+
+def pdf_chapters(data: bytes, max_chars: int | None = None) -> tuple[str, list[BookChapter]]:
+    """A PDF's chapters from its outline (bookmarks), else from its headings."""
+    doc = read_pdf_pages(data, max_chars)
+    starts = [s for s in _outline_starts(doc.reader) if s[0] < max(len(doc.pages), 1)]
+    if len(starts) < 2:
+        return "headings", text_chapters("\n\n".join(doc.pages))
+    return "pdf-outline", _outline_chapters(doc.pages, starts)
+
+
+def _page_label(first: int, last: int) -> str:
+    return f"Page {first}" if first == last else f"Pages {first}-{last}"
+
+
+def pdf_sections(data: bytes, max_chars: int | None = None) -> tuple[str, list[BookChapter]]:
+    """A PDF cut into sections for the search index.
+
+    With bookmarks, one section per chapter, labelled with the bookmark's title
+    (the pages before the first bookmark become one unnumbered "Pages 1-N"
+    section, so nothing is dropped). Without bookmarks, one section per page,
+    labelled "Page N", so a search hit still says where in the book it is.
+    Raises :class:`PdfNoTextLayer` for a PDF with no text on any page read.
+    """
+    doc = read_pdf_pages(data, max_chars)
+    if not doc.has_text:
+        raise PdfNoTextLayer(
+            f"no text layer on any of its {doc.page_count} pages (a scan that has not been OCRed)"
+        )
+    starts = [s for s in _outline_starts(doc.reader) if s[0] < len(doc.pages)]
+    if len(starts) >= 2:
+        chapters = _outline_chapters(doc.pages, starts)
+        first = starts[0][0]
+        front = "\n\n".join(p.strip() for p in doc.pages[:first] if p.strip())
+        if front:
+            label = _page_label(1, first)
+            chapters.insert(0, BookChapter(label=label, text=front, title=label, matter=True))
+        return "pdf-outline", chapters
+    sections = [
+        BookChapter(label=f"Page {i + 1}", text=text.strip(), title=f"Page {i + 1}")
+        for i, text in enumerate(doc.pages)
+        if text.strip()
+    ]
+    return "pdf-pages", sections
 
 
 # --- Plain text ---
@@ -656,14 +753,7 @@ def read_book_text(data: bytes, fmt: str) -> str:
     """A whole book's text, for a format read here (PDF pages in order, EPUB chapters, TXT)."""
     fmt = fmt.upper()
     if fmt == "PDF":
-        try:
-            from pypdf import PdfReader
-
-            reader = PdfReader(io.BytesIO(data))
-            pages = [(page.extract_text() or "").strip() for page in reader.pages]
-        except Exception as exc:
-            raise ChapterError(f"not a readable PDF: {exc}") from exc
-        return "\n\n".join(p for p in pages if p)
+        return "\n\n".join(p.strip() for p in read_pdf_pages(data).pages if p.strip())
     if fmt == "TXT":
         return data.decode("utf-8", "replace")
     if fmt == "EPUB":
