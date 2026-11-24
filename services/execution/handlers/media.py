@@ -280,6 +280,23 @@ async def _is_ma_entity(ctx, entity_id: str) -> bool:
     return bool(state) and is_music_assistant_player(state.get("attributes"), entity_id)
 
 
+#: Search-result order for a genre or mood request: a playlist or a station before a track
+#: whose title happens to contain the word ("Call to Worship").
+GENRE_CATEGORIES = ["playlists", "radio", "albums", "artists", "tracks"]
+_GENRE_KINDS = ("playlist", "radio", "album", "artist", "track")
+
+
+def _direct_hit(mass_client, results: list[dict], genre: bool) -> tuple[str, str] | None:
+    """The direct route's hit: the HA order, or playlists and radio first for a genre."""
+    if not genre:
+        return mass_client.best_uri(results)
+    for kind in _GENRE_KINDS:
+        for item in results:
+            if item.get("type") == kind and item.get("uri"):
+                return item["uri"], kind
+    return None
+
+
 async def play_music_direct(req: MediaPlayRequest, entity_id: str, ctx, why: str) -> ExecutionResult:
     """Play on a speaker straight through Music Assistant, without Home Assistant.
 
@@ -322,9 +339,14 @@ async def play_music_direct(req: MediaPlayRequest, entity_id: str, ctx, why: str
             pick = random.choice(playlists)
             uri, kind, query = pick["uri"], "playlist", pick.get("name") or "a playlist"
         else:
-            hit = mass_client.best_uri(
-                await mass_client.search(ctx.mass_url, ctx.mass_token, query, limit=10, library_only=False)
-            )
+            genre = (req.media_content_type or "").lower() == "genre"
+            hit = _direct_hit(mass_client, await mass_client.search(
+                ctx.mass_url, ctx.mass_token, query, limit=10, library_only=False), genre)
+            relaxed = (req.fallback_query or "").strip()
+            if not hit and relaxed and relaxed.lower() != query.lower():
+                hit = _direct_hit(mass_client, await mass_client.search(
+                    ctx.mass_url, ctx.mass_token, relaxed, limit=10, library_only=False), genre)
+                query = relaxed if hit else query
             better = None if hit else media_vocabulary.correct(query, "artist", "playlist")
             if better and media_vocabulary.squash(better) != media_vocabulary.squash(query):
                 hit = mass_client.best_uri(
@@ -417,13 +439,16 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx, correct
                 log.error(f"[media/play] play_media direct call failed: {result.get('error')}")
                 return ExecutionResult(status="FAILURE", message=f"Failed to play direct URI: {result.get('error')}", service="media_play")
 
-        log.info(f"[media/play] Searching MASS for '{req.query}' on {entity_id}")
+        # A genre or mood ("worship music") is a playlist or a station, not a track title.
+        genre = (req.media_content_type or "").lower() == "genre"
+        log.info(f"[media/play] Searching MASS for '{req.query}' on {entity_id}" + (" as a genre" if genre else ""))
         search_result = await ha_client.call_service(
             ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
             service_data={
                 "config_entry_id": mass_entry,
                 "name": req.query,
-                "media_type": ["track", "artist", "album", "playlist", "radio"],
+                "media_type": ["playlist", "radio", "album", "artist", "track"] if genre
+                else ["track", "artist", "album", "playlist", "radio"],
                 "limit": 5,
                 **ma_identity.act_as(ctx),
             },
@@ -438,7 +463,8 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx, correct
             resp = raw.get("service_response", raw)
             uri = None
             media_type_label = ""
-            for category in ["tracks", "albums", "artists", "playlists", "radio"]:
+            order = GENRE_CATEGORIES if genre else ["tracks", "albums", "artists", "playlists", "radio"]
+            for category in order:
                 items = resp.get(category, [])
                 log.info(f"[media/play] Category '{category}' items count: {len(items)}")
                 if items:
@@ -472,6 +498,12 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx, correct
                     log.error(f"[media/play] play_media service call failed: {result.get('error')}")
                     return ExecutionResult(status="FAILURE", message=f"Failed to play '{req.query}': {result.get('error')}", service="media_play")
 
+        # The relaxed words ("worship" after "worship music") get one search before anything else.
+        relaxed = (req.fallback_query or "").strip()
+        if relaxed and relaxed.lower() != (req.query or "").strip().lower():
+            log.info(f"[media/play] no match for '{req.query}'; trying the relaxed search '{relaxed}'")
+            return await _play_music_via_ha(req.model_copy(update={"query": relaxed, "fallback_query": None}),
+                                            entity_id, ctx, corrected=corrected)
         # A misheard name ("brand in Lake") gets one more search, for the library name it most
         # likely was; never a random track (BUG-25: they asked for something specific).
         if not corrected:

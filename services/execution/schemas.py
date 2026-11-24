@@ -229,7 +229,8 @@ class MediaPlayRequest(BaseRequest):
     query: str | None = Field(None, description="Search query: song/album/artist name, video title, podcast name, audiobook title, or URL")
     media_type: str | None = Field(None, description="Content type: 'music', 'video', 'podcast', 'audiobook', 'radio', 'url', 'announcement'")
     media_content_id: str | None = Field(None, description="Direct URL or media ID (bypasses search)")
-    media_content_type: str | None = Field(None, description="HA media_content_type hint (e.g., 'music', 'video', 'url', 'audio/wav')")
+    media_content_type: str | None = Field(None, description="HA media_content_type hint (e.g., 'music', 'video', 'url', 'audio/wav'); 'genre' searches Music Assistant playlists and radio first")
+    fallback_query: str | None = Field(None, description="One relaxed search to try when the query finds no music (e.g. 'worship' after 'worship music')")
     enqueue: Literal["add", "next", "replace"] | None = Field("replace", description="Queue behavior for Music Assistant")
     volume: float | None = Field(None, ge=0.0, le=1.0, description="Set volume before playback")
 
