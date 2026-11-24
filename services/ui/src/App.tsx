@@ -67,6 +67,7 @@ const NotFound = lazy(() => import('./pages/NotFound'));
 const Bible = lazy(() => import('./pages/Bible'));
 
 import { initAppUpdater } from './lib/appUpdater';
+import { startKeyboardMedia } from './plugins/keyboardMedia';
 import { useSiteTheme } from './themes/siteTheme';
 
 import { Toaster } from 'react-hot-toast';
@@ -144,6 +145,8 @@ function App() {
     };
     window.addEventListener('resize', handleResize);
     void initAppUpdater();
+    // GIFs and stickers from the phone's keyboard go into the focused chat box.
+    void startKeyboardMedia();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 

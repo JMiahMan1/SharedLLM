@@ -5,7 +5,7 @@ import { AxiosError } from 'axios';
 import TasmotaTemplateSection from './TasmotaTemplateSection';
 import * as api from '../../lib/tasmotaTemplates';
 import {
-  filterCatalog, pasteProblem, templateName,
+  applyRequestFor, filterCatalog, measuredLabel, pasteProblem, templateName,
   type ApplyResult, type CatalogTemplate, type DeviceTemplate, type Suggestion,
 } from '../../lib/tasmotaTemplates';
 
@@ -15,6 +15,9 @@ vi.mock('../../lib/tasmotaTemplates', async (importOriginal) => ({
   getTemplateCatalog: vi.fn(),
   applyTemplate: vi.fn(),
   restorePreviousTemplate: vi.fn(),
+  getPinFinder: vi.fn(),
+  saveMeasuredTemplate: vi.fn(),
+  forgetMeasuredTemplate: vi.fn(),
 }));
 
 const KAUF = '{"NAME":"Kauf Bulb","GPIO":[0,0,0,0,416,419,0,0,417,420,418,0,0,0],"FLAG":0,"BASE":18}';
@@ -63,6 +66,8 @@ describe('TasmotaTemplateSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.getTemplateCatalog).mockResolvedValue([entry(), PLUG]);
+    vi.mocked(api.getPinFinder).mockResolvedValue({ active: false, status: 'idle', question: null, result: null,
+      message: null, interrupted: false, kinds: ['bulb', 'strip', 'dimmer'] });
   });
 
   it('shows the current template and the suggestions with their reasons', async () => {
@@ -171,6 +176,71 @@ describe('TasmotaTemplateSection', () => {
     expect(screen.getByRole('button', { name: /Restore previous/ })).toBeEnabled();
   });
 
+  it('says when nothing identifies the device and offers the pin finder before any guess', async () => {
+    vi.mocked(api.getDeviceTemplate).mockResolvedValue(state({
+      identified: false, suggestions: [],
+      identify_note: 'It reports nothing that identifies it: it runs the Generic module with no pins set.',
+      guesses: [suggestion({ reasons: ['Its name says it is a bulb'] })],
+    }));
+    renderSection();
+    expect(await screen.findByTestId('template-unidentified')).toHaveTextContent('nothing that identifies it');
+    const finder = screen.getByTestId('pin-finder');
+    expect(within(finder).getByRole('button', { name: 'Start the pin finder' })).toBeInTheDocument();
+    expect(screen.queryAllByTestId('template-suggestion')).toHaveLength(0);
+    const guesses = screen.getByTestId('template-guesses');
+    expect(guesses).not.toHaveAttribute('open');
+    expect(guesses).toHaveTextContent('Guesses from its name only (1)');
+    // The pin finder comes before the guesses on the page.
+    expect(finder.compareDocumentPosition(guesses) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('labels a measured template with the device it was measured on and loads it by its id', async () => {
+    const measured = suggestion({ id: 'measured-lotton-a19-cct-1a2b3c4d', manufacturer: 'Lotton', model: 'A19 CCT',
+      name: 'Lotton A19 CCT', channels: 2, source: 'measured', measured_on: 'Den lamp', measured_at: '2026-11-24',
+      reasons: ['Its name matches the model measured on Den lamp'] });
+    vi.mocked(api.getDeviceTemplate).mockResolvedValue(state({ identified: true, suggestions: [measured, suggestion()] }));
+    vi.mocked(api.applyTemplate).mockResolvedValue(applied());
+    renderSection();
+    const rows = await screen.findAllByTestId('template-suggestion');
+    expect(within(rows[0]).getByTestId('measured-label')).toHaveTextContent('Measured on Den lamp, 2026-11-24');
+    expect(within(rows[1]).queryByTestId('measured-label')).toBeNull();
+    fireEvent.click(within(rows[0]).getByRole('button', { name: 'Choose' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await confirmIn(/Load this template/, 'Load and restart');
+    await waitFor(() => expect(api.applyTemplate).toHaveBeenCalledWith('t1', { measured_id: 'measured-lotton-a19-cct-1a2b3c4d' }));
+  });
+
+  it('saves the template of a working device as measured on it', async () => {
+    vi.mocked(api.getDeviceTemplate).mockResolvedValue(state({
+      current: { ...state().current, module: 0, template_name: 'Porch CCT', template_json: KAUF, active: true,
+        light: true, light_channels: 2, measured_matches: [] },
+    }));
+    vi.mocked(api.saveMeasuredTemplate).mockResolvedValue({ status: 'saved', template: entry({ source: 'measured' }),
+      message: 'Saved. Devices like it will be offered this template, marked "Measured on Porch bulb".' });
+    renderSection();
+    const box = await screen.findByTestId('template-save-device');
+    fireEvent.click(within(box).getByText("Save this device's template"));
+    const save = within(box).getByRole('button', { name: 'Save as measured' });
+    expect(save).toBeDisabled();
+    fireEvent.change(within(box).getByLabelText('Manufacturer'), { target: { value: 'Example' } });
+    fireEvent.change(within(box).getByLabelText('Model'), { target: { value: ' A1 ' } });
+    fireEvent.click(save);
+    await waitFor(() => expect(api.saveMeasuredTemplate).toHaveBeenCalledWith('t1',
+      { manufacturer: 'Example', model: 'A1', kind: 'bulb' }));
+    expect(await within(box).findByRole('status')).toHaveTextContent('Measured on Porch bulb');
+  });
+
+  it('does not offer to save a template the household already measured', async () => {
+    vi.mocked(api.getDeviceTemplate).mockResolvedValue(state({
+      current: { ...state().current, module: 0, template_name: 'Porch CCT', template_json: KAUF, active: true,
+        light: true, light_channels: 2,
+        measured_matches: [{ id: 'measured-x', manufacturer: 'Example', model: 'A1', measured_on: 'Porch bulb' }] },
+    }));
+    renderSection();
+    await screen.findByTestId('template-current');
+    expect(screen.queryByTestId('template-save-device')).toBeNull();
+  });
+
   it('shows why the device could not be read', async () => {
     vi.mocked(api.getDeviceTemplate).mockRejectedValue(new AxiosError('x', '503', undefined, undefined,
       { status: 503, data: { detail: 'Tasmota 192.0.2.51 unreachable' } } as never));
@@ -190,6 +260,14 @@ describe('tasmotaTemplates helpers', () => {
     expect(pasteProblem('{"NAME":"x","GPIO":[1.5],"BASE":1}')).toMatch('whole number');
     expect(pasteProblem('{"NAME":"x","GPIO":[1]}')).toMatch('no BASE');
     expect(pasteProblem(KAUF)).toBeNull();
+  });
+
+  it('labels measured templates and picks the request that loads each', () => {
+    expect(measuredLabel({ source: 'measured', measured_on: 'Den lamp' })).toBe('Measured on Den lamp');
+    expect(measuredLabel({ source: 'measured', measured_on: null })).toBe('Measured here');
+    expect(measuredLabel({ source: 'catalog' })).toBeNull();
+    expect(applyRequestFor(entry({ source: 'measured', id: 'measured-a' }))).toEqual({ measured_id: 'measured-a' });
+    expect(applyRequestFor(entry())).toEqual({ catalog_id: 'kauf-blf15' });
   });
 
   it('filters the catalog by every word and the kind', () => {
