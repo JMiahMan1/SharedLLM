@@ -25,7 +25,7 @@ import numpy as np
 
 from services.common import voice_enroll, voice_learning, voice_speaker
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, REDIS_URL
-from services.execution import voiceprint
+from services.execution import media_vocabulary, voiceprint
 
 log = logging.getLogger("execution.wyoming_stt")
 #: Every recognition outcome is logged at INFO (who, score, timing; never the
@@ -61,6 +61,7 @@ class Event:
     """One Wyoming event, with the exact bytes it arrived as (to pass on)."""
 
     def __init__(self, header: dict, data: dict, payload: bytes, raw: bytes):
+        self.header = header
         self.type = header.get("type")
         self.data = data
         self.payload = payload
@@ -83,6 +84,37 @@ async def read_event(reader: asyncio.StreamReader) -> Event | None:
         payload = await reader.readexactly(header["payload_length"])
         raw.append(payload)
     return Event(header, data, payload, b"".join(raw))
+
+
+#: Where a ``transcribe`` event carries the library's names (``media_vocabulary.initial_prompt``).
+#: Wyoming's Transcribe has a free-form ``context``; an engine that biases per request reads the
+#: prompt from it. wyoming-faster-whisper 3.8.1 (docker-compose ``whisper``) does not: it only
+#: takes a fixed ``--initial-prompt`` at start, so there the misheard-name correction in the media
+#: handlers (``media_vocabulary.correct``) is what catches "brand in Lake".
+HINTS_CONTEXT_KEY = "initial_prompt"
+
+
+def with_name_hints(event: Event) -> bytes:
+    """A ``transcribe`` event's bytes with the library's names added to its context.
+
+    Anything else, an empty vocabulary, or a context that already has a prompt
+    passes through byte for byte.
+    """
+    if event.type != "transcribe":
+        return event.raw
+    prompt = media_vocabulary.initial_prompt()
+    context = event.data.get("context")
+    context = dict(context) if isinstance(context, dict) else {}
+    if not prompt or context.get(HINTS_CONTEXT_KEY):
+        return event.raw
+    context[HINTS_CONTEXT_KEY] = prompt
+    data = {**event.data, "context": context}
+    header = {k: v for k, v in event.header.items() if k not in ("data", "data_length", "payload_length")}
+    header["data"] = data
+    if event.payload:
+        header["payload_length"] = len(event.payload)
+    log.debug("[voice] %d library name(s) offered to speech to text", prompt.count(",") + 1)
+    return (json.dumps(header) + "\n").encode() + event.payload
 
 
 def to_samples(pcm: bytes, rate: int, width: int, channels: int) -> np.ndarray:
@@ -307,7 +339,7 @@ async def _handle(ha_reader, ha_writer, redis) -> None:
                 utterance.add(event)
             elif event.type == "audio-stop":
                 utterance.start_matching()
-            up_writer.write(event.raw)
+            up_writer.write(with_name_hints(event))
             await up_writer.drain()
 
     async def to_ha() -> None:

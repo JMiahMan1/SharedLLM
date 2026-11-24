@@ -99,6 +99,7 @@ from services.gateway import (
     family_safety,
     fast_garden,
     fast_lights,
+    fast_media,
     garden_routes,
     helper_routes,
     hub_registry_routes,
@@ -1393,8 +1394,9 @@ def extract_media_request(query: str) -> tuple[str | None, str | None]:
     Pull a likely media search string and target device name from commands like:
     - Play Brandon Lake on Den TV
     - Listen to jazz on the kitchen speaker
+    - Can you play some music, please? (the filler is not part of the search)
     """
-    cleaned = (query or "").strip().strip("?.!")
+    cleaned = fast_media.strip_request_filler(query or "")
     if not cleaned:
       return None, None
 
@@ -3906,6 +3908,9 @@ def _voice_context_from(request: Request, body: dict) -> dict | None:
     # The satellite's entity: a timer set by voice shows and rings there (execution satellite_timers.py).
     satellite = text("satellite")
     out["satellite"] = satellite if satellite and re.fullmatch(r"assist_satellite\.[a-z0-9_]+", satellite) else None
+    # The satellite's own speaker: media with no device named plays there (fast_media.satellite_player).
+    player = text("media_player")
+    out["media_player"] = player if player and re.fullmatch(r"media_player\.[a-z0-9_]+", player) else None
     if raw.get("whispered") is True:
         out["whispered"] = True
     return {k: v for k, v in out.items() if v}
@@ -4482,29 +4487,59 @@ async def chat_handler(request: Request, background_tasks=None):
                 else:
                     log.info(f"[FastPath] Using cached device: {cached_device_id} (state={cached_state})")
 
+        # A voice satellite's own speaker: what "play music" with no device named means, ahead of
+        # the household's last-used player (fast_media.py). A named device still wins.
+        sat_player, sat_state = (fast_media.satellite_player(voice_context, media_entities)
+                                 if media_entities is not None else (None, None))
+        # Admin > Voice satellites: where media asked for at a satellite plays when no device is named.
+        # "this_device" (the default) is the satellite's own speaker; "last_used" keeps the household's
+        # last player. Anything else is a misconfiguration: said in the log, the default used.
+        if sat_player:
+            playback = (await fetch_global_setting("voice_satellite_playback", "this_device")).strip() or "this_device"
+            if playback not in fast_media.SATELLITE_PLAYBACK:
+                log.error(f"[FastPath] voice_satellite_playback is {playback!r}, not one of "
+                          f"{sorted(fast_media.SATELLITE_PLAYBACK)}: using this_device")
+            elif playback == "last_used":
+                sat_player, sat_state = None, None
+
         # Attempt entity extraction/resolution for control intents
         if intent == "play_media":
             media_type = "video" if is_likely_video_request(query) else None
-            resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id)
+            if sat_player and media_type != "video" and not extract_media_request(query)[1]:
+                resolved_entity = sat_player
+                log.info(f"[FastPath] no device named; playing on the satellite's own speaker {sat_player}")
+            else:
+                resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id)
         elif intent in ["turn_on", "turn_off"]:
             resolved_entity = engine.extract_entity(query, intent)
             if not asks_about_state(query):
                 light_set = fast_lights.choose(engine, query, intent, resolved_entity, media_entities, voice_context)
             if not resolved_entity and not light_set:
-                resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
+                if sat_player and fast_media.power_names_no_device(query):
+                    resolved_entity = sat_player  # "turn off the music" at a satellite: its own speaker
+                    log.info(f"[FastPath] no device named; power {intent} on the satellite's own speaker {sat_player}")
+                else:
+                    resolved_entity = resolve_media_target(query, media_entities or [], media_type="power",
+                                                           cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
             # A named player ("on the den TV") or else the last one used while it plays;
             # of players that match, the one playing (resolve_media_target "transport").
             named = engine.extract_target(query, intent)
-            active_cache = cached_device_id if cached_state in ACTIVE_MEDIA_STATES else None
-            resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
-                                                   cached_device=None if named else active_cache, requested_device=named)
+            if not named and sat_player and sat_state in ACTIVE_MEDIA_STATES:
+                resolved_entity = sat_player
+                log.info(f"[FastPath] no player named; the satellite's own speaker {sat_player} is {sat_state}")
+            else:
+                active_cache = cached_device_id if cached_state in ACTIVE_MEDIA_STATES else None
+                resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
+                                                       cached_device=None if named else active_cache, requested_device=named)
             if not resolved_entity and media_entities:
                 for e in media_entities:
                     if e.get("entity_id", "").startswith("media_player.") and e.get("state") in ("playing", "paused"):
                         resolved_entity = e.get("entity_id")
                         log.info(f"[FastPath] Auto-targeting active {e.get('state')} player: {resolved_entity}")
                         break
+            if not resolved_entity and not named and sat_player:
+                resolved_entity = sat_player  # nothing plays anywhere: "volume up" means the speaker spoken to
         else:
             resolved_entity = engine.extract_entity(query, intent)
 
@@ -4595,6 +4630,7 @@ async def chat_handler(request: Request, background_tasks=None):
             "location_query": "/execute/location",
         }
         endpoint = endpoint_map.get(intent)
+        direct_answer: str | None = None  # an answer that needs no execution call
         if endpoint:
             exec_payload: dict = {
                 "user_context": creds.model_dump(),
@@ -4627,8 +4663,16 @@ async def chat_handler(request: Request, background_tasks=None):
                     if m_read.group(2):
                         named_device = m_read.group(2).strip()
                 q_lower = query.lower().strip()
-                resume_phrases = {"play my audiobook", "continue my book", "resume my audiobook", "keep reading", "continue reading"}
-                is_audiobook_resume = q_lower in resume_phrases
+                # "Play my latest audiobook", "the audiobook by <author>", "<title> audiobook":
+                # Audiobookshelf, never a Music Assistant search for the sentence (fast_media.py).
+                book_ask = fast_media.parse_audiobook_request(
+                    query, is_device=lambda d: resolve_media_target(query, media_entities or [], requested_device=d) is not None)
+                if book_ask is not None:
+                    ask, book_device = book_ask
+                    if book_device is None and named_device:
+                        # The " on " was part of the title, not a device ("Murder on the Orient Express").
+                        named_device = None
+                        resolved_entity = sat_player or None
 
                 media_type = "video" if is_likely_video_request(query) else None
                 if not media_type:
@@ -4648,14 +4692,30 @@ async def chat_handler(request: Request, background_tasks=None):
                 else:
                     device_name = named_device
 
-                if is_audiobook_resume:
-                    exec_payload = {
+                if book_ask is not None:
+                    ask = book_ask[0]
+                    if ask.mine and creds.user == fast_media.HOUSEHOLD_USER:
+                        log.info(f"[FastPath] '{query}' asks for the speaker's own audiobook; the speaker was not recognised")
+                        direct_answer = fast_media.unknown_speaker_reply()
+                    log.info(f"[FastPath] audiobook request: {ask}")
+                    exec_payload = fast_media.audiobook_payload(ask, {
                         "user_context": creds.model_dump(),
-                        "action": "resume",
                         "entity_id": resolved_entity,
                         "device_name": device_name,
-                    }
+                    })
                     endpoint = "/execute/audiobookshelf"
+                    svc_base = EXECUTION_SVC
+                elif media_type is None and fast_media.is_generic_music(
+                        media_query if media_query is not None else fast_media.strip_request_filler(query)):
+                    # "Can you play music?" names nothing: execution plays something from the library.
+                    log.info(f"[FastPath] '{query}' names no music; asking for something from the library")
+                    exec_payload = {
+                        "user_context": creds.model_dump(),
+                        "entity_id": resolved_entity,
+                        "device_name": device_name,
+                        "query": None,
+                        "media_type": "music",
+                    }
                     svc_base = EXECUTION_SVC
                 else:
                     clean_q = media_query or query
@@ -4696,6 +4756,13 @@ async def chat_handler(request: Request, background_tasks=None):
                 svc_base = EXECUTION_SVC
             else:
                 svc_base = EXECUTION_SVC
+
+            if direct_answer is not None:
+                await update_history(user_id, "user", query)
+                await update_history(user_id, "assistant", direct_answer)
+                if is_openai:
+                    return _make_openai_response(direct_answer, selected_model, intent)
+                return _make_ollama_response(direct_answer, selected_model, intent)
 
             fast_timeout=aiohttp.ClientTimeout(total=120.0) if intent == "play_media" else aiohttp.ClientTimeout(total=30.0)
             async with shared_http_client() as client:

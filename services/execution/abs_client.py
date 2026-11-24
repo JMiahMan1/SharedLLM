@@ -240,15 +240,8 @@ def _item_matches_query(item: dict, query: str) -> bool:
     return query.lower() in haystack
 
 
-async def search_library(
-    abs_url: str, abs_api_key: str, query: str, limit: int = 10
-) -> dict:
-    """Search the book library for items matching the query.
-
-    NOTE: Some ABS servers ignore the `query` param on the library-items
-    endpoint and simply return the entire library. To guarantee correct
-    results we fetch the full library once and filter client-side.
-    """
+async def get_book_library_items(abs_url: str, abs_api_key: str) -> list | dict:
+    """Every item in the book library (the first non-podcast library), or a dict with "error"."""
     # Resolve (and cache) the book/audiobook library ID. ABS (and MA's ABS
     # integration) label these libraries in varying ways ("book", "audiobook",
     # ...), so we skip podcast libraries and use the first non-podcast library
@@ -269,7 +262,19 @@ async def search_library(
             return {"error": "No book library found"}
         _cache_set(abs_url, "book_lib_id", book_lib_id)
 
-    items = await get_all_library_items(abs_url, abs_api_key, book_lib_id)
+    return await get_all_library_items(abs_url, abs_api_key, book_lib_id)
+
+
+async def search_library(
+    abs_url: str, abs_api_key: str, query: str, limit: int = 10
+) -> dict:
+    """Search the book library for items matching the query.
+
+    NOTE: Some ABS servers ignore the `query` param on the library-items
+    endpoint and simply return the entire library. To guarantee correct
+    results we fetch the full library once and filter client-side.
+    """
+    items = await get_book_library_items(abs_url, abs_api_key)
     if isinstance(items, dict) and "error" in items:
         return items
 
