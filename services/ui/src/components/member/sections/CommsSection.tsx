@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { Bell, MessageSquare, Phone, PhoneMissed, Search } from 'lucide-react';
+import { AlertTriangle, Bell, MessageSquare, Phone, PhoneMissed, Search } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../../../services/api';
 import MemberCard from '../MemberCard';
@@ -9,6 +9,7 @@ import { commsLine } from '../../../lib/memberPage';
 import { formatDayLabel, localDay } from '../../../lib/healthHub';
 import type { ActivityEvent } from '../../../types/api';
 import { useMemberDeviceNoun } from '../../../hooks/useDeviceNoun';
+import { collectionNotices } from '../../../lib/collectorHealth';
 
 type Kind = 'all' | 'calls' | 'sms' | 'social';
 
@@ -101,6 +102,8 @@ export default function CommsSection({ username, name }: { username: string; nam
 
   if (refused || error || isLoading) {
     return (
+      <>
+      {!refused && <CollectionBanner username={username} name={name} device={device} />}
       <MemberCard
         title="Calls & messages"
         icon={MessageSquare}
@@ -109,11 +112,13 @@ export default function CommsSection({ username, name }: { username: string; nam
         isLoading={isLoading}
         error={refused ? 'Only a parent can see calls and messages.' : error ? 'Calls and messages could not be loaded.' : null}
       />
+      </>
     );
   }
   const today = localDay();
   return (
     <>
+      <CollectionBanner username={username} name={name} device={device} />
       <MemberCard
         title="Calls & messages"
         icon={MessageSquare}
@@ -230,6 +235,40 @@ export default function CommsSection({ username, name }: { username: string; nam
         )}
       </MemberCard>
     </>
+  );
+}
+
+/**
+ * Why calls, texts or screen time may be missing: what the child's phone says
+ * about itself (a permission off, background collection not running, signed
+ * out) and the server's own check (other activity kept arriving long after the
+ * last text or call). Nothing is shown when all is well or the check fails.
+ */
+function CollectionBanner({ username, name, device }: { username: string; name: string; device: string }) {
+  const { data } = useQuery({
+    queryKey: ['member-collector-health', username],
+    queryFn: () => api.getGuardianCollectorHealth(username),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const notices = useMemo(() => collectionNotices(data, name, device), [data, name, device]);
+  if (notices.length === 0) return null;
+  return (
+    <div
+      role="status"
+      data-testid="member-collection-banner"
+      className="col-span-full flex min-w-0 gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-100 sm:p-4"
+    >
+      <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-300" aria-hidden="true" />
+      <div className="min-w-0 space-y-1">
+        <p className="font-semibold text-amber-50">{name}'s {device} may not be sending everything</p>
+        <ul className="space-y-1">
+          {notices.map((n) => (
+            <li key={n.key} className="break-words" data-testid="member-collection-notice">{n.text}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 

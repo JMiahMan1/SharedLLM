@@ -1,4 +1,5 @@
 import axios, { type AxiosRequestConfig } from 'axios';
+import type { CollectorHealth } from '../lib/collectorHealth';
 import type {
   InternetOutage, NetworkDevice, NetworkDeviceFields, NetworkStatus, NetworkUsage, RouterLogLine,
 } from '../lib/network';
@@ -1759,6 +1760,12 @@ export const api = {
   /** Calls, texts and message notifications over the last ``days`` (parents only). */
   async getGuardianComms(username: string, days = 7): Promise<{ days: number; events: ActivityEvent[] }> {
     const resp = await apiClient.get(`/api/guardian/comms/${encodeURIComponent(username)}`, { params: { days } });
+    return resp.data;
+  },
+
+  /** Whether a child's phone is still collecting calls, texts and screen time (parents only). */
+  async getGuardianCollectorHealth(username: string): Promise<CollectorHealth> {
+    const resp = await apiClient.get(`/api/guardian/collector-health/${encodeURIComponent(username)}`);
     return resp.data;
   },
 

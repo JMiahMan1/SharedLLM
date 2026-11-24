@@ -56,6 +56,8 @@ public class CommsSyncWorker extends Worker {
         // Location fixes from a stretch without signal, in case the tracking
         // service is not running (or not moving) to send them itself.
         ok &= LocationOutbox.flush(getApplicationContext());
+        // How collection is going on this phone, for the parents (at most every ten minutes).
+        DeviceHealth.reportIfDue(getApplicationContext());
         return ok ? Result.success() : Result.retry();
     }
 }

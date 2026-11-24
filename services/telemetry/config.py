@@ -88,3 +88,11 @@ MALWAREBAZAAR_MIN_INTERVAL_S = float(os.getenv("MALWAREBAZAAR_MIN_INTERVAL_S", "
 MALWAREBAZAAR_TTL_DAYS = int(os.getenv("MALWAREBAZAAR_TTL_DAYS", "7"))
 MALWAREBAZAAR_BACKOFF_BASE_S = int(os.getenv("MALWAREBAZAAR_BACKOFF_BASE_S", "600"))
 MALWAREBAZAAR_BACKOFF_MAX_S = int(os.getenv("MALWAREBAZAAR_BACKOFF_MAX_S", str(24 * 3600)))
+
+
+# Collection health (services/telemetry/collector_health.py). Read once at startup.
+#: How long after a child's last call or text other activity may keep arriving
+#: before the parents are told the phone stopped sending calls and texts.
+COMMS_STALE_HOURS = float(os.getenv("COMMS_STALE_HOURS", "12"))
+#: The same for screen time, which a phone sends at least every half hour.
+USAGE_STALE_HOURS = float(os.getenv("USAGE_STALE_HOURS", "48"))

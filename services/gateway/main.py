@@ -88,6 +88,7 @@ from services.gateway import (
     calls,
     camera_live_routes,
     camera_routes,
+    collector_health_routes,
     cookbook,
     dashboard_routes,
     discovery_routes,
@@ -945,6 +946,7 @@ app.add_middleware(
 app.include_router(info_router)
 app.include_router(family_safety.router)
 app.include_router(app_vetting_routes.router)
+app.include_router(collector_health_routes.router)
 app.include_router(push_routes.router)
 app.include_router(network_routes.router)
 app.include_router(weather_routes.router)

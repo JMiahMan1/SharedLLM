@@ -122,6 +122,12 @@ public class TokenBridgePlugin extends Plugin {
                     UnifiedPushDistributor.switchAccount(getContext(), previousServer, previousKey);
                 }
                 PushService.start(getContext());
+                // Signing in (again) puts the collecting workers back: a
+                // sign-out cancelled them, and they used to come back only
+                // when the activity was created from scratch.
+                if (BackgroundWork.ensureScheduled(getContext())) {
+                    DeviceHealth.reportSoon(getContext());
+                }
             }
         }
         if ((accountChanged || serverChanged) && p.getString(KEY_API_KEY, null) != null) {

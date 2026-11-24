@@ -2534,7 +2534,7 @@ def update_credential_shares(
 _DELETED_USER_KEY_PREFIXES = (
     "tel:activity:", "tel:usage:", "tel:usagedev:", "tel:concerns:", "tel:concern-image:",
     "tel:concern-reviews:", "tel:recap:", "tel:night:", "tel:apps:devices:", "tel:apps:mb-state:",
-    "tel:apps:inv:", "phone_beacon:",
+    "tel:apps:inv:", "tel:devhealth:", "tel:arrivals:", "phone_beacon:",
 )
 
 
