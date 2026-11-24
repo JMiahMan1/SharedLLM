@@ -131,6 +131,8 @@ final class Proximity {
 
     // -- lifecycle (from LocationTrackingService) ------------------------------------
 
+    private static boolean receiverRegistered;
+
     static void start(Context context) {
         synchronized (LOCK) {
             app = context.getApplicationContext();
@@ -138,6 +140,26 @@ final class Proximity {
                 thread = new HandlerThread("proximity");
                 thread.start();
                 handler = new Handler(thread.getLooper());
+            }
+            if (!receiverRegistered) {
+                // Bluetooth switched off stops everything; switched on starts it again.
+                android.content.BroadcastReceiver r = new android.content.BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context ctx, android.content.Intent intent) {
+                        int st = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
+                        if (st == BluetoothAdapter.STATE_ON || st == BluetoothAdapter.STATE_OFF) {
+                            Handler h = handler;
+                            if (h != null) h.post(Proximity::apply);
+                        }
+                    }
+                };
+                android.content.IntentFilter f = new android.content.IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    app.registerReceiver(r, f, Context.RECEIVER_EXPORTED);
+                } else {
+                    app.registerReceiver(r, f);
+                }
+                receiverRegistered = true;
             }
         }
         handler.post(Proximity::apply);
