@@ -2785,10 +2785,15 @@ def stats(
 ):
     """The reading picture for one user, plus their day-by-day window."""
     picture = metrics.compute(session, username)
+    state = session.get(UserBibleState, username)
     return {
         "username": username,
         **picture,
         "window": metrics.window_counts(session, username, days),
+        "chapters_window": metrics.chapter_window(session, username, days),
+        # The plan the reader last opened, so a progress card can show that one
+        # when several plans are under way.
+        "last_plan_id": (state.last_plan_id or None) if state else None,
     }
 
 

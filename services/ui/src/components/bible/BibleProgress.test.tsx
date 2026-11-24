@@ -1,30 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import BibleProgress from './BibleProgress';
-import type { BibleMark } from '../../types/api';
+import type { BibleMark, BiblePlanEnrollment, BibleStats } from '../../types/api';
+import { localDayKey } from './progressNumbers';
 
 vi.mock('../../hooks/useHaptics', () => ({ useHaptics: () => ({ trigger: vi.fn() }) }));
 vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: { username: 'sam' } }) }));
 
 vi.mock('../../services/api', () => ({
   api: {
-    getBibleStats: vi.fn().mockResolvedValue({
-      username: 'sam',
-      read_streak_current: 5,
-      read_streak_longest: 12,
-      open_streak_current: 7,
-      open_streak_longest: 14,
-      days_read: 45,
-      metrics: { chapters_total: 25, books_read: 3, read_streak: 5, plan_days_total: 30, plan_completed: 1, memory_mastered: 2, quizzes_total: 10, quiz_perfect: 3 },
-      days_opened: 50,
-      marks: 10,
-      highlights: 6,
-      bookmarks: 4,
-      position: { book: 'John', chapter: 3, verse: 16, reference: 'John 3', label: 'John 3' },
-      last_read_at: '2026-10-13T10:00:00Z',
-      window: { '2026-10-07': 2, '2026-10-08': 1, '2026-10-09': 3, '2026-10-10': 0, '2026-10-11': 2, '2026-10-12': 1, '2026-10-13': 1 },
-    }),
+    getBibleStats: vi.fn(),
+    getBiblePlans: vi.fn(),
     getBibleAchievements: vi.fn().mockResolvedValue({
       username: 'sam',
       points: 65,
@@ -56,10 +43,53 @@ vi.mock('../../services/api', () => ({
 
 import { api } from '../../services/api';
 
-function renderProgress(marks: BibleMark[] = []) {
+/** The local date `back` days before today, as the stats window keys it. */
+function daysAgo(back: number): string {
+  const now = new Date();
+  return localDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - back));
+}
+
+function stats(overrides: Partial<BibleStats> = {}): BibleStats {
+  return {
+    username: 'sam',
+    read_streak_current: 5,
+    read_streak_longest: 12,
+    open_streak_current: 7,
+    open_streak_longest: 14,
+    days_read: 45,
+    metrics: { chapters_total: 25, books_read: 3, read_streak: 5, plan_days_total: 30, plan_completed: 1, memory_mastered: 2, quizzes_total: 10, quiz_perfect: 3 },
+    days_opened: 50,
+    marks: 10,
+    highlights: 6,
+    bookmarks: 4,
+    position: { book: 'John', chapter: 3, verse: 16, reference: 'John 3' },
+    last_read_at: '2026-10-13T10:00:00Z',
+    // Every event: opening the app and searching count here, so it must not be read as chapters.
+    window: { [daysAgo(0)]: 40, [daysAgo(1)]: 40 },
+    // Listed out of order and with a day outside the week, which must not count.
+    chapters_window: { [daysAgo(0)]: 1, [daysAgo(9)]: 20, [daysAgo(2)]: 3, [daysAgo(6)]: 2 },
+    last_plan_id: null,
+    ...overrides,
+  };
+}
+
+function enrollment(overrides: Partial<BiblePlanEnrollment>): BiblePlanEnrollment {
+  return {
+    plan_id: 'gospels-made-up', name: 'A Made-up Gospel Plan', started_on: '2026-10-01', finished_on: null, days: 40,
+    completed: 12, completed_days: [], percent: 30, calendar_day: 13, current_day: 13, next_day: 13, behind: 0,
+    finished: false, today: null, ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.mocked(api.getBibleStats).mockReset().mockResolvedValue(stats());
+  vi.mocked(api.getBiblePlans).mockReset().mockResolvedValue({ catalogue: [], mine: [enrollment({})] });
+});
+
+function renderProgress(marks: BibleMark[] = [], onOpenPlans?: () => void) {
   return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <BibleProgress marks={marks} onDeleteMark={vi.fn()} onOpenRef={vi.fn()} />
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <BibleProgress marks={marks} onDeleteMark={vi.fn()} onOpenRef={vi.fn()} onOpenPlans={onOpenPlans} />
     </QueryClientProvider>,
   );
 }
@@ -67,28 +97,68 @@ function renderProgress(marks: BibleMark[] = []) {
 describe('BibleProgress', () => {
   it('shows streak, days read, and chapters stats', async () => {
     renderProgress([]);
-    await waitFor(() => expect(screen.getByText('Read streak')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('5')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('Best streak')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('12')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('Days read')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('45')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('Chapters')).toBeInTheDocument());
-    // Chapters appears twice (Chapters and Chapters total), get the first one
-    const chaptersElements = await screen.findAllByText('25');
-    expect(chaptersElements.length).toBeGreaterThanOrEqual(1);
+    const card = (label: string) => screen.getByText(label).closest('.glass-panel');
+    await waitFor(() => expect(card('Read streak')).toHaveTextContent('5'));
+    expect(card('Best streak')).toHaveTextContent('12');
+    expect(card('Days read')).toHaveTextContent('45');
+    expect(card('Chapters')).toHaveTextContent('25');
   });
 
-  it('shows this week chapters and plan progress', async () => {
+  it('never prints markup as text in any card', async () => {
     renderProgress([]);
-    // This week value is 10, but 10 appears in multiple places. Target the "This week" card.
-    const thisWeekLabel = await screen.findByText('This week');
-    const thisWeekCard = thisWeekLabel.closest('.glass-panel');
-    await waitFor(() => expect(thisWeekCard).toHaveTextContent('10'));
-    await waitFor(() => expect(screen.getByText('Plan progress')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText(/30/)).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('Books finished')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument());
+    const card = await screen.findByTestId('bible-progress-week');
+    await waitFor(() => expect(card).toHaveTextContent('6 chapters'));
+    const progress = screen.getByTestId('bible-progress');
+    expect(progress.textContent).not.toMatch(/<\/?span|className=/);
+    // The unit is a real element, styled apart from the number.
+    expect(within(card).getByText(/chapters/).tagName).toBe('SPAN');
+  });
+
+  it('counts this week from the last seven local days of chapters, not every event', async () => {
+    renderProgress([]);
+    const card = await screen.findByTestId('bible-progress-week');
+    await waitFor(() => expect(card).toHaveTextContent('6 chapters'));
+  });
+
+  it('shows days done of the plan under way, with its name', async () => {
+    renderProgress([]);
+    const card = await screen.findByTestId('bible-progress-plan');
+    await waitFor(() => expect(card).toHaveTextContent('12 of 40 days'));
+    expect(card).toHaveTextContent('A Made-up Gospel Plan');
+    expect(card).not.toHaveTextContent('%');
+  });
+
+  it('shows the plan the reader last opened when several are under way', async () => {
+    vi.mocked(api.getBibleStats).mockResolvedValue(stats({ last_plan_id: 'psalms-made-up' }));
+    vi.mocked(api.getBiblePlans).mockResolvedValue({
+      catalogue: [],
+      mine: [
+        enrollment({ started_on: '2026-10-05' }),
+        enrollment({ plan_id: 'psalms-made-up', name: 'Made-up Psalms', days: 150, completed: 7, started_on: '2026-09-01' }),
+      ],
+    });
+    renderProgress([]);
+    const card = await screen.findByTestId('bible-progress-plan');
+    await waitFor(() => expect(card).toHaveTextContent('7 of 150 days'));
+    expect(card).toHaveTextContent('Made-up Psalms');
+  });
+
+  it('says No plan, with a way to start one, when no plan is under way', async () => {
+    vi.mocked(api.getBiblePlans).mockResolvedValue({ catalogue: [], mine: [] });
+    const onOpenPlans = vi.fn();
+    renderProgress([], onOpenPlans);
+    const card = await screen.findByTestId('bible-progress-plan');
+    await waitFor(() => expect(card).toHaveTextContent('No plan'));
+    fireEvent.click(within(card).getByTestId('bible-progress-start-plan'));
+    expect(onOpenPlans).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows memorized verses and books finished, and no second chapter total', async () => {
+    renderProgress([]);
+    const memorized = await screen.findByTestId('bible-progress-memorized');
+    await waitFor(() => expect(memorized).toHaveTextContent('2 verses'));
+    expect(screen.getByTestId('bible-progress-books')).toHaveTextContent('3');
+    expect(screen.queryByText('Chapters total')).not.toBeInTheDocument();
   });
 
   it('shows earned badges and progress toward next', async () => {

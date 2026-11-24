@@ -5,8 +5,12 @@ Three sources, best first, each field taken from the first that has it:
 
 1. The file itself: an EPUB's OPF (title, authors, subjects, description,
    ISBN, publisher, date, language, cover) or a PDF's document info.
-2. Google Books, then Open Library, searched by ISBN when there is one and by
-   title and author otherwise (both free, no key; a failure is skipped).
+2. The book catalogues turned on in Settings > Accounts & Integrations (Google
+   Books with its API key, Open Library), in the order set there, searched by
+   ISBN when there is one and by title and author otherwise
+   (services/common/book_metadata.py). A catalogue that is off, or on without
+   what it needs, is skipped and the reply says why; one that answers with an
+   error (a refused key, a used-up quota) is reported, never silently dropped.
 3. Tags: the library's own tags that match the book's subjects, plus the
    topics the app's features read (fasting, prayer, bible-study...) when the
    title, subjects or description call for them.
@@ -19,13 +23,13 @@ from __future__ import annotations
 import base64
 import io
 import logging
-import os
 import re
 from typing import Any
 from urllib.parse import quote, urlparse
 
 import aiohttp
 
+from services.common import book_metadata
 from services.storage.calibre_writer import clean_isbn, epub_details
 
 log = logging.getLogger(__name__)
@@ -95,29 +99,45 @@ def _from_stem(filename: str) -> dict[str, Any]:
     return out
 
 
-async def _json(session: aiohttp.ClientSession, url: str) -> dict:
+class CatalogueError(RuntimeError):
+    """A catalogue answered with an error, or not at all; the text is said to the person as is."""
+
+
+async def _json(session: aiohttp.ClientSession, url: str, source: str = "") -> dict:
+    """A catalogue's JSON answer; raises CatalogueError naming what went wrong."""
     try:
         async with session.get(url, timeout=TIMEOUT) as resp:
             if resp.status != 200:
-                return {}
-            return await resp.json(content_type=None)
-    except Exception as exc:  # a catalogue that is down is skipped
-        log.info("[lookup] %s failed: %s", urlparse(url).netloc, exc)
-        return {}
+                try:
+                    body = await resp.json(content_type=None)
+                except Exception:
+                    body = None
+                if source == book_metadata.GOOGLE_BOOKS:
+                    raise CatalogueError(book_metadata.google_error(resp.status, body))
+                raise CatalogueError(book_metadata.open_library_error(resp.status))
+            body = await resp.json(content_type=None)
+            return body if isinstance(body, dict) else {}
+    except CatalogueError:
+        raise
+    except Exception as exc:
+        # The host and the type only: the URL can carry the key.
+        log.info("[lookup] %s failed: %s", urlparse(url).netloc, type(exc).__name__)
+        raise CatalogueError(book_metadata.unreachable(source)) from None
 
 
-async def google_books(session: aiohttp.ClientSession, title: str, author: str, isbn: str) -> dict[str, Any]:
+async def google_books(session: aiohttp.ClientSession, title: str, author: str, isbn: str, *,
+                       api_key: str = "") -> dict[str, Any]:
+    if not api_key:
+        # Never keyless: Google's shared keyless quota answers 429 most days.
+        raise CatalogueError(f"{book_metadata.NAMES[book_metadata.GOOGLE_BOOKS]}: no API key is set in "
+                             f"{book_metadata.WHERE}")
     if isbn:
         q = f"isbn:{isbn}"
     elif title:
         q = f"intitle:{title}" + (f"+inauthor:{author}" if author else "")
     else:
         return _blank()
-    # Without a key Google shares one daily quota among everyone and soon
-    # answers 429; GOOGLE_BOOKS_API_KEY (free) gives the family its own.
-    key = os.getenv("GOOGLE_BOOKS_API_KEY", "").strip()
-    url = f"https://www.googleapis.com/books/v1/volumes?maxResults=3&q={quote(q)}" + (f"&key={quote(key)}" if key else "")
-    data = await _json(session, url)
+    data = await _json(session, book_metadata.google_books_url(q, api_key), book_metadata.GOOGLE_BOOKS)
     items = data.get("items") or []
     if not items:
         return _blank()
@@ -147,13 +167,13 @@ OPEN_LIBRARY_FIELDS = "key,title,author_name,subject,publisher,first_publish_yea
 
 async def open_library(session: aiohttp.ClientSession, title: str, author: str, isbn: str) -> dict[str, Any]:
     if isbn:
-        url = f"https://openlibrary.org/search.json?limit=1&isbn={quote(isbn)}"
+        query = f"isbn={quote(isbn)}"
     elif title:
-        url = f"https://openlibrary.org/search.json?limit=1&title={quote(title)}" + (f"&author={quote(author)}" if author else "")
+        query = f"title={quote(title)}" + (f"&author={quote(author)}" if author else "")
     else:
         return _blank()
-    url += f"&fields={OPEN_LIBRARY_FIELDS}"
-    docs = (await _json(session, url)).get("docs") or []
+    url = book_metadata.open_library_search_url(f"{query}&fields={OPEN_LIBRARY_FIELDS}")
+    docs = (await _json(session, url, source=book_metadata.OPEN_LIBRARY)).get("docs") or []
     if not docs:
         return _blank()
     doc = docs[0]
@@ -172,7 +192,10 @@ async def open_library(session: aiohttp.ClientSession, title: str, author: str, 
     if doc.get("cover_i"):
         out["cover_url"] = f"https://covers.openlibrary.org/b/id/{doc['cover_i']}-L.jpg"
     if doc.get("key"):
-        work = await _json(session, f"https://openlibrary.org{doc['key']}.json")
+        try:
+            work = await _json(session, f"https://openlibrary.org{doc['key']}.json", source=book_metadata.OPEN_LIBRARY)
+        except CatalogueError:
+            work = {}  # the search answered; only the description is missing
         desc = work.get("description")
         out["comments"] = str(desc.get("value") if isinstance(desc, dict) else desc or "").strip()
     return out
@@ -331,22 +354,52 @@ async def fetch_cover(url: str) -> bytes | None:
 
 
 async def inspect(data: bytes, filename: str, existing_tags: list[str], *, online: bool = True,
-                  usage: dict[str, int] | None = None, known: dict[str, Any] | None = None) -> dict[str, Any]:
+                  usage: dict[str, int] | None = None, known: dict[str, Any] | None = None,
+                  catalogues: dict[str, Any] | None = None) -> dict[str, Any]:
     """Every field Jarvis can find for a book, with where each one came from."""
     base = file_details(data, filename)
-    out = await lookup(base, filename, existing_tags, online=online, usage=usage, known=known)
+    out = await lookup(base, filename, existing_tags, online=online, usage=usage, known=known, catalogues=catalogues)
     out.pop("cover", None)  # the preview carries it; bytes are not JSON
     return out
 
 
+def _plan(catalogues: dict[str, Any] | None, online: bool) -> tuple[list[tuple[str, dict[str, Any]]], list[dict[str, str]]]:
+    """The catalogues to ask, in order, and the ones skipped with why.
+
+    ``catalogues`` is the requesting person's settings (book_metadata.resolve, via
+    identity), or ``{"error": ...}`` when they could not be read: then nothing is
+    asked and every catalogue says so.
+    """
+    if not online:
+        return [], [{"source": book_metadata.NAMES[s], "reason": "auto-fill was turned off for this book"}
+                    for s in book_metadata.SOURCES]
+    if not catalogues or catalogues.get("error") or not isinstance(catalogues.get("sources"), dict):
+        why = (catalogues or {}).get("error") or f"the integrations in {book_metadata.WHERE} could not be read"
+        return [], [{"source": book_metadata.NAMES[s], "reason": why} for s in book_metadata.SOURCES]
+    ask: list[tuple[str, dict[str, Any]]] = []
+    skipped: list[dict[str, str]] = []
+    for name in catalogues.get("order") or book_metadata.DEFAULT_ORDER:
+        source = catalogues["sources"].get(name) or {}
+        if source.get("ready"):
+            ask.append((name, source))
+        else:
+            skipped.append({"source": book_metadata.NAMES.get(name, name),
+                            "reason": str(source.get("reason") or "not set up")})
+    return ask, skipped
+
+
 async def lookup(base: dict[str, Any], filename: str, existing_tags: list[str], *, online: bool = True,
-                 usage: dict[str, int] | None = None, known: dict[str, Any] | None = None) -> dict[str, Any]:
+                 usage: dict[str, int] | None = None, known: dict[str, Any] | None = None,
+                 catalogues: dict[str, Any] | None = None) -> dict[str, Any]:
     """Every field Jarvis can find for a book: ``base`` (what the file says), then the catalogues.
 
     ``known`` are fields the library or the person already has (a title typed in,
     a book's catalogue row): they are what the catalogues are searched by and what
     their answers are checked against. A catalogue answer that is not the same
     book (``same_book``) is dropped, and ``identified`` says whether any was kept.
+    ``catalogues`` are the requesting person's integration settings; the answer's
+    ``catalogues`` says which were asked, which matched, which were skipped and
+    why, and which answered with an error.
     """
     known = known or {}
     layers: list[tuple[str, dict[str, Any]]] = [("the file", base)]
@@ -356,16 +409,34 @@ async def lookup(base: dict[str, Any], filename: str, existing_tags: list[str], 
     isbn = str(known.get("isbn") or base["isbn"] or "")
     identified = False
     rejected: list[str] = []
-    if online and (title or isbn):
+    ask, skipped = _plan(catalogues, online)
+    report_of: dict[str, Any] = {"asked": [], "used": [], "skipped": skipped, "errors": []}
+    if ask and not (title or isbn):
+        skipped.extend({"source": book_metadata.NAMES[name], "reason": "no title or ISBN to search by"} for name, _ in ask)
+        ask = []
+    if ask:
         author = authors[0] if authors else ""
-        async with aiohttp.ClientSession(headers={"User-Agent": "JarvisOS-Library/1.0"}) as session:
-            for source, fetch in (("Google Books", google_books), ("Open Library", open_library)):
-                found = await fetch(session, title, author, isbn)
+        email = str(((catalogues or {}).get("sources") or {}).get(book_metadata.OPEN_LIBRARY, {}).get("contact_email") or "")
+        async with aiohttp.ClientSession(headers={"User-Agent": book_metadata.user_agent(email)}) as session:
+            for name, settings in ask:
+                source = book_metadata.NAMES[name]
+                report_of["asked"].append(source)
+                try:
+                    if name == book_metadata.GOOGLE_BOOKS:
+                        found = await google_books(session, title, author, isbn, api_key=str(settings.get("api_key") or ""))
+                    else:
+                        found = await open_library(session, title, author, isbn)
+                except CatalogueError as exc:
+                    report_of["errors"].append({"source": source, "error": str(exc)})
+                    note_result(name, str(exc))
+                    continue
+                note_result(name, None)
                 if not found.get("title"):
                     continue
                 # An ISBN search is the book by definition; a title search must be checked.
                 if (isbn and found.get("isbn") == isbn) or same_book(title, authors, found):
                     layers.append((source, found))
+                    report_of["used"].append(source)
                     identified = True
                 else:
                     rejected.append(f"{source} suggested “{found['title']}”")
@@ -397,7 +468,21 @@ async def lookup(base: dict[str, Any], filename: str, existing_tags: list[str], 
     out["cover"] = cover
     out["identified"] = identified
     out["rejected"] = rejected
+    out["catalogues"] = report_of
     return out
+
+
+# ── What each catalogue last answered, for the integration's status ─────────
+
+#: source -> the error its last lookup ended in (None: it answered). In memory:
+#: a restart forgets it, and the next lookup says again.
+LAST_RESULT: dict[str, dict[str, Any]] = {}
+
+
+def note_result(source: str, error: str | None) -> None:
+    import time
+
+    LAST_RESULT[source] = {"ok": error is None, "error": error, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
 
 
 # ── Filling in a book that is being added, or one already on the shelf ──────
@@ -438,11 +523,27 @@ def merge(given: dict[str, Any], found: dict[str, Any]) -> tuple[dict[str, Any],
     return merged, filled
 
 
-def report(title: str, identified: bool, filled: dict[str, str], rejected: list[str]) -> str:
-    """One sentence for the person: what was filled in, or that the book was not identified."""
+def catalogue_line(catalogues: dict[str, Any] | None) -> str:
+    """Which catalogues were asked, which were skipped and why, and which answered with an error."""
+    if not catalogues:
+        return ""
+    parts = []
+    if catalogues.get("asked"):
+        parts.append(f"Asked {' and '.join(catalogues['asked'])}.")
+    parts += [f"{e['error'].rstrip('.')}." for e in catalogues.get("errors") or []]
+    parts += [f"Skipped {s['reason'].rstrip('.')}." if s["reason"].startswith(s["source"])
+              else f"Skipped {s['source']}: {s['reason'].rstrip('.')}." for s in catalogues.get("skipped") or []]
+    return " ".join(parts)
+
+
+def report(title: str, identified: bool, filled: dict[str, str], rejected: list[str],
+           catalogues: dict[str, Any] | None = None) -> str:
+    """What was filled in, or that the book was not identified, then which catalogues were used and why not."""
+    line = catalogue_line(catalogues)
+    tail = f" {line}" if line else ""
     if identified:
         named = ", ".join(k for k in (*FIELDS, "tags") if k in filled) or "nothing new"
-        return f"Added “{title}”. Filled in from the file and the catalogues: {named}."
+        return f"Added “{title}”. Filled in from the file and the catalogues: {named}.{tail}"
     why = f" ({'; '.join(rejected)}, which did not match)" if rejected else ""
     return (f"Added “{title}”, but I could not identify it in the book catalogues{why}. "
-            "Please check the title and author.")
+            f"Please check the title and author.{tail}")
