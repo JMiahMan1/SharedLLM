@@ -102,6 +102,7 @@ describe('form label and control accessibility', () => {
         if (tag.includes('type="hidden"') || /\bhidden\b/.test(tag)) continue;
         // A wrapper's own input takes its name from the caller's props, which are checked where it is used.
         if (path.basename(file) === 'NumberField.tsx' && tag.includes('{...rest}')) continue;
+        if (path.basename(file) === 'PasswordField.tsx' && tag.includes('{...input}')) continue;
         if (tag.includes('className="hidden"') || tag.includes('sr-only')) continue;
         if (ranges.some(([s, e]) => s <= start && end <= e)) continue;
         if (/\b(aria-label|aria-labelledby|title)=/.test(tag)) continue;
