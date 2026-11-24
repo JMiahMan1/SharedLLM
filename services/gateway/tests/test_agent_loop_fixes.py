@@ -232,6 +232,20 @@ def test_action_signature_existing_file_path_unchanged():
     assert action_signature("WorkspaceFileWriteRequest", {"file_path": "game.py"}) == "workspacefilewriterequest::'game.py'"
 
 
+def test_action_signature_without_a_payload_keeps_the_empty_tail():
+    # Nothing identifies the call: the empty tail it always had, never a digest of nothing.
+    assert action_signature("LightControlRequest", None) == "lightcontrolrequest::''"
+    assert action_signature("LightControlRequest", {}) == "lightcontrolrequest::''"
+    assert action_signature("LightControlRequest", {"user_context": {"a": 1}, "query": ""}) == "lightcontrolrequest::''"
+
+
+def test_action_signature_fallback_tells_different_calls_apart():
+    a = action_signature("LightControlRequest", {"entity_id": "light.porch"})
+    b = action_signature("LightControlRequest", {"entity_id": "light.kitchen"})
+    assert a != b
+    assert a == action_signature("LightControlRequest", {"entity_id": "light.porch", "user_context": {"x": 1}})
+
+
 def test_seven_different_web_reads_do_not_trip_mission_loop():
     history = [
         (action_signature("WebReadRequest", {"url": f"https://example.com/page{i}"}), True, "")
