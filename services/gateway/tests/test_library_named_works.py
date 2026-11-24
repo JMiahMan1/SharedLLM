@@ -125,7 +125,7 @@ async def test_a_named_book_not_in_the_library_gets_a_note_and_no_other_books_pa
     context = await _fetch(session, "Give me notes on Wild at Heart by John Eldredge, chapter 4")
     assert "Martha and Mary" not in context
     assert "Macduff" not in context
-    assert "not in the indexed library" in context
+    assert "not in the searchable index yet" in context
     assert '"Wild at Heart"' in context
     assert orchestrator.LIBRARY_NOT_INDEXED_HEADER in context
     assert "Answer from these passages" not in context
@@ -135,7 +135,7 @@ async def test_a_named_book_in_the_library_gets_its_own_passages_only():
     context = await _fetch(_Library([MACDUFF, ELDREDGE]), "Give me notes on Wild at Heart by John Eldredge, chapter 4")
     assert "battle to fight" in context
     assert "Martha and Mary" not in context
-    assert "not in the indexed library" not in context
+    assert "not in the searchable index yet" not in context
 
 
 async def test_a_named_book_outranked_by_others_is_found_by_its_name():

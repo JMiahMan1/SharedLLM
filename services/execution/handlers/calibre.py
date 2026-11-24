@@ -148,10 +148,14 @@ def _chapter_max_chars() -> int:
     return int(CALIBRE_CHAPTER_MAX_CHARS)
 
 
-def _book_name(book: dict) -> str:
+def _author_of(book: dict) -> str:
     authors = book.get("authors")
     author = " & ".join(authors) if isinstance(authors, list) else str(authors or "")
-    return f"{book.get('title') or 'Book'} by {book.get('author') or author or 'unknown author'}"
+    return str(book.get("author") or author or "")
+
+
+def _book_name(book: dict) -> str:
+    return f"{book.get('title') or 'Book'} by {_author_of(book) or 'unknown author'}"
 
 
 def _chapter_name(chapter: dict) -> str:
@@ -215,6 +219,7 @@ async def _fetch_chapter(client: CalibreClient, req: CalibreRequest) -> Executio
         detail={
             "book_id": row.get("book_id"),
             "title": row.get("title"),
+            "author": _author_of(row),
             "chapter": {k: chapter.get(k) for k in ("index", "number", "title", "front_matter", "chars", "part", "parts")},
         },
     )

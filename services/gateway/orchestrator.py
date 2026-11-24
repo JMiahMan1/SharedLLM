@@ -15,6 +15,7 @@ from services.common.circuit_breaker import CircuitOpenError, get_breaker
 from services.common.rag_collections import HOME_DEVICES, canonical_collection
 from services.gateway import context_router, library_names, prompt_budget, tool_cache
 from services.gateway.config import (
+    CHAPTER_PREFETCH_MAX_CHARS,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
     IDENTITY_SVC,
@@ -672,16 +673,28 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         # use for it. A Raven mission and a workspace turn always get it.
         include_curriculum = False
     sections: dict[str, int] = {}
+    # A question that names a chapter of a book ("chapter 4 of <Title> by <Author>") gets
+    # that chapter read from the library before the model runs, alongside the search: a
+    # book the search index does not hold yet can still be read, and a model told only
+    # "not in the index" answered from memory instead of calling the tool.
+    chapter_ref = None if (grounded or is_autonomous) else library_names.chapter_named(query)
+    chapter_task: asyncio.Task[ChapterPrefetch] | None = (
+        asyncio.create_task(_prefetch_named_chapter(chapter_ref, creds)) if chapter_ref else None
+    )
     if grounded:
         # The caller already supplied the complete, authoritative passages;
         # unrelated household/workspace hits are what made Bible study answers
         # cite the wrong material.
         rag_context = ""
     else:
+        extra: dict[str, Any] = {"chapter_read": chapter_task} if chapter_task else {}
         rag_context = await _fetch_rag_context(
             query, user_id, creds, workspace_id=workspace_id, include_curriculum=include_curriculum,
-            intent=intent, confidence=intent_confidence, sections=sections, **rag_budget
+            intent=intent, confidence=intent_confidence, sections=sections, **rag_budget, **extra
         )
+    book_chapter = (await chapter_task).block if chapter_task else ""
+    if book_chapter:
+        sections["book_chapter"] = len(book_chapter)
 
     # A Raven mission may arrive with context already retrieved at dispatch
     # time, so that the mission brief can carry the sources it was launched
@@ -724,13 +737,122 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         from services.gateway.messaging import infer_priority_from_payload
 
         job_priority = infer_priority_from_payload(job_payload)
-        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat", priority=job_priority, persona=bool(job_payload.get("persona")))
+        chapter_kw: dict[str, Any] = {"book_chapter": book_chapter} if book_chapter else {}
+        ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking, grounded=grounded, turn_note=turn_note, speech_stream=bool(job_payload.get("speech_stream")), context_sections=sections, budget_path="voice" if is_voice else "chat", priority=job_priority, persona=bool(job_payload.get("persona")), **chapter_kw)
 
     return ans
 
 #: Heads the note that replaces other books' passages when the question names a
 #: book or author the library does not hold (``library_names``).
 LIBRARY_NOT_INDEXED_HEADER = "LIBRARY: THE BOOK LIBRARY WAS SEARCHED FOR THIS QUESTION"
+
+#: How long the gateway waits for a named chapter before the model runs without it.
+CHAPTER_PREFETCH_TIMEOUT_S = 20.0
+
+
+class ChapterPrefetch:
+    """The outcome of reading a named chapter: ``ok`` when the text was read, and the
+    block for the question's context (the chapter, or a note saying why not)."""
+
+    __slots__ = ("block", "ok")
+
+    def __init__(self, ok: bool, block: str) -> None:
+        self.ok = ok
+        self.block = block
+
+
+def _chapter_not_read(ref: "library_names.ChapterRef", why: str) -> ChapterPrefetch:
+    book = ref.book_query or "the book"
+    block = (
+        f"[BOOK CHAPTER NOT READ: chapter {ref.chapter} of {book}]\n"
+        f"The library was asked for this chapter and answered: {why.strip()}\n"
+        "Say so plainly. Anything you add from general knowledge must be marked as not "
+        "from the library, never presented as the chapter's text.\n"
+    )
+    return ChapterPrefetch(False, block)
+
+
+async def _prefetch_named_chapter(ref: "library_names.ChapterRef", creds: ResolvedCredentials) -> ChapterPrefetch:
+    """Read the chapter a question names through execution's CalibreRequest, as the asker.
+
+    Time-boxed to ``CHAPTER_PREFETCH_TIMEOUT_S``; never raises. On success the block
+    carries the chapter (at most ``CHAPTER_PREFETCH_MAX_CHARS``), on failure the
+    library's own message, so the model can say what went wrong.
+    """
+    payload = {
+        "action": "fetch_text",
+        "query": ref.book_query,
+        "chapter": str(ref.chapter),
+        "user_context": creds.model_dump(),
+    }
+    try:
+        settings = await get_all_settings()
+        base = _get(settings, "execution_svc_url")
+        endpoint = SINGLE_TURN_TOOL_ENDPOINTS.get("calibrerequest", "/execute/calibre")
+        from services.gateway.main import shared_http_client
+
+        async def call() -> tuple[int, Any]:
+            async with shared_http_client() as client:
+                resp = await client.post(
+                    f"{base}{endpoint}", json=payload,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=CHAPTER_PREFETCH_TIMEOUT_S),
+                )
+                if resp.status != 200:
+                    return resp.status, await resp.text()
+                return resp.status, await resp.json()
+
+        status, body = await asyncio.wait_for(call(), timeout=CHAPTER_PREFETCH_TIMEOUT_S)
+    except TimeoutError:
+        log.info("[Chapter prefetch] %r chapter %s: no answer in %.0f s", ref.book_query, ref.chapter,
+                 CHAPTER_PREFETCH_TIMEOUT_S)
+        return _chapter_not_read(ref, f"no answer within {CHAPTER_PREFETCH_TIMEOUT_S:.0f} seconds. "
+                                      "CalibreRequest fetch_text with query and chapter can try again.")
+    except Exception as exc:
+        log.warning("[Chapter prefetch] %r chapter %s failed: %s", ref.book_query, ref.chapter, exc)
+        return _chapter_not_read(ref, f"the library could not be reached ({exc}).")
+    if status != 200 or not isinstance(body, dict):
+        log.warning("[Chapter prefetch] %r chapter %s: HTTP %s", ref.book_query, ref.chapter, status)
+        return _chapter_not_read(ref, f"the library service answered HTTP {status}.")
+    message = str(body.get("message") or "")
+    if body.get("status") != "SUCCESS":
+        log.info("[Chapter prefetch] %r chapter %s not read: %s", ref.book_query, ref.chapter, message[:200])
+        return _chapter_not_read(ref, message or "no reason given.")
+
+    detail = body.get("detail") if isinstance(body.get("detail"), dict) else {}
+    chapter = detail.get("chapter") if isinstance(detail.get("chapter"), dict) else {}
+    # The tool's message is "<Title> by <Author>, chapter N: <name>:" then the text.
+    _head, sep, text = message.partition("\n\n")
+    if not sep:
+        text = message
+    title = str(detail.get("title") or ref.title or "the book")
+    author = str(detail.get("author") or ref.author or "").strip()
+    number = chapter.get("number") or ref.chapter
+    name = str(chapter.get("title") or "").strip()
+    label = f"chapter {number}" + (f": {name}" if name and name.lower() != f"chapter {number}".lower() else "")
+    by = f" by {author}" if author else ""
+    total = len(text)
+    bound = CHAPTER_PREFETCH_MAX_CHARS
+    if total > bound:
+        text = (
+            text[:bound].rstrip()
+            + f"\n\n[Truncated: the first {bound:,} of {total:,} characters of this chapter. "
+            "Say the summary covers only this part, or read the rest with CalibreRequest fetch_text.]"
+        )
+    parts = int(chapter.get("parts") or 1)
+    if parts > 1:
+        text += (
+            f"\n\n[This is part {int(chapter.get('part') or 1)} of {parts} of the chapter; "
+            "CalibreRequest fetch_text with the same chapter and part=2 reads the next.]"
+        )
+    block = (
+        f"[BOOK CHAPTER, READ FROM YOUR LIBRARY: {title}{by}, {label}]\n"
+        "This is the chapter the question asks for, read from the library just now. Answer from "
+        "it; do not fetch it again.\n\n"
+        f"{text.strip()}\n"
+    )
+    log.info("[Chapter prefetch] read %r chapter %s: %d chars", title, number, total)
+    return ChapterPrefetch(True, block)
 
 
 def _above_floor(hits: list, floor: float | None, collection: str) -> list:
@@ -823,6 +945,7 @@ async def _fetch_rag_context(
     min_similarity: float | None = RAG_PREFETCH_MIN_SIMILARITY,
     hit_chars: int = RAG_HIT_MAX_CHARS,
     sections: dict[str, int] | None = None,
+    chapter_read: Awaitable[ChapterPrefetch] | None = None,
 ) -> str:
     """Assemble the retrieved context for one turn.
 
@@ -845,6 +968,10 @@ async def _fetch_rag_context(
     wording), ``k`` hits each above ``min_similarity``, de-duplicated, inside
     ``search_chars``. Nothing below the floor is included "just in case": the
     knowledge map tells the model where to fetch anything else.
+
+    ``chapter_read`` (the named chapter being read, ``_prefetch_named_chapter``) is
+    awaited before saying a named book is not in the index: a book whose chapter was
+    read gets no such note.
 
     ``sections`` (when given) receives the characters each part contributed, keyed
     ``prefetch:<collection>``, ``curriculum:<block>``, ``weather`` and so on, for the
@@ -926,7 +1053,9 @@ async def _fetch_rag_context(
                         hits = await _passages_from_named_works(
                             client, rag_svc, user_id, named, hits, MAX_HITS_PER_COLL, min_similarity,
                         )
-                        if not hits:
+                        if not hits and chapter_read is not None and (await chapter_read).ok:
+                            log.info("[RAG prefetch] %s not in the index; its chapter was read directly", named)
+                        elif not hits:
                             note = library_names.not_indexed_note(named)
                             rag_context += f"\n[{LIBRARY_NOT_INDEXED_HEADER}]\n{note}"
                             total_chars += len(note)
@@ -2071,8 +2200,12 @@ def _assistant_persona() -> str:
         return ""
 
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None, persona: bool = False) -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False, grounded: bool = False, workspace_id: str | None = None, workspace_context: str = "", event_callback: Callable[[dict], Awaitable[None]] | None = None, turn_note: str = "", speech_stream: bool = False, context_sections: dict[str, int] | None = None, budget_path: str = "chat", priority: int | None = None, persona: bool = False, book_chapter: str = "") -> str:
     """Answer ``query`` in at most MAX_TURNS tool calls plus one closing turn.
+
+    ``book_chapter`` is a chapter the gateway read for this question
+    (``_prefetch_named_chapter``), or the note that it could not: it travels with the
+    question, after the retrieved context and outside its size cap.
 
     The system message carries the knowledge map (``knowledge_map``): where every
     kind of information lives and the tool that fetches it, since only a small,
@@ -2142,6 +2275,8 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     if turn_note.strip():
         context_parts.append(turn_note.strip())
     context_parts.append(f"Retrieved Context:\n{rag_context}")
+    if book_chapter.strip():
+        context_parts.append(book_chapter.strip())
     question = "[Context for this question]\n" + "\n\n".join(context_parts) + f"\n\n[Question]\n{query}"
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
@@ -2160,7 +2295,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             "knowledge_map": len(kmap),
             "workspace": ws_chars,
             "history": _history_chars(history),
-            "question": len(question) - len(rag_context),
+            "question": len(question) - len(rag_context) - len(book_chapter.strip()),
             **prefetch,
         },
         model=model,
