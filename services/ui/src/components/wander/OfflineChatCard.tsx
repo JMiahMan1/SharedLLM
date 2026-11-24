@@ -31,20 +31,20 @@ export default function OfflineChatCard({ me, room, position, nameOf }: Props) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  const reload = useCallback(async () => {
-    try {
-      setDiag(await FamilyMesh.getDiagnostics());
-      setMessages((await FamilyMesh.list()).messages);
-    } catch {
-      setDiag(null);
-    }
+  const reload = useCallback(() => {
+    Promise.all([FamilyMesh.getDiagnostics(), FamilyMesh.list()])
+      .then(([d, l]) => {
+        setDiag(d);
+        setMessages(l.messages);
+      })
+      .catch(() => setDiag(null));
   }, []);
 
   useEffect(() => {
     if (!android) return undefined;
-    void reload();
+    reload();
     let remove: (() => Promise<void>) | undefined;
-    void FamilyMesh.addListener('change', () => void reload()).then((h) => { remove = h.remove; });
+    void FamilyMesh.addListener('change', reload).then((h) => { remove = h.remove; });
     return () => { void remove?.(); };
   }, [android, reload]);
 
@@ -58,7 +58,7 @@ export default function OfflineChatCard({ me, room, position, nameOf }: Props) {
     setBusy(true);
     try {
       await FamilyMesh.send({ kind, fields });
-      await reload();
+      reload();
       return true;
     } catch (e) {
       toast.error(errorText(e, 'Could not keep that message'));

@@ -100,7 +100,9 @@ test('family nearby, the offline chat and the diagnostics on a scan-only tablet'
   await chat.getByLabel('Offline message', { exact: true }).fill('On our way down');
   await chat.getByRole('button', { name: 'Send offline' }).click();
   await expect(chat).toContainText('On our way down');
-  const sent = await page.evaluate(() => (window as any).__nativeCalls.filter((c: any) => c.method === 'send'));
+  type Call = { plugin: string; method: string; options: unknown };
+  const sent = await page.evaluate(() =>
+    ((window as Window & { __nativeCalls?: Call[] }).__nativeCalls ?? []).filter((c) => c.method === 'send'));
   expect(sent[0].options).toEqual({ kind: 'text', fields: { text: 'On our way down' } });
 
   const diag = page.getByTestId('bt-diagnostics');

@@ -26,10 +26,13 @@ const PLUGINS: Record<string, string[]> = {
 
 export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<void> {
   await page.addInitScript(({ plugins, initial }) => {
-    const s = JSON.parse(JSON.stringify(initial)) as Record<string, any>;
+    type Bag = Record<string, unknown>;
+    type FakeWindow = Window & { __nativeCalls?: unknown[]; CapacitorCustomPlatform?: unknown; Capacitor?: Bag };
+    const win = window as FakeWindow;
+    const s = JSON.parse(JSON.stringify(initial)) as Bag & { messages?: unknown[] };
     const calls: Array<{ plugin: string; method: string; options: unknown }> = [];
-    (window as any).__nativeCalls = calls;
-    (window as any).CapacitorCustomPlatform = { name: 'android', plugins: {} };
+    win.__nativeCalls = calls;
+    win.CapacitorCustomPlatform = { name: 'android', plugins: {} };
     // The app keeps its sign-in in Preferences on Android (web: localStorage with this prefix);
     // copy what the page mocks seeded, and point it at this server.
     for (const key of ['jarvis_api_key', 'jarvis_user']) {
@@ -37,26 +40,26 @@ export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<
       if (v !== null) localStorage.setItem(`CapacitorStorage.${key}`, v);
     }
     localStorage.setItem('CapacitorStorage.jarvis_server_url', location.origin);
-    const answer = (plugin: string, method: string, options: any): unknown => {
+    const answer = (plugin: string, method: string, options: Bag): unknown => {
       calls.push({ plugin, method, options });
       if (plugin === 'JarvisVehicleBluetooth') {
-        if (method === 'listDevices') return { ...s.vehicle, devices: s.devices ?? [] };
+        if (method === 'listDevices') return { ...(s.vehicle as Bag), devices: s.devices ?? [] };
         if (method === 'getDiagnostics') return s.vehicle;
         if (['getStatus', 'requestPermission'].includes(method)) return s.vehicle;
         return {};
       }
       if (plugin === 'JarvisProximity') {
-        if (method === 'enable') s.proximity = { ...s.proximity, enabled: true };
-        if (method === 'disable') s.proximity = { ...s.proximity, enabled: false };
+        if (method === 'enable') s.proximity = { ...(s.proximity as Bag), enabled: true };
+        if (method === 'disable') s.proximity = { ...(s.proximity as Bag), enabled: false };
         return s.proximity;
       }
       if (plugin === 'JarvisFamilyMesh') {
-        if (method === 'enable') s.mesh = { ...s.mesh, enabled: true };
-        if (method === 'disable') s.mesh = { ...s.mesh, enabled: false };
+        if (method === 'enable') s.mesh = { ...(s.mesh as Bag), enabled: true };
+        if (method === 'disable') s.mesh = { ...(s.mesh as Bag), enabled: false };
         if (method === 'list') return { messages: s.messages ?? [] };
         if (method === 'send') {
           const m = { id: String(Date.now()).padStart(32, '0'), t: options.kind, from: 'parent', room: 'abcd1234',
-            sent_at: Date.now() / 1000, mine: true, synced: false, hops: 0, ...options.fields };
+            sent_at: Date.now() / 1000, mine: true, synced: false, hops: 0, ...(options.fields as Bag) };
           s.messages = [...(s.messages ?? []), m];
           return { id: m.id };
         }
@@ -65,13 +68,13 @@ export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<
       }
       return {};
     };
-    (window as any).Capacitor = {
-      ...(window as any).Capacitor,
+    win.Capacitor = {
+      ...win.Capacitor,
       PluginHeaders: Object.entries(plugins).map(([name, methods]) => ({
         name,
         methods: (methods as string[]).map((m) => ({ name: m, rtype: 'promise' })),
       })),
-      nativePromise: (plugin: string, method: string, options: unknown) =>
+      nativePromise: (plugin: string, method: string, options: Bag) =>
         new Promise((resolve) => setTimeout(() => resolve(answer(plugin, method, options)), 10)),
       nativeCallback: () => 'cb',
     };
