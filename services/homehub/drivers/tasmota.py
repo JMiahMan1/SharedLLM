@@ -620,3 +620,8 @@ class TasmotaDriver(Driver):
             if str(self.power.get(idx, "")).upper() != "ON":
                 await self._send(f"{power} On")  # a plain on, or a device set not to power on with a change
         self._publish_lights()
+
+    # -- one command for the template tools (tasmota_templates.py) --------------------------------
+    async def cm(self, command: str) -> dict[str, Any]:
+        """One ``/cm`` command and its reply, through the driver's own transport (password included)."""
+        return await self._command(command)

@@ -535,3 +535,52 @@ async def capabilities(request: Request):
     allowed = ("ability", "area", "domain", "device_id", "platform", "available")
     params = [(k, v) for k, v in request.query_params.multi_items() if k in allowed]
     return _answer(*await _hub("GET", "/api/homehub/capabilities", params=params or None))
+
+
+# -- Tasmota templates (homehub tasmota_templates.py) -----------------------------------------------
+
+#: Loading a template restarts the device; the hub waits up to 30 s for it and reads it back.
+_TEMPLATE_TIMEOUT = aiohttp.ClientTimeout(total=120, connect=5)
+_TEMPLATE_KIND = re.compile(r"^[a-z]{3,10}$")
+
+
+@router.get("/tasmota/templates")
+async def tasmota_templates(request: Request, kind: str | None = None, q: str | None = None):
+    """The catalog of Tasmota templates, by kind and words."""
+    await _admin(request)
+    params: dict[str, str] = {}
+    if kind:
+        if not _TEMPLATE_KIND.match(kind):
+            raise HTTPException(status_code=400, detail="Unknown kind")
+        params["kind"] = kind
+    if q:
+        params["q"] = q[:100]
+    return _answer(*await _hub("GET", "/hub/tasmota/templates", params=params or None))
+
+
+@router.get("/tasmota/{entry_id}/template")
+async def tasmota_template(entry_id: str, request: Request):
+    """A Tasmota device's template now, the catalog entries it equals, and up to three suggestions."""
+    await _admin(request)
+    return _answer(*await _hub("GET", f"/hub/tasmota/{_rid(entry_id, 'integration')}/template",
+                               timeout=_SCAN_TIMEOUT))
+
+
+@router.post("/tasmota/{entry_id}/template")
+async def tasmota_apply_template(entry_id: str, request: Request):
+    """Load a template: ``{"template"? or "catalog_id"?, "confirm": true}``; the device restarts."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("template", "catalog_id", "confirm") if k in body}
+    return _answer(*await _hub("POST", f"/hub/tasmota/{_rid(entry_id, 'integration')}/template", json=payload,
+                               timeout=_TEMPLATE_TIMEOUT))
+
+
+@router.post("/tasmota/{entry_id}/template/restore")
+async def tasmota_restore_template(entry_id: str, request: Request):
+    """Send back the template the last load replaced: ``{"confirm": true}``."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("confirm",) if k in body}
+    return _answer(*await _hub("POST", f"/hub/tasmota/{_rid(entry_id, 'integration')}/template/restore",
+                               json=payload, timeout=_TEMPLATE_TIMEOUT))
