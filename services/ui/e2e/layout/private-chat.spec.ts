@@ -24,6 +24,8 @@ const expect = baseExpect.configure({ timeout: 20_000 });
 const PASSWORD = 'a long shared sentence';
 const TOKEN = 'roomprivate1';
 const SEC = Math.floor(Date.now() / 1000);
+/** A real two-frame animated GIF, 2x2 (what a keyboard's GIF is, only smaller). */
+const GIF = Buffer.from('R0lGODlhAgACAPAAAP8AAAAA/yH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAAgACAAACAoRRACH5BAAKAAAALAAAAAACAAIAgAAA/wAAAAIChFEAOw==', 'base64');
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
 interface Run { mocks: HomeMocks; errors: string[]; found: string[] }
@@ -1130,6 +1132,38 @@ test.describe('private chat on every form factor', () => {
     await expect(page.getByText('Only photos and videos can be sent in a private chat')).toBeVisible();
     expect(server.uploads).toHaveLength(2);
     expect(page.url()).toContain('/family');
+    done(run);
+  });
+
+  test('a GIF from the phone keyboard (GIPHY, Tenor) is encrypted, sent as a GIF and shown', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+
+    // What KeyboardMediaPlugin.java hands the page when the keyboard inserts a GIF into the focused box.
+    await page.getByTestId('private-input').focus();
+    const taken = await page.evaluate((data) => window.__jarvisKeyboardMedia!({ mime: 'image/gif', name: 'keyboard.gif', data }), GIF.toString('base64'));
+    expect(taken).toBe(true);
+    await expect.poll(() => server.posted.length).toBe(1);
+
+    // The server holds ciphertext only; inside the encryption it is a GIF, so it plays as one.
+    expect(server.uploads).toHaveLength(1);
+    expect(server.uploads![0].length).toBe(GIF.length + 12 + 16);
+    expect(server.uploads![0].includes(GIF.subarray(0, 6))).toBe(false);
+    expect(server.posted[0]).not.toContain('keyboard.gif');
+    expect(await openMessage(key, server.posted[0])).toMatchObject({ t: 'image', mime: 'image/gif', name: 'keyboard.gif' });
+    const picture = page.getByTestId('private-feed').getByTestId('private-picture').last();
+    await expect(picture).toBeVisible();
+    await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+    await check(page, info, run, 'private keyboard gif sent', page.getByTestId('chat-thread'), await overPanel(page, /^private keyboard gif sent$/));
+
+    // Nothing focused that takes a picture: the keyboard's GIF is not lost silently.
+    await page.getByTestId('private-input').blur();
+    expect(await page.evaluate((data) => window.__jarvisKeyboardMedia!({ mime: 'image/gif', data }), GIF.toString('base64'))).toBe(false);
+    await expect(page.getByText('GIFs and stickers can only be sent in a chat message.')).toBeVisible();
+    expect(server.uploads).toHaveLength(1);
     done(run);
   });
 

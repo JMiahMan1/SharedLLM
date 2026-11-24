@@ -58,6 +58,7 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(DeviceUnlockPlugin.class);
         registerPlugin(PrivatePreviewPlugin.class);
         registerPlugin(ChatShortcutPlugin.class);
+        registerPlugin(KeyboardMediaPlugin.class);
         super.onCreate(savedInstanceState);
         // The chat's inline video players keep their own iframe navigations
         // (PlayerFrameRules); everything else is Capacitor's as before.
