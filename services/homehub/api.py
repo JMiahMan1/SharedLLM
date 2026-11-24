@@ -1364,12 +1364,25 @@ class WSConnection:
 
 
     # -- Music Assistant's Sendspin pairing (what HA's sendspin integration answers) ------------------------------
-    # Admin only (Music Assistant's connection): these hand out a device's pairing secret.
-    def _admin(self) -> bool:
-        return self.principal is not None and self.principal.is_admin
+    # Admins and Music Assistant's own service login only: these hand out a device's pairing secret.
+    def _may_pair_sendspin(self) -> bool:
+        """An admin, or the hub's own Music Assistant service login (service_logins_api.MA_USER).
+
+        HomeHub gives Music Assistant a non-admin service user on purpose; these two
+        commands are what that login exists to use, so it may, and only it besides admins.
+        """
+        p = self.principal
+        if p is None:
+            return False
+        if p.is_admin:
+            return True
+        from services.homehub.service_logins_api import MA_USER
+
+        user = self.auth.users().get(p.user_id) or {}
+        return bool(user.get("service")) and user.get("name") == MA_USER
 
     async def _subscribe_sendspin_clients(self, mid: int) -> None:
-        if not self._admin():
+        if not self._may_pair_sendspin():
             await self.error(mid, "unauthorized", "Only an administrator may follow Sendspin clients.")
             return
         clients = getattr(self.runtime, "sendspin_clients", None)
@@ -1387,7 +1400,7 @@ class WSConnection:
         self.subs[mid] = clients.subscribe(push)
 
     async def _sendspin_pairing_token(self, mid: int, client_id: Any) -> None:
-        if not self._admin():
+        if not self._may_pair_sendspin():
             await self.error(mid, "unauthorized", "Only an administrator may fetch a pairing token.")
             return
         clients = getattr(self.runtime, "sendspin_clients", None)

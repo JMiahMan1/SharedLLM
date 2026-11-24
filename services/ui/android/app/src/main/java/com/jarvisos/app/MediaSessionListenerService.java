@@ -53,6 +53,12 @@ public class MediaSessionListenerService extends NotificationListenerService {
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
+        // Android binds this listener whatever the app does, so it is the one
+        // part that survives a sign-out, a reboot or an update: it puts the
+        // collecting workers back (a no-op when they are scheduled or no one
+        // is signed in) and collects calls and texts once now.
+        BackgroundWork.ensureScheduled(this);
+        BackgroundWork.collectCommsSoon(this);
         try {
             sessionManager = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
             ComponentName me = new ComponentName(this, MediaSessionListenerService.class);
@@ -183,6 +189,11 @@ public class MediaSessionListenerService extends NotificationListenerService {
         }
 
         String pkg = sbn.getPackageName();
+        // A text or a call just came in: collect calls and texts now (at most
+        // every 30 s, one run at a time). The periodic worker stays the
+        // backstop for anything that brings no notification.
+        BackgroundWork.ensureScheduledHourly(this);
+        if (isCommsSource(pkg)) BackgroundWork.collectCommsSoon(this);
         if (ChatMessageLog.MESSAGING_APPS.contains(pkg)) {
             noteChatMessage(sbn, n, extras);
             return;  // texts are logged from the message store, not as "social"
@@ -220,5 +231,32 @@ public class MediaSessionListenerService extends NotificationListenerService {
             long postedAt = sbn.getPostTime() > 0 ? sbn.getPostTime() : System.currentTimeMillis();
             GuardApi.reportSocialNotification(this, record.pkg, label, record.sender, record.body, postedAt);
         }
+    }
+
+    /**
+     * A call that ended takes its ongoing notification away, and the call log
+     * has the call only then: collect once more.
+     */
+    @Override
+    public void onNotificationRemoved(StatusBarNotification sbn) {
+        if (sbn != null && isCommsSource(sbn.getPackageName())) BackgroundWork.collectCommsSoon(this);
+    }
+
+    /** The default SMS app, the default dialer, or a known messaging app. */
+    private boolean isCommsSource(String pkg) {
+        String sms = null;
+        String dialer = null;
+        try {
+            sms = android.provider.Telephony.Sms.getDefaultSmsPackage(this);
+        } catch (Exception ignored) {
+            // A tablet without telephony has none.
+        }
+        try {
+            android.telecom.TelecomManager telecom = getSystemService(android.telecom.TelecomManager.class);
+            if (telecom != null) dialer = telecom.getDefaultDialerPackage();
+        } catch (Exception ignored) {
+            // No telecom service: no dialer.
+        }
+        return CollectRules.isCommsSource(pkg, sms, dialer, ChatMessageLog.MESSAGING_APPS);
     }
 }

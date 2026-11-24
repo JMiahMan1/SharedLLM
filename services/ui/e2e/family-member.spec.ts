@@ -173,6 +173,8 @@ async function mockApi(page: Page, viewer: Viewer) {
         { user: 'sam', feature: 'sms', item: 'Leo', action: 'message', at: ago(60), detail: { direction: 'out', number: '+15555550102', body: 'see you at practice' } },
       ] });
     }
+    // Whether the phone is still collecting (the Calls & messages banner): all well here.
+    if (p.startsWith('/api/guardian/collector-health/')) return json({ status: 'SUCCESS', devices: [], staleness: {} });
     if (/^\/api\/family\/member\/[^/]+\/devices$/.test(p)) {
       // The server's rule: the father and admins only.
       return viewer === 'dad' ? json(DEVICES) : json({ detail: 'Only the father or an admin can see device details' }, 403);

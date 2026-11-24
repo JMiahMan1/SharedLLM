@@ -76,8 +76,13 @@ public class UsageSyncWorker extends Worker {
         Context app = getApplicationContext();
         WidgetApi.ensureCredentials(app);
         String key = WidgetApi.apiKey(app);
-        if (key == null || key.isEmpty()) return Result.success();
+        if (key == null || key.isEmpty()) {
+            CollectorStatus.record(app, "usage", false, "signed_out", "Not signed in on this phone");
+            return Result.success();
+        }
         if (!PhoneUsagePlugin.hasUsageAccess(app)) {
+            CollectorStatus.record(app, "usage", false, "no_permission", "Usage access is off");
+            DeviceHealth.reportIfDue(app);
             remindIfProtected(app);
             return Result.success();
         }
@@ -99,8 +104,11 @@ public class UsageSyncWorker extends Worker {
             post(app, localDay(now), deviceKey, PhoneUsagePlugin.readDay(app, today, now));
         } catch (Exception e) {
             Log.w(TAG, "usage sync failed: " + e.getMessage());
+            CollectorStatus.record(app, "usage", false, "upload_failed", "Upload stopped: " + WidgetApi.problem(e));
+            DeviceHealth.reportIfDue(app);
             return Result.retry();
         }
+        CollectorStatus.record(app, "usage", true, "ok", "Screen time sent");
         try {
             postNight(app, deviceKey, today, now);
         } catch (Exception e) {
@@ -108,6 +116,8 @@ public class UsageSyncWorker extends Worker {
             // the day's usage above is unaffected, and the next run tries again.
             Log.w(TAG, "night sync failed: " + e.getMessage());
         }
+        // How collection is going on this phone, for the parents (at most every ten minutes).
+        DeviceHealth.reportIfDue(app);
         return Result.success();
     }
 

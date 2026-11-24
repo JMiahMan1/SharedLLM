@@ -40,6 +40,11 @@ public class AppUpdateWorker extends Worker {
     @NonNull
     @Override
     public Result doWork() {
+        // This worker is never cancelled by a sign-out, so it puts back the
+        // collecting workers a sign-out (and a later sign-in that did not
+        // schedule them) left off: a phone recovers by itself, without anyone
+        // opening the app. KEEP policy: a no-op when they are scheduled.
+        BackgroundWork.ensureScheduled(getApplicationContext());
         NativeUpdater.maybeCheck(getApplicationContext(), 5 * 60_000L);
         return Result.success();
     }
