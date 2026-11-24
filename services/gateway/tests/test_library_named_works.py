@@ -125,7 +125,7 @@ async def test_a_named_book_not_in_the_library_gets_a_note_and_no_other_books_pa
     context = await _fetch(session, "Give me notes on Wild at Heart by John Eldredge, chapter 4")
     assert "Martha and Mary" not in context
     assert "Macduff" not in context
-    assert "not in the searchable index yet" in context
+    assert "not found in the library catalogue search" in context
     assert '"Wild at Heart"' in context
     assert orchestrator.LIBRARY_NOT_INDEXED_HEADER in context
     assert "Answer from these passages" not in context
@@ -135,7 +135,7 @@ async def test_a_named_book_in_the_library_gets_its_own_passages_only():
     context = await _fetch(_Library([MACDUFF, ELDREDGE]), "Give me notes on Wild at Heart by John Eldredge, chapter 4")
     assert "battle to fight" in context
     assert "Martha and Mary" not in context
-    assert "not in the searchable index yet" not in context
+    assert "not found in the library catalogue search" not in context
 
 
 async def test_a_named_book_outranked_by_others_is_found_by_its_name():
@@ -181,3 +181,57 @@ def test_names_are_read_from_the_question_not_from_a_list(question, names):
 ])
 def test_matching_ignores_case_punctuation_and_small_misspellings(name, target, expected):
     assert library_names.name_matches(name, target) is expected
+
+
+# --- a named book found by its catalogue card ----------------------------------------
+#: The library index holds each book's catalogue card, never its text (2026-11-24).
+
+def _card(title, author, similarity=0.7):
+    return {"content": f"Book: {title}\nAuthor: {author}\nDescription: A test description.\nContents: One; Two",
+            "score": 0.016, "similarity": similarity,
+            "metadata": {"title": title, "author": author, "is_metadata": True, "catalogue": True}}
+
+
+async def test_a_named_book_found_by_its_card_gets_the_card_and_how_to_read_it():
+    card = _card("Wild at Heart", "John Eldredge")
+    session = _Library([MACDUFF], lookups={"Wild at Heart": [card]})
+    context = await _fetch(session, 'Give me three discussion questions on "Wild at Heart"')
+    assert "A test description." in context
+    assert orchestrator.LIBRARY_CATALOGUE_HEADER in context
+    assert '"Wild at Heart by John Eldredge": in the library' in context
+    assert "action fetch_text" in context
+    assert "not found in the library catalogue search" not in context
+    assert "Martha and Mary" not in context
+
+
+async def test_a_card_among_the_questions_own_hits_counts_as_the_book():
+    context = await _fetch(_Library([_card("Wild at Heart", "John Eldredge")]),
+                           'Give me three discussion questions on "Wild at Heart"')
+    assert orchestrator.LIBRARY_CATALOGUE_HEADER in context
+
+
+async def test_a_passage_of_the_book_needs_no_read_it_note():
+    context = await _fetch(_Library([ELDREDGE, _card("Wild at Heart", "John Eldredge")]),
+                           "Give me notes on Wild at Heart by John Eldredge")
+    assert "battle to fight" in context
+    assert orchestrator.LIBRARY_CATALOGUE_HEADER not in context
+
+
+async def test_a_named_chapter_being_read_needs_no_read_it_note():
+    import asyncio
+
+    read = asyncio.get_running_loop().create_future()
+    read.set_result(orchestrator.ChapterPrefetch(True, "chapter text"))
+    with patch("services.gateway.main.shared_http_client",
+               return_value=_Library([_card("Wild at Heart", "John Eldredge")])):
+        context = await orchestrator._fetch_rag_context(
+            "Summarize chapter 4 of Wild at Heart by John Eldredge", "u", None,
+            include_curriculum=False, include_library=True, chapter_read=read,
+        )
+    assert orchestrator.LIBRARY_CATALOGUE_HEADER not in context
+
+
+def test_the_catalogue_note_says_the_card_is_not_the_text():
+    note = library_names.catalogue_only_note(["Quiet Harbor Lights by Ann Fakewright"])
+    assert "the card is not the book's text" in note
+    assert "action chapters" in note and "action fetch_text" in note

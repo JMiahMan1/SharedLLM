@@ -752,6 +752,30 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
 #: book or author the library does not hold (``library_names``).
 LIBRARY_NOT_INDEXED_HEADER = "LIBRARY: THE BOOK LIBRARY WAS SEARCHED FOR THIS QUESTION"
 
+#: Heads the note that a named book was found by its catalogue card, with how to read it.
+LIBRARY_CATALOGUE_HEADER = "LIBRARY: THE BOOK IS IN THE LIBRARY; ITS TEXT IS READ ON REQUEST"
+
+
+def _only_catalogue_cards(hits: list) -> bool:
+    """Whether every library hit is a book's catalogue (metadata) row, not a passage of its text."""
+    return bool(hits) and all(_as_meta_dict(h.get("metadata")).get("is_metadata") for h in hits)
+
+
+def _card_titles(hits: list, named: list[str]) -> list[str]:
+    """``Title by Author`` for each book the cards are of, in order, else the names asked for."""
+    out: list[str] = []
+    for hit in hits:
+        meta = _as_meta_dict(hit.get("metadata"))
+        title = str(meta.get("title") or "").strip()
+        if not title:
+            continue
+        author = str(meta.get("author") or "").strip()
+        label = f"{title} by {author}" if author else title
+        if label not in out:
+            out.append(label)
+    return out or list(named)
+
+
 #: How long the gateway waits for a named chapter before the model runs without it.
 #: A first read of a book downloads and opens it (tens of seconds for a big PDF); the
 #: voice satellite plays a hold line and music meanwhile, inside the household's
@@ -911,8 +935,11 @@ async def _passages_from_named_works(
 
     When none of the question's hits is from it, each name is looked up on its own
     (a title or an author is a phrase the book's rows carry), so a named book that
-    is indexed but was outranked still answers. An empty result means the library
-    does not hold it, and the caller says so instead of quoting other books.
+    is indexed but was outranked still answers. The library index holds each book's
+    catalogue card (title, author, description, contents), so a found book usually
+    comes back as its card; the caller then says how to read its text. An empty
+    result means the catalogue search did not find it, and the caller says so
+    instead of quoting other books.
     """
     own = [h for h in hits if library_names.hit_is_from(_as_meta_dict(h.get("metadata")), named)]
     if own:
@@ -938,7 +965,7 @@ async def _passages_from_named_works(
         for hit in _above_floor(results, floor, "calibre_files"):
             meta = _as_meta_dict(hit.get("metadata"))
             key = str(hit.get("content"))
-            if meta.get("is_metadata") or key in seen or not library_names.hit_is_from(meta, named):
+            if key in seen or not library_names.hit_is_from(meta, named):
                 continue
             seen.add(key)
             found.append(hit)
@@ -1077,6 +1104,14 @@ async def _fetch_rag_context(
                             rag_context += f"\n[{LIBRARY_NOT_INDEXED_HEADER}]\n{note}"
                             total_chars += len(note)
                             log.info("[RAG prefetch] named work(s) %s not in the indexed library", named)
+                        elif chapter_read is None and _only_catalogue_cards(hits):
+                            # The book is on the shelf, but the index holds its card, not
+                            # its text: say how to read it rather than leave the model to
+                            # answer about its content from the card or from memory.
+                            note = library_names.catalogue_only_note(_card_titles(hits, named))
+                            rag_context += f"\n[{LIBRARY_CATALOGUE_HEADER}]\n{note}"
+                            total_chars += len(note)
+                            log.info("[RAG prefetch] named work(s) %s found by catalogue card", named)
                     if hits:
                         # For home devices, enrich with live state from the hub
                         if coll == HOME_DEVICES and creds:

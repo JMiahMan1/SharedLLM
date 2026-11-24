@@ -31,6 +31,7 @@ from services.storage.indexer import (
 from services.storage.library_api import router as library_router
 from services.storage.models import (
     IndexScanRequest,
+    ProviderConfig,
     ProviderFetchRequest,
     ProviderListRequest,
     ProviderMirrorRequest,
@@ -39,7 +40,10 @@ from services.storage.models import (
 from services.storage.providers import build_provider
 
 log = logging.getLogger("storage")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+# force: an import above already logged through the root logger, which configured it
+# at WARNING, so without it every INFO line here (crawl progress, "Indexed files 1-8")
+# was dropped and a crawl left nothing in the log but uvicorn's access lines.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s", force=True)
 
 
 async def _artifact_purge_loop() -> None:
@@ -64,10 +68,12 @@ async def lifespan(_app: FastAPI):
         # not mounted; artifact endpoints will report the real failure.
         log.warning("Artifact storage is unavailable: %s", exc)
     purge_task = asyncio.create_task(_artifact_purge_loop())
+    catalogue_task = asyncio.create_task(_calibre_catalogue_loop())
     try:
         yield
     finally:
         purge_task.cancel()
+        catalogue_task.cancel()
 
 
 from services.common.logging_utils import redact_access_log  # noqa: E402
@@ -296,7 +302,9 @@ async def _run_full_index_task(req: IndexScanRequest):
         log.info(f"Scan complete. Found {len(entries)} raw entries.")
         items = build_content_index(entries)
 
-        checkpoint = None if req.force else CheckpointManager(_checkpoint_path() or "")
+        # force reads every file again, but still records what it indexed.
+        record = CheckpointManager(_checkpoint_path() or "")
+        checkpoint = None if req.force else record
         user_id = _index_owner(req)
         session_id = str(int(time.time()))
         indexed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -319,7 +327,10 @@ async def _run_full_index_task(req: IndexScanRequest):
                 crawl_phase("extracting", 0, len(items))
                 for g in range(0, len(items), _INDEX_GROUP_FILES):
                     group = items[g:g + _INDEX_GROUP_FILES]
-                    chunks = await extract_and_chunk_contents(provider, group, checkpoint=checkpoint)
+                    marks: list[tuple[str, str]] = []
+                    chunks = await extract_and_chunk_contents(
+                        provider, group, checkpoint=checkpoint, pending_marks=marks,
+                    )
                     crawl_phase("extracting", min(g + _INDEX_GROUP_FILES, len(items)), len(items))
                     for c in chunks:
                         c["metadata"]["session_id"] = session_id
@@ -334,6 +345,13 @@ async def _run_full_index_task(req: IndexScanRequest):
                             )
                         total_synced += len(batch)
                         crawl_phase("syncing", total_synced, total_chunks)
+                    # Only now are this group's files in the index: a crawl stopped
+                    # before this point reads them again next time.
+                    if marks:
+                        for path, stamp in marks:
+                            record.mark_indexed(path, stamp)
+                        record.save()
+                    crawl_phase("indexing", min(g + _INDEX_GROUP_FILES, len(items)), len(items))
                     log.info(f"Indexed files {g + 1}-{g + len(group)} of {len(items)}: {len(chunks)} chunks")
 
                 log.info(f"Background index complete for {user_id}. Synced {total_synced}/{total_chunks} chunks.")
@@ -357,6 +375,74 @@ async def _run_full_index_task(req: IndexScanRequest):
         import traceback
         log.error(traceback.format_exc())
         crawl_end(error=f"{type(e).__name__}: {e}")
+
+def _catalogue_interval_s() -> float:
+    from services import config
+
+    return float(config.CALIBRE_INDEX_INTERVAL_S)
+
+
+#: Seconds after startup before the first catalogue check: Identity's settings
+#: (the library path among them) are resolved by then, and startup stays quick.
+_CATALOGUE_FIRST_CHECK_S = 60.0
+_CATALOGUE_PATH_WARNED = False
+
+
+async def _calibre_catalogue_tick(last_digest: str | None) -> str | None:
+    """Index the library's catalogue when ``metadata.db`` changed since ``last_digest``.
+
+    Returns the digest the index now matches (``last_digest`` when nothing ran or
+    the crawl failed, so the next tick tries again). A changed catalogue means a
+    book was added, removed or edited; the crawl's checkpoint skips every book
+    whose ``last_modified`` is unchanged, so only those books are read, and the
+    stale-path purge removes the cards of books that are gone. Nobody has to ask
+    for a reindex.
+    """
+    global _CATALOGUE_PATH_WARNED
+    from services import config
+
+    library = str(config.CALIBRE_LIBRARY_PATH or "").strip()
+    if not library:
+        if not _CATALOGUE_PATH_WARNED:
+            _CATALOGUE_PATH_WARNED = True
+            log.warning("calibre_library_path is not set: the library catalogue is not indexed "
+                        "automatically. Set it in Admin > LLM & Settings.")
+        return last_digest
+    if crawl_snapshot().get("active"):
+        return last_digest
+    req = IndexScanRequest(
+        provider=ProviderConfig(kind="calibre", settings={"library_path": library}),
+        path="/" + library.strip("/"), recursive=True,
+    )
+    provider = build_provider(req.provider)
+    await provider._load_catalog(refresh=True)  # type: ignore[attr-defined]
+    digest = getattr(provider, "_catalog_digest", None)
+    if digest is not None and digest == last_digest:
+        return last_digest
+    log.info("Library catalogue %s: indexing what changed", "is new" if last_digest is None else "changed")
+    await _run_full_index_task(req)
+    if crawl_snapshot().get("error"):
+        return last_digest
+    return digest
+
+
+async def _calibre_catalogue_loop() -> None:
+    """Keep the library's catalogue cards in the index: at startup, then on every change."""
+    interval = _catalogue_interval_s()
+    if interval <= 0:
+        log.info("CALIBRE_INDEX_INTERVAL_S is 0: the library catalogue is indexed only on request")
+        return
+    await asyncio.sleep(_CATALOGUE_FIRST_CHECK_S)
+    digest: str | None = None
+    while True:
+        try:
+            digest = await _calibre_catalogue_tick(digest)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Library catalogue check failed: %s: %s", type(exc).__name__, exc)
+        await asyncio.sleep(interval)
+
 
 def _within_scope(path: str, scope: str, recursive: bool) -> bool:
     """Whether ``path`` is one a scan of ``scope`` would have listed.

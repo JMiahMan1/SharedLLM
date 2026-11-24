@@ -50,12 +50,12 @@ class FakeNextcloud:
 
 
 class ExplodingProvider(CalibreStorageProvider):
-    """One book whose reader fails with something other than EpubTextError."""
+    """One book whose card fails with something unexpected."""
 
-    async def get_sections(self, path):
+    async def catalogue_card(self, path):
         if "Wild at Heart" in path:
             raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
-        return await super().get_sections(path)
+        return await super().catalogue_card(path)
 
 
 def _provider(cls=CalibreStorageProvider, client=None):
@@ -156,9 +156,9 @@ def test_every_book_in_the_library_is_indexed_with_its_title_and_author(monkeypa
     _crawl(monkeypatch, rag, _provider())
 
     assert rag.books() == EXPECTED
-    passages = [r for r in rag.rows.values() if not r["meta"].get("is_metadata")]
-    assert {r["meta"]["title"] for r in passages} == {t for t, _ in EXPECTED}
-    assert all(r["meta"]["author"] for r in passages)
+    # One catalogue card per book, and no passage of any book's text.
+    assert len(rag.rows) == len(EXPECTED)
+    assert all(r["meta"].get("is_metadata") and r["meta"].get("catalogue") for r in rag.rows.values())
 
 
 def test_the_library_is_filed_under_the_shared_owner_whoever_crawls_it(monkeypatch):
@@ -182,9 +182,9 @@ def test_one_unreadable_book_does_not_cost_the_others(monkeypatch):
     rag = FakeRag()
     _crawl(monkeypatch, rag, _provider(ExplodingProvider))
 
-    assert rag.books() == EXPECTED, "the broken book keeps its metadata row and the others their text"
-    texts = {r["meta"]["title"] for r in rag.rows.values() if not r["meta"].get("is_metadata")}
-    assert texts == {"Memories of Bethany", "The Faithful Promiser"}
+    assert rag.books() == EXPECTED, "the broken book keeps its metadata row and the others their cards"
+    carded = {r["meta"]["title"] for r in rag.rows.values() if r["meta"].get("catalogue")}
+    assert carded == {"Memories of Bethany", "The Faithful Promiser"}
 
 
 def test_the_crawl_syncs_as_it_goes_rather_than_holding_the_whole_library(monkeypatch):

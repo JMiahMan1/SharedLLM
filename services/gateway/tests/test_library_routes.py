@@ -53,3 +53,17 @@ def test_inspecting_a_book_is_for_admins(monkeypatch):
     calls = _setup(monkeypatch, {"user": "dad", "is_admin": True})
     assert TestClient(main.app).post("/api/library/books/inspect", files={"file": ("a.epub", b"x")}).status_code == 200
     assert calls[0][1] == "/calibre/books/inspect"
+
+
+def test_filling_in_books_is_for_admins_and_a_dry_run_unless_said_otherwise(monkeypatch):
+    calls = _setup(monkeypatch, {"user": "kid", "is_admin": False})
+    assert TestClient(main.app).post("/api/library/enrich", json={}).status_code == 403
+    assert calls == []
+    calls = _setup(monkeypatch, {"user": "dad", "is_admin": True})
+    client = TestClient(main.app)
+    assert client.post("/api/library/enrich", json={}).status_code == 200
+    assert calls[0][1] == "/calibre/books/enrich"
+    assert calls[0][2]["dry_run"] is True and calls[0][2]["limit"] == 10
+    assert client.post("/api/library/enrich", json={"dry_run": False, "limit": 500}).status_code == 200
+    assert calls[1][2]["dry_run"] is False and calls[1][2]["limit"] == 200
+    assert client.post("/api/library/enrich", json={"limit": "lots"}).status_code == 422

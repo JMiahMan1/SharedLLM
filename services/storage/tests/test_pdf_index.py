@@ -159,15 +159,15 @@ def _calibre(pdf: bytes, **settings) -> CalibreStorageProvider:
 BOOK = f"{LIBRARY}/Anon/Desert Fathers (7).txt"
 
 
-def test_a_pdf_only_book_with_bookmarks_is_indexed_by_chapter():
+def test_a_pdf_only_book_with_bookmarks_is_carded_with_its_bookmarks_as_contents():
     provider = _calibre(BOOKMARKED)
     entries = asyncio.run(provider.list_entries("/"))
     chunks = asyncio.run(extract_and_chunk_contents(provider, build_content_index(entries)))
-    body = [c for c in chunks if not c["metadata"].get("is_metadata")]
-    assert [c["metadata"]["chapter"] for c in body] == ["Page 1", "The Call", "The Wilderness", "The Return"]
-    assert "Chapter two opening" in body[2]["content"]
-    assert all(c["metadata"]["title"] == "Desert Fathers" for c in body)
-    assert any(c["metadata"].get("is_metadata") for c in chunks), "the metadata row is still there"
+    assert len(chunks) == 1, "the index holds the book's card, not its pages"
+    card = chunks[0]
+    assert card["metadata"]["is_metadata"] and card["metadata"]["title"] == "Desert Fathers"
+    assert "Contents: The Call; The Wilderness; The Return" in card["content"]
+    assert "Chapter two opening" not in card["content"]
 
 
 def test_a_pdf_only_book_without_bookmarks_is_indexed_by_page():
@@ -178,18 +178,15 @@ def test_a_pdf_only_book_without_bookmarks_is_indexed_by_page():
     assert asyncio.run(provider.get_bytes(BOOK)) == b"First page prose\n\nThird page prose"
 
 
-def test_a_scanned_pdf_book_is_metadata_only_and_the_log_says_why(caplog):
+def test_a_scanned_pdf_book_gets_a_card_without_its_pages_being_read():
     provider = _calibre(SCANNED)
     entries = asyncio.run(provider.list_entries("/"))
-    with caplog.at_level(logging.WARNING):
-        chunks = asyncio.run(extract_and_chunk_contents(provider, build_content_index(entries)))
+    chunks = asyncio.run(extract_and_chunk_contents(provider, build_content_index(entries)))
     assert len(chunks) == 1 and chunks[0]["metadata"]["is_metadata"]
     assert "Desert Fathers" in chunks[0]["content"]
-    said = caplog.text
-    assert "no text layer" in said and "Desert Fathers" in said
-    assert "no text extractor" not in said
+    assert "Contents:" not in chunks[0]["content"]
     pdf_reads = [p for p in provider.client.requested if p.endswith(".pdf")]
-    assert len(pdf_reads) == 1, "a scan is downloaded and parsed once, not again for get_content"
+    assert len(pdf_reads) == 1, "one download for its bookmarks, and no page text"
 
 
 def test_the_pdf_text_budget_is_a_setting():
