@@ -82,6 +82,102 @@ def is_generic_music(media_query: str | None) -> bool:
     return not text or bool(_GENERIC_MUSIC.match(text))
 
 
+#: A play verb as speech recognition writes it: "Playin' music", "Playing", "Put on", "Can you start".
+PLAY_VERB = r"(?:play(?:in[g'\u2019]?|s)?|put\s+on|start(?:\s+playing)?|throw\s+on|listen\s+to)"
+_LEADING_VERB = re.compile(rf"^{PLAY_VERB}(?=[\s,]|$)[\s,]*", re.IGNORECASE)
+#: Words before what is asked for that are never part of it ("me some", "us a little").
+_LEADING_WORDS = re.compile(r"^(?:me|us|some|any)\b\s*", re.IGNORECASE)
+#: Determiners and taste words that only qualify a genre or "music" ("a little", "some good").
+_SOFT_WORDS = re.compile(
+    r"^(?:a\s+little(?:\s+bit\s+of)?|a\s+bit\s+of|a\s+few|an?|the|little|good|nice|random|great)\b\s*",
+    re.IGNORECASE)
+_TRAILING_WORDS = re.compile(r"(?:[\s,]+(?:please|for\s+(?:me|us)|now|thanks|thank\s+you))+$", re.IGNORECASE)
+#: "music by X", "something from X": the name after it is the request.
+_BY_NAME = re.compile(r"^(?:music|songs?|tunes|something|anything|stuff|tracks?)\s+(?:by|from)\s+(?P<name>.+)$",
+                      re.IGNORECASE)
+#: Nouns that say "music" without naming any.
+GENERIC_MEDIA_NOUNS = frozenset({"music", "songs", "song", "tunes", "tune", "something", "anything", "stuff",
+                                 "tracks", "track"})
+#: Genre and mood words: a request made only of these is searched as a genre (playlist or radio first),
+#: never as a track title ("worship" is not the song "Call to Worship").
+GENRE_WORDS = frozenset({
+    "worship", "christian", "gospel", "praise", "hymn", "hymns", "spiritual", "church", "sunday",
+    "relaxing", "relaxed", "calm", "calming", "chill", "peaceful", "quiet", "soft", "soothing", "mellow",
+    "instrumental", "acoustic", "piano", "ambient", "background", "easy", "listening", "meditation",
+    "kids", "kid", "children", "childrens", "children's", "kids'", "family", "lullaby", "lullabies", "nursery",
+    "sleep", "sleepy", "study", "focus", "dinner", "party", "workout", "upbeat", "happy", "energetic",
+    "classical", "jazz", "country", "rock", "pop", "folk", "blues", "soul", "funk", "rap", "hip", "hop",
+    "hip-hop", "r&b", "reggae", "electronic", "dance", "oldies", "bluegrass", "latin", "lofi", "lo-fi",
+    "christmas", "holiday", "contemporary", "classic", "modern", "old", "new", "morning", "evening",
+    "80s", "90s", "70s", "60s", "2000s", "and",
+})
+
+
+@dataclass(frozen=True)
+class MusicAsk:
+    """What a spoken music request asks for.
+
+    ``kind`` is "library" (nothing named: play something from the library), "genre" (only
+    genre or mood words: search playlists and radio first) or "named" (an artist, album or
+    track, searched as before). ``fallback`` is the one relaxed search to try when ``query``
+    finds nothing.
+    """
+
+    kind: str
+    query: str | None = None
+    fallback: str | None = None
+
+
+def _words(text: str) -> list[str]:
+    return [w for w in re.split(r"\s+", text.strip(" ,.!?\"'")) if w]
+
+
+def _strip_repeat(pattern: re.Pattern, text: str) -> str:
+    while True:
+        new = pattern.sub("", text, count=1).strip(" ,")
+        if new == text:
+            return text
+        text = new
+
+
+def parse_music_request(text: str | None) -> MusicAsk:
+    """The music a request asks for, from the whole sentence or the words after the verb.
+
+    "Play some worship music." is the genre "worship music" (then "worship"); "Playin' music."
+    and "Play music." name nothing; "Play Example Band" and "Always Holding On by Example
+    Band" stay as they were said.
+    """
+    t = strip_request_filler(text or "")
+    t = _strip_repeat(_LEADING_VERB, t)
+    t = _TRAILING_WORDS.sub("", t).strip(" ,.!?\"'")
+    t = _strip_repeat(_LEADING_WORDS, t)
+    by = _BY_NAME.match(t)
+    if by:
+        name = by.group("name").strip(" ,.!?\"'")
+        return MusicAsk("named", name) if name else MusicAsk("library")
+    named_text = t  # an artist or title keeps its own "A" / "An" ("A Fake Band")
+    soft = _strip_repeat(_SOFT_WORDS, t)
+    words = _words(soft)
+    if words and words[0].lower() in ("something", "anything") and len(words) > 1:
+        words = words[1:]  # "something relaxing"
+    head = list(words)
+    while head and head[-1].lower() in GENERIC_MEDIA_NOUNS:
+        head.pop()
+    head = _words(_strip_repeat(_SOFT_WORDS, " ".join(head)))
+    if not head:
+        return MusicAsk("library")
+    noun_dropped = len(head) < len(words)
+    if all(w.lower().strip(",") in GENRE_WORDS for w in head) and not all(w.lower() == "and" for w in head):
+        cleaned = " ".join(head)
+        if noun_dropped:
+            return MusicAsk("genre", " ".join(words), cleaned)
+        return MusicAsk("genre", cleaned)
+    if noun_dropped:
+        # "Example Band songs": search the name; the words as said are the relaxed try.
+        return MusicAsk("named", " ".join(head), " ".join(words))
+    return MusicAsk("named", re.sub(r"^the\s+", "", named_text, flags=re.IGNORECASE) or named_text)
+
+
 def _split_device(text: str) -> tuple[str, str | None]:
     """("<request>", "<device>") from "<request> on <device>", for a short device phrase."""
     m = re.match(r"^(.+?)\s+on\s+(?:the\s+)?(.{1,40})$", text, flags=re.IGNORECASE)
