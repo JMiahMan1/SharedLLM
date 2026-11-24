@@ -6,6 +6,7 @@ import json
 import logging
 import os
 
+from services.gateway import fast_read
 from services.gateway.config import EMBEDDING_MODEL, FAST_PATH_THRESHOLD, PHRASEBOOK_PATH
 
 try:
@@ -464,6 +465,14 @@ class IntentEngine:
     #: speech to text sometimes adds an s ("Is the desk lamp ons").
     _STATE_WORDS = r"(?:on|ons|off|offs|still on|still off|turned on|turned off|running|playing)"
 
+    def is_area(self, phrase: str) -> bool:
+        """True when ``phrase`` is the name or an alias of a room the hub's devices are in ("kitchen")."""
+        name = _norm_name(phrase)
+        if not name:
+            return False
+        meta: dict[str, dict[str, Any]] = getattr(self, "device_meta", {})
+        return any(name == a for m in meta.values() for a in (m.get("area"), *m.get("area_aliases", ())) if a)
+
     def state_question_target(self, query: str) -> str | None:
         """The device a yes/no state question names: "Is the desk lamp on?" -> "desk lamp".
 
@@ -646,7 +655,7 @@ class IntentEngine:
             return "play_media", 1.0
 
         # "read <title>" / "read me <title>" only when followed by a title
-        if re.search(r"^read(?:\s+me)?\s+(?!my\s+(?:notifications|messages)\b|the\s+news\b)\S", q):
+        if re.search(r"^read(?:\s+me)?\s+\S", q) and not fast_read.reads_something_else(q):
             return "play_media", 1.0
 
         # Lights & Switches

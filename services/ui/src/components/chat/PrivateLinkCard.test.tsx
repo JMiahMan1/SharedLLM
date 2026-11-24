@@ -1,7 +1,8 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import PrivateLinkCard, { PrivateLinkDraft } from './PrivateLinkCard';
 import type { LinkPreview } from '../../lib/privateLinkPreview';
+import { PAUSED_STORAGE_KEY, resetAnimationChoicesForTests } from '../../lib/animatedImage';
 
 const JPEG = `data:image/jpeg;base64,${btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xe0) + 'jpeg')}`;
 
@@ -133,5 +134,67 @@ describe('PrivateLinkDraft', () => {
     expect(screen.getByTestId('private-link-draft-card')).toHaveTextContent('The cabin');
     fireEvent.click(screen.getByRole('button', { name: 'Send without a preview' }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a GIPHY or Tenor link (a GIF served as MP4)', () => {
+  const GIPHY: LinkPreview = { url: 'https://giphy.com/gifs/happy-dance-abc123', title: 'Happy dance', site_name: 'GIPHY', kind: 'video', image: JPEG,
+    embed: { provider: 'file', src: 'https://media.giphy.com/media/abc123/giphy.mp4', mime: 'video/mp4' } };
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    resetAnimationChoicesForTests();
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  });
+
+  it('loads nothing from the site until tapped, then loops silently like a GIF with the pause control', () => {
+    const onBubble = vi.fn();
+    const { container } = render(<div onClick={onBubble}><PrivateLinkCard preview={GIPHY} own={false} /></div>);
+    expect(screen.getByTestId('private-link-card')).toHaveAttribute('data-kind', 'gif');
+    expect(loads(container)).toEqual([JPEG]);
+    fireEvent.click(screen.getByRole('button', { name: 'Play GIF: Happy dance' }));
+    const clip = screen.getByTestId('private-link-player') as HTMLVideoElement;
+    expect(clip.getAttribute('src')).toBe('https://media.giphy.com/media/abc123/giphy.mp4');
+    expect(clip.loop).toBe(true);
+    expect(clip.muted).toBe(true);
+    expect(clip.controls).toBe(false);
+    expect(onBubble).not.toHaveBeenCalled();
+    const toggle = screen.getByRole('button', { name: 'Pause animation' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    // The frame on screen stays: the clip is paused, not taken away.
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+    expect(screen.getByTestId('private-link-player')).toBe(clip);
+    expect(JSON.parse(window.sessionStorage.getItem(PAUSED_STORAGE_KEY)!)).toEqual({ 'link:https://giphy.com/gifs/happy-dance-abc123': 'paused' });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    expect(onBubble).not.toHaveBeenCalled();
+  });
+
+  it('drawn again this session: a playing one plays on, a paused one shows its still card and asks nothing of the site', () => {
+    const first = render(<PrivateLinkCard preview={GIPHY} own={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Play GIF: Happy dance' }));
+    first.unmount();
+    const again = render(<PrivateLinkCard preview={GIPHY} own={false} />);
+    expect(screen.getByTestId('private-link-player')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Pause animation' }));
+    again.unmount();
+    resetAnimationChoicesForTests();
+    const { container } = render(<PrivateLinkCard preview={GIPHY} own={false} />);
+    expect(screen.queryByTestId('private-link-player')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Play GIF: Happy dance' })).toBeInTheDocument();
+    expect(loads(container)).toEqual([JPEG]);
+  });
+
+  it('an ordinary video file is still a video with its own controls', () => {
+    render(<PrivateLinkCard preview={CLIP} own={false} />);
+    expect(screen.getByTestId('private-link-card')).toHaveAttribute('data-kind', 'video');
+    fireEvent.click(screen.getByRole('button', { name: 'Play video: clip.mp4' }));
+    expect((screen.getByTestId('private-link-player') as HTMLVideoElement).controls).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Pause animation' })).toBeNull();
   });
 });
