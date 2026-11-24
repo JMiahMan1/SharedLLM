@@ -148,6 +148,11 @@ class Service:
         self._bg.append(asyncio.create_task(self.runtime.archive.run(), name="device-archive"))
         self._bg.append(asyncio.create_task(recorder_statistics.start(self.runtime)))  # recorder statistics
         self._bg.append(asyncio.create_task(echo_ota.run_loop(self.hub), name="echo-ota"))
+        # Music Assistant pairs Sendspin satellites with the tokens this hands out (api.py).
+        from services.homehub.sendspin_clients import SendspinClients
+
+        self.runtime.sendspin_clients = SendspinClients(self.hub, self.runtime)
+        await self.runtime.sendspin_clients.start()
         await self._start_discovery()
 
     def _start_login_providers(self) -> None:
@@ -247,6 +252,10 @@ class Service:
         if bluetooth is not None:
             self.runtime.bluetooth = None
             await bluetooth.stop()
+        sendspin = getattr(self.runtime, "sendspin_clients", None)
+        if sendspin is not None:
+            self.runtime.sendspin_clients = None
+            await sendspin.stop()
         for t in self._bg:
             t.cancel()
         self._bg.clear()

@@ -1247,6 +1247,10 @@ class WSConnection:
                 await self.result(mid)
             elif kind == "subscribe_entities":
                 await self._subscribe_entities(mid, msg.get("entity_ids"))
+            elif kind == "sendspin/subscribe_clients":
+                await self._subscribe_sendspin_clients(mid)
+            elif kind == "sendspin/get_pairing_token":
+                await self._sendspin_pairing_token(mid, msg.get("client_id"))
             elif kind == "unsubscribe_events":
                 unsub = self.subs.pop(msg.get("subscription"), None)
                 if unsub is None:
@@ -1357,6 +1361,41 @@ class WSConnection:
         initial = {s.entity_id: compress(s) for s in self.hub.states.all()
                    if (not wanted or s.entity_id in wanted) and self._sees(s.entity_id)}
         await self.send({"id": mid, "type": "event", "event": {"a": initial}})
+
+
+    # -- Music Assistant's Sendspin pairing (what HA's sendspin integration answers) ------------------------------
+    # Admin only (Music Assistant's connection): these hand out a device's pairing secret.
+    def _admin(self) -> bool:
+        return self.principal is not None and self.principal.is_admin
+
+    async def _subscribe_sendspin_clients(self, mid: int) -> None:
+        if not self._admin():
+            await self.error(mid, "unauthorized", "Only an administrator may follow Sendspin clients.")
+            return
+        clients = getattr(self.runtime, "sendspin_clients", None)
+        if clients is None:
+            await self.error(mid, "not_supported", "This hub hands out no Sendspin pairing tokens.")
+            return
+        await self.result(mid)
+
+        def push(ids: list[str], _mid: int = mid) -> None:
+            task = asyncio.get_running_loop().create_task(
+                self.send({"id": _mid, "type": "event", "event": {"client_ids": ids}}))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+        self.subs[mid] = clients.subscribe(push)
+
+    async def _sendspin_pairing_token(self, mid: int, client_id: Any) -> None:
+        if not self._admin():
+            await self.error(mid, "unauthorized", "Only an administrator may fetch a pairing token.")
+            return
+        clients = getattr(self.runtime, "sendspin_clients", None)
+        token = clients.token_for(str(client_id or "")) if clients is not None else None
+        if not token:
+            await self.error(mid, "not_found", "No Sendspin pairing token for that client right now.")
+            return
+        await self.result(mid, {"token": token})
 
 
 #: The WebSocket commands api.py answers itself; each one checks a limited user's entities.
