@@ -122,6 +122,15 @@ def test_beacon_parse_and_tag():
     assert not beacon.verifies(hassmic.arbitration_mac_key(bytes(32)))
 
 
+def test_member_beacon_is_byte_for_byte_the_c_beacon():
+    """HomeHub's member beacon is built exactly as arb.c builds one (same inputs, same bytes)."""
+    built = hassmic.member_beacon(v("echo_arb_pk"), N, v("arbitration_mac_key"), 7, node="echo-test", flags=0)
+    assert built == v("beacon")
+    quiet = hassmic.parse_beacon(hassmic.member_beacon(v("echo_arb_pk"), N, v("arbitration_mac_key"), 8,
+                                                       node="homehub"), "192.168.10.5")
+    assert quiet is not None and quiet.flags == hassmic.F_QUIET and quiet.verifies(v("arbitration_mac_key"))
+
+
 def test_probe_beacon_is_a_loner_beacon():
     raw = hassmic.probe_beacon(v("hub_pk"))
     beacon = hassmic.parse_beacon(raw)

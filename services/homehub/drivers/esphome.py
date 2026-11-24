@@ -1537,6 +1537,10 @@ class ESPHomeDriver(Driver):
                     self.hub.states.set(f"tag.{tag_id}", utcnow().isoformat(),
                                         {"tag_id": tag_id, "last_scanned_by_device_id": device_id})
             return
+        if call.service == "esphome.homehub_arbitration_key":
+            # An Echo offering K to HomeHub, which made it (hassmic.member_beacon stops the offers).
+            self.log.debug("ESPHome %s offered HomeHub the Echo network key it already holds", self.device_name)
+            return
         if not self.allow_service_calls:
             is_arb_key = call.service.startswith("esphome.") and call.service.endswith("_arbitration_key")
             if not (is_arb_key and self.entry.options.get("echo_mesh_vouch", True)):

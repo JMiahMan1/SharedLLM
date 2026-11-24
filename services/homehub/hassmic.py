@@ -242,6 +242,26 @@ class Beacon:
         return secrets.compare_digest(b2k(16, mac_key, self.raw[:-16]), self.raw[-16:])
 
 
+#: Beacon flags (arb.c): QUIET is a member that never takes part in wake word arbitration (an Echo with it
+#: off); HELLO asks the members to answer at once.
+F_QUIET, F_HELLO = 1, 4
+
+
+def member_beacon(pub: bytes, net_id: int, mac_key: bytes, ctr: int, node: str = "homehub",
+                  flags: int = F_QUIET) -> bytes:
+    """HomeHub's beacon as a member of its own Echo network (it holds K).
+
+    An Echo that heard HomeHub's probe keeps it as a candidate and, once it holds K, asks the hub every
+    30 s to hand K to "homehub" (esphome.homehub_arbitration_key). A tagged member beacon tells it HomeHub
+    is in the network already; QUIET keeps HomeHub out of the wake word rounds (count_peers skips it).
+    """
+    raw = node.encode()
+    body = b"HMA1\x01" + pub + net_id.to_bytes(8, "little") + bytes([len(raw)]) + raw + ctr.to_bytes(8, "little")
+    if flags:
+        body += bytes([flags])
+    return body + b2k(16, mac_key, body)
+
+
 def probe_beacon(pub: bytes, node: str = "homehub") -> bytes:
     """A beacon from outside any network: every Echo in one answers with its own beacon at once."""
     raw = node.encode()
@@ -309,6 +329,19 @@ class BeaconScanner:
             sock.close()
             raise
         return sock
+
+    async def announce(self, packet: bytes) -> None:
+        """Send one beacon (HomeHub's member beacon) to the Echos' port."""
+        loop = asyncio.get_running_loop()
+        try:
+            sock = self._socket()
+        except OSError as exc:
+            raise HassmicError(f"HomeHub cannot send on UDP {self.bind_port}: {exc}") from exc
+        transport, _ = await loop.create_datagram_endpoint(asyncio.DatagramProtocol, sock=sock)
+        try:
+            transport.sendto(packet, self.target)
+        finally:
+            transport.close()
 
     async def scan(self, own_pub: bytes, *, fresh: bool = False, timeout: float = SCAN_S) -> list[Beacon]:
         async with self._lock:
@@ -982,6 +1015,7 @@ class HassmicManager:
         self.web_url = f"http://{beacon.ip}:{WEB_PORT}" if beacon.ip else None
         if beacon.net == auth.net_id and beacon.verifies(auth.mac_key):
             self.in_network = True
+            await self._announce_member(auth)
             return
         if beacon.net == auth.net_id:
             raise HassmicError(f"the Echo is in network {auth.net_id:016x} but not with HomeHub's key (its beacon tag "
@@ -1007,9 +1041,19 @@ class HassmicManager:
             if beacon.net == auth.net_id and beacon.verifies(auth.mac_key):
                 self.in_network = True
                 self.log.info("hassmic %s: joined HomeHub's Echo network", self.name)
+                await self._announce_member(auth)
                 return
         raise HassmicError("the Echo did not join HomeHub's Echo network after it was handed the key (it beacons "
                            f"network {beacon.net:016x}); its log says why")
+
+    async def _announce_member(self, auth: Authority) -> None:
+        """Tell the network's Echos HomeHub holds K, so none keeps offering it the key (best effort)."""
+        scanner = self.scanner or scanner_for(self.hub)
+        packet = member_beacon(auth.hub_pk, auth.net_id, auth.mac_key, time.time_ns() // 1000)
+        try:
+            await scanner.announce(packet)
+        except HassmicError as exc:
+            self.log.warning("hassmic %s: %s", self.name, exc)
 
     # -- step 2: the web login ------------------------------------------------------------------------------------
     def _node_web_url(self) -> str | None:

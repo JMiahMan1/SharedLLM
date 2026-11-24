@@ -226,6 +226,10 @@ class FakeEcho:
 class FakeScanner:
     def __init__(self, *echos: FakeEcho, ip: str = "127.0.0.1") -> None:
         self.echos, self.ip, self.scans = list(echos), ip, 0
+        self.announced: list[bytes] = []
+
+    async def announce(self, packet):
+        self.announced.append(packet)
 
     async def scan(self, own_pub, *, fresh=False, timeout=0.0):
         self.scans += 1
@@ -390,6 +394,11 @@ async def test_bring_up_pushes_the_key_logs_in_and_shows_the_settings(env):
     sealed = hub.store.blobs[hassmic.AUTHORITY_BLOB]
     assert base64.b64decode(sealed["net_key"]) == auth.net_key
     assert sealed["net_key"] not in json.dumps(hub.store.kv) and "net_key" not in json.dumps(drv.entry.options)
+    # once the Echo holds K, HomeHub beacons as a quiet member, so the Echo stops offering it K
+    [member] = mgr.scanner.announced if mgr.scanner is not None else hassmic.scanner_for(hub).announced
+    heard = hassmic.parse_beacon(member, "192.168.10.5")
+    assert heard is not None and heard.net == auth.net_id and heard.node == "homehub"
+    assert heard.flags == hassmic.F_QUIET and heard.verifies(auth.mac_key)
     await drv.async_unload()
 
 
