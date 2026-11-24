@@ -861,11 +861,12 @@ class WorkspaceLintRequest(BaseRequest):
 
 class StorageFileReadRequest(BaseRequest):
     """
-    Reads a file from Nextcloud storage (Documents/Notes).
-    Do NOT use this for code. Use WorkspaceFileReadRequest instead.
+    Reads a file from Nextcloud storage (Documents/Notes). A PDF comes back as
+    its text, page by page. Do NOT use this for code. Use WorkspaceFileReadRequest instead.
     """
     user_context: UserContext
     path: str = Field(..., description="Path within Nextcloud (e.g. '/Documents/memo.txt')")
+    start_page: int = Field(1, ge=1, description="For a PDF: the first page to read (continue a long document)")
 
 class StorageFileWriteRequest(BaseRequest):
     """
@@ -933,10 +934,13 @@ class WebSearchRequest(BaseRequest):
     max_results: int | None = Field(None, description="Maximum number of results to return")
 
 class WebReadRequest(BaseRequest):
-    """Fetches a URL and returns the content as markdown."""
+    """Fetches a URL and returns its readable text: a web page's main content as
+    markdown, a PDF's text page by page, or a plain-text file."""
     user_context: UserContext
     url: str
     use_current_user_auth: bool = False
+    start_page: int = Field(1, ge=1, description="For a PDF: the first page to read (continue a long document)")
+    save: bool = Field(False, description="Also save the downloaded file (PDF or other file) to the user's Downloads folder")
 
 
 class BrowserAction(BaseModel):
