@@ -172,3 +172,50 @@ def test_the_entry_view_reports_the_next_retry(tmp_path, monkeypatch):
     assert view["state"] == "not_loaded", "the state the UI shows is unchanged"
     runtime.next_retry.clear()
     assert entries.summary(runtime, entry)["retry_at"] is None
+
+
+async def test_retry_now_cuts_a_long_wait_short(tmp_path, monkeypatch):
+    monkeypatch.setattr(rt, "retry_delay", lambda _attempt: 3600.0)  # a gap that has grown to an hour
+
+    class Away(Driver):
+        poll_interval = None
+        calls = 0
+
+        async def async_setup(self):
+            type(self).calls += 1
+            if type(self).calls == 1:
+                raise OSError("Connect call failed")
+
+    hub, runtime = _runtime(tmp_path, monkeypatch, Away)
+    entry = hub.config_entries["x"]
+    await runtime.start_all()
+    await runtime.wait_first_setups(2)
+    await _wait_for(lambda: "x" in runtime.next_retry)
+    assert runtime.retry_now("x", "it announced itself") is True
+    await _wait_for(lambda: entry.state == "loaded")
+    assert entry.state == "loaded" and Away.calls == 2
+    assert runtime.retry_now("x", "again") is False, "nothing to cut short once it is loaded"
+    await runtime.shutdown()
+
+
+async def test_an_mdns_announcement_from_a_failing_entrys_address_retries_it(tmp_path, monkeypatch):
+    from services.homehub.discovery import DiscoveryManager
+
+    woken: list[str] = []
+
+    class FakeRuntime:
+        def __init__(self):
+            self.next_retry = {"x": object()}
+
+        def retry_now(self, entry_id, why):
+            woken.append(entry_id)
+            return True
+
+    hub = Hub()
+    hub.config_entries["x"] = ConfigEntry("x", "esphome", title="Hall speaker", data={"host": "192.168.10.40"})
+    hub.config_entries["y"] = ConfigEntry("y", "esphome", title="Porch light", data={"host": "192.168.10.41"})
+    mgr = DiscoveryManager.__new__(DiscoveryManager)
+    mgr.hub, mgr.runtime = hub, FakeRuntime()
+    mgr._retry_reappeared("192.168.10.40", "_esphomelib._tcp.local.")
+    mgr._retry_reappeared("192.168.10.99", "_esphomelib._tcp.local.")
+    assert woken == ["x"]
