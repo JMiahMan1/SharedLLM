@@ -115,3 +115,27 @@ and Jarvis use, and shows the state of the switches that already exist
 (activity, Wander and Bible in Settings > Family; health in Health > Health)
 with a link to each. On someone else's page, the areas they keep private are
 named in one line under their cards.
+
+## The admin page (Admin > People, `/admin/people/{username}`)
+
+One person at a time, picked from a strip of the family. Admins only: the
+gateway refuses anyone else, and the app shows a member its usual refusal
+without asking for the stats. In order:
+
+1. **Worth a look**: the trend flags, or "Nothing stands out".
+2. **Requests to Jarvis**: how many, how many did not go through, the
+   typical and slowest waits, failures by day, the tools that failed most and
+   the slowest hours (from the request outcomes record; empty until it has
+   data).
+3. **Devices and app**: each device, its app version (amber when behind the
+   person's newest), last seen, and the phone's own collection problems in
+   plain words.
+4. **What they use** (30 days, and features not used for a month),
+   **Asked for, not there yet** (capability gaps), **Talking to Jarvis**
+   (conversations counted per day, never read; app opens).
+5. **Screen time** (14 days, with the average), **Guardian** (concerns on
+   record, the recap's headline; links to the family member page), **Errors
+   logged for them**.
+6. **Across Jarvis**: the person's profile cards, every area, no opt-in.
+
+Each section has its own loading, empty and unavailable state.
