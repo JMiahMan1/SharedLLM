@@ -164,12 +164,14 @@ async def test_the_token_never_reaches_a_log(caplog):
 # -- the WebSocket commands Music Assistant sends --------------------------------------------------------------------
 
 class FakeConn(api.WSConnection):
-    def __init__(self, runtime: Any, admin: bool = True) -> None:  # no socket
+    def __init__(self, runtime: Any, admin: bool = True, users: dict[str, Any] | None = None,
+                 user_id: str = "u1", name: str = "Someone") -> None:  # no socket
         self.runtime = runtime
         self.hub = runtime.hub
         self.subs = {}
         self._tasks = set()
-        self.principal = Principal(user_id="u1", name="Music Assistant", is_admin=admin)
+        self.auth = SimpleNamespace(users=lambda: users or {})
+        self.principal = Principal(user_id=user_id, name=name, is_admin=admin)
         self.sent: list[dict[str, Any]] = []
 
     async def send(self, msg: dict[str, Any]) -> None:
@@ -213,3 +215,24 @@ async def test_a_hub_without_the_tracker_says_so():
     conn = FakeConn(SimpleNamespace(hub=hub))
     await conn.handle({"id": 3, "type": "sendspin/subscribe_clients"})
     assert conn.sent[-1]["error"]["code"] == "not_supported"
+
+
+async def test_music_assistants_own_service_login_may_pair():
+    # HomeHub gives Music Assistant a non-admin service user on purpose (ha_auth.ensure_service_user).
+    clients, hub, _probe, _clock = tracker()
+    await clients.refresh()
+    users = {"ma": {"id": "ma", "name": "Music Assistant", "service": True}}
+    conn = FakeConn(SimpleNamespace(hub=hub, sendspin_clients=clients), admin=False, users=users,
+                    user_id="ma", name="Music Assistant")
+    await conn.handle({"id": 1, "type": "sendspin/get_pairing_token", "client_id": CLIENT_ID})
+    assert conn.sent[-1]["result"] == {"token": PAIRING_TOKEN}
+
+
+async def test_a_person_named_music_assistant_is_not_the_service_login():
+    clients, hub, _probe, _clock = tracker()
+    await clients.refresh()
+    users = {"p": {"id": "p", "name": "Music Assistant"}}  # a person, not the service login
+    conn = FakeConn(SimpleNamespace(hub=hub, sendspin_clients=clients), admin=False, users=users,
+                    user_id="p", name="Music Assistant")
+    await conn.handle({"id": 1, "type": "sendspin/get_pairing_token", "client_id": CLIENT_ID})
+    assert conn.sent[-1]["error"]["code"] == "unauthorized"
