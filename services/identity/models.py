@@ -660,6 +660,7 @@ DEFAULT_GLOBAL_SETTINGS = [
 
     # --- VOICE SATELLITES ---
     {"key": "voice_satellite_playback", "value": "this_device", "description": "Where media asked for at a voice satellite plays when no device is named: this_device (the satellite's own speaker) or last_used (the last player the household used). A device named in the request always wins."},
+    {"key": "voice_video_search", "value": "youtube", "description": "Whether 'play <name>' may look for a YouTube video when the request asks for a video or the target is a TV and nothing in the libraries matched: youtube (the default) or off."},
     {"key": "voice_default_music", "value": "", "description": "What 'play music' plays when no artist, song or playlist is named: a Music Assistant URI, or a playlist or artist name to search. Empty shuffles a library playlist, else library tracks."},
     {"key": "household_device_access", "value": "unlocked", "description": "What a voice satellite or kiosk may control when it does not recognise who is speaking: unlocked (every device that is not locked) or none. Edit in Admin > Users & Devices > Voice satellites."},
 

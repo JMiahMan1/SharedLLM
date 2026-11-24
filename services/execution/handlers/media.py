@@ -1005,7 +1005,21 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
 
         # Route to appropriate handler
         log.info(f"[media/play] Routing playback to handler for media_type='{media_type}'")
-        if media_type == "video":
+        if req.pick or (req.search_everywhere and req.query and "://" not in req.query):
+            # "Play X": every source that is set up, not only the one the words suggest (media_finder.py).
+            from services.execution import media_finder
+
+            result = await media_finder.find_and_play(req, entity_id, ctx)
+            if (result.status != "SUCCESS" and media_type == "podcast" and not req.pick
+                    and (result.detail or {}).get("route") == "none"):
+                # The podcast route's own last resorts (the Nextcloud Podcasts folder, a track search).
+                fallback = await play_podcast(req.model_copy(update={"search_everywhere": False}), entity_id, ctx)
+                result = fallback if fallback.status == "SUCCESS" else result
+            found = (result.detail or {}).get("found") or {}
+            media_type = {"video": "video", "podcast": "podcast", "episode": "podcast",
+                          "audiobook": "audiobook", "series": "audiobook", "author": "audiobook"}.get(
+                str(found.get("kind") or ""), media_type)
+        elif media_type == "video":
             result = await play_video(req, entity_id, ctx)
         elif media_type == "podcast":
             result = await play_podcast(req, entity_id, ctx)
@@ -1019,7 +1033,7 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         # Log the play on the person's activity feed (music, video, podcast,
         # audiobook). Best effort: recording is never allowed to change the
         # playback result and never raises.
-        if result.status == "SUCCESS":
+        if result.status == "SUCCESS" and (result.detail or {}).get("route") not in ("ask", "offer_read"):
             feature = {
                 "video": "video",
                 "podcast": "podcast",

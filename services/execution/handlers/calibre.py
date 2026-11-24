@@ -213,9 +213,14 @@ async def _chapters(client: CalibreClient, req: CalibreRequest) -> ExecutionResu
 
 
 async def _fetch_chapter(client: CalibreClient, req: CalibreRequest) -> ExecutionResult:
+    # A caller that sets max_chars (a voice reading a chapter aloud in parts) gets parts that
+    # size, never larger than the configured bound; otherwise the configured part size.
+    size = _chapter_max_chars()
+    if "max_chars" in req.model_fields_set:
+        size = min(size, req.max_chars)
     body = await client.chapters(
         book_id=req.book_id, path=req.path, query=req.query,
-        chapter=str(req.chapter), part=req.part, max_chars=_chapter_max_chars(),
+        chapter=str(req.chapter), part=req.part, max_chars=size,
     )
     row = body.get("row") or {}
     chapter = body.get("chapter") or {}
