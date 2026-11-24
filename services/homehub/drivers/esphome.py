@@ -357,6 +357,8 @@ class ESPHomeDriver(Driver):
         from services.homehub.esphome_restarts import RestartMonitor
 
         self.restarts = RestartMonitor(self)  # restarts and drops, with the node's log lines around each
+        #: An echo-dot-assist (hassmic) Echo's management (services/homehub/hassmic.py); None for any other node.
+        self.hassmic: Any = None
         self.local_entities = [e for e in self.entities if "/" not in (e.unique_id or "")
                                and re.match(r"^[0-9A-Fa-f:]{17}-", e.unique_id or "")]
 
@@ -453,10 +455,28 @@ class ESPHomeDriver(Driver):
         except Exception:
             self.log.exception("ESPHome %s: subscribing to its voice assistant failed", self.device_name)
         self._attach_bluetooth(client, device_info)
+        self._attach_hassmic(client, device_info, services)
         self.publish_firmware_update()
         if self._was_connected:
             self.log.info("ESPHome %s (%s) reconnected", self.device_name, self.host)
         self._was_connected = True
+
+    def _attach_hassmic(self, client: Any, device_info: Any, services: list[Any]) -> None:
+        """A hassmic Echo: its network key, settings login and device-page entities, in the background.
+
+        Only nodes whose firmware says it is hassmic (echo-dot-assist); every other node is left alone. Runs
+        after the keyed connection is up and never blocks it or the voice pipeline.
+        """
+        from services.homehub.hassmic import HassmicManager, is_hassmic
+
+        if not is_hassmic(device_info):
+            return
+        try:
+            if self.hassmic is None:
+                self.hassmic = HassmicManager(self)
+            self.hassmic.attach(client, device_info, services)
+        except Exception:
+            self.log.exception("ESPHome %s: managing it as a hassmic Echo failed", self.device_name)
 
     def _attach_bluetooth(self, client: Any, device_info: Any) -> None:
         """A node running ``bluetooth_proxy`` feeds the hub's Bluetooth bus over this connection."""
@@ -482,6 +502,8 @@ class ESPHomeDriver(Driver):
         self._detach_bluetooth()
         self._client = None
         self.voice.detach()
+        if self.hassmic is not None:
+            self.hassmic.detach()
         self.stop_audio()  # a node that went away reads no more audio
         if self._closing:
             return
@@ -539,6 +561,8 @@ class ESPHomeDriver(Driver):
             t.cancel()
         self.restarts.close()
         self.voice.detach()
+        if self.hassmic is not None:
+            self.hassmic.close()
         self.stop_audio()
         self._unregister_services()
         if self._unsub_bus:
@@ -1202,6 +1226,8 @@ class ESPHomeDriver(Driver):
             raise DeviceUnavailable(f"ESPHome {self.device_name}: {exc}") from exc
 
     def _local_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
+        if self.hassmic is not None and self.hassmic.owns(entity):
+            return self.hassmic.call(entity, domain, service, data)  # the Echo's settings API (hassmic.py)
         if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word_2"):
             return self.voice.set_wake_word(str(data.get("option")), slot=1)  # the node's second wake word
         if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word"):
