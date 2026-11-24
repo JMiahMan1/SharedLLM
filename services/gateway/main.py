@@ -101,6 +101,7 @@ from services.gateway import (
     fast_garden,
     fast_lights,
     fast_media,
+    fast_read,
     garden_routes,
     helper_routes,
     hub_registry_routes,
@@ -1427,6 +1428,56 @@ def extract_media_request(query: str) -> tuple[str | None, str | None]:
     return (media_query or None, device_name or None)
 
 
+async def _execution_post(path: str, payload: dict, timeout: float = 120.0) -> dict:
+    """POST to the execution service as the gateway; the JSON answer (an error answer is a FAILURE)."""
+    async with shared_http_client() as client:
+        resp = await client.post(f"{EXECUTION_SVC}{path}", json=payload,
+                                 headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                 timeout=aiohttp.ClientTimeout(total=timeout))
+        if resp.status != 200:
+            text = await resp.text()
+            return {"status": "FAILURE", "message": f"The {path} call answered HTTP {resp.status}: {text[:200]}"}
+        return await resp.json()
+
+
+async def _answer_media_choice(query: str, user_id: str, creds: Any) -> str | None:
+    """Play or read the option a pending media question named, or None when there is none or this is not an answer."""
+    pending = fast_media.pending_choice(user_id)
+    if not pending:
+        return None
+    option = fast_media.match_choice(query, pending)
+    if option is None:
+        return None
+    fast_media.clear_choice(user_id)
+    log.info(f"[FastPath] answer to the media question: {option.get('label')}")
+    if option.get("read"):
+        book = option["read"]
+        return await fast_read.read_book_chapter(
+            _execution_post, creds.model_dump(), user_id, chapter=1, book_id=book.get("book_id"),
+            title=str(book.get("title") or ""), author=str(book.get("author") or ""))
+    data = await _execution_post("/execute/media/play", {
+        "user_context": creds.model_dump(), "entity_id": pending.get("entity_id"),
+        "query": pending.get("query"), "pick": option.get("pick"), "search_everywhere": True,
+    })
+    return str(data.get("message") or "Done.")
+
+
+def extract_media_place(query: str, entities: list[dict]) -> tuple[str | None, str | None]:
+    """(what to play, where) from "play X on <device>" or "play X in the <room>".
+
+    A room counts only when the household has it (an area, or a player's name), so a title
+    with "in" in it keeps its words.
+    """
+    media_query, device = extract_media_request(query)
+    if device or not media_query:
+        return media_query, device
+
+    def is_place(name: str) -> bool:
+        return engine.is_area(name) or resolve_media_target(query, entities, requested_device=name) is not None
+
+    return fast_media.split_room(media_query, is_place)
+
+
 def is_likely_video_request(query: str) -> bool:
     q = (query or "").lower()
     if "podcast" in q or "audiobook" in q or "audio" in q or "song" in q or "music" in q:
@@ -1577,7 +1628,16 @@ def is_plain_media_command(query: str) -> bool:
         return False
     if command in _ENHANCED_FASTPATH_COMMANDS:
         return True
+    if _STARTS_WITH_PLAY.match(fast_media.strip_request_filler(query or "")):
+        # "Play the next episode" skips; "Play the song Next to Me" names a song.
+        return bool(_PLAY_NEXT.match(fast_media.strip_request_filler(query or "")))
     return bool(_MEDIA_NOUNS.search(query or "") or _BARE_MEDIA_COMMAND.match(query or ""))
+
+
+_STARTS_WITH_PLAY = re.compile(rf"^{fast_media.PLAY_VERB}\b", re.IGNORECASE)
+_PLAY_NEXT = re.compile(
+    rf"^{fast_media.PLAY_VERB}\s+(?:the\s+)?(?:next|previous|last)\s+(?:one|episode|track|song|chapter|item)"
+    r"(?:\s+(?:on|in)\s+.+)?$", re.IGNORECASE)
 
 
 def is_time_or_date_query(query: str) -> bool:
@@ -4454,6 +4514,34 @@ async def chat_handler(request: Request, background_tasks=None):
         log.info(f"[FastPath] plain media command: {extract_media_transport_command(query)}")
         intent, confidence = "media_transport", 1.0
 
+    # The answer to "Harbor: the song, or the audiobook?" (or "Do you want me to read it?"):
+    # the option the person named, played or read as it was found (fast_media.py).
+    if not grounded:
+        choice_answer = await _answer_media_choice(query, user_id, creds)
+        if choice_answer is not None:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", choice_answer)
+            if is_openai:
+                return _make_openai_response(choice_answer, selected_model, "play_media")
+            return _make_ollama_response(choice_answer, selected_model, "play_media")
+
+    # "Read John 3:16", "Read chapter 1 of <Title>", "Read <Title>", "Keep reading": read aloud
+    # from the Bible service or the book library (fast_read.py). A title the library does not
+    # hold falls through to the media path below ("Read <Title>" then plays its audiobook).
+    if not grounded and (read_ask := fast_read.parse(query)) is not None:
+        try:
+            read_answer = await fast_read.handle(read_ask, _execution_post, creds.model_dump(), user_id)
+        except Exception as exc:
+            log.warning(f"[FastRead] {read_ask.kind} read of {query!r} failed: {exc}")
+            read_answer = None
+        if read_answer is not None:
+            log.info(f"[FastRead] MATCHED: {read_ask.kind} ({len(read_answer)} characters)")
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", read_answer)
+            if is_openai:
+                return _make_openai_response(read_answer, selected_model, "read_aloud")
+            return _make_ollama_response(read_answer, selected_model, "read_aloud")
+
     # Resolve dynamic threshold from Identity
     threshold_str = await fetch_global_setting("fast_path_threshold", str(_DEFAULT_FAST_PATH_THRESHOLD))
     try:
@@ -4531,11 +4619,13 @@ async def chat_handler(request: Request, background_tasks=None):
         # Attempt entity extraction/resolution for control intents
         if intent == "play_media":
             media_type = "video" if is_likely_video_request(query) else None
-            if sat_player and media_type != "video" and not extract_media_request(query)[1]:
+            named_place = extract_media_place(query, media_entities or [])[1]
+            if sat_player and media_type != "video" and not named_place:
                 resolved_entity = sat_player
                 log.info(f"[FastPath] no device named; playing on the satellite's own speaker {sat_player}")
             else:
-                resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id)
+                resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id,
+                                                       requested_device=named_place)
         elif intent in ["turn_on", "turn_off"]:
             resolved_entity = engine.extract_entity(query, intent)
             if not asks_about_state(query):
@@ -4681,7 +4771,7 @@ async def chat_handler(request: Request, background_tasks=None):
                 }
                 svc_base = EXECUTION_SVC
             elif intent == "play_media":
-                media_query, named_device = extract_media_request(query)
+                media_query, named_device = extract_media_place(query, media_entities or [])
                 # "read <title>" / "read me <title>"
                 m_read = re.match(r"^read(?:\s+me)?\s+(.+?)(?:\s+on\s+(.+))?$", query.strip(), flags=re.IGNORECASE)
                 if m_read and not media_query:
@@ -4758,6 +4848,9 @@ async def chat_handler(request: Request, background_tasks=None):
                         "media_content_type": "genre" if music_ask.kind == "genre" else "artist",
                         "media_type": None,
                         "fallback_query": music_ask.fallback,
+                        # A name ("Play Moon Garden") may be a song, an audiobook, a podcast or a video:
+                        # every source that is set up is searched (execution media_finder.py).
+                        "search_everywhere": music_ask.kind != "genre",
                     }
                     svc_base = EXECUTION_SVC
                 else:
@@ -4775,6 +4868,7 @@ async def chat_handler(request: Request, background_tasks=None):
                         "query": clean_q,
                         "media_content_type": media_type or "artist",
                         "media_type": media_type,
+                        "search_everywhere": True,
                     }
                     svc_base = EXECUTION_SVC
             elif intent in ["pause_media", "media_transport"]:
@@ -4810,7 +4904,12 @@ async def chat_handler(request: Request, background_tasks=None):
             fast_timeout=aiohttp.ClientTimeout(total=120.0) if intent == "play_media" else aiohttp.ClientTimeout(total=30.0)
             async with shared_http_client() as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=fast_timeout)
-                ans = (await exec_resp.json()).get("message", "Action completed.")
+                exec_data = await exec_resp.json()
+                ans = exec_data.get("message", "Action completed.")
+            exec_choice = (exec_data.get("detail") or {}).get("choice") if isinstance(exec_data, dict) else None
+            if intent == "play_media" and isinstance(exec_choice, dict):
+                # A question ("Harbor: the song, or the audiobook?"): its answer comes as the next request.
+                fast_media.remember_choice(user_id, exec_choice)
 
             if resolved_entity and intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
                 entity_map = {e.get("entity_id"): e for e in media_entities or []}
@@ -12372,8 +12471,9 @@ async def library_book_tags(book_id: int, request: Request):
 @app.post("/api/library/books/inspect")
 async def library_inspect_book(request: Request):
     """Fill in a book before adding it: the file's own details, Google Books and
-    Open Library, and suggested tags. Nothing is saved."""
-    await _require_admin(request)
+    Open Library (the ones the admin turned on in Accounts & Integrations), and
+    suggested tags. Nothing is saved."""
+    who = await _require_admin(request)
     form = await request.form()
     upload = form.get("file")
     if upload is None or not hasattr(upload, "read"):
@@ -12381,6 +12481,7 @@ async def library_inspect_book(request: Request):
     out = aiohttp.FormData()
     out.add_field("library_path", await _library_path())
     out.add_field("online", "false" if str(form.get("online") or "").lower() == "false" else "true")
+    out.add_field("user", who)
     out.add_field("file", await upload.read(), filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     return await _storage_library("POST", "/calibre/books/inspect", data=out, timeout=120.0)
 
@@ -12401,6 +12502,8 @@ async def library_add_book(request: Request):
     for key in ("title", "authors", "tags", "series", "comments", "publisher", "published", "isbn", "language", "cover_url",
                 "online"):
         out.add_field(key, str(form.get(key) or "")[:8000])
+    # Whose catalogue integrations (Accounts & Integrations) fill the book in.
+    out.add_field("user", who)
     out.add_field("file", data, filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     log.info("[library] %s adds %s (%d bytes)", who, getattr(upload, "filename", "book"), len(data))
     return await _storage_library("POST", "/calibre/books/add", data=out, timeout=600.0)
@@ -12424,8 +12527,16 @@ async def library_enrich_books(request: Request):
     log.info("[library] %s fills in books (dry_run=%s, limit=%s)", who, dry_run, limit)
     return await _storage_library("POST", "/calibre/books/enrich", json_body={
         "library_path": await _library_path(), "dry_run": dry_run, "limit": limit,
-        "book_ids": book_ids, "online": body.get("online", True) is not False,
+        "book_ids": book_ids, "online": body.get("online", True) is not False, "user": who,
     }, timeout=600.0)
+
+
+@app.get("/api/library/catalogues")
+async def library_catalogues(request: Request):
+    """The book catalogues (Google Books, Open Library) as they apply to the caller:
+    on or off, ready or why not, and each one's last answer. Never a key."""
+    who = await _signed_in(request)
+    return await _storage_library("POST", "/calibre/catalogues", json_body={"user": who}, timeout=30.0)
 
 
 #: Topics a feature may ask for (rag topics.py): a Calibre tag such as

@@ -16,7 +16,8 @@ import inspect
 
 from fastapi.testclient import TestClient
 
-from services.storage import book_lookup, library_api
+from services.common import book_metadata
+from services.storage import book_lookup, book_sources, library_api
 from services.storage import calibre_writer as cw
 from services.storage.main import app
 from services.storage.tests.test_calibre_writer import _Dav, _epub, _library_bytes, _open
@@ -51,8 +52,27 @@ def test_tags_are_the_librarys_most_used_ones_never_its_catalogue_fragments():
 
 # --- adding a book --------------------------------------------------------------------
 
+#: Both catalogues on, Google Books with a made-up key (as identity resolves them).
+BOTH_ON = book_metadata.resolve({"google_books_enabled": True}, None, key="made-up-books-key", key_source="own")
+
+
+def _integrations(monkeypatch, resolved=BOTH_ON):
+    """identity's /api/resolve, replaced: ``resolved`` is every person's book_metadata."""
+    asked: list[dict] = []
+
+    async def resolve(body):
+        asked.append(body)
+        return {"user": body.get("rag_user") or "household", "book_metadata": resolved}
+
+    book_sources.forget()
+    monkeypatch.setattr(book_sources, "identity_resolve", resolve)
+    return asked
+
+
 def _catalogues(monkeypatch, google=None, openlib=None):
-    async def g(session, title, author, isbn):
+    _integrations(monkeypatch)
+
+    async def g(session, title, author, isbn, **kw):
         out = book_lookup._blank()
         out.update(google or {})
         return out
@@ -249,7 +269,7 @@ def test_open_library_is_asked_for_subjects_publishers_and_isbns(monkeypatch):
 
     asked: list[str] = []
 
-    async def fake_json(session, url):
+    async def fake_json(session, url, source=""):
         asked.append(url)
         return {"docs": [{"title": "Dawn", "author_name": ["H. Rider Haggard"], "subject": ["Fiction, general"]}]}
 

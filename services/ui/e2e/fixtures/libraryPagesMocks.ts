@@ -357,6 +357,14 @@ export async function mockLibraryPages(page: Page): Promise<void> {
     // Knowledge.
     if (p === '/api/library/tags') return json({ tags: [{ name: 'Bible study', books: 12 }, { name: 'Family', books: 4 }, { name: 'Home', books: 2 }] });
     if (p === '/api/library/books') return json({ total: BOOKS.length, books: BOOKS });
+    // The book catalogues "Add a book" fills details from (Accounts & Integrations): Open Library only.
+    if (p === '/api/library/catalogues') {
+      return json({ order: ['google_books', 'open_library'], sources: {
+        google_books: { name: 'Google Books', enabled: false, enabled_from: 'default', ready: false, key_set: false, key_source: 'absent',
+          reason: 'Google Books: not set up (add an API key in Settings > Accounts & Integrations)' },
+        open_library: { name: 'Open Library', enabled: true, enabled_from: 'default', ready: true, reason: '', contact_email: '' },
+      } });
+    }
     if (p === '/api/storage/stats') {
       return json({ total_chunks: 48210, total_documents: 1312, last_indexed: iso(-90), providers: ['nextcloud'],
         breakdown: { documents: { chunks: 40000, documents: 1200 }, notes: { chunks: 8210, documents: 112 } }, status: 'ok' });

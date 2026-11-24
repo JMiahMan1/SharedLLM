@@ -93,6 +93,13 @@ class User(SQLModel, table=True):  # type: ignore
     # The system default user's key is the household default: it applies to
     # everyone who has not set their own, with no grant needed.
     malwarebazaar_key_enc: str | None = None
+    # Google Books API key for the library's book lookups (services/common/book_metadata.py).
+    # Like the abuse.ch key, the system default user's is the household default.
+    google_books_key_enc: str | None = None
+    # The book catalogue integrations (Google Books, Open Library): a JSON object of
+    # this person's own choices (enabled, Open Library contact email, order). A key it
+    # does not hold follows the system default user's, then book_metadata.DEFAULT_*.
+    book_metadata: str | None = None
     # The home router (system user only; docs/NETWORK.md): a read-only rpcd
     # login, and the SHA-256 of its self-signed certificate, pinned on first use.
     router_url: str | None = None
@@ -660,6 +667,7 @@ DEFAULT_GLOBAL_SETTINGS = [
 
     # --- VOICE SATELLITES ---
     {"key": "voice_satellite_playback", "value": "this_device", "description": "Where media asked for at a voice satellite plays when no device is named: this_device (the satellite's own speaker) or last_used (the last player the household used). A device named in the request always wins."},
+    {"key": "voice_video_search", "value": "youtube", "description": "Whether 'play <name>' may look for a YouTube video when the request asks for a video or the target is a TV and nothing in the libraries matched: youtube (the default) or off."},
     {"key": "voice_default_music", "value": "", "description": "What 'play music' plays when no artist, song or playlist is named: a Music Assistant URI, or a playlist or artist name to search. Empty shuffles a library playlist, else library tracks."},
     {"key": "household_device_access", "value": "unlocked", "description": "What a voice satellite or kiosk may control when it does not recognise who is speaking: unlocked (every device that is not locked) or none. Edit in Admin > Users & Devices > Voice satellites."},
 
