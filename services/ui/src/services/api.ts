@@ -1,5 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { CollectorHealth } from '../lib/collectorHealth';
+import type { ProfileStats, SharingState, ShareArea } from '../lib/profileStats';
 import type {
   InternetOutage, NetworkDevice, NetworkDeviceFields, NetworkStatus, NetworkUsage, RouterLogLine,
 } from '../lib/network';
@@ -1360,6 +1361,23 @@ export const api = {
    * left every non-admin with an empty picker and "Everyone" as their only
    * choice. This returns username + display name and nothing else.
    */
+  /** One person's profile stats as the caller may see them (docs/PROFILE_STATS.md). */
+  async getProfileStats(username: string, fresh = false): Promise<ProfileStats> {
+    const resp = await apiClient.get(`/api/profile/stats/${encodeURIComponent(username || 'me')}`, { params: fresh ? { fresh: 1 } : undefined });
+    return resp.data;
+  },
+
+  /** The caller's own sharing choice, with the switches other areas already have. */
+  async getProfileSharing(): Promise<SharingState> {
+    const resp = await apiClient.get('/api/profile/sharing');
+    return resp.data;
+  },
+
+  async setProfileSharing(areas: ShareArea[]): Promise<SharingState> {
+    const resp = await apiClient.put('/api/profile/sharing', { areas });
+    return resp.data;
+  },
+
   /** Everyone in the household with their chat picture and Talk account. */
   async getFamilyDirectory(): Promise<FamilyMember[]> {
     const resp = await apiClient.get('/api/users/family-directory');
