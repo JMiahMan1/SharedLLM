@@ -93,6 +93,13 @@ class User(SQLModel, table=True):  # type: ignore
     # The system default user's key is the household default: it applies to
     # everyone who has not set their own, with no grant needed.
     malwarebazaar_key_enc: str | None = None
+    # Google Books API key for the library's book lookups (services/common/book_metadata.py).
+    # Like the abuse.ch key, the system default user's is the household default.
+    google_books_key_enc: str | None = None
+    # The book catalogue integrations (Google Books, Open Library): a JSON object of
+    # this person's own choices (enabled, Open Library contact email, order). A key it
+    # does not hold follows the system default user's, then book_metadata.DEFAULT_*.
+    book_metadata: str | None = None
     # The home router (system user only; docs/NETWORK.md): a read-only rpcd
     # login, and the SHA-256 of its self-signed certificate, pinned on first use.
     router_url: str | None = None

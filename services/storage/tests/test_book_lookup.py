@@ -4,6 +4,7 @@ import io
 
 import pytest
 
+from services.common import book_metadata
 from services.storage import book_lookup
 from services.storage.tests.test_calibre_writer import _epub
 
@@ -25,7 +26,7 @@ def test_breakfast_is_not_a_fast():
 
 
 def test_the_file_comes_first_then_the_catalogues(monkeypatch):
-    async def google(session, title, author, isbn):
+    async def google(session, title, author, isbn, **kw):
         out = book_lookup._blank()
         out.update(title="Great Lent : Journey to Pascha", comments="From Google.", publisher="SVS Press",
                    isbn="9780913836040", cover_url="https://books.google.com/x.jpg")
@@ -38,7 +39,9 @@ def test_the_file_comes_first_then_the_catalogues(monkeypatch):
 
     monkeypatch.setattr(book_lookup, "google_books", google)
     monkeypatch.setattr(book_lookup, "open_library", openlib)
-    out = asyncio.run(book_lookup.inspect(_epub(cover=b"\xff\xd8" + b"x" * 2000), "great-lent.epub", ["Lent"]))
+    both = book_metadata.resolve({"google_books_enabled": True}, None, key="made-up-books-key", key_source="own")
+    out = asyncio.run(book_lookup.inspect(_epub(cover=b"\xff\xd8" + b"x" * 2000), "great-lent.epub", ["Lent"],
+                                          catalogues=both))
     assert out["title"] == "Great Lent" and out["sources"]["title"] == "the file"
     assert out["comments"] == "From Google." and out["sources"]["comments"] == "Google Books"
     assert out["published"] == "1969" and out["sources"]["published"] == "Open Library"

@@ -40,6 +40,7 @@ import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel'
 import VoiceSignaturePanel from '../components/settings/VoiceSignaturePanel';
 import SpotifyLinkPanel from '../components/settings/SpotifyLinkPanel';
 import AbuseChKeyTile from '../components/settings/AbuseChKeyTile';
+import BookCatalogueTile from '../components/settings/BookCatalogueTile';
 import HomeHubTile from '../components/settings/HomeHubTile';
 import MusicAssistantTile from '../components/settings/MusicAssistantTile';
 import { HA_OFF_NOTICE } from '../lib/homehub';
@@ -766,6 +767,8 @@ const Identity = () => {
                 }}
               />
               <AbuseChKeyTile userData={fullUser} />
+              <BookCatalogueTile id="google_books" userData={fullUser} />
+              <BookCatalogueTile id="open_library" userData={fullUser} />
             </div>
           </section>
 

@@ -167,6 +167,51 @@ lookup of the empty file's fingerprint. A key abuse.ch refuses is not saved,
 and abuse.ch not answering means try again. A saved key is never shown again,
 not even with the eye; enter a new one to replace it.
 
+## Google Books
+
+One of the two book catalogues the family library fills a book in from
+(Knowledge > Family library > Add a book, and filling in books already on the
+shelf; docs/CALIBRE_LIBRARY.md). Only a book's title, author or ISBN is sent.
+
+**Where the key goes:** Settings > Accounts & Integrations > **Google Books** >
+Set up (or Manage). Paste the key into **Google Books API key** (the eye shows
+what you pasted), press **Test**, then **Save key**. Saving a key turns Google
+Books on. For the whole household, an admin sets it on the default user instead:
+sign in as the default user and use the same card, or Admin > Users & Devices >
+Edit the default user > Google Books.
+
+- **Getting a key** (free): in Google Cloud Console, pick or create a project,
+  turn on the **Books API** (APIs & Services > Library), then APIs & Services >
+  Credentials > Create credentials > API key. Restrict it to the Books API if
+  you like.
+- **Household default:** the default user's key and choices apply to everyone
+  who has not set their own, with no admin grant. A person's own key wins;
+  remove it to go back to the household's.
+- **Off until set up:** Google Books is never asked without a key (Google's
+  shared keyless quota answers 429 most days). Turned on with no key, the card
+  says "On, but no API key is set" and every lookup says it skipped Google Books
+  for that reason.
+- **Test** does one lookup of a known book and shows exactly what Google
+  answered: the book, or the error (a refused key, HTTP 403 with the reason when
+  the Books API is not turned on for the key, or 429 when its daily quota is
+  used up). The same errors appear in the library's reply when they happen
+  during a lookup.
+- A saved key is stored encrypted and never shown again, not even with the eye;
+  paste a new one to replace it.
+
+## Open Library
+
+The other book catalogue. It needs no key and is **on** unless turned off
+(Settings > Accounts & Integrations > **Open Library**).
+
+- **Contact email** (optional): Open Library asks apps to name a contact in
+  their requests. When set, every request carries it in its User-Agent
+  (`JarvisOS-Library/1.0 (you@example.com)`). The household's (on the default
+  user) applies to everyone who has not set their own.
+- **Ask first** (on either card): which catalogue is asked first; the other
+  fills in what the first one lacks.
+- **Test** does one lookup of a known book and shows the result.
+
 ## Cloud Providers (OpenRouter / ClinePass)
 
 A cloud provider is configured once for the whole household, not per user: pick

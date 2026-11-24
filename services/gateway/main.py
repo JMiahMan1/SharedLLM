@@ -12372,8 +12372,9 @@ async def library_book_tags(book_id: int, request: Request):
 @app.post("/api/library/books/inspect")
 async def library_inspect_book(request: Request):
     """Fill in a book before adding it: the file's own details, Google Books and
-    Open Library, and suggested tags. Nothing is saved."""
-    await _require_admin(request)
+    Open Library (the ones the admin turned on in Accounts & Integrations), and
+    suggested tags. Nothing is saved."""
+    who = await _require_admin(request)
     form = await request.form()
     upload = form.get("file")
     if upload is None or not hasattr(upload, "read"):
@@ -12381,6 +12382,7 @@ async def library_inspect_book(request: Request):
     out = aiohttp.FormData()
     out.add_field("library_path", await _library_path())
     out.add_field("online", "false" if str(form.get("online") or "").lower() == "false" else "true")
+    out.add_field("user", who)
     out.add_field("file", await upload.read(), filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     return await _storage_library("POST", "/calibre/books/inspect", data=out, timeout=120.0)
 
@@ -12401,6 +12403,8 @@ async def library_add_book(request: Request):
     for key in ("title", "authors", "tags", "series", "comments", "publisher", "published", "isbn", "language", "cover_url",
                 "online"):
         out.add_field(key, str(form.get(key) or "")[:8000])
+    # Whose catalogue integrations (Accounts & Integrations) fill the book in.
+    out.add_field("user", who)
     out.add_field("file", data, filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     log.info("[library] %s adds %s (%d bytes)", who, getattr(upload, "filename", "book"), len(data))
     return await _storage_library("POST", "/calibre/books/add", data=out, timeout=600.0)
@@ -12424,8 +12428,16 @@ async def library_enrich_books(request: Request):
     log.info("[library] %s fills in books (dry_run=%s, limit=%s)", who, dry_run, limit)
     return await _storage_library("POST", "/calibre/books/enrich", json_body={
         "library_path": await _library_path(), "dry_run": dry_run, "limit": limit,
-        "book_ids": book_ids, "online": body.get("online", True) is not False,
+        "book_ids": book_ids, "online": body.get("online", True) is not False, "user": who,
     }, timeout=600.0)
+
+
+@app.get("/api/library/catalogues")
+async def library_catalogues(request: Request):
+    """The book catalogues (Google Books, Open Library) as they apply to the caller:
+    on or off, ready or why not, and each one's last answer. Never a key."""
+    who = await _signed_in(request)
+    return await _storage_library("POST", "/calibre/catalogues", json_body={"user": who}, timeout=30.0)
 
 
 #: Topics a feature may ask for (rag topics.py): a Calibre tag such as
