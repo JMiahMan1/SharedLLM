@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import BibleGames from './BibleGames';
 import type { BibleGame, BibleGameResult } from '../../types/api';
 
@@ -46,11 +47,13 @@ const RESULT: BibleGameResult = {
   newly_earned: [{ id: 'quiz_first', name: 'First Quiz', description: '', points: 5, earned_on: '2026-10-13' } as never],
 };
 
-function renderGames() {
+function renderGames(path = '/bible?tab=play') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <BibleGames page="sepia" />
+      <MemoryRouter initialEntries={[path]}>
+        <BibleGames page="sepia" />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -177,5 +180,24 @@ describe('leaderboard answers', () => {
     renderGames();
     await user.click(await screen.findByTestId('bible-leaderboard-sam'));
     expect(await screen.findByRole('alert')).toHaveTextContent("Play today's quiz first");
+  });
+});
+
+describe('a challenge from a profile', () => {
+  it("offers to beat the score it came with", async () => {
+    renderGames('/bible?tab=play&beat=Robin&score=8&of=10');
+    expect((await screen.findByTestId('bible-daily-challenge')).textContent).toBe("Challenge: beat Robin's 8/10.");
+  });
+
+  it('says how it went once today is played', async () => {
+    apiMock.getBibleGame.mockResolvedValue({ ...DAILY, played_today: { correct: 9, total: 10, duration_ms: 1000 } });
+    renderGames('/bible?tab=play&beat=Robin&score=8&of=10');
+    await waitFor(() => expect(screen.getByTestId('bible-daily-challenge').textContent).toBe("You beat Robin's 8/10 with 9/10."));
+  });
+
+  it('shows nothing for a link that does not add up', async () => {
+    renderGames('/bible?tab=play&beat=Robin&score=12&of=10');
+    await screen.findByTestId('bible-game-start-daily');
+    expect(screen.queryByTestId('bible-daily-challenge')).toBeNull();
   });
 });

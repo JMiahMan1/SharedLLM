@@ -88,3 +88,30 @@ Said once, in plain words: a Bible reading streak that stopped (best 3 days
 or more), reading this week under half of last week's, sleep, mood or energy
 down on last week (from the health weekly digest), screen time up 30% and 30
 minutes a day on last week, and open capability gaps.
+
+## The profile page (`/profile`, `/profile/{username}`)
+
+In the nav as **Profile**. A strip of the family across the top (you first,
+as "Me"), then one card per area. Every stat is a link, at least 44px tall and
+reachable by keyboard, into the page that already does that thing; nothing is
+a parallel screen:
+
+| Stat | Opens |
+|---|---|
+| Bible reading streak, "pick up where you left off" | the reader at that chapter (`/bible?tab=read&ref=`) |
+| Days and chapters read, badges, points | Bible progress (`/bible?tab=progress`) |
+| Today's daily Bible quiz | the quiz (`/bible?tab=play`); someone else's score adds `beat`, `score` and `of`, and the quiz shows "Challenge: beat Robin's 8/10" and, once played, how it went |
+| Steps, workouts, activity points | Health, Fitness (`/fitness?tab=fitness`) |
+| Miles driven | Wander for that person (`/wander?person=`) |
+| Health habits, sleep, meals | Health (`/fitness`, `?tab=sleep`, `?tab=nutrition`) |
+| Garden streak, care, badges | the Garden (`/garden`) |
+| A recipe cooked most | that recipe (`/recipes?recipe=`) |
+| A Family Game score | that game on the family shelf (`/family?tab=games&play=`) |
+| An arcade score | the games tab (`/family?tab=games`) |
+| Something used most | that part of Jarvis (Music, Bible, Map...) |
+
+On your own page, **What your family sees** has a switch for garden, recipes
+and Jarvis use, and shows the state of the switches that already exist
+(activity, Wander and Bible in Settings > Family; health in Health > Health)
+with a link to each. On someone else's page, the areas they keep private are
+named in one line under their cards.
