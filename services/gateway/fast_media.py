@@ -292,3 +292,93 @@ def power_names_no_device(query: str) -> bool:
     """True for "turn it off" / "turn off the music": a power command that names no particular device."""
     m = _POWER_OBJECT.match(strip_request_filler(query))
     return bool(m) and (m.group("obj") or "").strip().lower() in _POWER_GENERIC
+
+
+# --------------------------------------------------------------------------- #
+# "In the kitchen": a room after what to play                                  #
+# --------------------------------------------------------------------------- #
+
+_IN_ROOM = re.compile(r"^(?P<what>.+?)\s+(?:in|into)\s+(?:the\s+|my\s+|our\s+)?(?P<room>[\w' -]{2,40}?)$", re.IGNORECASE)
+
+
+def split_room(text: str | None, is_place) -> tuple[str | None, str | None]:
+    """("some music", "kitchen") from "some music in the kitchen" when ``is_place`` knows the room.
+
+    Only a room or player the household has counts, so "Murder in the Cathedral" and "Singing
+    in the Rain" keep their titles.
+    """
+    m = _IN_ROOM.match((text or "").strip(" ,.!?"))
+    if not m or len(m.group("room").split()) > 4:
+        return text, None
+    room = m.group("room").strip()
+    try:
+        known = bool(is_place(room))
+    except Exception as exc:
+        log.warning(f"[FastPath] could not check whether '{room}' is a room: {exc}")
+        known = False
+    return (m.group("what").strip(), room) if known else (text, None)
+
+
+# --------------------------------------------------------------------------- #
+# A question about what to play, and its answer                               #
+# --------------------------------------------------------------------------- #
+
+#: How long a "the song or the audiobook?" question waits for its answer.
+CHOICE_TTL_S = 120
+_YES = frozenset({"yes", "yeah", "yep", "sure", "please", "ok", "okay", "go ahead", "do it", "read it", "yes please"})
+
+
+def _choice_key(user_id: str) -> str:
+    return f"media:choice:{user_id}"
+
+
+def remember_choice(user_id: str, choice: dict) -> None:
+    """Keep execution's question (its options) until the person answers or it expires."""
+    import json
+
+    from services.gateway.cache import redis_cache_set
+
+    redis_cache_set(_choice_key(user_id), json.dumps(choice), CHOICE_TTL_S)
+
+
+def pending_choice(user_id: str) -> dict | None:
+    import json
+
+    from services.gateway.cache import redis_cache_get
+
+    raw = redis_cache_get(_choice_key(user_id))
+    try:
+        data = json.loads(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) and data.get("options") else None
+
+
+def clear_choice(user_id: str) -> None:
+    from services.gateway.cache import redis_cache_delete
+
+    redis_cache_delete(_choice_key(user_id))
+
+
+_ORDINALS = {"first": 0, "1st": 0, "one": 0, "second": 1, "2nd": 1, "two": 1, "last": -1}
+
+
+def match_choice(answer: str, choice: dict) -> dict | None:
+    """The option ``answer`` names ("the audiobook", "the song", "the first one", "yes"), or None.
+
+    An answer that names no option is not taken as one: it is a new request.
+    """
+    options = [o for o in choice.get("options") or [] if isinstance(o, dict)]
+    text = " ".join(re.sub(r"[^a-z0-9' ]+", " ", strip_request_filler(answer).lower()).split())
+    if not text or not options or len(text.split()) > 8:
+        return None
+    if len(options) == 1 and (text in _YES or text.startswith(("yes ", "yeah ", "sure "))):
+        return options[0]
+    hits = [o for o in options if any(re.search(rf"\b{re.escape(str(w).lower())}\b", text) for w in o.get("words") or [])]
+    if len(hits) == 1:
+        return hits[0]
+    m = re.search(r"\b(first|1st|second|2nd|last|one|two)\b(?:\s+one)?", text)
+    if m and len(text.split()) <= 4:
+        idx = _ORDINALS[m.group(1)]
+        return options[idx] if -len(options) <= idx < len(options) else None
+    return None

@@ -574,8 +574,11 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Control Home Assistant lights (on/off/brightness/color).",
      "payload fields: action, entity_id, brightness_pct, color_temp, rgb_color."),
     ("MediaPlayRequest", SVC_EXECUTION, "POST", "/execute/media/play", False,
-     "Play media via Music Assistant / HA (playlists, favorites, stream).",
-     "payload fields: entity_id, device_name, query, media_type, media_content_id, media_content_type, enqueue, volume."),
+     "Play media via Music Assistant / HA (playlists, favorites, stream). With search_everywhere=true the "
+     "query (a title, artist, audiobook, podcast or video) is searched in every source that is set up and the "
+     "best match plays, or a short question comes back naming two kinds that match equally.",
+     "payload fields: entity_id, device_name, query, media_type, media_content_id, media_content_type, enqueue, "
+     "volume, search_everywhere."),
     ("MediaTransportRequest", SVC_EXECUTION, "POST", "/execute/media/transport", False,
      "Media transport controls: play, pause, stop, next, previous, volume, and audiobook controls "
      "(seek_relative, chapter_next, chapter_previous, chapter_goto, speed, sleep).",

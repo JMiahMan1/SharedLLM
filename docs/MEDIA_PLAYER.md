@@ -178,6 +178,36 @@ A `query` containing `://` is played directly; plain text goes through MA
 search first. Local targets (`local`, `web_player`) update the in-process
 playback registry instead of calling HA.
 
+#### Search everywhere (`"search_everywhere": true`)
+
+What a spoken "Play <name>" sends (`services/execution/media_finder.py`). The
+name is searched in every media source that is set up and usable now, and the
+best match plays on the player:
+
+| Source | Searched when | Finds |
+|---|---|---|
+| Music Assistant | the hub's `music_assistant` entry is loaded, or the person's own MA server (Identity) | tracks, artists, albums, playlists, radio, podcasts, audiobooks |
+| Audiobookshelf | an Audiobookshelf login in Accounts & Integrations | audiobooks, series, authors, podcasts |
+| YouTube (yt-dlp, built in) | the player is a screen (capability index) or a video was asked for; `voice_video_search` is not `off` | one video |
+| The book library (Calibre) | `calibre_library_path` and a Nextcloud login; only when nothing playable matched | a book, offered to be read aloud |
+
+A disabled, not-loaded or failing source is skipped and named in the answer.
+Titles are compared by `services/common/media_titles.py` (case, punctuation,
+"(Unabridged)", leading articles and spoken numbers do not matter; a number
+said must be in the title). Words in the request choose the kind ("the
+audiobook X", "X the song", "X on YouTube", "the movie X"); otherwise when two
+kinds match equally well the answer is a question ("Harbor: the song by ...,
+or the audiobook?") with `detail.choice`, and the gateway plays the option
+named in the next turn (`pick`). The same audiobook in Audiobookshelf and Music
+Assistant plays from Audiobookshelf (progress, chapters, resume). Nothing found
+says which sources were searched.
+
+Spoken "Read ..." requests are the gateway's `fast_read.py`: scripture with a
+chapter ("Read John 3:16") from the Bible service, "Read chapter N of <title>"
+and "Read <title>" from the book library in voice-sized parts, "keep reading"
+for the next part. "Read my messages", "read the news" and the like are not
+books and are left to the model.
+
 ### `POST /execute/media/transport`
 
 `MediaTransportRequest.command` is a `Literal`; unknown values are rejected

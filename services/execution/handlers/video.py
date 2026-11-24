@@ -137,6 +137,34 @@ async def search_youtube(query: str) -> str | None:
     return None
 
 
+async def search_youtube_entry(query: str) -> tuple[str | None, str | None]:
+    """(url, title) of YouTube's first result for ``query``; the title is None when only a link was found.
+
+    The title lets an answer say what is playing. yt-dlp's flat search carries it; when
+    yt-dlp cannot search, ``search_youtube``'s fallbacks still find a link.
+    """
+    try:
+        import yt_dlp
+
+        def _first() -> tuple[str | None, str | None]:
+            opts: dict[str, object] = {"quiet": True, "no_warnings": True, "extract_flat": True, "playlistend": 1}
+            with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[arg-type]
+                info = ydl.extract_info(f"ytsearch1:{query}", download=False) or {}
+                for entry in list(info.get("entries") or [])[:1]:
+                    url = entry.get("url") or entry.get("webpage_url")
+                    if url:
+                        return url, entry.get("title") or None
+            return None, None
+
+        url, title = await asyncio.get_running_loop().run_in_executor(None, _first)
+        if url:
+            log.info(f"[video] yt-dlp ytsearch '{query}' -> {url} ({title})")
+            return url, title
+    except Exception as e:
+        log.warning(f"[video] yt-dlp ytsearch with title failed: {e}")
+    return await search_youtube(query), None
+
+
 async def extract_audio_stream_url(video_url: str) -> tuple[str | None, str | None]:
     """
     Extract a direct, in-memory audio CDN URL from a YouTube video using yt-dlp.

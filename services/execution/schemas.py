@@ -233,6 +233,10 @@ class MediaPlayRequest(BaseRequest):
     fallback_query: str | None = Field(None, description="One relaxed search to try when the query finds no music (e.g. 'worship' after 'worship music')")
     enqueue: Literal["add", "next", "replace"] | None = Field("replace", description="Queue behavior for Music Assistant")
     volume: float | None = Field(None, ge=0.0, le=1.0, description="Set volume before playback")
+    search_everywhere: bool = Field(False, description="Search every media source that is set up (Music Assistant, "
+                                    "Audiobookshelf, video on a screen, the book library) for query and play the best "
+                                    "match, ask between two equally good kinds, or say what was searched")
+    pick: dict | None = Field(None, description="An option from a search_everywhere question, played as is")
 
 
 class MediaTransportRequest(BaseRequest):
