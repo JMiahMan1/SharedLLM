@@ -216,7 +216,7 @@ async def scan_media_item(
     }
     try:
         content = await llm.local_chat_content(
-            session, f"{url.rstrip('/')}/v1/chat/completions", payload, MEDIA_MODEL_TIMEOUT_SECONDS
+            session, f"{url.rstrip('/')}/v1/chat/completions", payload, MEDIA_MODEL_TIMEOUT_SECONDS, background=True
         )
     except BackendUnavailable as exc:
         # The GPU box is off (logged once by the breaker). Not checked is not clean:
@@ -446,7 +446,8 @@ async def _ask_model(session, url: str, model: str, concern: dict[str, Any], tex
         "max_tokens": 200,
         "stream": False,
     }
-    content = await llm.local_chat_content(session, f"{url.rstrip('/')}/v1/chat/completions", payload, MODEL_TIMEOUT_SECONDS)
+    content = await llm.local_chat_content(session, f"{url.rstrip('/')}/v1/chat/completions", payload, MODEL_TIMEOUT_SECONDS,
+                                           background=True)
     return concern_review.parse_verdict(content)
 
 
