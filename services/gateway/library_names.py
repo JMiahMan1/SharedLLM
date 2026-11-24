@@ -147,17 +147,36 @@ def hit_is_from(meta: dict, names: list[str]) -> bool:
 def not_indexed_note(names: list[str]) -> str:
     """The prompt line that replaces other books' passages.
 
-    A book missing from the search index may still be on the shelf (a reindex can
-    take hours), so the note never says it cannot be read: it names the tool that
-    reads it straight from the library.
+    The index holds every book's catalogue card, but a spoken title is often
+    misheard and a book added a minute ago may not be carded yet, so the note never
+    says the library lacks the book: it names the tool that finds the closest title
+    and reads it straight from the library.
     """
     named = ", ".join(f'"{n}"' for n in names)
     return (
-        f"- {named}: not in the searchable index yet, so no passage from it was retrieved "
-        "here. That does not mean the library lacks it or that it cannot be read: "
-        "CalibreRequest with action fetch_text, query (the title and author) and chapter "
-        "(a number or title) reads it directly from the library. Do not answer from other "
+        f"- {named}: not found in the library catalogue search, so nothing from it was "
+        "retrieved here. That does not mean the library lacks it: CalibreRequest with action "
+        "fetch_text, query (the title and author) and chapter (a number or title) finds the "
+        "closest title and reads it directly from the library. Do not answer from other "
         "books' passages.\n"
+    )
+
+
+def catalogue_only_note(books: list[str]) -> str:
+    """The prompt line for a book the library holds, found by its catalogue card.
+
+    The search index holds each book's card (title, author, description, contents),
+    never its text; the text is read on request. Without this the model answered
+    questions about a book's content from its description or from memory.
+    """
+    named = ", ".join(f'"{b}"' for b in books)
+    return (
+        f"- {named}: in the library. Its catalogue card is above (description and contents); "
+        "the card is not the book's text. For anything about what the book says (a summary, "
+        "a chapter, quotations, discussion questions) read it first: CalibreRequest with action "
+        "chapters and query (the title and author) lists its chapters, and action fetch_text "
+        "with the same query and chapter (a number or title) reads one. Do not present general "
+        "knowledge as the book's text.\n"
     )
 
 

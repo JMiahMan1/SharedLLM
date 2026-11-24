@@ -131,7 +131,7 @@ CATALOG = _db(
 
 
 @pytest.mark.asyncio
-async def test_a_book_becomes_labelled_chunks_carrying_its_bibliographic_metadata():
+async def test_a_book_becomes_one_catalogue_card_carrying_its_bibliographic_metadata():
     client = FakeClient(CATALOG, _epub())
     provider = _provider(client)
     entries = await provider.list_entries(LIBRARY)
@@ -141,6 +141,8 @@ async def test_a_book_becomes_labelled_chunks_carrying_its_bibliographic_metadat
     ]
     assert all(e.is_dir is False for e in entries)
 
+    # Even a book whose chapters could be read is indexed by its card alone: its
+    # text is read on demand, never embedded.
     provider.sections = {entries[0].path: [
         ContentSection(ordinal=1, label="1st Day.", text="First day prose."),
         ContentSection(ordinal=2, label="2d Day.", text="Second day prose."),
@@ -149,12 +151,14 @@ async def test_a_book_becomes_labelled_chunks_carrying_its_bibliographic_metadat
     items = build_content_index(entries)
     chunks = await extract_and_chunk_contents(provider, items)
 
-    body = [c for c in chunks if not c["metadata"].get("is_metadata")]
-    assert [c["metadata"]["chapter"] for c in body] == ["1st Day.", "2d Day."]
-    assert [c["metadata"]["chapter_ordinal"] for c in body] == [1, 2]
-    assert all(c["metadata"]["calibre_id"] == 617 for c in body)
-    assert all(c["metadata"]["title"] == "The Faithful Promiser" for c in body)
-    assert all(c["metadata"]["author"] == "John R. Macduff" for c in body)
+    assert len(chunks) == 1
+    card = chunks[0]
+    assert card["metadata"]["is_metadata"] is True
+    assert card["metadata"]["catalogue"] is True
+    assert card["metadata"]["calibre_id"] == 617
+    assert card["metadata"]["title"] == "The Faithful Promiser"
+    assert card["metadata"]["author"] == "John R. Macduff"
+    assert "First day prose" not in card["content"]
 
 
 @pytest.mark.asyncio
@@ -187,9 +191,9 @@ async def test_the_skeleton_row_names_the_book_so_an_author_search_can_match_it(
     skeleton = [c for c in chunks if c["metadata"].get("is_metadata")]
     assert len(skeleton) == 1
     body = skeleton[0]["content"]
-    assert "The Faithful Promiser" in body
-    assert "John R. Macduff" in body
-    assert "Calibre id: 617" in body
+    assert "Book: The Faithful Promiser" in body
+    assert "Author: John R. Macduff" in body
+    assert skeleton[0]["metadata"]["calibre_id"] == 617
 
 
 @pytest.mark.asyncio
@@ -207,8 +211,8 @@ async def test_a_book_keeps_its_author_when_the_author_link_is_empty():
 
     chunks = await extract_and_chunk_contents(provider, build_content_index(entries))
 
-    body = [c for c in chunks if not c["metadata"].get("is_metadata")]
-    assert [c["metadata"]["author"] for c in body] == ["Anon"]
+    assert [c["metadata"]["author"] for c in chunks] == ["Anon"]
+    assert "Author: Anon" in chunks[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -232,22 +236,17 @@ async def test_an_unreadable_format_still_leaves_a_searchable_metadata_row():
 
 
 @pytest.mark.asyncio
-async def test_a_long_section_is_windowed_without_losing_its_label():
+async def test_a_long_book_is_still_one_row():
     client = FakeClient(CATALOG, _epub())
     provider = _provider(client)
     entries = await provider.list_entries(LIBRARY)
-    long_section = "word " * 600
     provider.sections = {
-        entries[0].path: [
-            ContentSection(ordinal=1, label="1st Day.", text=long_section),
-        ]
+        entries[0].path: [ContentSection(ordinal=1, label="1st Day.", text="word " * 600)]
     }
 
     chunks = await extract_and_chunk_contents(provider, build_content_index(entries))
-    body = [c for c in chunks if not c["metadata"].get("is_metadata")]
 
-    assert len(body) > 1, "a 3000 character section must not be one oversized chunk"
-    assert {c["metadata"]["chapter"] for c in body} == {"1st Day."}
+    assert len(chunks) == 1 and chunks[0]["metadata"]["is_metadata"]
 
 
 @pytest.mark.asyncio

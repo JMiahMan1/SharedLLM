@@ -146,7 +146,7 @@ def test_no_chapter_ref_without_a_chapter_of_a_book(question):
 
 def test_the_not_indexed_note_never_says_the_book_cannot_be_read():
     note = library_names.not_indexed_note(["Quiet Harbor Lights", "Ann Fakewright"])
-    assert "not in the searchable index yet" in note
+    assert "not found in the library catalogue search" in note
     assert "CalibreRequest" in note and "fetch_text" in note and "chapter" in note
     assert "not in the indexed library" not in note
     assert "not in the library" not in note
@@ -171,7 +171,7 @@ async def test_a_named_chapter_is_read_as_the_asker_and_put_with_the_question(mo
     assert seen["system_prompt"] == "FIXED SYSTEM"
     # The book was not in the index, but its chapter was read: no not-indexed note.
     assert orchestrator.LIBRARY_NOT_INDEXED_HEADER not in seen["rag_context"]
-    assert "searchable index" not in seen["rag_context"]
+    assert "catalogue search" not in seen["rag_context"]
 
 
 async def test_a_long_chapter_is_cut_with_a_note(monkeypatch):
@@ -191,7 +191,7 @@ async def test_a_chapter_that_cannot_be_read_is_reported_plainly(monkeypatch):
     assert "no chapter 4 (the book has 3 chapters)" in chapter
     assert "READ FROM YOUR LIBRARY" not in chapter
     # Nothing was read, so the index note stays (in its new wording).
-    assert "not in the searchable index yet" in seen["rag_context"]
+    assert "not found in the library catalogue search" in seen["rag_context"]
 
 
 async def test_a_slow_library_is_given_up_on(monkeypatch):

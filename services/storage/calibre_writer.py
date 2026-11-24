@@ -259,6 +259,76 @@ def insert_book(conn: sqlite3.Connection, book: NewBook) -> tuple[int, str, str]
     return book_id, folder, name
 
 
+def _is_blank_title(title: str | None) -> bool:
+    return not str(title or "").strip() or str(title).strip().lower() in ("unknown", "untitled")
+
+
+def fill_missing(conn: sqlite3.Connection, book_id: int, fields: dict[str, Any]) -> dict[str, Any]:
+    """Fill a book's empty fields from ``fields``; a field that has a value is never touched.
+
+    Checked against the library as it is now (a fresh copy), not as it was when the
+    proposal was made, so a title or a tag a person set in between is kept. The
+    title is changed in the catalogue only: the book's folder keeps its name (Calibre
+    renames it on its next edit), so no file moves. Returns what was written.
+    """
+    row = conn.execute("SELECT title, pubdate FROM books WHERE id = ?", [book_id]).fetchone()
+    if not row:
+        raise LibraryWriteError(f"There is no book {book_id} in the library.")
+    written: dict[str, Any] = {}
+    title = str(fields.get("title") or "").strip()
+    if title and _is_blank_title(row[0]):
+        conn.execute("UPDATE books SET title = ? WHERE id = ?", [title, book_id])
+        written["title"] = title
+    authors = [a.strip() for a in fields.get("authors") or [] if str(a).strip()]
+    current = [r[0] for r in conn.execute(
+        "SELECT a.name FROM authors a JOIN books_authors_link l ON l.author = a.id WHERE l.book = ?", [book_id])]
+    if authors and not [a for a in current if a.strip().lower() != "unknown"]:
+        conn.execute("DELETE FROM books_authors_link WHERE book = ?", [book_id])
+        for name in authors:
+            conn.execute("INSERT OR IGNORE INTO books_authors_link (book, author) VALUES (?, ?)",
+                         [book_id, _item_id(conn, "authors", name, with_sort=True)])
+        conn.execute("UPDATE books SET author_sort = ? WHERE id = ?",
+                     [" & ".join(author_sort(a) for a in authors), book_id])
+        written["authors"] = authors
+    tags = clean_tags(fields.get("tags") or [])
+    if tags and not conn.execute("SELECT 1 FROM books_tags_link WHERE book = ?", [book_id]).fetchone():
+        for name in tags:
+            conn.execute("INSERT OR IGNORE INTO books_tags_link (book, tag) VALUES (?, ?)",
+                         [book_id, _item_id(conn, "tags", name, with_sort=False)])
+        written["tags"] = tags
+    comments = str(fields.get("comments") or "").strip()
+    if comments and not conn.execute(
+            "SELECT 1 FROM comments WHERE book = ? AND length(trim(text)) > 0", [book_id]).fetchone():
+        conn.execute("DELETE FROM comments WHERE book = ?", [book_id])
+        conn.execute("INSERT INTO comments (book, text) VALUES (?, ?)", [book_id, comments])
+        written["comments"] = comments
+    series = str(fields.get("series") or "").strip()
+    if series and _has_table(conn, "books_series_link") and not conn.execute(
+            "SELECT 1 FROM books_series_link WHERE book = ?", [book_id]).fetchone():
+        conn.execute("INSERT INTO books_series_link (book, series) VALUES (?, ?)",
+                     [book_id, _item_id(conn, "series", series, with_sort=True)])
+        written["series"] = series
+    publisher = str(fields.get("publisher") or "").strip()[:200]
+    if publisher and _has_table(conn, "books_publishers_link") and not conn.execute(
+            "SELECT 1 FROM books_publishers_link WHERE book = ?", [book_id]).fetchone():
+        conn.execute("INSERT INTO books_publishers_link (book, publisher) VALUES (?, ?)",
+                     [book_id, _item_id(conn, "publishers", publisher, with_sort=True)])
+        written["publisher"] = publisher
+    isbn = clean_isbn(str(fields.get("isbn") or ""))
+    if isbn and _has_table(conn, "identifiers") and not conn.execute(
+            "SELECT 1 FROM identifiers WHERE book = ? AND type = 'isbn'", [book_id]).fetchone():
+        conn.execute("INSERT INTO identifiers (book, type, val) VALUES (?, 'isbn', ?)", [book_id, isbn])
+        written["isbn"] = isbn
+    published = calibre_date(str(fields.get("published") or ""))
+    if published != UNDEFINED_DATE and str(row[1] or UNDEFINED_DATE).startswith("0101"):
+        conn.execute("UPDATE books SET pubdate = ? WHERE id = ?", [published, book_id])
+        written["published"] = published[:10]
+    if written:
+        conn.execute("UPDATE books SET last_modified = ? WHERE id = ?", [_now(), book_id])
+        _dirty(conn, book_id)
+    return written
+
+
 def check(conn: sqlite3.Connection) -> None:
     result = conn.execute("PRAGMA integrity_check").fetchone()
     if not result or result[0] != "ok":
@@ -422,6 +492,13 @@ class LibraryWriter:
                 return {**result, "backup": backup, "attempts": attempt}
         raise LibraryWriteError("The library kept changing while Jarvis tried to write it. Try again in a minute.")
 
+    async def fill_missing(self, proposals: dict[int, dict[str, Any]]) -> dict:
+        """Fill the empty fields of several books in one write (``fill_missing``)."""
+        def edit(conn):
+            return {"written": {book_id: fill_missing(conn, book_id, fields)
+                                for book_id, fields in proposals.items()}}
+        return await self._change(edit)
+
     async def set_tags(self, book_id: int, add: list[str], remove: list[str]) -> dict:
         def edit(conn):
             return {"book_id": book_id, "tags": set_book_tags(conn, book_id, add, remove)}
@@ -429,7 +506,8 @@ class LibraryWriter:
 
     async def add_book(self, data: bytes, filename: str, *, title: str = "", authors: list[str] | None = None,
                        tags: list[str] | None = None, series: str = "", comments: str = "", publisher: str = "",
-                       published: str = "", isbn: str = "", language: str = "", cover: bytes | None = None) -> dict:
+                       published: str = "", isbn: str = "", language: str = "", cover: bytes | None = None,
+                       file_subjects_as_tags: bool = True) -> dict:
         fmt = PurePosixPath(filename).suffix.lower().lstrip(".")
         if fmt not in FORMATS:
             raise LibraryWriteError(f"{filename} is not a book format Calibre keeps ({', '.join(sorted(FORMATS))}).")
@@ -446,7 +524,9 @@ class LibraryWriter:
             authors=[a for a in (authors or found["authors"]) if a.strip()] or ["Unknown"],
             fmt=fmt,
             size=len(data),
-            tags=clean_tags([*(tags or []), *([] if tags else found["tags"])]),
+            # A caller that chose the tags (from the library's own, book_lookup) does not
+            # want the file's raw subject headings added as new ones.
+            tags=clean_tags([*(tags or []), *([] if tags or not file_subjects_as_tags else found["tags"])]),
             series=series,
             comments=comments or found["comments"],
             has_cover=bool(found["cover"]),

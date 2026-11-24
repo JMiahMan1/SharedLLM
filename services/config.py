@@ -272,6 +272,10 @@ CALIBRE_CATALOG_CHECK_S = float(os.getenv("CALIBRE_CATALOG_CHECK_S") or 30)
 # rather than guessing a shelf, because a wrong guess reports itself as an
 # empty library and reads like "we have no Bibles".
 CALIBRE_LIBRARY_PATH = os.getenv("CALIBRE_LIBRARY_PATH")
+# Seconds between checks that the Calibre catalogue (metadata.db) changed; on a
+# change storage indexes the new or edited books' catalogue cards by itself. 0
+# turns the automatic indexing off (a reindex is then only done on request).
+CALIBRE_INDEX_INTERVAL_S = float(os.getenv("CALIBRE_INDEX_INTERVAL_S") or 900)
 # Characters of one chapter returned by CalibreRequest fetch_text with a chapter;
 # a longer chapter comes back in numbered parts.
 CALIBRE_CHAPTER_MAX_CHARS = int(os.getenv("CALIBRE_CHAPTER_MAX_CHARS") or 60000)

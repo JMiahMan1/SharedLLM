@@ -597,6 +597,34 @@ mireds, 2000-6536 K), 3 RGB (`hs`), 4 RGBW (`hs`, `white`), 5 RGB with cold/warm
 lit means `color_temp`/`white` mode). `light.turn_on` sends `HsbColor1`/`HsbColor2` or `CT`,
 then `White`, then `Dimmer`, each reply carrying the new state; brightness 0 is `Power<n> Off`.
 
+**Templates, the pin finder and measured templates** (`tasmota_templates.py`, `tasmota_pin_finder.py`,
+`tasmota_measured.py`, routes in `tasmota_templates_api.py`). A reflashed bulb needs its template (GPIO map)
+before it drives its LEDs. The bundled catalog holds only templates copied from templates.blakadder.com.
+When the device says nothing about itself (the Generic module, no light or relays, names that match no maker
+or model), `GET /hub/tasmota/{entry}/template` returns `identified: false` with an `identify_note`, and the
+kind-only matches as `guesses` instead of `suggestions`, so the page offers the pin finder first.
+
+The pin finder (lights only) saves the device's template, module, `SetOption68` and `SetOption92` in
+`entry.data["pin_finder_backup"]` before sending anything, loads a test template with five candidate pins as
+PWM1-5 and `SetOption68 1`, then asks the person what the light looks like with each pin alone (dark, cool,
+warm, white, red, green, blue). Red/green/blue pins make RGB (plus whites: RGBW, RGBCW); two whites are cold
+and warm (shown one after the other if the answers did not say which is cooler); one white is a dimmable
+white or the brightness pin of a brightness + CT bulb, found by showing it alone and then adding each dark pin
+(`Delay 20`) and asking whether it got cooler or warmer. Tasmota's CT mode (`SO92 1`) drives the CT pin harder
+the warmer it is set, so a pin that cools the light is written inverted (PWMi2). The template is then loaded
+and checked by eye (CT 153 cool, CT 500 warm; each colour); one swapped answer is corrected and checked
+again. A cancel, a failure, a run nobody answers for 15 minutes, or a cancel after a hub restart puts the saved
+template back; a template load is refused while a run is open. Plugs and switches are not covered: probing a
+relay means driving pins that may be inputs (a button to ground, a power meter's pulse output).
+
+Measured templates live in the hub's database (`tasmota_measured` table), never in the bundled JSON: maker and
+model as the person typed them, kind, chip, template, commands, how it was found (`pin_finder`,
+`saved_from_device`, `by_hand`), date, and the device it was measured on. They are suggested beside catalog
+entries (`source: "measured"`, `measured_on`), first when the device's names match their model. `POST
+/hub/tasmota/{entry}/measured` saves the template a working device runs (it only reads the device); `POST
+/hub/tasmota/measured` records one worked out by hand without contacting the device (`entry_id` or
+`device_name`, `manufacturer`, `model`, `kind`, `template`, `commands`).
+
 **Web passwords.** Tasmota's `/cm` takes its password only as `user=admin&password=...`
 arguments (its documented form), so that is how the driver sends it; no log line or error text
 carries the request URL (`safe_error`). A 401 or the `Need user=` reply is `AuthRequired`
