@@ -180,7 +180,7 @@ playback registry instead of calling HA.
 
 #### Search everywhere (`"search_everywhere": true`)
 
-What a spoken "Play <name>" sends (`services/execution/media_finder.py`). The
+What a spoken `Play <name>` sends (`services/execution/media_finder.py`). The
 name is searched in every media source that is set up and usable now, and the
 best match plays on the player:
 
@@ -203,8 +203,8 @@ Assistant plays from Audiobookshelf (progress, chapters, resume). Nothing found
 says which sources were searched.
 
 Spoken "Read ..." requests are the gateway's `fast_read.py`: scripture with a
-chapter ("Read John 3:16") from the Bible service, "Read chapter N of <title>"
-and "Read <title>" from the book library in voice-sized parts, "keep reading"
+chapter ("Read John 3:16") from the Bible service, `Read chapter N of <title>`
+and `Read <title>` from the book library in voice-sized parts, "keep reading"
 for the next part. "Read my messages", "read the news" and the like are not
 books and are left to the model.
 
