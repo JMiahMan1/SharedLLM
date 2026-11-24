@@ -1342,8 +1342,10 @@ class ResolveStreamRequest(BaseRequest):
 
 class OcrRequest(BaseRequest):
     """
-    Extracts all visible text from an image in the workspace using the
-    user-configured vision LLM (vision_ocr_model, e.g. qwen2.5-vl:7b).
+    Extracts all visible text from an image (or a PDF) in the workspace using
+    the user-configured vision LLM (vision_ocr_model, e.g. qwen2.5-vl:7b). A PDF
+    with a text layer is read from it; a scanned PDF's pages are rendered and
+    read by the vision model, a few pages per call (continue with start_page).
 
     Returns structured fields: full_text, headline, subtext, badge.
     """
@@ -1352,6 +1354,9 @@ class OcrRequest(BaseRequest):
     # An image sent inline instead of a workspace file (a photo of a food label
     # from the Health hub): base64 bytes, never written outside a temp file.
     image_base64: str | None = Field(None, description="Base64 image bytes, used instead of image_path")
+    # A PDF is read too: its text layer for 'general'/'document', else its pages
+    # rendered as images, a few pages per call.
+    start_page: int = Field(1, ge=1, description="For a PDF: the first page to read (continue a long document)")
     task: str = Field(
         "general",
         description=(

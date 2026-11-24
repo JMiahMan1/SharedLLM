@@ -822,8 +822,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     # from hand-copied rows of their own; listing them here makes this table
     # the one place a tool's route is written down.
     ("OcrRequest", SVC_EXECUTION, "POST", "/execute/ocr", True,
-     "Read the text in a workspace image or scanned page with the vision model.",
-     "payload fields: image_path, task. task is general, document or price_scrape."),
+     "Read the text in a workspace image, scanned page or PDF with the vision model "
+     "(a PDF with a text layer is read from it; a scanned PDF a few pages per call).",
+     "payload fields: image_path, task, start_page. start_page continues a PDF; task is general, document or price_scrape."),
     ("GhRequest", SVC_EXECUTION, "POST", "/execute/gh", True,
      "Run a GitHub CLI (gh) command in the workspace.",
      "payload fields: args, cwd, timeout. args omits the leading 'gh'."),

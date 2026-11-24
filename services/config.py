@@ -267,6 +267,10 @@ CALIBRE_LIBRARY_PATH = os.getenv("CALIBRE_LIBRARY_PATH")
 # Characters of one chapter returned by CalibreRequest fetch_text with a chapter;
 # a longer chapter comes back in numbered parts.
 CALIBRE_CHAPTER_MAX_CHARS = int(os.getenv("CALIBRE_CHAPTER_MAX_CHARS") or 60000)
+# Characters of text read from one PDF when storage indexes it (a Calibre book or a
+# Nextcloud file). Pages are read in order and reading stops here, so one huge PDF
+# cannot hold the whole crawl's memory; 3,000,000 is about 1,500 printed pages.
+STORAGE_PDF_MAX_CHARS = int(os.getenv("STORAGE_PDF_MAX_CHARS") or 3_000_000)
 BIBLE_DEVOTIONAL_DIR = os.getenv("BIBLE_DEVOTIONAL_DIR")
 # The translation whose verses are embedded for meaning search. Unset: the
 # installed translation whose wording is most modern (see bible/meaning.py).

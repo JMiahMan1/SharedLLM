@@ -274,8 +274,20 @@ async def test_the_handler_returns_a_pdf_books_text(monkeypatch):
     assert prose in result.message
 
 
-async def test_an_oversize_fetch_points_at_the_ceiling(monkeypatch):
-    _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=413))
+async def test_an_oversize_fetch_reads_the_book_file_and_cuts_it_honestly(monkeypatch):
+    """A big book (a long PDF, say) is read from its own file, not refused."""
+    prose = "Long book prose. " * 400
+    text_body = _resp({"book": {"id": 617}, "format": "PDF", "text": prose[:2000], "total_chars": len(prose),
+                       "truncated": True})
+    fake = _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=413), text_body)
+    text, detail = await _client().fetch_text(book_id=617, max_chars=2000)
+    assert fake.calls[-1]["url"].endswith("/calibre/books/617/text")
+    assert text.startswith("Long book prose.") and detail["truncated"] is True
+
+
+async def test_an_oversize_fetch_with_no_readable_file_points_at_the_ceiling(monkeypatch):
+    refused = _resp({"detail": "No text reader for DJVU files; convert the book to EPUB in Calibre."}, status=422)
+    _install(monkeypatch, _identity(), _list(THREE_BOOKS), _fetch("", status=413), refused)
     with pytest.raises(calibre_client.CalibreLibraryError, match="too large for one fetch"):
         await _client().fetch_text(book_id=617)
 
