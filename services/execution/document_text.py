@@ -6,7 +6,8 @@ HTML, or plain text (e.g. ``Week 2 - Scripture.pdf``). Both the workspace
 file-read tool and the audiobook regeneration flow need to turn those into
 plain text before TTS. We dispatch to the right converter:
 
-* **PDF**     -> ``pdftotext -layout`` (poppler-utils)
+* **PDF**     -> ``pdftotext -layout`` (poppler-utils), else pypdf when the
+  binary is missing or fails on the file (both are in the execution image)
 * **EPUB**    -> ``pandoc -t plain``
 * **DOCX**    -> ``pandoc -t plain`` (also docx->markdown etc.)
 * **RTF/ODT** -> ``pandoc -t plain``
@@ -62,13 +63,50 @@ async def _pandoc(path: str) -> str:
 
 
 async def _pdftotext(path: str) -> str:
-    """Extract text from a PDF preserving layout (headings/list columns)."""
-    if not shutil.which(PDFTOTEXT_BIN):
+    """Extract text from a PDF preserving layout (headings/list columns).
+
+    pdftotext keeps the layout best; when it is missing or cannot read the file,
+    pypdf reads the text layer instead, so a PDF is never refused for want of
+    one converter.
+    """
+    if shutil.which(PDFTOTEXT_BIN):
+        try:
+            return await _run([PDFTOTEXT_BIN, "-layout", path, "-"])
+        except RuntimeError as exc:
+            log.warning("pdftotext could not read %s (%s); reading it with pypdf", path, exc)
+    else:
+        log.info("pdftotext is not installed; reading %s with pypdf", path)
+    return await asyncio.to_thread(_pypdf_text, path)
+
+
+def _pypdf_text(path: str) -> str:
+    """Every page's text in order, pages separated by a blank line (no page markers:
+    this text may be read aloud)."""
+    import io
+
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
         raise RuntimeError(
-            "pdftotext is not installed in this container; cannot extract PDF text. "
-            "Install poppler-utils or convert the PDF to text another way."
-        )
-    return await _run([PDFTOTEXT_BIN, "-layout", path, "-"])
+            "Neither pdftotext nor pypdf is installed in this container; cannot extract PDF text."
+        ) from exc
+    with open(path, "rb") as f:
+        data = f.read()
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise RuntimeError(f"{path} is encrypted with a password, so its text cannot be read.")
+        pages = []
+        for page in reader.pages:
+            try:
+                pages.append((page.extract_text() or "").strip())
+            except Exception as exc:
+                log.warning("pypdf could not read a page of %s: %s", path, exc)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"{path} is not a readable PDF ({exc}).") from exc
+    return "\n\n".join(p for p in pages if p)
 
 
 async def _html2text(path: str) -> str:
@@ -114,7 +152,8 @@ async def extract_document_text(path: str) -> str:
     """Return the plain text of an EPUB/DOCX/PDF/RTF/ODT/HTML/plain file.
 
     Raises FileNotFoundError when the file is missing, RuntimeError when the
-    converter is unavailable or yields no text (e.g. a scanned image-only PDF).
+    converter is unavailable or yields no text (e.g. a scanned image-only PDF,
+    which OcrRequest can read page by page).
     """
     if not os.path.exists(path):
         raise FileNotFoundError(f"Document not found: {path}")
@@ -135,5 +174,6 @@ async def extract_document_text(path: str) -> str:
 
     text = text.strip()
     if not text:
-        raise RuntimeError(f"No text extracted from {path} (scanned/image-only document?)")
+        hint = " Read it with OcrRequest instead (it reads a PDF's pages as images)." if ext == ".pdf" else ""
+        raise RuntimeError(f"No text extracted from {path} (scanned/image-only document?).{hint}")
     return text

@@ -290,7 +290,7 @@ async def _audit(client: CalibreClient) -> ExecutionResult:
                 f"keep {_row_line(g['keep'])}, could remove {', '.join(_row_line(o) for o in g['others'])}" for g in groups[:5]
             )
             parts.append(f"{report.get('counts', {}).get(key, len(groups))} {label}: {sample}.")
-    for key, label in (("no_file", "records with no book file"), ("unreadable", "books only in a format Jarvis cannot read (convert to EPUB)"),
+    for key, label in (("no_file", "records with no book file"), ("unreadable", "books only in a format Jarvis cannot read (convert to EPUB or PDF)"),
                        ("untagged", "books with no tags")):
         section = report.get(key) or {}
         if section.get("count"):
