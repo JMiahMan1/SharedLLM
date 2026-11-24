@@ -1,5 +1,6 @@
 # services/storage/main.py
 import asyncio
+from typing import Any
 import base64
 import logging
 import os
@@ -250,6 +251,32 @@ async def _drop_private_library_copies(client, collection_name: str) -> None:
             log.warning("Dropping %s's private copy of %s failed: %s", owner, collection_name, e)
 
 
+#: RAG embeds a batch on the CPU; a batch of long book chunks can take minutes, and one
+#: slow batch used to stop a 4,000-book crawl at the 60 s limit (TimeoutError, 2026-11-23).
+_SYNC_TIMEOUT_S = 180.0
+_SYNC_ATTEMPTS = 3
+_SYNC_RETRY_WAIT_S = (5.0, 30.0)
+
+
+async def _sync_batch(client: Any, batch: list[dict[str, Any]], user_id: str, collection_name: str) -> Any:
+    """POST one batch to RAG, retrying a timeout or a dropped connection before giving up."""
+    for attempt in range(_SYNC_ATTEMPTS):
+        try:
+            return await client.post(
+                f"{RAG_SVC}/rag/sync/files",
+                json={"chunks": batch, "user_id": user_id, "collection_name": collection_name},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=_SYNC_TIMEOUT_S, connect=5.0),
+            )
+        except (TimeoutError, aiohttp.ClientConnectionError) as exc:
+            if attempt == _SYNC_ATTEMPTS - 1:
+                raise
+            wait = _SYNC_RETRY_WAIT_S[min(attempt, len(_SYNC_RETRY_WAIT_S) - 1)]
+            log.warning("RAG sync of %d chunks failed (%s); retrying in %.0f s", len(batch), type(exc).__name__, wait)
+            await asyncio.sleep(wait)
+    raise RuntimeError("unreachable")
+
+
 async def _run_full_index_task(req: IndexScanRequest):
     """Internal task for background indexing."""
     crawl_begin(req.provider.kind, req.path)
@@ -300,12 +327,7 @@ async def _run_full_index_task(req: IndexScanRequest):
                     total_chunks += len(chunks)
                     for i in range(0, len(chunks), _SYNC_BATCH_CHUNKS):
                         batch = chunks[i:i + _SYNC_BATCH_CHUNKS]
-                        resp = await client.post(
-                            f"{RAG_SVC}/rag/sync/files",
-                            json={"chunks": batch, "user_id": user_id, "collection_name": collection_name},
-                            headers={"X-Internal-Secret": INTERNAL_SECRET},
-                            timeout=aiohttp.ClientTimeout(total=60.0, connect=5.0),
-                        )
+                        resp = await _sync_batch(client, batch, user_id, collection_name)
                         if resp.status != 200:
                             raise RuntimeError(
                                 f"RAG sync failed (files {g + 1}-{g + len(group)} of {len(items)}): {resp.status}"
