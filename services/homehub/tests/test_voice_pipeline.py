@@ -381,11 +381,17 @@ async def test_each_failure_is_an_error_event_then_run_end(env, monkeypatch, bac
 async def test_jarvis_taking_too_long_times_out(env, monkeypatch):
     monkeypatch.setenv("HOMEHUB_VOICE_JARVIS_TIMEOUT_S", "0.05")
     monkeypatch.setattr(voice_pipeline, "JARVIS_GUARD_S", 0.0)
-    Backends(ask_delay=2.0).install(monkeypatch)
+    be = Backends(ask_delay=2.0).install(monkeypatch)
     _hub, drv = make_driver()
     await drv.async_setup()
     await run_turn(drv, drv._client, [_tone(0.6), _silence(1.0)])
-    assert (await _error_of(drv))["code"] == "intent-timeout"
+    # The run still ends as a timeout, but the node hears the ask-later line instead of an error chime.
+    run = drv.voice.last_run
+    assert run.outcome == "error" and run.error["code"] == "intent-timeout" and run.timeout_line
+    assert be.spoken == [voice_pipeline.DEFAULT_TIMEOUT_LINE]
+    kinds = drv._client.kinds()
+    assert E.VOICE_ASSISTANT_ERROR not in kinds and kinds[-2:] == [E.VOICE_ASSISTANT_TTS_END,
+                                                                  E.VOICE_ASSISTANT_RUN_END]
     await drv.async_unload()
 
 

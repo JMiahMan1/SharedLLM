@@ -368,6 +368,26 @@ class ClipStream:
         self._notify()
         return len(pcm) / 2 / rate
 
+    def append_pcm(self, pcm: bytes) -> float:
+        """Add raw mono 16-bit little-endian PCM at the stream's own rate, straight after what is there.
+
+        No pause goes in front: this is for audio made in pieces that must join without a gap (the
+        hold music). The stream must already have its rate (a sentence went first). Returns seconds.
+        """
+        if self.closed:
+            raise HubError("the streamed reply has already ended")
+        if self.rate is None:
+            raise HubError("the streamed reply has no sample rate yet")
+        pcm = pcm[: len(pcm) - len(pcm) % 2]
+        self.parts.append(pcm)
+        self._notify()
+        return len(pcm) / 2 / self.rate
+
+    @property
+    def seconds(self) -> float:
+        """How much audio (pauses included) is in the stream so far."""
+        return sum(len(p) for p in self.parts) / 2 / self.rate if self.rate else 0.0
+
     def close(self) -> None:
         if not self.closed:
             self.closed = True
