@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import logging
 import os
 import re
@@ -341,36 +342,120 @@ async def roku_device_info(host: str) -> dict[str, str]:
     return {child.tag: (child.text or "") for child in root}
 
 
+#: The password opened the device's own web page, but ``/cm`` took it no way it can be sent.
+TASMOTA_HTTP_API_OFF = ("The password is right, but this Tasmota device refuses commands over HTTP. On the device: "
+                        "Configuration, Configure Other, turn on 'HTTP API Enable' (newer firmware), save, "
+                        "then add it again.")
+
+
+class TasmotaStatus(dict):  # type: ignore[type-arg]
+    """A ``Status 0`` reply, with the way its ``/cm`` took the web password (``drivers.tasmota.AUTH_MODES``)."""
+
+    auth_mode = "both"
+
+
+async def _tasmota_cm(session: Any, host: str, password: str | None, mode: str) -> tuple[int, Any, str]:
+    """``(HTTP status, JSON body or None, reply text)`` of one ``Status 0``; aiohttp errors propagate."""
+    from services.homehub.drivers.tasmota import cm_url
+
+    url, auth = cm_url(host, "Status 0", password, mode)
+    async with session.get(url, auth=auth) as resp:
+        text = await resp.text(errors="replace")
+        if resp.status == 401:
+            try:
+                body = json.loads(text)
+            except ValueError:
+                body = None
+        else:
+            body = json.loads(text)
+        return resp.status, body, text
+
+
+def _log_tasmota_refusal(host: str, password: str, outcome: str, attempts: list[dict[str, Any]]) -> None:
+    """One WARNING when a supplied password ends in a refusal: what each ``/cm`` try answered (status, the reply
+    cut to 200 characters with any trace of the password replaced, ``redact``), and only the password's length and which awkward
+    characters it has (``password_traits``), never the password."""
+    from services.homehub.drivers.tasmota import password_traits, redact
+
+    tried = [{"mode": a["mode"], "status": a["status"], "reply": redact(str(a.get("reply") or "")[:200], password)}
+             for a in attempts]
+    log.warning("Tasmota at %s: %s with a password supplied; tries=%s password=%s",
+                host, outcome, tried, password_traits(password))
+
+
 async def tasmota_status(host: str, password: str | None) -> dict[str, Any]:
-    """``Status 0`` from the device; NeedsInput when it wants its web password."""
+    """``Status 0`` from the device (a ``TasmotaStatus``); NeedsInput when it wants its web password.
+
+    With a password that ``/cm`` refuses (it hangs up, or answers 401), the password is checked against the
+    device's own login page first, so a right password is never reported as wrong: ``/cm`` is then asked
+    again with the password only as query arguments, then only as HTTP Basic, and the first that answers is
+    the entry's ``auth_mode``. A right password that no way gets through is the device's HTTP API being off.
+    Any refusal of a supplied password is logged once (``_log_tasmota_refusal``), without the password.
+    """
     import aiohttp
 
-    from services.homehub.drivers.tasmota import asks_for_login, basic_auth, cm_params, needs_password, safe_error
+    from services.homehub.drivers.tasmota import asks_for_login, needs_password, password_accepted, safe_error
+
+    attempts: list[dict[str, Any]] = []
+
+    def did_not_answer(exc: BaseException) -> FlowError:
+        return FlowError(f"The Tasmota device at {host} did not answer: {safe_error(exc, password)}", 502)
+
+    def refused(outcome: str, error: Exception) -> Exception:
+        if password:
+            _log_tasmota_refusal(host, password, outcome, attempts)
+        return error
+
+    def not_accepted(outcome: str) -> Exception:
+        return refused(outcome, NeedsInput([TASMOTA_PASSWORD_REQUIRED], "This Tasmota device asks for its web "
+                                           "password.", "The password was not accepted."))
+
+    async def ask(mode: str) -> tuple[int, Any]:
+        try:
+            status, body, text = await _tasmota_cm(session, host, password, mode)
+        except Exception as exc:
+            attempts.append({"mode": mode, "status": None, "reply": safe_error(exc, password)})
+            raise
+        attempts.append({"mode": mode, "status": status, "reply": text})
+        return status, body
 
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session:
+        dropped: BaseException | None = None
         try:
-            async with session.get(f"http://{host}/cm", params=cm_params("Status 0", password),
-                                   auth=basic_auth(password)) as resp:
-                body = None if resp.status == 401 else await resp.json(content_type=None)
-                status = resp.status
+            status, body = await ask("both")
         except aiohttp.ServerDisconnectedError as exc:
-            # Some firmwares close /cm without a word when it lacks the web password; their
-            # pages then answer 401 with a Basic challenge. That is a password, not an outage.
-            if await asks_for_login(session, host):
-                status, body = 401, None
-            else:
-                raise FlowError(f"The Tasmota device at {host} did not answer: {safe_error(exc, password)}",
-                                502) from None
+            # Some firmwares close /cm without a word when it lacks (or will not take) the web password.
+            status, body, dropped = 0, None, exc
         except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
-            raise FlowError(f"The Tasmota device at {host} did not answer: {safe_error(exc, password)}", 502) from None
-    if needs_password(status, body):
-        raise NeedsInput([TASMOTA_PASSWORD_REQUIRED], "This Tasmota device asks for its web password.",
-                         "The password was not accepted." if password else None)
-    if status != 200:
-        raise FlowError(f"The Tasmota device at {host} answered HTTP {status}", 502)
-    if not isinstance(body, dict):
-        raise FlowError("The Tasmota device sent an unexpected reply", 502)
-    return body
+            raise refused("no answer", did_not_answer(exc)) from None
+        if dropped is None and not needs_password(status, body):
+            if status != 200:
+                raise refused(f"HTTP {status}", FlowError(f"The Tasmota device at {host} answered HTTP {status}", 502))
+            if not isinstance(body, dict):
+                raise refused("unexpected reply", FlowError("The Tasmota device sent an unexpected reply", 502))
+            return TasmotaStatus(body)
+        if not password:
+            # A hang-up from a device whose pages ask for a login is a password, not an outage.
+            if dropped is not None and not await asks_for_login(session, host):
+                raise did_not_answer(dropped)
+            raise NeedsInput([TASMOTA_PASSWORD_REQUIRED], "This Tasmota device asks for its web password.")
+        accepted = await password_accepted(session, host, password)
+        if accepted is False:
+            raise not_accepted("not accepted (the web page refused it too)")
+        for mode in ("params", "basic"):
+            try:
+                status, body = await ask(mode)
+            except (aiohttp.ClientError, TimeoutError, ValueError):
+                continue
+            if status == 200 and isinstance(body, dict) and not needs_password(status, body):
+                found = TasmotaStatus(body)
+                found.auth_mode = mode
+                return found
+    if accepted:
+        raise refused("HTTP API refused a right password", FlowError(TASMOTA_HTTP_API_OFF, 502))
+    if dropped is not None:
+        raise refused("no answer", did_not_answer(dropped))
+    raise not_accepted("not accepted (/cm refused it every way)")
 
 
 # -- the flows -------------------------------------------------------------------------
@@ -669,6 +754,9 @@ async def adopt_tasmota(runtime: Any, finding: dict[str, Any], name: str | None,
     data: dict[str, Any] = {"host": host, "mac": ":".join(mac[i:i + 2] for i in range(0, 12, 2))}
     if password:
         data.update({"username": "admin", "password": password})
+        mode = getattr(status, "auth_mode", "both")
+        if mode != "both":  # an entry without it sends both, as every entry did before
+            data["auth_mode"] = mode
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="tasmota", title=title, data=data,
                         source="user" if finding.get("source") == "user" else "zeroconf", unique_id=mac_up)
     plan = Plan(hub, entry)

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { ChevronRight, ExternalLink, EyeOff, KeyRound, Loader2, Pencil, Power, Tag, Trash2, WifiOff } from 'lucide-react';
@@ -11,6 +11,7 @@ import DeviceGlyph from './DeviceGlyph';
 import { accentFor, isActiveState } from '../../lib/deviceIcons';
 import { EntityControl } from '../dashboards/EntityControls';
 import { confirmDialog } from '../ui/confirmDialog';
+import PasswordField from '../ui/PasswordField';
 import type { HubEntity } from '../../lib/dashboards';
 import {
   connectionFields, entryNeedsText, failureStatus, failureText, reconfigureEntry, removeHubDevice, updateHubDevice,
@@ -157,6 +158,7 @@ function ConnectionSettings({ entry, onChanged }: { entry: HubEntry; onChanged: 
   const secret = fields.find((f) => f.key === 'password');
   const [address, setAddress] = useState(host?.value ?? '');
   const [password, setPassword] = useState('');
+  const passwordId = useId();
   const save = useMutation({
     mutationFn: () => reconfigureEntry(entry.entry_id, { data: {
       ...(host && address.trim() !== (host.value ?? '') ? { host: address.trim() } : {}),
@@ -179,9 +181,10 @@ function ConnectionSettings({ entry, onChanged }: { entry: HubEntry; onChanged: 
         </label>
       )}
       {secret && (
-        <label className="block text-xs text-slate-400">
-          {secret.label}
-          <input className={`mt-1 ${INPUT}`} type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+        // A div, not a wrapping label: the eye is a button, which must not join the label.
+        <div className="block text-xs text-slate-400">
+          <label htmlFor={passwordId}>{secret.label}</label>
+          <PasswordField id={passwordId} wrapperClassName="mt-1" className={INPUT} value={password} onChange={(e) => setPassword(e.target.value)}
             placeholder={secret.set ? 'Unchanged' : 'Not set'} autoComplete="new-password"
             aria-describedby={entry.needs === 'password' ? `needs-${entry.entry_id}` : undefined} />
           {entry.needs === 'password' && (
@@ -190,7 +193,7 @@ function ConnectionSettings({ entry, onChanged }: { entry: HubEntry; onChanged: 
             </span>
           )}
           {secret.help && <span className="mt-1 block text-[11px] text-slate-500">{secret.help}</span>}
-        </label>
+        </div>
       )}
       {save.error && <p className="text-sm text-amber-300" role="alert">{failureText(save.error)}</p>}
       <button type="submit" className={BTN} disabled={save.isPending || !changed}>
