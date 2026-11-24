@@ -1,0 +1,739 @@
+"""hassmic Echo management: the network key, the vouch login, signed calls and the device-page entities.
+
+``FakeEcho`` is a settings API and an arbitration identity on 127.0.0.1 written from hassmic's C (``arb.c``
+``take_key``, ``web.c`` vouch/signed_ok/respond_s, ``mww_store.c``) with hashlib, cryptography and PyNaCl directly,
+not with ``hassmic.py``; its math is the math ``test_hassmic_crypto.py`` checks against hassmic's own C vectors.
+Every value here is made up (MACs 02:00:00:00:00:xx, addresses 192.168.10.x).
+"""
+from __future__ import annotations
+
+import asyncio
+import base64
+import hashlib
+import json
+import os
+import socket
+from typing import Any, ClassVar
+
+import pytest
+from aioesphomeapi import (
+    ButtonInfo,
+    DeviceInfo,
+    TextSensorInfo,
+    TextSensorState,
+    UserService,
+    UserServiceArg,
+    UserServiceArgType,
+)
+from aiohttp import web
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from nacl.bindings import crypto_aead_xchacha20poly1305_ietf_decrypt
+
+from services.homehub import echo_ota, hassmic
+from services.homehub.core import HubError
+from services.homehub.drivers.esphome import ESPHomeDriver
+from services.homehub.tests.conftest import make_hub
+
+MAC = "02:00:00:00:00:21"
+NODE = "echo-kitchen"
+DATA = {"host": "127.0.0.1", "port": 6053, "password": "", "noise_psk": "not-a-real-key", "device_name": NODE}
+DEAD = "audio: micAsr delivers nothing (status 110), reopening"
+REOPEN = "audio: micAsr rate=16000 ch=1 bits=16"
+_clock = [100.0]
+
+
+def stamped(*lines: str) -> list[str]:
+    """Lines as hassmic writes them to boot.log (clock.c stamps each, here with seconds since boot)."""
+    out = []
+    for line in lines:
+        _clock[0] += 1.5
+        out.append(f"boot+{_clock[0]:.3f} {line}")
+    return out
+
+
+def _pub(sk: bytes) -> bytes:
+    return X25519PrivateKey.from_private_bytes(sk).public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+
+
+def _x(sk: bytes, pk: bytes) -> bytes:
+    return X25519PrivateKey.from_private_bytes(sk).exchange(X25519PublicKey.from_public_bytes(pk))
+
+
+def _b2k(n: int, key: bytes, msg: bytes) -> bytes:
+    return hashlib.blake2b(msg, key=key, digest_size=n).digest()
+
+
+class FakeEcho:
+    """One hassmic Echo: its arbitration identity and network, and its settings API."""
+
+    def __init__(self, node: str = NODE) -> None:
+        self.node = node
+        self.arb_sk, self.web_sk = os.urandom(32), os.urandom(32)
+        self.arb_pk, self.web_pk = _pub(self.arb_sk), _pub(self.web_sk)
+        self.net_id = int.from_bytes(os.urandom(8), "little") | (1 << 63)  # a random network of its own
+        self.net_key = os.urandom(32)
+        self.arbitrating = True
+        self.keys_taken = 0
+        self.clients: dict[bytes, dict[str, Any]] = {}
+        self.nonces: dict[bytes, bytes] = {}
+        self.settings = {"wake_engine": "amazon", "online_updates": "off"}
+        self.models: dict[str, dict[str, Any]] = {}
+        self.log_lines: list[str] = ["hassmic: started", "voice: listening"]
+        self.reboots = 0
+        self.github = True
+        self.forge = False
+        self.calls: list[tuple[str, str]] = []
+        self.port = 0
+        self._runner: web.AppRunner | None = None
+
+    # -- arbitration --------------------------------------------------------------------------------------
+    def take_key(self, network: str, key: str) -> None:
+        """arb.c take_key: a lower id than ours, a blob that opens with our identity and that id."""
+        blob = base64.b64decode(key)
+        nid = int(network, 16)
+        if not self.arbitrating or len(blob) != 104 or not nid or nid >= self.net_id or blob[:32] == self.arb_pk:
+            return
+        msg = b"hassmic arb key\x00" + blob[:32] + self.arb_pk + nid.to_bytes(8, "little")
+        wrap = _b2k(32, _x(self.arb_sk, blob[:32]), msg)
+        try:
+            k = crypto_aead_xchacha20poly1305_ietf_decrypt(blob[72:] + blob[56:72], blob[:32], blob[32:56], wrap)
+        except Exception:
+            return
+        self.net_key, self.net_id = k, nid
+        self.keys_taken += 1
+
+    def beacon(self) -> bytes:
+        name = self.node.encode()
+        raw = b"HMA1\x01" + self.arb_pk + self.net_id.to_bytes(8, "little") + bytes([len(name)]) + name
+        raw += (12345).to_bytes(8, "little")
+        return raw + _b2k(16, _b2k(32, self.net_key, b"hassmic arbitration mac"), raw)
+
+    # -- web ----------------------------------------------------------------------------------------------
+    def _session(self, pub: bytes) -> bytes:
+        return _b2k(32, _x(self.web_sk, pub), b"hassmic web 1" + self.web_pk + pub)
+
+    def _signed(self, req: web.Request, body: bytes) -> bytes | None:
+        try:
+            pub = bytes.fromhex(req.headers["X-HM-Pub"])
+            ctr_s = req.headers["X-HM-Ctr"]
+            ctr, mac = int(ctr_s), bytes.fromhex(req.headers["X-HM-Mac"])
+        except (KeyError, ValueError):
+            return None
+        client = self.clients.get(pub)
+        if client is None or ctr <= client["floor"] or ctr in client["seen"]:
+            return None
+        want = _b2k(16, self._session(pub), f"{req.method}\n{req.path}\n{ctr_s}\n".encode() + body)
+        if want != mac:
+            return None
+        client["seen"].add(ctr)
+        return pub
+
+    def _answer(self, req: web.Request, pub: bytes, status: int, payload: Any, text: bool = False) -> web.Response:
+        body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        mac = _b2k(16, self._session(pub), f"RESP\n{req.headers['X-HM-Ctr']}\n".encode() + body)
+        if self.forge:
+            mac = bytes(16)
+        return web.Response(status=status, body=body, headers={"X-HM-Mac": mac.hex()},
+                            content_type="text/plain" if text else "application/json")
+
+    async def handle(self, req: web.Request) -> web.Response:
+        body = await req.read()
+        path = req.path
+        self.calls.append((req.method, path))
+        if path == "/api/hello":
+            return web.json_response({"name": "Kitchen Echo", "node": self.node, "pub": self.web_pk.hex(), "members": []})
+        if path == "/api/vouch/nonce":
+            try:
+                pub = bytes.fromhex(body.decode())
+                assert len(pub) == 32
+            except (ValueError, AssertionError):
+                return web.json_response({"error": "key"}, status=400)
+            nonce = os.urandom(16)
+            self.nonces[nonce] = pub
+            return web.json_response({"nonce": nonce.hex()})
+        if path == "/api/vouch/login":
+            parts = body.decode().split(" ", 4)
+            pub, nonce, mac, via = (bytes.fromhex(p) for p in parts[:4])
+            if self.nonces.pop(nonce, None) != pub or not self.arbitrating:
+                return web.json_response({"login": "refused"})
+            wk = _b2k(32, self.net_key, b"hassmic web voucher 1")
+            if _b2k(16, wk, b"hassmic voucher 1" + self.web_pk + pub + nonce + via) != mac:
+                return web.json_response({"login": "refused"})
+            client = self.clients.setdefault(pub, {"floor": 0, "seen": set()})
+            client["label"] = f"{parts[4][:30]} via {via.decode()[:28]}"
+            return web.json_response({"login": "approved"})
+        pub = self._signed(req, body)
+        if pub is None:
+            return web.json_response({"error": "not logged in"}, status=401)
+        return self._route(req, pub, body)
+
+    def _route(self, req: web.Request, pub: bytes, body: bytes) -> web.Response:
+        path = req.path
+        if path == "/api/state":
+            choices = {"wake_engine": ["amazon", "microwakeword", "homeassistant"],
+                       "online_updates": ["off", "beta", "release"]}
+            settings = [{"name": n, "type": "choice", "choices": c, "value": c.index(self.settings[n])}
+                        for n, c in choices.items()]
+            return self._answer(req, pub, 200, {"settings": settings, "arbitration": {"network": f"{self.net_id:016x}"}})
+        if path == "/api/set":
+            name, _, value = body.decode().strip().partition("=")
+            errors = ""
+            if name == "wake_engine" and value == "microwakeword" and not self.models:
+                errors = "wake_engine: no microWakeWord model on this Echo yet: add one first\n"
+            elif name == "online_updates" and value != "off" and not self.github:
+                errors = "online_updates: GitHub cannot be reached from this Echo (timeout), so they stay off\n"
+            elif name not in self.settings:
+                errors = f"{name}: no such setting on this Echo\n"
+            else:
+                self.settings[name] = value
+            return self._answer(req, pub, 200, {"applied": 0 if errors else 1, "errors": errors, "github_unreachable": ""})
+        if path == "/api/mww":
+            models = [{"id": i, "name": m["wake_word"], "size": m["size"]} for i, m in sorted(self.models.items())]
+            return self._answer(req, pub, 200, {"engine": self.settings["wake_engine"], "active": None, "second": None,
+                                                "max": 1 << 20, "models": models})
+        if path.startswith("/api/mww/add/"):
+            head, _, rest = body.partition(b"\n")
+            n = int(head)
+            manifest, model = json.loads(rest[:n]), rest[n:]
+            if manifest.get("type") != "micro" or not manifest.get("wake_word") or not model:
+                return self._answer(req, pub, 400, {"error": "manifest"})
+            self.models[path.rsplit("/", 1)[1]] = {"wake_word": manifest["wake_word"], "size": len(model)}
+            return self._answer(req, pub, 200, {"ok": True})
+        if path == "/api/log/0":
+            return self._answer(req, pub, 200, ("\n".join(self.log_lines) + "\n").encode(), text=True)
+        if path == "/api/reboot":
+            if body != b"reboot":
+                return self._answer(req, pub, 400, {"error": "say reboot"})
+            self.reboots += 1
+            return self._answer(req, pub, 200, {"reboot": True})
+        return web.json_response({"error": "not found"}, status=404)
+
+    async def start(self) -> None:
+        app = web.Application()
+        app.router.add_route("*", "/{tail:.*}", self.handle)
+        self._runner = web.AppRunner(app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, "127.0.0.1", 0)
+        await site.start()
+        self.port = site._server.sockets[0].getsockname()[1]
+
+    async def stop(self) -> None:
+        if self._runner is not None:
+            await self._runner.cleanup()
+
+
+class FakeScanner:
+    def __init__(self, *echos: FakeEcho, ip: str = "127.0.0.1") -> None:
+        self.echos, self.ip, self.scans = list(echos), ip, 0
+
+    async def scan(self, own_pub, *, fresh=False, timeout=0.0):
+        self.scans += 1
+        return [b for b in (hassmic.parse_beacon(e.beacon(), self.ip) for e in self.echos if e.arbitrating) if b]
+
+
+class FakeStore:
+    def __init__(self) -> None:
+        self.blobs: dict[str, Any] = {}
+        self.kv: dict[str, Any] = {}
+
+    def load_blob(self, name, default=None):
+        return self.blobs.get(name, default)
+
+    def save_blob(self, name, value):
+        self.blobs[name] = json.loads(json.dumps(value))
+
+    def get_kv(self, key, default=None):
+        return self.kv.get(key, default)
+
+    def set_kv(self, key, value):
+        self.kv[key] = json.loads(json.dumps(value))
+
+
+ARB_SERVICE = UserService(name="arbitration_key", key=19, args=[
+    UserServiceArg(name="network", type=UserServiceArgType.STRING),
+    UserServiceArg(name="key", type=UserServiceArgType.STRING)])
+RESTART = ButtonInfo(object_id="restart", key=60, name="Restart")
+WEB_UI = TextSensorInfo(object_id="web_ui_address", key=61, name="Web UI address")
+
+
+class FakeClient:
+    """The keyed ESPHome connection: ``arbitration_key`` reaches the fake Echo's ``take_key``."""
+
+    echo: ClassVar[FakeEcho | None] = None
+    project: ClassVar[str] = "hassmic.echo-dot-assist"
+    services: ClassVar[list[Any]] = [ARB_SERVICE]
+
+    def __init__(self) -> None:
+        self.executed: list[dict[str, Any]] = []
+        self.buttons: list[int] = []
+
+    async def connect(self, on_stop=None, login=False):
+        self.on_stop = on_stop
+
+    async def device_info_and_list_entities(self):
+        info = DeviceInfo(name=NODE, friendly_name="Kitchen Echo", mac_address=MAC, project_name=self.project)
+        return info, [RESTART, WEB_UI], list(self.services)
+
+    def subscribe_home_assistant_states_and_services(self, **_kw):
+        pass
+
+    async def execute_service(self, svc, data, return_response=None):
+        self.executed.append(dict(data))
+        if FakeClient.echo is not None and svc.name == "arbitration_key":
+            FakeClient.echo.take_key(data["network"], data["key"])
+
+    def button_command(self, key, device_id=0):
+        self.buttons.append(key)
+
+    async def disconnect(self, force=False):
+        pass
+
+
+def _models_dir(tmp_path, ids=("hey_jarvis", "okay_nabu")) -> str:
+    """A stand-in for ESPHome's model repository: v2 manifests and a few bytes of model each."""
+    d = tmp_path / "repo"
+    d.mkdir(exist_ok=True)
+    for i in ids:
+        (d / f"{i}.json").write_text(json.dumps({
+            "type": "micro", "wake_word": i.replace("_", " ").title(), "author": "test", "version": 2,
+            "trained_languages": ["en"], "model": f"{i}.tflite",
+            "micro": {"probability_cutoff": 0.97, "feature_step_size": 10, "sliding_window_size": 5}}))
+        (d / f"{i}.tflite").write_bytes(b"TFL3" + i.encode() * 10)
+    return str(d)
+
+
+@pytest.fixture
+async def env(tmp_path, monkeypatch):
+    echo = FakeEcho()
+    await echo.start()
+    repo = _models_dir(tmp_path)
+
+    async def fetch(self, url):
+        path = os.path.join(repo, url.rsplit("/", 1)[1])
+        if not os.path.exists(path):
+            raise hassmic.HassmicError(f"{url} answered 404")
+        with open(path, "rb") as f:
+            return f.read()
+
+    monkeypatch.setattr(hassmic.WakeModelCache, "_fetch", fetch)
+    monkeypatch.setattr(hassmic, "WEB_PORT", echo.port)
+    monkeypatch.setattr(hassmic, "CONFIRM_S", 1.0)
+    monkeypatch.setattr(hassmic, "CONFIRM_POLL_S", 0.01)
+    monkeypatch.setattr("services.homehub.drivers.esphome.COMMAND_SETTLE", 0.05)
+    FakeClient.echo, FakeClient.project, FakeClient.services = echo, "hassmic.echo-dot-assist", [ARB_SERVICE]
+    clients: list[FakeClient] = []
+
+    def build(options=None, entities=None):
+        hub, entry = make_hub("esphome", dict(DATA), entities or [], options=options or {})
+        hub.store = FakeStore()
+        hub.data_dir = str(tmp_path / "data")
+        hub._hassmic_scanner = FakeScanner(echo)
+        drv = ESPHomeDriver(hub, entry)
+
+        def make(host, port=None):
+            clients.append(FakeClient())
+            return clients[-1]
+
+        drv._make_client = make  # type: ignore[method-assign]
+        hub.drivers[entry.entry_id] = drv
+        return hub, drv
+
+    async def up(drv):
+        """Connect with the background runner held back, then bring the Echo up in the test's own order."""
+        monkeypatch.setattr(hassmic.HassmicManager, "_run", _idle)
+        await drv.async_setup()
+        mgr = drv.hassmic
+        notices: list[dict] = []
+
+        async def notifier(payload):
+            notices.append(payload)
+
+        mgr.notifier = notifier
+        mgr.notices = notices
+        return mgr
+
+    yield type("Env", (), {"echo": echo, "build": staticmethod(build), "up": staticmethod(up), "clients": clients})
+    FakeClient.echo = None
+    await echo.stop()
+
+
+async def _idle(self, client):
+    return None
+
+
+def _state(hub, uid_suffix):
+    ent = next(e for e in hub.entities.values() if (e.unique_id or "").endswith(f"-{uid_suffix}"))
+    return ent, hub.states.get(ent.entity_id)
+
+
+# -- the whole bring-up ---------------------------------------------------------------------------------------
+
+async def test_bring_up_pushes_the_key_logs_in_and_shows_the_settings(env):
+    hub, drv = env.build()
+    mgr = await env.up(drv)
+    await mgr.bring_up()
+    auth = hub._hassmic_authority
+    assert env.echo.net_id == auth.net_id == hassmic.NET_ID_START and env.echo.net_key == auth.net_key
+    assert env.clients[-1].executed[0]["network"] == "00000000ffffffff" and len(env.clients[-1].executed[0]["key"]) == 140
+    assert env.echo.clients[auth.web_pk]["label"] == "HomeHub via homehub"
+    _ent, st = _state(hub, "hassmic_wake_engine")
+    assert st.state == "Amazon" and st.attributes["options"] == ["Amazon", "microWakeWord"]
+    ent, st = _state(hub, "hassmic_online_updates")
+    assert st.state == "Off" and ent.entity_id.endswith("_online_updates") and ent.entity_category == "config"
+    _ent, st = _state(hub, "hassmic_management")
+    assert st.state == "ready" and st.attributes["in_network"] and st.attributes["logged_in"]
+    assert st.attributes["network"] == "00000000ffffffff" and "reason" not in st.attributes
+    ent, _st = _state(hub, "hassmic_microphone")
+    assert ent.entity_category == "diagnostic" and ent.trusted("original_device_class") == "problem"
+    # K and HomeHub's keys are kept sealed in the store blob, never in kv, options or entry data
+    sealed = hub.store.blobs[hassmic.AUTHORITY_BLOB]
+    assert base64.b64decode(sealed["net_key"]) == auth.net_key
+    assert sealed["net_key"] not in json.dumps(hub.store.kv) and "net_key" not in json.dumps(drv.entry.options)
+    await drv.async_unload()
+
+
+async def test_the_background_runner_brings_the_echo_up(env):
+    hub, drv = env.build()
+    await drv.async_setup()
+    drv.hassmic.mic_check_s = 0.05
+    async def settles(key, want):
+        for _ in range(200):
+            st = hub.states.get(_state(hub, key)[0].entity_id)
+            if st is not None and st.state == want:
+                return True
+            await asyncio.sleep(0.02)
+        return False
+
+    assert await settles("hassmic_management", "ready")
+    assert await settles("hassmic_microphone", "off")
+    await drv.async_unload()
+
+
+async def test_an_echo_already_in_the_network_is_not_handed_the_key_again(env):
+    _hub, drv = env.build()
+    mgr = await env.up(drv)
+    await mgr.bring_up()
+    await mgr.bring_up()
+    assert env.echo.keys_taken == 1 and len(env.clients[-1].executed) == 1
+    # a reconnect does not log in again either: the approval is remembered
+    logins = sum(1 for c in env.echo.calls if c[1] == "/api/vouch/login")
+    await mgr.bring_up()
+    assert sum(1 for c in env.echo.calls if c[1] == "/api/vouch/login") == logins == 1
+
+
+async def test_entities_only_for_hassmic_nodes(env):
+    FakeClient.project = "example.rgbww"
+    hub, drv = env.build()
+    await drv.async_setup()
+    assert drv.hassmic is None
+    assert not [e for e in hub.entities.values() if "hassmic_" in (e.unique_id or "")]
+    assert env.echo.calls == [] and env.echo.keys_taken == 0
+    await drv.async_unload()
+
+
+async def test_arbitration_off_is_said_plainly_on_the_device(env):
+    FakeClient.services = []  # no arbitration_key: wake_engine=homeassistant at start, or -a 0
+    hub, drv = env.build()
+    mgr = await env.up(drv)
+    with pytest.raises(hassmic.HassmicError) as err:
+        await mgr.bring_up()
+    mgr._fail(str(err.value))
+    _ent, st = _state(hub, "hassmic_management")
+    assert st.state == "error" and "not running hassmic's arbitration" in st.attributes["reason"]
+    _ent, st = _state(hub, "hassmic_wake_engine")
+    assert st.state == "unavailable" and "arbitration" in st.attributes["reason"]
+    assert hassmic.AUTHORITY_BLOB not in hub.store.blobs  # nothing made for an Echo that cannot take it
+    with pytest.raises(HubError, match="arbitration"):
+        await hub.call_service("select", "select_option", {"entity_id": _state(hub, "hassmic_wake_engine")[0].entity_id,
+                                                           "option": "microWakeWord"})
+
+
+async def test_an_approved_echo_with_arbitration_off_keeps_its_settings_reachable(env):
+    hub, drv = env.build()
+    mgr = await env.up(drv)
+    await mgr.bring_up()  # approved while arbitration ran
+    env.echo.settings["wake_engine"] = "homeassistant"
+    env.echo.arbitrating = False
+    FakeClient.services = []
+    await drv.async_unload()
+    hub2, drv2 = env.build()
+    hub2.store = hub.store
+    mgr2 = await env.up(drv2)
+    drv2._last[(0, WEB_UI.key)] = TextSensorState(key=WEB_UI.key, state=f"http://127.0.0.1:{env.echo.port}")
+    await mgr2.bring_up()
+    _ent, st = _state(hub2, "hassmic_management")
+    assert st.state == "error" and "not running hassmic's arbitration" in st.attributes["reason"]
+    _ent, st = _state(hub2, "hassmic_wake_engine")
+    assert st.state == "unknown" and "Home Assistant's wake word engine" in st.attributes["reason"]
+    await hub2.call_service("select", "select_option", {"entity_id": _ent.entity_id, "option": "Amazon"})
+    assert env.echo.settings["wake_engine"] == "amazon"
+    await drv2.async_unload()
+
+
+async def test_no_beacon_is_a_reason_not_a_silence(env):
+    hub, drv = env.build()
+    hub._hassmic_scanner = FakeScanner()
+    mgr = await env.up(drv)
+    with pytest.raises(hassmic.HassmicError, match="no arbitration beacon from echo-kitchen"):
+        await mgr.bring_up()
+
+
+async def test_an_echo_in_an_older_network_is_reported(env):
+    env.echo.net_id = 5
+    _hub, drv = env.build()
+    mgr = await env.up(drv)
+    with pytest.raises(hassmic.HassmicError, match="older network"):
+        await mgr.bring_up()
+    assert env.clients[-1].executed == []
+
+
+async def test_without_a_sealing_store_nothing_is_made(env):
+    hub, drv = env.build()
+    hub.store = type("NoFernet", (FakeStore,), {"save_blob": lambda self, n, v: (_ for _ in ()).throw(
+        RuntimeError("FERNET_KEY is not set"))})()
+    mgr = await env.up(drv)
+    with pytest.raises(hassmic.HassmicError, match="cannot keep the Echo network key sealed"):
+        await mgr.bring_up()
+    assert env.echo.keys_taken == 0
+
+
+# -- the settings API -----------------------------------------------------------------------------------------
+
+async def _logged_in(env):
+    hub, drv = env.build()
+    mgr = await env.up(drv)
+    await mgr.bring_up()
+    return hub, drv, mgr
+
+
+async def test_vouch_is_refused_without_the_network_key(env):
+    hub = make_hub("esphome")[0]
+    hub.store = FakeStore()
+    auth = hassmic.Authority.for_hub(hub)  # HomeHub's K, which this Echo never got
+    client = hassmic.EchoWeb(f"http://127.0.0.1:{env.echo.port}", auth)
+    with pytest.raises(hassmic.HassmicError, match="refused HomeHub's login voucher"):
+        await client.vouch()
+    assert sum(1 for c in env.echo.calls if c[1] == "/api/vouch/login") == 2  # one retry, then the reason
+
+
+async def test_a_reused_counter_is_refused(env, monkeypatch):
+    _hub, _drv, mgr = await _logged_in(env)
+    monkeypatch.setattr(hassmic, "next_counter", lambda: "1764000000000001")
+    status, _body = await mgr.web.call("GET", "/api/state")
+    assert status == 200
+    with pytest.raises(hassmic.HassmicError, match="does not accept HomeHub's login"):
+        await mgr.web.call("GET", "/api/state")
+
+
+async def test_a_wrong_answer_signature_is_rejected(env):
+    _hub, _drv, mgr = await _logged_in(env)
+    env.echo.forge = True
+    with pytest.raises(hassmic.HassmicError, match="wrong signature"):
+        await mgr.web.json("GET", "/api/state")
+
+
+async def test_a_lost_approval_logs_in_again(env):
+    _hub, _drv, mgr = await _logged_in(env)
+    env.echo.clients.clear()  # pushed out of clients[], or revoked
+    doc = await mgr.web.json("GET", "/api/mww")
+    assert doc["models"] == [] and sum(1 for c in env.echo.calls if c[1] == "/api/vouch/login") == 2
+
+
+async def test_switching_to_microwakeword_installs_the_models_first(env):
+    hub, drv, _mgr = await _logged_in(env)
+    drv.entry.options["echo_wake_models"] = ["hey_jarvis", "okay_nabu"]
+    eid = _state(hub, "hassmic_wake_engine")[0].entity_id
+    await hub.call_service("select", "select_option", {"entity_id": eid, "option": "microWakeWord"})
+    assert env.echo.settings["wake_engine"] == "microwakeword"
+    assert sorted(env.echo.models) == ["hey_jarvis", "okay_nabu"]
+    assert hub.states.get(eid).state == "microWakeWord"
+    _ent, st = _state(hub, "hassmic_wake_models")
+    assert st.state == "hey_jarvis, okay_nabu" and st.attributes["missing"] == []
+    # cached once in HomeHub's data dir
+    assert sorted(os.listdir(os.path.join(hub.data_dir, "hassmic_wake_models"))) == [
+        "hey_jarvis.json", "hey_jarvis.tflite", "okay_nabu.json", "okay_nabu.tflite"]
+    await hub.call_service("select", "select_option", {"entity_id": eid, "option": "Amazon"})
+    assert env.echo.settings["wake_engine"] == "amazon" and hub.states.get(eid).state == "Amazon"
+
+
+async def test_a_model_that_cannot_be_had_stops_the_switch_with_its_reason(env):
+    hub, drv, _mgr = await _logged_in(env)
+    drv.entry.options["echo_wake_models"] = ["hey_jarvis", "no_such_word"]
+    eid = _state(hub, "hassmic_wake_engine")[0].entity_id
+    with pytest.raises(HubError, match="no_such_word"):
+        await hub.call_service("select", "select_option", {"entity_id": eid, "option": "microWakeWord"})
+    assert env.echo.settings["wake_engine"] == "amazon"
+    _ent, st = _state(hub, "hassmic_wake_models")
+    assert "no_such_word" in st.attributes["reason"] and st.attributes["missing"] == ["no_such_word"]
+
+
+async def test_online_updates_select_and_echo_ota(env):
+    sat = {"entity_id": "assist_satellite.kitchen_echo", "unique_id": f"{MAC.upper()}-assist_satellite"}
+    hub, drv = env.build(entities=[sat])
+    mgr = await env.up(drv)
+    hub.store.kv.pop("echo_ota", None)
+    await mgr.bring_up()
+    eid = _state(hub, "hassmic_online_updates")[0].entity_id
+    assert echo_ota.echo_nodes(hub) == [drv.entry.entry_id]
+    await echo_ota.ensure_channel(hub)  # what the hub's echo-ota loop (and the bring-up's nudge) runs
+    assert env.echo.settings["online_updates"] == "release" and hub.states.get(eid).state == "Release"
+    await hub.call_service("select", "select_option", {"entity_id": eid, "option": "Beta"})
+    assert env.echo.settings["online_updates"] == "beta"
+
+
+async def test_online_updates_refused_by_the_echo_shows_why(env):
+    hub, _drv, _mgr = await _logged_in(env)
+    env.echo.github = False
+    eid = _state(hub, "hassmic_online_updates")[0].entity_id
+    with pytest.raises(HubError, match="GitHub cannot be reached"):
+        await hub.call_service("select", "select_option", {"entity_id": eid, "option": "Release"})
+    st = hub.states.get(eid)
+    assert st.state == "Off" and "GitHub cannot be reached" in st.attributes["reason"]
+
+
+# -- the microphone -------------------------------------------------------------------------------------------
+
+async def test_a_dead_microphone_reboots_once_an_hour_and_tells_the_admins(env):
+    hub, _drv, mgr = await _logged_in(env)
+    now = [1_800_000_000.0]
+    mgr.clock = lambda: now[0]
+    mic = _state(hub, "hassmic_microphone")[0].entity_id
+
+    assert await mgr.check_microphone() is False and hub.states.get(mic).state == "off"
+    env.echo.log_lines += stamped(*[DEAD, REOPEN] * 6)
+    assert await mgr.check_microphone() is True
+    st = hub.states.get(mic)
+    assert st.state == "on" and "micAsr delivers nothing" in st.attributes["reason"] and "rebooted" in st.attributes["reason"]
+    assert env.echo.reboots == 1 and mgr.notices == []
+
+    env.echo.log_lines += stamped("hassmic: started", *[DEAD, REOPEN] * 5)  # rebooted, and still deaf
+    now[0] += 300
+    assert await mgr.check_microphone() is True
+    assert env.echo.reboots == 1 and len(mgr.notices) == 1
+    notice = mgr.notices[0]
+    assert notice["user"] == "@admins" and notice["audience"] == "parents" and "cannot hear" in notice["title"]
+    env.echo.log_lines += stamped(DEAD, REOPEN)
+    now[0] += 60
+    await mgr.check_microphone()
+    assert env.echo.reboots == 1 and len(mgr.notices) == 1  # one notice per episode
+
+    env.echo.log_lines += stamped("voice: wake word heard")
+    now[0] += 60
+    assert await mgr.check_microphone() is False and hub.states.get(mic).state == "off"
+
+    env.echo.log_lines += stamped(*[DEAD, REOPEN] * 4)
+    now[0] += 3600
+    assert await mgr.check_microphone() is True and env.echo.reboots == 2  # an hour later: the next reboot
+
+
+async def test_a_hiccup_or_an_old_episode_is_not_a_dead_microphone(env):
+    hub, _drv, mgr = await _logged_in(env)
+    env.echo.log_lines += stamped(DEAD, REOPEN, "voice: listening")
+    assert await mgr.check_microphone() is False
+    env.echo.log_lines += stamped(*[DEAD, REOPEN] * 5)
+    mgr.clock = lambda: 1_800_000_000.0
+    assert await mgr.check_microphone() is True
+    # nothing logged since the last look: a dead stream logs every few seconds, so this one recovered
+    assert await mgr.check_microphone() is False
+    assert hub.states.get(_state(hub, "hassmic_microphone")[0].entity_id).state == "off"
+
+
+async def test_a_reboot_inside_the_hour_is_not_repeated_but_reported(env):
+    _hub, _drv, mgr = await _logged_in(env)
+    mgr.clock = lambda: 1_800_000_000.0
+    mgr.last_reboot = 1_800_000_000.0 - 600  # rebooted for an earlier episode ten minutes ago
+    env.echo.log_lines += stamped(*[DEAD, REOPEN] * 5)
+    assert await mgr.check_microphone() is True
+    assert env.echo.reboots == 0 and len(mgr.notices) == 1 and "within the last hour" in mgr.notices[0]["body"]
+
+
+async def test_without_a_login_the_restart_button_reboots(env):
+    _hub, _drv, mgr = await _logged_in(env)
+    mgr.logged_in = False
+    assert await mgr.reboot() == "Restart button"
+    assert env.clients[-1].buttons == [RESTART.key]
+
+
+def test_mic_dead_needs_repeats_at_the_end():
+    m = hassmic.HassmicManager.mic_dead
+    assert m(["a", DEAD, REOPEN, DEAD, REOPEN, DEAD]) == 3
+    assert m([DEAD, REOPEN, DEAD]) == 0
+    assert m([DEAD, REOPEN] * 3 + ["x"] * 10) == 0
+
+
+# -- the authority and options --------------------------------------------------------------------------------
+
+def test_authority_is_made_once_sealed_and_rotates_down():
+    hub = make_hub("esphome")[0]
+    hub.store = FakeStore()
+    auth = hassmic.Authority.for_hub(hub)
+    assert auth.net_id == hassmic.NET_ID_START and "net_key" not in repr(auth)
+    del hub._hassmic_authority
+    again = hassmic.Authority.for_hub(hub)
+    assert again.net_key == auth.net_key and again.web_sk == auth.web_sk
+    rotated = again.rotate(hub)
+    assert rotated.net_id == hassmic.NET_ID_START - 1 and rotated.net_key != auth.net_key
+    assert rotated.web_pk == auth.web_pk and hub._hassmic_authority is rotated
+
+
+def test_no_store_means_no_network_key():
+    hub = make_hub("esphome")[0]
+    with pytest.raises(hassmic.HassmicError, match="no store"):
+        hassmic.Authority.for_hub(hub)
+
+
+def test_wake_models_option():
+    assert hassmic.wake_models_option({}) == ["hey_jarvis", "okay_nabu", "hey_mycroft", "alexa"]
+    assert hassmic.wake_models_option({"echo_wake_models": "okay_nabu, alexa,okay_nabu"}) == ["okay_nabu", "alexa"]
+    with pytest.raises(hassmic.HassmicError):
+        hassmic.wake_models_option({"echo_wake_models": ["../etc"]})
+
+
+def test_manifest_validation():
+    good = {"type": "micro", "wake_word": "Okay Nabu", "micro": {"probability_cutoff": 0.9, "feature_step_size": 10}}
+    assert hassmic.validate_manifest("okay_nabu", json.dumps(good).encode())["wake_word"] == "Okay Nabu"
+    for bad in ({**good, "type": "nano"}, {**good, "wake_word": ""}, {**good, "micro": {"probability_cutoff": 1.5}},
+                {**good, "micro": {"probability_cutoff": 0.9, "feature_step_size": 20}}, {"wake_word": "x"}):
+        with pytest.raises(hassmic.HassmicError):
+            hassmic.validate_manifest("x", json.dumps(bad).encode())
+
+
+def test_echo_wake_models_is_an_esphome_option():
+    from services.homehub.entries import ENTRY_OPTIONS
+
+    assert "echo_wake_models" in ENTRY_OPTIONS["esphome"]
+
+
+# -- beacons over a real UDP socket ---------------------------------------------------------------------------
+
+def _free_udp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+async def test_the_scanner_probes_and_hears_answers():
+    echo = FakeEcho("echo-den")
+    probes: list[bytes] = []
+
+    class Responder(asyncio.DatagramProtocol):
+        def connection_made(self, transport):
+            self.transport = transport
+
+        def datagram_received(self, data, addr):
+            probes.append(data)
+            self.transport.sendto(echo.beacon(), addr)  # a real Echo broadcasts it to the arbitration port
+
+    loop = asyncio.get_running_loop()
+    transport, _ = await loop.create_datagram_endpoint(Responder, local_addr=("127.0.0.1", 0))
+    try:
+        port = transport.get_extra_info("sockname")[1]
+        scanner = hassmic.BeaconScanner(bind_port=_free_udp_port(), target=("127.0.0.1", port))
+        own = os.urandom(32)
+        found = await scanner.scan(own, timeout=0.3)
+    finally:
+        transport.close()
+    assert hassmic.parse_beacon(probes[0]).net == 0 and hassmic.parse_beacon(probes[0]).pub == own
+    assert [(b.node, b.pub, b.ip) for b in found] == [("echo-den", echo.arb_pk, "127.0.0.1")]
+    assert await scanner.scan(own) == found  # a fresh scan is shared for a few seconds

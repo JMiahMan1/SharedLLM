@@ -296,10 +296,17 @@ async def lifespan(_app):
         await service.stop()
 
 
+#: uvicorn's HTTP parser. httptools (its default when installed) answers a streamed response with
+#: chunked transfer encoding even to an HTTP/1.0 client, which cannot read it: an Echo running
+#: echo-dot-assist fetches a reply's audio with HTTP/1.0, read the chunk size as the start of the WAV
+#: and played nothing (2026-11-23; every streamed reply silent, finished clips with a length fine).
+#: h11 ends such a response by closing the connection, as HTTP/1.0 expects.
+HTTP_PROTOCOL = "h11"
+
 app = build_app(service.runtime, service.auth, admin_hooks={"import": service.do_import})
 app.router.lifespan_context = lifespan
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=os.getenv("HOMEHUB_HOST", "0.0.0.0"), port=PORT,
+    uvicorn.run(app, host=os.getenv("HOMEHUB_HOST", "0.0.0.0"), port=PORT, http=HTTP_PROTOCOL,
                 log_level=os.getenv("LOG_LEVEL", "info").lower(), ws_ping_interval=30)
