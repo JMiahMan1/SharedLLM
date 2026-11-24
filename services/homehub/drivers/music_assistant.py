@@ -56,6 +56,7 @@ from services.homehub.core import (
     ServiceNotFound,
 )
 from services.homehub.drivers.media_common import F, as_list, clamp01, clean, normalize_mac, utc_iso
+from services.homehub.drivers.music_assistant_hass_link import HassLinkWatch
 
 COMMAND_TIMEOUT_S = 30.0
 FAVORITE_SUFFIX = "_favorite_now_playing"
@@ -245,6 +246,8 @@ class MusicAssistantDriver(Driver):
         self._listed = False
         #: player_id -> what its registry work was last done for (``_player_signature``).
         self._seen: dict[str, tuple[Any, ...]] = {}
+        #: Reloads MA's ``hass`` provider (its link back to this hub) when it failed during a HomeHub restart.
+        self.hass_link = HassLinkWatch(self.cmd, self.log)
 
     # -- lifecycle ------------------------------------------------------------------
     async def async_setup(self) -> None:
@@ -262,6 +265,7 @@ class MusicAssistantDriver(Driver):
         await conn.connect()
         self.conn = conn
         await self.refresh()
+        self.hass_link.kick(reconnected=True)
 
     def _on_close(self) -> None:
         self.log.warning("Music Assistant connection to %s closed", self.url)
@@ -276,8 +280,10 @@ class MusicAssistantDriver(Driver):
                 raise DeviceUnavailable(f"Music Assistant reconnect failed: {exc}") from exc
             return
         await self.refresh()
+        self.hass_link.kick()
 
     async def async_unload(self) -> None:
+        await self.hass_link.stop()
         if self.conn is not None:
             await self.conn.close()
 
