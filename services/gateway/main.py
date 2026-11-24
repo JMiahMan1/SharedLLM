@@ -1411,8 +1411,9 @@ def extract_media_request(query: str) -> tuple[str | None, str | None]:
       return None, None
 
     # Capture common "play/listen/resume <content> on <device>" phrasing.
+    # The verb as speech recognition writes it too: "Playin' music", "Put on some hymns".
     match = re.match(
-      r"^(?:play|listen to|listen|resume)\s+(.+?)(?:\s+on\s+(.+))?$",
+      rf"^(?:{fast_media.PLAY_VERB}|listen|resume)[\s,]+(.+?)(?:\s+on\s+(.+))?$",
       cleaned,
       flags=re.IGNORECASE,
     )
@@ -4730,9 +4731,9 @@ async def chat_handler(request: Request, background_tasks=None):
                     })
                     endpoint = "/execute/audiobookshelf"
                     svc_base = EXECUTION_SVC
-                elif media_type is None and fast_media.is_generic_music(
-                        media_query if media_query is not None else fast_media.strip_request_filler(query)):
-                    # "Can you play music?" names nothing: execution plays something from the library.
+                elif media_type is None and (music_ask := fast_media.parse_music_request(
+                        media_query if media_query is not None else query)).kind == "library":
+                    # "Can you play music?" / "Playin' music." names nothing: something from the library.
                     log.info(f"[FastPath] '{query}' names no music; asking for something from the library")
                     exec_payload = {
                         "user_context": creds.model_dump(),
@@ -4740,6 +4741,23 @@ async def chat_handler(request: Request, background_tasks=None):
                         "device_name": device_name,
                         "query": None,
                         "media_type": "music",
+                    }
+                    svc_base = EXECUTION_SVC
+                elif media_type is None:
+                    # Music: the verb, filler and determiners are gone ("some worship music" ->
+                    # "worship music"); a genre is searched as a playlist or radio first, and the
+                    # relaxed words ("worship") are tried once when the first search finds nothing.
+                    clean_q = re.sub(r'\bSaint\b', 'St.', music_ask.query or "", flags=re.IGNORECASE)
+                    log.info(f"[FastPath] music request '{query}' -> {music_ask.kind} '{clean_q}'"
+                             + (f" (then '{music_ask.fallback}')" if music_ask.fallback else ""))
+                    exec_payload = {
+                        "user_context": creds.model_dump(),
+                        "entity_id": resolved_entity,
+                        "device_name": device_name,
+                        "query": clean_q,
+                        "media_content_type": "genre" if music_ask.kind == "genre" else "artist",
+                        "media_type": None,
+                        "fallback_query": music_ask.fallback,
                     }
                     svc_base = EXECUTION_SVC
                 else:

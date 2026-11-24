@@ -94,3 +94,47 @@ def honest_reply(query: str, answer: str, device_runs: list[tuple[str, str]]) ->
         first = re.split(r"(?<=[.!?])\s+", reason, maxsplit=1)[0] if reason else ""
         return f"I couldn't turn that {state}, so nothing was switched. {first}".strip()
     return f"I didn't switch anything just now, so I can't say it's {state}. Please ask me again."
+
+
+# --------------------------------------------------------------------------- actions claimed with no tool
+
+#: The one extra instruction when an answer claims an action no tool did (see ``claims_action``).
+NO_TOOL_NUDGE = ("You did not call any tool, so nothing was done. Call the tool now, "
+                 "or say plainly that you could not do it.")
+
+_ACTION_DONE = (r"play(?:ed|ing)?|start(?:ed|ing)|turn(?:ed|ing)\s+(?:\w+\s+){0,4}?(?:on|off)|switch(?:ed|ing)"
+                r"\s+(?:\w+\s+){0,4}?(?:on|off)|set(?:ting)?|search(?:ed|ing)|look(?:ed|ing)\s+up|read(?:ing)?"
+                r"|open(?:ed|ing)|sen(?:t|ding)|add(?:ed|ing)|sav(?:ed|ing)|queu(?:ed|ing)|put(?:ting)?\s+on")
+#: Leading words an assistant puts before what it did ("Okay, playing ...").
+_ACK = r"(?:(?:ok(?:ay)?|sure(?:\s+thing)?|alright|all\s+right|done|got\s+it|you\s+got\s+it|certainly|absolutely)[,.!]?\s+)*"
+_CLAIMED_ACTION = re.compile(
+    rf"^{_ACK}(?:now\s+)?(?:play(?:ing|ed)|start(?:ing|ed)|turn(?:ing|ed)\s|switch(?:ing|ed)\s|setting\s|search(?:ing|ed)\s"
+    rf"|reading\s|open(?:ing|ed)\s|sending\s|sent\s|adding\s|added\s|saving\s|saved\s|queu(?:ing|ed)\s)"
+    rf"|\bi(?:'ve|\s+have|'m|\s+am)?\s+(?:just\s+|now\s+|also\s+)?(?:{_ACTION_DONE})\b"
+    rf"|\b(?:is|are)\s+now\s+(?:playing|on|off|set)\b|\bnow\s+playing\b"
+    rf"|\b(?:has|have)\s+been\s+(?:played|started|turned|switched|set|sent|added|saved|opened|queued)\b",
+    re.IGNORECASE,
+)
+#: A sentence that asks, offers or says it could not: not a claim that something was done.
+_NOT_A_CLAIM = re.compile(
+    r"\b(?:would\s+you|do\s+you\s+want|want\s+me\s+to|shall\s+i|should\s+i|i\s+can|i\s+could|i\s+would"
+    r"|i(?:'ll|\s+will)|if\s+you(?:'d|\s+would)?\s+like|let\s+me\s+know|can't|cannot|couldn't|could\s+not"
+    r"|unable|not\s+able|didn't|did\s+not|haven't|have\s+not|wasn't|was\s+not|won't|don't|do\s+not"
+    r"|i'd\s+be\s+happy|happy\s+to)\b",
+    re.IGNORECASE,
+)
+
+
+def claims_action(answer: str | None) -> bool:
+    """True when ``answer`` says an action was done ("Playing worship music in the office.", "I searched
+    the web..."), as opposed to asking, offering or saying it could not.
+
+    Word lists only, so it costs nothing; the caller asks the model again only when no tool ran.
+    """
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", (answer or "").strip()):
+        s = sentence.strip(" *-\"'")
+        if not s or s.endswith("?") or _NOT_A_CLAIM.search(s):
+            continue
+        if _CLAIMED_ACTION.search(s):
+            return True
+    return False

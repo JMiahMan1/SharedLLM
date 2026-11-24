@@ -30,7 +30,13 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
-from services.gateway.device_claims import DEVICE_TOOLS, drop_repeated_request, honest_reply
+from services.gateway.device_claims import (
+    DEVICE_TOOLS,
+    NO_TOOL_NUDGE,
+    claims_action,
+    drop_repeated_request,
+    honest_reply,
+)
 from services.gateway.history import get_history
 from services.gateway.intent_engine import is_raven_intent
 from services.gateway.knowledge_map import knowledge_map_for
@@ -2203,6 +2209,9 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     #: Every device tool run in this turn, with its result: what an answer may claim (device_claims).
     device_runs: list[tuple[str, str]] = []
+    #: Tools called in this turn, and whether an answer claiming an action with none was sent back once.
+    tools_called = 0
+    nudged = False
     gate = None
     if speech_stream and chunk_callback and not event_callback:
         from services.gateway.speech_stream import SpeechGate
@@ -2299,6 +2308,19 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 messages.append({"role": "assistant", "content": ans})
                 messages.append({"role": "user", "content": "You must emit your tool call as a JSON object now, or provide a brief final answer."})
                 continue
+
+            # "Playing worship music in the office." with no tool called: nothing was played
+            # (2026-11-23, twice by voice). One more turn to call the tool or say it could not;
+            # a word-list check, so an answer that claims nothing costs no extra call.
+            if not tools_called and not nudged and turn < MAX_TURNS - 1:
+                from services.gateway.llm_providers import strip_thinking_blocks
+                if claims_action(strip_thinking_blocks(clean_text)):
+                    nudged = True
+                    log.warning("[_single_turn_inference] answer claims an action but no tool was called; "
+                                f"asking once more: {clean_text[:160]!r}")
+                    messages.append({"role": "assistant", "content": ans})
+                    messages.append({"role": "user", "content": NO_TOOL_NUDGE})
+                    continue
 
             # No tool call; this is our final answer
             if chunk_callback and turn == 0 and gate is None:
@@ -2432,6 +2454,9 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             tool_data["action"] = action_aliases[raw_action]
 
         action = tool_data.get("action", "").lower().strip()
+        tools_called += 1
+        if gate is not None:
+            gate.tool_called = True
         log.info(f"[_single_turn_inference] Tool call detected: {action}")
         log.info(f"[_single_turn_inference] Raw LLM output: {ans[:500]}")
         log.info(f"[_single_turn_inference] Extracted tool_data: {tool_data}")

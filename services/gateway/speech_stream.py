@@ -28,7 +28,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from services.gateway.device_claims import device_command
+from services.gateway.device_claims import claims_action, device_command
 
 #: Text that starts a tool call or markup the hub must not read out: nothing after it in that turn is spoken.
 _TOOL_MARKERS = ("{", "```", "<tool", "[TOOL", "tool_code", "<|")
@@ -71,6 +71,10 @@ class SpeechGate:
         self._buf = ""
         self._blocked = False
         self._said = False
+        #: Set once a tool runs in this job. Until then a sentence claiming an action ("Playing worship
+        #: music.") is not said: the orchestrator sends such an answer back to the model (NO_TOOL_NUDGE),
+        #: and the hub would otherwise have spoken the false claim already.
+        self.tool_called = False
 
     async def begin_turn(self) -> None:
         """A new model call: what it says replaces nothing already said, and starts unblocked."""
@@ -92,7 +96,7 @@ class SpeechGate:
         sentences = self._take()
         tail = "" if "<think>" in self._buf.lower() else self._buf.strip()
         self._buf = ""
-        if tail and not self._blocked:
+        if tail and not self._blocked and (self.tool_called or not claims_action(tail)):
             sentences.append(tail)
         for sentence in sentences:
             await self.emit({"type": "speech", "text": sentence})
@@ -134,6 +138,8 @@ class SpeechGate:
                     out.append(speakable[:m.end()].strip())
                     start = m.end()
                     break
+        if not self.tool_called and any(claims_action(piece) for piece in out):
+            out, cut = [], 0  # held back with the rest of this turn; the final answer is said whole
         if out:
             self._said = True
         if cut >= 0:
