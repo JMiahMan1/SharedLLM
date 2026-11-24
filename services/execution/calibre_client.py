@@ -337,9 +337,10 @@ class CalibreClient:
 
         The bytes come back through ``/providers/fetch`` because the shelf's
         synthetic ``.txt`` path *is* the file and its bytes are its text. A
-        PDF-only book has no text there, so its text is read by storage from the
-        PDF itself (``/calibre/books/{id}/text``); only a book with no readable
-        file at all is refused.
+        PDF-only book's shelf text is its PDF's pages. When the shelf has no text
+        (a scan, a format storage cannot read) or more than one fetch carries,
+        storage reads the book's own file (``/calibre/books/{id}/text``) and cuts
+        it at ``max_chars``; only a book with no readable file at all is refused.
         """
         row = await self.get_book(book_id=book_id, path=path)
         root = await self._library_path()
@@ -356,13 +357,11 @@ class CalibreClient:
             timeout=FETCH_TIMEOUT_SECONDS,
         )
         status = int(resp.get("status_code") or 0)
-        if status == 502:
+        if status in (413, 502):
             text = await self._file_text(row, max_chars)
             if text is None:
                 raise CalibreLibraryError(_fetch_refusal(status, resp, row))
             return text
-        if status == 413:
-            raise CalibreLibraryError(_fetch_refusal(status, resp, row))
         body = _decode(resp, url)
         encoded = body.get("content_b64")
         if not isinstance(encoded, str) or not encoded:
@@ -381,8 +380,8 @@ class CalibreClient:
         return _bounded_text(text, len(text), max_chars, row)
 
     async def _file_text(self, row: dict[str, Any], max_chars: int) -> tuple[str, dict[str, Any]] | None:
-        """The text of a book the shelf has none for (a PDF), read by storage from the
-        file itself; ``None`` when storage has no reader for any of its files."""
+        """A book's text read by storage from its own file (EPUB, PDF or TXT), cut at
+        ``max_chars``; ``None`` when storage has no reader for any of its files."""
         try:
             ident = int(str(row.get("book_id")))
         except ValueError:
@@ -523,7 +522,7 @@ def _fetch_refusal(status: int, resp: dict[str, Any], row: dict[str, Any]) -> st
         formats = str(row.get("formats") or "no known format")
         return (
             f"{row.get('title') or row.get('path')} has no text to fetch: it "
-            f"is stored only as {formats}, which has no extractor here. It "
+            f"is stored only as {formats}, and no text could be read from it. It "
             "still appears in list and search."
         )
     return (

@@ -181,14 +181,29 @@ def test_extension_case_follows_the_format_not_the_name():
     assert catalog[1]["text_path"].endswith(".epub")
 
 
-def test_a_pdf_only_book_is_metadata_only_not_a_format_we_cannot_read():
+def test_a_pdf_only_book_is_read_from_its_pdf():
     catalog = _parse_catalog(_make_db([
         (1, "Scanned", "A/Scanned (1)", "", None, [1], [], [("PDF", "Scanned - A", 10)]),
     ]), "/Books/Text")
     book = catalog[1]
     assert book["formats"] == ["PDF"]
-    assert book["text_format"] is None
-    assert book["text_path"] is None
+    assert book["text_format"] == "PDF"
+    assert book["text_path"] == "/Books/Text/A/Scanned (1)/Scanned - A.pdf"
+
+
+def test_a_book_with_epub_and_pdf_is_still_read_from_the_epub():
+    catalog = _parse_catalog(_make_db([
+        (1, "Both", "A/Both (1)", "", None, [1], [], [("PDF", "Both - A", 7), ("EPUB", "Both - A", 10)]),
+    ]), "/Books/Text")
+    assert catalog[1]["text_format"] == "EPUB"
+    assert catalog[1]["text_path"].endswith(".epub")
+
+
+def test_a_book_in_a_format_with_no_reader_stays_metadata_only():
+    catalog = _parse_catalog(_make_db([
+        (1, "Atlas", "A/Atlas (1)", "", None, [1], [], [("DJVU", "Atlas - A", 10)]),
+    ]), "/Books/Text")
+    assert catalog[1]["text_format"] is None and catalog[1]["text_path"] is None
 
 
 def test_epub_is_preferred_when_a_book_also_has_docx():
@@ -318,7 +333,7 @@ def test_a_path_without_a_book_id_is_not_treated_as_a_book_locator():
     assert asyncio.run(provider.get_content("/Books/Text/some/other/file.txt")) is None
 
 
-def test_a_pdf_only_book_yields_no_sections_but_still_appears_as_an_entry():
+def test_a_pdf_book_whose_file_is_missing_yields_no_sections_but_still_appears_as_an_entry():
     db = _make_db([(1, "Scanned", "A/Scanned (1)", "", None, [1], [], [("PDF", "Scanned - A", 10)])])
     provider = _provider({"/Books/Text/metadata.db": db})
     assert len(asyncio.run(provider.list_entries("/"))) == 1

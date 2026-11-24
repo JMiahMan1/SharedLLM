@@ -25,11 +25,13 @@ from services.storage.artifacts_api import require_internal_secret
 from services.storage.calibre_writer import MAX_BOOK_BYTES, LibraryWriteError, LibraryWriter
 from services.storage.models import IndexScanRequest, ProviderConfig
 from services.storage.providers import build_provider
+from services.storage.providers_impl.calibre import _TEXT_FORMATS
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/calibre", dependencies=[Depends(require_internal_secret)])
 
-_TEXT_FORMATS = {"EPUB", "AZW3", "MOBI", "FB2"}
+#: Formats whose text Jarvis reads are the shelf provider's own ``_TEXT_FORMATS``
+#: (PDF among them): a book in one of them is searchable by its words, not its title only.
 
 
 def _provider(library_path: str):
@@ -211,7 +213,7 @@ class BookTextQuery(BaseModel):
 
 
 def text_payload(book: dict[str, Any], fmt: str, data: bytes, *, max_chars: int = 20000) -> dict[str, Any]:
-    """A whole book's text, cut at ``max_chars`` (the format with no shelf text, like PDF)."""
+    """A whole book's text, cut at ``max_chars``, read from its own file."""
     try:
         text = book_chapters.read_book_text(data, fmt)
     except book_chapters.ChapterError as exc:
@@ -226,7 +228,7 @@ def text_payload(book: dict[str, Any], fmt: str, data: bytes, *, max_chars: int 
 
 @router.post("/books/{book_id}/text")
 async def book_text(book_id: int, req: BookTextQuery):
-    """A book's whole text from its EPUB, PDF or TXT file (PDF has no text on the shelf)."""
+    """A book's whole text from its EPUB, PDF or TXT file."""
     book, fmt, data = await _book_file(req.library_path, book_id)
     return await asyncio.to_thread(text_payload, book, fmt, data, max_chars=req.max_chars)
 
@@ -280,7 +282,7 @@ def audit(books: list[dict[str, Any]], limit: int = 40) -> dict[str, Any]:
         "no_file": {"count": len(no_file), "books": [_row(b) for b in no_file[:limit]],
                     "why": "A record with no book file: nothing to read."},
         "unreadable": {"count": len(unreadable), "books": [_row(b) for b in unreadable[:limit]],
-                       "why": "Only in a format Jarvis cannot read (usually PDF): only the title is searchable. Converting to EPUB in Calibre fixes it."},
+                       "why": "Only in a format Jarvis cannot read (such as DJVU or CBZ): only the title is searchable. Converting to EPUB or PDF in Calibre fixes it."},
         "untagged": {"count": len(untagged), "books": [_row(b) for b in untagged[:limit]],
                      "why": "No tags, so no topic (fasting, prayer, Bible) can find it."},
         "counts": {"copies": len(copies), "editions": len(editions)},

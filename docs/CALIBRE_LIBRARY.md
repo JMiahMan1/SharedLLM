@@ -101,7 +101,7 @@ BibleVersion + BibleVerse + StudyNote rows in bible.db
 |---|---|---|
 | `StorageProvider.get_bytes(path)` | `services/storage/providers.py` | `get_content` decodes bytes as text, so a PDF or EPUB comes back as a string of replacement characters rather than an error, and anything reading it then works from confident mojibake. `get_bytes` returns the real bytes, and returns `None` for "this provider cannot give you bytes", which is a different answer from "the file was empty" |
 | `NextcloudStorageProvider.get_bytes` | `services/storage/providers_impl/nextcloud.py` | `NextCloudClient.get_file_bytes`, whose own docstring warns about `get_file_content` |
-| `CalibreStorageProvider.get_bytes` | `services/storage/providers_impl/calibre.py` | Returns the shelf entry's extracted text as UTF-8 bytes (the entry *is* a `.txt` document), so `/providers/fetch` works for callers like Raven's `fetch_text`; a book with no extracted text (PDF-only) returns `None`, keeping the honest "cannot read as bytes" refusal |
+| `CalibreStorageProvider.get_bytes` | `services/storage/providers_impl/calibre.py` | Returns the shelf entry's extracted text as UTF-8 bytes (the entry *is* a `.txt` document), so `/providers/fetch` works for callers like Raven's `fetch_text`; a PDF-only book returns its pages' text; a book with no extracted text (a scan with no text layer, a format with no reader) returns `None`, keeping the honest "cannot read as bytes" refusal |
 | `ProviderFetchRequest` | `services/storage/models.py` | `provider`, `path`, `max_bytes` |
 | `POST /providers/fetch` | `services/storage/main.py` | Returns `{"status":"SUCCESS","path","name","size","content_b64"}`, guarded by `X-Internal-Secret` |
 
@@ -196,10 +196,25 @@ library.
   not a book. Books are added and tagged through the librarian (above), never by writing files.
 - **Deleting books.** Jarvis can suggest what the family may not need (the audit) but never deletes;
   removing a book is done by a person in Calibre.
-- **PDF and DOCX text.** Only `EPUB`, `AZW3`, `MOBI` and `FB2` are extracted. A PDF-only book still
-  appears as a searchable metadata row rather than a failure, and nothing pretends its bytes are text.
-  (The Bible importer is the exception, because it has its own PDF reader (see
-  `services/bible/pdf_import.py`), and it refuses a PDF whose chapter counts do not match the canon.)
+- **DOCX and DJVU text.** `EPUB`, `AZW3`, `MOBI`, `FB2` and `PDF` are extracted. A book only in
+  another format still appears as a searchable metadata row rather than a failure, and nothing
+  pretends its bytes are text.
+
+## PDF books
+
+A book stored only as PDF is indexed by its text, through the same reader Nextcloud PDFs use
+(`services/storage/pdf_index.py` over `book_chapters.pdf_sections`):
+
+- **With bookmarks**, one section per chapter, labelled with the bookmark's title (so a search hit
+  cites "The Wilderness", not "chunk 412"). Pages before the first bookmark become one unnumbered
+  "Pages 1-N" section, so nothing is dropped.
+- **Without bookmarks**, one section per page, labelled "Page N".
+- **A scan with no text layer** keeps its metadata row, and the log says "is a PDF with no text
+  layer"; OCR it (`ocrmypdf`) to index its words. OcrRequest can read its pages meanwhile.
+- **Memory is bounded**: pages are extracted one at a time and reading stops at
+  `STORAGE_PDF_MAX_CHARS` characters per book (default 3,000,000, about 1,500 printed pages;
+  a provider's `pdf_max_chars` setting overrides it).
+- A book that has both EPUB and PDF is still read from the EPUB.
 - **Calibre-Web's `/cdb/cmd`.** That endpoint executes arbitrary `calibredb` commands, which is a
   shell on the library. Use `calibredb` deliberately, not by proxy.
 - **Annotations and reading progress.** The schema carries both tables; neither is read yet.
