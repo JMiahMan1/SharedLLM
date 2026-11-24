@@ -223,3 +223,58 @@ def test_chapter_accepts_a_number_or_words():
     assert _request("fetch_text", book_id=7, chapter="four").chapter == "four"
     with pytest.raises(ValueError):
         _request("fetch_text", book_id=7, chapter=4, part=0)
+
+
+# --- A misheard request: the clearly closest book is read, and says so ---
+
+MISHEARD_SHELF = [*SHELF, _entry(14, "John Enderby", "Gilbert Parker")]
+MISHEARD_ROWS = [calibre_client._book_row(e) for e in MISHEARD_SHELF]
+MISHEARD = "Wild and Park by John Elbridge"
+
+
+def test_the_clearly_closest_book_is_read_when_speech_mangled_the_title():
+    # Below the match threshold, but the author is a near-exact match and nothing else is close.
+    assert not match_books(MISHEARD_ROWS, MISHEARD)[0]
+    row = pick_book(MISHEARD_ROWS, MISHEARD)
+    assert row["book_id"] == 7 and row["asked_for"] == MISHEARD
+
+
+def test_a_close_title_is_enough_when_the_author_was_misheard_too():
+    query = "Waking the Deaf by Jon Elder"
+    assert not match_books(MISHEARD_ROWS, query)[0]
+    row = pick_book(MISHEARD_ROWS, query)
+    assert row["book_id"] == 8 and row["asked_for"] == query
+
+
+def test_two_close_candidates_stay_a_refusal_not_a_guess():
+    rows = [calibre_client._book_row(e) for e in [*MISHEARD_SHELF, _entry(15, "Wild at Heart Study Guide", "John Eldredge")]]
+    with pytest.raises(CalibreLibraryError) as caught:
+        pick_book(rows, MISHEARD)
+    assert "no book matching" in str(caught.value)
+
+
+def test_a_poor_closest_book_is_still_refused():
+    with pytest.raises(CalibreLibraryError):
+        pick_book(MISHEARD_ROWS, "Wild Things by Maurice Sendak")
+    with pytest.raises(CalibreLibraryError):
+        pick_book(MISHEARD_ROWS, "Parker Jones by Fred Elbridge")
+
+
+async def test_the_chapter_says_which_book_was_read(monkeypatch):
+    chapter = {**CHAPTER_LIST[5], "part": 1, "parts": 1, "text": "Every man carries a wound."}
+    fake = _install(monkeypatch, _identity(), _shelf(MISHEARD_SHELF), _chapters(chapter))
+    result = await calibre_handler.handle_calibre(_request("fetch_text", query=MISHEARD, chapter="4"))
+    assert result.status == "SUCCESS", result.message
+    assert result.message.startswith(
+        "Read Wild at Heart by John Eldredge (asked for 'Wild and Park by John Elbridge'), chapter 4: The Wound:"
+    )
+    assert result.detail["asked_for"] == MISHEARD and result.detail["book_id"] == 7
+    assert fake.calls[-1]["url"].endswith("/calibre/books/7/chapters")
+
+
+async def test_a_chapter_list_without_sizes_leaves_them_out(monkeypatch):
+    unread = [{**c, "chars": None} for c in CHAPTER_LIST]
+    _install(monkeypatch, _identity(), _shelf(),
+             _resp({"book": {"id": 7}, "format": "PDF", "source": "pdf-outline", "chapters": unread, "chapter": None}))
+    result = await calibre_handler.handle_calibre(_request("chapters", book_id=7))
+    assert "4. The Wound;" in result.message and "chars" not in result.message

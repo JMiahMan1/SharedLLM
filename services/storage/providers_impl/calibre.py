@@ -1,8 +1,10 @@
 # services/storage/providers_impl/calibre.py
+import asyncio
 import logging
 import re
 import sqlite3
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -227,36 +229,111 @@ class CalibreStorageProvider(StorageProvider):
             data, max_chars=self.pdf_max_chars, what=f"Book {book['title']} ({book['id']}) at {remote}"
         )
 
-    async def _load_catalog(self, refresh: bool = False) -> dict[int, dict[str, Any]]:
-        """Fetch and parse ``metadata.db``, at most once per index run.
+    @property
+    def catalog_key(self) -> tuple[str, str, str]:
+        """Which library's catalogue this is: one per Nextcloud login and metadata.db."""
+        return (
+            str(getattr(self.client, "base_url", "") or ""),
+            str(getattr(self.client, "username", "") or ""),
+            self.metadata_db_path,
+        )
 
-        The catalogue is only re-downloaded when ``refresh`` is set, which only
-        ``list_entries`` does -- that is the call that must notice a newly added
-        book. ``get_content`` reuses whatever is loaded, because an index run
-        calls it once per book and re-fetching a multi-megabyte database for each
-        of three thousand books would transfer gigabytes to prove nothing had
-        changed.
+    async def _stat_metadata(self) -> tuple[Any, ...] | None:
+        """metadata.db's ``(etag, size, mtime)``, or ``None`` when it cannot be asked."""
+        stat = getattr(self.client, "stat", None)
+        if not callable(stat):
+            return None
+        try:
+            found = await stat(self.metadata_db_path)
+        except Exception as exc:
+            log.info("Calibre catalogue: stat of %s failed: %s", self.metadata_db_path, exc)
+            return None
+        if not isinstance(found, dict):
+            return None
+        return (found.get("etag"), found.get("size"), found.get("mtime"))
+
+    def _adopt(self, kept: dict[str, Any]) -> dict[int, dict[str, Any]]:
+        if kept["digest"] != self._catalog_digest:
+            self._no_text.clear()  # a new catalogue: books found textless may have changed
+        self._catalog = kept["catalog"]
+        self._catalog_digest = kept["digest"]
+        return self._catalog
+
+    async def _load_catalog(self, refresh: bool = False) -> dict[int, dict[str, Any]]:
+        """Fetch and parse ``metadata.db``, only when it changed.
+
+        Without ``refresh`` whatever is loaded is reused: an index run calls
+        ``get_content`` once per book, and re-fetching a multi-megabyte database
+        for each of three thousand books would transfer gigabytes to prove nothing
+        had changed. With ``refresh`` (``list_entries``, the librarian routes)
+        metadata.db is checked, not downloaded: a PROPFIND for its ETag, size and
+        modification time, at most every ``CALIBRE_CATALOG_CHECK_S`` seconds, and
+        the download and parse happen only when one of them changed. The parsed
+        catalogue is kept per library (``_CATALOGS``), so a provider built after
+        another expired does not download it again either. A client that cannot
+        stat (or a stat that fails) downloads every time, as before, and the
+        digest still spares the parse.
         """
         if self._catalog and not refresh:
             return self._catalog
+        key = self.catalog_key
+        kept = _CATALOGS.get(key)
+        if kept is not None and kept["signature"] is not None and \
+                time.monotonic() - kept["checked_at"] < _catalog_check_s():
+            return self._adopt(kept)
+        started = time.perf_counter()
+        signature = await self._stat_metadata()
+        stat_s = time.perf_counter() - started
+        if kept is not None and signature is not None and signature == kept["signature"]:
+            kept["checked_at"] = time.monotonic()
+            log.debug("Calibre catalogue: %s unchanged (stat %.2f s)", self.metadata_db_path, stat_s)
+            return self._adopt(kept)
         data = await self.client.get_file_bytes(self.metadata_db_path, timeout=self.download_timeout)
+        download_s = time.perf_counter() - started - stat_s
         if not data:
             if self._catalog:
                 return self._catalog
+            if kept is not None:
+                return self._adopt(kept)
             raise CalibreLibraryError(
                 f"Could not download the Calibre metadata database at {self.metadata_db_path}. "
                 "Check the library_path setting and the Nextcloud credentials."
             )
         digest = _digest(data)
+        if kept is not None and digest == kept["digest"]:
+            kept.update(signature=signature, checked_at=time.monotonic())
+            log.info("Calibre catalogue: %s downloaded again but unchanged (stat %.2f s, download %.2f s, %.1f MB)",
+                     self.metadata_db_path, stat_s, download_s, len(data) / 1e6)
+            return self._adopt(kept)
         if digest == self._catalog_digest and self._catalog:
-            return self._catalog
-        self._catalog = _parse_catalog(data, self.library_path)
-        self._catalog_digest = digest
-        self._no_text.clear()
-        log.info(
-            "Calibre catalogue: %d books from %s", len(self._catalog), self.metadata_db_path
-        )
-        return self._catalog
+            catalog = self._catalog
+        else:
+            parse_started = time.perf_counter()
+            catalog = await asyncio.to_thread(_parse_catalog, data, self.library_path)
+            log.info(
+                "Calibre catalogue: %d books from %s (stat %.2f s, download %.2f s, %.1f MB, parse %.2f s)",
+                len(catalog), self.metadata_db_path, stat_s, download_s, len(data) / 1e6,
+                time.perf_counter() - parse_started,
+            )
+        kept = {"signature": signature, "digest": digest, "catalog": catalog, "checked_at": time.monotonic()}
+        _CATALOGS[key] = kept
+        return self._adopt(kept)
+
+
+#: Parsed catalogues by ``catalog_key``: ``{signature, digest, catalog, checked_at}``.
+_CATALOGS: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+
+def _catalog_check_s() -> float:
+    from services.config import CALIBRE_CATALOG_CHECK_S
+
+    return float(CALIBRE_CATALOG_CHECK_S)
+
+
+def forget_catalog_checks() -> None:
+    """Make the next catalogue read check metadata.db now (after a write to it)."""
+    for kept in _CATALOGS.values():
+        kept["checked_at"] = 0.0
 
 
 def _digest(data: bytes) -> str:

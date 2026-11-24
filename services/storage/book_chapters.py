@@ -18,6 +18,7 @@ from __future__ import annotations
 import io
 import posixpath
 import re
+import threading
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
@@ -93,6 +94,9 @@ class BookChapter:
     number: int | None = None
     title: str = ""
     matter: bool = False
+    #: ``(first, end)`` page indexes of a PDF chapter whose text is read only when
+    #: asked for (``OpenedBook.chapter_text``); ``None`` once read or for other formats.
+    pages: tuple[int, int] | None = None
 
     def row(self, index: int) -> dict:
         return {
@@ -101,7 +105,9 @@ class BookChapter:
             "title": self.title or self.label,
             "label": self.label,
             "front_matter": self.matter,
-            "chars": len(self.text),
+            # Unknown (None) for a PDF chapter not read yet: counting it would mean
+            # extracting every page of the book to answer for one chapter.
+            "chars": None if self.pages is not None else len(self.text),
         }
 
 
@@ -599,6 +605,85 @@ def pdf_sections(data: bytes, max_chars: int | None = None) -> tuple[str, list[B
         if text.strip()
     ]
     return "pdf-pages", sections
+
+
+class OpenedBook:
+    """A book opened once and kept between requests (``book_cache``).
+
+    EPUB and TXT books are parsed whole (their chapters are cheap to cut once the
+    file is unzipped). A PDF with bookmarks is not: its outline gives the chapters
+    and their pages, and a chapter's pages are extracted only when that chapter is
+    read, each page once. Extracting every page of a 250-page PDF to answer for one
+    chapter was most of a 27 s chapter read. A PDF without bookmarks still needs all
+    its text to find the headings, which is then kept.
+    """
+
+    def __init__(self, fmt: str, source: str, chapters: list[BookChapter], *, reader: object = None,
+                 page_count: int = 0, file_bytes: int = 0) -> None:
+        self.fmt = fmt.upper()
+        self.source = source
+        self.chapters = chapters
+        self.page_count = page_count
+        self.file_bytes = file_bytes
+        self._reader = reader
+        self._pages: dict[int, str] = {}
+        self._lock = threading.Lock()
+        #: Pages extracted so far (each page is extracted at most once).
+        self.pages_extracted = 0
+
+    def _page(self, index: int) -> str:
+        if index not in self._pages:
+            try:
+                text = self._reader.pages[index].extract_text() or ""  # type: ignore[attr-defined]
+            except Exception:
+                text = ""
+            self._pages[index] = text
+            self.pages_extracted += 1
+        return self._pages[index]
+
+    def chapter_text(self, index: int) -> str:
+        """The chapter's text, reading its pages now if they have not been read."""
+        chapter = self.chapters[index]
+        if chapter.pages is None:
+            return chapter.text
+        with self._lock:
+            if chapter.pages is not None:
+                first, end = chapter.pages
+                chapter.text = "\n\n".join(t.strip() for t in (self._page(i) for i in range(first, end)) if t.strip())
+                chapter.pages = None
+        return chapter.text
+
+    def whole_text(self) -> str:
+        """The whole book's text (a PDF's pages in order, an EPUB's chapters)."""
+        if self.fmt == "PDF" and self._reader is not None:
+            with self._lock:
+                pages = [self._page(i).strip() for i in range(self.page_count)]
+            return "\n\n".join(p for p in pages if p)
+        return "\n\n".join(c.text.strip() for c in self.chapters if c.text.strip())
+
+    def size_bytes(self) -> int:
+        """What this costs in memory, roughly: the PDF kept for its reader, plus the text held."""
+        text = sum(len(c.text) for c in self.chapters) + sum(len(t) for t in self._pages.values())
+        return (self.file_bytes if self._reader is not None else 0) + text
+
+
+def open_book(data: bytes, fmt: str) -> OpenedBook:
+    """Open a book file for chapter reads; a PDF's chapter text is read lazily."""
+    fmt = fmt.upper()
+    if fmt != "PDF":
+        source, chapters = read_book_chapters(data, fmt)
+        return OpenedBook(fmt, source, chapters)
+    head = read_pdf_pages(data, max_chars=0)  # opens (and decrypts) it, reads no page
+    starts = [s for s in _outline_starts(head.reader) if 0 <= s[0] < head.page_count]
+    if len(starts) < 2:
+        doc = read_pdf_pages(data)
+        return OpenedBook(fmt, "headings", text_chapters("\n\n".join(doc.pages)), page_count=doc.page_count)
+    chapters: list[BookChapter] = []
+    for i, (page, label) in enumerate(starts):
+        end = max(starts[i + 1][0] if i + 1 < len(starts) else head.page_count, page + 1)
+        chapters.append(BookChapter(label=label, pages=(page, end)))
+    return OpenedBook(fmt, "pdf-outline", number_chapters(chapters), reader=head.reader,
+                      page_count=head.page_count, file_bytes=len(data))
 
 
 # --- Plain text ---

@@ -231,3 +231,20 @@ async def test_the_chapter_rides_with_the_question_and_the_system_message_is_unc
     assert block not in calls[1][0]["content"]
     assert block in calls[1][-1]["content"]
     assert calls[1][-1]["content"].index(block) < calls[1][-1]["content"].index("[Question]")
+
+
+def test_the_prefetch_waits_long_enough_for_a_first_read():
+    # A first read downloads and opens the book; the voice satellite holds meanwhile.
+    assert orchestrator.CHAPTER_PREFETCH_TIMEOUT_S == 60.0
+
+
+async def test_a_closest_book_read_for_a_misheard_name_is_named(monkeypatch):
+    read = _chapter_ok()
+    read["detail"]["asked_for"] = "Quiet Harper Lights by Anne Fakewrite"
+    read["message"] = ("Read Quiet Harbor Lights by Ann Fakewright (asked for 'Quiet Harper Lights by Anne "
+                       f"Fakewrite'), chapter 4: The Keeper:\n\n{CHAPTER_TEXT}")
+    seen = await _ask(monkeypatch, _Services(calibre=read))
+    chapter = seen["book_chapter"]
+    assert chapter.startswith("[BOOK CHAPTER, READ FROM YOUR LIBRARY: Quiet Harbor Lights by Ann Fakewright")
+    assert "named 'Quiet Harper Lights by Anne Fakewrite'" in chapter and "Say at the start which book" in chapter
+    assert CHAPTER_TEXT.strip() in chapter

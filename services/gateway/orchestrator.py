@@ -753,7 +753,10 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
 LIBRARY_NOT_INDEXED_HEADER = "LIBRARY: THE BOOK LIBRARY WAS SEARCHED FOR THIS QUESTION"
 
 #: How long the gateway waits for a named chapter before the model runs without it.
-CHAPTER_PREFETCH_TIMEOUT_S = 20.0
+#: A first read of a book downloads and opens it (tens of seconds for a big PDF); the
+#: voice satellite plays a hold line and music meanwhile, inside the household's
+#: 180 s voice limit. A repeat read of the same book is served from storage's cache.
+CHAPTER_PREFETCH_TIMEOUT_S = 60.0
 
 
 class ChapterPrefetch:
@@ -851,8 +854,16 @@ async def _prefetch_named_chapter(ref: "library_names.ChapterRef", creds: Resolv
             f"\n\n[This is part {int(chapter.get('part') or 1)} of {parts} of the chapter; "
             "CalibreRequest fetch_text with the same chapter and part=2 reads the next.]"
         )
+    asked = str(detail.get("asked_for") or "").strip()
+    # The library read the closest book to a misheard name; the person must hear which.
+    closest = (
+        f"The question named '{asked}'; the library has no book by that name, so it read the "
+        f"closest one, {title}{by}. Say at the start which book you read.\n"
+        if asked else ""
+    )
     block = (
         f"[BOOK CHAPTER, READ FROM YOUR LIBRARY: {title}{by}, {label}]\n"
+        f"{closest}"
         "This is the chapter the question asks for, read from the library just now. Answer from "
         "it; do not fetch it again.\n\n"
         f"{text.strip()}\n"

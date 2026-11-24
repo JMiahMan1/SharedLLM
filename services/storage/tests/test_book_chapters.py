@@ -265,11 +265,11 @@ H = {"X-Internal-Secret": "test-secret"}
 
 
 def _fake_file(monkeypatch, data: bytes, fmt: str = "EPUB"):
-    async def book_file(library_path, book_id):
+    async def opened_book(library_path, book_id):
         assert book_id == 7
-        return BOOK, fmt, data
+        return BOOK, fmt, data  # the payloads open raw bytes themselves
 
-    monkeypatch.setattr(library_api, "_book_file", book_file)
+    monkeypatch.setattr(library_api, "_opened_book", opened_book)
 
 
 def test_the_route_lists_chapters_without_text(monkeypatch):

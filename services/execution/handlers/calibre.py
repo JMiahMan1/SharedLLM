@@ -158,6 +158,18 @@ def _book_name(book: dict) -> str:
     return f"{book.get('title') or 'Book'} by {_author_of(book) or 'unknown author'}"
 
 
+def _read_as(book: dict) -> str:
+    """The book's name, and, when the closest book stood in for what was asked, both.
+
+    "Read Wild at Heart by John Eldredge (asked for 'Wild and Park by John Elbridge')"
+    lets the answer tell the person which book was actually read.
+    """
+    asked = str(book.get("asked_for") or "").strip()
+    if not asked:
+        return _book_name(book)
+    return f"Read {_book_name(book)} (asked for '{asked}')"
+
+
 def _chapter_name(chapter: dict) -> str:
     title = str(chapter.get("title") or chapter.get("label") or "").strip()
     if chapter.get("number") is None:
@@ -177,13 +189,16 @@ async def _chapters(client: CalibreClient, req: CalibreRequest) -> ExecutionResu
         "epub-ncx": "the book's table of contents",
         "pdf-outline": "the PDF's bookmarks",
     }.get(str(body.get("source")), "headings in the text")
-    parts = [f"{_book_name(row)} (id {row.get('book_id')}) has {len(numbered)} chapters, from {source}."]
+    parts = [f"{_read_as(row)} (id {row.get('book_id')}) has {len(numbered)} chapters, from {source}."]
     if before:
         parts.append("Before chapter 1 (not numbered): " + ", ".join(str(c.get("title")) for c in before) + ".")
     if numbered:
         parts.append(
             "Chapters: "
-            + "; ".join(f"{c['number']}. {c.get('title')} (~{int(c.get('chars') or 0):,} chars)" for c in numbered)
+            + "; ".join(
+                f"{c['number']}. {c.get('title')}" + (f" (~{int(c['chars']):,} chars)" if c.get("chars") is not None else "")
+                for c in numbered
+            )
             + "."
         )
     if after:
@@ -192,7 +207,8 @@ async def _chapters(client: CalibreClient, req: CalibreRequest) -> ExecutionResu
     return ExecutionResult.ok(
         " ".join(parts),
         service=SERVICE,
-        detail={"book_id": row.get("book_id"), "title": row.get("title"), "source": body.get("source"), "chapters": rows},
+        detail={"book_id": row.get("book_id"), "title": row.get("title"), "source": body.get("source"), "chapters": rows,
+                **({"asked_for": row["asked_for"]} if row.get("asked_for") else {})},
     )
 
 
@@ -212,7 +228,7 @@ async def _fetch_chapter(client: CalibreClient, req: CalibreRequest) -> Executio
         where = f" (part {part} of {total}{more})"
     else:
         where = ""
-    header = f"{_book_name(row)}, {_chapter_name(chapter)}{where}:\n\n"
+    header = f"{_read_as(row)}, {_chapter_name(chapter)}{where}:\n\n"
     return ExecutionResult.ok(
         header + str(chapter.get("text") or ""),
         service=SERVICE,
@@ -221,6 +237,7 @@ async def _fetch_chapter(client: CalibreClient, req: CalibreRequest) -> Executio
             "title": row.get("title"),
             "author": _author_of(row),
             "chapter": {k: chapter.get(k) for k in ("index", "number", "title", "front_matter", "chars", "part", "parts")},
+            **({"asked_for": row["asked_for"]} if row.get("asked_for") else {}),
         },
     )
 
@@ -229,17 +246,21 @@ async def _fetch_text(client: CalibreClient, req: CalibreRequest) -> ExecutionRe
     if req.chapter is not None and str(req.chapter).strip():
         return await _fetch_chapter(client, req)
     book_id = req.book_id
+    asked = ""
     if book_id is None and not req.path and req.query:
-        book_id = (await client.resolve_book(query=req.query)).get("book_id")
+        found = await client.resolve_book(query=req.query)
+        book_id, asked = found.get("book_id"), str(found.get("asked_for") or "")
     text, book = await client.fetch_text(
         book_id=book_id, path=req.path, max_chars=req.max_chars
     )
     total = int(book.get("total_chars") or 0)
     truncation = ", truncated" if book.get("truncated") else ""
     header = (
-        f"{book.get('title') or 'Book'} by "
+        ("Read " if asked else "")
+        + f"{book.get('title') or 'Book'} by "
         f"{book.get('author') or book.get('authors') or 'unknown author'} "
-        f"({total:,} characters{truncation}):\n\n"
+        + (f"(asked for '{asked}') " if asked else "")
+        + f"({total:,} characters{truncation}):\n\n"
     )
     return ExecutionResult.ok(
         header + text,
@@ -249,6 +270,7 @@ async def _fetch_text(client: CalibreClient, req: CalibreRequest) -> ExecutionRe
             "title": book.get("title"),
             "total_chars": total,
             "truncated": bool(book.get("truncated")),
+            **({"asked_for": asked} if asked else {}),
         },
     )
 

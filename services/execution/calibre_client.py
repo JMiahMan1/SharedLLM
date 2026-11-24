@@ -49,6 +49,15 @@ FETCH_MAX_BYTES = 4 * 1024 * 1024
 MATCH_THRESHOLD = 0.7
 #: Two books within this score of each other are an honest tie: ask, do not guess.
 AMBIGUOUS_MARGIN = 0.05
+#: With no book at the threshold, the closest is still read when it is clearly the one
+#: meant (speech recognition heard "Wild and Park by John Elbridge"): it scores at least
+#: this, beats the next book by ``CLOSEST_MARGIN``, and its author (similarity ratio at
+#: least ``CLOSEST_AUTHOR_RATIO``) or its title (``CLOSEST_TITLE_RATIO``) matches what was
+#: asked. The answer then says which book was read.
+CLOSEST_MIN_SCORE = 0.5
+CLOSEST_MARGIN = 0.15
+CLOSEST_AUTHOR_RATIO = 0.8
+CLOSEST_TITLE_RATIO = 0.7
 #: Words that carry no identity in a title or a request.
 _STOPWORDS = frozenset({"the", "a", "an", "at", "of", "by", "and", "in", "on", "to", "for", "book", "books"})
 
@@ -302,7 +311,9 @@ class CalibreClient:
         max_chars: int = 60000,
     ) -> dict[str, Any]:
         """The book's chapter list and, when ``chapter`` is named, that chapter (one part)."""
+        started = time.perf_counter()
         row = await self.resolve_book(book_id=book_id, path=path, query=query)
+        resolved_s = time.perf_counter() - started
         try:
             ident = int(str(row.get("book_id")))
         except ValueError as exc:
@@ -320,6 +331,8 @@ class CalibreClient:
             headers=self._headers(),
             timeout=FETCH_TIMEOUT_SECONDS,
         )
+        log.info("[calibre] book %s chapter %r: resolved in %.2f s, storage answered %s in %.2f s",
+                 ident, chapter, resolved_s, resp.get("status_code"), time.perf_counter() - started - resolved_s)
         status = int(resp.get("status_code") or 0)
         if status in (404, 422):
             detail = (resp.get("text") or "").strip()
@@ -491,6 +504,40 @@ def match_books(rows: list[dict[str, Any]], query: str) -> tuple[list[dict[str, 
     return matches, closest
 
 
+def _phrase_ratio(asked: str, actual: str) -> float:
+    a, b = " ".join(_norm_words(asked)), " ".join(_norm_words(actual))
+    return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+
+
+def _row_authors(row: dict[str, Any]) -> list[str]:
+    authors = row.get("authors") if isinstance(row.get("authors"), list) else [row.get("authors") or ""]
+    return [str(a) for a in [row.get("author"), *authors] if str(a or "").strip()]
+
+
+def clear_closest(rows: list[dict[str, Any]], query: str) -> dict[str, Any] | None:
+    """The closest book when it is clearly the one meant, else ``None`` (see ``CLOSEST_*``).
+
+    Two books close to each other are never chosen between: that stays a question.
+    """
+    scored = sorted(((book_score(row, query), i, row) for i, row in enumerate(rows)), key=lambda t: (-t[0], t[1]))
+    if not scored or scored[0][0] < CLOSEST_MIN_SCORE:
+        return None
+    top, _i, best = scored[0]
+    second = next((score for score, _j, row in scored[1:] if not _same_book(row, best)), 0.0)
+    if top - second < CLOSEST_MARGIN:
+        return None
+    asked_title, by, asked_author = str(query).rpartition(" by ")
+    if not by:
+        asked_title, asked_author = str(query), ""
+    author_ratio = max((_phrase_ratio(asked_author, a) for a in _row_authors(best)), default=0.0) if asked_author else 0.0
+    title_ratio = _phrase_ratio(asked_title, str(best.get("title") or ""))
+    if author_ratio >= CLOSEST_AUTHOR_RATIO or title_ratio >= CLOSEST_TITLE_RATIO:
+        log.info("[calibre] %r read as the closest book %s (score %.2f, next %.2f, author %.2f, title %.2f)",
+                 query, _named(best), top, second, author_ratio, title_ratio)
+        return best
+    return None
+
+
 def _named(row: dict[str, Any]) -> str:
     author = str(row.get("author") or row.get("authors") or "").strip() or "unknown author"
     return f"{row.get('title') or 'Untitled'} by {author} (id {row.get('book_id')})"
@@ -510,6 +557,9 @@ def pick_book(rows: list[dict[str, Any]], query: str) -> dict[str, Any]:
             "with its book_id.",
             matches[:5],
         )
+    nearest = clear_closest(rows, query)
+    if nearest is not None:
+        return {**nearest, "asked_for": str(query).strip()}
     near = "; ".join(_named(row) for row in closest)
     raise CalibreLibraryError(
         f"The library has no book matching {query!r}." + (f" The closest titles are: {near}." if near else "")

@@ -13,6 +13,7 @@ import contextlib
 import json
 import logging
 import re
+import time
 from collections import defaultdict
 from contextlib import suppress
 from typing import Any
@@ -20,12 +21,12 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from services.storage import book_chapters, book_lookup
+from services.storage import book_cache, book_chapters, book_lookup
 from services.storage.artifacts_api import require_internal_secret
 from services.storage.calibre_writer import MAX_BOOK_BYTES, LibraryWriteError, LibraryWriter
 from services.storage.models import IndexScanRequest, ProviderConfig
 from services.storage.providers import build_provider
-from services.storage.providers_impl.calibre import _TEXT_FORMATS
+from services.storage.providers_impl.calibre import _TEXT_FORMATS, forget_catalog_checks
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/calibre", dependencies=[Depends(require_internal_secret)])
@@ -42,14 +43,15 @@ def _provider(library_path: str):
 
 @contextlib.asynccontextmanager
 async def _opened(library_path: str):
-    """The library's provider, closed afterwards: each request builds one, and its
-    Nextcloud session was left for the garbage collector ("Unclosed client
-    session" on every library request)."""
-    provider = _provider(library_path)
-    try:
-        yield provider
-    finally:
-        await provider.close()
+    """The library's provider, kept open between requests.
+
+    ``build_provider`` keeps one provider per login and library, and its
+    Nextcloud session with it: closing it after each request (as this once did,
+    when every request built its own) made the next request open a new
+    connection and have Nextcloud check the password again, seconds per call.
+    ``build_provider`` closes a provider when it drops it.
+    """
+    yield _provider(library_path)
 
 
 async def _catalog(library_path: str) -> dict[int, dict[str, Any]]:
@@ -146,65 +148,138 @@ class ChapterQuery(BaseModel):
 _CHAPTER_FORMATS = ("EPUB", "PDF", "TXT")
 
 
-async def _book_file(library_path: str, book_id: int) -> tuple[dict[str, Any], str, bytes]:
-    """The book's row, the format chosen for chapters, and that file's bytes."""
+def _locate(book: dict[str, Any] | None, book_id: int) -> tuple[str, str]:
+    """The format chosen for chapters and that file's path, or the refusal."""
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"No book with id {book_id} in the library.")
+    files = {f["format"]: f["path"] for f in _files(book)}
+    fmt = next((f for f in _CHAPTER_FORMATS if f in files), None)
+    if fmt is None:
+        stored = ", ".join(book.get("formats") or []) or "no file"
+        raise HTTPException(
+            status_code=422,
+            detail=f"{book['title']} is stored only as {stored}, which has no chapter reader here. "
+            "Converting it to EPUB in Calibre makes its chapters readable.",
+        )
+    return fmt, files[fmt]
+
+
+async def _file_signature(provider: Any, book: dict[str, Any], path: str) -> tuple[Any, ...]:
+    """What says the book file is unchanged: its WebDAV ETag, size and mtime.
+
+    When the server cannot be asked, the catalogue's own record of the file
+    (Calibre rewrites metadata.db whenever it replaces a format) stands in.
+    """
+    stat = getattr(provider.client, "stat", None)
+    found = None
+    if callable(stat):
+        with suppress(Exception):
+            found = await stat(path)
+    if isinstance(found, dict) and any(found.values()):
+        return ("dav", found.get("etag"), found.get("size"), found.get("mtime"))
+    size = next((f.get("size") for f in _files(book) if f["path"] == path), None)
+    return ("catalogue", size, getattr(provider, "_catalog_digest", None))
+
+
+async def _opened_book(library_path: str, book_id: int) -> tuple[dict[str, Any], str, book_chapters.OpenedBook]:
+    """The book's row, its chapter format, and the book opened for reading, from the cache when unchanged.
+
+    Logs one line per call with where the time went (catalogue, stat, download,
+    open), which is how a slow chapter read is diagnosed.
+    """
+    timings: dict[str, float] = {}
+    started = time.perf_counter()
     try:
         async with _opened(library_path) as provider:
             book = (await provider._load_catalog(refresh=True)).get(book_id)
-            if book is None:
-                raise HTTPException(status_code=404, detail=f"No book with id {book_id} in the library.")
-            files = {f["format"]: f["path"] for f in _files(book)}
-            fmt = next((f for f in _CHAPTER_FORMATS if f in files), None)
-            if fmt is None:
-                stored = ", ".join(book.get("formats") or []) or "no file"
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"{book['title']} is stored only as {stored}, which has no chapter reader here. "
-                    "Converting it to EPUB in Calibre makes its chapters readable.",
-                )
-            data = await provider.client.get_file_bytes(files[fmt], timeout=provider.download_timeout)
+            timings["catalogue"] = time.perf_counter() - started
+            fmt, path = _locate(book, book_id)
+            mark = time.perf_counter()
+            signature = await _file_signature(provider, book, path)
+            timings["stat"] = time.perf_counter() - mark
+            key = (getattr(provider, "catalog_key", library_path), book_id, path)
+
+            async def load() -> tuple[book_chapters.OpenedBook, int]:
+                mark = time.perf_counter()
+                data = await provider.client.get_file_bytes(path, timeout=provider.download_timeout)
+                timings["download"] = time.perf_counter() - mark
+                if not data:
+                    raise HTTPException(status_code=502, detail=f"The {fmt} file of {book['title']} could not be downloaded.")
+                timings["mb"] = len(data) / 1e6
+                mark = time.perf_counter()
+                try:
+                    opened = await asyncio.to_thread(book_chapters.open_book, data, fmt)
+                except book_chapters.ChapterError as exc:
+                    raise HTTPException(status_code=422, detail=f"{book['title']}: {exc}") from exc
+                timings["open"] = time.perf_counter() - mark
+                return opened, opened.size_bytes()
+
+            opened, cached = await book_cache.BOOKS.get_or_load(key, signature, load)
     except HTTPException:
         raise
     except Exception as exc:
         log.warning("[library] book %s file read failed: %s", book_id, exc)
         raise HTTPException(status_code=502, detail="The book file could not be read from the library.") from exc
-    if not data:
-        raise HTTPException(status_code=502, detail=f"The {fmt} file of {book['title']} could not be downloaded.")
-    return book, fmt, data
+    log.info(
+        "[library] book %s (%s): %s; %s, total %.2f s",
+        book_id, fmt, "cached" if cached else "downloaded and opened",
+        ", ".join(f"{k} {v:.1f} MB" if k == "mb" else f"{k} {v:.2f} s" for k, v in timings.items()),
+        time.perf_counter() - started,
+    )
+    return book, fmt, opened
 
 
-def chapter_payload(book: dict[str, Any], fmt: str, data: bytes, *, chapter: str = "", part: int = 1,
-                    max_chars: int = book_chapters.DEFAULT_PART_CHARS) -> dict[str, Any]:
+def _as_opened(fmt: str, data: bytes | book_chapters.OpenedBook) -> book_chapters.OpenedBook:
+    return data if isinstance(data, book_chapters.OpenedBook) else book_chapters.open_book(data, fmt)
+
+
+def chapter_payload(book: dict[str, Any], fmt: str, data: bytes | book_chapters.OpenedBook, *, chapter: str = "",
+                    part: int = 1, max_chars: int = book_chapters.DEFAULT_PART_CHARS) -> dict[str, Any]:
     """The book's contents and, when ``chapter`` is named, that chapter's text (one part of it)."""
     try:
-        source, chapters = book_chapters.read_book_chapters(data, fmt)
+        opened = _as_opened(fmt, data)
     except book_chapters.ChapterError as exc:
         raise HTTPException(status_code=422, detail=f"{book['title']}: {exc}") from exc
+    chapters = opened.chapters
     out: dict[str, Any] = {
-        "book": _row(book), "format": fmt, "source": source,
-        "chapters": [c.row(i) for i, c in enumerate(chapters)], "chapter": None,
+        "book": _row(book), "format": fmt, "source": opened.source, "chapter": None,
     }
     if not str(chapter or "").strip():
+        out["chapters"] = [c.row(i) for i, c in enumerate(chapters)]
         return out
     try:
         index = book_chapters.find_chapter(chapters, chapter)
     except book_chapters.ChapterError as exc:
         raise HTTPException(status_code=404, detail=f"{book['title']}: {exc}") from exc
+    started = time.perf_counter()
+    text = opened.chapter_text(index)
+    extract_s = time.perf_counter() - started
     found = chapters[index]
-    parts = book_chapters.split_parts(found.text, max_chars)
+    out["chapters"] = [c.row(i) for i, c in enumerate(chapters)]
+    parts = book_chapters.split_parts(text, max_chars)
     if part > len(parts):
         raise HTTPException(status_code=422, detail=f"{book['title']}, {found.title}: there are only {len(parts)} parts.")
     out["chapter"] = {**found.row(index), "part": part, "parts": len(parts), "text": parts[part - 1]}
+    log.info("[library] book %s chapter %r: extracted in %.2f s (%d chars, %d pages read so far)",
+             book.get("id"), chapter, extract_s, len(text), opened.pages_extracted)
     return out
+
+
+def _resize_cached(opened: book_chapters.OpenedBook) -> None:
+    """A PDF chapter just read grew its cache entry; keep the byte budget honest."""
+    if isinstance(opened, book_chapters.OpenedBook):
+        book_cache.BOOKS.resize_value(opened, opened.size_bytes())
 
 
 @router.post("/books/{book_id}/chapters")
 async def book_chapter_list(book_id: int, req: ChapterQuery):
     """A book's chapters (from its contents, outline or headings), and one chapter's text if named."""
-    book, fmt, data = await _book_file(req.library_path, book_id)
-    return await asyncio.to_thread(
-        chapter_payload, book, fmt, data, chapter=req.chapter, part=req.part, max_chars=req.max_chars,
+    book, fmt, opened = await _opened_book(req.library_path, book_id)
+    out = await asyncio.to_thread(
+        chapter_payload, book, fmt, opened, chapter=req.chapter, part=req.part, max_chars=req.max_chars,
     )
+    _resize_cached(opened)
+    return out
 
 
 class BookTextQuery(BaseModel):
@@ -212,10 +287,12 @@ class BookTextQuery(BaseModel):
     max_chars: int = Field(default=20000, ge=500, le=200000)
 
 
-def text_payload(book: dict[str, Any], fmt: str, data: bytes, *, max_chars: int = 20000) -> dict[str, Any]:
+def text_payload(book: dict[str, Any], fmt: str, data: bytes | book_chapters.OpenedBook, *,
+                 max_chars: int = 20000) -> dict[str, Any]:
     """A whole book's text, cut at ``max_chars``, read from its own file."""
     try:
-        text = book_chapters.read_book_text(data, fmt)
+        text = (data.whole_text() if isinstance(data, book_chapters.OpenedBook)
+                else book_chapters.read_book_text(data, fmt))
     except book_chapters.ChapterError as exc:
         raise HTTPException(status_code=422, detail=f"{book['title']}: {exc}") from exc
     if not text.strip():
@@ -229,8 +306,10 @@ def text_payload(book: dict[str, Any], fmt: str, data: bytes, *, max_chars: int 
 @router.post("/books/{book_id}/text")
 async def book_text(book_id: int, req: BookTextQuery):
     """A book's whole text from its EPUB, PDF or TXT file."""
-    book, fmt, data = await _book_file(req.library_path, book_id)
-    return await asyncio.to_thread(text_payload, book, fmt, data, max_chars=req.max_chars)
+    book, fmt, opened = await _opened_book(req.library_path, book_id)
+    out = await asyncio.to_thread(text_payload, book, fmt, opened, max_chars=req.max_chars)
+    _resize_cached(opened)
+    return out
 
 
 _NOISE = re.compile(
@@ -341,6 +420,8 @@ async def change_tags(book_id: int, req: TagChange, background: BackgroundTasks)
             result = await writer.set_tags(book_id, req.add, req.remove)
         except LibraryWriteError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            forget_catalog_checks()
     background.add_task(_rag_tags, book_id, result["tags"])
     return {"status": "SUCCESS", **result}
 
@@ -401,5 +482,7 @@ async def add_book(
             )
         except LibraryWriteError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        finally:
+            forget_catalog_checks()
     background.add_task(_index_folder, library_path, result["path"])
     return {"status": "SUCCESS", **result}

@@ -1,6 +1,7 @@
 # services/storage/providers.py
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import time
 from abc import ABC, abstractmethod
@@ -93,11 +94,40 @@ def build_provider(config: ProviderConfig) -> StorageProvider:
     cached = _PROVIDERS.get(key)
     if cached and time.monotonic() - cached[1] < _PROVIDER_TTL_S:
         return cached[0]
+    if cached:
+        _close_later(cached[0])
     provider = _build_provider(config)
     _PROVIDERS[key] = (provider, time.monotonic())
     while len(_PROVIDERS) > _PROVIDERS_MAX:
-        _PROVIDERS.pop(next(iter(_PROVIDERS)))
+        _close_later(_PROVIDERS.pop(next(iter(_PROVIDERS)))[0])
     return provider
+
+
+def _close_later(provider: StorageProvider) -> None:
+    """Close a provider that is no longer kept (its Nextcloud session), off the caller's path.
+
+    Callers no longer close the kept provider after each request, so the one that
+    drops it closes it. A request still using it (a download may take minutes)
+    finishes first: closing waits ``_CLOSE_DELAY_S``.
+    """
+    import asyncio
+
+    async def close() -> None:
+        await asyncio.sleep(_CLOSE_DELAY_S)
+        with contextlib.suppress(Exception):
+            await provider.close()
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    task = loop.create_task(close())
+    _CLOSING.add(task)
+    task.add_done_callback(_CLOSING.discard)
+
+
+_CLOSING: set = set()
+_CLOSE_DELAY_S = 300.0
 
 
 def _build_provider(config: ProviderConfig) -> StorageProvider:

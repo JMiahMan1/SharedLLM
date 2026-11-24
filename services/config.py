@@ -260,6 +260,14 @@ BIBLE_DATABASE_URL = os.getenv("BIBLE_DATABASE_URL")
 # must produce a visible "configure this" state in the devotional card, not a
 # deep link guessed at some host that may not be blb.org's.
 BLB_BASE_URL = os.getenv("BLB_BASE_URL")
+# Megabytes of opened library books (file plus parsed chapters) storage keeps in
+# memory, least recently read dropped first, so a second read of a book's chapter
+# needs no download and no parse.
+CALIBRE_BOOK_CACHE_MB = float(os.getenv("CALIBRE_BOOK_CACHE_MB") or 256)
+# Seconds between checks (a WebDAV PROPFIND) that the Calibre metadata.db is
+# unchanged; the catalogue is downloaded again only when its ETag, size or
+# modification time changed.
+CALIBRE_CATALOG_CHECK_S = float(os.getenv("CALIBRE_CATALOG_CHECK_S") or 30)
 # Root of the Nextcloud library, e.g. /Books/Text. Blank refuses to browse
 # rather than guessing a shelf, because a wrong guess reports itself as an
 # empty library and reads like "we have no Bibles".
