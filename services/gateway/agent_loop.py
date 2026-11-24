@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import logging
 import mimetypes
@@ -1311,12 +1312,38 @@ def _repair_json_control_chars(text: str) -> str:
 # These are pure functions so the gating logic can be unit-tested without a live
 # model or any downstream service.
 
+# Payload keys that are volatile or per-call and must NOT be part of a tool's
+# signature: they differ between identical calls and would hide real repetition.
+_SIG_VOLATILE_KEYS = {"user_context", "action", "@type", "type", "tool"}
+
+
+def _payload_signature_digest(payload: dict) -> str:
+    """Short stable digest of a payload that carries no identifying key.
+
+    Used as the signature tail for tools keyed by something other than the
+    known path/command/query fields (e.g. WebReadRequest keyed by `url`).
+    Volatile and per-call keys are dropped first so two calls that differ only
+    in them produce identical signatures.
+    """
+    cleaned = {
+        k: v
+        for k, v in payload.items()
+        if k not in _SIG_VOLATILE_KEYS and not str(k).startswith("_")
+    }
+    canonical = json.dumps(cleaned, sort_keys=True, default=str)
+    return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:12]
+
+
 def action_signature(action_name: str, payload: dict | None) -> str:
     """Stable signature of a dispatched tool action for repetition detection.
 
     Combines the canonical action name with the most identifying payload field
-    (file path or shell command) so the loop can tell apart 'wrote game.py' from
-    'wrote README.md' and from 'ran ruff', which matters for stagnation checks.
+    (file path, shell command, query, or URL) so the loop can tell apart calls
+    that touch different targets, which matters for stagnation checks.
+    When the payload carries none of the known identifying keys, fall back to a
+    short digest of the canonical payload (volatile keys removed) so tools
+    keyed by anything else still get distinct, stable signatures instead of all
+    collapsing to ``<action>::''``.
     """
     action_name = (action_name or "").lower()
     if not isinstance(payload, dict):
@@ -1328,11 +1355,15 @@ def action_signature(action_name: str, payload: dict | None) -> str:
         or payload.get("command")
         or payload.get("commands")
         or payload.get("query")
+        or payload.get("url")
+        or payload.get("urls")
         or ""
     )
     if isinstance(key, (list, tuple)):
         key = " ".join(str(k) for k in key)
-    return f"{action_name}::{key!r}"
+    if key:
+        return f"{action_name}::{key!r}"
+    return f"{action_name}::{_payload_signature_digest(payload)!r}"
 
 
 def detect_repetitive_failure(recent: list[tuple[str, bool]], window: int = 3) -> bool:
