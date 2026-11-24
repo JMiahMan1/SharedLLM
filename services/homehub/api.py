@@ -51,6 +51,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     restarts_api,  # /hub/devices/{id}/restarts: an ESPHome node's restarts and their causes
     service_logins_api,
     statistics_api,
+    tasmota_templates_api,  # /hub/tasmota: device templates (GPIO maps), suggested and loaded
     users_api,  # the hub's users and its login providers (local, Jarvis)
     voice_api,  # /hub/voice: the voice satellites and their runs
 )
@@ -894,6 +895,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map
     app.include_router(helpers_api.build_router(runtime, auth))  # HA's helpers
     app.include_router(light_groups_api.build_router(runtime, auth))  # light groups
+    app.include_router(tasmota_templates_api.build_router(runtime, auth))  # Tasmota templates
 
     from services.homehub import echo_dropin_bridge as _echo_dropin_bridge
 

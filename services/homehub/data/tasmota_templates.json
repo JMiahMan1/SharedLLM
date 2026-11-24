@@ -1,0 +1,270 @@
+{
+ "source": "https://templates.blakadder.com/",
+ "fetched": "2026-11-23",
+ "templates": [
+  {
+   "id": "kauf-blf10",
+   "manufacturer": "KAUF",
+   "model": "BLF10 10W RGBCCT bulb",
+   "kind": "bulb",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Kauf Bulb\",\"GPIO\":[0,0,0,0,416,419,0,0,417,420,418,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/kauf_BLF10.html",
+   "notes": "E26. Ships with ESPHome; converts to Tasmota from its web page. Same template as the BLF15 and BLF19."
+  },
+  {
+   "id": "kauf-blf15",
+   "manufacturer": "KAUF",
+   "model": "BLF15 A15 5W RGBCCT bulb",
+   "kind": "bulb",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Kauf Bulb\",\"GPIO\":[0,0,0,0,416,419,0,0,417,420,418,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/kauf_BLF15.html",
+   "notes": "E26. Ships with ESPHome; converts to Tasmota from its web page. Same template as the BLF10 and BLF19."
+  },
+  {
+   "id": "kauf-blf19",
+   "manufacturer": "KAUF",
+   "model": "BLF19 A19 7W RGBCCT bulb",
+   "kind": "bulb",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Kauf Bulb\",\"GPIO\":[0,0,0,0,416,419,0,0,417,420,418,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/kauf_BLF19.html",
+   "notes": "E26. Ships with ESPHome; converts to Tasmota from its web page. Same template as the BLF10 and BLF15."
+  },
+  {
+   "id": "athom-lb10-5w-tas",
+   "manufacturer": "Athom",
+   "model": "LB10-5W-TAS GU10 RGBCCT bulb",
+   "kind": "bulb",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Athom LB10-5W-TAS\",\"GPIO\":[0,0,0,0,416,419,0,0,417,420,418,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/athom_LB10-5W-TAS.html",
+   "notes": "Ships with Tasmota. The page warns never to run SetOption105 1 (white mixing) on it: it can damage the bulb."
+  },
+  {
+   "id": "athom-lb03-12w-e27-tas",
+   "manufacturer": "Athom",
+   "model": "LB03-12W-E27-TAS RGBCCT bulb",
+   "kind": "bulb",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"LB03-12W-E27-TAS\",\"GPIO\":[0,0,0,0,416,419,0,0,417,452,418,0,0,0],\"FLAG\":0,\"BASE\":18,\"CMND\":\"SO92 1 | DimmerRange 24,100\"}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/athom_LB03-12W-E27-TAS.html",
+   "notes": "Ships with Tasmota. The template carries SetOption92 1 and DimmerRange 24,100 (its CMND). The page warns never to run SetOption105 1 (white mixing) on it."
+  },
+  {
+   "id": "cloudfree-cf-lbc",
+   "manufacturer": "CloudFree",
+   "model": "CF-LBC A21 RGBCCT bulb",
+   "kind": "bulb",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"CloudFree LBC\",\"GPIO\":[0,0,0,0,416,419,0,0,417,420,418,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/cloudfree_CF-LBC.html",
+   "notes": "E26. Ships with Tasmota."
+  },
+  {
+   "id": "kauf-plf10",
+   "manufacturer": "KAUF",
+   "model": "PLF10 power monitoring plug",
+   "kind": "plug",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"KAUF Plug\",\"GPIO\":[576,0,320,0,224,2720,0,0,2624,32,2656,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/kauf_PLF10.html",
+   "notes": "US. Ships with ESPHome. Power monitoring needs calibration for accurate readings."
+  },
+  {
+   "id": "athom-pg03v2-us16a-tas",
+   "manufacturer": "Athom",
+   "model": "PG03V2-US16A-TAS 16A plug V2",
+   "kind": "plug",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Athom Plug V2\",\"GPIO\":[0,0,0,3104,0,32,0,0,224,576,0,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/athom_PG03V2-US16A-TAS.html",
+   "notes": "US, power monitoring. Ships with Tasmota. Power monitoring needs calibration."
+  },
+  {
+   "id": "cloudfree-p2",
+   "manufacturer": "CloudFree",
+   "model": "Smart Plug 2 (P2)",
+   "kind": "plug",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"CloudFree P2\",\"GPIO\":[320,0,576,0,224,2720,0,0,2624,32,2656,0,0,0],\"FLAG\":0,\"BASE\":45}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/cloudfree_P2.html",
+   "notes": "US, power monitoring. Ships with Tasmota. Power monitoring needs calibration."
+  },
+  {
+   "id": "topgreener-tgwf115prm",
+   "manufacturer": "TopGreener",
+   "model": "TGWF115PRM power monitoring plug",
+   "kind": "plug",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"TGWF115PRM\",\"GPIO\":[0,320,0,32,2720,2656,0,0,2624,321,224,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/topgreener_TGWF115PRM.html",
+   "notes": "US. Newer units may carry a Wi-Fi module Tasmota does not run on."
+  },
+  {
+   "id": "treatlife-sk50",
+   "manufacturer": "Treatlife",
+   "model": "SK50 smart plug",
+   "kind": "plug",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Treatlife SK50\",\"GPIO\":[1,1,1,1,320,576,1,1,224,1,32,1,1,1],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/treatlife_SK50.html",
+   "notes": "US. Only after its WB2S module was replaced with an ESP-02S or similar."
+  },
+  {
+   "id": "gosund-sw5",
+   "manufacturer": "Gosund",
+   "model": "SW5 single pole switch",
+   "kind": "switch",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Gosund SW5\",\"GPIO\":[32,0,320,0,0,0,0,0,0,0,224,0,576,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/gosund_SW5.html",
+   "notes": "US. This is the green ON LED template; the page also lists one for a red ON LED."
+  },
+  {
+   "id": "treatlife-ss02s",
+   "manufacturer": "Treatlife",
+   "model": "SS02S single pole switch",
+   "kind": "switch",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Treatlife SS02\",\"GPIO\":[0,0,0,0,288,576,0,0,224,32,0,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/treatlife_SS02S.html",
+   "notes": "US."
+  },
+  {
+   "id": "martin-jerry-mj-s01",
+   "manufacturer": "Martin Jerry",
+   "model": "MJ-S01 15A switch",
+   "kind": "switch",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"MJ-S01 Switch\",\"GPIO\":[0,0,0,0,320,321,0,0,224,32,0,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/martin-jerry-MJ-S01.html",
+   "notes": "US. Also sold with Tasmota preinstalled."
+  },
+  {
+   "id": "athom-sw03-tas-3us",
+   "manufacturer": "Athom",
+   "model": "SW03-TAS-3US 3 gang touch switch",
+   "kind": "switch",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Athom SW03-TAS-3US\",\"GPIO\":[576,290,0,33,225,34,0,0,32,224,289,226,288,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/athom_SW03-TAS-3US.html",
+   "notes": "US. Ships with Tasmota."
+  },
+  {
+   "id": "martin-jerry-mj-sd01",
+   "manufacturer": "Martin Jerry",
+   "model": "MJ-SD01 dimmer",
+   "kind": "dimmer",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"MJ-SD01 Dimmer\",\"GPIO\":[34,33,0,323,576,322,0,0,321,416,320,96,256,0],\"FLAG\":0,\"BASE\":73}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/martin_jerry_MJ-SD01.html",
+   "notes": "US. Uses Tasmota's PWM Dimmer module (BASE 73); the firmware needs PWM Dimmer support."
+  },
+  {
+   "id": "shelly-dimmer-2",
+   "manufacturer": "Shelly",
+   "model": "Dimmer 2",
+   "kind": "dimmer",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Shelly Dimmer 2\",\"GPIO\":[0,3200,0,3232,5568,5600,0,0,193,0,192,0,320,4736],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/shelly_Dimmer_2.html",
+   "notes": "Tasmota 9.2+. Set this template before loading the STM32 firmware the page links to."
+  },
+  {
+   "id": "shelly-1",
+   "manufacturer": "Shelly",
+   "model": "1 relay module",
+   "kind": "relay",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Shelly 1\",\"GPIO\":[1,1,0,1,224,192,0,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":46}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/shelly_1.html",
+   "notes": "Single relay module."
+  },
+  {
+   "id": "shelly-1pm",
+   "manufacturer": "Shelly",
+   "model": "1PM relay module",
+   "kind": "relay",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"Shelly 1PM\",\"ARCH\":\"ESP8266\",\"GPIO\":[320,0,8096,0,192,2720,0,0,0,0,0,224,0,4736],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/shelly_1PM.html",
+   "notes": "Single relay with power monitoring; needs calibration."
+  },
+  {
+   "id": "shelly-plus-1",
+   "manufacturer": "Shelly",
+   "model": "Plus 1 relay module (SNSW-001X16EU)",
+   "kind": "relay",
+   "chip": "ESP32",
+   "template": "{\"NAME\":\"Shelly Plus 1 \",\"GPIO\":[288,0,0,0,192,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,32,224,0,0,0,0,0,4736,4705,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":1}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/shelly_plus_1.html",
+   "notes": "Tasmota 9.5.0.9+. Single-core units need the ESP32-SOLO1 build."
+  },
+  {
+   "id": "sonoff-minir4",
+   "manufacturer": "Sonoff",
+   "model": "MINIR4 Mini Extreme relay module",
+   "kind": "relay",
+   "chip": "ESP32",
+   "template": "{\"NAME\":\"Sonoff MINIR4\",\"GPIO\":[32,0,0,0,0,0,0,0,0,0,0,0,0,0,0,576,0,0,0,0,0,0,224,160,0,0,0,0,0,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":1}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/sonoff_MINIR4.html",
+   "notes": ""
+  },
+  {
+   "id": "athom-ls5p-tas",
+   "manufacturer": "Athom",
+   "model": "LS5P-TAS RGBW LED strip controller",
+   "kind": "strip",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"LS_5PIN_TAS\",\"GPIO\":[32,0,576,0,416,0,0,0,417,419,418,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/athom_LS5P-TAS.html",
+   "notes": "5-24V. Ships with Tasmota."
+  },
+  {
+   "id": "athom-ls2812b-tas",
+   "manufacturer": "Athom",
+   "model": "LS2812B-TAS addressable LED controller",
+   "kind": "strip",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"LS2812B-TAS\",\"GPIO\":[32,0,1376,0,0,0,0,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/athom_LS2812B-TAS.html",
+   "notes": "Ships with Tasmota. Units shipped before 5 Jan 2022; newer ones (LED on GPIO1) use the page's V2 template."
+  },
+  {
+   "id": "athom-ls2812b-tas-v2",
+   "manufacturer": "Athom",
+   "model": "LS2812B-TAS addressable LED controller (V2)",
+   "kind": "strip",
+   "chip": "ESP8266",
+   "template": "{\"NAME\":\"LS2812B-TAS-V2\",\"GPIO\":[32,1376,0,0,0,0,0,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":18}",
+   "commands": [],
+   "source_url": "https://templates.blakadder.com/athom_LS2812B-TAS.html",
+   "notes": "Ships with Tasmota. Units shipped since 5 Jan 2022, with the LED data on GPIO1."
+  }
+ ]
+}
