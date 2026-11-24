@@ -113,7 +113,16 @@ final class DeviceHealth {
         workers.put("usage_sync", workerState(app, UsageSyncWorker.WORK_NAME));
         workers.put("photo_scan", workerState(app, PhotoScanWorker.WORK_NAME));
         body.put("workers", workers);
-        body.put("collectors", CollectorStatus.toJson(app));
+        JSONObject collectors = CollectorStatus.toJson(app);
+        // Family nearby (Bluetooth LE), once turned on: running, or plainly why not
+        // (a tablet that cannot advertise says so).
+        if (Proximity.enabled(app)) {
+            perms.put("bluetooth_scan", Proximity.scanPermission(app));
+            Object[] h = Proximity.health(app);
+            collectors.put("proximity", new JSONObject().put("at", System.currentTimeMillis())
+                .put("ok", h[0]).put("outcome", h[1]).put("message", h[2]));
+        }
+        body.put("collectors", collectors);
         body.put("reported_at", System.currentTimeMillis());
         return body;
     }

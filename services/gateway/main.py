@@ -15364,6 +15364,57 @@ async def unlink_geo_vehicle_bluetooth(request: Request, vehicle_id: str, addres
         await _raise_vehicle_link_failure(resp)
 
 
+async def _geo_proximity(method: str, path: str, **kw):
+    async with shared_http_client() as client:
+        resp = await getattr(client, method)(
+            f"{GEO_SVC}{path}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+            **kw,
+        )
+        if resp.status == 200:
+            return await resp.json()
+        if resp.status in (400, 422):
+            try:
+                detail = (await resp.json()).get("detail")
+            except Exception:
+                detail = None
+            raise HTTPException(status_code=resp.status, detail=detail or "Refused")
+    raise HTTPException(status_code=502, detail="Geo service unavailable")
+
+
+@app.get("/api/geo/proximity/config")
+async def get_geo_proximity_config(request: Request):
+    """The household key and members a signed-in family phone needs to find the
+    family's other phones over Bluetooth LE (see services/geo/proximity.py)."""
+    user = await _require_authenticated(request)
+    return await _geo_proximity("get", "/proximity/config", params={"user": user})
+
+
+@app.post("/api/geo/proximity")
+async def post_geo_proximity(request: Request):
+    """Sightings of other family phones, filed under the signed-in person."""
+    user = await _require_authenticated(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="A JSON object is required")
+    return await _geo_proximity("post", f"/proximity/{quote(user.split('.')[-1].lower(), safe='')}",
+                                json={"events": body.get("events")})
+
+
+@app.get("/api/geo/proximity/near")
+async def get_geo_proximity_near(request: Request):
+    user = await _require_authenticated(request)
+    return await _geo_proximity("get", "/proximity/near", params={"viewer": user})
+
+
+@app.post("/api/geo/proximity/key/rotate")
+async def rotate_geo_proximity_key(request: Request):
+    """A parent makes a new household key (a lost phone): old identifiers stop resolving."""
+    await _require_admin(request)
+    return await _geo_proximity("post", "/proximity/key/rotate")
+
+
 async def _raise_vehicle_link_failure(resp) -> None:
     """geo's own answer for a link it understood and refused (404/409/422); 502 otherwise."""
     if resp.status in (404, 409, 422):

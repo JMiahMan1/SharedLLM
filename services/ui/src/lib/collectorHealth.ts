@@ -60,6 +60,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   notification_listener: 'Notification access (app messages)',
   location: 'Location',
   bluetooth: 'Nearby devices (which car a trip was in)',
+  bluetooth_scan: 'Nearby devices (family phones nearby)',
 };
 
 const WORKER_LABELS: Record<string, string> = {
@@ -143,6 +144,11 @@ export function collectionNotices(
         key: `${device.device_id}-workers`,
         text: `Background collection of ${listWords(off)} is not running on ${which}. ${restart}`,
       });
+    }
+    // Family nearby (Bluetooth LE): said plainly, e.g. a tablet that can only scan.
+    const nearby = problems.find((p) => p.kind === 'collector' && p.what === 'proximity' && p.outcome !== 'no_permission');
+    if (nearby?.message) {
+      out.push({ key: `${device.device_id}-proximity`, text: `Family nearby on ${which}: ${nearby.message}.` });
     }
     for (const p of problems) {
       // A listener-started run is a comms run: the comms collector's line covers it.

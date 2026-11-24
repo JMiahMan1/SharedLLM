@@ -1,3 +1,4 @@
+import type { NearPerson } from '../lib/proximity';
 import type { VehicleBtLink } from '../lib/vehicleBluetooth';
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { CollectorHealth } from '../lib/collectorHealth';
@@ -2126,6 +2127,12 @@ export const api = {
     const resp = await apiClient.delete(
       `/api/geo/vehicles/${encodeURIComponent(vehicleId)}/bluetooth/${encodeURIComponent(address)}`,
     );
+    return resp.data;
+  },
+
+  /** Family members whose phones were near the signed-in person's in the last few minutes. */
+  async getProximityNear(): Promise<{ viewer: string; near: NearPerson[] }> {
+    const resp = await apiClient.get('/api/geo/proximity/near');
     return resp.data;
   },
 

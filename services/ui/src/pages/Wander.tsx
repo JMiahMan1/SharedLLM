@@ -51,6 +51,8 @@ import { buildFamilyCards, groupByPlace, motionLabel, roomLabel, type FamilyMemb
 import PlacesPanel from '../components/wander/PlacesPanel';
 import VehicleBluetoothPanel from '../components/wander/VehicleBluetoothPanel';
 import BluetoothDiagnostics from '../components/wander/BluetoothDiagnostics';
+import FamilyNearbyCard from '../components/wander/FamilyNearbyCard';
+import { bandLabel, nearOf, togetherLine } from '../lib/proximity';
 import { vehicleSourceLabel } from '../lib/vehicleBluetooth';
 import toast from 'react-hot-toast';
 import { errorText } from '../lib/errorText';
@@ -192,6 +194,14 @@ const Wander = () => {
     ...houseConfigQueryOptions,
   });
   const peopleDirectory = useFamilyDirectory();
+  // Family phones near mine lately (Bluetooth LE), within the family's location sharing.
+  const nearQuery = useQuery({
+    queryKey: ['geo-proximity-near'],
+    queryFn: () => api.getProximityNear(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
 
   const trips = useMemo(() => tripsQuery.data?.trips ?? [], [tripsQuery.data]);
   const vehicles = useMemo(
@@ -706,6 +716,13 @@ const Wander = () => {
                         <span>{trip.vehicle_name || 'Assigned Vehicle'}</span>
                       </div>
 
+                      {/* Who it was taken with (phones close together, or the same linked car) */}
+                      {togetherLine(trip.together, (id) => peopleDirectory(id)?.display_name) && (
+                        <span data-testid="trip-together" className="font-medium text-emerald-200">
+                          {togetherLine(trip.together, (id) => peopleDirectory(id)?.display_name)}
+                        </span>
+                      )}
+
                       {/* How the vehicle was decided: a linked car's Bluetooth, or by hand */}
                       {vehicleSourceLabel(trip.vehicle_source) && (
                         <span
@@ -811,6 +828,11 @@ const Wander = () => {
                   </span>
                 )}
               </h3>
+              {nearOf(nearQuery.data?.near, person?.username ?? member.id) && (
+                <span data-testid="member-near" className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-200 border border-emerald-500/30">
+                  {bandLabel(nearOf(nearQuery.data?.near, person?.username ?? member.id)?.band)}
+                </span>
+              )}
               <div className="flex items-center gap-1.5 text-xs text-slate-400">
                 <MapPin size={12} className="text-purple-400" />
                 <span>{member.zone}</span>
@@ -1069,6 +1091,8 @@ const Wander = () => {
           isAdmin={Boolean(user?.is_admin)}
           onChanged={() => void queryClient.invalidateQueries({ queryKey: vehiclesQueryKey() })}
         />
+
+        <FamilyNearbyCard />
 
         {user?.is_admin && <BluetoothDiagnostics />}
       </div>

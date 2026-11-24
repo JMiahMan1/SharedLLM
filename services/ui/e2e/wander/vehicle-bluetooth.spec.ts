@@ -76,3 +76,19 @@ test('a trip says Bluetooth chose its car, and a hand-picked one can go back to 
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('a trip taken together names the person and the car, and a nearby member says how near', async ({ page }, info) => {
+  const errors = await open(page);
+  const together = page.getByTestId('trip-together').first();
+  await together.scrollIntoViewIfNeeded();
+  await expect(together).toHaveText(/^with Parent in the Family minivan with the roof box$/);
+  await expect(page.getByTestId('member-near').first()).toHaveText('In the same room');
+  // No metres anywhere: bands only.
+  await expect(page.locator('main')).not.toContainText(/\d+(\.\d+)? ?m away/);
+  await settle(page);
+  // The map credit Leaflet draws in its corner is an attribution, not a control (as in the family audit).
+  const leaflet = [{ where: /wander/, finding: /under 44px: (Leaflet|OpenStreetMap)\b/, why: 'map attribution' }];
+  expect(await screenFindings(page, page.locator('main'), 'wander together', leaflet)).toEqual([]);
+  await shot(page, info, 'wander-together');
+  expect(errors).toEqual([]);
+});
