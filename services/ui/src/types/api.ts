@@ -3603,7 +3603,12 @@ export interface BibleStats extends BibleStreaks {
   bookmarks: number;
   position: BiblePosition | null;
   last_read_at: string | null;
+  /** Every reading event per day (opening the app, searching, reading), keyed YYYY-MM-DD. */
   window: Record<string, number>;
+  /** Distinct chapters finished per day over the same window; days with none are left out. */
+  chapters_window: Record<string, number>;
+  /** The reading plan the reader last opened, or null. */
+  last_plan_id: string | null;
 }
 
 export interface BibleEarnedAchievement {

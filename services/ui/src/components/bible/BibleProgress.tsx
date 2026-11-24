@@ -1,12 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
-import { Award, BookMarked, Flame, Trash2, Users, BookOpen, Target } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Award, BookMarked, Brain, Flame, Trash2, Users, BookOpen, Target } from 'lucide-react';
 import { api } from '../../services/api';
 import type { BibleMark } from '../../types/api';
+import { chaptersThisWeek, pickCurrentPlan } from './progressNumbers';
 
 interface BibleProgressProps {
   marks: BibleMark[];
   onDeleteMark: (markId: number) => void;
   onOpenRef: (ref: string) => void;
+  /** Opens the reading plans (the Today tab), from the "No plan" hint. */
+  onOpenPlans?: () => void;
 }
 
 /**
@@ -16,11 +20,16 @@ interface BibleProgressProps {
  * Bible activity is simply not in the feed, and asking for one who has not
  * shared is a 404 that reads as "not shared" rather than as a failure.
  */
-export default function BibleProgress({ marks, onDeleteMark, onOpenRef }: BibleProgressProps) {
+export default function BibleProgress({ marks, onDeleteMark, onOpenRef, onOpenPlans }: BibleProgressProps) {
   const { data: stats } = useQuery({ queryKey: ['bible-stats'], queryFn: () => api.getBibleStats(30) });
   const { data: achievements } = useQuery({
     queryKey: ['bible-achievements'],
     queryFn: () => api.getBibleAchievements(),
+  });
+  // Shares its cache with the plans list on the Today tab.
+  const { data: plansData, isError: plansFailed } = useQuery({
+    queryKey: ['bible-plans'],
+    queryFn: () => api.getBiblePlans(),
   });
   const { data: feed, isLoading: feedLoading, error: feedError } = useQuery({
     queryKey: ['bible-activity-feed'],
@@ -30,13 +39,70 @@ export default function BibleProgress({ marks, onDeleteMark, onOpenRef }: BibleP
 
   const feedFailure = feedError instanceof Error ? feedError.message : null;
 
-  // This week's reading (from the 7-day window)
-  const thisWeekChapters = stats?.window
-    ? Object.entries(stats.window).slice(-7).reduce((sum, [, count]) => sum + count, 0)
-    : 0;
-  const planProgress = stats?.metrics?.plan_days_total
-    ? Math.min(100, Math.round((stats.metrics.plan_days_total / (stats.metrics.plan_days_total + (stats.metrics.plan_completed ? 0 : 30))) * 100))
-    : 0;
+  const thisWeekChapters = chaptersThisWeek(stats?.chapters_window);
+  const currentPlan = pickCurrentPlan(plansData?.mine, stats?.last_plan_id);
+
+  let planValue: ReactNode;
+  if (plansData === undefined) {
+    planValue = plansFailed ? <span className="text-base text-slate-400">Unavailable</span> : '-';
+  } else if (currentPlan) {
+    planValue = (
+      <>
+        {currentPlan.completed}
+        <span className="text-xs font-normal text-slate-400"> of {currentPlan.days} days</span>
+      </>
+    );
+  } else {
+    planValue = <span className="text-base">No plan</span>;
+  }
+  let planNote: ReactNode = null;
+  if (currentPlan) {
+    planNote = (
+      <p className="mt-0.5 text-[11px] text-slate-400 truncate" title={currentPlan.name}>
+        {currentPlan.finished ? `Finished: ${currentPlan.name}` : currentPlan.name}
+      </p>
+    );
+  } else if (plansData !== undefined) {
+    planNote = onOpenPlans ? (
+      <button
+        type="button"
+        onClick={onOpenPlans}
+        className="mt-0.5 min-h-11 text-left text-[11px] text-sky-300 underline underline-offset-2"
+        data-testid="bible-progress-start-plan"
+      >
+        Start one in Today
+      </button>
+    ) : (
+      <p className="mt-0.5 text-[11px] text-slate-400">Start one in Today</p>
+    );
+  }
+
+  const weekCards: Array<{ label: string; value: ReactNode; icon: typeof Flame; note?: ReactNode; testId: string }> = [
+    {
+      label: 'This week',
+      value: (
+        <>
+          {thisWeekChapters}
+          <span className="text-xs font-normal text-slate-400"> {thisWeekChapters === 1 ? 'chapter' : 'chapters'}</span>
+        </>
+      ),
+      icon: BookOpen,
+      testId: 'bible-progress-week',
+    },
+    { label: 'Plan progress', value: planValue, icon: Target, note: planNote, testId: 'bible-progress-plan' },
+    {
+      label: 'Memorized',
+      value: (
+        <>
+          {stats?.metrics?.memory_mastered ?? 0}
+          <span className="text-xs font-normal text-slate-400"> {stats?.metrics?.memory_mastered === 1 ? 'verse' : 'verses'}</span>
+        </>
+      ),
+      icon: Brain,
+      testId: 'bible-progress-memorized',
+    },
+    { label: 'Books finished', value: stats?.metrics?.books_read ?? 0, icon: Award, testId: 'bible-progress-books' },
+  ];
 
   return (
     <div className="space-y-4" data-testid="bible-progress">
@@ -59,18 +125,14 @@ export default function BibleProgress({ marks, onDeleteMark, onOpenRef }: BibleP
 
       {/* This week's progress */}
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {[
-          { label: 'This week', value: thisWeekChapters, icon: BookOpen, unit: 'chapters' },
-          { label: 'Plan progress', value: planProgress, icon: Target, unit: '%' },
-          { label: 'Chapters total', value: stats?.metrics?.chapters_total ?? 0, icon: BookMarked, unit: '' },
-          { label: 'Books finished', value: stats?.metrics?.books_read ?? 0, icon: Award, unit: '' },
-        ].map(({ label, value, icon: Icon, unit }) => (
-          <div key={label} className="glass-panel rounded-2xl p-3">
+        {weekCards.map(({ label, value, icon: Icon, note, testId }) => (
+          <div key={label} className="glass-panel rounded-2xl p-3 min-w-0" data-testid={testId}>
             <div className="flex items-center gap-1.5 text-slate-500">
               <Icon size={12} />
               <span className="text-[10px] uppercase tracking-wider truncate">{label}</span>
             </div>
-            <p className="mt-1.5 text-2xl font-bold text-white tabular-nums">{value}{unit ? ` <span className="text-xs font-normal text-slate-400">{unit}</span>` : ''}</p>
+            <p className="mt-1.5 text-2xl font-bold text-white tabular-nums">{value}</p>
+            {note}
           </div>
         ))}
       </section>

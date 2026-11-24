@@ -1194,6 +1194,7 @@ const { user } = useAuth();
             await refreshMarks();
           }}
           onOpenRef={openRef}
+          onOpenPlans={() => setTab('today')}
         />
       )}
     </div>
