@@ -662,3 +662,74 @@ class TestAbsStreamClientsAreClosed:
         )
         assert resp.status_code == 200
         assert resp.content == b"ts-bytes"
+
+
+def test_a_stream_signed_for_the_household_resolves_as_the_household(client, upstream, monkeypatch):
+    """A voice satellite that did not recognise the speaker plays as the household.
+
+    Live 2026-11-24: every audiobook an unrecognised voice asked for answered its first
+    track request with 401, because the token's user ("household") was looked up as a
+    person, which Identity refuses. The household is asked for as the household.
+    """
+    from services.gateway import main
+    from services.gateway.tests.conftest_media import DEFAULT_IDENTITY
+
+    asked: list[dict] = []
+
+    async def resolve(body):
+        asked.append(dict(body))
+        if body.get("rag_user") == "household":
+            raise main.HTTPException(status_code=401, detail="Invalid credentials")
+        return {**DEFAULT_IDENTITY, "user": "household"}
+
+    monkeypatch.setattr(main, "resolve_identity", resolve)
+    _mock_track(upstream, "sess9", 1)
+    mt, _exp = sign("household")
+    resp = client.get("/api/media/stream/abs-session/sess9/1", params={"user": "household", "mt": mt})
+    assert resp.status_code == 200
+    assert asked == [{"household": True}]
+
+
+def test_a_person_is_still_resolved_by_name(client, upstream, monkeypatch):
+    from services.gateway import main
+    from services.gateway.tests.conftest_media import DEFAULT_IDENTITY
+
+    asked: list[dict] = []
+
+    async def resolve(body):
+        asked.append(dict(body))
+        return dict(DEFAULT_IDENTITY)
+
+    monkeypatch.setattr(main, "resolve_identity", resolve)
+    _mock_track(upstream, "sess8", 1)
+    mt, _exp = sign("testuser")
+    assert client.get("/api/media/stream/abs-session/sess8/1", params={"user": "testuser", "mt": mt}).status_code == 200
+    assert asked == [{"rag_user": "testuser"}]
+
+
+def test_segments_carry_a_fresh_device_token_not_the_incoming_one(client, upstream):
+    """A segment fetched hours into a book must not expire with the first URL's token."""
+    import re
+
+    from services.shared.media_token import verify
+
+    _mock_track(upstream, "sess7", 1)
+    old, _exp = sign("testuser", now=__import__("time").time() - 43000, ttl=43200)  # 200 s left
+    resp = client.get("/api/media/stream/abs-session/sess7/1", params={"user": "testuser", "mt": old})
+    assert resp.status_code == 200
+    tokens = set(re.findall(r"[?&]mt=([^&\s]+)", resp.text))
+    assert tokens and old not in tokens
+    exp = int(next(iter(tokens)).split(".")[0])
+    assert exp - __import__("time").time() > 43000  # good for the device's whole lifetime
+    assert all(verify(t.replace("%2E", "."), "testuser") for t in tokens)
+
+
+def test_a_refused_token_is_a_403_and_says_why_in_the_log(client, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
+    mt, _exp = sign("someone-else")
+    resp = client.get("/api/media/stream/abs-session/sess6/1", params={"user": "testuser", "mt": mt})
+    assert resp.status_code == 403
+    assert any("[media token] refused for user='testuser'" in r.getMessage() and "bad signature" in r.getMessage()
+               for r in caplog.records)

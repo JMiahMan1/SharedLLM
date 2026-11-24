@@ -217,7 +217,8 @@ from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WOR
 from services.health import challenges as _challenges
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
-from services.shared.media_token import sign, verify
+from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS, sign, verify
+from services.shared.media_token import why_invalid as media_token_why_invalid
 
 START_TIME = time.time()
 
@@ -2771,10 +2772,17 @@ async def _resolve_identity_from_media_token(request: Request) -> Any | None:
     if not mt:
         return None
     user = request.query_params.get("user", "")
-    if not user or not verify(mt, user):
+    why = media_token_why_invalid(mt, user)
+    if why:
+        log.info(f"[media token] refused for user={user!r} on {request.url.path}: {why}")
         raise HTTPException(status_code=403, detail="Invalid or expired media token")
+    # A voice satellite that did not recognise the speaker acts as the household, and its
+    # streams are signed for that name. The household is not a user: Identity answers it
+    # only when asked for it as the household (a "rag_user" lookup is a 401, and every
+    # audiobook or podcast started by an unrecognised voice failed on its first request).
+    who = {"household": True} if user == fast_media.HOUSEHOLD_USER else {"rag_user": user}
     try:
-        return await resolve_identity({"rag_user": user})
+        return await resolve_identity(who)
     except HTTPException as e:
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
 
@@ -20798,7 +20806,9 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
         raise HTTPException(status_code=400, detail="Audiobookshelf URL not configured")
 
     user = request.query_params.get("user") or creds.get("user") or creds.get("username") or ""
-    mt = request.query_params.get("mt") or (sign(user)[0] if user else None)
+    # The segments get a token of their own, minted now for the device's lifetime: reusing the
+    # incoming one made every segment expire with the first URL, part way into a long book.
+    mt = sign(user, ttl=DEVICE_TOKEN_TTL_SECONDS)[0] if user else None
 
     track_url = f"{abs_url}/public/session/{session_id}/track/{track_index}"
     playlist_url: str | None = None
