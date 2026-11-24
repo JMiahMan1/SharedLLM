@@ -1,11 +1,14 @@
 # services/execution/handlers/storage.py
+import asyncio
 import logging
 
 from services.execution.schemas import ExecutionResult, StorageFileReadRequest, StorageFileWriteRequest, StorageTextToAudioRequest
 
 from ..artifacts import artifact_name, create_artifact
+from ..http_client import fetch_bytes
 from ..http_client import request as http_request
 from ..nextcloud_client import resolve_credentials, webdav_url
+from ..pdf_text import DEFAULT_MAX_CHARS, PdfReadError, extract_pdf_text, is_pdf
 from ..personal_data import resolve_personal_data_provider
 from ..tts import text_to_speech
 
@@ -13,12 +16,31 @@ log = logging.getLogger("execution.storage")
 
 #: A growth-journal photo larger than this is refused rather than pushed at Nextcloud.
 MAX_PHOTO_BYTES = 25 * 1024 * 1024
+#: What one read of a PDF returns to the model at most (the rest via start_page).
+PDF_READ_MAX_CHARS = DEFAULT_MAX_CHARS
 
 def _ok(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service="storage", detail=detail)
 
 def _fail(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=message, service="storage", detail=detail)
+
+def _pdf_result(req: StorageFileReadRequest, data: bytes) -> ExecutionResult:
+    """A PDF's text, page by page, with the pages it holds ("pages 1-6 of 23")."""
+    name = req.path.rstrip("/").rsplit("/", 1)[-1]
+    try:
+        pdf = extract_pdf_text(data, start_page=req.start_page, max_chars=PDF_READ_MAX_CHARS, fallback_title=name)
+    except PdfReadError as e:
+        return _fail(f"Could not read the PDF storage:{req.path}: {e}")
+    except ValueError as e:
+        return _fail(str(e))
+    detail = pdf.as_detail()
+    detail["path"] = req.path
+    message = f"Read PDF storage:{req.path} ({pdf.pages_label})"
+    if pdf.scanned:
+        message += ". It is a scanned image with no text layer."
+    return _ok(message, detail)
+
 
 async def handle_storage_read(req: StorageFileReadRequest) -> ExecutionResult:
     try:
@@ -28,15 +50,19 @@ async def handle_storage_read(req: StorageFileReadRequest) -> ExecutionResult:
         assert url is not None and user is not None and pw is not None
 
         file_url = webdav_url(url, user, req.path)
-        resp = await http_request("GET", file_url, auth=(user, pw), timeout=30, verify=False)
+        # Bytes, not text: a PDF decoded as text is binary garbage.
+        status, content_type, data = await fetch_bytes(file_url, auth=(user, pw), timeout=30, verify=False)
 
-        if resp["status_code"] == 200:
-            content = resp["text"]
+        if status == 200:
+            if is_pdf(content_type, data):
+                # Off the event loop: a long PDF takes a while to parse.
+                return await asyncio.to_thread(_pdf_result, req, data)
+            content = data.decode("utf-8", errors="replace")
             return _ok(f"Read {len(content)} bytes from storage:{req.path}", {"content": content, "path": req.path})
-        elif resp["status_code"] == 404:
+        elif status == 404:
             return _fail(f"File not found in storage: {req.path}")
         else:
-            return _fail(f"Nextcloud error {resp['status_code']}: {resp['text'][:200]}")
+            return _fail(f"Nextcloud error {status}: {data[:200].decode('utf-8', errors='replace')}")
 
     except Exception as e:
         log.error(f"Storage read failed: {e}")

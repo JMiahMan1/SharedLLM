@@ -33,8 +33,6 @@ SERVER_KEYS = ("url", "token")
 SENDSPIN_PORT = 28928
 SENDSPIN_ENTITY_NAME = "Sendspin pairing token"
 SENDSPIN_OBJECT_ID = "sendspin_pairing_token"
-#: Music Assistant's provider config command that registers a Sendspin satellite.
-SENDSPIN_PAIR_COMMAND = "config/providers/sendspin/pair"
 #: Music Assistant's Audiobookshelf provider domain (multi-instance).
 ABS_DOMAIN = "audiobookshelf"
 
@@ -272,52 +270,35 @@ async def sendspin_pairing_info(hub: Any, device_id: str, *, include_token: bool
 
 
 async def pair_sendspin_device(hub: Any, device_id: str) -> dict[str, Any]:
-    """Ask the connected Music Assistant to pair one satellite's ``<host>:28928`` Sendspin provider.
+    """Whether Music Assistant can pair one satellite, and why not.
 
-    The token travels to Music Assistant only, never into logs or the answer. When Music Assistant
-    cannot register the provider itself, the answer says so and gives the address for manual pairing.
+    Music Assistant pairs an encrypted Sendspin satellite itself: it follows HomeHub's
+    ``sendspin/subscribe_clients`` and fetches the token with ``sendspin/get_pairing_token``
+    (api.py, sendspin_clients.py). There is no command to send it, so this only reports
+    whether HomeHub has what it needs. The token never appears in the answer.
     """
     _require_device(hub, device_id)
     server = _reachable_music_assistant(hub)
     entry, error = _esphome_entry_for_device(hub, device_id)
     host = str(((entry.data or {}) if entry is not None else {}).get("host") or "").strip()
     token, host_or_reason = find_sendspin_token(hub, device_id)
-    address = f"{host}:{SENDSPIN_PORT}" if host else None
+    clients = getattr(getattr(hub, "runtime", None), "sendspin_clients", None)
+    client_id = next((c for c in (clients.client_ids() if clients is not None else [])
+                      if clients.device_for(c) == device_id), None)
     out: dict[str, Any] = {
-        "ok": False, "device_id": device_id, "sendspin_address": address,
-        "token_available": bool(token), "music_assistant_url": server.get("url"),
-        "paired": False, "manual_pairing_required": True,
+        "ok": bool(token), "device_id": device_id,
+        "sendspin_address": f"{host}:{SENDSPIN_PORT}" if host else None,
+        "token_available": bool(token), "client_id_known": client_id is not None,
+        "music_assistant_url": server.get("url"),
+        "automatic": True, "paired": False, "manual_pairing_required": False,
     }
     if token is None:
         out["error"] = host_or_reason or error or "This satellite has no Sendspin pairing token yet."
         out["message"] = out["error"]
         return out
-    driver = _driver_for(hub, server.get("entry_id") or "")
-    conn = getattr(driver, "conn", None)
-    if conn is None or not getattr(conn, "connected", False):
-        raise SendspinError(f"HomeHub is not connected to Music Assistant at {server.get('url')}. "
-                            "Check Integrations > Music Assistant.")
-    command = getattr(conn, "send_command", None) or getattr(conn, "command", None)
-    if command is None:
-        out["message"] = (f"Music Assistant cannot register Sendspin providers from HomeHub. Pair the "
-                          f"satellite manually at {address} with its Sendspin pairing token.")
-        return out
-    try:
-        result = await command(SENDSPIN_PAIR_COMMAND, address=address, token=token)
-    except Exception as exc:  # MA versions without a Sendspin provider command: say what to do instead
-        out["message"] = (f"Music Assistant did not register the satellite ({exc}). Pair it manually at "
-                          f"{address} with its Sendspin pairing token.")
-        return out
-    paired = result if isinstance(result, bool) else True
-    out.update({
-        "ok": True, "paired": paired, "manual_pairing_required": not paired,
-        "message": (f"Music Assistant paired the satellite at {address}." if paired
-                    else f"Pair the satellite manually at {address} with its Sendspin pairing token."),
-    })
-    if paired:
-        log.info("Music Assistant paired the Sendspin satellite %s at %s", device_id, address)
+    out["message"] = ("Music Assistant pairs this satellite by itself through HomeHub once both are "
+                      "online; nothing needs to be done here.")
     return out
-
 
 #: username -> lock: one account request per person at a time, so two arriving together cannot each
 #: make a token (or, for a new person, each try to make the account).

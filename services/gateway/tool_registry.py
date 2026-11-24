@@ -645,8 +645,10 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Web search for current/external information.",
      "payload fields: query, max_results."),
     ("WebReadRequest", SVC_EXECUTION, "POST", "/execute/web_read", False,
-     "Fetch and extract readable text from a URL.",
-     "payload fields: url."),
+     "Read a URL: a web page's main text, a PDF's text page by page (says which pages, e.g. "
+     "'pages 1-6 of 23'; continue with start_page), or a text file. save: true also keeps the "
+     "downloaded file (PDF or other) in the user's Downloads folder.",
+     "payload fields: url, start_page, save."),
     ("CodeSearchRequest", SVC_EXECUTION, "POST", "/execute/code_search", False,
      "Semantic search over indexed workspace code.",
      "payload fields: query, workspace_id, max_results."),
@@ -696,8 +698,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Clone/pull a workspace's git repo and prime its directory.",
      "payload fields: workspace_id, repo_url, branch."),
     ("StorageFileReadRequest", SVC_EXECUTION, "POST", "/execute/storage_file_read", False,
-     "Read a file from SharedLLM storage volumes.",
-     "payload fields: path."),
+     "Read a file from SharedLLM storage volumes; a PDF comes back as its text page by page "
+     "(says which pages, e.g. 'pages 1-6 of 23'; continue with start_page).",
+     "payload fields: path, start_page."),
     ("StorageFileWriteRequest", SVC_EXECUTION, "POST", "/execute/storage_file_write", False,
      "Write a file into SharedLLM storage volumes.",
      "payload fields: path, content."),

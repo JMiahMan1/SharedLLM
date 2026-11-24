@@ -133,6 +133,11 @@ RUN pip install --no-cache-dir "librosa==0.11.0" "scipy==1.17.1" "webrtcvad-whee
     && pip install --no-cache-dir --no-deps "resemblyzer==0.1.4" \
     && python3 -c "from resemblyzer import VoiceEncoder; VoiceEncoder('cpu', verbose=False)"
 
+# WebReadRequest / StorageFileReadRequest (services/execution/pdf_text.py):
+# PDF text with pypdf, and a web page's main article with trafilatura.
+RUN pip install --no-cache-dir "pypdf==6.21.4" "trafilatura==2.4.0" \
+    && python3 -c "import pypdf, trafilatura"
+
 # Per-commit layers last: the build stamp and the source (~14 MB).
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
