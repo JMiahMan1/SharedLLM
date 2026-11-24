@@ -44,7 +44,7 @@ from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION,
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.studio import actions as studio_actions
 from services.gateway.studio import tools as studio_tools
-from services.gateway.tool_registry import hub_tool_prompt, hub_tool_withheld
+from services.gateway.tool_registry import hub_tool_prompt, hub_tool_withheld, promote_tool_discriminator
 from services.shared.media_validation import MEDIA_EXTS, media_extension, rewrite_media_extension, validate_media_bytes
 
 _LESSON_MARKERS = ("RULE:", "ROOT CAUSE:", "OUTCOME:", "CONFIDENCE:", "SUPERSEDES:")
@@ -844,17 +844,7 @@ def _normalize_tool(obj: dict) -> dict | None:
                 break
 
     # Prioritize tool class name from discriminator over device verb action
-    for t_key in ("tool", "@type", "type"):
-        if t_key in obj and isinstance(obj[t_key], str) and obj[t_key] not in ("function",):
-            cand_tool = obj[t_key]
-            cand_tool_norm = re.sub(r'[\s_]+', '', cand_tool).lower()
-            if cand_tool_norm in ALLOWED_TOOLS or cand_tool_norm.endswith("request"):
-                act_norm = re.sub(r'[\s_]+', '', str(obj.get("action", ""))).lower()
-                if act_norm not in ALLOWED_TOOLS:
-                    if "action" in obj:
-                        obj["sub_action"] = obj["action"]
-                        obj["device_action"] = obj["action"]
-                    obj["action"] = cand_tool
+    promote_tool_discriminator(obj, lambda n: n in ALLOWED_TOOLS or n.endswith("request"))
 
     # Set action from any known discriminator
     if "action" not in obj:

@@ -46,6 +46,7 @@ from services.gateway.tool_registry import (
     SINGLE_TURN_GARDEN_TOOLS,
     hub_tool_guide,
     names_withheld_hub_tool,
+    promote_tool_discriminator,
     single_turn_tools,
 )
 
@@ -2234,6 +2235,19 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 _gp = {k: v for k, v in tool_data.items() if k not in ("tool", "name", "payload")}
             tool_data = {"action": _named, "payload": _gp}
 
+        # When a discriminator names a known tool but action is a verb (e.g. TimerRequest+add),
+        # promote the tool name to the routing action and keep the verb for payload dispatch.
+        promote_tool_discriminator(
+            tool_data,
+            lambda n: (
+                n in SINGLE_TURN_TOOL_ENDPOINTS
+                or n == "controlplanerequest"
+                or bool(studio_tools.tool_for(n))
+                or n in _GARDEN_ACTIONS
+                or n.endswith("request")
+            ),
+        )
+
         _candidate = str(tool_data.get("action", "")).strip()
         _cand_norm = re.sub(r'[\s_]+', '', _candidate).lower()
         _is_ha_action = _cand_norm in ("turnon", "turnoff", "toggle", "play", "pause", "stop", "send", "messages", "list")
@@ -2261,11 +2275,23 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                         break
         else:
             # action is a tool name (routing key); ensure payload has valid HA action
-            if _cand_norm in SINGLE_TURN_TOOL_ENDPOINTS or _cand_norm == "controlplanerequest":
+            _is_tool_route = (
+                _cand_norm in SINGLE_TURN_TOOL_ENDPOINTS
+                or _cand_norm == "controlplanerequest"
+                or bool(studio_tools.tool_for(_cand_norm))
+                or _cand_norm in _GARDEN_ACTIONS
+                or _cand_norm.endswith("request")
+            )
+            if _is_tool_route:
                 _pl = tool_data.get("payload")
                 if not isinstance(_pl, dict):
                     _pl = {}
-                if "action" in _pl and _pl["action"] in SINGLE_TURN_TOOL_ENDPOINTS:
+                _pl_action_norm = re.sub(r"[\s_]+", "", str(_pl.get("action", ""))).lower()
+                if "action" in _pl and (
+                    _pl_action_norm in SINGLE_TURN_TOOL_ENDPOINTS
+                    or _pl_action_norm == "controlplanerequest"
+                    or _pl_action_norm.endswith("request")
+                ):
                     # payload.action is also a tool name, not an HA action; remove it
                     _pl.pop("action")
                 if "action" not in _pl:

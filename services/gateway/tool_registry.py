@@ -18,6 +18,7 @@ Services targeted:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -56,6 +57,32 @@ SVC_GATEWAY = "gateway"
 SVC_RAG = "rag"
 SVC_STORAGE = "storage"
 SVC_CONTROL_PLANE = "control_plane"
+
+
+def promote_tool_discriminator(
+    tool_data: dict[str, Any],
+    is_known: Callable[[str], bool],
+) -> bool:
+    """Promote a tool discriminator to the routing action when action is a verb.
+
+    When ``tool`` (or ``@type``/``type``) names a known tool and ``action`` is not
+    a known tool, the tool name becomes the routing action and the original action
+    is preserved as ``sub_action``/``device_action`` for payload dispatch. Returns
+    True when the routing action was changed.
+    """
+    for t_key in ("tool", "@type", "type"):
+        if t_key in tool_data and isinstance(tool_data[t_key], str) and tool_data[t_key] not in ("function",):
+            cand_tool = tool_data[t_key]
+            cand_tool_norm = re.sub(r"[\s_]+", "", cand_tool).lower()
+            if is_known(cand_tool_norm):
+                act_norm = re.sub(r"[\s_]+", "", str(tool_data.get("action", ""))).lower()
+                if not is_known(act_norm):
+                    if "action" in tool_data:
+                        tool_data["sub_action"] = tool_data["action"]
+                        tool_data["device_action"] = tool_data["action"]
+                    tool_data["action"] = cand_tool
+                    return True
+    return False
 
 
 _GH_TOOL = {
