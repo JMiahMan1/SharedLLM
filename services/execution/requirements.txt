@@ -14,6 +14,9 @@ redis
 playwright
 Pillow>=10.0.0
 html2text
+# WebReadRequest / StorageFileReadRequest: PDF text (pdf_text.py) and a page's main article.
+pypdf
+trafilatura
 docker>=7.0.0
 # Pinned exactly: 0.10 removed KokoroPipeline and SSMD support outright, and an
 # unpinned upgrade is what left read-aloud unable to import its own engine.
