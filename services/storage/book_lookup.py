@@ -140,6 +140,11 @@ async def google_books(session: aiohttp.ClientSession, title: str, author: str, 
     return out
 
 
+#: What an Open Library search must be asked for: since 2025 its default answer has
+#: no subjects, publishers or ISBNs, which left every looked-up book without tags.
+OPEN_LIBRARY_FIELDS = "key,title,author_name,subject,publisher,first_publish_year,isbn,language,cover_i"
+
+
 async def open_library(session: aiohttp.ClientSession, title: str, author: str, isbn: str) -> dict[str, Any]:
     if isbn:
         url = f"https://openlibrary.org/search.json?limit=1&isbn={quote(isbn)}"
@@ -147,6 +152,7 @@ async def open_library(session: aiohttp.ClientSession, title: str, author: str, 
         url = f"https://openlibrary.org/search.json?limit=1&title={quote(title)}" + (f"&author={quote(author)}" if author else "")
     else:
         return _blank()
+    url += f"&fields={OPEN_LIBRARY_FIELDS}"
     docs = (await _json(session, url)).get("docs") or []
     if not docs:
         return _blank()
@@ -172,15 +178,77 @@ async def open_library(session: aiohttp.ClientSession, title: str, author: str, 
     return out
 
 
-def suggest_tags(found: dict[str, Any], existing: list[str], limit: int = 8) -> list[dict[str, Any]]:
-    """Tags for the book: library tags its subjects name, then the app's topics it calls for."""
+#: How many tags a book is given: a few that say what it is, not a subject index.
+MAX_TAGS = 5
+#: A library tag used by fewer books than this is not offered from a subject
+#: (one-off catalogue strings such as "1725-1798" or "etc.").
+MIN_TAG_USES = 2
+
+
+#: Catalogue subjects that say nothing about what a book is (Open Library's lending
+#: shelves, a language, "general").
+_EMPTY_SUBJECTS = frozenset({
+    "general", "accessible book", "protected daisy", "in library", "lending library", "large type books",
+    "english", "english language", "fiction in english", "open library staff picks", "ebook", "ebooks", "book",
+    "books", "internet archive wishlist", "long now manual for civilization",
+})
+
+
+def _usable_tag(name: str) -> bool:
+    """A library tag that names a genre or subject, not a fragment of a catalogue heading."""
+    name = name.strip()
+    if name.lower() in _EMPTY_SUBJECTS:
+        return False
+    return 2 < len(name) <= 40 and "--" not in name and bool(re.search(r"[A-Za-z]{3}", name)) \
+        and not re.fullmatch(r"[\d\s.,-]+", name) and not re.fullmatch(r"[A-Za-z]{1,4}\.", name)
+
+
+def _subject_parts(subject: str) -> list[str]:
+    """"England -- Fiction", "Fiction / Christian" and "Fiction, general" name several subjects each."""
+    return [p.strip() for p in re.split(r"\s*(?:--|/|;|,)\s*", str(subject)) if p.strip()]
+
+
+def suggest_tags(found: dict[str, Any], existing: list[str], limit: int = MAX_TAGS,
+                 usage: dict[str, int] | None = None) -> list[dict[str, Any]]:
+    """A small, consistent set of tags for the book, from the library's own tags.
+
+    Tags are never invented from a catalogue's subject strings (the library already
+    has two thousand of those): a subject, or a part of one, is kept only when the
+    library already uses that tag, most used first, so every book lands on the same
+    shelves. The app's topics (fasting, prayer...) are added when the title,
+    subjects or description call for them.
+    """
+    usage = usage or {}
     by_lower = {t.lower(): t for t in existing}
     picked: dict[str, dict[str, Any]] = {}
+    candidates: list[tuple[int, str, str]] = []
     for subject in found.get("subjects") or []:
-        name = by_lower.get(str(subject).strip().lower())
-        if name and name.lower() not in picked:
+        for part in [str(subject).strip(), *_subject_parts(subject)]:
+            name = by_lower.get(part.lower())
+            if not name or not _usable_tag(name):
+                continue
+            uses = usage.get(name, MIN_TAG_USES if not usage else 0)
+            if uses < MIN_TAG_USES:
+                continue
+            candidates.append((uses, name, str(subject)))
+    for _uses, name, subject in sorted(candidates, key=lambda c: (-c[0], c[1].lower())):
+        if name.lower() not in picked:
             picked[name.lower()] = {"name": name, "why": f"subject “{subject}”", "existing": True}
+    if len(picked) < limit:
+        # Then a library tag the subject names in so many words ("American poetry" is
+        # Poetry), most used first: the library's shelf, never the catalogue's heading.
+        shelves = sorted((n for n in existing if _usable_tag(n) and usage.get(n, 0) >= MIN_TAG_USES
+                          and len(n) >= 4 and n.lower() not in picked), key=lambda n: (-usage.get(n, 0), n.lower()))
+        subjects = [str(x).lower() for x in found.get("subjects") or []]
+        for name in shelves:
+            if len(picked) >= limit:
+                break
+            pattern = rf"\b{re.escape(name.lower())}\b"
+            subject = next((x for x in subjects if re.search(pattern, x)), None)
+            if subject:
+                picked[name.lower()] = {"name": name, "why": f"subject “{subject}”", "existing": True}
     text = " ".join([found.get("title") or "", " ".join(found.get("subjects") or []), (found.get("comments") or "")[:2000]]).lower()
+    topics: list[dict[str, Any]] = []
     for topic, words in TOPICS.items():
         if topic in picked:
             continue
@@ -188,8 +256,61 @@ def suggest_tags(found: dict[str, Any], existing: list[str], limit: int = 8) -> 
         hit = next((w for w in words if re.search(rf"\b{re.escape(w)}\b", text)), None)
         if hit:
             name = by_lower.get(topic) or by_lower.get(f"jarvis:{topic}") or topic
-            picked[name.lower()] = {"name": name, "why": f"mentions “{hit.strip()}”", "existing": name.lower() in by_lower}
-    return list(picked.values())[:limit]
+            topics.append({"name": name, "why": f"mentions “{hit.strip()}”", "existing": name.lower() in by_lower})
+    out = [*picked.values(), *[t for t in topics if t["name"].lower() not in picked]]
+    return out[:limit]
+
+
+# ── Is a catalogue's answer this book? ──────────────────────────────────────
+
+#: How alike a catalogue's title must be to the book's (after dropping subtitles).
+TITLE_MATCH = 0.75
+
+
+def _norm_words(text: str) -> str:
+    text = re.sub(r"['\u2019]", "", str(text or "").lower())
+    return " ".join(w for w in re.findall(r"[a-z0-9]+", text) if w not in ("the", "a", "an"))
+
+
+def _main_title(title: str) -> str:
+    return re.split(r"\s*[:(\[]\s*|\s+-\s+", str(title or ""), maxsplit=1)[0]
+
+
+def _edition_of(one: str, other: str) -> bool:
+    """"wild at heart" and "wild at heart revised updated": one title, an edition note added.
+
+    The shorter must be at least two words and half of the longer, so "book" is not
+    "book thief".
+    """
+    short, long = sorted((one.split(), other.split()), key=len)
+    return len(short) >= 2 and len(short) * 2 >= len(long) and long[:len(short)] == short
+
+
+def same_book(title: str, authors: list[str], found: dict[str, Any]) -> bool:
+    """Whether a catalogue result is the book asked about, not just its first search hit.
+
+    A search for the file name "book" answered "The Book Thief"; taking the first hit
+    unchecked files a book under someone else's title. The result's main title must
+    match the asked title (either may carry a subtitle or an edition note), and when
+    an author is known one of the result's authors must share a surname with them.
+    """
+    from difflib import SequenceMatcher
+
+    if not found.get("title") or not title:
+        return False
+    want, got = _norm_words(_main_title(title)), _norm_words(_main_title(found["title"]))
+    full_want, full_got = _norm_words(title), _norm_words(found["title"])
+    if not want or not got:
+        return False
+    alike = max(SequenceMatcher(None, want, got).ratio(),
+                1.0 if _edition_of(full_want, full_got) else 0.0)
+    if alike < TITLE_MATCH:
+        return False
+    asked = [a for a in authors if a.strip() and a.strip().lower() != "unknown"]
+    if not asked or not found.get("authors"):
+        return True
+    surnames = {(_norm_words(a).split() or [""])[-1] for a in asked}
+    return any((_norm_words(a).split() or [""])[-1] in surnames for a in found["authors"])
 
 
 async def fetch_cover(url: str) -> bytes | None:
@@ -209,18 +330,46 @@ async def fetch_cover(url: str) -> bytes | None:
         return None
 
 
-async def inspect(data: bytes, filename: str, existing_tags: list[str], *, online: bool = True) -> dict[str, Any]:
+async def inspect(data: bytes, filename: str, existing_tags: list[str], *, online: bool = True,
+                  usage: dict[str, int] | None = None, known: dict[str, Any] | None = None) -> dict[str, Any]:
     """Every field Jarvis can find for a book, with where each one came from."""
-    layers: list[tuple[str, dict[str, Any]]] = [("the file", file_details(data, filename))]
-    base = layers[0][1]
-    if online:
-        title = base["title"] or _from_stem(filename)["title"]
-        author = (base["authors"] or _from_stem(filename)["authors"] or [""])[0]
-        isbn = base["isbn"]
+    base = file_details(data, filename)
+    out = await lookup(base, filename, existing_tags, online=online, usage=usage, known=known)
+    out.pop("cover", None)  # the preview carries it; bytes are not JSON
+    return out
+
+
+async def lookup(base: dict[str, Any], filename: str, existing_tags: list[str], *, online: bool = True,
+                 usage: dict[str, int] | None = None, known: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Every field Jarvis can find for a book: ``base`` (what the file says), then the catalogues.
+
+    ``known`` are fields the library or the person already has (a title typed in,
+    a book's catalogue row): they are what the catalogues are searched by and what
+    their answers are checked against. A catalogue answer that is not the same
+    book (``same_book``) is dropped, and ``identified`` says whether any was kept.
+    """
+    known = known or {}
+    layers: list[tuple[str, dict[str, Any]]] = [("the file", base)]
+    stem = _from_stem(filename)
+    title = str(known.get("title") or base["title"] or stem["title"] or "")
+    authors = list(known.get("authors") or base["authors"] or stem["authors"] or [])
+    isbn = str(known.get("isbn") or base["isbn"] or "")
+    identified = False
+    rejected: list[str] = []
+    if online and (title or isbn):
+        author = authors[0] if authors else ""
         async with aiohttp.ClientSession(headers={"User-Agent": "JarvisOS-Library/1.0"}) as session:
-            layers.append(("Google Books", await google_books(session, title, author, isbn)))
-            layers.append(("Open Library", await open_library(session, title, author, isbn)))
-    layers.append(("the file name", _from_stem(filename)))
+            for source, fetch in (("Google Books", google_books), ("Open Library", open_library)):
+                found = await fetch(session, title, author, isbn)
+                if not found.get("title"):
+                    continue
+                # An ISBN search is the book by definition; a title search must be checked.
+                if (isbn and found.get("isbn") == isbn) or same_book(title, authors, found):
+                    layers.append((source, found))
+                    identified = True
+                else:
+                    rejected.append(f"{source} suggested “{found['title']}”")
+    layers.append(("the file name", stem))
 
     out: dict[str, Any] = {}
     sources: dict[str, str] = {}
@@ -243,6 +392,57 @@ async def inspect(data: bytes, filename: str, existing_tags: list[str], *, onlin
     elif out.get("cover_url"):
         sources["cover"] = sources.pop("cover_url", "a catalogue")
     out["cover_preview"] = f"data:image/jpeg;base64,{base64.b64encode(cover).decode('ascii')}" if cover and len(cover) < 2_000_000 else ""
-    out["tags"] = suggest_tags(out, existing_tags)
+    out["tags"] = suggest_tags(out, existing_tags, usage=usage)
     out["sources"] = sources
+    out["cover"] = cover
+    out["identified"] = identified
+    out["rejected"] = rejected
     return out
+
+
+# ── Filling in a book that is being added, or one already on the shelf ──────
+
+#: The fields a book is filled in with, in the order a reply names them.
+FIELDS = ("title", "authors", "series", "publisher", "published", "isbn", "comments", "language")
+
+
+def _given(value: Any) -> bool:
+    if isinstance(value, list):
+        return any(str(v).strip() and str(v).strip().lower() != "unknown" for v in value)
+    text = str(value or "").strip()
+    return bool(text) and text.lower() not in ("unknown", "untitled")
+
+
+def merge(given: dict[str, Any], found: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    """``given`` (typed by a person, or already in the library) wins; ``found`` fills the rest.
+
+    Returns the merged fields and, for each field ``found`` filled, where it came from.
+    """
+    merged: dict[str, Any] = {}
+    filled: dict[str, str] = {}
+    sources = found.get("sources") or {}
+    for key in FIELDS:
+        if _given(given.get(key)):
+            merged[key] = given[key]
+        elif _given(found.get(key)):
+            merged[key] = found[key]
+            filled[key] = str(sources.get(key) or "a catalogue")
+        else:
+            merged[key] = [] if key == "authors" else ""
+    if _given(given.get("tags")):
+        merged["tags"] = list(given["tags"])
+    else:
+        merged["tags"] = [t["name"] for t in found.get("tags") or []]
+        if merged["tags"]:
+            filled["tags"] = "the library's tags"
+    return merged, filled
+
+
+def report(title: str, identified: bool, filled: dict[str, str], rejected: list[str]) -> str:
+    """One sentence for the person: what was filled in, or that the book was not identified."""
+    if identified:
+        named = ", ".join(k for k in (*FIELDS, "tags") if k in filled) or "nothing new"
+        return f"Added “{title}”. Filled in from the file and the catalogues: {named}."
+    why = f" ({'; '.join(rejected)}, which did not match)" if rejected else ""
+    return (f"Added “{title}”, but I could not identify it in the book catalogues{why}. "
+            "Please check the title and author.")

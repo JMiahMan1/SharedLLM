@@ -4,6 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import LibraryPanel from './LibraryPanel';
 import { api } from '../../services/api';
 import type { LibraryBook } from '../../types/api';
+import toast from 'react-hot-toast';
+
+vi.mock('react-hot-toast', () => {
+  const toast = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() });
+  return { default: toast };
+});
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -127,6 +133,21 @@ describe('LibraryPanel', () => {
     fireEvent.click(within(form).getByTestId('library-add-submit'));
     await waitFor(() => expect(api.libraryAddBook).toHaveBeenCalled());
     expect(api.libraryInspectBook).not.toHaveBeenCalled();
+    expect(vi.mocked(api.libraryAddBook).mock.calls[0][0].get('online')).toBe('false');
+  });
+
+  it('says so when the book could not be identified', async () => {
+    vi.mocked(api.libraryAddBook).mockResolvedValue({
+      book_id: 14, title: 'book', tags: [], path: 'x', identified: false,
+      message: 'Added “book”, but I could not identify it in the book catalogues. Please check the title and author.',
+    });
+    renderPanel(true);
+    fireEvent.click(await screen.findByTestId('library-add-button'));
+    const form = screen.getByTestId('library-add');
+    fireEvent.click(within(form).getByLabelText('Auto-fill and tag'));
+    fireEvent.change(within(form).getByTestId('library-add-file'), { target: { files: [new File(['x'], 'book.pdf')] } });
+    fireEvent.click(within(form).getByTestId('library-add-submit'));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining('could not identify it'), expect.anything()));
   });
 
   it('audits the shelf and only suggests', async () => {

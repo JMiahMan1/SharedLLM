@@ -12496,11 +12496,35 @@ async def library_add_book(request: Request):
     data = await upload.read()
     out = aiohttp.FormData()
     out.add_field("library_path", await _library_path())
-    for key in ("title", "authors", "tags", "series", "comments", "publisher", "published", "isbn", "language", "cover_url"):
+    # "online" false (auto-fill off) stops storage looking the book up; absent means on.
+    for key in ("title", "authors", "tags", "series", "comments", "publisher", "published", "isbn", "language", "cover_url",
+                "online"):
         out.add_field(key, str(form.get(key) or "")[:8000])
     out.add_field("file", data, filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     log.info("[library] %s adds %s (%d bytes)", who, getattr(upload, "filename", "book"), len(data))
     return await _storage_library("POST", "/calibre/books/add", data=out, timeout=600.0)
+
+
+@app.post("/api/library/enrich")
+async def library_enrich_books(request: Request):
+    """Fill in books that lack a title, an author or tags (admins).
+
+    ``dry_run`` defaults to true: it counts those books and shows what ``limit`` of
+    them would get, writing nothing. Only empty fields are ever written.
+    """
+    who = await _require_admin(request)
+    body = await _request_json_object(request)
+    dry_run = body.get("dry_run", True) is not False
+    try:
+        limit = max(0, min(int(body.get("limit", 10)), 200))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="limit must be a number from 0 to 200.") from None
+    book_ids = [int(b) for b in (body.get("book_ids") or []) if str(b).isdigit()][:500]
+    log.info("[library] %s fills in books (dry_run=%s, limit=%s)", who, dry_run, limit)
+    return await _storage_library("POST", "/calibre/books/enrich", json_body={
+        "library_path": await _library_path(), "dry_run": dry_run, "limit": limit,
+        "book_ids": book_ids, "online": body.get("online", True) is not False,
+    }, timeout=600.0)
 
 
 #: Topics a feature may ask for (rag topics.py): a Calibre tag such as

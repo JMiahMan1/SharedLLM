@@ -104,6 +104,13 @@ _TEST_ENV_DEFAULTS = {
     # itself with a per-test fixture; the fix belongs here.
     "INTERNAL_SECRET": "test-secret",
     "FERNET_KEY": _test_fernet_key,
+    # The Calibre library settings storage reads at import: their code defaults,
+    # never a developer's tuning.
+    "CALIBRE_BOOK_CACHE_MB": "256",
+    "CALIBRE_CATALOG_CHECK_S": "30",
+    "CALIBRE_CHAPTER_MAX_CHARS": "60000",
+    "CALIBRE_INDEX_INTERVAL_S": "900",
+    "STORAGE_PDF_MAX_CHARS": "3000000",
     # Identity's browser allowlist: deterministic, and never the developer's
     # deployment origins (or "*") leaking into the CORS tests.
     "IDENTITY_CORS_ORIGINS": "https://jarvis.example.com,http://localhost:5173",

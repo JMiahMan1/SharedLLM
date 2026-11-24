@@ -33,7 +33,7 @@ def test_the_file_comes_first_then_the_catalogues(monkeypatch):
 
     async def openlib(session, title, author, isbn):
         out = book_lookup._blank()
-        out.update(published="1969", subjects=["Lent"])
+        out.update(title="Great Lent", published="1969", subjects=["Lent"])
         return out
 
     monkeypatch.setattr(book_lookup, "google_books", google)

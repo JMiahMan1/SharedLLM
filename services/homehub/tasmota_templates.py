@@ -10,7 +10,12 @@ device unless an admin asked for it with ``confirm: true``.
 - ``read_device`` asks the device for ``Template``, ``Module`` and ``Status 0``.
 - ``suggest`` ranks catalog entries with a small, explainable score: words in the device's names that
   name a maker or a model, the kind of device its names say it is, what it drives now (a light, relays,
-  an energy meter), and its chip. A template for another chip family is never offered.
+  an energy meter), and its chip. A template for another chip family is never offered. Templates measured
+  in this household (``tasmota_measured.py``) are scored the same way and rank first when the device's names
+  match their maker or model.
+- When the device says nothing that identifies it (a Generic module that drives nothing, and names that match
+  no maker or model), ``read_device`` says so and offers the pin finder (``tasmota_pin_finder.py``) instead of
+  ranking a template that only matches a word like "lamp"; those are returned apart, as ``guesses``.
 - ``apply_template`` sends ``Backlog Template <json>; Module 0`` (an entry's extra commands first, each on
   its own), waits for the restart, reads ``Template`` back to verify it, keeps the template it replaced in
   ``entry.data["previous_template"]`` (and ``previous_module``) and reloads the entry, adding the light or
@@ -51,6 +56,11 @@ MIN_SCORE = 3
 MAX_SUGGESTIONS = 3
 
 _locks: dict[str, asyncio.Lock] = {}
+#: Entries something else has in hand (the pin finder), with what to tell a caller who tries to load a template.
+BUSY: dict[str, str] = {}
+#: Tasmota leaves the flash pins out of a template: GPIO6, 7, 8 and 11 on the ESP8266 and the ESP32.
+_FLASH_PINS = {"esp8266": (6, 7, 8, 11), "esp32": (6, 7, 8, 11), "esp32c3": (), "esp32s3": ()}
+_MAX_GPIO = {"esp8266": 18, "esp32": 40, "esp32c3": 22, "esp32s3": 49}
 
 
 class TemplateError(HubError):
@@ -139,6 +149,12 @@ def fits_chip(tpl: dict[str, Any], family: str | None) -> bool:
     if family is None or family not in GPIO_LENGTHS:
         return True
     return len(tpl.get("GPIO") or []) in GPIO_LENGTHS[family]
+
+
+def gpio_numbers(family: str) -> list[int]:
+    """The GPIO number of each place in a template's GPIO list for a chip family (ESP8266: 0-5, 9, 10, 12-17)."""
+    flash = _FLASH_PINS[family]
+    return [g for g in range(_MAX_GPIO[family]) if g not in flash]
 
 
 def pwm_channels(tpl: dict[str, Any]) -> int:
@@ -316,16 +332,46 @@ def score_entry(entry: dict[str, Any], facts: dict[str, Any], words: set[str] | 
     return score, reasons
 
 
-def suggest(facts: dict[str, Any], limit: int = MAX_SUGGESTIONS) -> list[dict[str, Any]]:
-    """Up to ``limit`` catalog entries that fit the device best, each with its score and reasons."""
+#: A measured template whose maker or model the device's names match ranks above every catalog entry.
+MEASURED_MATCH_BONUS = 20
+
+
+def score_measured(rec: dict[str, Any], facts: dict[str, Any], words: set[str] | None = None) -> tuple[int, list[str]]:
+    """``(score, reasons)`` of a template measured in this household: the catalog's score, plus a bonus that
+    puts it first when the device's names contain its whole model (or maker and a model code)."""
+    words = _device_words(facts) if words is None else words
+    score, reasons = score_entry({**rec, "id": ""}, facts, words)
+    if score < 0:
+        return score, reasons
+    model = _words(rec.get("model") or "")
+    maker = _words(rec.get("manufacturer") or "")
+    if (model and all(w in words for w in model)) or any(r.startswith("Its name mentions the model") for r in reasons):
+        score += MEASURED_MATCH_BONUS
+        reasons.insert(0, f"Its name matches the model measured on {rec.get('device_name') or 'another device'}")
+    elif maker and all(w in words for w in maker):
+        score += 2
+    return score, reasons
+
+
+def suggest(facts: dict[str, Any], limit: int = MAX_SUGGESTIONS,
+            measured: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Up to ``limit`` templates that fit the device best, each with its score and reasons: the catalog's and
+    those measured in this household (``source: "measured"``)."""
+    from services.homehub.tasmota_measured import public
+
     words = _device_words(facts)
     ranked = []
+    for rec in measured or []:
+        score, reasons = score_measured(rec, facts, words)
+        if score >= MIN_SCORE:
+            ranked.append((score, 0, rec["id"], {**public(rec), "score": score, "reasons": reasons}))
     for entry in load_catalog():
         score, reasons = score_entry(entry, facts, words)
         if score >= MIN_SCORE:
-            ranked.append((score, entry["id"], {**public_entry(entry), "score": score, "reasons": reasons}))
-    ranked.sort(key=lambda r: (-r[0], r[1]))
-    return [r[2] for r in ranked[:limit]]
+            ranked.append((score, 1, entry["id"], {**public_entry(entry), "source": "catalog", "score": score,
+                                                   "reasons": reasons}))
+    ranked.sort(key=lambda r: (-r[0], r[1], r[2]))
+    return [r[3] for r in ranked[:limit]]
 
 
 # -- the device ------------------------------------------------------------------------------------
@@ -380,16 +426,49 @@ async def _read(runtime: Any, entry: Any, drv: Any) -> dict[str, Any]:
     return device_facts(status, template, module, module_name, _names_of(runtime, entry))
 
 
-def _current(facts: dict[str, Any]) -> dict[str, Any]:
+def _measured(runtime: Any) -> list[dict[str, Any]]:
+    from services.homehub import tasmota_measured
+
+    return tasmota_measured.all_records(runtime)
+
+
+def _current(facts: dict[str, Any], measured: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     tpl = facts.get("template")
     matches = catalog_matches(tpl) if tpl else []
+    mine = [r for r in measured or [] if tpl and same_template(json.loads(r["template"]), tpl)]
     return {**facts, "template_json": template_text(tpl) if tpl else None, "active": facts.get("module") == 0,
             "catalog_matches": [{"id": e["id"], "manufacturer": e["manufacturer"], "model": e["model"]}
-                                for e in matches]}
+                                for e in matches],
+            "measured_matches": [{"id": r["id"], "manufacturer": r["manufacturer"], "model": r["model"],
+                                  "measured_on": r.get("device_name")} for r in mine]}
+
+
+#: Reasons that say something about the device itself, not only the kind of thing its name suggests.
+_IDENTIFYING = re.compile(r"^(Its name mentions|It already drives a light|It has \d+ light channels|"
+                          r"It reports power use|It switches relays|Its name matches)")
+
+
+def drives_nothing(facts: dict[str, Any]) -> bool:
+    """A device that has no light and no relays yet: a fresh flash on the Generic module, or a template with no
+    pins set."""
+    if facts.get("light") or facts.get("relays"):
+        return False
+    tpl = facts.get("template") or {}
+    pins = [g for g in tpl.get("GPIO") or [] if isinstance(g, int) and g > 1]
+    return not (facts.get("module") == 0 and pins)
+
+
+def identified(suggestions: list[dict[str, Any]]) -> bool:
+    return any(_IDENTIFYING.match(r) for s in suggestions for r in s.get("reasons") or [])
 
 
 async def read_device(runtime: Any, entry_id: str) -> dict[str, Any]:
-    """The device's template, module and names now, the catalog entries it already equals, and suggestions."""
+    """The device's template, module and names now, the templates it already equals, and suggestions.
+
+    When the device drives nothing and no suggestion rests on anything but its kind (its names match no maker or
+    model), the suggestions are only guesses: they are returned as ``guesses``, ``suggestions`` is empty and
+    ``identified`` is false, so the page can offer the pin finder first.
+    """
     entry = _tasmota_entry(runtime, entry_id)
     drv, made = _driver_for(runtime, entry)
     try:
@@ -397,13 +476,32 @@ async def read_device(runtime: Any, entry_id: str) -> dict[str, Any]:
     finally:
         if made:
             await drv.async_unload()
-    current = _current(facts)
-    up_to_date = bool(current["catalog_matches"]) and current["active"]
+    measured = _measured(runtime)
+    current = _current(facts, measured)
+    found = current["measured_matches"] or current["catalog_matches"]
+    up_to_date = bool(found) and current["active"]
+    if current["measured_matches"]:
+        m = current["measured_matches"][0]
+        message = (f"It already has the {m['manufacturer']} {m['model']} template measured on {m['measured_on']}: "
+                   "nothing to do.").replace("  ", " ")
+    elif found:
+        message = f"It already has the {found[0]['manufacturer']} {found[0]['model']} template: nothing to do."
+    else:
+        message = None
+    ranked = suggest(facts, measured=measured)
+    blank = drives_nothing(facts)
+    known = identified(ranked)
+    note = None
+    if blank and not known:
+        note = ("It reports nothing that identifies it: it runs the "
+                f"{facts.get('module_name') or 'Generic'} module with no pins set, and its names match no maker "
+                "or model. Find its pins with the pin finder, or search the catalog by the model on its box.")
     return {
         "entry_id": entry.entry_id, "title": entry.title, "current": current, "up_to_date": up_to_date,
-        "message": (f"It already has the {current['catalog_matches'][0]['manufacturer']} "
-                    f"{current['catalog_matches'][0]['model']} template: nothing to do.") if up_to_date else None,
-        "suggestions": suggest(facts),
+        "message": message if up_to_date else None,
+        "identified": known or not blank, "identify_note": note,
+        "suggestions": ranked if known or not blank else [],
+        "guesses": [] if known or not blank else ranked,
         "previous_template": entry.data.get("previous_template"),
     }
 
@@ -475,11 +573,55 @@ def _entity_plan(runtime: Any, entry: Any, status: dict[str, Any]) -> tuple[Any,
     return plan, added, stale
 
 
+async def send_and_restart(runtime: Any, entry: Any, drv: Any, tpl: dict[str, Any] | None, module: int,
+                           extra: list[str], uptime_before: Any) -> tuple[bool, dict[str, Any] | None,
+                                                                          dict[str, Any] | None, str]:
+    """Send ``extra`` one by one, then ``Backlog Template <tpl>; Module <module>`` (no template: only the module),
+    wait for the restart and read the device back: ``(restarted, last Status 0, facts after or None, sent)``."""
+    for cmd in extra:
+        await _cm(drv, cmd)
+    sent = f"Backlog Template {template_text(tpl)}; Module {module}" if tpl else f"Module {module}"
+    await _cm(drv, sent)
+    log.info("tasmota %s (%s): loaded template %r (module %s), waiting for its restart", entry.title,
+             entry.entry_id, (tpl or {}).get("NAME"), module)
+    restarted, status = await _wait_for_restart(drv, uptime_before)
+    after: dict[str, Any] | None = None
+    if status is not None:
+        try:
+            after = await _read(runtime, entry, drv)
+        except TemplateError:
+            after = None
+    return restarted, status, after, sent
+
+
+async def reload_entry(runtime: Any, entry: Any, status: dict[str, Any] | None,
+                       after: dict[str, Any] | None) -> tuple[list[str], list[str]]:
+    """Bring the entry's entities in line with what the device drives now and restart it:
+    ``(added unique_ids, stale entity_ids)``."""
+    from services.homehub.flows import FlowError, commit
+
+    added: list[str] = []
+    stale: list[str] = []
+    if after is not None and status is not None:
+        plan, added, stale = _entity_plan(runtime, entry, status)
+        try:
+            await commit(runtime, plan, restart=not entry.disabled_by)
+        except FlowError as exc:
+            raise TemplateError(str(exc), exc.status) from None
+    elif not entry.disabled_by:
+        await runtime.stop_entry(entry.entry_id)
+        runtime.start_entry(entry)
+    return added, stale
+
+
 async def _load(runtime: Any, entry: Any, tpl: dict[str, Any], extra: list[str], *,
                 module: int = 0, restore_of: str | None = None) -> dict[str, Any]:
     """Send the template (and ``extra`` first), wait for the restart, verify, record, reload."""
-    from services.homehub.flows import FlowError, commit
-
+    if entry.entry_id in BUSY:
+        raise TemplateError(BUSY[entry.entry_id], 409)
+    if entry.data.get("pin_finder_backup"):
+        raise TemplateError("A pin finder run on this device did not finish. Put its saved template back first "
+                            "(Find my pins).", 409)
     lock = _locks.setdefault(entry.entry_id, asyncio.Lock())
     if lock.locked():
         raise TemplateError("A template is already being loaded onto this device", 409)
@@ -491,41 +633,21 @@ async def _load(runtime: Any, entry: Any, tpl: dict[str, Any], extra: list[str],
             text = template_text(tpl)
             if restore_of is None and same_template(old_tpl, tpl) and old_module == module:
                 return {"status": "unchanged", "verified": True, "template": text, "sent": None,
-                        "message": "The device already has this template.", "current": _current(before),
+                        "message": "The device already has this template.",
+                        "current": _current(before, _measured(runtime)),
                         "previous_template": entry.data.get("previous_template")}
             # Keep what it had before anything is sent, so it can be put back even if the wait fails.
             previous = template_text(old_tpl) if old_tpl else None
             if previous is not None and not same_template(old_tpl, tpl):
                 entry.data = {**entry.data, "previous_template": previous, "previous_module": old_module}
                 runtime.store.save_config_entry(entry)
-            for cmd in extra:
-                await _cm(drv, cmd)
-            sent = f"Backlog Template {text}; Module {module}"
-            await _cm(drv, sent)
-            log.info("tasmota %s (%s): loaded template %r, waiting for its restart", entry.title,
-                     entry.entry_id, tpl.get("NAME"))
-            restarted, status = await _wait_for_restart(drv, before.get("uptime_s"))
-            after: dict[str, Any] | None = None
-            if status is not None:
-                try:
-                    after = await _read(runtime, entry, drv)
-                except TemplateError:
-                    after = None
+            restarted, status, after, sent = await send_and_restart(runtime, entry, drv, tpl, module, extra,
+                                                                    before.get("uptime_s"))
         finally:
             if made:
                 await drv.async_unload()
         verified = bool(after) and same_template(after.get("template"), tpl) and after.get("module") == module
-        added: list[str] = []
-        stale: list[str] = []
-        if after is not None and status is not None:
-            plan, added, stale = _entity_plan(runtime, entry, status)
-            try:
-                await commit(runtime, plan, restart=not entry.disabled_by)
-            except FlowError as exc:
-                raise TemplateError(str(exc), exc.status) from None
-        elif not entry.disabled_by:
-            await runtime.stop_entry(entry.entry_id)
-            runtime.start_entry(entry)
+        added, stale = await reload_entry(runtime, entry, status, after)
         if verified:
             message = "Loaded and verified: the device restarted with the new template."
         elif after is None:
@@ -539,7 +661,7 @@ async def _load(runtime: Any, entry: Any, tpl: dict[str, Any], extra: list[str],
             "status": "applied", "verified": verified, "restarted": restarted, "sent": sent, "template": text,
             "previous_template": entry.data.get("previous_template"), "message": message,
             "entities_added": added, "entities_stale": stale,
-            "current": _current(after) if after is not None else None,
+            "current": _current(after, _measured(runtime)) if after is not None else None,
         }
 
 
@@ -550,10 +672,18 @@ def _confirmed(body: dict[str, Any]) -> None:
 
 
 async def apply_template(runtime: Any, entry_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """``{"template": <json text or object>} or {"catalog_id"}``, with ``"confirm": true``."""
+    """``{"template": <json text or object>}``, ``{"catalog_id"}`` or ``{"measured_id"}``, with ``"confirm": true``."""
+    from services.homehub import tasmota_measured
+
     entry = _tasmota_entry(runtime, entry_id)
     extra: list[str] = []
-    if body.get("catalog_id"):
+    if body.get("measured_id"):
+        rec = tasmota_measured.get(runtime, str(body["measured_id"]))
+        if rec is None:
+            raise TemplateError("No such measured template", 404)
+        tpl = validate_template(rec["template"])
+        extra = [str(c) for c in rec.get("commands") or []]
+    elif body.get("catalog_id"):
         found = catalog_entry(str(body["catalog_id"]))
         if found is None:
             raise TemplateError("No such catalog template", 404)
@@ -562,7 +692,8 @@ async def apply_template(runtime: Any, entry_id: str, body: dict[str, Any]) -> d
     elif body.get("template") is not None:
         tpl = validate_template(body["template"])
     else:
-        raise TemplateError("Send a template (\"template\") or a catalog entry (\"catalog_id\").")
+        raise TemplateError("Send a template (\"template\"), a catalog entry (\"catalog_id\") or a measured "
+                            "template (\"measured_id\").")
     _confirmed(body)
     family = chip_family(_known_chip(runtime, entry))
     if not fits_chip(tpl, family):

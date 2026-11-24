@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { CheckCircle2, Cpu, ExternalLink, Loader2, RotateCcw, Search, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, Cpu, ExternalLink, FlaskConical, Info, Loader2, RotateCcw, Search, TriangleAlert } from 'lucide-react';
 import { confirmDialog } from '../ui/confirmDialog';
 import { failureText } from '../../lib/discoveredDevices';
 import {
-  KIND_LABEL, applyTemplate, catalogKey, deviceTemplateKey, filterCatalog, getDeviceTemplate, getTemplateCatalog,
-  pasteProblem, restorePreviousTemplate, templateName,
-  type ApplyRequest, type ApplyResult, type CatalogTemplate, type TemplateKind,
+  KIND_LABEL, applyRequestFor, applyTemplate, catalogKey, deviceTemplateKey, filterCatalog, forgetMeasuredTemplate,
+  getDeviceTemplate, getTemplateCatalog, measuredLabel, pasteProblem, restorePreviousTemplate, saveMeasuredTemplate,
+  templateName,
+  type ApplyRequest, type ApplyResult, type CatalogTemplate, type DeviceTemplate, type TemplateKind,
 } from '../../lib/tasmotaTemplates';
+import TasmotaPinFinder from './TasmotaPinFinder';
 
 const CARD = 'rounded-2xl border border-white/10 bg-white/[0.03]';
 const INPUT = 'min-h-11 w-full min-w-0 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-white placeholder:text-slate-500';
@@ -22,13 +24,22 @@ function label(e: CatalogTemplate) {
   return `${e.manufacturer} ${e.model}`;
 }
 
-function Row({ entry, chosen, onChoose, reasons }: {
-  entry: CatalogTemplate; chosen: boolean; onChoose: () => void; reasons?: string[];
+function Row({ entry, chosen, onChoose, reasons, testId, onForget }: {
+  entry: CatalogTemplate; chosen: boolean; onChoose: () => void; reasons?: string[]; testId?: string;
+  onForget?: () => void;
 }) {
+  const measured = measuredLabel(entry);
   return (
-    <li className="flex flex-col gap-2 py-2 sm:flex-row sm:items-start sm:justify-between" data-testid={reasons ? 'template-suggestion' : 'template-option'}>
+    <li className="flex flex-col gap-2 py-2 sm:flex-row sm:items-start sm:justify-between"
+      data-testid={testId ?? (reasons ? 'template-suggestion' : 'template-option')} data-source={entry.source ?? 'catalog'}>
       <div className="min-w-0">
         <p className="break-words text-sm text-slate-100">{label(entry)}</p>
+        {measured && (
+          <p className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-200"
+            data-testid="measured-label">
+            <FlaskConical size={11} aria-hidden /> {measured}{entry.measured_at ? `, ${entry.measured_at}` : ''}
+          </p>
+        )}
         <p className="break-words text-xs text-slate-400">
           {KIND_LABEL[entry.kind]?.replace(/s$/, '') ?? entry.kind} · {entry.chip} · &quot;{entry.name}&quot;
         </p>
@@ -39,10 +50,15 @@ function Row({ entry, chosen, onChoose, reasons }: {
         )}
         {entry.notes && <p className="mt-1 break-words text-xs text-slate-500">{entry.notes}</p>}
       </div>
-      <button type="button" className={`${BTN} shrink-0 ${chosen ? 'border-blue-400/60 bg-blue-500/20 text-white' : ''}`}
-        aria-pressed={chosen} onClick={onChoose}>
-        {chosen ? 'Chosen' : 'Choose'}
-      </button>
+      <div className="flex shrink-0 gap-2">
+        {onForget && (
+          <button type="button" className={BTN} onClick={onForget} aria-label={`Forget ${label(entry)}`}>Forget</button>
+        )}
+        <button type="button" className={`${BTN} ${chosen ? 'border-blue-400/60 bg-blue-500/20 text-white' : ''}`}
+          aria-pressed={chosen} onClick={onChoose}>
+          {chosen ? 'Chosen' : 'Choose'}
+        </button>
+      </div>
     </li>
   );
 }
@@ -55,6 +71,58 @@ function Result({ result }: { result: ApplyResult }) {
       {ok ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" aria-hidden /> : <TriangleAlert size={16} className="mt-0.5 shrink-0" aria-hidden />}
       <p className="min-w-0 break-words">{result.message}</p>
     </div>
+  );
+}
+
+/** "Save this device's template": keep the template a working device runs, as measured on it. */
+function SaveThisDevice({ entryId, d }: { entryId: string; d: DeviceTemplate }) {
+  const qc = useQueryClient();
+  const [maker, setMaker] = useState('');
+  const [model, setModel] = useState('');
+  const [kind, setKind] = useState<TemplateKind>(d.current.light ? 'bulb' : d.current.relays ? 'plug' : 'bulb');
+  const [done, setDone] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () => saveMeasuredTemplate(entryId, { manufacturer: maker.trim(), model: model.trim(), kind }),
+    onSuccess: (r) => {
+      setDone(r.message);
+      void qc.invalidateQueries({ queryKey: catalogKey });
+      void qc.invalidateQueries({ queryKey: deviceTemplateKey(entryId) });
+    },
+    onError: (err) => toast.error(failureText(err)),
+  });
+  return (
+    <details className="group border-t border-white/5 pt-2" data-testid="template-save-device">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center text-xs font-medium text-slate-400 [&::-webkit-details-marker]:hidden">
+        Save this device&apos;s template
+      </summary>
+      {done ? (
+        <p className="flex gap-1.5 text-sm text-emerald-200" role="status"><CheckCircle2 size={16} className="mt-0.5 shrink-0" aria-hidden /> {done}</p>
+      ) : (
+        <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (model.trim()) save.mutate(); }}>
+          <p className="text-xs text-slate-400">
+            It works, so keep its template (&quot;{d.current.template_name}&quot;) for other devices like it. The hub only reads it.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className="block text-xs text-slate-400">Manufacturer
+              <input className={`${INPUT} mt-1`} value={maker} maxLength={60} onChange={(e) => setMaker(e.target.value)}
+                placeholder="As printed on the box" autoComplete="off" />
+            </label>
+            <label className="block text-xs text-slate-400">Model
+              <input className={`${INPUT} mt-1`} value={model} maxLength={60} onChange={(e) => setModel(e.target.value)}
+                placeholder="Model" autoComplete="off" />
+            </label>
+            <label className="block text-xs text-slate-400">Kind
+              <select className={`${INPUT} mt-1`} value={kind} onChange={(e) => setKind(e.target.value as TemplateKind)}>
+                {(Object.keys(KIND_LABEL) as TemplateKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+              </select>
+            </label>
+          </div>
+          <button type="submit" className={PRIMARY} disabled={!model.trim() || save.isPending}>
+            {save.isPending ? <Loader2 size={14} className="animate-spin" aria-hidden /> : null} Save as measured
+          </button>
+        </form>
+      )}
+    </details>
   );
 }
 
@@ -83,6 +151,9 @@ export default function TasmotaTemplateSection({ entryId, deviceName }: { entryI
     onError: (err) => toast.error(failureText(err)) });
   const restore = useMutation({ mutationFn: () => restorePreviousTemplate(entryId), onSuccess: done,
     onError: (err) => toast.error(failureText(err)) });
+  const forget = useMutation({ mutationFn: (id: string) => forgetMeasuredTemplate(id),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: catalogKey }); },
+    onError: (err) => toast.error(failureText(err)) });
   const busy = apply.isPending || restore.isPending;
 
   const matches = useMemo(() => filterCatalog(catalog.data ?? [], search, kind), [catalog.data, search, kind]);
@@ -101,8 +172,20 @@ export default function TasmotaTemplateSection({ entryId, deviceName }: { entryI
       confirmLabel: 'Load and restart',
     });
     if (!yes) return;
-    apply.mutate(choice.kind === 'catalog' ? { catalog_id: choice.entry.id } : { template: paste.trim() });
+    apply.mutate(choice.kind === 'catalog' ? applyRequestFor(choice.entry) : { template: paste.trim() });
   };
+
+  const onForget = async (e: CatalogTemplate) => {
+    const yes = await confirmDialog({
+      title: `Forget ${label(e)}?`,
+      body: `The template measured on ${e.measured_on ?? 'a device here'} is no longer offered. Devices that run it keep it.`,
+      confirmLabel: 'Forget', danger: true,
+    });
+    if (yes) forget.mutate(e.id);
+  };
+
+  const unknown = d?.identified === false;
+  const savable = Boolean(d?.current.active && d.current.template_json && !(d.current.measured_matches ?? []).length);
 
   const onRestore = async () => {
     const yes = await confirmDialog({
@@ -142,6 +225,29 @@ export default function TasmotaTemplateSection({ entryId, deviceName }: { entryI
 
         {result && <Result result={result} />}
 
+        {unknown && d?.identify_note && (
+          <p className="flex gap-1.5 rounded-xl border border-blue-400/20 bg-blue-500/5 p-2 text-sm text-slate-200" data-testid="template-unidentified">
+            <Info size={16} className="mt-0.5 shrink-0 text-blue-300" aria-hidden />
+            <span className="min-w-0 break-words">{d.identify_note}</span>
+          </p>
+        )}
+        {unknown && <TasmotaPinFinder entryId={entryId} deviceName={deviceName} first />}
+
+        {unknown && (d?.guesses ?? []).length > 0 && (
+          <details className="group border-t border-white/5 pt-2" data-testid="template-guesses">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center text-xs font-medium text-slate-400 [&::-webkit-details-marker]:hidden">
+              Guesses from its name only ({d?.guesses?.length})
+            </summary>
+            <ul className="divide-y divide-white/5" aria-label="Guessed templates">
+              {(d?.guesses ?? []).map((s) => (
+                <Row key={s.id} entry={s} reasons={s.reasons} testId="template-guess"
+                  chosen={choice?.kind === 'catalog' && choice.entry.id === s.id}
+                  onChoose={() => setChoice({ kind: 'catalog', entry: s })} />
+              ))}
+            </ul>
+          </details>
+        )}
+
         {d && d.suggestions.length > 0 && (
           <div>
             <p className="text-xs font-medium text-slate-400">Suggested for this device</p>
@@ -177,12 +283,13 @@ export default function TasmotaTemplateSection({ entryId, deviceName }: { entryI
             <ul className="divide-y divide-white/5" aria-label="Catalog templates">
               {matches.slice(0, SHOWN).map((e) => (
                 <Row key={e.id} entry={e} chosen={choice?.kind === 'catalog' && choice.entry.id === e.id}
-                  onChoose={() => setChoice({ kind: 'catalog', entry: e })} />
+                  onChoose={() => setChoice({ kind: 'catalog', entry: e })}
+                  onForget={e.source === 'measured' ? () => void onForget(e) : undefined} />
               ))}
             </ul>
             {matches.length > SHOWN && <p className="text-xs text-slate-500">{matches.length - SHOWN} more: narrow the search.</p>}
             <p className="text-[11px] text-slate-500">
-              Copied from <a className="inline-flex min-h-11 items-center underline" href="https://templates.blakadder.com/" target="_blank" rel="noopener noreferrer">
+              Measured ones were worked out in this household. The rest are copied from <a className="inline-flex min-h-11 items-center underline" href="https://templates.blakadder.com/" target="_blank" rel="noopener noreferrer">
                 templates.blakadder.com<ExternalLink size={10} className="ml-0.5 inline" aria-hidden /></a>.
             </p>
           </div>
@@ -217,6 +324,9 @@ export default function TasmotaTemplateSection({ entryId, deviceName }: { entryI
             </button>
           )}
         </div>
+
+        {d && savable && <SaveThisDevice entryId={entryId} d={d} />}
+        {d && !unknown && <TasmotaPinFinder entryId={entryId} deviceName={deviceName} first={false} />}
       </div>
     </section>
   );

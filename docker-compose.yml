@@ -569,6 +569,8 @@ services:
       - NEXTCLOUD_USER=${NEXTCLOUD_USER:-}
       - NEXTCLOUD_PASS=${NEXTCLOUD_PASS:-}
       - STORAGE_CHECKPOINT_PATH=${STORAGE_CHECKPOINT_PATH:-/data/index_checkpoint.json}
+      - CALIBRE_INDEX_INTERVAL_S=${CALIBRE_INDEX_INTERVAL_S:-900}
+      - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
       - ARTIFACTS_ROOT=/artifacts
       - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
