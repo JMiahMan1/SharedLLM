@@ -145,10 +145,179 @@ def hit_is_from(meta: dict, names: list[str]) -> bool:
 
 
 def not_indexed_note(names: list[str]) -> str:
-    """The prompt line that replaces other books' passages."""
+    """The prompt line that replaces other books' passages.
+
+    A book missing from the search index may still be on the shelf (a reindex can
+    take hours), so the note never says it cannot be read: it names the tool that
+    reads it straight from the library.
+    """
     named = ", ".join(f'"{n}"' for n in names)
     return (
-        f"- {named}: not in the indexed library. No passage from it was found, so do not "
-        "answer from other books; say it is not in the library and offer what you know "
-        "about it in general, clearly marked as not from the library.\n"
+        f"- {named}: not in the searchable index yet, so no passage from it was retrieved "
+        "here. That does not mean the library lacks it or that it cannot be read: "
+        "CalibreRequest with action fetch_text, query (the title and author) and chapter "
+        "(a number or title) reads it directly from the library. Do not answer from other "
+        "books' passages.\n"
     )
+
+
+# --- A chapter the question names -------------------------------------------------------
+
+_UNITS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+    "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+         "eighty": 80, "ninety": 90}
+_ORDINALS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7,
+    "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13,
+    "fourteenth": 14, "fifteenth": 15, "sixteenth": 16, "seventeenth": 17, "eighteenth": 18,
+    "nineteenth": 19, "twentieth": 20, "thirtieth": 30, "fortieth": 40, "fiftieth": 50,
+}
+#: Chapter numbers above this are not chapters ("chapter MIX" is a word, not 1009).
+MAX_CHAPTER = 200
+_ROMAN = re.compile(r"M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})", re.I)
+_TENS_ALT = "|".join(_TENS)
+_NUMBER_WORD = (
+    rf"(?:(?:{_TENS_ALT})(?:[\s-]+(?:{'|'.join(_UNITS)}|{'|'.join(_ORDINALS)}))?"
+    rf"|{'|'.join(sorted({**_UNITS, **_ORDINALS}, key=len, reverse=True))})"
+)
+#: "chapter 4", "chapter four", "chapter IV", "ch. 4", "chapter twenty-one".
+_CHAPTER_AFTER = re.compile(
+    rf"\b(?:chapter|chap\.|ch\.)\s*(?P<num>\d{{1,3}}(?:st|nd|rd|th)?|{_NUMBER_WORD}|[ivxlcdm]{{1,8}})\b",
+    re.I,
+)
+#: "the fourth chapter", "the 4th chapter", "the twenty-first chapter".
+_CHAPTER_BEFORE = re.compile(
+    rf"\b(?P<num>\d{{1,3}}(?:st|nd|rd|th)|{_NUMBER_WORD})\s+chapter\b",
+    re.I,
+)
+#: Where a title read after "chapter N of" ends.
+_TITLE_END = re.compile(
+    r"\s+by\s+|\s+(?:from|in|on)\s+(?:our|my|the|your)\s+(?:library|shelf|shelves|calibre|books?)\b"
+    r"|\s+and\s+(?:then\s+)?(?:give|tell|summari[sz]e|explain|read|say|share)\b"
+    r"|\s+(?:about|say|says|mean|means|cover|covers|please)\s*[?.!]*\s*$|\s+please\b"
+    r"|[?!,;:]|\.(?:\s|$)|$",
+    re.I,
+)
+_AFTER_CHAPTER_TITLE = re.compile(
+    r"^\s+(?:of|in|from)\s+(?:the\s+(?:book|novel)\s+(?:called\s+|titled\s+)?)?", re.I
+)
+_BY_NAME = re.compile(r"\bby\s+([\w'.\u2019-]+(?:\s+[\w'.\u2019-]+){0,3})", re.I)
+
+
+def chapter_number(token: str) -> int | None:
+    """A chapter number in digits, words, an ordinal or roman numerals (4, four, fourth, IV)."""
+    token = str(token or "").strip().strip(".:").lower()
+    if not token:
+        return None
+    number: int | None = None
+    if token.isdigit():
+        number = int(token)
+    elif m := re.fullmatch(r"(\d+)(?:st|nd|rd|th)", token):
+        number = int(m.group(1))
+    else:
+        parts = [p for p in re.split(r"[\s-]+", token) if p]
+        if len(parts) == 1 and parts[0] in _UNITS:
+            number = _UNITS[parts[0]]
+        elif len(parts) == 1 and parts[0] in _ORDINALS:
+            number = _ORDINALS[parts[0]]
+        elif len(parts) == 1 and parts[0] in _TENS:
+            number = _TENS[parts[0]]
+        elif len(parts) == 2 and parts[0] in _TENS:
+            tail = _UNITS.get(parts[1]) or _ORDINALS.get(parts[1])
+            number = _TENS[parts[0]] + tail if tail and tail < 10 else None
+        elif len(parts) == 1 and _ROMAN.fullmatch(parts[0]):
+            values = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+            total = 0
+            for i, ch in enumerate(parts[0]):
+                value = values[ch]
+                total += -value if i + 1 < len(parts[0]) and values[parts[0][i + 1]] > value else value
+            number = total or None
+    if number is None or not 1 <= number <= MAX_CHAPTER:
+        return None
+    return number
+
+
+class ChapterRef:
+    """A chapter of a book the question names: ``chapter`` of ``title`` by ``author``."""
+
+    __slots__ = ("author", "chapter", "title")
+
+    def __init__(self, chapter: int, title: str, author: str) -> None:
+        self.chapter = chapter
+        self.title = title
+        self.author = author
+
+    @property
+    def book_query(self) -> str:
+        """The words CalibreRequest finds the book by: its title and author."""
+        return " ".join(p for p in (self.title, self.author) if p)
+
+    def __repr__(self) -> str:  # for logs and test failures
+        return f"ChapterRef({self.chapter}, {self.title!r}, {self.author!r})"
+
+
+def _clean_title(text: str) -> str:
+    text = re.sub(r"^(?:the\s+(?:book|novel)\s+(?:called\s+|titled\s+)?)", "", text.strip(), flags=re.I)
+    return text.strip(" \"'\u201c\u201d.,;:!?")
+
+
+def chapter_named(query: str) -> ChapterRef | None:
+    """The chapter and book a question asks for ("chapter 4 of <Title> by <Author>"), if any.
+
+    The number may be digits, words, an ordinal or roman numerals. A chapter with no
+    book named (a Bible chapter, "the next chapter") is ``None``: there is nothing to
+    fetch it from.
+    """
+    text = str(query or "")
+    found: tuple[int, re.Match[str]] | None = None
+    for pattern in (_CHAPTER_AFTER, _CHAPTER_BEFORE):
+        for m in pattern.finditer(text):
+            raw = m.group("num")
+            # A lower-case one-letter roman numeral is an English word ("chapter i liked").
+            if len(raw) == 1 and raw.isalpha() and raw.islower():
+                continue
+            number = chapter_number(raw)
+            if number is not None:
+                found = (number, m)
+                break
+        if found:
+            break
+    if found is None:
+        return None
+    number, match = found
+
+    author = ""
+    for m in _BY_NAME.finditer(text):
+        name = _trim_name(m.group(1))
+        if _significant(name):
+            author = name
+            break
+
+    title = ""
+    rest = text[match.end():]
+    lead = _AFTER_CHAPTER_TITLE.match(rest)
+    if lead:
+        tail = rest[lead.end():]
+        end = _TITLE_END.search(tail)
+        title = _clean_title(tail[: end.start()] if end else tail)
+    if not _significant(title):
+        title = ""
+        for name in named_works(text):
+            if re.search(r"\bchapter\b", name, re.I) or (author and name_matches(name, author)):
+                continue
+            name = re.sub(
+                rf"^(?:chapter\s+)?{re.escape(match.group('num'))}\s+(?:of|in|from)\s+", "", name, flags=re.I
+            )
+            name = _clean_title(name)
+            if _significant(name):
+                title = name
+                break
+    if not author and not _QUOTED.search(text) and (len(_significant(title)) < 2 or title.lower().startswith("of ")):
+        # "chapter 3 of John" or "of Romans" is scripture, not a book on the shelf: a
+        # one-word title with no author would match any book by a John.
+        return None
+    return ChapterRef(number, title, author)

@@ -336,9 +336,10 @@ class CalibreClient:
         """A book's extracted prose, truncated honestly at ``max_chars``.
 
         The bytes come back through ``/providers/fetch`` because the shelf's
-        synthetic ``.txt`` path *is* the file and its bytes are its text; a
-        PDF-only book has no text there, which is reported as the refusal it
-        is rather than as an empty book.
+        synthetic ``.txt`` path *is* the file and its bytes are its text. A
+        PDF-only book has no text there, so its text is read by storage from the
+        PDF itself (``/calibre/books/{id}/text``); only a book with no readable
+        file at all is refused.
         """
         row = await self.get_book(book_id=book_id, path=path)
         root = await self._library_path()
@@ -355,7 +356,12 @@ class CalibreClient:
             timeout=FETCH_TIMEOUT_SECONDS,
         )
         status = int(resp.get("status_code") or 0)
-        if status in (413, 502):
+        if status == 502:
+            text = await self._file_text(row, max_chars)
+            if text is None:
+                raise CalibreLibraryError(_fetch_refusal(status, resp, row))
+            return text
+        if status == 413:
             raise CalibreLibraryError(_fetch_refusal(status, resp, row))
         body = _decode(resp, url)
         encoded = body.get("content_b64")
@@ -372,19 +378,53 @@ class CalibreClient:
                 f"{row['path']!r} came back as something that is not UTF-8 "
                 f"text: {exc}"
             ) from exc
-        total = len(text)
-        bound = max(int(max_chars), 1)
-        if total > bound:
-            text = (
-                text[:bound]
-                + f"\n\n[Truncated: showing the first {bound:,} of "
-                + f"{total:,} characters. For a passage beyond this point, "
-                + "search the library (RAG collection calibre_files) instead.]"
-            )
-        detail = dict(row)
-        detail["total_chars"] = total
-        detail["truncated"] = total > bound
-        return text, detail
+        return _bounded_text(text, len(text), max_chars, row)
+
+    async def _file_text(self, row: dict[str, Any], max_chars: int) -> tuple[str, dict[str, Any]] | None:
+        """The text of a book the shelf has none for (a PDF), read by storage from the
+        file itself; ``None`` when storage has no reader for any of its files."""
+        try:
+            ident = int(str(row.get("book_id")))
+        except ValueError:
+            return None
+        url = f"{self._storage_endpoint()}/calibre/books/{ident}/text"
+        bound = max(int(max_chars), 500)
+        resp = await http_client.request(
+            "POST",
+            url,
+            json={"library_path": await self._library_path(), "max_chars": bound},
+            headers=self._headers(),
+            timeout=FETCH_TIMEOUT_SECONDS,
+        )
+        status = int(resp.get("status_code") or 0)
+        if status in (404, 422):
+            detail = (resp.get("text") or "").strip()
+            with contextlib.suppress(ValueError, AttributeError):
+                detail = str(json.loads(detail).get("detail") or detail)
+            if "no chapter reader" in detail or "no text reader" in detail.lower():
+                return None
+            raise CalibreLibraryError(detail or f"{row.get('title')}: its text could not be read.")
+        body = _decode(resp, url)
+        text = str(body.get("text") or "")
+        total = int(body.get("total_chars") or len(text))
+        return _bounded_text(text, total, bound, row)
+
+
+def _bounded_text(text: str, total: int, max_chars: int, row: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """``text`` cut at ``max_chars`` with an honest note, and the row with its size."""
+    bound = max(int(max_chars), 1)
+    if total > bound:
+        text = (
+            text[:bound]
+            + f"\n\n[Truncated: showing the first {bound:,} of "
+            + f"{total:,} characters. For a passage beyond this point, read one "
+            + "chapter (fetch_text with chapter) or search the library (RAG "
+            + "collection calibre_files) instead.]"
+        )
+    detail = dict(row)
+    detail["total_chars"] = total
+    detail["truncated"] = total > bound
+    return text, detail
 
 
 def _norm_words(text: str) -> list[str]:
