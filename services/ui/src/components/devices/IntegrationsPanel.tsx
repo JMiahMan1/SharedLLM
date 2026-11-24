@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import Modal from '../ui/Modal';
 import AdoptDeviceDialog from './AdoptDeviceDialog';
+import PasswordField from '../ui/PasswordField';
 import {
   addByAddress,
   failureStatus,
@@ -341,6 +342,7 @@ export default function IntegrationsPanel() {
 }
 
 function ReconfigureDialog({ entry, onClose, onSaved }: { entry: HubEntry; onClose: () => void; onSaved: () => void }) {
+  const fieldId = useId();
   const [title, setTitle] = useState(entry.title);
   const [values, setValues] = useState<Record<string, string>>(
     Object.fromEntries(entry.reconfigure.map((f) => [f.key, f.value ?? ''])),
@@ -382,16 +384,31 @@ function ReconfigureDialog({ entry, onClose, onSaved }: { entry: HubEntry; onClo
               </select>
               {f.help && <span className="mt-1 block text-[11px] text-slate-500">{f.help}</span>}
             </label>
+          ) : f.type === 'password' ? (
+            // A div, not a wrapping label: the eye is a button, which must not join the label.
+            <div key={f.key} className="block text-xs text-slate-400">
+              <label htmlFor={`${fieldId}-${f.key}`}>{f.label}</label>
+              <PasswordField
+                id={`${fieldId}-${f.key}`}
+                wrapperClassName="mt-1"
+                className="min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white"
+                value={values[f.key] || ''}
+                placeholder={f.set ? 'Unchanged' : undefined}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                autoComplete="new-password"
+                spellCheck={false}
+              />
+              {f.help && <span className="mt-1 block text-[11px] text-slate-500">{f.help}</span>}
+            </div>
           ) : (
             <label key={f.key} className="block text-xs text-slate-400">
               {f.label}
               <input
                 className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white"
-                type={f.type === 'password' ? 'password' : 'text'}
+                type="text"
                 value={values[f.key] || ''}
-                placeholder={f.type === 'password' && f.set ? 'Unchanged' : undefined}
                 onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                autoComplete={f.type === 'password' ? 'new-password' : 'off'}
+                autoComplete="off"
                 spellCheck={false}
               />
               {f.help && <span className="mt-1 block text-[11px] text-slate-500">{f.help}</span>}

@@ -584,6 +584,8 @@ async def adopt_jarvis_identity(runtime: Any, finding: dict[str, Any], name: str
 async def check_tasmota(data: dict[str, Any]) -> None:
     """A new Tasmota address or web password: refused only when the device answers that the password is wrong.
 
+    The way its ``/cm`` took the password is recorded in ``data["auth_mode"]`` (absent means both ways).
+
     A device that does not answer is saved anyway: it may be switched off, or at an address the hub follows
     by its MAC once it is back.
     """
@@ -592,12 +594,19 @@ async def check_tasmota(data: dict[str, Any]) -> None:
     host = str(data.get("host") or "").strip()
     if not host:
         return
+    password = str(data.get("password") or "") or None
     try:
-        await flows.tasmota_status(host, str(data.get("password") or "") or None)
+        status = await flows.tasmota_status(host, password)
     except NeedsInput:
         raise
     except Exception as exc:
         log.info("Tasmota at %s could not be checked (%s); saved as entered", host, type(exc).__name__)
+        return
+    mode = getattr(status, "auth_mode", "both") if password else "both"
+    if mode == "both":
+        data.pop("auth_mode", None)  # the way every entry sent it before
+    else:
+        data["auth_mode"] = mode  # the way this device's /cm takes the new password
 
 
 #: Settings checked before a reconfigure saves them: ``{domain: (keys that trigger it, async check(new data))}``.

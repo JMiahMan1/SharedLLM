@@ -76,4 +76,4 @@ async def test_a_device_that_hangs_up_with_no_login_page_still_did_not_answer():
 
 def test_basic_auth_is_admin_with_the_web_password():
     assert tasmota.basic_auth(None) is None
-    assert tasmota.basic_auth(PASSWORD) == aiohttp.BasicAuth("admin", PASSWORD)
+    assert tasmota.basic_auth(PASSWORD) == aiohttp.BasicAuth("admin", PASSWORD, encoding="utf-8")
