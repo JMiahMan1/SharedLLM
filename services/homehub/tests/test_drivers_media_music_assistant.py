@@ -226,6 +226,28 @@ async def test_music_assistant_play_media_resolves_names():
                                                                  "media_id": "nonexistent"})
 
 
+async def test_the_payload_execution_sends_for_a_found_item_is_accepted_as_is():
+    """Execution's "play what was found" call (media_finder -> media.play_music): a library URI,
+    enqueue and the person's MA account. Pinned against the hub's real schema and dispatch."""
+    from services.homehub.drivers.music_assistant import MACommandError
+
+    hub, drv, made = build()
+    await drv.async_setup()
+    c = made["c"]
+    c.sent.clear()
+    for uri in ("library://playlist/2", "library://radio/1", "radiobrowser://radio/abc", "library://audiobook/9"):
+        await hub.call_service("music_assistant", "play_media", {
+            "entity_id": "media_player.study_speaker", "media_id": uri, "enqueue": "replace", "user": "ma-user-1"})
+        assert c.sent[-1] == ("player_queues/play_media", {"queue_id": STUDY, "media": [uri], "option": "replace",
+                                                           "user": "ma-user-1"})
+    # Music Assistant refusing an empty playlist is a 400 that says why (execution passes it on).
+    c.replies["player_queues/play_media"] = MACommandError("999: No playable items found")
+    with pytest.raises(HubError, match="No playable items found") as err:
+        await hub.call_service("music_assistant", "play_media", {
+            "entity_id": "media_player.study_speaker", "media_id": "library://playlist/2", "enqueue": "replace"})
+    assert err.value.status == 400
+
+
 async def test_play_announcement_service_keys():
     hub, drv, made = build()
     await drv.async_setup()
