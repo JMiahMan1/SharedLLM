@@ -21,7 +21,7 @@ import aiohttp
 
 from services.common.backend_health import BackendUnavailable
 from services.config import JARVIS_TALK_CLAIM_KEY
-from services.gateway import local_ai, notices
+from services.gateway import local_ai, notices, voice_outcomes
 from services.gateway.agent_loop import mission_stopped_early, should_persist_learning
 from services.gateway.config import (
     EXECUTION_SVC,
@@ -1090,6 +1090,10 @@ class RavenWorker:
         # and a job cancelled while waiting for TIER2_SEMAPHORE used to end
         # in UnboundLocalError instead of its cancellation.
         mission_id = payload.get("_mission_id")
+
+        # A person's request carries its outcome record: resume it here so the
+        # tools this job runs are counted with it (voice_outcomes).
+        voice_outcomes.resume(payload, user_id)
 
         # Determine job tier (2 = Librarian, 3 = Raven) for concurrency control
         is_autonomous = self._is_autonomous_job(payload, user_id)

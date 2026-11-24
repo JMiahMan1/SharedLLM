@@ -42,7 +42,7 @@ Admin only, on top of the above with no opt-in:
 | Screen time (14 days) | telemetry `/api/telemetry/usage/{user}` |
 | Guardian (concerns, the weekly recap) | telemetry `/recap/{user}`, `/concerns/{user}` (the Guardian itself, reused) |
 | Errors logged against the person | logging `/api/logs?user_id=` |
-| Request outcomes and latency | gateway `voice_outcomes` (PR 4) |
+| Request outcomes and latency | gateway `voice_outcomes` (below) |
 
 ## The opt-in model
 
@@ -139,3 +139,34 @@ without asking for the stats. In order:
 6. **Across Jarvis**: the person's profile cards, every area, no opt-in.
 
 Each section has its own loading, empty and unavailable state.
+
+## Request outcomes (`services/gateway/voice_outcomes.py`)
+
+The one record kept for these pages. For each request to Jarvis (a voice
+satellite's or typed chat), per person and day: the outcome (`ok`, `timeout`,
+`error`, `tool_failure`, or `offline`, when it fell back to the "the AI is
+offline" answer), whether it waited in line before a worker took it
+(`queued`, over `VOICE_OUTCOME_QUEUED_MS`, 3 s), its latency bucket, the hour,
+and which single-turn tools ran and which failed. **Counts and timings only:
+never the question, the answer or a tool's arguments.** A refused request
+(400, 401, 403) and a job that was not a person's request (a Raven mission)
+are not counted.
+
+- **Off the request's path.** The handler only adds to an in-memory counter;
+  a background task writes the counters to Redis every
+  `VOICE_OUTCOME_FLUSH_S` (10 s) as one pipeline of `HINCRBY`. A failed write
+  keeps the counters for the next try and never touches the request.
+- **Bounded.** One hash per person and day, `outcomes:{user}:{day}`, kept
+  `VOICE_OUTCOME_RETENTION_DAYS` (90) days.
+- **How a request is followed.** `chat_handler` starts a record; a request
+  answered in the handler is counted there (a stream when it ends); one handed
+  to the job queue carries its record in the job and is counted by
+  `complete_job` / `fail_job`, with the worker resuming it so its tool calls
+  count. `_execute_single_tool` names each tool and whether it did the thing.
+- **On the admin page:** totals, the share that did not go through, the
+  typical and 90th-percentile wait (from the buckets), failures by day, the
+  tools that failed most and the slowest hours (over `VOICE_OUTCOME_SLOW_MS`,
+  8 s). A person whose requests fail `PROFILE_STATS_VOICE_FAILURE_FLAG` (10%)
+  of the time or more, over at least ten requests, gets a flag.
+
+All settings are read once at startup.
