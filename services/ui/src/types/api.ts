@@ -168,7 +168,68 @@ export interface UserProfileRaw {
   /** Whose abuse.ch Auth-Key this person's app checks use (GET /api/users/me): their own, the
    *  household default (the default user's), or none. Never the key. */
   abuse_ch_status?: 'own' | 'household' | 'not_set_up' | null;
+  /** The book catalogues (Google Books, Open Library) as they apply to this person
+   *  (GET /api/users/me). Never the key. */
+  book_metadata_status?: BookCatalogues | null;
+  /** A partial update of the catalogue settings (PATCH): merged over what is saved; null follows the household. */
+  book_metadata?: BookCatalogueSettings | null;
   [key: string]: unknown;
+}
+
+export type BookCatalogueId = 'google_books' | 'open_library';
+
+/** What a person can set for the book catalogues (services/common/book_metadata.py). */
+export interface BookCatalogueSettings {
+  google_books_enabled?: boolean | null;
+  open_library_enabled?: boolean | null;
+  open_library_email?: string | null;
+  order?: BookCatalogueId[] | null;
+}
+
+/** Where a setting came from: the person, the household (the default user), or the built-in default. */
+export type BookSettingFrom = 'own' | 'household' | 'default';
+
+export interface BookCatalogueSource {
+  name: string;
+  enabled: boolean;
+  enabled_from: BookSettingFrom;
+  /** Asked on a lookup: on, with what it needs. */
+  ready: boolean;
+  /** Why it is not asked, in words to show as is ("" when ready). */
+  reason: string;
+  /** Google Books: whether a key applies, and whose. */
+  key_set?: boolean;
+  key_source?: 'own' | 'household' | 'absent';
+  /** Open Library: the contact email its User-Agent names. */
+  contact_email?: string;
+  contact_email_from?: BookSettingFrom;
+  /** The library page's status (GET /api/library/catalogues): this catalogue's last answer. */
+  last?: { ok: boolean; error: string | null; at: string };
+}
+
+export interface BookCatalogues {
+  order: BookCatalogueId[];
+  order_from?: BookSettingFrom;
+  sources: Partial<Record<BookCatalogueId, BookCatalogueSource>>;
+  /** Set when the settings could not be read: no catalogue is asked. */
+  error?: string;
+}
+
+/** One Test button press: the exact outcome. */
+export interface BookCatalogueTest {
+  ok: boolean;
+  source: BookCatalogueId;
+  status: number | null;
+  message: string;
+}
+
+/** Which catalogues a lookup asked, used (matched the book), skipped and why, and which answered with an error. */
+export interface BookCatalogueReport {
+  asked: string[];
+  used: string[];
+  skipped: { source: string; reason: string }[];
+  errors: { source: string; error: string }[];
+  message?: string;
 }
 
 /**
@@ -4605,6 +4666,8 @@ export interface BookInspection {
   tags: { name: string; why: string; existing: boolean }[];
   /** Where each field came from: "the file", "Google Books", "Open Library", "the file name". */
   sources: Record<string, string>;
+  /** Which catalogues were asked, skipped and why, or answered with an error. */
+  catalogues?: BookCatalogueReport;
 }
 
 export interface LibraryAuditGroup {
