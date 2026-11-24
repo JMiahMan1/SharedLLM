@@ -292,6 +292,10 @@ async def esphome_probe(host: str, port: int, noise_psk: str | None, password: s
             await asyncio.wait_for(client.disconnect(), 3)
 
 
+#: The all-zero Noise PSK, base64: what an ESPHome node without a key of its own encrypts with.
+ZERO_NOISE_PSK = base64.b64encode(bytes(32)).decode("ascii")
+
+
 async def esphome_provision_noise_psk(host: str, port: int, password: str = "") -> str | None:
     """Set a fresh Noise PSK on a plaintext ESPHome node at runtime.
 
@@ -303,16 +307,25 @@ async def esphome_provision_noise_psk(host: str, port: int, password: str = "") 
     from aioesphomeapi import APIClient
 
     psk = base64.b64encode(os.urandom(32)).decode("ascii")
-    client = APIClient(host, port, password, client_info="homehub", noise_psk=None)
-    try:
-        await asyncio.wait_for(client.connect(login=True), 10)
-        ok = await asyncio.wait_for(client.noise_encryption_set_key(psk.encode("ascii")), 10)
-        if not ok:
-            return None
-        return psk
-    finally:
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(client.disconnect(), 3)
+    # hassmic takes a first key only over an encrypted connection with the all-zero PSK (so the key never
+    # crosses the network readable) and refuses it over plaintext ("key change refused (plaintext
+    # connection)"); ordinary ESPHome firmware takes it over plaintext. Try the zero PSK first.
+    for transport_psk in (ZERO_NOISE_PSK, None):
+        client = APIClient(host, port, password, client_info="homehub", noise_psk=transport_psk)
+        try:
+            try:
+                await asyncio.wait_for(client.connect(login=True), 10)
+            except Exception:
+                if transport_psk is None:
+                    raise
+                continue  # not a zero-PSK node: plaintext next
+            ok = await asyncio.wait_for(client.noise_encryption_set_key(psk.encode("ascii")), 10)
+            if ok:
+                return psk
+        finally:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(client.disconnect(), 3)
+    return None
 
 
 async def roku_device_info(host: str) -> dict[str, str]:
@@ -565,6 +578,11 @@ async def adopt_esphome(runtime: Any, finding: dict[str, Any], name: str | None,
         except (APIConnectionError, OSError, TimeoutError) as exc:
             raise FlowError(f"Failed to provision encryption key on {label}: "
                             f"{exc or type(exc).__name__}", 502) from exc
+        hassmic = "hassmic" in project or "echo-dot-assist" in project
+        if new_psk is None and hassmic:
+            raise FlowError(f"{label} did not accept an encryption key. An Echo running echo-dot-assist must be "
+                            "encrypted (its clock, music pairing, updates and Echo network need it); restart it "
+                            "and add it again.", 502)
         if new_psk is not None:
             try:
                 device_info, infos = await esphome_probe(host, port, new_psk, password)

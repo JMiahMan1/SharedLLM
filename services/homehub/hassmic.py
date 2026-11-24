@@ -855,8 +855,44 @@ class HassmicManager:
                         self._publish_mic(UNKNOWN, f"its log could not be read: {exc}")
                 await asyncio.sleep(self.mic_check_s)
 
+    async def ensure_encryption(self) -> bool:
+        """Give an Echo adopted unencrypted its own Noise key; True when it now reconnects with one.
+
+        hassmic takes its first key only over a zero-PSK connection, which adoption did not use before,
+        so Echos were added plaintext: no key means no clock from the hub, no Sendspin pairing, no
+        update installs and no Echo network key (each needs the "keyed" connection). The key is saved
+        on the entry and the connection dropped; the driver reconnects with it.
+        """
+        drv = self.driver
+        if getattr(drv, "noise_psk", None):
+            return False
+        from services.homehub import flows
+
+        try:
+            psk = await flows.esphome_provision_noise_psk(str(drv.host), int(drv.port), str(drv.password or ""))
+        except Exception as exc:
+            raise HassmicError(f"it is not encrypted and did not take an encryption key: {exc or type(exc).__name__}"
+                               ) from exc
+        if not psk:
+            raise HassmicError("it is not encrypted and refused an encryption key; restart it and HomeHub tries again")
+        entry = drv.entry
+        entry.data = {**dict(entry.data or {}), "noise_psk": psk}
+        store = getattr(self.hub, "store", None)
+        if store is not None:
+            store.save_config_entry(entry)
+        drv.noise_psk = psk
+        self.log.warning("hassmic %s: it was added unencrypted; gave it an encryption key and reconnecting with it",
+                         self.name)
+        client = self.client
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.disconnect()
+        return True
+
     async def bring_up(self) -> None:
-        """Network key, then the web login, then the entity states (in that order; each needs the one before)."""
+        """Encryption, network key, web login, entity states (in that order; each needs the one before)."""
+        if await self.ensure_encryption():
+            return  # the driver reconnects with the key; attach() runs the bring-up again
         async with self._busy:
             network_error: HassmicError | None = None
             try:

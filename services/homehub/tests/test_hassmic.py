@@ -737,3 +737,54 @@ async def test_the_scanner_probes_and_hears_answers():
     assert hassmic.parse_beacon(probes[0]).net == 0 and hassmic.parse_beacon(probes[0]).pub == own
     assert [(b.node, b.pub, b.ip) for b in found] == [("echo-den", echo.arb_pk, "127.0.0.1")]
     assert await scanner.scan(own) == found  # a fresh scan is shared for a few seconds
+
+
+async def test_an_echo_adopted_unencrypted_is_given_a_key_saved_and_reconnected(monkeypatch):
+    """Adoption used to give hassmic its key over plaintext, which it refuses: Echos ended up unencrypted."""
+    import logging
+    from types import SimpleNamespace
+
+    from services.homehub import flows
+    from services.homehub import hassmic as hm
+
+    saved, dropped = [], []
+    key = "a2V5LWZvci1hLXRlc3Qtb25seS1ub3QtcmVhbC0wMDA="
+
+    async def provision(host, port, password=""):
+        assert (host, port) == ("192.168.10.21", 6053)
+        return key
+
+    async def disconnect():
+        dropped.append(True)
+
+    monkeypatch.setattr(flows, "esphome_provision_noise_psk", provision)
+    entry = SimpleNamespace(data={"host": "192.168.10.21", "port": 6053, "noise_psk": ""})
+    driver = SimpleNamespace(noise_psk=None, host="192.168.10.21", port=6053, password="", entry=entry,
+                             device_name="echo-test")
+    mgr = hm.HassmicManager.__new__(hm.HassmicManager)
+    mgr.driver = driver
+    mgr.hub = SimpleNamespace(store=SimpleNamespace(save_config_entry=saved.append))
+    mgr.client = SimpleNamespace(disconnect=disconnect)
+    mgr.log = logging.getLogger("test")
+    assert await mgr.ensure_encryption() is True
+    assert driver.noise_psk == key and entry.data["noise_psk"] == key and saved == [entry] and dropped
+    assert await mgr.ensure_encryption() is False  # encrypted now: nothing to do
+
+
+async def test_an_echo_that_refuses_a_key_says_so(monkeypatch):
+    import logging
+    from types import SimpleNamespace
+
+    from services.homehub import flows
+    from services.homehub import hassmic as hm
+
+    async def provision(host, port, password=""):
+        return None
+
+    monkeypatch.setattr(flows, "esphome_provision_noise_psk", provision)
+    mgr = hm.HassmicManager.__new__(hm.HassmicManager)
+    mgr.driver = SimpleNamespace(noise_psk=None, host="192.168.10.21", port=6053, password="",
+                                 entry=SimpleNamespace(data={}), device_name="echo-test")
+    mgr.hub, mgr.client, mgr.log = SimpleNamespace(store=None), None, logging.getLogger("test")
+    with pytest.raises(hm.HassmicError, match="refused an encryption key"):
+        await mgr.ensure_encryption()
