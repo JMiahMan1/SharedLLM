@@ -303,7 +303,7 @@ def _models_dir(tmp_path, ids=("hey_jarvis", "okay_nabu")) -> str:
             "type": "micro", "wake_word": i.replace("_", " ").title(), "author": "test", "version": 2,
             "trained_languages": ["en"], "model": f"{i}.tflite",
             "micro": {"probability_cutoff": 0.97, "feature_step_size": 10, "sliding_window_size": 5}}))
-        (d / f"{i}.tflite").write_bytes(b"TFL3" + i.encode() * 10)
+        (d / f"{i}.tflite").write_bytes(bytes(4) + b"TFL3" + i.encode() * 40)  # the flatbuffer's file identifier
     return str(d)
 
 
@@ -797,3 +797,58 @@ async def test_an_echo_that_refuses_a_key_says_so(monkeypatch):
     mgr.hub, mgr.client, mgr.log = SimpleNamespace(store=None), None, logging.getLogger("test")
     with pytest.raises(hm.HassmicError, match="refused an encryption key"):
         await mgr.ensure_encryption()
+
+
+
+async def test_a_model_sent_in_small_chunks_is_read_whole_and_a_short_one_refused(tmp_path):
+    """The live download kept only the first chunk: 5512 of 57248 bytes, which the Echo then refused."""
+    from aiohttp import web
+
+    model = bytes(4) + b"TFL3" + bytes(range(256)) * 300
+    manifest = json.dumps({"type": "micro", "wake_word": "Hey Test", "model": "hey_test.tflite", "version": 2,
+                           "micro": {"probability_cutoff": 0.9, "sliding_window_size": 5,
+                                     "feature_step_size": 10}}).encode()
+
+    async def handler(request):
+        name = request.match_info["name"]
+        body = manifest if name.endswith(".json") else model
+        resp = web.StreamResponse(headers={"Content-Length": str(len(body))})
+        await resp.prepare(request)
+        for i in range(0, len(body), 1000):  # many small chunks, as a CDN sends them
+            await resp.write(body[i:i + 1000])
+        return resp
+
+    app = web.Application()
+    app.router.add_get("/m/{name}", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    try:
+        cache = hassmic.WakeModelCache(str(tmp_path / "cache"), base_url=f"http://127.0.0.1:{port}/m")
+        got_manifest, got_model = await cache.get("hey_test")
+        assert got_model == model and got_manifest == manifest
+    finally:
+        await runner.cleanup()
+
+
+async def test_a_truncated_cached_model_is_downloaded_again(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    manifest = json.dumps({"type": "micro", "wake_word": "Hey Test", "model": "hey_test.tflite", "version": 2,
+                           "micro": {"probability_cutoff": 0.9, "sliding_window_size": 5,
+                                     "feature_step_size": 10}}).encode()
+    (cache_dir / "hey_test.json").write_bytes(manifest)
+    (cache_dir / "hey_test.tflite").write_bytes(b"not a model")
+    whole = bytes(4) + b"TFL3" + bytes(200)
+    fetched = []
+
+    async def fetch(self, url):
+        fetched.append(url)
+        return manifest if url.endswith(".json") else whole
+
+    monkeypatch.setattr(hassmic.WakeModelCache, "_fetch", fetch)
+    _, model = await hassmic.WakeModelCache(str(cache_dir)).get("hey_test")
+    assert model == whole and len(fetched) == 2
+    assert not hassmic.is_tflite(b"x" * 100) and hassmic.is_tflite(whole)

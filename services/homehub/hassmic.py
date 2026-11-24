@@ -619,7 +619,21 @@ class WakeModelCache:
                     session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 if resp.status != 200:
                     raise HassmicError(f"{url} answered {resp.status}")
-                data = await resp.content.read(MODEL_MAX_BYTES + 1)
+                # content.read(n) returns what has arrived, often one chunk: read to the end (capped).
+                parts: list[bytes] = []
+                size = 0
+                while True:
+                    chunk = await resp.content.read(64 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MODEL_MAX_BYTES:
+                        raise HassmicError(f"{url} is over {MODEL_MAX_BYTES} bytes")
+                    parts.append(chunk)
+                data = b"".join(parts)
+                expected = resp.content_length
+                if expected is not None and expected != len(data):
+                    raise HassmicError(f"{url} ended after {len(data)} of {expected} bytes")
         except (aiohttp.ClientError, OSError, TimeoutError) as exc:
             raise HassmicError(f"{url} could not be downloaded: {exc or type(exc).__name__}") from exc
         return data
@@ -642,18 +656,26 @@ class WakeModelCache:
                 manifest = await asyncio.to_thread(_read, jpath)
                 model = await asyncio.to_thread(_read, mpath)
                 validate_manifest(model_id, manifest)
-                if 0 < len(model) <= MODEL_MAX_BYTES:
+                if is_tflite(model) and len(model) <= MODEL_MAX_BYTES:
                     return manifest, model
+                log.warning("hassmic: the cached wake word model %s is not a whole model; downloading it again",
+                            model_id)
             manifest = await self._fetch(f"{self.base_url}/{model_id}.json")
             validate_manifest(model_id, manifest)
             model = await self._fetch(f"{self.base_url}/{model_id}.tflite")
-            if not 0 < len(model) <= MODEL_MAX_BYTES:
-                raise HassmicError(f"wake word model {model_id}: model.tflite is empty or over 1 MiB")
+            if not is_tflite(model) or len(model) > MODEL_MAX_BYTES:
+                raise HassmicError(f"wake word model {model_id}: model.tflite is not a TensorFlow Lite model "
+                                   "or is over 1 MiB")
             os.makedirs(self.directory, exist_ok=True)
             await asyncio.to_thread(self._write, mpath, model)
             await asyncio.to_thread(self._write, jpath, manifest)
             log.info("hassmic: downloaded wake word model %s (%d bytes)", model_id, len(model))
             return manifest, model
+
+
+def is_tflite(data: bytes) -> bool:
+    """A TensorFlow Lite flatbuffer: its file identifier "TFL3" at bytes 4-8 (and more than a header)."""
+    return len(data) > 64 and data[4:8] == b"TFL3"
 
 
 def _read(path: str) -> bytes:
