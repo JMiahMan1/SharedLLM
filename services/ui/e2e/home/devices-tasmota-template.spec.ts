@@ -58,6 +58,9 @@ async function open(page: Page): Promise<Run> {
     route.fulfill({ json: { ...HARDWARE, devices: [...HARDWARE.devices, TAS] } }));
   await page.route(/\/api\/homehub\/hardware\/hw-tas$/, (route: Route) =>
     route.fulfill({ json: { ...detailFor('hw-lamp', initialStates()), ...TAS, children: [], entry: null, entity_list: [] } }));
+  await page.route(/\/api\/homehub\/tasmota\/e-tas\/pinfinder$/, (route: Route) =>
+    route.fulfill({ json: { active: false, status: 'idle', question: null, result: null, message: null, interrupted: false,
+      kinds: ['bulb', 'strip', 'dimmer'] } }));
   await page.route(/\/api\/homehub\/tasmota\/templates/, (route: Route) =>
     route.fulfill({ json: { kinds: ['bulb', 'plug', 'switch', 'dimmer', 'strip', 'relay'], templates: CATALOG } }));
   let state: Record<string, unknown> = structuredClone(STATE);
