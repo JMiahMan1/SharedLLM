@@ -92,6 +92,8 @@ def test_a_tag_change_is_written_and_sent_to_the_index(monkeypatch):
     monkeypatch.setattr(library_api, "_provider", lambda path: Prov())
     monkeypatch.setattr(library_api, "_rag_tags", rag)
     body = client.post("/calibre/books/1/tags", json={**LIB, "add": ["fasting"]}, headers=H).json()
-    assert closed == [True]  # the request's Nextcloud session is closed, not left to the GC
+    # The provider is the kept one (build_provider), so its Nextcloud session stays
+    # open for the next request; build_provider closes it when it drops it.
+    assert closed == []
     assert body["tags"] == ["Lent", "fasting"] and patched == [(1, ["Lent", "fasting"])]
     assert client.post("/calibre/books/1/tags", json=LIB, headers=H).status_code == 422
