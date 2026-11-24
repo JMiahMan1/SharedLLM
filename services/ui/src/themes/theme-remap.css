@@ -44,6 +44,7 @@
 [data-site-theme-active] .bg-violet-500 { background-color: var(--site-accent) !important; }
 [data-site-theme-active] .bg-violet-500\/15 { background-color: color-mix(in srgb, var(--site-accent) 15%, transparent) !important; }
 [data-site-theme-active] .bg-violet-500\/20 { background-color: color-mix(in srgb, var(--site-accent) 20%, transparent) !important; }
+[data-site-theme-active] .bg-violet-500\/5 { background-color: color-mix(in srgb, var(--site-accent) 5%, transparent) !important; }
 [data-site-theme-active] .bg-violet-500\/70 { background-color: color-mix(in srgb, var(--site-accent) 70%, transparent) !important; }
 [data-site-theme-active] .bg-violet-600\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .border-indigo-300\/10 { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
