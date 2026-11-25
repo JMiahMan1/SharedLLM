@@ -948,6 +948,39 @@ async def fetch_talk_file(req: Any) -> tuple[int, str, bytes]:
     return await provider.download_file(path)
 
 
+async def _direct_chat_with(provider: Any, person: str) -> tuple[str | None, str | None, str]:
+    """The one-to-one conversation with a family member named as said ("Sam", "sam"); opened if new.
+
+    Returns ``(token, their display name, error)``. The name is looked up among
+    the Nextcloud users the caller can message: an exact id or display name, or
+    a first name only one of them has.
+    """
+    want = " ".join(person.lower().split())
+    ok, data, message = await _talk_request_with_retry(
+        provider, "GET", "/ocs/v2.php/core/autocomplete/get",
+        params={"search": person, "itemType": "call", "itemId": "new", "shareTypes[]": "0", "limit": "20"},
+    )
+    if not ok:
+        return None, None, message or "Could not look up who that is."
+    people = [(str(i.get("id")), str(i.get("label") or i.get("id"))) for i in (data or [])
+              if isinstance(i, dict) and i.get("id") and i.get("source") in (None, "users")]
+    exact = [p for p in people if want in (p[0].lower(), p[1].lower())]
+    first = [p for p in people if p[1].lower().split()[:1] == [want]]
+    match = exact[:1] or (first if len(first) == 1 else []) or (people if len(people) == 1 else [])
+    if not match:
+        names = ", ".join(label for _id, label in people[:5])
+        return None, None, (f"Several people match {person!r}: {names}. Which one?" if people
+                            else f"No one called {person!r} can be messaged.")
+    user_id, display = match[0]
+    ok, data, message = await _talk_request_with_retry(
+        provider, "POST", "/ocs/v2.php/apps/spreed/api/v4/room", data={"roomType": "1", "invite": user_id},
+    )
+    token = data.get("token") if ok and isinstance(data, dict) else None
+    if not token:
+        return None, None, message or f"Could not open a chat with {display}."
+    return str(token), display, ""
+
+
 async def handle_talk(req: TalkRequest) -> ExecutionResult:
     provider = resolve_personal_data_provider(req.user_context)
     if not provider:
@@ -1252,6 +1285,14 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 detail={"poll": _poll_summary(data) if isinstance(data, dict) else {}},
             )
 
+        sent_to = None
+        if action == "send" and not req.token and req.target_user and req.message:
+            # "Send <person> a message": their one-to-one chat, from the person asking.
+            token, sent_to, why = await _direct_chat_with(provider, req.target_user)
+            if not token:
+                return ExecutionResult(status="FAILURE", message=why, service="talk_send")
+            req = req.model_copy(update={"token": token})
+
         if action == "send":
             if not req.token or not req.message:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message are required.", service="talk_send")
@@ -1300,7 +1341,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
 
             return ExecutionResult(
                 status="SUCCESS",
-                message="Chat message sent.",
+                message=f"Sent {sent_to} the message in your chat with them." if sent_to else "Chat message sent.",
                 service="talk_send",
                 detail={"message_record": _message_summary(data)},
             )

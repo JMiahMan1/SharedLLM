@@ -183,10 +183,19 @@ async def test_the_system_message_is_the_same_for_every_question_so_it_stays_cac
 
 def test_an_unrecognised_speaker_is_never_given_a_name():
     line = orchestrator._speaker_line(orchestrator.ResolvedCredentials(user="household"))
-    assert "not identified" in line and "Never guess or invent a name" in line
+    assert "the household" in line and "Never guess or invent a name" in line
     named = orchestrator.ResolvedCredentials(user="robin", identified_by="voice")
     assert orchestrator._speaker_line(named) == "Speaker: robin (recognised by their voice)."
     assert orchestrator._speaker_line(orchestrator.ResolvedCredentials(user="robin")) == "Speaker: robin."
+
+
+def test_the_household_is_never_asked_who_it_is_for_an_ordinary_request():
+    # 2026-11-24: told only "not identified", the model answered "Play ..." with "Could you
+    # tell me your name?". The household is the default user and is served as such.
+    line = orchestrator._speaker_line(orchestrator.ResolvedCredentials(user="household"))
+    assert "default user" in line
+    assert "never ask who is speaking or for a name" in line
+    assert "they can tell you their name" not in line
 
 
 async def test_the_voice_note_reaches_the_question_and_raven_keeps_it_in_its_instructions(monkeypatch):

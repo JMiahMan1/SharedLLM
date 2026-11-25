@@ -37,7 +37,14 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from services.common.media_titles import clean_title, main_title, names_match, normalize, title_score
+from services.common.media_titles import (
+    clean_title,
+    main_title,
+    names_sound_alike,
+    normalize,
+    sounds_like,
+    title_score,
+)
 from services.execution.schemas import AudiobookshelfRequest, CalibreRequest, ExecutionResult, MediaPlayRequest
 
 log = logging.getLogger("execution.media_finder")
@@ -220,12 +227,16 @@ class Candidate:
 
 
 def score_candidates(cands: list[Candidate], query: str, by: str = "") -> list[Candidate]:
-    """Each candidate scored against ``query`` (and ``by``, the artist or author said), best first."""
+    """Each candidate scored against ``query`` (and ``by``, the artist or author said), best first.
+
+    The artist or author counts when it is the same name or sounds like it ("Return by the
+    Great Evens" is the song by The Gray Havens).
+    """
     for c in cands:
         cap = {"series": 0.97, "author": 0.96}.get(c.kind, 1.0)
         c.score = title_score(query, c.title, cap=cap)
         if by:
-            if c.by and names_match(by, c.by):
+            if c.by and names_sound_alike(by, c.by):
                 c.score = min(1.0, c.score + 0.05)
             elif c.kind not in ("artist", "author"):
                 c.score *= 0.6  # "Harbor by The Example Band" is not the audiobook Harbor
@@ -538,7 +549,7 @@ async def _abs_login(ctx) -> tuple[str, str]:
 
 
 async def abs_catalogue(ctx) -> list[dict]:
-    """Every playable item in every Audiobookshelf library: id, kind, title, author, series."""
+    """Every playable item in every Audiobookshelf library: id, kind, title, author, series, added (ms)."""
     import time
 
     from services.execution import abs_client
@@ -568,7 +579,8 @@ async def abs_catalogue(ctx) -> list[dict]:
             items.append({"id": item["id"], "kind": "podcast" if podcast else "audiobook",
                           "title": str(meta.get("title") or ""),
                           "author": str(meta.get("authorName") or meta.get("author") or ""),
-                          "series": [] if podcast else _series_names(meta)})
+                          "series": [] if podcast else _series_names(meta),
+                          "added": item.get("addedAt") or 0})
     _abs_catalogues[url] = (time.monotonic(), items)
     return items
 
@@ -868,14 +880,26 @@ async def find_and_play(req: MediaPlayRequest, entity_id: str, ctx) -> Execution
                                     service=SERVICE, detail={"route": "none", "searched": []})
     # The players' libraries first; the book library and the web only when they found nothing to play.
     library = [s for s in sources if s.key not in ("web_video", "calibre")]
-    cands, searched, skipped = await search_sources(ctx, library, search_words(what))
+    if by:
+        heard_by, by = by, known_name(by)
+        if by != heard_by:
+            log.info(f"[media/find] heard the artist or author {heard_by!r} as the library's {by!r}")
+    if by:
+        # "Return by <artist>": a one-word title is common; the title with its artist finds this one.
+        (cands, searched, skipped), (more, _s, _k) = await asyncio.gather(
+            search_sources(ctx, library, search_words(what)),
+            search_sources(ctx, library, f"{search_words(what)} {by}"))
+        cands = cands + more
+    else:
+        cands, searched, skipped = await search_sources(ctx, library, search_words(what))
     if by and not any(title_score(what, c.title) >= PLAY_THRESHOLD for c in cands):
         # "X by Y" may be one title ("Murder by Death"): search the words as said too.
         more, _s, _k = await search_sources(ctx, library, search_words(title))
         cands += more
     ranked = score_candidates(dedupe(cands), what, by)
     if by:
-        whole = score_candidates(dedupe(cands), title)
+        # Scored on copies: scoring writes each candidate's score, and the "by" scores above must stay.
+        whole = score_candidates([Candidate(**c.as_pick()) for c in dedupe(cands)], title)
         if whole and (not ranked or whole[0].score > ranked[0].score):
             ranked, what, by = whole, title, ""
     if not screen:
@@ -932,6 +956,26 @@ async def find_and_play(req: MediaPlayRequest, entity_id: str, ctx) -> Execution
             )
     return ExecutionResult.fail(not_found_message(what, searched, skipped), service=SERVICE,
                                 detail={"route": "none", "searched": searched, "skipped": skipped})
+
+
+def known_name(heard: str) -> str:
+    """The library's artist or author ``heard`` sounds like, when exactly one does; else ``heard``.
+
+    From the names the libraries have listed (``media_vocabulary``, kept fresh by
+    ``stt_vocabulary``): "the Great Evens" is "The Gray Havens" when that band is in the library.
+    """
+    from services.execution import media_vocabulary
+
+    names = media_vocabulary.names("artist", "author")
+    if not names or any(normalize(heard) == normalize(n) for n in names):
+        return heard
+    hit = media_vocabulary.best_match(heard, names)
+    if hit:
+        return hit
+    alike = sorted(((sounds_like(heard, n), n) for n in names), reverse=True)
+    if alike and alike[0][0] and (len(alike) == 1 or alike[0][0] - alike[1][0] >= media_vocabulary.MATCH_MARGIN):
+        return alike[0][1]
+    return heard
 
 
 async def corrected_query(ctx, sources: list[Source], what: str) -> str | None:
@@ -1042,6 +1086,10 @@ async def play_candidate(cand: Candidate, req: MediaPlayRequest, entity_id: str,
         if (result.detail or {}).get("playback") == "not_started":
             return result.model_copy(update={"detail": detail})  # already says it plainly
         return result.model_copy(update={"detail": detail, "message": failed_message(cand, result.message, player)})
+    if cand.source != "web_video":
+        from services.execution import stt_vocabulary
+
+        stt_vocabulary.note_used(cand.title, *re.split(r",\s*|\s+&\s+", cand.by or ""))
     if cand.source == "web_video" and audio_only:
         title = clean_title(cand.title) if cand.extra.get("title_known") else ""
         return ExecutionResult.ok((f"Playing the audio of '{title}' from YouTube on {player}." if title

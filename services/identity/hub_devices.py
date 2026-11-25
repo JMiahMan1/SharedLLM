@@ -230,6 +230,38 @@ def owner_for(session: Session, entity_id: str | None) -> dict | None:
     return dict(found) if found else None
 
 
+def find_person(session: Session, name: str | None) -> User | None:
+    """The family member a spoken name means: their username, display name or its first word.
+
+    Case and an "'s" ending are ignored; the system account is never a match, and
+    a first name two people share matches nobody rather than a guess.
+    """
+    want = " ".join(str(name or "").lower().replace("\u2019", "'").split())
+    if want.endswith("'s"):
+        want = want[:-2]
+    if not want:
+        return None
+    people = [u for u in session.exec(select(User)).all() if not u.is_system_default]
+    for user in people:
+        if want in (user.username.lower(), (user.display_name or "").strip().lower()):
+            return user
+    firsts = [u for u in people if (u.display_name or "").strip().lower().split()[:1] == [want]]
+    return firsts[0] if len(firsts) == 1 else None
+
+
+def person_devices(session: Session, name: str | None) -> dict[str, Any] | None:
+    """A person and the hub devices assigned to them (satellites, speakers, TVs); None when no one matches."""
+    user = find_person(session, name)
+    if user is None:
+        return None
+    rows = session.exec(select(Device).where(Device.owner_username == user.username)).all()
+    devices = [
+        {"kind": d.kind, "label": d.label, "entity_ids": entity_list(d), "room": d.room or d.hub_area}
+        for d in rows if is_hub_device(d) and not d.revoked and not d.archived_at
+    ]
+    return {"username": user.username, "name": user.display_name or user.username, "devices": devices}
+
+
 def fetch_from_hub() -> list[dict[str, Any]]:
     """HomeHub's voice satellites, speakers and TVs; HubDeviceError when it cannot say."""
     from services.identity.music_assistant import HubUnavailable, _hub_login, _hub_request

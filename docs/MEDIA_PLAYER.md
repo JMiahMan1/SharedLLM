@@ -251,16 +251,51 @@ named in the next turn (`pick`). The same audiobook in Audiobookshelf and Music
 Assistant plays from Audiobookshelf (progress, chapters, resume). Nothing found
 says which sources were searched.
 
+The answer to that question (`fast_media.read_choice_answer`) is read before
+anything else in the gateway, and the model never sees a pending question:
+
+* a close variant names its option: "the audio", "audio book", "the book one",
+  "the song one", "music", the artist's name, a misspelling ("audibook");
+* the option plays on the device that asked the question (the choice's
+  `entity_id`), never the household's last player;
+* "no" or "never mind" calls it off ("Okay.");
+* a sentence that starts like a new request ("turn off the lights", "Play the
+  playlist `<name>`") drops the question and is routed as itself;
+* anything else is asked again once, briefly ("Sorry, the song or the
+  audiobook?"); a second unclear answer drops it ("Sorry, I still didn't catch
+  that...").
+
+"X by Y": the artist or author counts when it is the same name or sounds like it
+(`names_sound_alike`: "the Great Evens" is "The Gray Havens"), a misheard one is
+replaced by the library's when exactly one sounds like it
+(`media_finder.known_name`), and the title is searched both alone and with the
+artist ("Return" is a common title). A playlist heard as different words ("so
+fast" for "Some favs") is too far for any matching; that is the speech-to-text
+vocabulary's job (docs/VOICE_RECOGNITION.md, "The household's words").
+
+A spoken reply never says an entity id: execution names the player by its
+friendly name and the item by its real title ("Playing Example FM, the radio
+station, on Den Echo."), and the gateway replaces any id left in a spoken reply,
+fast or from the model, with the device's friendly name, else a name made from
+the id (`services/common/spoken_names.py`), and logs a warning when it had to.
+
 Heard wrong: titles also match by how they sound (`phonetic_key` /
 `spoken_similarity` in `media_titles.py`; a long sound key must be 85% alike, a
 short one identical, and a number said is still required), Music Assistant's
 playlists and stations are matched locally as well as through its search, and
 the book library reads the title that is clearly closest by sound. A request
-whose first word sounds like "play" (`Late <title>`, `Player <name>`) is played
+whose first word sounds like "play" (`Late <title>`, `Lake <name>`, `Player <name>`) is played
 only when `POST /execute/media/find` (a search that plays nothing) finds a
 strong library match for the rest. The gateway logs what it said for fast media,
 read and device answers as one `[Reply] <intent>: ...` line (200 characters), so
 a voice test can be graded from its log.
+
+Before any of this, a spoken request whose verb speech to text glued to the
+next word or misheard is repaired (`voice_transcript.py`, logged as `[Heard]`):
+"PlayDork Diaries 3" is "Play Dork Diaries 3", "ReDork Diaries" is "Read Dork
+Diaries", "Reach after one of `<title>`" is "Read chapter one of `<title>`". Only
+those shapes at the start of the sentence; "After one of these" or "PlayStation"
+are left alone.
 
 Spoken "Read ..." requests are the gateway's `fast_read.py`: scripture with a
 chapter ("Read John 3:16") from the Bible service, `Read chapter N of <title>`

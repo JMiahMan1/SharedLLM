@@ -1,0 +1,9 @@
+{
+  "prompt": "playful game show thinking music, light pizzicato strings and a ticking clock, bright major key, bouncy and curious, steady medium tempo, background bed, no vocals",
+  "duration_s": 24,
+  "seed": 5150,
+  "model": "musicgen (alpaca audio-server POST /api/music)",
+  "rate": 24000,
+  "loop_crossfade_s": 0.5,
+  "rms_dbfs": -24.0
+}

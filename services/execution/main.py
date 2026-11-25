@@ -505,6 +505,9 @@ async def lifespan(app: FastAPI):
     # Home Assistant's speech-to-text, passed through, recognising who speaks
     from services.execution.wyoming_stt import serve as serve_voice_stt
     voice_stt_task = asyncio.create_task(serve_voice_stt())
+    # The household's names for Whisper's prompt, rebuilt from the integrations (stt_vocabulary.py)
+    from services.execution.stt_vocabulary import refresh_loop as stt_vocabulary_loop
+    stt_vocabulary_task = asyncio.create_task(stt_vocabulary_loop())
 
     # Start ESPresense BLE presence pipeline (E7: was never invoked)
     from services.config import REDIS_URL as _PRESENCE_REDIS_URL
@@ -570,7 +573,8 @@ async def lifespan(app: FastAPI):
     # Exception) when awaited; suppress(Exception) let it escape, so shutdown
     # failed ("Application shutdown failed. Exiting.") before stopping the rest,
     # and docker had to kill the container after its 10 s grace.
-    background = [telemetry_task, prune_task, glance_task, leave_by_task, *reminder_tasks, voice_stt_task]
+    background = [telemetry_task, prune_task, glance_task, leave_by_task, *reminder_tasks, voice_stt_task,
+                  stt_vocabulary_task]
     if config_task is not None:
         background.append(config_task)
     await _stop_background(background)
@@ -1285,6 +1289,14 @@ async def execute_ai_capabilities():
                 }
             ]
         }
+
+@app.get("/execute/voice/vocabulary")
+async def voice_vocabulary():
+    """The household's names for speech to text (stt_vocabulary.py): rooms, names in order, players."""
+    from services.execution import stt_vocabulary
+
+    return stt_vocabulary.served()
+
 
 @app.get("/execute/timers")
 async def list_timers(user_id: str | None = None):
@@ -2349,6 +2361,142 @@ def _ma_wrapped_roku(idx, entity_id: str, attrs: dict) -> str | None:
 
 @app.post("/execute/announce", response_model=ExecutionResult)
 async def execute_announce(req: AnnouncementRequest):
+    """Announce on what the request means, never failing for want of a device name.
+
+    One named device or room goes straight to ``_announce_one``. ``entity_ids``,
+    ``rooms``, ``person`` and ``everywhere`` (or nothing named at all) fan out over
+    the reachable speakers ``announce_targets`` chooses, and the reply says where
+    it played and which were offline.
+    """
+    from services.execution import announce_targets as at
+
+    single = (req.entity_id or req.device_name) and not (
+        req.entity_ids or req.rooms or req.person or req.everywhere or at.is_everywhere(req.device_name))
+    if single and req.device_name and not req.entity_id and not at.names_a_device_kind(req.device_name):
+        # "announce to <a family member>" often arrives as a device name; identity says whether it is a person.
+        person = await _announce_person_lookup(req.device_name)
+        if person is not None:
+            return await _announce_fan_out(req, person=person)
+    if single:
+        return await _announce_one(req)
+    return await _announce_fan_out(req)
+
+
+async def _announce_person_lookup(name: str | None) -> dict | None:
+    """Identity's answer for a family member by a spoken name: their devices, or None."""
+    if not name or not name.strip():
+        return None
+    try:
+        async with get_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC_URL}/api/internal/person-devices", params={"person": name.strip()},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=5.0))
+            if resp.status != 200:
+                return None
+            body = await resp.json(content_type=None)
+    except Exception as e:  # identity down: the name is treated as a device name, as before
+        log.warning(f"[announce] Could not ask identity who {name!r} is: {e}")
+        return None
+    return body if isinstance(body, dict) and body.get("username") else None
+
+
+async def _announce_push(ctx: UserContext, person: dict, message: str) -> bool:
+    """The announcement on the person's phone too, from whoever asked."""
+    from services.common import notify
+
+    sender = (ctx.user or "").strip()
+    title = f"Announcement from {sender.title()}" if sender and sender != "default" else "Announcement"
+    return await notify.send(notify.notice(
+        person["username"], "home", title, message, link=notify.link("family", tab="announce"),
+        tag="announcement"))
+
+
+async def _announce_fan_out(req: AnnouncementRequest, person: dict | None = None) -> ExecutionResult:
+    """Announce on every target the request means, skipping the unavailable ones and saying so."""
+    from services.execution import announce_targets as at
+    from services.execution.capability_index import CapabilityIndexError, routing_index
+
+    ctx = req.user_context
+    if person is None and req.person:
+        person = await _announce_person_lookup(req.person)
+        if person is None:
+            return _fail(f"I don't know who {req.person!r} is in this household.", "announce")
+    ha_url, ha_token = hardware_router.hub_pair(ctx)
+    if not ha_url or not ha_token or ha_health.is_down(ha_url):
+        if person is None:
+            return _fail(hardware_router.NO_HUB_MESSAGE, "announce")
+        pushed = await _announce_push(ctx, person, req.message)
+        if pushed:
+            return _ok(f"The home hub is not answering, so I sent it to {person['name']}'s phone.", "announce")
+        return _fail(hardware_router.NO_HUB_MESSAGE, "announce")
+
+    idx = None
+    try:
+        idx = await routing_index(ha_url, ha_token, "announcement targets")
+    except CapabilityIndexError as e:
+        log.warning(f"[announce] No capability index, choosing targets from states: {e}")
+    states = await ha_client.get_states(ha_url, ha_token) or []
+    by_state = {s.get("entity_id"): s for s in states if isinstance(s, dict) and s.get("entity_id")}
+
+    targets: list[str] = []
+    skipped: list[str] = []
+    if req.entity_ids:
+        for eid in req.entity_ids:
+            if at.reachable(by_state.get(eid)):
+                targets.append(eid)
+            else:
+                skipped.append(at.label(eid, by_state))
+    elif req.rooms:
+        for room in req.rooms:
+            area = (idx.area_id_for(room) or idx.area_in_text(room)) if idx is not None else None
+            pick = idx.pick_player(area, room, "announcement", states) if area else None
+            if pick and at.reachable(by_state.get(pick)):
+                targets.append(pick)
+            else:
+                skipped.append(at.label(pick, by_state) if pick else room)
+    elif person is not None:
+        targets, skipped = at.person_players(idx, person.get("devices") or [], by_state)
+    else:
+        own = None if (req.everywhere or at.is_everywhere(req.device_name)) else at.satellite_player(
+            idx, ctx.voice_satellite, by_state)
+        if own:
+            targets = [own]
+        else:
+            targets, skipped = at.everywhere(idx, by_state)
+
+    targets = list(dict.fromkeys(targets))
+    log.info(f"[announce] fan-out user={ctx.user} person={(person or {}).get('username')} "
+             f"targets={targets} skipped={skipped}")
+    pushed = None
+    if person is not None and await _announce_push(ctx, person, req.message):
+        pushed = person["name"]
+
+    async def one(eid: str, first: bool) -> ExecutionResult:
+        sub = req.model_copy(update={"entity_id": eid, "device_name": None, "entity_ids": None, "rooms": None,
+                                     "group_id": None, "person": None, "everywhere": False,
+                                     "save_path": req.save_path if first else None})
+        try:
+            return await _announce_one(sub)
+        except HTTPException as e:
+            return _fail(str(e.detail), "announce")
+        except Exception as e:
+            log.error(f"[announce] {eid} failed: {e}")
+            return _fail(str(e), "announce")
+
+    results = await asyncio.gather(*(one(eid, i == 0) for i, eid in enumerate(targets)))
+    done = [at.label(eid, by_state) for eid, r in zip(targets, results, strict=True) if r.status == "SUCCESS"]
+    failed = [(at.label(eid, by_state), (r.message or "failed").removeprefix("Announcement failed: "))
+              for eid, r in zip(targets, results, strict=True) if r.status != "SUCCESS"]
+    message = at.summary(done, failed, skipped, pushed)
+    detail = {"announced": done, "failed": [n for n, _ in failed], "skipped": skipped, "pushed_to": pushed,
+              "targets": targets}
+    if done or pushed:
+        return ExecutionResult(status="SUCCESS", message=message, service="announce", detail=detail)
+    return ExecutionResult(status="FAILURE", message=message, service="announce", detail=detail)
+
+
+async def _announce_one(req: AnnouncementRequest) -> ExecutionResult:
+    """One announcement on one device (``entity_id``, else resolved from ``device_name``)."""
     ctx = req.user_context
     target_player = req.entity_id
 
@@ -2417,6 +2565,19 @@ async def execute_announce(req: AnnouncementRequest):
         if s.get("entity_id") == target_player:
             initial_state = s
             break
+
+    if initial_state and initial_state.get("state") == "unavailable":
+        # The hub cannot reach it. Another player on the same device or in the same room stands in;
+        # with none, say it is offline instead of waiting out a wake-up that cannot happen.
+        from services.execution import announce_targets as at
+
+        by_state = {s.get("entity_id"): s for s in all_states if isinstance(s, dict)}
+        stand_in = at.alternative_for(announce_idx, target_player, by_state)
+        if stand_in is None:
+            return _fail(f"{at.label(target_player, by_state)} is offline (the hub reports it unavailable), "
+                         "so I could not announce there.", "announce")
+        log.info(f"[announce] {target_player} is unavailable; announcing on {stand_in} instead")
+        target_player, initial_state = stand_in, by_state.get(stand_in)
 
     # Detect if this is an MA-wrapped Roku and store both entities (works even when state=='off' and app_id is None)
     ma_player_entity = None
@@ -2731,10 +2892,63 @@ async def execute_announce(req: AnnouncementRequest):
         return _ok(f"Announcement sent successfully to {target_player}.", "announce")
     return _fail(f"Announcement failed: {result.get('error')}", "announce", result)
 
+#: At most this many entities go back to a model (the UI's lists use ``/execute/entity/search``).
+MODEL_ENTITY_SEARCH_CAP = 25
+#: The domains a search for a kind of device ("office speaker", "the den TV") means.
+SOUND_DEVICE_DOMAINS = ("media_player", "assist_satellite")
+
+
 @app.post("/execute/entity_search", response_model=ExecutionResult)
+async def execute_entity_search_for_model(req: EntitySearchRequest):
+    """The tool a model calls: what ``execute_entity_search`` finds, shaped so the answer is readable.
+
+    Reachable entities first, one entity per physical device and domain (a stale
+    "_2" copy or a second player of the same speaker is folded into the one that
+    works), a device kind ("speaker", "TV") searched among players and satellites
+    only, never their diagnostic sensors, and at most ``MODEL_ENTITY_SEARCH_CAP``
+    results. A model shown 122 matches with the dead ones on top told the family
+    no speaker was available.
+    """
+    return await _entity_search(req, for_model=True)
+
+
 @app.post("/execute/entity/search", response_model=ExecutionResult)
 async def execute_entity_search(req: EntitySearchRequest):
     """Search for HA entities by name, domain, area, or state."""
+    return await _entity_search(req, for_model=False)
+
+
+def _model_entity_results(results: list[dict], search_idx: Any) -> tuple[list[dict], int]:
+    """Available before unavailable (order otherwise kept), duplicates of one device folded; how many were folded."""
+    from services.execution import announce_targets as at
+
+    ordered = sorted(results, key=lambda r: 1 if r.get("state") in at.UNREACHABLE_STATES else 0)
+    seen: set[tuple[str, str]] = set()
+    kept: list[dict] = []
+    for r in ordered:
+        eid = r["entity_id"]
+        device = search_idx.device_of(eid) if search_idx is not None and eid in search_idx else None
+        # The same name with a number on the end ("Den TV 2", media_player.den_tv_2) is the same device added again.
+        name = re.sub(r"[\s_]*\d+$", "", norm_name(r.get("friendly_name") or eid.split(".", 1)[-1]))
+        keys = {(r["domain"], f"name:{name}")} | ({(r["domain"], f"device:{device}")} if device else set())
+        # Folded: an unavailable copy of something already listed, or a second player of one speaker.
+        # Two working lights called "Lamp 1" and "Lamp 2" are both kept.
+        if keys & seen and (r.get("state") in at.UNREACHABLE_STATES
+                            or (r["domain"] == "media_player" and (r["domain"], f"device:{device}") in seen)):
+            continue
+        seen |= keys
+        kept.append(r)
+    return kept, len(results) - len(kept)
+
+
+def norm_name(text: str) -> str:
+    """A device name compared without case, punctuation or spacing differences."""
+    from services.execution.capability_index import norm
+
+    return norm(text)
+
+
+async def _entity_search(req: EntitySearchRequest, *, for_model: bool) -> ExecutionResult:
     ctx = req.user_context
     # The caller's own hub login, else the hub's: results are filtered by can_view below.
     ha_url, ha_token = hardware_router.hub_pair(ctx)
@@ -2778,6 +2992,10 @@ async def execute_entity_search(req: EntitySearchRequest):
     results = []
 
     search_terms = req.query.lower().split()
+    from services.execution.announce_targets import names_a_device_kind
+
+    # "office speaker" means the speaker, not its IP-address sensor (a model's search only).
+    kind_search = for_model and names_a_device_kind(req.query)
 
     for state in all_states:
         eid = state.get("entity_id", "")
@@ -2807,6 +3025,8 @@ async def execute_entity_search(req: EntitySearchRequest):
             entity_domain = eid.split('.')[0] if '.' in eid else ''
             if allowed_domains and entity_domain not in allowed_domains:
                 continue
+        elif kind_search and eid.split(".", 1)[0] not in SOUND_DEVICE_DOMAINS:
+            continue
         if want_area_id is not None:
             if search_idx.area_of(eid) != want_area_id:
                 continue
@@ -2871,9 +3091,20 @@ async def execute_entity_search(req: EntitySearchRequest):
         # lists aren't cut arbitrarily by HA state order.
         results.sort(key=lambda r: (r.get("friendly_name") or r["entity_id"]).lower())
 
-    limit = max(1, min(int(req.limit or 200), 1000))
+    folded = 0
+    if for_model:
+        results, folded = _model_entity_results(results, search_idx)
+    limit = max(1, min(int(req.limit or 200), MODEL_ENTITY_SEARCH_CAP if for_model else 1000))
     detail: dict[str, Any] = {"entities": results[:limit], "total": len(results), "limit": limit}
     message = f"Found {len(results)} matching entities."
+    if for_model:
+        offline = sum(1 for r in results if r.get("state") == "unavailable")
+        detail.update(duplicates_folded=folded, unavailable=offline)
+        if len(results) > limit:
+            message += f" Showing the first {limit}; add an area or domain to narrow it."
+        if offline:
+            message += (f" {offline} of them are unavailable (offline or stale copies); the rest are reachable, "
+                        "and a TV that is off can still be turned on and announced on.")
     if stale_at is not None:
         from services.execution import ha_snapshot
 

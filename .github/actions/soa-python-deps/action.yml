@@ -1,0 +1,62 @@
+name: SOA Python dependencies
+description: >
+  Python 3.11 with the test tools and every service's requirements, in a
+  virtualenv restored from the Actions cache when nothing it is built from has
+  changed this week.
+
+# Every SOA job (lint and the six test shards) used to pip install the same
+# nine requirement sets, 2.5 to 10 minutes each, because pip's cache only
+# saves the downloads and openai-whisper pulled CUDA torch with ~3 GB of nvidia
+# wheels. Now one job builds the virtualenv and the rest restore it.
+#
+# The key changes when a requirements file or this file changes, and once a
+# week, so unpinned requirements still move to new releases (weekly, not on
+# every run).
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python 3.11
+      id: python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Week of the year
+      id: week
+      shell: bash
+      run: echo "week=$(date -u +%G-w%V)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the virtualenv
+      id: venv
+      uses: actions/cache@v4
+      with:
+        path: ~/.venv-soa
+        key: soa-venv-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('services/*/requirements.txt', '.github/actions/soa-python-deps/action.yml') }}-${{ steps.week.outputs.week }}
+
+    - name: Build the virtualenv
+      if: steps.venv.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        python -m venv ~/.venv-soa
+        . ~/.venv-soa/bin/activate
+        python -m pip install --upgrade pip
+        # CPU torch first, so openai-whisper's torch requirement is already met
+        # and pip does not fetch the CUDA build (~3 GB of nvidia wheels). No
+        # test needs a GPU; services/rag's test even asserts CPU-only torch.
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split "fakeredis[lua]" respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
+        # Heavy ML packages (fastembed models) are not installed: the tests
+        # mock them, so only the API contracts are needed. RAG's requirements
+        # (torch, models) are left out for the same reason.
+        for svc in identity execution gateway storage bible health automation telemetry homehub; do
+          pip install -r "services/$svc/requirements.txt"
+        done
+        # Nothing above may have swapped the CPU build for the CUDA one.
+        python -c "import torch, sys; v = torch.__version__; print('torch', v); sys.exit(0 if '+cpu' in v else 'torch is not the CPU build: ' + v)"
+
+    - name: Use the virtualenv
+      shell: bash
+      run: |
+        echo "VIRTUAL_ENV=$HOME/.venv-soa" >> "$GITHUB_ENV"
+        echo "$HOME/.venv-soa/bin" >> "$GITHUB_PATH"
