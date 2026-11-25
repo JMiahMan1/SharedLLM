@@ -11,7 +11,7 @@ const device: NearbyDeviceState = {
 describe('nearbySettings', () => {
   it('reads a partial or odd answer as the defaults', () => {
     expect(nearbyState(null).settings).toEqual(NEARBY_DEFAULTS);
-    const s = nearbyState({ settings: { chat: true, car: 'no' }, managed_by_parent: true, always_on: ['parent_link', 3] });
+    const s = nearbyState({ settings: { chat: true, car: 'no' }, managed_by_parent: true, chosen: true, always_on: ['parent_link', 3] });
     expect(s.settings).toEqual({ ...NEARBY_DEFAULTS, chat: true });
     expect(s.managed_by_parent).toBe(true);
     expect(s.can_change).toBe(false);

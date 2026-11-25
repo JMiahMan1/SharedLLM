@@ -10,7 +10,7 @@ import NearbyChildCard from './NearbyChildCard';
 
 const state = {
   username: 'robin', settings: { nearby: false, chat: false, offline: false, car: true },
-  managed_by_parent: true, can_change: true, always_on: ['parent_link'],
+  managed_by_parent: true, chosen: true, can_change: true, always_on: ['parent_link'],
 };
 const draw = () =>
   render(
