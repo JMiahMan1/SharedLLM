@@ -1019,10 +1019,18 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
     query = req.query
     log.info(f"[media/resolve_stream] Resolving audio stream URL for query='{query}'")
 
-    # Step 1: Find a YouTube page URL for the query
-    video_url = await video_handler.search_youtube(query)
+    from services.execution import video_safety
+
+    # Step 1: Find a YouTube page URL for the query (safe search), screened before it plays anywhere
+    level = await video_safety.safe_search_level(req.user_context)
+    video_url = await video_handler.search_youtube(query, level)
     if not video_url:
         return ExecutionResult(status="FAILURE", message="Could not find stream on YouTube", service="resolve_stream")
+    verdict = await video_safety.screen_url(video_url, req.user_context)
+    if not verdict.ok:
+        log.info(f"[media/resolve_stream] refused a result ({verdict.why}) at safe_search={level}")
+        return ExecutionResult(status="FAILURE", message=video_safety.refusal_message(verdict.why),
+                               service="resolve_stream", detail={"reason": verdict.why})
 
     # Step 2: Extract a direct, in-memory audio stream URL; no download needed
     stream_url, title = await video_handler.extract_audio_stream_url(video_url)

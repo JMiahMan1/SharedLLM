@@ -242,9 +242,20 @@ def _found(by_source: dict[str, list[C]]):
     return search
 
 
-async def _run(req, *, screen=False, sources=None, found=None, player="Den Speaker"):
+async def _run(req, *, screen=False, sources=None, found=None, player="Den Speaker", facts=None):
+    from services.execution import video_safety
+    from services.execution.handlers import video as video_handler
+
+    video_safety._checked.clear()
+    facts = facts or {}
+
+    async def inspect(url):
+        return {"title": "", "channel": "", "age_limit": 0, **facts.get(url, {})}
+
     played = AsyncMock(side_effect=lambda cand, *_a, **_k: ExecutionResult.ok(f"played {cand.ident}", service="t"))
-    with patch.object(mf, "target_facts", new=AsyncMock(return_value=(screen, player))), \
+    with patch.object(video_safety, "_setting", new=_settings({})), \
+            patch.object(video_handler, "inspect_video", new=inspect), \
+            patch.object(mf, "target_facts", new=AsyncMock(return_value=(screen, player))), \
             patch.object(mf, "discover_sources", new=AsyncMock(return_value=sources or [])), \
             patch.object(mf, "_search", new=_found(found or {})), \
             patch.object(mf, "corrected_query", new=AsyncMock(return_value=None)), \

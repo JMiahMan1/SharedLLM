@@ -682,6 +682,8 @@ DEFAULT_GLOBAL_SETTINGS = [
 
     # --- VOICE SATELLITES ---
     {"key": "voice_satellite_playback", "value": "this_device", "description": "Where media asked for at a voice satellite plays when no device is named: this_device (the satellite's own speaker) or last_used (the last player the household used). A device named in the request always wins."},
+    {"key": "video_safe_search", "value": "strict", "description": "Safe search for every web video Jarvis searches for or plays (voice and assistant): strict (the default), moderate or off. Only an admin can change it, and it is always strict for a child or teen and for a speaker Jarvis did not recognise. Videos rated 13+ never play on a shared screen, 18+ never."},
+    {"key": "video_blocklist", "value": "", "description": "Words or phrases, comma separated or one per line, that keep a web video from playing when its title or channel contains them. Empty by default."},
     {"key": "voice_video_search", "value": "youtube", "description": "Whether 'play <name>' may look for a YouTube video when the request asks for a video or the target is a TV and nothing in the libraries matched: youtube (the default) or off."},
     {"key": "voice_default_music", "value": "", "description": "What 'play music' plays when no artist, song or playlist is named: a Music Assistant URI, or a playlist or artist name to search. Empty shuffles a library playlist, else library tracks."},
     {"key": "household_device_access", "value": "unlocked", "description": "What a voice satellite or kiosk may control when it does not recognise who is speaking: unlocked (every device that is not locked) or none. Edit in Admin > Users & Devices > Voice satellites."},
