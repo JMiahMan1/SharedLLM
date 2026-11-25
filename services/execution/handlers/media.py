@@ -764,6 +764,48 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
 
     return ExecutionResult(status="FAILURE", message=f"Failed to play video on {entity_id}.", service="media_play")
 
+async def play_web_audio(video_url: str, entity_id: str, ctx) -> ExecutionResult:
+    """The sound of a YouTube video on a speaker (a speaker shows no picture).
+
+    Screened like a video for a screen (age rating, blocklist). The audio stream
+    (``extract_audio_stream_url``, AAC/m4a first) goes to the speaker's Music Assistant
+    player when it has one, which converts it for any speaker, else straight to the player.
+    """
+    from services.execution import video_safety
+
+    from . import video as video_handler
+
+    verdict = await video_safety.screen_url(video_url, ctx)
+    if not verdict.ok:
+        log.info(f"[media.audio] refused a YouTube video's audio ({verdict.why}, age_limit={verdict.age_limit})")
+        return ExecutionResult(status="FAILURE", message=video_safety.refusal_message(verdict.why),
+                               service="media_play", detail={"playback": "not_started", "reason": verdict.why})
+    stream_url, title = await video_handler.extract_audio_stream_url(video_url)
+    if not stream_url:
+        return ExecutionResult(status="FAILURE", service="media_play",
+                               message="I couldn't get the audio of that video from YouTube.",
+                               detail={"reason": "no_audio_stream"})
+    try:
+        target = await resolve_mass_entity(ctx, entity_id)
+        via_ma = target != entity_id or await _is_ma_entity(ctx, target)
+    except Exception as exc:
+        log.warning(f"[media.audio] could not check {entity_id} for a Music Assistant player: {exc}")
+        target, via_ma = entity_id, False
+    log.info(f"[media.audio] YouTube audio of {title!r} on {target} ({'Music Assistant' if via_ma else 'the player'})")
+    if via_ma:
+        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", target,
+                                              {"media_id": stream_url, "enqueue": "replace"})
+    else:
+        result = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "play_media", target,
+                                              {"media_content_id": stream_url, "media_content_type": "music"})
+    if result.get("ok"):
+        return ExecutionResult(status="SUCCESS", service="media_play", message=f"Playing the audio of '{title}'.",
+                               detail={"route": "web_audio", "entity_id": target})
+    return ExecutionResult(status="FAILURE", service="media_play",
+                           message=f"Failed to play audio: {result.get('error') or 'the player refused it'}",
+                           detail={"reason": result.get("error"), "entity_id": target})
+
+
 async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play podcast via Music Assistant or URL."""
     from . import roku as roku_handler

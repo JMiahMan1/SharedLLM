@@ -332,6 +332,43 @@ CHOICE_TTL_S = 120
 _YES = frozenset({"yes", "yeah", "yep", "sure", "please", "ok", "okay", "go ahead", "do it", "read it", "yes please"})
 
 
+# --------------------------------------------------------------------------- #
+# "On YouTube": where to look, not where to play                               #
+# --------------------------------------------------------------------------- #
+
+#: "YouTube" heard where a device would be ("Play X on YouTube"), with a device after it or not
+#: ("Play X on YouTube on the den TV").
+_YOUTUBE_PLACE = re.compile(r"^youtube(?:\s+(?:on|in)\s+(?:the\s+)?(?P<device>.+))?$", re.IGNORECASE)
+
+
+def split_youtube_source(media_query: str | None, device: str | None) -> tuple[str | None, str | None]:
+    """("X on YouTube", the real device or None) when ``device`` is "YouTube" or "YouTube on <device>".
+
+    "On YouTube" names where to find it. Taken as a device it matched no player, and the
+    request reached execution with neither a player nor a device it could use.
+    """
+    m = _YOUTUBE_PLACE.match((device or "").strip(" ,.!?"))
+    if not m or not media_query:
+        return media_query, device
+    return f"{media_query} on YouTube", (m.group("device") or "").strip(" ,.!?") or None
+
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_PLAY_START = re.compile(rf"^{PLAY_VERB}\b", re.IGNORECASE)
+
+
+def last_play_request(query: str) -> str:
+    """The last of several "Play ..." sentences ("Play X. Play X on YouTube." -> "Play X on YouTube.").
+
+    A person who repeats a request with more detail means the second one; joined, the two made one
+    search for "X. Play X".
+    """
+    sentences = [t for t in _SENTENCE_END.split((query or "").strip()) if t.strip()]
+    if len(sentences) > 1 and all(_PLAY_START.match(fast.strip()) for fast in sentences):
+        return sentences[-1].strip()
+    return query
+
+
 def _choice_key(user_id: str) -> str:
     return f"media:choice:{user_id}"
 

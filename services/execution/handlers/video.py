@@ -325,6 +325,24 @@ async def _ensure_youtube_cookies() -> str | None:
         return None
 
 
+#: What yt-dlp downloads for a screen (Cast, Roku, Samsung, webOS, Android TV), best first.
+#: YouTube serves almost every video only as separate video and audio streams now. The old
+#: choice, the single-file formats 22 and 18, is gone for most videos (22) and missing for
+#: some clients (18): "Requested format is not available", and nothing played. So: H.264
+#: video with AAC audio merged into one MP4 (every screen here plays it), then a single-file
+#: H.264/AAC MP4, then any video and audio pair (merged to MP4), then whatever there is.
+#: The merge needs ffmpeg, which the execution image has (Dockerfile).
+VIDEO_FORMAT = ("bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]"
+                "/b[ext=mp4][vcodec^=avc1][acodec^=mp4a]"
+                "/bv*[height<=1080]+ba"
+                "/b")
+
+
+def video_format_args() -> list[str]:
+    """yt-dlp's format arguments for a video a screen will play (``VIDEO_FORMAT``, merged to MP4)."""
+    return ["-f", VIDEO_FORMAT, "--merge-output-format", "mp4"]
+
+
 #: Time limits for yt-dlp: the metadata lookup, reaching the progressive
 #: start threshold, and a whole download. Without them a stalled yt-dlp hung
 #: the cast (and its process) for good.
@@ -359,7 +377,7 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
 
     try:
         cookies_path = await _ensure_youtube_cookies()
-        cmd = ["yt-dlp", "-f", "best[ext=mp4][vcodec^=avc1][acodec^=mp4a]/best[ext=mp4]/best", "--no-playlist", "--merge-output-format", "mp4", "-o", tmp_path]
+        cmd = ["yt-dlp", *video_format_args(), "--no-playlist", "-o", tmp_path]
         if cookies_path:
             cmd.extend(["--cookies", cookies_path])
         cmd.append(video_url)
@@ -446,8 +464,11 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
 
         # --no-progress keeps stderr to real errors: nothing reads the pipes
         # while this waits, and yt-dlp's progress lines used to fill them and
-        # stall the download.
-        dl_cmd = ["yt-dlp", "-f", "22/18/best[ext=mp4][height<=720]", "--no-playlist", "--no-progress", "-o", tmp_path]
+        # stall the download. A merged pair (VIDEO_FORMAT) appears at tmp_path
+        # only once both streams are down and joined; that is quick (a
+        # one-hour video at 1080p took 26 s), and a single-file format still
+        # starts from its .part file.
+        dl_cmd = ["yt-dlp", *video_format_args(), "--no-playlist", "--no-progress", "-o", tmp_path]
         if cookies_path:
             dl_cmd.extend(["--cookies", cookies_path])
         dl_cmd.append(video_url)
@@ -511,9 +532,7 @@ async def _wait_for_download(proc, tmp_path: str, media_id: str):
 
 async def download_video_for_roku(video_url: str) -> tuple[str | None, str | None]:
     """
-    Download video optimized for Roku using pre-generated H.264/AAC formats.
-    Uses format 22 (720p) or 18 (360p) which are single-file containers
-    that require no local muxing, ensuring immediate streaming readiness.
+    Download a video for Roku: H.264/AAC in one MP4 (``VIDEO_FORMAT``), which Roku plays.
     """
     media_id = secrets.token_urlsafe(16)
     tmp_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
@@ -543,7 +562,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
         else:
             title = video_url
 
-        dl_cmd = ["yt-dlp", "-f", "22/18/best[ext=mp4][height<=720]", "--no-playlist", "-o", tmp_path]
+        dl_cmd = ["yt-dlp", *video_format_args(), "--no-playlist", "--no-progress", "-o", tmp_path]
         if cookies_path:
             dl_cmd.extend(["--cookies", cookies_path])
         dl_cmd.append(video_url)

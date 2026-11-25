@@ -1518,7 +1518,43 @@ def extract_media_request(query: str) -> tuple[str | None, str | None]:
     device_name = match.group(2).strip(" \"'") if match.group(2) else None
     if device_name:
       device_name = re.sub(r"^(?:the)\s+", "", device_name, flags=re.IGNORECASE)
+    # "on YouTube" says where to look, not where to play (fast_media.split_youtube_source).
+    media_query, device_name = fast_media.split_youtube_source(media_query or None, device_name or None)
     return (media_query or None, device_name or None)
+
+
+#: What is said when execution's answer is not one it can read (an HTTP error, a bare string).
+EXECUTION_TROUBLE_REPLY = "Sorry, that didn't work. Something went wrong on my side."
+#: An HTTP 403 from execution: the device (or what it guards) is not this person's to use.
+EXECUTION_DENIED_REPLY = "Sorry, I'm not allowed to use that device for you."
+
+
+async def read_execution_reply(resp: Any, path: str) -> dict:
+    """execution's answer as an object with a ``message``, whatever came back.
+
+    An ExecutionResult comes back as is. Anything else (an HTTP error such as a 403 or a 422,
+    whose ``detail`` is a string or a list, a bare JSON string, or no JSON at all) is logged
+    and becomes a FAILURE with a plain sentence: a voice request must always get an answer,
+    never a 500 (on 2026-11-24 "Play X on YouTube" crashed on a 403's string ``detail``).
+    """
+    status = resp.status if isinstance(getattr(resp, "status", None), int) else 200
+    data: Any = None
+    try:
+        try:
+            data = await resp.json(content_type=None)  # aiohttp: read JSON whatever the content type says
+        except TypeError:
+            data = await resp.json()
+    except Exception:
+        data = None
+    if status == 200 and isinstance(data, dict):
+        return data
+    try:
+        body = data if data is not None else (await resp.text())[:300]
+    except Exception:
+        body = "(no body)"
+    log.warning(f"[execution] {path} answered HTTP {status} with something that is not a result: {str(body)[:300]}")
+    return {"status": "FAILURE", "message": EXECUTION_DENIED_REPLY if status == 403 else EXECUTION_TROUBLE_REPLY,
+            "detail": {"http_status": status}}
 
 
 async def _execution_post(path: str, payload: dict, timeout: float = 120.0) -> dict:
@@ -1527,10 +1563,7 @@ async def _execution_post(path: str, payload: dict, timeout: float = 120.0) -> d
         resp = await client.post(f"{EXECUTION_SVC}{path}", json=payload,
                                  headers={"X-Internal-Secret": INTERNAL_SECRET},
                                  timeout=aiohttp.ClientTimeout(total=timeout))
-        if resp.status != 200:
-            text = await resp.text()
-            return {"status": "FAILURE", "message": f"The {path} call answered HTTP {resp.status}: {text[:200]}"}
-        return await resp.json()
+        return await read_execution_reply(resp, path)
 
 
 async def _misheard_play(query: str, creds: Any) -> str | None:
@@ -1542,7 +1575,7 @@ async def _misheard_play(query: str, creds: Any) -> str | None:
         except Exception as exc:
             log.warning(f"[FastPath] could not check {guess!r} as a misheard play: {exc}")
             return None
-        detail = data.get("detail") or {}
+        detail = data.get("detail") if isinstance(data.get("detail"), dict) else {}
         if detail.get("action") == "play" and float(detail.get("score") or 0) >= fast_media.MISHEARD_PLAY_MIN_SCORE:
             best = detail.get("best") or {}
             log.info(f"[FastPath] heard {query!r} as 'Play {guess}' (the library has {best.get('title')!r}, "
@@ -1586,7 +1619,8 @@ async def _answer_media_choice(query: str, user_id: str, creds: Any) -> str | No
             _execution_post, creds.model_dump(), user_id, chapter=1, book_id=book.get("book_id"),
             title=str(book.get("title") or ""), author=str(book.get("author") or ""))
     data = await _execution_post("/execute/media/play", {
-        "user_context": creds.model_dump(), "entity_id": pending.get("entity_id"),
+        # "Which TV should I put it on?": the TV named is where it plays.
+        "user_context": creds.model_dump(), "entity_id": option.get("entity_id") or pending.get("entity_id"),
         "query": pending.get("query"), "pick": option.get("pick"), "search_everywhere": True,
     })
     return str(data.get("message") or "Done.")
@@ -4968,9 +5002,13 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
 
         # Attempt entity extraction/resolution for control intents
         if intent == "play_media":
+            query = fast_media.last_play_request(query)
             media_type = "video" if is_likely_video_request(query) else None
             named_place = extract_media_place(query, media_entities or [])[1]
-            if sat_player and media_type != "video" and not named_place:
+            # "Play X on YouTube" at a satellite with no device named: the satellite's own speaker, where
+            # execution plays the video's sound, or asks which TV when a video was asked for.
+            youtube_here = media_type == "video" and "youtube" in query.lower() and not named_place
+            if sat_player and (media_type != "video" or youtube_here) and not named_place:
                 resolved_entity = sat_player
                 log.info(f"[FastPath] no device named; playing on the satellite's own speaker {sat_player}")
             else:
@@ -5268,9 +5306,10 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
             fast_timeout=aiohttp.ClientTimeout(total=120.0) if intent == "play_media" else aiohttp.ClientTimeout(total=30.0)
             async with shared_http_client() as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=fast_timeout)
-                exec_data = await exec_resp.json()
-                ans = exec_data.get("message", "Action completed.")
-            exec_choice = (exec_data.get("detail") or {}).get("choice") if isinstance(exec_data, dict) else None
+                exec_data = await read_execution_reply(exec_resp, endpoint)
+                ans = str(exec_data.get("message") or "Action completed.")
+            exec_detail = exec_data.get("detail")
+            exec_choice = exec_detail.get("choice") if isinstance(exec_detail, dict) else None
             if intent == "play_media" and isinstance(exec_choice, dict):
                 # A question ("Harbor: the song, or the audiobook?"): its answer comes as the next request.
                 fast_media.remember_choice(user_id, exec_choice)
