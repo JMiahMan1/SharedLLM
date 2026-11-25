@@ -23,6 +23,8 @@ Transport controls for active media players.
 - Fields: `tool`, `command` (`pause`, `resume`, `stop`, `next`, `previous`, `volume_set`, `volume_up`, `volume_down`, `volume_mute`, `volume_unmute`).
 - Optional: `entity_id` or `device_name`; `volume_level` (0 to 1) with `volume_set`.
 - "Set the volume to N%" is `volume_set` with `volume_level` N/100; `volume_up`/`volume_down` are one small step.
+- Any target level is `volume_set`, never repeated steps: "lower it to 30%", "turn it down to 30", "keep lowering it until 30%" and a follow-up "set it to 50%" (the device just talked about) are all `{"tool": "MediaTransportRequest", "command": "volume_set", "volume_level": 0.3, "device_name": "Office TV"}`.
+- Never state a volume you did not just set or read with a tool in this turn; to check one, call `MediaStatusRequest`.
 - "Hit play", "resume", "unpause" or "continue" on a device is `resume` on that device, never a `MediaPlayRequest` search for the device's name: `{"tool": "MediaTransportRequest", "command": "resume", "device_name": "Den TV"}`.
 - Examples: `{"tool": "MediaTransportRequest", "command": "pause"}`, `{"tool": "MediaTransportRequest", "command": "volume_set", "volume_level": 0.6}`
 

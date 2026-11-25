@@ -178,3 +178,15 @@ async def test_abs_resolves_a_named_device_too(_patch, monkeypatch):
     ctx = SimpleNamespace(ha_url=HUB, ha_token="tok")
     # audiobookshelf resolves through the same resolver.
     assert await media.resolve_room_player(ctx, "Office TV", "music") == "media_player.office_tv_3"
+
+
+@pytest.mark.asyncio
+async def test_a_players_exact_name_wins_over_the_rooms_pick(_patch, monkeypatch):
+    _states(monkeypatch, OFFICE_STATES)
+    ctx = SimpleNamespace(ha_url=HUB, ha_token="tok")
+    players = [(str(s["attributes"].get("friendly_name") or ""), s["entity_id"])
+               for s in OFFICE_STATES if s["entity_id"].startswith("media_player.")]
+    unique = [(n, e) for n, e in players if n and [p for p, _ in players].count(n) == 1]
+    assert unique  # "Office TV Remote" and "Den speaker" are each one player's name
+    for friendly, entity_id in unique:
+        assert await media.resolve_room_player(ctx, friendly, None) == entity_id

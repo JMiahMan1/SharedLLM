@@ -1068,9 +1068,15 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
 @app.post("/execute/media/transport", response_model=ExecutionResult)
 async def execute_media_transport(req: MediaTransportRequest):
     is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
-    if req.entity_id and not is_local:
+    if not is_local and (req.entity_id or getattr(req, "device_name", None)):
+        # The hub login first: resolving a device name reads the hub's players with it. Without it,
+        # "volume down on the Office TV" read an empty player list and answered "I couldn't find a
+        # speaker in Office TV" (2026-11-24) while the same command by entity id worked.
         req = _with_hub_login(req)
-        if not await verify_entity_access(req.user_context, req.entity_id):
+        if not req.entity_id:
+            req.entity_id = await media.resolve_room_player(req.user_context, req.device_name, None)
+        # A player found by name is checked like one named by id.
+        if req.entity_id and not await verify_entity_access(req.user_context, req.entity_id):
             raise HTTPException(status_code=403, detail="Access denied to this device")
     return await MediaPlaybackService.transport(req)
 

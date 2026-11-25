@@ -20,6 +20,12 @@ from services.gateway.speech_stream import SpeechGate
     "I set a timer for five minutes.",
     "Worship music is now playing in the office.",
     "Done. I added milk to the shopping list.",
+    # Said with no tool call while the TV sat at 31% (2026-11-24).
+    "Volume is at 50% on Office TV Cast.",
+    "Yes, it's confirmed at 50% on Office TV Cast.",
+    "It's now at 30 percent.",
+    "I've checked, and the volume is set to 40%.",
+    "I turned it down a little.",
 ])
 def test_a_claimed_action(answer):
     assert claims_action(answer)
@@ -33,6 +39,8 @@ def test_a_claimed_action(answer):
     "Sorry, I can't play that.",
     "The capital of France is Paris.",
     "Do you want me to turn on the lights?",
+    "Would you like me to set the volume to 30%?",
+    "I can't confirm the volume on that TV.",
     "",
 ])
 def test_not_a_claim(answer):

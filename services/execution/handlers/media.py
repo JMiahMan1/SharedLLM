@@ -84,6 +84,13 @@ async def resolve_room_player(ctx, name, purpose) -> str | None:
     try:
         idx = await _routing_index(ha_url, ha_token, purpose or "room player")
         states = await ha_client.get_states(ha_url, ha_token) or [] if ha_url else []
+        # A name that is exactly one player's ("Office TV Cast") means that player, before the room's
+        # capability pick (which sent "Office TV Cast" to media_player.office_tv_chrome, 2026-11-25).
+        spoken = " ".join(_name_words(name))
+        exact = [s for s in states if str(s.get("entity_id") or "").startswith("media_player.")
+                 and spoken and " ".join(_name_words(str((s.get("attributes") or {}).get("friendly_name") or ""))) == spoken]
+        if len(exact) == 1:
+            return exact[0]["entity_id"]
         if idx is not None:
             area_id = idx.area_in_text(name)
             if area_id is not None:
@@ -1691,6 +1698,10 @@ def _level(attrs: dict | None) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
+#: How far a player's reported volume may be from the level asked for and still count as set.
+VOLUME_CONFIRM_TOLERANCE = 0.035
+
+
 def _volume_settled(command: str, data: dict, before: dict, now: dict) -> bool:
     """Whether the player's state shows the change asked for."""
     if command in ("volume_mute", "mute", "volume_unmute"):
@@ -1700,9 +1711,11 @@ def _volume_settled(command: str, data: dict, before: dict, now: dict) -> bool:
     if level is None:
         return False
     if "volume_level" in data:
-        return abs(level - float(data["volume_level"])) < 0.015
+        # TVs and Chromecasts snap to their own steps: a 30% request read back as 32% on the Office TV.
+        return abs(level - float(data["volume_level"])) < VOLUME_CONFIRM_TOLERANCE
     old = _level(before)
     return old is None or abs(level - old) >= 0.005 or level in (0.0, 1.0)
+
 
 
 async def _confirm_volume(ctx, entity_id: str, command: str, before: dict, data: dict) -> ExecutionResult:
