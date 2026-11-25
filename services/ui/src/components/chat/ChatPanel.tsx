@@ -1,9 +1,11 @@
-import OfflineChatCard from '../wander/OfflineChatCard';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
+import FamilyMesh from '../../plugins/familyMesh';
+import { roomOfflineMessages } from '../../lib/offlineChat';
+import { OfflineChatNotice, OfflineRoomComposer, OfflineRoomMessages } from './OfflineRoom';
+import { useOfflineChat } from './useOfflineChat';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import { useNearbyDevice } from '../../hooks/useNearbyDevice';
 import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { blobToBase64 } from '../../lib/base64';
@@ -127,8 +129,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const { offline } = useOfflineMode();
-  // Whether the offline family chat is on (Settings > Nearby & offline), for the folded card online.
-  const nearbyDevice = useNearbyDevice();
+  // The offline chat (Settings > Nearby & offline): every room works with no internet, through nearby family phones.
+  const offlineChat = useOfflineChat();
   const isAdmin = Boolean(me?.is_admin);
   const people = useFamilyDirectory();
   const myActorIds = useMemo(
@@ -137,7 +139,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   );
 
   const {
-    data: conversations = EMPTY_ARRAY,
+    data: talkConversations = EMPTY_ARRAY,
     dataUpdatedAt: conversationsAt,
     isSuccess: conversationsLoaded,
     isPlaceholderData: conversationsStale,
@@ -159,6 +161,23 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     placeholderData: keepPreviousData,
     select: (response) => detailList<TalkConversation>(response, 'conversations'),
   });
+
+  // With no internet and nothing fetched yet, the inbox is the rooms this phone can use offline.
+  const conversations = useMemo<TalkConversation[]>(
+    () =>
+      talkConversations.length > 0 || !offline || !offlineChat.enabled
+        ? talkConversations
+        : offlineChat.rooms.map((r) => ({ token: r.room, display_name: r.name, type: r.type })),
+    [talkConversations, offline, offlineChat.enabled, offlineChat.rooms],
+  );
+  // Online, the phone fetches its rooms' offline keys again whenever the chat list changes
+  // (a new chat, someone joined or left), so every room is ready before the internet goes.
+  const roomList = talkConversations.map((c) => c.token).sort().join(',');
+  const meshOn = offlineChat.enabled;
+  useEffect(() => {
+    if (!meshOn || offline || !roomList) return;
+    void FamilyMesh.refreshRooms().catch(() => undefined);
+  }, [meshOn, offline, roomList]);
 
   const conversationsErrorMessage = conversationsErrorObj?.message?.toLowerCase().includes('timeout')
     ? 'The family server is taking too long to answer.'
@@ -782,6 +801,12 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
   const name = activeConversation?.display_name || 'Select a conversation';
 
+  // The offline chat in this room: its messages (online, only those not posted yet), and with
+  // no internet its composer. Not the parents' private chats: the server cannot post into them.
+  const roomOffline = offlineChat.enabled && Boolean(activeToken) && !privateMessages;
+  const offlineHere = roomOffline ? roomOfflineMessages(offlineChat.messages, activeToken, offline) : EMPTY_ARRAY;
+  const writeOffline = offline && roomOffline;
+
   return (
     <div
       className={`grid min-h-0 overflow-hidden rounded-3xl max-lg:flex-1 max-lg:grid-cols-[minmax(0,1fr)] lg:min-h-[440px] border border-white/5 bg-black/20 lg:h-[680px] lg:grid-cols-[320px_minmax(0,1fr)] ${className}`}
@@ -789,19 +814,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     >
       {/* Inbox */}
       <aside className={`min-h-0 min-w-0 flex-col border-white/5 p-3 lg:flex lg:border-r ${showThread ? 'hidden' : 'flex'}`}>
-        {/* No server: the family chat goes through nearby family phones instead (Android),
-            pinned open; online it waits folded at the top, when the offline chat is on in Settings. */}
-        {offline ? (
-          <div className="mb-3 max-h-[60vh] overflow-y-auto" data-testid="chat-offline">
-            <OfflineChatCard me={(me?.username ?? '').toLowerCase()} room={me?.chat_default_token} />
-          </div>
-        ) : nearbyDevice?.chat && (
-          <details className="mb-3 max-h-[60vh] overflow-y-auto rounded-2xl" data-testid="chat-offline-folded">
-            <summary className="min-h-11 cursor-pointer content-center px-2 text-xs font-semibold text-slate-300">Offline family chat</summary>
-            <OfflineChatCard me={(me?.username ?? '').toLowerCase()} room={me?.chat_default_token} />
-          </details>
-        )}
-        {conversationsError && conversations.length > 0 && (
+        {/* No server: every chat goes through nearby family phones instead (Android). */}
+        {offline && <OfflineChatNotice chat={offlineChat} />}
+        {conversationsError && conversations.length > 0 && !(offline && offlineChat.enabled) && (
           <div className="mb-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100" role="status">
             <span className="font-semibold">Couldn't refresh chats.</span>{' '}
             {conversationsErrorMessage}
@@ -988,7 +1003,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
         <PollStrip polls={polls} onVote={(pollId, optionId) => void vote(pollId, optionId)} />
 
-        {messagesError && (
+        {messagesError && !writeOffline && (
           // Without this a failed fetch looked exactly like an empty room.
           <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2" data-testid="thread-error">
             <p className="text-xs text-amber-200">
@@ -1038,11 +1053,19 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           loadingEarlier={loadingEarlier}
           emptyText={
             activeToken
-              ? messagesError
-                ? 'Could not load messages.'
-                : 'No messages yet. Say hello, or ask @Jarvis something.'
+              ? writeOffline
+                ? 'No internet. Messages written here go to family phones nearby.'
+                : messagesError
+                  ? 'Could not load messages.'
+                  : 'No messages yet. Say hello, or ask @Jarvis something.'
               : 'Pick a conversation to see messages.'
           }
+        />
+
+        <OfflineRoomMessages
+          messages={offlineHere}
+          me={(me?.username ?? '').toLowerCase()}
+          nameOf={(u) => people(u)?.display_name}
         />
 
         {showPollForm && (
@@ -1111,6 +1134,13 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           </div>
         )}
 
+        {writeOffline ? (
+          <OfflineRoomComposer
+            room={activeToken}
+            ready={offlineChat.rooms.some((r) => r.room === activeToken)}
+            onSent={offlineChat.reload}
+          />
+        ) : (
         <Composer
           token={activeToken}
           drafts={drafts}
@@ -1195,6 +1225,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           sendAs={sendAs}
           onSendAsChange={setSendAs}
         />
+        )}
         </>
         )}
       </section>

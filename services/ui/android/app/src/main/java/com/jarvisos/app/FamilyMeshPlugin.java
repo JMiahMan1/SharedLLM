@@ -15,9 +15,10 @@ import com.getcapacitor.annotation.PermissionCallback;
 import org.json.JSONObject;
 
 /**
- * Wander's offline family chat: turn it on (the only moment Android 12+ is
- * asked for Nearby devices' connect), send a message, a place or a small photo
- * preview, list what this phone holds, and the diagnostics a parent checks.
+ * The offline chat, in every chat room (Chat): turn it on (the only moment
+ * Android 12+ is asked for Nearby devices' connect), the rooms that work
+ * offline, send a message, a place or a small photo preview to a room, list
+ * what this phone holds and may read, and the diagnostics a parent checks.
  */
 @CapacitorPlugin(
     name = "JarvisFamilyMesh",
@@ -72,20 +73,38 @@ public class FamilyMeshPlugin extends Plugin {
         call.resolve(diag());
     }
 
-    /** The family chat the messages go to once online (the one Chat opens on launch). */
+    /** The rooms this person can use offline (names only, never the keys), as last fetched. */
     @PluginMethod
-    public void setRoom(PluginCall call) {
-        String room = call.getString("room", "");
-        FamilyMesh.setRoom(getContext(), room != null && room.matches("[A-Za-z0-9]{4,64}") ? room : "");
-        call.resolve();
+    public void rooms(PluginCall call) {
+        JSObject o = new JSObject();
+        try {
+            o.put("rooms", MeshRules.roomsForApp(FamilyMesh.rooms(getContext())));
+        } catch (Exception e) {
+            o.put("rooms", new JSArray());
+        }
+        call.resolve(o);
+    }
+
+    /** Fetch the rooms and their keys again now (online; the chat list changed). */
+    @PluginMethod
+    public void refreshRooms(PluginCall call) {
+        new Thread(() -> {
+            try {
+                FamilyMesh.refreshRooms(getContext());
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("Could not get your chats for offline use");
+            }
+        }, "family-mesh-rooms").start();
     }
 
     @PluginMethod
     public void send(PluginCall call) {
+        String room = call.getString("room", "");
         String kind = call.getString("kind", "text");
         JSObject fields = call.getObject("fields", new JSObject());
         try {
-            String id = FamilyMesh.send(getContext(), kind, fields == null ? new JSONObject() : fields);
+            String id = FamilyMesh.send(getContext(), room, kind, fields == null ? new JSONObject() : fields);
             JSObject o = new JSObject();
             o.put("id", id);
             call.resolve(o);
@@ -100,7 +119,7 @@ public class FamilyMeshPlugin extends Plugin {
     public void list(PluginCall call) {
         JSObject o = new JSObject();
         try {
-            o.put("messages", FamilyMesh.list(getContext()));
+            o.put("messages", FamilyMesh.list(getContext(), call.getString("room", "")));
         } catch (Exception e) {
             o.put("messages", new JSArray());
         }

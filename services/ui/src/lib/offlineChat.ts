@@ -1,17 +1,27 @@
 /**
- * The offline family chat's words and small helpers (the radio and the
- * crypto are on the phone: FamilyMesh / MeshRules).
+ * The offline chat's words and small helpers (the radio and the crypto are on
+ * the phone: FamilyMesh / MeshRules). Every chat room works offline; each
+ * message belongs to its own room.
  */
 import type { MeshMessage } from '../plugins/familyMesh';
 
 /** Largest photo preview the offline chat carries (MeshRules.THUMB_MAX). */
 export const THUMB_MAX_BYTES = 24 * 1024;
 
-/** Where a message is: waiting for a phone, passed on, or in the family chat. */
+/** Where a message is: waiting for the internet, passed on, or in the chat. */
 export function deliveryLine(m: MeshMessage): string {
-  if (m.synced) return 'In the family chat';
+  if (m.synced) return 'In the chat';
   if (m.mine) return 'Waiting for the internet; passed to family phones nearby';
   return m.hops > 1 ? `Came through ${m.hops - 1} other phone${m.hops === 2 ? '' : 's'}` : 'From a phone nearby';
+}
+
+/**
+ * The offline messages a room shows. Online, only those not yet in the chat
+ * (the rest are in its history already); offline, all of them, since the
+ * history cannot be fetched.
+ */
+export function roomOfflineMessages(messages: MeshMessage[], room: string, offline: boolean): MeshMessage[] {
+  return messages.filter((m) => m.room === room && (offline || !m.synced));
 }
 
 export function mapLink(lat: number, lon: number): string {

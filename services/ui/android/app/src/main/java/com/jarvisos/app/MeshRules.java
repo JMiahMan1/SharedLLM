@@ -22,16 +22,22 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
- * The offline family chat's rules, free of Android so they run in plain JVM
+ * The offline chat's rules, free of Android so they run in plain JVM
  * tests ({@link FamilyMesh} does the radio).
  *
  * <h3>Messages</h3>
  * A message is a random 16-byte id, when it expires, how many phones it has
  * passed through, and a {@code sealed} envelope: the private chat's envelope
  * (AES-256-GCM, a fresh 12-byte IV, the 16-byte tag after the ciphertext;
- * {@link PrivateEnvelope}, services/common/sealed.py) under the household's
- * offline chat key. Who wrote it, the conversation and the words are inside the
- * envelope; a relay or a listener sees only the id, sizes and the hop count.
+ * {@link PrivateEnvelope}, services/common/sealed.py) under the key of the chat
+ * room it was written in ({@link Room}: the server issues each member a key per
+ * room, see services/gateway/family_mesh.py). Who wrote it, the room and the
+ * words are inside the envelope; beside it in the clear is only a routing tag
+ * ({@link #routeTag}: an HMAC of the room key, the period and the id), so a
+ * phone that is in the room finds the key without trying them all, and a relay
+ * or a listener sees only the id, sizes, the hop count and a tag that names no
+ * room and differs for every message. Messages kept from before room keys carry
+ * no tag and are sealed with the household's offline chat key.
  * Kinds: {@code text} (at most {@link #TEXT_MAX} characters), {@code pin} (a
  * place) and {@code thumb} (a JPEG preview of at most {@link #THUMB_MAX} bytes).
  *
@@ -57,7 +63,7 @@ final class MeshRules {
     /** Cached household information is offered for up to a week (its age is shown). */
     static final long CACHE_TTL_S = 7 * 86400;
 
-    /** Item types: a family chat message; a Jarvis request and its answer (relayed);
+    /** Item types: a chat message; a Jarvis request and its answer (relayed);
      *  a cached household item (newest wins); a parent's command and the child's acknowledgement. */
     static final String T_CHAT = "chat";
     static final String T_REQUEST = "rq";
@@ -154,6 +160,138 @@ final class MeshRules {
         return ProximityRules.hex(b, ID_BYTES);
     }
 
+    // -- rooms ------------------------------------------------------------------------
+
+    /** A routing tag's period: fixed here, so a phone never needs the proximity config to read one. */
+    static final long ROOM_TAG_PERIOD_S = 6 * 3600;
+
+    /** A chat room this phone's person is in, with the key the server issued for it. */
+    static final class Room {
+        final String room;
+        final String name;
+        final int type;
+        final byte[] key;
+        /** Keys the room had before its members last changed, which this person held. */
+        final List<byte[]> previous;
+
+        Room(String room, String name, int type, byte[] key, List<byte[]> previous) {
+            this.room = room;
+            this.name = name;
+            this.type = type;
+            this.key = key;
+            this.previous = previous;
+        }
+
+        List<byte[]> keys() {
+            List<byte[]> out = new ArrayList<>();
+            out.add(key);
+            out.addAll(previous);
+            return out;
+        }
+    }
+
+    /** A GET /api/family-mesh/rooms answer (or what was kept of one); bad entries are left out. */
+    static List<Room> parseRooms(JSONObject answer) {
+        List<Room> out = new ArrayList<>();
+        JSONArray a = answer == null ? null : answer.optJSONArray("rooms");
+        for (int k = 0; a != null && k < a.length(); k++) {
+            JSONObject r = a.optJSONObject(k);
+            if (r == null) continue;
+            String token = r.optString("room", "");
+            byte[] key = key32(r.optString("key", ""));
+            if (!token.matches("[A-Za-z0-9]{4,64}") || key == null) continue;
+            List<byte[]> previous = new ArrayList<>();
+            JSONArray p = r.optJSONArray("previous");
+            for (int j = 0; p != null && j < p.length(); j++) {
+                byte[] old = key32(p.optString(j, ""));
+                if (old != null) previous.add(old);
+            }
+            String name = r.optString("name", "").trim();
+            out.add(new Room(token, name.isEmpty() ? token : name, r.optInt("type", 2), key, previous));
+        }
+        return out;
+    }
+
+    private static byte[] key32(String b64) {
+        try {
+            byte[] k = Base64.getDecoder().decode(b64);
+            return k.length == 32 ? k : null;
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /** The rooms as the app shows them (never the keys). */
+    static JSONArray roomsForApp(List<Room> rooms) {
+        JSONArray out = new JSONArray();
+        for (Room r : rooms) {
+            try {
+                out.put(new JSONObject().put("room", r.room).put("name", r.name).put("type", r.type));
+            } catch (Exception ignored) {
+                // Plain values: org.json does not throw here.
+            }
+        }
+        return out;
+    }
+
+    static Room findRoom(List<Room> rooms, String room) {
+        for (Room r : rooms) if (r.room.equals(room)) return r;
+        return null;
+    }
+
+    static long tagPeriod(long sentS) {
+        return Math.floorDiv(sentS, ROOM_TAG_PERIOD_S);
+    }
+
+    /**
+     * The clear tag beside a room message: HMAC-SHA256 of the room key over the
+     * period and the message id, 16 bytes in hex (services/gateway/family_mesh.py
+     * route_tag). Only a holder of the key can make or recognise it, and it is
+     * different for every message, so a relay cannot tell which room, nor that
+     * two messages are from the same one.
+     */
+    static String routeTag(byte[] key, long period, String id) {
+        return ProximityRules.hex(ProximityRules.hmac(key, "jarvis-mesh-room-v1|" + period + "|" + id), 16);
+    }
+
+    /** A new message of this phone's, sealed with its room's key and tagged. */
+    static Item roomMessage(Room room, JSONObject payload, long nowS, SecureRandom random) throws Exception {
+        String id = newId(random);
+        Item i = new Item(id, nowS + TTL_S, 0, seal(room.key, payload, random));
+        i.meta = new JSONObject().put("rt", routeTag(room.key, tagPeriod(nowS), id));
+        i.mine = true;
+        i.room = room.room;
+        return i;
+    }
+
+    /**
+     * A chat message opened, or null when this phone may not read it: a room
+     * message opens only with the key of a room this person is in (the tag says
+     * which, and the envelope must name that room); a message from before room
+     * keys opens with the household chat key.
+     */
+    static JSONObject openChat(Item i, List<Room> rooms, byte[] householdKey) {
+        if (i == null || !T_CHAT.equals(i.type)) return null;
+        String tag = i.routeTag();
+        if (tag == null) {
+            // Before room keys (an older phone wrote it): the household chat key.
+            return householdKey == null ? null : open(householdKey, i.env);
+        }
+        long period = tagPeriod(i.expiresS - TTL_S);
+        for (Room r : rooms) {
+            for (byte[] k : r.keys()) {
+                if (!java.security.MessageDigest.isEqual(
+                        routeTag(k, period, i.id).getBytes(StandardCharsets.US_ASCII),
+                        tag.getBytes(StandardCharsets.US_ASCII))) {
+                    continue;
+                }
+                JSONObject p = open(k, i.env);
+                return p != null && r.room.equals(p.optString("room")) ? p : null;
+            }
+        }
+        return null;
+    }
+
     // -- the store ------------------------------------------------------------------
 
     /** One message as kept on a phone. {@code wire} is what travels; the rest is this phone's. */
@@ -170,9 +308,11 @@ final class MeshRules {
         JSONObject meta;
         /** Written on this phone (it is this phone's job to post it). */
         boolean mine;
-        /** Known to be in the family chat. */
+        /** Known to be in its chat. */
         boolean synced;
         long receivedAtMs;
+        /** This phone's own message: the room it was written in (kept here, never sent to a peer). */
+        String room;
 
         Item(String id, long expiresS, int hops, JSONObject env) {
             this.id = id;
@@ -194,7 +334,15 @@ final class MeshRules {
         }
 
         JSONObject toJson() throws Exception {
-            return wire().put("mine", mine).put("synced", synced).put("rx", receivedAtMs);
+            JSONObject o = wire().put("mine", mine).put("synced", synced).put("rx", receivedAtMs);
+            if (mine && room != null) o.put("room", room);
+            return o;
+        }
+
+        /** The clear routing tag beside a room message, or null (an older message, or another type). */
+        String routeTag() {
+            String t = meta == null ? "" : meta.optString("rt", "");
+            return t.matches("[0-9a-f]{32}") ? t : null;
         }
 
         static Item fromWire(JSONObject o) {
@@ -210,6 +358,8 @@ final class MeshRules {
             i.mine = o.optBoolean("mine", false);
             i.synced = o.optBoolean("synced", false);
             i.receivedAtMs = o.optLong("rx", 0L);
+            String room = o.optString("room", "");
+            if (i.mine && room.matches("[A-Za-z0-9]{4,64}")) i.room = room;
             return i;
         }
     }
@@ -369,7 +519,7 @@ final class MeshRules {
         return iSortFirst || !iCanServe || sinceLastMs >= FALLBACK_MS;
     }
 
-    /** The ids a /api/family-mesh/sync answer says are in the family chat. */
+    /** The ids a /api/family-mesh/sync answer says are in their chat. */
     static List<String> postedIds(JSONObject answer) {
         List<String> out = new ArrayList<>();
         JSONObject results = answer == null ? null : answer.optJSONObject("results");

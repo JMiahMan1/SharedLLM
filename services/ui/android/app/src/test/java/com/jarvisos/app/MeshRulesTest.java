@@ -253,4 +253,179 @@ public class MeshRulesTest {
         assertArrayEquals(KEY, c.chatKey);
         assertNull(ProximityRules.parseConfig(new JSONObject().put("key", key)).chatKey);
     }
+
+    // -- rooms: a key per room, every phone relays, only members open ----------------------
+
+    private static final byte[] ROOM_KEY = new byte[32];
+    private static final byte[] GROUP_KEY = new byte[32];
+    static {
+        for (int k = 0; k < 32; k++) {
+            ROOM_KEY[k] = (byte) k;
+            GROUP_KEY[k] = (byte) (200 - k);
+        }
+    }
+
+    private static MeshRules.Room room(String token, byte[] key, byte[]... previous) {
+        return new MeshRules.Room(token, token, 1, key, Arrays.asList(previous));
+    }
+
+    private MeshRules.Item roomText(MeshRules.Room r, String from, String text) throws Exception {
+        JSONObject p = MeshRules.payload("text", from, r.room, new JSONObject().put("text", text), NOW_S);
+        return MeshRules.roomMessage(r, p, NOW_S, random);
+    }
+
+    @Test
+    public void theRoutingTagMatchesTheServers() {
+        // services/gateway/tests/test_family_mesh.py pins the same vector (key bytes 0..31).
+        assertEquals("1349794a53c68320fb8f9f158d3c27df", MeshRules.routeTag(ROOM_KEY, 100, repeat('0', 32)));
+    }
+
+    private static String repeat(char c, int n) {
+        char[] a = new char[n];
+        Arrays.fill(a, c);
+        return new String(a);
+    }
+
+    @Test
+    public void aRoomMessageIsSealedWithItsRoomsKeyAndOpensOnlyForItsMembers() throws Exception {
+        MeshRules.Room oneToOne = room("abcd1234", ROOM_KEY);
+        MeshRules.Room group = room("grp98765", GROUP_KEY);
+        MeshRules.Item m = roomText(oneToOne, "pat", "Meet at the car");
+        assertTrue(m.mine);
+        assertEquals("abcd1234", m.room);
+        // Not the household key, not the other room's key.
+        assertNull(MeshRules.open(KEY, m.env));
+        assertNull(MeshRules.open(GROUP_KEY, m.env));
+        assertEquals("Meet at the car", MeshRules.open(ROOM_KEY, m.env).getString("text"));
+        // A member of the room opens it; someone in the group only does not.
+        assertEquals("Meet at the car", MeshRules.openChat(m, Arrays.asList(group, oneToOne), KEY).getString("text"));
+        assertNull(MeshRules.openChat(m, Collections.singletonList(group), KEY));
+        assertNull(MeshRules.openChat(m, Collections.emptyList(), KEY));
+        // The private chat's own opener reads the same envelope.
+        String raw = PrivateEnvelope.FENCE + "\n" + m.env + "\n" + PrivateEnvelope.FENCE;
+        assertEquals("Meet at the car", PrivateEnvelope.previewText(raw, ROOM_KEY));
+    }
+
+    @Test
+    public void aNonMemberRelayCannotOpenButStillForwards() throws Exception {
+        MeshRules.Room group = room("grp98765", GROUP_KEY);
+        MeshRules.Store author = new MeshRules.Store();
+        MeshRules.Store relay = new MeshRules.Store();
+        MeshRules.Store member = new MeshRules.Store();
+        MeshRules.Item m = roomText(group, "pat", "Lost signal, all fine");
+        author.add(m, NOW_S);
+        // Every family phone shares the household proximity key, so the relay syncs with both.
+        sync(new MeshRules.Session(relay, KEY, PERIOD, 180, NOW_MS), new MeshRules.Session(author, KEY, PERIOD, 180, NOW_MS));
+        MeshRules.Item carried = relay.items.get(m.id);
+        assertNotNull(carried);
+        assertNull(MeshRules.openChat(carried, Collections.singletonList(room("abcd1234", ROOM_KEY)), KEY));
+        // What the relay sees in the clear: the id, the expiry, the hops and the tag; never the room.
+        String wire = carried.wire().toString();
+        assertFalse(wire.contains("grp98765"));
+        assertFalse(wire.contains("Lost signal"));
+        assertFalse(wire.contains("pat"));
+        // A peer cannot plant a room or "mine" on a copy it hands over.
+        assertNull(carried.room);
+        assertFalse(carried.mine);
+
+        sync(new MeshRules.Session(member, KEY, PERIOD, 180, NOW_MS), new MeshRules.Session(relay, KEY, PERIOD, 180, NOW_MS));
+        MeshRules.Item arrived = member.items.get(m.id);
+        assertEquals(2, arrived.hops);
+        assertEquals("Lost signal, all fine",
+                MeshRules.openChat(arrived, Collections.singletonList(group), KEY).getString("text"));
+    }
+
+    @Test
+    public void twoMembersExchangeInBothDirections() throws Exception {
+        MeshRules.Room shared = room("abcd1234", ROOM_KEY);
+        MeshRules.Store a = new MeshRules.Store();
+        MeshRules.Store b = new MeshRules.Store();
+        MeshRules.Item fromA = roomText(shared, "pat", "Where are you?");
+        MeshRules.Item fromB = roomText(shared, "alex", "At the lookout");
+        a.add(fromA, NOW_S);
+        b.add(fromB, NOW_S);
+        sync(new MeshRules.Session(a, KEY, PERIOD, 20, NOW_MS), new MeshRules.Session(b, KEY, PERIOD, 20, NOW_MS));
+        List<MeshRules.Room> rooms = Collections.singletonList(shared);
+        assertEquals("At the lookout", MeshRules.openChat(a.items.get(fromB.id), rooms, null).getString("text"));
+        assertEquals("Where are you?", MeshRules.openChat(b.items.get(fromA.id), rooms, null).getString("text"));
+        assertEquals("abcd1234", MeshRules.openChat(b.items.get(fromA.id), rooms, null).getString("room"));
+    }
+
+    @Test
+    public void theRoutingTagRevealsNothingAcrossPeriodsOrMessages() throws Exception {
+        String id = MeshRules.newId(random);
+        long p = MeshRules.tagPeriod(NOW_S);
+        String tag = MeshRules.routeTag(ROOM_KEY, p, id);
+        assertEquals(32, tag.length());
+        // The same room in the next period, or another message in the same period: unrelated tags.
+        assertFalse(tag.equals(MeshRules.routeTag(ROOM_KEY, p + 1, id)));
+        assertFalse(tag.equals(MeshRules.routeTag(ROOM_KEY, p, MeshRules.newId(random))));
+        // Two rooms never share a tag, and the tag is not the key or its id.
+        assertFalse(tag.equals(MeshRules.routeTag(GROUP_KEY, p, id)));
+        assertFalse(tag.contains(ProximityRules.hex(ROOM_KEY, 8)));
+        // Two messages to one room look as unrelated as two messages to two rooms.
+        MeshRules.Room r = room("abcd1234", ROOM_KEY);
+        MeshRules.Item a = roomText(r, "pat", "one");
+        MeshRules.Item b = roomText(r, "pat", "two");
+        assertFalse(a.routeTag().equals(b.routeTag()));
+        // A message a period later is still found by its member (the period comes from its expiry).
+        long later = NOW_S + MeshRules.ROOM_TAG_PERIOD_S;
+        MeshRules.Item next = MeshRules.roomMessage(r,
+                MeshRules.payload("text", "pat", r.room, new JSONObject().put("text", "later"), later), later, random);
+        assertEquals("later", MeshRules.openChat(next, Collections.singletonList(r), null).getString("text"));
+    }
+
+    @Test
+    public void aRotatedKeyStillOpensWhatWasSealedBeforeForAMemberWhoHadIt() throws Exception {
+        MeshRules.Room before = room("grp98765", GROUP_KEY);
+        MeshRules.Item old = roomText(before, "pat", "Sent before the change");
+        MeshRules.Room stayer = room("grp98765", ROOM_KEY, GROUP_KEY);
+        MeshRules.Room newcomer = room("grp98765", ROOM_KEY);
+        assertEquals("Sent before the change",
+                MeshRules.openChat(old, Collections.singletonList(stayer), null).getString("text"));
+        assertNull(MeshRules.openChat(old, Collections.singletonList(newcomer), null));
+    }
+
+    @Test
+    public void aMessageHeldFromBeforeRoomKeysStillOpensWithTheHouseholdKey() throws Exception {
+        MeshRules.Item legacy = message("from an older phone");
+        assertNull(legacy.routeTag());
+        assertEquals("from an older phone",
+                MeshRules.openChat(legacy, Collections.singletonList(room("abcd1234", ROOM_KEY)), KEY).getString("text"));
+        assertNull(MeshRules.openChat(legacy, Collections.emptyList(), null));
+    }
+
+    @Test
+    public void aTagForAnotherRoomOrAWrongRoomNameIsNotOpened() throws Exception {
+        MeshRules.Room real = room("abcd1234", ROOM_KEY);
+        MeshRules.Item m = roomText(real, "pat", "hi");
+        // The key matches but the room list names it as a different room: not shown there.
+        assertNull(MeshRules.openChat(m, Collections.singletonList(room("zzzz9999", ROOM_KEY)), null));
+    }
+
+    @Test
+    public void ownMessagesKeepTheirRoomOnThisPhoneOnly() throws Exception {
+        MeshRules.Store s = new MeshRules.Store();
+        MeshRules.Item m = roomText(room("abcd1234", ROOM_KEY), "pat", "hi");
+        s.add(m, NOW_S);
+        assertFalse(m.wire().has("room"));
+        assertEquals("abcd1234", MeshRules.Store.decode(s.encode()).items.get(m.id).room);
+    }
+
+    @Test
+    public void roomsAreReadFromTheServersAnswerAndShownWithoutKeys() throws Exception {
+        String key = Base64.getEncoder().encodeToString(ROOM_KEY);
+        String old = Base64.getEncoder().encodeToString(GROUP_KEY);
+        JSONObject answer = new JSONObject("{\"rooms\":[{\"room\":\"abcd1234\",\"name\":\"Alex\",\"type\":1,\"key\":\""
+                + key + "\",\"previous\":[\"" + old + "\",\"short\"]},{\"room\":\"bad room\",\"key\":\"" + key
+                + "\"},{\"room\":\"nokey123\",\"key\":\"abc\"}]}");
+        List<MeshRules.Room> rooms = MeshRules.parseRooms(answer);
+        assertEquals(1, rooms.size());
+        assertEquals("Alex", rooms.get(0).name);
+        assertEquals(1, rooms.get(0).previous.size());
+        String shown = MeshRules.roomsForApp(rooms).toString();
+        assertTrue(shown.contains("abcd1234"));
+        assertFalse(shown.contains(key));
+        assertTrue(MeshRules.parseRooms(null).isEmpty());
+    }
 }

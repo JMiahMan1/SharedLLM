@@ -1,6 +1,6 @@
 import { registerPlugin } from '@capacitor/core';
 
-/** One offline family chat message as this phone holds it (opened). */
+/** One offline chat message as this phone holds it (opened: only rooms this person is in). */
 export interface MeshMessage {
   id: string;
   t: 'text' | 'pin' | 'thumb';
@@ -17,7 +17,7 @@ export interface MeshMessage {
   caption?: string;
   /** Written on this phone. */
   mine: boolean;
-  /** Already in the family chat. */
+  /** Already in its chat room. */
   synced: boolean;
   /** How many phones it passed through to get here. */
   hops: number;
@@ -26,14 +26,14 @@ export interface MeshMessage {
 export interface MeshDiagnostics {
   enabled: boolean;
   connectPermission: boolean;
-  /** A family chat is chosen for the messages to go to online. */
-  room: boolean;
+  /** How many of this person's chat rooms have an offline key on this phone. */
+  rooms: number;
   /** This phone accepts offline chat connections (a GATT server is open). */
   server: boolean;
   /** The family member being synced with now, or null. */
   syncing: string | null;
   stored: number;
-  /** This phone's own messages not yet in the family chat. */
+  /** This phone's own messages not yet in their chat room. */
   unsynced: number;
   hasMail: boolean;
   lastSentAt: number | null;
@@ -43,14 +43,26 @@ export interface MeshDiagnostics {
   lastError: string | null;
 }
 
+/** A chat room this phone can use offline (its key stays on the phone). */
+export interface MeshRoom {
+  room: string;
+  name: string;
+  /** Talk room type: 1 one-to-one, 2 group, 3 public. */
+  type: number;
+}
+
 export interface FamilyMeshPluginInterface {
   getDiagnostics(): Promise<MeshDiagnostics>;
   /** Turn the offline chat on (asks for Nearby devices' connect on Android 12+, only now). */
   enable(): Promise<MeshDiagnostics>;
   disable(): Promise<MeshDiagnostics>;
-  setRoom(options: { room: string }): Promise<void>;
-  send(options: { kind: 'text' | 'pin' | 'thumb'; fields: Record<string, unknown> }): Promise<{ id: string }>;
-  list(): Promise<{ messages: MeshMessage[] }>;
+  /** The rooms that work offline, as last fetched (kept for when there is no internet). */
+  rooms(): Promise<{ rooms: MeshRoom[] }>;
+  /** Fetch the rooms and their keys again (online). */
+  refreshRooms(): Promise<void>;
+  send(options: { room: string; kind: 'text' | 'pin' | 'thumb'; fields: Record<string, unknown> }): Promise<{ id: string }>;
+  /** What this phone holds and may read; one room's when `room` is given. */
+  list(options?: { room?: string }): Promise<{ messages: MeshMessage[] }>;
   addListener(event: 'change', cb: () => void): Promise<{ remove: () => Promise<void> }>;
 }
 
@@ -60,7 +72,8 @@ const FamilyMesh = registerPlugin<FamilyMeshPluginInterface>('JarvisFamilyMesh',
     getDiagnostics: async () => Promise.reject(new Error(NEEDS_APP)),
     enable: async () => Promise.reject(new Error(NEEDS_APP)),
     disable: async () => Promise.reject(new Error(NEEDS_APP)),
-    setRoom: async () => undefined,
+    rooms: async () => ({ rooms: [] }),
+    refreshRooms: async () => undefined,
     send: async () => Promise.reject(new Error(NEEDS_APP)),
     list: async () => ({ messages: [] }),
     addListener: async () => ({ remove: async () => undefined }),

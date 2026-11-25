@@ -10,8 +10,8 @@ const expect = baseExpect.configure({ timeout: 15_000 });
 
 /**
  * The Bluetooth features as the Android app shows them, at every size:
- * linking a car (Wander), and the offline family chat (Chat, switched on in
- * Settings > Nearby & offline). The Bluetooth plugins are answered by
+ * linking a car (Wander), and the offline chat in each chat room (Chat,
+ * switched on in Settings > Nearby & offline). The Bluetooth plugins are answered by
  * fixtures/fakeAndroid.ts, since neither the browser nor the emulator has
  * Bluetooth. Made-up devices. The admin diagnostics moved to Admin > Users &
  * Devices (PIN-gated in the app; covered by BluetoothDiagnostics.test.tsx).
@@ -40,14 +40,15 @@ const STATE: FakeAndroidState = {
   },
   nearby: { nearby: true, chat: true, offline: false, car: true, host: 'location' },
   mesh: {
-    enabled: true, connectPermission: true, room: true, server: false, syncing: null, stored: 2, unsynced: 1,
+    enabled: true, connectPermission: true, rooms: 2, server: false, syncing: null, stored: 2, unsynced: 1,
     hasMail: true, lastSentAt: Date.now(), lastReceivedAt: Date.now(), lastServerSyncAt: null,
     lastPeerSync: { at: Date.now(), peer: 'robin', sent: 1, received: 1 }, lastError: null,
   },
+  meshRooms: [{ room: 'room-family', name: 'The Family Group', type: 2 }, { room: 'room-jordan', name: 'Jordan', type: 1 }],
   messages: [
-    { id: 'a'.repeat(32), t: 'text', from: 'robin', room: 'abcd1234', sent_at: 1, mine: false, synced: false, hops: 2,
+    { id: 'a'.repeat(32), t: 'text', from: 'robin', room: 'room-family', sent_at: 1, mine: false, synced: false, hops: 2,
       text: 'No signal up here. We are at the second lookout, all fine, back by four.' },
-    { id: 'b'.repeat(32), t: 'pin', from: 'parent', room: 'abcd1234', sent_at: 2, mine: true, synced: false, hops: 0,
+    { id: 'b'.repeat(32), t: 'pin', from: 'parent', room: 'room-family', sent_at: 2, mine: true, synced: false, hops: 0,
       lat: 39.7392, lon: -104.9903, label: 'Trailhead parking' },
   ],
 };
@@ -102,27 +103,25 @@ test('Wander keeps only the car link and points to Nearby & offline in Settings'
   expect(errors).toEqual([]);
 });
 
-test('the offline chat lives in Chat, folded while online', async ({ page }, info) => {
+test('online, a room shows its own offline messages not yet posted, and the usual composer', async ({ page }, info) => {
   const errors = await open(page, '/family?tab=chat');
-  const folded = page.getByTestId('chat-offline-folded');
-  await folded.locator('summary').click();
-  const chat = folded.getByTestId('offline-chat');
-  await expect(chat).toContainText('No signal up here');
-  await expect(chat).toContainText('Came through 1 other phone');
-  await expect(chat.getByRole('link', { name: /Trailhead parking/ })).toBeVisible();
-  // Switched in Settings now: no Turn on or off here.
-  await expect(chat.getByRole('button', { name: /Turn (on|off)/ })).toHaveCount(0);
-  await chat.getByLabel('Offline message', { exact: true }).fill('On our way down');
-  await chat.getByRole('button', { name: 'Send offline' }).click();
-  await expect(chat).toContainText('On our way down');
-  type Call = { plugin: string; method: string; options: unknown };
-  const sent = await page.evaluate(() =>
-    ((window as Window & { __nativeCalls?: Call[] }).__nativeCalls ?? []).filter((c) => c.method === 'send'));
-  expect(sent[0].options).toEqual({ kind: 'text', fields: { text: 'On our way down' } });
+  // No offline notice and no offline composer while the server answers.
+  await expect(page.getByTestId('chat-offline')).toHaveCount(0);
+  const list = page.getByRole('list', { name: 'Conversations' });
+  await list.getByRole('button', { name: /The Family Group/ }).first().click();
+  const thread = page.getByTestId('chat-thread');
+  const offline = thread.getByTestId('offline-room-messages');
+  await expect(offline).toContainText('No signal up here');
+  await expect(offline).toContainText('Came through 1 other phone');
+  await expect(offline.getByRole('link', { name: /Trailhead parking/ })).toBeVisible();
+  await expect(thread.getByTestId('offline-room-composer')).toHaveCount(0);
+  // The phone is asked for the rooms' keys again while online.
+  type Call = { plugin: string; method: string };
+  await expect.poll(async () => page.evaluate(() =>
+    ((window as Window & { __nativeCalls?: Call[] }).__nativeCalls ?? []).some((c) => c.method === 'refreshRooms'))).toBe(true);
 
   await settle(page);
-  expect(await screenFindings(page, folded, 'offline chat in Chat', LEAFLET)).toEqual([]);
-  await shot(page, info, 'chat-android-offline-chat');
-  if (process.env.SNAP_DIR) await chat.screenshot({ path: `${process.env.SNAP_DIR}/offline-chat-${info.project.name}.png` });
+  expect(await screenFindings(page, offline, 'offline messages in a room', LEAFLET)).toEqual([]);
+  await shot(page, info, 'chat-android-offline-messages-online');
   expect(errors).toEqual([]);
 });
