@@ -320,3 +320,14 @@ def test_an_audiobook_asked_at_a_satellite_plays_on_its_speaker(monkeypatch):
     _, executed = _ask(monkeypatch, "play the latest audiobook by Example Author", "play_media", voice=VOICE, cache=TV)
     [(path, payload)] = executed
     assert path.endswith("audiobookshelf") and payload.get("entity_id") == SAT_SPEAKER
+
+
+def test_by_the_artist_fillers_are_dropped_from_a_named_request():
+    # 2026-11-24: "Play up by the artist, <names>" searched for an artist called "the artist, <names>".
+    from services.gateway.fast_media import parse_music_request
+
+    assert parse_music_request("Play up by the artist, Forest Fenn and Connor Pike.").query == \
+        "up by Forest Fenn and Connor Pike"
+    assert parse_music_request("Play the song called Up by the artist Forrest Fenn and Connor Pike.").query == \
+        "song called Up by Forrest Fenn and Connor Pike"
+    assert parse_music_request("Play Harbor by the band Example Band").query == "Harbor by Example Band"
