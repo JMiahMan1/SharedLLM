@@ -328,6 +328,18 @@ turns the pipeline off (`PATCH /hub/voice/{entry_id}` `{"enabled": false}` sets 
 (outcome, what ended it, per-stage timings) and last error. Transcripts and replies are logged at debug
 level only and never kept.
 
+**Hold music** (`hold_music.py`): while a slow answer is made, a satellite says a playful line and plays music
+until the first sentence is ready. Which music is a hub setting, not an environment variable: Devices > Setup >
+Voice hold music (`GET`/`PUT /hub/voice/hold-music`, through the gateway's `/api/homehub/voice/hold-music`).
+`gameshow` (the default) is `data/hold_music_gameshow.wav`, an original thinking loop composed once by MusicGen
+on the alpaca audio server (`scripts/compose_hold_music.py`; the prompt and seed are in the `.json` beside it);
+`builtin` is the soft chord loop made in code; `upload` is a clip an admin uploaded
+(`POST /hub/voice/hold-music/clip`: wav, mp3, ogg or m4a, at most 5 MB and 60 s, decoded once with ffmpeg and
+kept as a mono WAV beside the database, never served back). Every clip is made the stream's rate, brought to
+-24 dBFS RMS and crossfaded into a seamless loop, once per rate; one that is missing or cannot be decoded plays
+the built-in tune instead and is logged once. The same setting can replace the hold lines (empty: the defaults,
+or `HOMEHUB_VOICE_HOLD_LINES`). Each run records `music_source`.
+
 ### Sentence triggers and conversation services (`conversation.py`)
 
 An automation with `trigger: conversation` owns its sentences (HA template syntax: `[optional]`, `(a|b)`,

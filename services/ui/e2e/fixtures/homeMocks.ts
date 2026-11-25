@@ -316,6 +316,44 @@ function logbook(areaId: string | null) {
   return { entries: inArea ? rows.filter((r) => inArea.has(r.entity_id)) : rows, truncated: false };
 }
 
+/** The hold music setting as the hub answers it: the game-show clip, the default lines, no upload. */
+function holdMusicSettings() {
+  return {
+    source: 'gameshow' as string,
+    sources: [{ id: 'gameshow', label: 'Game-show thinking' }, { id: 'builtin', label: 'Built-in tune' },
+      { id: 'upload', label: 'Upload your own' }],
+    lines: [] as string[],
+    upload: null as null | { name: string; type: string; seconds: number; bytes: number; uploaded_at: number },
+    limits: { types: ['wav', 'mp3', 'ogg', 'm4a'], max_bytes: 5 * 1024 * 1024, max_seconds: 60, max_lines: 20, max_line_chars: 160 },
+  };
+}
+
+/** A write to the hold music setting, or null for any other path. An upload is "decoded" by its file name. */
+function holdMusicAnswer(state: ReturnType<typeof holdMusicSettings>, method: string, path: string, body: unknown,
+  raw: Buffer | null): { status: number; body: unknown } | null {
+  if (path === '/api/homehub/voice/hold-music' && method === 'PUT') {
+    const b = (body ?? {}) as { source?: string; lines?: string[] };
+    if (b.source) state.source = b.source;
+    if (b.lines) state.lines = b.lines;
+    return { status: 200, body: state };
+  }
+  if (path === '/api/homehub/voice/hold-music/clip' && method === 'POST') {
+    const name = /filename="([^"]+)"/.exec(raw?.toString('latin1') ?? '')?.[1] ?? 'clip.wav';
+    if (name.startsWith('too-long')) {
+      return { status: 400, body: { detail: 'The clip is longer than 60 s; trim it and upload it again' } };
+    }
+    state.upload = { name, type: name.split('.').pop() ?? 'wav', seconds: 24.5, bytes: raw?.length ?? 0, uploaded_at: 1 };
+    state.source = 'upload';
+    return { status: 200, body: state };
+  }
+  if (path === '/api/homehub/voice/hold-music/clip' && method === 'DELETE') {
+    state.upload = null;
+    if (state.source === 'upload') state.source = 'gameshow';
+    return { status: 200, body: state };
+  }
+  return null;
+}
+
 export interface HomeMocks {
   unmocked: string[];
   posts: Array<{ path: string; body: unknown }>;
@@ -366,6 +404,8 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
   // The to-do lists, changed by the page's writes so the next read shows them.
   const lists = todoLists();
   const listOf = (id: string) => lists.find((l) => l.entity_id === id);
+  // Devices > Setup > Voice hold music: the hub's setting, changed by the page's writes.
+  const holdMusic = holdMusicSettings();
   await page.addInitScript((p) => {
     localStorage.setItem('jarvis_api_key', 'test-key');
     localStorage.setItem('jarvis_user', JSON.stringify(p));
@@ -382,6 +422,8 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
       let body: unknown;
       try { body = request.postDataJSON(); } catch { body = null; }
       posts.push({ path: p, body });
+      const hold = holdMusicAnswer(holdMusic, method, p, body, request.postDataBuffer());
+      if (hold) return json(hold.body, hold.status);
       const registry = registries.answer(method, p, body);
       if (registry) {
         mirrorRoomWrite(rooms, method, p, body, registry);
@@ -682,6 +724,7 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (p === '/api/homehub/flows') return json({ flows: FLOWS });
     if (p === '/api/homehub/phones') return json(PHONES);
     if (p === '/api/homehub/phones/settings') return json(PHONES.settings);
+    if (p === '/api/homehub/voice/hold-music') return json(holdMusic);
     if (p === '/api/homehub/bluetooth/map') return json(ROOM_MAP);
     if (p.startsWith('/api/homehub/bluetooth/map/sessions/')) {
       return json({ status: 'done', samples: 58, scanners_heard: 3, seconds_left: 0 });
