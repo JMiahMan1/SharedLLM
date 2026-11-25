@@ -632,12 +632,24 @@ async def _dispatch_stream(
     # A 200 from HA only means the service call was accepted. Verify the player
     # actually engaged, so a no-op is reported as a failure with a real reason.
     ok, detail = await _verify_playback(ha_url, ha_token, full_entity_id)
+    if ok:
+        # Seen playing once is not enough: a refused stream plays for a moment, then stops.
+        from services.execution import playback_check
+
+        held, why = await playback_check.confirm_playing(
+            lambda eid: ha_client.get_state(ha_url, ha_token, eid), [full_entity_id])
+        if held is False:
+            ok, detail = False, why
     if not ok:
         log.warning(f"[abs] Playback did not start on '{full_entity_id}': {detail}")
+        from services.common.media_titles import clean_title
+
+        player = ((state or {}).get("attributes") or {}).get("friendly_name") or full_entity_id
         return ExecutionResult(
             status="FAILURE",
-            message=f"'{title}' was accepted by {full_entity_id} but did not start: {detail}",
+            message=f"I started {clean_title(title)}, but {player} isn't playing it. I'm looking into it.",
             service="audiobookshelf",
+            detail={"playback": "not_started", "reason": detail, "entity_id": full_entity_id},
         )
 
     # A plain URL player does not resume by itself: after playback is confirmed,
@@ -656,7 +668,8 @@ async def _dispatch_stream(
             if not seek_result.get("ok"):
                 log.warning(f"[abs] Resume seek failed on '{full_entity_id}': {seek_result.get('error')}")
 
-    return ExecutionResult(status="SUCCESS", message=f"Now playing: {title}", service="audiobookshelf")
+    return ExecutionResult(status="SUCCESS", message=f"Now playing: {title}", service="audiobookshelf",
+                           detail={"playback": "confirmed"})
 
 
 async def _ma_media_id(

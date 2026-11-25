@@ -168,3 +168,20 @@ def window_counts(session: Session, username: str, days: int, today: date | None
         if row.day and row.day >= start:
             counts[row.day] = counts.get(row.day, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def chapter_window(session: Session, username: str, days: int, today: date | None = None) -> dict[str, int]:
+    """Chapters finished per day over the trailing ``days`` window.
+
+    ``window_counts`` counts every reading event (opening the app, searching,
+    tapping a verse), so it cannot say how many chapters were read. This counts
+    distinct ``chapter_complete`` references per day: finishing the same chapter
+    twice on one day is one chapter. Days with none are left out.
+    """
+    anchor = today or date.today()
+    start = (anchor - timedelta(days=max(0, days - 1))).isoformat()
+    per_day: dict[str, set[str]] = {}
+    for row in _events(session, username, frozenset({"chapter_complete"})):
+        if row.day and row.day >= start and row.ref:
+            per_day.setdefault(row.day, set()).add(row.ref)
+    return {day: len(refs) for day, refs in sorted(per_day.items())}

@@ -245,6 +245,20 @@ export function presentExport(
       .filter((f) => f.label && f.value);
   };
 
+  /** The book catalogue choices on the profile (the Google Books key is never in the file). */
+  const BOOK_CATALOGUES: Record<string, string> = { google_books: 'Google Books', open_library: 'Open Library' };
+  const bookFacts = (v: unknown): { label: string; value: string }[] => {
+    const b = obj(v);
+    const onOff = Object.keys(BOOK_CATALOGUES)
+      .filter((k) => typeof b[`${k}_enabled`] === 'boolean')
+      .map((k) => `${BOOK_CATALOGUES[k]} ${b[`${k}_enabled`] ? 'on' : 'off'}`);
+    return [
+      { label: 'Book catalogues', value: onOff.join(', ') },
+      { label: 'Book catalogue order', value: arr(b.order).map((k) => BOOK_CATALOGUES[str(k)] || words(k)).join(', then ') },
+      { label: 'Open Library contact', value: str(b.open_library_email) },
+    ];
+  };
+
   // --- one formatter per kind: returns the item and the time it sorts by --------
   type Out = { item: PresentedItem; at: Date | null } | null;
   type Ctx = { all: Record<string, AnyRow[]> };
@@ -289,6 +303,7 @@ export function presentExport(
             { label: 'GitHub', value: str(r.github_user) },
             { label: 'GitLab', value: str(r.gitlab_user) },
             { label: 'Git', value: str(r.git_user) },
+            ...bookFacts(r.book_metadata),
           ].filter((f) => f.value),
         },
       }),
@@ -302,6 +317,16 @@ export function presentExport(
         return { at: null, item: { title: 'Notifications', detail: off.length ? `Turned off: ${off.join(', ')}` : 'Every kind of notice is on' } };
       },
       activity_sharing: (r) => ({ at: null, item: { title: 'Activity sharing', facts: settingsFacts(r.data) } }),
+      profile_sharing: (r) => {
+        const areas = arr(obj(r.data).areas).map(sentence).filter(Boolean);
+        return {
+          at: null,
+          item: {
+            title: 'Profile sharing',
+            detail: areas.length ? `The family may see: ${areas.join(', ')}` : 'Private: the family sees none of these areas',
+          },
+        };
+      },
       dashboard_widgets: (r) => ({
         at: null,
         item: {
@@ -570,7 +595,7 @@ export function presentExport(
   const SERVICE_LABELS: Record<string, string> = { identity: 'Profile and settings', health: 'Health', bible: 'Bible', geo: 'Places, trips and steps' };
   const LABELS: Record<string, string> = {
     profile: 'Profile', avatar_image: 'Profile picture', theme: 'Theme', weather: 'Weather', calendar_settings: 'Calendar',
-    notification_preferences: 'Notifications', activity_sharing: 'Activity sharing', dashboard_widgets: 'Dashboard',
+    notification_preferences: 'Notifications', activity_sharing: 'Activity sharing', profile_sharing: 'Profile sharing', dashboard_widgets: 'Dashboard',
     workspace_sessions: 'Workspace sessions', workspace_chats: 'Workspace chats', assistant_conversations: 'Conversations with Jarvis',
     feature_usage: 'Features you use', screen_rules: 'Screen time rules', recommendation_lanes: 'Recommendations',
     screen_time_requests: 'Screen time requests', guard_requests: 'App requests', unlock_requests: 'Unlock requests', chore_checks: 'Chores',
