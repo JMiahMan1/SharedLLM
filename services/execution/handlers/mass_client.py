@@ -100,6 +100,17 @@ async def get_playlists(mass_url: str, mass_token: str) -> list[dict[str, Any]]:
         return []
 
 
+async def library_items(mass_url: str, mass_token: str, media_type: str, search: str,
+                        limit: int = 50) -> list[dict[str, Any]]:
+    """The library's ``media_type`` ("tracks", "albums") whose names match ``search``, as MA returns them.
+
+    MA's ``music/search`` can miss a very short title ("Up") that the library itself has;
+    ``music/<type>/library_items`` filters the library by the same words.
+    """
+    raw = await _ma_api(mass_url, mass_token, f"music/{media_type}/library_items", {"search": search, "limit": limit})
+    return [i for i in raw if isinstance(i, dict)]
+
+
 async def get_recent(mass_url: str, mass_token: str) -> list[dict[str, Any]]:
     """Get Music Assistant recently played items via REST API."""
     try:
@@ -206,6 +217,7 @@ async def search(
                                 "uri": item.get("uri", ""),
                                 "type": item.get("media_type", "track"),
                                 "artist": item_artist,
+                                "artists": [a.get("name", "") for a in item_artists if isinstance(a, dict)],
                                 "album": album_name,
                                 "duration": item.get("duration", 0),
                                 "image": image_path,

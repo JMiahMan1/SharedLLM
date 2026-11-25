@@ -103,6 +103,7 @@ from services.gateway import (
     fast_lights,
     fast_media,
     fast_read,
+    fast_volume,
     garden_routes,
     helper_routes,
     hub_registry_routes,
@@ -301,6 +302,23 @@ def _note_spoken_names(entities: list[dict] | None) -> None:
             names[str(eid)] = str(friendly)
 
 
+#: A voice satellite's answer may say the speaker sounded like nobody enrolled (``new_voice``) and
+#: carry one line for the satellite to say after the answer (``voice_note``, the invitation to be
+#: learned, at most once a day per voice). Set by the chat handler (``_new_voice_check``).
+_VOICE_NEW: ContextVar[dict[str, Any] | None] = ContextVar("voice_new", default=None)
+
+
+def _voice_new_fields() -> dict[str, Any]:
+    """``new_voice`` and ``voice_note`` for the response in hand (empty when there is nothing to say)."""
+    found = _VOICE_NEW.get()
+    if not found:
+        return {}
+    out: dict[str, Any] = {"new_voice": True}
+    if found.get("note"):
+        out["voice_note"] = found["note"]
+    return out
+
+
 #: Fast answers whose words are logged (one line, ``REPLY_LOG_CHARS``), so a voice test can be
 #: graded from the gateway log: what was played, read, or done. Only these: other answers can
 #: be personal (a recap, a location, a private chat) and stay out of the log.
@@ -339,6 +357,7 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
         }
         if _REPLY_VOICE.get():
             res["voice"] = _REPLY_VOICE.get()
+        res.update(_voice_new_fields())
         if intent:
             res["intent"] = intent
         if debug_context:
@@ -346,6 +365,7 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
         return JSONResponse(res)
 
     reply_voice = _REPLY_VOICE.get()
+    new_fields = _voice_new_fields()
 
     async def gen():
         msg: dict[str, Any] = {"role": "assistant", "content": message}
@@ -360,7 +380,7 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
         if reply_voice:
             chunk["voice"] = reply_voice
         yield json.dumps(chunk) + "\n"
-        yield json.dumps({"model": model, "done": True}) + "\n"
+        yield json.dumps({"model": model, "done": True, **new_fields}) + "\n"
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
@@ -396,6 +416,7 @@ def _make_openai_response(message: str, model: str, intent: str | None = None, d
         }
         if _REPLY_VOICE.get():
             res["voice"] = _REPLY_VOICE.get()
+        res.update(_voice_new_fields())
         if intent:
             res["intent"] = intent
         if debug_context:
@@ -3784,6 +3805,65 @@ async def _offer_voice_candidate(query: str, satellite: str) -> None:
 
 _VOICE_CANDIDATE_TASKS: set[asyncio.Task] = set()
 
+#: What Jarvis adds, once a day at most per voice, when a voice sounds like nobody enrolled. "Learn
+#: my voice" only works at a satellite assigned to one person who has no voice profile yet
+#: (``_voice_teaching_reply``); anywhere else the invitation points to the people who can set it up.
+NEW_VOICE_LINE_LEARN_HERE = (
+    "By the way, I don't think I know your voice yet. Want me to learn it? Just say 'learn my voice'."
+)
+NEW_VOICE_LINE_ASK_GROWN_UP = (
+    "By the way, I don't think I know your voice yet. If you'd like me to learn it, "
+    "ask a grown-up to set that up in the Jarvis app."
+)
+#: The new-voice check must never hold up an answer for long.
+_NEW_VOICE_TIMEOUT = aiohttp.ClientTimeout(total=1.5)
+
+
+async def _new_voice_check(query: str, voice_context: dict) -> dict | None:
+    """Whether this command's voice sounded like nobody enrolled, and the line to add if so.
+
+    Execution keeps the signature of such a command for a few seconds
+    (``voice_speaker.looks_new``); identity checks it against the profiles, counts
+    it in an anonymous cluster for the satellite and says whether to invite the
+    speaker (once a day per voice). Never a profile, never logged; any failure is
+    simply no invitation. A whispered command, or someone already asking to be
+    learned, is not invited.
+    """
+    from services.common import voice_enroll, voice_speaker
+    from services.gateway.cache import get_redis
+
+    satellite = str(voice_context.get("satellite") or "")
+    key = voice_speaker.new_voice_key(query)
+    if not satellite or not key:
+        return None
+    try:
+        take = voice_enroll.decode_take(await asyncio.to_thread(get_redis().getdel, key))
+    except Exception as e:
+        log.warning(f"[VoiceNewVoice] lookup failed: {type(e).__name__}")
+        return None
+    if take is None:
+        return None
+    try:
+        resp = await get_http_client().post(
+            f"{IDENTITY_SVC}/api/voice/new_voice",
+            json={"satellite": satellite, "embedding": take["embedding"],
+                  "speech_seconds": take.get("speech_seconds"), "model": take.get("model") or "resemblyzer-ge2e-256"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=_NEW_VOICE_TIMEOUT,
+        )
+        body = await resp.json(content_type=None)
+    except Exception as e:
+        log.warning(f"[VoiceNewVoice] not counted: {type(e).__name__}")
+        return None
+    if not isinstance(body, dict) or not body.get("new_voice"):
+        return None
+    quiet = bool(voice_context.get("whispered")) or _wants_voice_learning(query)
+    ask = bool(body.get("ask")) and not quiet
+    note = (NEW_VOICE_LINE_LEARN_HERE if body.get("learn_here") else NEW_VOICE_LINE_ASK_GROWN_UP) if ask else None
+    log.info(f"[VoiceNewVoice] satellite={satellite} visits_week={body.get('visits_week')} "
+             f"invited={'yes' if note else 'no'}{' (whispered)' if voice_context.get('whispered') else ''}")
+    return {"note": note}
+
 
 #: Things a person says to refresh their own voice profile from a satellite.
 #: The phrasing is deliberately narrow: a question ("how do I update my
@@ -4422,16 +4502,20 @@ async def _fast_echo_bluetooth_answer(query: str, creds: dict, voice_context: di
 
 
 async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None,
-                             spoken_names: dict[str, str] | None = None):
+                             spoken_names: dict[str, str] | None = None,
+                             new_fields: dict[str, Any] | None = None):
     """A voice satellite's answer as NDJSON: safe sentences as they are written, then what is left.
 
     Each sentence is a chunk with ``"speech": true`` (``speech_stream.SpeechGate`` chose it). The last
     chunk (``done``) carries the whole ``reply`` and ``speech_rest``, the part of it not yet said
     (``speech_stream.speech_rest``), or ``error`` when the job failed. Every chunk names the reply's
-    ``voice`` when the gateway chose one.
+    ``voice`` when the gateway chose one; the last one also ``new_voice`` and ``voice_note``
+    (``_voice_new_fields``) when the speaker sounded like nobody enrolled.
     """
     from services.common.spoken_names import speakable
     from services.gateway.speech_stream import speech_rest
+
+    new_fields = new_fields or {}
 
     assert job_queue is not None, "Job queue not initialized"
     spoken_names = dict(spoken_names or {})
@@ -4467,7 +4551,7 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None,
             log.info(f"[speech_stream] job {job_id}: {said} sentences streamed before the end, "
                      f"{len(rest)} of {len(reply)} characters left to say")
             yield json.dumps(_make_ollama_chunk("", model, True, reply=reply, speech_rest=rest,
-                                                voice=reply_voice)) + "\n"
+                                                voice=reply_voice, **new_fields)) + "\n"
             return
         if job["status"] == JobStatus.FAILED:
             err = str(job.get("error") or "Job failed")
@@ -4667,6 +4751,10 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
             if is_openai:
                 return _make_openai_response(teaching, selected_model, "voice_teaching")
             return _make_ollama_response(teaching, selected_model, "voice_teaching")
+        # A voice nobody enrolled: answered as usual (the satellite's person, else the default user),
+        # and the answer may carry one invitation to be learned (``_new_voice_check``).
+        if creds.identified_by != "voice":
+            _VOICE_NEW.set(await _new_voice_check(str(query), voice_context))
 
     # What speech to text wrote, made routable: "PlayDork Diaries" is "Play Dork Diaries",
     # "Reach after one of <title>" is "Read chapter one of <title>" (voice_transcript.py).
@@ -4801,6 +4889,11 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         # skipped and called nothing. A plain skip/stop/pause is never the model's job.
         log.info(f"[FastPath] plain media command: {extract_media_transport_command(query)}")
         intent, confidence = "media_transport", 1.0
+    # "Set volume to 100%", "turn it up a bit", "mute": one meaning, one tool (fast_volume.py).
+    volume_ask = None if grounded else fast_volume.parse(query)
+    if volume_ask is not None:
+        log.info(f"[FastPath] volume command: {volume_ask}")
+        intent, confidence = "media_transport", 1.0
 
     # "Play" heard as another word ("Late <title>"): played only when the libraries have a
     # strong match for the rest; anything else goes on as it was heard (fast_media.misheard_play).
@@ -4930,14 +5023,23 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
             # A named player ("on the den TV") or else the last one used while it plays;
             # of players that match, the one playing (resolve_media_target "transport").
             named = engine.extract_target(query, intent)
-            if not named and sat_player and sat_state in ACTIVE_MEDIA_STATES:
+            if volume_ask is not None:
+                named = fast_volume.place(query)
+            if volume_ask is not None and named:
+                resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
+                                                       requested_device=named)
+            elif volume_ask is not None and sat_player:
+                # A volume command names no device: it is for the speaker that heard it, playing or not.
+                resolved_entity = sat_player
+                log.info(f"[FastPath] volume with no device named; the satellite's own speaker {sat_player}")
+            elif not named and sat_player and sat_state in ACTIVE_MEDIA_STATES:
                 resolved_entity = sat_player
                 log.info(f"[FastPath] no player named; the satellite's own speaker {sat_player} is {sat_state}")
             else:
                 active_cache = cached_device_id if cached_state in ACTIVE_MEDIA_STATES else None
                 resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
                                                        cached_device=None if named else active_cache, requested_device=named)
-            if not resolved_entity and media_entities:
+            if not resolved_entity and media_entities and not (volume_ask is not None and named):
                 for e in media_entities:
                     if e.get("entity_id", "").startswith("media_player.") and e.get("state") in ("playing", "paused"):
                         resolved_entity = e.get("entity_id")
@@ -5166,6 +5268,8 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
                     transport_cmd = "play"
                 area = (voice_context or {}).get("area") if isinstance(voice_context, dict) else None
                 _, named_device = extract_media_request(query)
+                if volume_ask is not None:
+                    named_device = fast_volume.place(query)
                 if not named_device and area:
                     transport_device_name = area
                 else:
@@ -5177,7 +5281,10 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
                     "command": transport_cmd,
                     **extract_media_transport_payload(query),
                 }
-                if transport_cmd == "volume_set":
+                if volume_ask is not None:
+                    exec_payload.update(fast_volume.transport_payload(
+                        volume_ask, fast_volume.current_level(resolved_entity, media_entities)))
+                elif transport_cmd == "volume_set":
                     exec_payload["volume_level"] = extract_volume_level(query)
                 svc_base = EXECUTION_SVC
             else:
@@ -5503,7 +5610,7 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
     if is_standard_client:
         if should_stream and speech_stream:
             return StreamingResponse(_speech_stream_gen(job_id, selected_model, _REPLY_VOICE.get(),
-                                                        _SPOKEN_NAMES.get()),
+                                                        _SPOKEN_NAMES.get(), _voice_new_fields()),
                                      media_type="application/x-ndjson")
         if should_stream:
             async def standard_stream_gen():

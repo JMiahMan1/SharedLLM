@@ -95,6 +95,58 @@ def worth_offering(verdict: dict | None) -> bool:
     return isinstance(score, (int, float)) and score >= CANDIDATE_MIN_SCORE
 
 
+#: A command whose voice is nobody enrolled may be a new person in the house. It
+#: is only called that when it is far from every profile, not when it is merely
+#: unsure between two people or a little under the threshold:
+#:
+#: * its best score is under ``NEW_VOICE_MAX_SCORE``. That is identity's
+#:   ``CANDIDATE_MIN_SCORE``, so a command that could be offered as a sample of
+#:   someone's voice is never also called new. On the live satellites
+#:   (2026-11, one profile enrolled) unrecognised commands scored in two groups,
+#:   0.45 to 0.55 and 0.58 to 0.70; 0.55 sits in the gap between them;
+#: * it is at least ``NEW_VOICE_GAP`` under the household threshold (0.72 to
+#:   0.90 once calibrated), so even a low threshold leaves a wide band of "not sure";
+#: * it had ``NEW_VOICE_MIN_SPEECH_SECONDS`` of speech (enrolment's own minimum)
+#:   and, when measured, speech at least ``NEW_VOICE_MIN_SNR_DB`` over the room
+#:   (enrolment's quality bar): a short or noisy clip gives a signature of the room.
+#:
+#: Its signature is kept briefly under the transcript (``new_voice_key``) for the
+#: gateway, which knows the satellite; identity keeps an anonymous cluster for a
+#: week and never makes a profile from it.
+NEW_VOICE_MAX_SCORE = 0.55
+NEW_VOICE_GAP = 0.15
+NEW_VOICE_MIN_SPEECH_SECONDS = 2.0
+NEW_VOICE_MIN_SNR_DB = 12.0
+
+
+def new_voice_key(text: str) -> str | None:
+    words = normalize(text)
+    return "voice:newvoice:take:" + hashlib.sha256(words.encode()).hexdigest() if words else None
+
+
+def looks_new(verdict: dict | None) -> bool:
+    """Whether an unrecognised command sounds like nobody enrolled at all (see above)."""
+    if not verdict or verdict.get("matched") or not verdict.get("embedding"):
+        return False
+    if verdict.get("nobody_enrolled") or verdict.get("error"):
+        return False
+    speech = verdict.get("speech_seconds")
+    if not isinstance(speech, (int, float)) or speech < NEW_VOICE_MIN_SPEECH_SECONDS:
+        return False
+    snr = verdict.get("snr_db")
+    if isinstance(snr, (int, float)) and snr < NEW_VOICE_MIN_SNR_DB:
+        return False
+    candidates = [c for c in verdict.get("candidates") or [] if isinstance(c, dict)]
+    scores = [c.get("score") for c in candidates]
+    if not scores or not all(isinstance(x, (int, float)) for x in scores):
+        return False
+    best = max(scores)
+    threshold = verdict.get("threshold")
+    if isinstance(threshold, (int, float)) and best > threshold - NEW_VOICE_GAP:
+        return False
+    return best < NEW_VOICE_MAX_SCORE
+
+
 def decode(raw: str | bytes | bytearray | None) -> str | None:
     """The recognised username in a stored record, if it is one."""
     if not isinstance(raw, (str, bytes, bytearray)):

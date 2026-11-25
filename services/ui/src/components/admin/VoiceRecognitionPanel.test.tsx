@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { VoiceRecognitionPanel } from './VoiceRecognitionPanel';
+import { newVoiceLine } from '../../lib/voiceAdmin';
 import { api } from '../../services/api';
 import type { VoiceAdminOverview } from '../../types/api';
 
@@ -12,6 +13,7 @@ vi.mock('../../services/api', () => ({
     approveVoiceCandidate: vi.fn(async () => ({ status: 'SUCCESS', samples: 5 })),
     rejectVoiceCandidate: vi.fn(async () => ({ status: 'SUCCESS' })),
     clearAutoVoiceSamples: vi.fn(async () => ({ status: 'SUCCESS', samples: 3 })),
+    forgetNewVoice: vi.fn(async () => ({ status: 'SUCCESS' })),
   },
 }));
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }));
@@ -66,5 +68,33 @@ describe('VoiceRecognitionPanel', () => {
     await waitFor(() => expect(api.recalibrateVoice).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: 'Remove auto-added' }));
     await waitFor(() => expect(api.clearAutoVoiceSamples).toHaveBeenCalledWith('member-a'));
+  });
+
+  it('lists a new voice by its counts only and can dismiss it', async () => {
+    vi.mocked(api.getVoiceAdmin).mockResolvedValue({
+      ...OVERVIEW,
+      new_voices: [{ id: 'c1', device: 'hub:mac:02:00:00:00:00:31', label: 'Office Echo', visits_week: 5, last_heard: '2026-11-24T10:00:00Z' }],
+    });
+    renderPanel();
+    expect(await screen.findByText('A new voice talked to the Office Echo 5 times this week.')).toBeTruthy();
+    expect(screen.getByText(/Counts only/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss the new voice at Office Echo' }));
+    await waitFor(() => expect(api.forgetNewVoice).toHaveBeenCalledWith('c1', 'hub:mac:02:00:00:00:00:31'));
+  });
+
+  it('says nothing about new voices when there are none', async () => {
+    renderPanel();
+    await screen.findByText('80%');
+    expect(screen.queryByTestId('voice-new-voices')).toBeNull();
+  });
+});
+
+describe('newVoiceLine', () => {
+  it('names the satellite and says how often', () => {
+    const base = { id: 'x', device: 'hub:dev', label: 'Kitchen', visits_week: 1, last_heard: '' };
+    expect(newVoiceLine(base)).toBe('A new voice talked to the Kitchen once this week.');
+    expect(newVoiceLine({ ...base, label: null, device: 'assist_satellite.den_assist_satellite', visits_week: 3 }))
+      .toBe('A new voice talked to the den 3 times this week.');
+    expect(newVoiceLine({ ...base, label: null })).toBe('A new voice talked to a satellite once this week.');
   });
 });

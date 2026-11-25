@@ -328,6 +328,51 @@ def wav_pcm(audio: bytes, rate: int | None = None) -> tuple[bytes, int]:
     return samples.tobytes(), out_rate
 
 
+def scale_pcm(pcm: bytes, factor: float) -> bytes:
+    """16-bit mono little-endian PCM scaled by ``factor`` and clipped (1.0 returns it unchanged)."""
+    if abs(factor - 1.0) < 1e-3 or not pcm:
+        return pcm
+    samples = array.array("h")
+    samples.frombytes(pcm[: len(pcm) - len(pcm) % 2])
+    if sys.byteorder == "big":
+        samples.byteswap()
+    for i, v in enumerate(samples):
+        samples[i] = max(-32768, min(32767, int(v * factor)))
+    if sys.byteorder == "big":
+        samples.byteswap()
+    return samples.tobytes()
+
+
+def scale_clip(token: str, factor: float) -> bool:
+    """Make a stored clip (``make_clip``) quieter in place; False when it is gone or not a WAV clip."""
+    item = _clips.get(token)
+    if item is None or abs(factor - 1.0) < 1e-3:
+        return item is not None
+    try:
+        with wave.open(io.BytesIO(item[1])) as w:
+            params = w.getparams()
+            frames = w.readframes(w.getnframes())
+    except (wave.Error, EOFError):
+        return False
+    if params.sampwidth != 2:
+        return False
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as out:
+        out.setparams(params)
+        out.writeframes(scale_pcm(frames, factor))
+    _clips[token] = (item[0], buf.getvalue())
+    return True
+
+
+def clip_seconds(audio: bytes) -> float | None:
+    """How long a WAV clip plays, or None when it is not one."""
+    try:
+        with wave.open(io.BytesIO(audio)) as w:
+            return w.getnframes() / float(w.getframerate() or 1)
+    except (wave.Error, EOFError):
+        return None
+
+
 def wav_header(rate: int, data_bytes: int | None) -> bytes:
     """A 16-bit mono WAV header; ``None`` bytes of data means a stream whose end is not known yet."""
     size = _OPEN_SIZE if data_bytes is None else data_bytes
@@ -349,6 +394,9 @@ class ClipStream:
         self.rate: int | None = None
         self.parts: list[bytes] = []
         self.closed = False
+        #: Every part is scaled by this as it goes in: a whispered command's reply on a satellite
+        #: whose volume cannot be set (``voice_pipeline``) is made quieter in the audio itself.
+        self.gain = 1.0
         self._changed = asyncio.Event()
 
     def _notify(self) -> None:
@@ -364,7 +412,7 @@ class ClipStream:
             self.rate = rate
         elif self.parts:
             self.parts.append(b"\x00\x00" * int(self.rate * SENTENCE_GAP_S))
-        self.parts.append(pcm)
+        self.parts.append(scale_pcm(pcm, self.gain))
         self._notify()
         return len(pcm) / 2 / rate
 
@@ -379,7 +427,7 @@ class ClipStream:
         if self.rate is None:
             raise HubError("the streamed reply has no sample rate yet")
         pcm = pcm[: len(pcm) - len(pcm) % 2]
-        self.parts.append(pcm)
+        self.parts.append(scale_pcm(pcm, self.gain))
         self._notify()
         return len(pcm) / 2 / self.rate
 

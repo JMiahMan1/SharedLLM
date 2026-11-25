@@ -38,11 +38,12 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from services.common.media_titles import (
+    artists_match,
     clean_title,
     main_title,
-    names_sound_alike,
     normalize,
     sounds_like,
+    tidy_by,
     title_score,
 )
 from services.execution.schemas import AudiobookshelfRequest, CalibreRequest, ExecutionResult, MediaPlayRequest
@@ -184,7 +185,11 @@ _BY = re.compile(r"^(?P<what>.+?)\s+by\s+(?P<who>.+)$", re.IGNORECASE)
 
 
 def split_by(text: str) -> tuple[str, str]:
-    """("Harbor", "The Example Band") from "Harbor by The Example Band"; ("x", "") without a "by"."""
+    """("Harbor", "The Example Band") from "Harbor by The Example Band"; ("x", "") without a "by".
+
+    "by the artist, X" and "by the band X" are "by X".
+    """
+    text = tidy_by(text)
     m = _BY.match(text or "")
     if m and m.group("what").strip() and m.group("who").strip():
         return m.group("what").strip(), m.group("who").strip()
@@ -226,17 +231,31 @@ class Candidate:
         return asdict(self)
 
 
+#: A title of one word this short ("Up", "Go", "Home") is too easy to find inside other titles:
+#: only the title itself counts, never "Rise Up" or "Going Home".
+SHORT_TITLE_CHARS = 4
+
+
+def is_short_title(query: str) -> bool:
+    words = normalize(query).split()
+    return len(words) == 1 and len(words[0]) <= SHORT_TITLE_CHARS
+
+
 def score_candidates(cands: list[Candidate], query: str, by: str = "") -> list[Candidate]:
     """Each candidate scored against ``query`` (and ``by``, the artist or author said), best first.
 
     The artist or author counts when it is the same name or sounds like it ("Return by the
-    Great Evens" is the song by The Gray Havens).
+    Great Evens" is the song by The Gray Havens), and one of several credited is enough
+    ("Up by Example Singer" is the song by "Example Singer & Other Voice").
     """
+    short = is_short_title(query)
     for c in cands:
         cap = {"series": 0.97, "author": 0.96}.get(c.kind, 1.0)
         c.score = title_score(query, c.title, cap=cap)
+        if short and c.kind not in ("artist", "author") and normalize(query) != normalize(main_title(c.title)):
+            c.score = min(c.score, PLAY_THRESHOLD - 0.1)
         if by:
-            if c.by and names_sound_alike(by, c.by):
+            if c.by and artists_match(by, c.by):
                 c.score = min(1.0, c.score + 0.05)
             elif c.kind not in ("artist", "author"):
                 c.score *= 0.6  # "Harbor by The Example Band" is not the audiobook Harbor
@@ -440,8 +459,8 @@ def _flatten_ma(resp: dict) -> list[Candidate]:
             if not isinstance(item, dict) or not item.get("uri"):
                 continue
             artists = item.get("artists") or item.get("authors") or []
-            first = artists[0] if artists else {}
-            by = first.get("name", "") if isinstance(first, dict) else str(first or "")
+            by = " & ".join(n for n in ((a.get("name", "") if isinstance(a, dict) else str(a or ""))
+                                        for a in artists) if n)
             out.append(Candidate("music_assistant", str(item.get("media_type") or kind), str(item.get("name") or ""),
                                  str(item["uri"]), by=by or str(item.get("artist") or "")))
     return out
@@ -510,7 +529,40 @@ async def _search_music_assistant(ctx, source: Source, query: str) -> list[Candi
     items = await mass_client.search(ctx.mass_url, ctx.mass_token, query, limit=60, media_types=_MA_TYPES,
                                      library_only=False)
     return [Candidate("music_assistant", str(i.get("type") or "track"), str(i.get("name") or ""), str(i["uri"]),
-                      by=str(i.get("artist") or "")) for i in items if i.get("uri")]
+                      by=" & ".join(i.get("artists") or []) or str(i.get("artist") or ""))
+            for i in items if i.get("uri")]
+
+
+#: The library kinds searched by name when Music Assistant's own search finds nothing.
+_MA_LIBRARY_KINDS = ("track", "album")
+
+
+async def search_ma_library(ctx, source: Source, query: str, kinds: tuple[str, ...] = _MA_LIBRARY_KINDS
+                            ) -> list[Candidate]:
+    """The library's tracks and albums whose names match ``query``, with every credited artist.
+
+    Music Assistant's ``search`` misses very short titles ("Up") that its library lists, so
+    this asks the library itself (``library_items`` with the words as its filter).
+    """
+    from services.execution.handlers import mass_client, mass_ha_client
+
+    out: list[Candidate] = []
+    for kind in kinds:
+        if source.route == "hub":
+            items = await mass_ha_client.get_library(ctx.ha_url, ctx.ha_token, kind, limit=50, search=query,
+                                                     mass_entry_id=source.entry_id)
+        else:
+            items = await mass_client.library_items(ctx.mass_url, ctx.mass_token, f"{kind}s", query, limit=50)
+        out += [Candidate("music_assistant", kind, str(i.get("name") or ""), str(i["uri"]),
+                          by=" & ".join(_artist_names(i)))
+                for i in items or [] if isinstance(i, dict) and i.get("uri") and i.get("name")]
+    return out
+
+
+def _artist_names(item: dict) -> list[str]:
+    """Every artist credited on a library item, whether listed as names or as artist items."""
+    names = (a.get("name") if isinstance(a, dict) else a for a in item.get("artists") or [])
+    return [str(n) for n in names if n]
 
 
 _SERIES_NUMBER = re.compile(r"\s*#\s*[\w.\-]+\s*$")
@@ -855,14 +907,144 @@ async def ask_which_screen(req: MediaPlayRequest, what: str, entity_id: str, ctx
         "choice": {"query": req.query, "entity_id": entity_id, "options": options}})
 
 
+def _rank(cands: list[Candidate], what: str, by: str, title: str) -> tuple[list[Candidate], str, str]:
+    """(ranked, title, artist): scored as "<what> by <by>", or as the words said when that scores better."""
+    ranked = score_candidates(dedupe(cands), what, by)
+    if by:
+        # Scored on copies: scoring writes each candidate's score, and the "by" scores above must stay.
+        whole = score_candidates([Candidate(**c.as_pick()) for c in dedupe(cands)], title)
+        if whole and (not ranked or whole[0].score > ranked[0].score):
+            return whole, title, ""
+    return ranked, what, by
+
+
+def _playable(ranked: list[Candidate]) -> bool:
+    return any(c.score >= PLAY_THRESHOLD for c in ranked)
+
+
+def title_artist_guesses(text: str, max_words: int = 8) -> list[tuple[str, str]]:
+    """(title, artist) for every way to cut "Up Example Singer" or "Example Singer Up" in two.
+
+    Said without "by", the artist may come before or after the title; the library decides
+    which cut is real (``search_artist_tracks``).
+    """
+    words = (text or "").split()
+    if not 2 <= len(words) <= max_words:
+        return []
+    out: list[tuple[str, str]] = []
+    for i in range(1, len(words)):
+        left, right = " ".join(words[:i]), " ".join(words[i:])
+        out += [(left, right), (right, left)]
+    return out
+
+
+def _library_words(title: str) -> list[str]:
+    """What to filter the library's names by: the title, and its two longest words when it has several.
+
+    The library filters by the letters as written, so "Dont Stop" does not list "Don't Stop!";
+    "Stop" does, and the title rules (punctuation never matters) then match it.
+    """
+    words = search_words(title)
+    parts = re.findall(r"[A-Za-z0-9]+", words)
+    if len(parts) < 2:
+        return [words]
+    longest = sorted(dict.fromkeys(p for p in parts if len(p) >= 4), key=len, reverse=True)[:2]
+    return [words, *longest]
+
+
+async def search_artist_tracks(ctx, library: list[Source], pairs: list[tuple[str, str]]) -> list[Candidate]:
+    """Library tracks named each pair's title AND credited to its artist, scored as that pair.
+
+    The way to find a short title ("Up") by an artist: Music Assistant's global search misses
+    it, but the library's tracks named "up" include it, credited to that artist.
+    """
+    ma = [s for s in library if s.key == "music_assistant" and s.ready]
+    if not ma or not pairs:
+        return []
+    titles = list(dict.fromkeys(w for t, _a in pairs for w in _library_words(t)))
+    results = await asyncio.gather(
+        *(asyncio.wait_for(search_ma_library(ctx, ma[0], t, ("track",)), SOURCE_TIMEOUT_S) for t in titles),
+        return_exceptions=True)
+    by_title: dict[str, list[Candidate]] = {}
+    for t, r in zip(titles, results, strict=True):
+        if isinstance(r, BaseException):
+            log.warning(f"[media/find] library tracks named {t!r} could not be listed: {r!r}")
+            continue
+        by_title[t] = r
+    found: list[Candidate] = []
+    for title, artist in pairs:
+        listed = {c.ident: c for w in _library_words(title) for c in by_title.get(w, [])}
+        for c in listed.values():
+            if c.by and artists_match(artist, c.by) and title_score(title, c.title) >= PLAY_THRESHOLD:
+                hit = Candidate(**c.as_pick())
+                hit.extra = {**hit.extra, "asked_title": title, "asked_by": artist}
+                found.append(hit)
+    return found
+
+
+async def collect(ctx, library: list[Source], title: str
+                  ) -> tuple[list[Candidate], str, str, list[str], list[str]]:
+    """(ranked, title, artist, searched, skipped) for the words ``title`` over the ``library`` sources.
+
+    The sources' own searches first ("<title>", and "<title> <artist>" when an artist was
+    named). When nothing found is good enough to play, the library's own lists by name:
+    the artist's tracks with that title (said with or without "by"), then tracks and albums
+    with the words in their name. Music Assistant's search misses very short titles.
+    """
+    what, by = split_by(title)
+    if by:
+        heard_by, by = by, known_name(by)
+        if by != heard_by:
+            log.info(f"[media/find] heard the artist or author {heard_by!r} as the library's {by!r}")
+    if by:
+        # "Return by <artist>": a one-word title is common; the title with its artist finds this one.
+        (cands, searched, skipped), (more, _s, _k), tracks = await asyncio.gather(
+            search_sources(ctx, library, search_words(what)),
+            search_sources(ctx, library, f"{search_words(what)} {by}"),
+            search_artist_tracks(ctx, library, [(what, by)]))
+        cands = cands + more + tracks
+    else:
+        cands, searched, skipped = await search_sources(ctx, library, search_words(what))
+    if by and not any(title_score(what, c.title) >= PLAY_THRESHOLD for c in cands):
+        # "X by Y" may be one title ("Murder by Death"): search the words as said too.
+        more, _s, _k = await search_sources(ctx, library, search_words(title))
+        cands += more
+    ranked, what_r, by_r = _rank(cands, what, by, title)
+    if _playable(ranked):
+        return ranked, what_r, by_r, searched, skipped
+    # Nothing to play from the searches: the library's own lists, by name.
+    if not by:
+        tracks = await search_artist_tracks(ctx, library, title_artist_guesses(search_words(what)))
+        if tracks:
+            for c in tracks:
+                score_candidates([c], c.extra["asked_title"], c.extra["asked_by"])
+            best = max(tracks, key=lambda c: c.score)
+            guess_title, guess_by = best.extra["asked_title"], best.extra["asked_by"]
+            log.info(f"[media/find] {what!r} is {guess_title!r} by {guess_by!r} in the library")
+            ranked = score_candidates(dedupe(cands + tracks), guess_title, guess_by)
+            if _playable(ranked):
+                return ranked, guess_title, guess_by, searched, skipped
+    ma = [s for s in library if s.key == "music_assistant" and s.ready]
+    if ma:
+        try:
+            listed = await asyncio.wait_for(search_ma_library(ctx, ma[0], search_words(what)), SOURCE_TIMEOUT_S)
+        except Exception as exc:
+            log.warning(f"[media/find] the library list for {what!r} failed: {exc!r}")
+            listed = []
+        if listed:
+            log.info(f"[media/find] the library lists {len(listed)} item(s) named like {what!r}")
+            ranked, what_r, by_r = _rank(cands + listed, what, by, title)
+    return ranked, what_r, by_r, searched, skipped
+
+
 async def find_and_play(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Search every source for ``req.query`` and play the best match on ``entity_id``."""
     if req.pick:
         return await play_pick(req, entity_id, ctx)
     title, group, kind = split_kind(req.query or "", req.media_type)
-    what, by = split_by(title)
     screen, player = await target_facts(ctx, entity_id)
     wants_video = group == "video"
+    what, by = split_by(title)
     if wants_video and not screen:
         # At a speaker: "the video of X" is a question about which TV; "X on YouTube" is its sound, here.
         if asks_for_picture(req.query or ""):
@@ -880,28 +1062,7 @@ async def find_and_play(req: MediaPlayRequest, entity_id: str, ctx) -> Execution
                                     service=SERVICE, detail={"route": "none", "searched": []})
     # The players' libraries first; the book library and the web only when they found nothing to play.
     library = [s for s in sources if s.key not in ("web_video", "calibre")]
-    if by:
-        heard_by, by = by, known_name(by)
-        if by != heard_by:
-            log.info(f"[media/find] heard the artist or author {heard_by!r} as the library's {by!r}")
-    if by:
-        # "Return by <artist>": a one-word title is common; the title with its artist finds this one.
-        (cands, searched, skipped), (more, _s, _k) = await asyncio.gather(
-            search_sources(ctx, library, search_words(what)),
-            search_sources(ctx, library, f"{search_words(what)} {by}"))
-        cands = cands + more
-    else:
-        cands, searched, skipped = await search_sources(ctx, library, search_words(what))
-    if by and not any(title_score(what, c.title) >= PLAY_THRESHOLD for c in cands):
-        # "X by Y" may be one title ("Murder by Death"): search the words as said too.
-        more, _s, _k = await search_sources(ctx, library, search_words(title))
-        cands += more
-    ranked = score_candidates(dedupe(cands), what, by)
-    if by:
-        # Scored on copies: scoring writes each candidate's score, and the "by" scores above must stay.
-        whole = score_candidates([Candidate(**c.as_pick()) for c in dedupe(cands)], title)
-        if whole and (not ranked or whole[0].score > ranked[0].score):
-            ranked, what, by = whole, title, ""
+    ranked, what, by, searched, skipped = await collect(ctx, library, title)
     if not screen:
         ranked = [c for c in ranked if c.group != "video"]
     log.info(f"[media/find] {what!r} (kind={group or kind or 'any'}, by={by!r}) on {entity_id}: "
@@ -1001,11 +1162,9 @@ async def find_only(req: MediaPlayRequest) -> ExecutionResult:
     """
     ctx = req.user_context
     title, group, _kind = split_kind(req.query or "", req.media_type)
-    what, by = split_by(title)
     sources = [s for s in await discover_sources(ctx, screen=False, wants_video=False)
                if s.key not in ("web_video", "calibre")]
-    cands, searched, skipped = await search_sources(ctx, sources, search_words(what))
-    ranked = score_candidates(dedupe(cands), what, by)
+    ranked, what, _by, searched, skipped = await collect(ctx, sources, title)
     choice = decide(ranked, group)
     best = choice.best
     log.info(f"[media/find] lookup {what!r}: {choice.action}"

@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AudioLines, Check, RefreshCw, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
-import type { ScoreSpread, VoiceAdminOverview, VoiceCalibration } from '../../types/api';
+import type { NewVoiceSeen, ScoreSpread, VoiceAdminOverview, VoiceCalibration } from '../../types/api';
 import { errorText } from '../../lib/errorText';
+import { newVoiceLine, satelliteName } from '../../lib/voiceAdmin';
 
 /**
  * Admin > Users & Devices > Voice recognition.
@@ -13,6 +14,9 @@ import { errorText } from '../../lib/errorText';
  * the household's own enrolled voices (identity voice.calibrate), and commands
  * heard at someone's own satellite that sounded close to them: approving one adds
  * it to their voice as an auto sample (never displacing one they recorded).
+ * Voices nobody enrolled that keep talking to a satellite are listed as counts
+ * only ("a new voice talked to the Office Echo 5 times this week"): they are
+ * anonymous, expire after a week and never become a profile.
  */
 
 const STATUS_WORDS: Record<VoiceCalibration['status'], string> = {
@@ -39,11 +43,6 @@ function Spread({ label, s }: { label: string; s: ScoreSpread | null }) {
   );
 }
 
-function satelliteName(entity: string | null): string {
-  if (!entity) return 'a satellite';
-  return entity.replace(/^[a-z_]+\./, '').replace(/_?assist_satellite$/, '').replace(/_/g, ' ').trim() || 'a satellite';
-}
-
 export const VoiceRecognitionPanel: FC = () => {
   const queryClient = useQueryClient();
   const { data, isPending, isError, error } = useQuery<VoiceAdminOverview>({ queryKey: ['voice-admin'], queryFn: () => api.getVoiceAdmin() });
@@ -63,6 +62,11 @@ export const VoiceRecognitionPanel: FC = () => {
     mutationFn: (id: number) => api.rejectVoiceCandidate(id),
     onSuccess: () => { void done(); toast.success('Rejected'); },
     onError: (e) => toast.error(errorText(e, 'Could not reject it')),
+  });
+  const forget = useMutation({
+    mutationFn: (v: NewVoiceSeen) => api.forgetNewVoice(v.id, v.device),
+    onSuccess: () => { void done(); toast.success('Dismissed'); },
+    onError: (e) => toast.error(errorText(e, 'Could not dismiss it')),
   });
   const clearAuto = useMutation({
     mutationFn: (username: string) => api.clearAutoVoiceSamples(username),
@@ -139,6 +143,29 @@ export const VoiceRecognitionPanel: FC = () => {
               satellite assigned to them. Recording at the satellite they use most helps it recognise them there.
             </p>
           )}
+        </div>
+      )}
+
+      {data && (data.new_voices?.length ?? 0) > 0 && (
+        <div className="mb-5">
+          <p className="px-1 pb-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">New voices</p>
+          <ul className="space-y-2" data-testid="voice-new-voices">
+            {(data.new_voices ?? []).map((v) => (
+              <li key={`${v.device}:${v.id}`} className="flex min-w-0 flex-col gap-2 rounded-xl border border-sky-400/20 bg-sky-500/5 p-3 text-sm sm:flex-row sm:items-center">
+                <p className="min-w-0 flex-1 break-words text-slate-200">{newVoiceLine(v)}</p>
+                <button type="button" disabled={forget.isPending} onClick={() => forget.mutate(v)}
+                  aria-label={`Dismiss the new voice at ${v.label || 'this satellite'}`}
+                  className="glass-button flex min-h-11 shrink-0 items-center justify-center gap-1 px-3 text-xs disabled:opacity-50">
+                  <X size={14} /> Dismiss
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-slate-400">
+            Counts only: Jarvis keeps no recording and no profile of these voices, and forgets them a week after
+            it last heard them. If someone new lives here, add them in People; they can then say &ldquo;Jarvis,
+            learn my voice&rdquo; at a satellite assigned to them.
+          </p>
         </div>
       )}
 

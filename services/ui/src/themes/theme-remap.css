@@ -10,6 +10,7 @@
 [data-site-theme-active] .bg-indigo-500\/25 { background-color: color-mix(in srgb, var(--site-accent) 25%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-500\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-500\/5 { background-color: color-mix(in srgb, var(--site-accent) 5%, transparent) !important; }
+[data-site-theme-active] .bg-indigo-500\/80 { background-color: color-mix(in srgb, var(--site-accent) 80%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-600 { background-color: var(--site-accent) !important; }
 [data-site-theme-active] .bg-indigo-600\/20 { background-color: color-mix(in srgb, var(--site-accent) 20%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-600\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
@@ -167,9 +168,9 @@
 [data-site-theme-active] .via-purple-500\/10 { --tw-gradient-via: color-mix(in srgb, var(--site-accent) 10%, transparent); }
 [data-site-theme-active] .via-purple-900\/90 { --tw-gradient-via: color-mix(in srgb, var(--site-accent) 20%, transparent); }
 [data-site-theme-active] .via-violet-950\/40 { --tw-gradient-via: color-mix(in srgb, var(--site-accent) 20%, transparent); }
-[data-site-theme-active] :is(.bg-indigo-500, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600) { color: var(--site-on-accent) !important; }
-[data-site-theme-active] :is(.bg-indigo-500, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600):is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200),
-[data-site-theme-active] :is(.bg-indigo-500, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600) :is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200) { color: var(--site-on-accent) !important; }
+[data-site-theme-active] :is(.bg-indigo-500, .bg-indigo-500\/80, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600) { color: var(--site-on-accent) !important; }
+[data-site-theme-active] :is(.bg-indigo-500, .bg-indigo-500\/80, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600):is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200),
+[data-site-theme-active] :is(.bg-indigo-500, .bg-indigo-500\/80, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600) :is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200) { color: var(--site-on-accent) !important; }
 
 /* Dark themes: text too dim to read on a dark surface. */
 [data-theme-scheme="dark"] .text-amber-100\/70 { color: color-mix(in srgb, oklch(96.2% 0.059 95.617) 85%, transparent) !important; }
@@ -513,5 +514,5 @@
 [data-theme-scheme="light"] .via-slate-950\/75 { --tw-gradient-via: color-mix(in srgb, var(--ht-surface) 75%, transparent); }
 [data-theme-scheme="light"] :is(.bg-amber-500, .bg-amber-600, .bg-black, .bg-blue-600, .bg-cyan-500, .bg-cyan-600, .bg-emerald-500, .bg-emerald-500\/90, .bg-emerald-600, .bg-emerald-600\/80, .bg-fuchsia-500, .bg-green-500, .bg-red-500, .bg-red-600, .bg-red-600\/80, .bg-rose-500, .bg-rose-500\/80, .bg-rose-600, .bg-rose-600\/80, .bg-rose-600\/90, .bg-sky-500, .bg-sky-500\/90, .bg-sky-600, .bg-yellow-500, .from-emerald-600, .from-fuchsia-500, .from-rose-600):is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200),
 [data-theme-scheme="light"] :is(.bg-amber-500, .bg-amber-600, .bg-black, .bg-blue-600, .bg-cyan-500, .bg-cyan-600, .bg-emerald-500, .bg-emerald-500\/90, .bg-emerald-600, .bg-emerald-600\/80, .bg-fuchsia-500, .bg-green-500, .bg-red-500, .bg-red-600, .bg-red-600\/80, .bg-rose-500, .bg-rose-500\/80, .bg-rose-600, .bg-rose-600\/80, .bg-rose-600\/90, .bg-sky-500, .bg-sky-500\/90, .bg-sky-600, .bg-yellow-500, .from-emerald-600, .from-fuchsia-500, .from-rose-600) :is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200) { color: #fff !important; }
-[data-theme-scheme="light"] :is(.bg-indigo-500, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600):is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200),
-[data-theme-scheme="light"] :is(.bg-indigo-500, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600) :is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200) { color: var(--site-on-accent) !important; }
+[data-theme-scheme="light"] :is(.bg-indigo-500, .bg-indigo-500\/80, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600):is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200),
+[data-theme-scheme="light"] :is(.bg-indigo-500, .bg-indigo-500\/80, .bg-indigo-600, .bg-indigo-600\/80, .bg-purple-500, .bg-purple-600, .bg-purple-600\/80, .bg-violet-500, .from-indigo-600, .from-purple-500, .from-purple-600) :is(.text-white, .text-slate-50, .text-slate-100, .text-slate-200) { color: var(--site-on-accent) !important; }

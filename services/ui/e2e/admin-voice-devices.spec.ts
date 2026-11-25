@@ -7,8 +7,8 @@ const expect = baseExpect.configure({ timeout: 15_000 });
 /**
  * Admin > Users & Devices: the voice satellites, speakers and TVs HomeHub knows,
  * assigned to a person or shared, and voice recognition (the calibration, who is
- * enrolled, candidate samples to review), at every hermetic size. Names, devices
- * and scores are made up.
+ * enrolled, candidate samples to review, new voices as counts), and HomeHub's
+ * whisper mode, at every hermetic size. Names, devices and scores are made up.
  */
 
 const ADMIN = { id: 1, username: 'pat', display_name: 'Pat', full_name: 'Pat', role: 'admin', is_admin: true, family_role: 'father' };
@@ -45,10 +45,20 @@ const VOICE = {
   candidates: [
     { id: 4, username: 'pat', name: 'Pat', score: 0.66, runner_up: null, speech_seconds: 2.2, satellite: 'assist_satellite.test_2', created_at: new Date().toISOString() },
   ],
+  new_voices: [
+    { id: 'c1', device: 'hub:mac:02:00:00:00:00:02', label: 'Test satellite with a very long room name', visits_week: 5, last_heard: new Date().toISOString() },
+  ],
+};
+
+const WHISPER = {
+  whisper: { enabled: true, volume: 0.22, level_drop_db: 8 },
+  defaults: { whisper: { enabled: true, volume: 0.22, level_drop_db: 8 } },
+  level_drop_range_db: [3, 30],
 };
 
 async function mockApi(page: Page) {
   const patched: unknown[] = [];
+  let whisper = { ...WHISPER, whisper: { ...WHISPER.whisper } };
   await page.addInitScript((profile) => {
     localStorage.setItem('jarvis_api_key', 'test-key');
     localStorage.setItem('jarvis_user', JSON.stringify(profile));
@@ -67,6 +77,18 @@ async function mockApi(page: Page) {
       return route.fulfill({ json: { ...row, ...change, owner_name: change.owner_username ? 'Kit' : null } });
     }
     if (p === '/api/admin/voice') return route.fulfill({ json: VOICE });
+    if (p.startsWith('/api/admin/voice/new_voices/') && req.method() === 'DELETE') {
+      patched.push({ forgot: p.split('/').pop(), device: new URL(req.url()).searchParams.get('device') });
+      return route.fulfill({ json: { status: 'SUCCESS' } });
+    }
+    if (p === '/api/dashboard/voice/settings') {
+      if (req.method() === 'PUT') {
+        const change = req.postDataJSON();
+        patched.push(change);
+        whisper = { ...whisper, whisper: { ...whisper.whisper, ...change.whisper } };
+      }
+      return route.fulfill({ json: whisper });
+    }
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
     if (p === '/api/integrations/status') return route.fulfill({ json: { homehub: { enabled: true } } });
     if (/\/api\/telemetry\//.test(p)) return route.fulfill({ json: { notifications: [], jobs: [] } });
@@ -105,11 +127,29 @@ test.describe('Admin > Users & Devices: voice', () => {
     await expect(voice).toContainText('Only one person has enrolled');
     await expect(voice).toContainText('Not enrolled');
     await expect(voice.getByTestId('voice-candidates')).toContainText('Sounded like');
+    await expect(voice.getByTestId('voice-new-voices')).toContainText(
+      'A new voice talked to the Test satellite with a very long room name 5 times this week.');
     await expectTapTargets(voice);
     await snap(page, info, 'admin-voice-recognition');
+    await voice.getByRole('button', { name: /Dismiss the new voice/ }).click();
+    await expect.poll(() => patched).toContainEqual({ forgot: 'c1', device: 'hub:mac:02:00:00:00:00:02' });
+
+    const whisperPanel = page.getByTestId('whisper-mode-panel');
+    await whisperPanel.scrollIntoViewIfNeeded();
+    const toggle = whisperPanel.getByRole('switch', { name: 'Whisper mode' });
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await expect(whisperPanel.getByTestId('whisper-volume-value')).toHaveText('22%');
+    await whisperPanel.getByLabel('What counts as a whisper').selectOption('12');
+    await whisperPanel.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(() => patched).toContainEqual({ whisper: { volume: 0.22, level_drop_db: 12 } });
+    await expectTapTargets(whisperPanel);
+    await snap(page, info, 'admin-whisper-mode');
+    await toggle.click();
+    await expect.poll(() => patched).toContainEqual({ whisper: { enabled: false } });
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
 
     expect(await controlsOffScreen(page)).toEqual([]);
-    const axe = await new AxeBuilder({ page }).include('[data-testid="hub-devices-panel"]').include('[data-testid="voice-recognition-panel"]').analyze();
+    const axe = await new AxeBuilder({ page }).include('[data-testid="hub-devices-panel"]').include('[data-testid="voice-recognition-panel"]').include('[data-testid="whisper-mode-panel"]').analyze();
     expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([]);
     expect(errors).toEqual([]);
   });

@@ -8,7 +8,7 @@ import type {
   InternetOutage, NetworkDevice, NetworkDeviceFields, NetworkStatus, NetworkUsage, RouterLogLine,
 } from '../lib/network';
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
-import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, HubDevice, NotifyLevel, TtsVoices, VoiceAdminOverview, VoiceCalibration } from '../types/api';
+import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, HubDevice, HubVoiceSettings, NotifyLevel, TtsVoices, VoiceAdminOverview, VoiceCalibration, WhisperModeSettings } from '../types/api';
 import type {
   GardenPlant, GardenSpecies, GardenLocation, GardenProfile,
   GardenTodaySummary, GardenCareLog, GardenCareRule,
@@ -1926,6 +1926,24 @@ export const api = {
   /** Admin: reject a candidate sample. */
   async rejectVoiceCandidate(id: number): Promise<{ status: string }> {
     const resp = await apiClient.delete(`/api/admin/voice/candidates/${id}`);
+    return resp.data;
+  },
+
+  /** Admin: stop listing a voice nobody enrolled (its counts are dropped; it was never a profile). */
+  async forgetNewVoice(id: string, device: string): Promise<{ status: string }> {
+    const resp = await apiClient.delete(`/api/admin/voice/new_voices/${encodeURIComponent(id)}`, { params: { device } });
+    return resp.data;
+  },
+
+  /** Admin: HomeHub's voice settings (whisper mode). */
+  async getHubVoiceSettings(): Promise<HubVoiceSettings> {
+    const resp = await apiClient.get('/api/dashboard/voice/settings');
+    return resp.data;
+  },
+
+  /** Admin: change HomeHub's whisper mode; used from the next command, no restart. */
+  async updateHubVoiceSettings(whisper: Partial<WhisperModeSettings>): Promise<HubVoiceSettings> {
+    const resp = await apiClient.put('/api/dashboard/voice/settings', { whisper });
     return resp.data;
   },
 

@@ -582,8 +582,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("MediaTransportRequest", SVC_EXECUTION, "POST", "/execute/media/transport", False,
      "Media transport controls: play, pause, stop, next, previous, volume, and audiobook controls "
      "(seek_relative, chapter_next, chapter_previous, chapter_goto, speed, sleep).",
-     "payload fields: entity_id, command, volume_level, position, seconds, chapter, rate, minutes, "
-     "end_of_chapter, muted."),
+     "payload fields: entity_id, device_name, command, volume_level, position, seconds, chapter, rate, minutes, "
+     "end_of_chapter, muted. \"Set volume to N%\" is command=volume_set with volume_level N/100 (0..1); "
+     "volume_up/volume_down are one step."),
     ("MediaStatusRequest", SVC_EXECUTION, "POST", "/execute/media/status", False,
      "Query current media player status/state.",
      "payload fields: area, entity_id."),

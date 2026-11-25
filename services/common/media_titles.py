@@ -169,3 +169,44 @@ def clean_title(title: str) -> str:
 def title_matches(query: str, title: str) -> bool:
     """True when ``query`` names ``title`` well enough to play or read it."""
     return title_score(query, title) >= MATCH_THRESHOLD
+
+
+#: What joins two artists in one credit: "A & B", "A and B", "A, B", "A x B", "A feat. B", "A with B".
+_ARTIST_JOIN = re.compile(r"\s*(?:&|\+|,|;|/|\b(?:and|x|feat\.?|ft\.?|featuring|with|vs\.?)(?=\s|$))\s*",
+                          re.IGNORECASE)
+
+
+def split_artists(name: str | None) -> list[str]:
+    """The artists in one credit: ["Example Singer", "Other Voice"] from "Example Singer & Other Voice".
+
+    A library often stores a duet or a featured artist as one artist entry, and people say
+    the names in any order, so both sides of a comparison are split the same way.
+    """
+    text = re.sub(r"[()\[\]]", " ", str(name or ""))
+    return [p.strip(" .") for p in _ARTIST_JOIN.split(text) if normalize(p)]
+
+
+def artists_match(asked: str | None, credited: str | None) -> bool:
+    """True when every artist ``asked`` for is in the ``credited`` artists, each by name or by sound.
+
+    "Forest Frank and Connor Price", "Connor Price & Forrest Frank" and "Forrest Frank" all
+    match the credit "Forrest Frank & Connor Price".
+    """
+    if not normalize(asked) or not normalize(credited):
+        return False
+    if names_sound_alike(str(asked), str(credited)):
+        return True
+    have = split_artists(credited)
+    want = split_artists(asked)
+    return bool(want and have) and all(any(names_sound_alike(w, h) for h in have) for w in want)
+
+
+#: "by the artist, X", "by the band X", "by artist X": the filler between "by" and the name.
+_BY_FILLER = re.compile(
+    r"\bby\s*,?\s+(?:the\s+)?(?:artists?|bands?|groups?|singers?|musicians?|rappers?)\b[\s,:]*(?=\S)",
+    re.IGNORECASE)
+
+
+def tidy_by(text: str | None) -> str:
+    """"Up by Example Singer" from "Up by the artist, Example Singer": the name follows "by" directly."""
+    return _BY_FILLER.sub("by ", str(text or "")).strip()

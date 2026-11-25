@@ -146,6 +146,8 @@ async def identify(samples: np.ndarray) -> dict | None:
     except voiceprint.VoiceprintError as e:
         log.info("[voice] not matching this command: %s", e)
         return None
+    # How far the speech stood above the room: a new voice is only suggested from a clean take.
+    snr_db = voiceprint.quality(samples).get("snr_db")
     embedded = time.monotonic()
     verdict: dict = {"matched": False, "score": None}
     try:
@@ -171,6 +173,7 @@ async def identify(samples: np.ndarray) -> dict | None:
     verdict["embedding"] = signature["embedding"]
     verdict["model"] = signature.get("model")
     verdict["speech_seconds"] = signature.get("speech_seconds")
+    verdict["snr_db"] = snr_db
     verdict["embed_ms"] = round((embedded - started) * 1000)
     verdict["total_ms"] = round((time.monotonic() - started) * 1000)
     return verdict
@@ -320,6 +323,25 @@ async def _keep_candidate(redis, text: str, verdict: dict) -> None:
         log.warning("[voice] could not keep a candidate sample: %s", e)
 
 
+async def _keep_new_voice(redis, text: str, verdict: dict) -> bool:
+    """Keep the signature of a command that sounds like nobody enrolled for a few
+    seconds (``voice_speaker.looks_new``), so the gateway, which knows the
+    satellite, can count it as a possible new voice. Never logged. Returns whether
+    it was kept."""
+    if not voice_speaker.looks_new(verdict):
+        return False
+    key = voice_speaker.new_voice_key(text)
+    take = voice_enroll.encode_take(verdict)
+    if not key or not take:
+        return False
+    try:
+        await redis.set(key, take, ex=voice_speaker.TTL_SECONDS)
+    except Exception as e:  # a new-voice hint is optional
+        log.warning("[voice] could not keep a new-voice take: %s", e)
+        return False
+    return True
+
+
 async def _connect_upstream():
     """(reader, writer) of the first speech-to-text server that answers, else None."""
     for i, upstream in enumerate(UPSTREAMS):
@@ -379,6 +401,8 @@ async def _handle(ha_reader, ha_writer, redis) -> None:
                         ex=voice_speaker.TTL_SECONDS,
                     )
                     await _keep_candidate(redis, text, verdict)
+                    if await _keep_new_voice(redis, text, verdict):
+                        log.info("[voice] this voice is far from every enrolled one: offered as a possible new voice")
                 if verdict and verdict.get("matched") and key and verdict.get("embedding"):
                     task = asyncio.create_task(_learn(redis, verdict))
                     _LEARNING_TASKS.add(task)
