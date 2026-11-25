@@ -625,3 +625,20 @@ class TasmotaDriver(Driver):
     async def cm(self, command: str) -> dict[str, Any]:
         """One ``/cm`` command and its reply, through the driver's own transport (password included)."""
         return await self._command(command)
+
+    # -- firmware ---------------------------------------------------------------------------------
+    async def upgrade(self) -> dict[str, Any]:
+        """Ask the device to fetch the firmware at its own update address and flash it (``Upgrade 1``).
+
+        Tasmota has no update entity: it keeps an ``OtaUrl`` and downloads from
+        it. The device answers first and restarts after, which is why a dropped
+        reply is reported as the request having been taken rather than an error.
+        """
+        try:
+            return await self._command("Upgrade 1")
+        except aiohttp.ServerDisconnectedError:
+            return {"Upgrade": "1"}
+        except DeviceUnavailable as exc:
+            if "closed" in str(exc).lower():
+                return {"Upgrade": "1"}
+            raise

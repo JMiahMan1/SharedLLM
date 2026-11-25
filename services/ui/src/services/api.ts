@@ -26,6 +26,7 @@ import type { MessageMark, PrivateChatInfo, PrivateChatReminders, PrivateChatSta
 import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto';
 import { configureBackupKeys, type BackupKeyUpload } from '../lib/privateChatBackupKey';
 import type { RestoreBatch, RestoreClient, RestoreCounts } from '../lib/privateChatBackupFile';
+import type { FirmwareReport } from '../lib/firmware';
 import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
 import type { BelovedActivityEntry, BelovedPrefs, BelovedSeenWhat } from '../lib/beloved/activity';
 import type { FreshPosition } from '../lib/freshPosition';
@@ -3690,6 +3691,28 @@ export const api = {
   async updateAllEchos(): Promise<{ queued: number }> {
     const resp = await apiClient.post('/api/homehub/echo_ota/update_all', {});
     return resp.data ?? { queued: 0 };
+  },
+
+  /** Every device's firmware, what is offered, and whether the hub can install it (admin only). */
+  async getFirmware(): Promise<FirmwareReport> {
+    const resp = await apiClient.get('/api/firmware', { timeout: 30000 });
+    return resp.data ?? { devices: [], installing: 0 };
+  },
+
+  /** Install the offered version on one update entity (an ESPHome node compiles and flashes it). */
+  async installFirmware(entityId: string): Promise<{ started: boolean }> {
+    const resp = await apiClient.post('/api/firmware/install', { entity_id: entityId }, { timeout: 60000 });
+    return resp.data ?? { started: false };
+  },
+
+  /** Tell a device with no update entity (Tasmota) to fetch and flash the image at its own update address. */
+  async upgradeDeviceFirmware(deviceId: string): Promise<{ reply?: unknown }> {
+    const resp = await apiClient.post(
+      `/api/firmware/${encodeURIComponent(deviceId)}/upgrade`,
+      undefined,
+      { timeout: 120000 },
+    );
+    return resp.data ?? {};
   },
 
   /** Ring the conversation's other members for a call you just started; ``video`` rings it as a video call. */
