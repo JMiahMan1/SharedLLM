@@ -424,6 +424,91 @@ def _stop_timeout(snap: dict) -> int:
     return int(value) if isinstance(value, int) and value > 0 else 10
 
 
+def _lookup(client, name: str):
+    """``client.containers.get`` that answers None instead of raising."""
+    try:
+        return client.containers.get(name)
+    except Exception:
+        return None
+
+
+def _is_running(container) -> bool:
+    with suppress(Exception):
+        container.reload()
+        return ((container.attrs or {}).get("State") or {}).get("Status") == "running"
+    return False
+
+
+def restore_serving_container(client, snap: dict, *, backup: str, image_id: str | None = None) -> str | None:
+    """Guarantee a container is running under ``snap['name']`` after a failed swap.
+
+    A stopped service is worse than a failed update: on 2026-11-25 the gateway's
+    rename raised a Docker connection error ("Bad file descriptor") just after the
+    old container had been stopped, the stop-first path had no rollback there, and
+    the household gateway was down for 53 minutes until it was started by hand.
+    Docker does not restart a container that was stopped on purpose, so nothing
+    brought it back.
+
+    Works by container name so it does not depend on the handles that just failed,
+    and retries once on a fresh Docker connection: the failure that gets here is
+    usually a pooled socket the daemon closed, which the same client cannot reuse.
+    Never raises. Returns the name now serving, or None when nothing could be started.
+    """
+    name = snap["name"]
+    for source in (client, None):
+        try:
+            docker_client = docker.from_env() if source is None else source
+            serving = _restore_with(docker_client, snap, backup=backup, image_id=image_id)
+            return serving
+        except Exception as e:  # recovery must not raise
+            _say(f"could not restore {name} ({e}); retrying with a fresh Docker connection")
+    log.critical(f"[recreate] no container is running as {name}; an update left it stopped")
+    return None
+
+
+def _reattach_missing(client, container, snap: dict) -> None:
+    """Put a container that was disconnected before its swap back on its networks."""
+    with suppress(Exception):
+        container.reload()
+        have = set(((container.attrs or {}).get("NetworkSettings") or {}).get("Networks") or {})
+        missing = [n for n in _attached_networks(snap) if n not in have]
+        if missing:
+            connect_container_networks(client, container, snap, only=missing)
+
+
+def _restore_with(client, snap: dict, *, backup: str, image_id: str | None) -> str:
+    """One recovery attempt (see restore_serving_container)."""
+    name = snap["name"]
+    current = _lookup(client, name)
+    spare = _lookup(client, backup)
+    if current is not None and _is_running(current):
+        # The replacement is up, or Docker brought the old one back: either way it serves.
+        if spare is not None and spare.id != current.id:
+            _remove(spare)
+        _say(f"{name} is running")
+        return name
+    if current is not None and current.id == snap.get("id"):
+        # The old container, stopped under its own name: start it again.
+        current.start()
+        _reattach_missing(client, current, snap)
+        _say(f"restarted {name} on its old image")
+        return name
+    if current is not None:
+        # A replacement that was created but never came up.
+        _remove(current)
+    if spare is not None:
+        spare.rename(name)
+        spare.start()
+        _reattach_missing(client, spare, snap)
+        _say(f"restored {name} on its old image")
+        return name
+    # Last resort: rebuild the old container from the snapshot taken before the swap.
+    rebuilt = create_from_snapshot(client, snap, image_id or snap.get("image_id") or "", name)
+    rebuilt.start()
+    _say(f"rebuilt {name} from its snapshot")
+    return name
+
+
 def recreate_from_snapshot(
     client: docker.DockerClient,
     container,
@@ -479,11 +564,10 @@ def recreate_from_snapshot(
             new.rename(name)
         except Exception as e:
             _remove(new)
-            with suppress(Exception):
-                container.reload()
-                if container.name != name:
-                    container.rename(name)
-                container.start()
+            if restore_serving_container(
+                client, snap, backup=backup, image_id=snap.get("image_id") or None,
+            ) is None:
+                log.critical(f"[recreate] {name} is not running after a failed swap: {e}")
             _alert_once(notify, name, new_image_id, f"swap failed: {e}")
             raise RecreateFailed(f"swap failed: {e}") from e
         _remove(container)
@@ -496,28 +580,26 @@ def recreate_from_snapshot(
     # networks and aliases were set at create, so its name resolves at start.
     backup = f"{name}_backup_{stamp}"
     _say(f"stopping {name}")
-    container.stop(timeout=_stop_timeout(snap))
-    container.rename(backup)
-    released = []
-    for net_name, net in _attached_networks(snap).items():
-        if net.get("IPv4Address") or net.get("IPv6Address"):
-            with suppress(Exception):
-                client.networks.get(net_name).disconnect(container)
-                released.append(net_name)
     new = None
     try:
+        # Everything from the first stop is inside the rollback: a failure before
+        # the new container exists used to leave the service stopped for good.
+        container.stop(timeout=_stop_timeout(snap))
+        container.rename(backup)
+        for net_name, net in _attached_networks(snap).items():
+            if net.get("IPv4Address") or net.get("IPv6Address"):
+                # Free a pinned address for the replacement; the restore puts it back.
+                with suppress(Exception):
+                    client.networks.get(net_name).disconnect(container)
         new = create_from_snapshot(client, snap, new_image_id, name)
         check(new)
     except Exception as e:
         _remove(new)
-        try:
-            container.rename(name)
-            if released:
-                connect_container_networks(client, container, snap, only=released)
-            container.start()
-            _say(f"restored {name} on its old image")
-        except Exception as fe:
-            log.critical(f"[recreate] could not restore {backup} as {name}: {fe}")
+        serving = restore_serving_container(
+            client, snap, backup=backup, image_id=snap.get("image_id") or None,
+        )
+        if serving is None:
+            log.critical(f"[recreate] {name} is not running after a failed update: {e}")
         _alert_once(notify, name, new_image_id, str(e))
         if isinstance(e, RecreateFailed):
             raise
