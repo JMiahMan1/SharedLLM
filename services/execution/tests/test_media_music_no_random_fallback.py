@@ -161,13 +161,15 @@ def test_a_successful_play_lands_on_the_activity_feed(monkeypatch):
     recorder.set("play_media", {"ok": True, "status_code": 200})
     _patch_common(monkeypatch, recorder)
     monkeypatch.setattr(media_handler, "resolve_entity", AsyncMock(return_value="media_player.office"))
-    monkeypatch.setattr(media_handler.ha_client, "get_state", AsyncMock(return_value={"state": "idle"}))
+    playing = {"state": "playing", "attributes": {"media_title": "Nevermind", "friendly_name": "Office"}}
+    monkeypatch.setattr(media_handler.ha_client, "get_state", AsyncMock(return_value=playing))
     recorded = AsyncMock()
     monkeypatch.setattr(media_handler.activity, "record", recorded)
 
     result = asyncio.run(media_handler.handle_media_play(_req("nevermind")))
 
     assert result.status == "SUCCESS"
+    assert result.detail["playback"] == "confirmed"
     recorded.assert_awaited_once()
     args, kwargs = recorded.await_args
     assert args == ("bug25", "music")
@@ -190,3 +192,34 @@ def test_a_failed_play_stays_off_the_activity_feed(monkeypatch):
 
     assert result.status == "FAILURE"
     recorded.assert_not_awaited()
+
+
+def test_a_play_the_player_never_starts_is_said_plainly_and_stays_off_the_feed(monkeypatch):
+    """Accepted is not playing (2026-11-24: "Playing ..." was said while the speaker stayed idle)."""
+    recorder = _CallRecorder()
+    recorder.set("search", _track_search())
+    recorder.set("play_media", {"ok": True, "status_code": 200})
+    _patch_common(monkeypatch, recorder)
+    monkeypatch.setattr(media_handler, "resolve_entity", AsyncMock(return_value="media_player.office"))
+    idle = {"state": "idle", "attributes": {"friendly_name": "Office Speaker"}}
+    monkeypatch.setattr(media_handler.ha_client, "get_state", AsyncMock(return_value=idle))
+    recorded = AsyncMock()
+    monkeypatch.setattr(media_handler.activity, "record", recorded)
+
+    result = asyncio.run(media_handler.handle_media_play(_req("nevermind")))
+
+    assert result.status == "FAILURE"
+    assert result.message == "I started it, but Office Speaker isn't playing it. I'm looking into it."
+    assert result.detail["playback"] == "not_started" and "nothing started playing" in result.detail["reason"]
+    recorded.assert_not_awaited()
+
+
+def test_a_player_that_only_reports_on_or_off_keeps_the_success(monkeypatch):
+    recorder = _CallRecorder()
+    recorder.set("search", _track_search())
+    recorder.set("play_media", {"ok": True, "status_code": 200})
+    _patch_common(monkeypatch, recorder)
+    monkeypatch.setattr(media_handler, "resolve_entity", AsyncMock(return_value="media_player.office"))
+    monkeypatch.setattr(media_handler.ha_client, "get_state", AsyncMock(return_value={"state": "on"}))
+    result = asyncio.run(media_handler.handle_media_play(_req("nevermind")))
+    assert result.status == "SUCCESS" and result.detail["playback"] == "unconfirmed"
