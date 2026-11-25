@@ -316,6 +316,14 @@ export function presentExport(
         const off = Object.keys(o).filter((k) => o[k] === false).map(words);
         return { at: null, item: { title: 'Notifications', detail: off.length ? `Turned off: ${off.join(', ')}` : 'Every kind of notice is on' } };
       },
+      nearby_settings: (r) => {
+        const o = obj(r.data);
+        const names: Record<string, string> = {
+          nearby: 'Find family nearby', chat: 'Offline family chat', offline: 'Offline mode', car: 'Car detection',
+        };
+        const on = Object.keys(names).filter((k) => o[k] === true).map((k) => names[k]);
+        return { at: null, item: { title: 'Nearby & offline', detail: on.length ? `On: ${on.join(', ')}` : 'Every part is off' } };
+      },
       activity_sharing: (r) => ({ at: null, item: { title: 'Activity sharing', facts: settingsFacts(r.data) } }),
       profile_sharing: (r) => {
         const areas = arr(obj(r.data).areas).map(sentence).filter(Boolean);
@@ -595,7 +603,7 @@ export function presentExport(
   const SERVICE_LABELS: Record<string, string> = { identity: 'Profile and settings', health: 'Health', bible: 'Bible', geo: 'Places, trips and steps' };
   const LABELS: Record<string, string> = {
     profile: 'Profile', avatar_image: 'Profile picture', theme: 'Theme', weather: 'Weather', calendar_settings: 'Calendar',
-    notification_preferences: 'Notifications', activity_sharing: 'Activity sharing', profile_sharing: 'Profile sharing', dashboard_widgets: 'Dashboard',
+    notification_preferences: 'Notifications', nearby_settings: 'Nearby & offline', activity_sharing: 'Activity sharing', profile_sharing: 'Profile sharing', dashboard_widgets: 'Dashboard',
     workspace_sessions: 'Workspace sessions', workspace_chats: 'Workspace chats', assistant_conversations: 'Conversations with Jarvis',
     feature_usage: 'Features you use', screen_rules: 'Screen time rules', recommendation_lanes: 'Recommendations',
     screen_time_requests: 'Screen time requests', guard_requests: 'App requests', unlock_requests: 'Unlock requests', chore_checks: 'Chores',

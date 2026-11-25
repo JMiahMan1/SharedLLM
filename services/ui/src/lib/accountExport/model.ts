@@ -141,6 +141,7 @@ const COLLECTION_LABELS: Record<string, string> = {
   weather: 'Weather',
   calendar_settings: 'Calendar settings',
   notification_preferences: 'Notifications',
+  nearby_settings: 'Nearby & offline',
   activity_sharing: 'Activity sharing',
   dashboard_widgets: 'Dashboard',
   workspace_sessions: 'Workspace sessions',
