@@ -60,7 +60,20 @@ final class ProximityRules {
     static final int PAYLOAD_BYTES = ID_BYTES + 2;
     /** Flag bits in the payload. */
     static final int FLAG_MOVING = 1;
+    /** This phone accepts a short connection for the offline chat. */
     static final int FLAG_CAN_CONNECT = 2;
+    /** This phone holds offline chat messages it can pass on. */
+    static final int FLAG_HAS_MAIL = 4;
+    /** The flag byte's top five bits: a tag of the offline chat messages held, so a change is seen at once. */
+    static final int MAIL_TAG_SHIFT = 3;
+
+    static int mailTagBits(long digestHash) {
+        return (int) (digestHash & 0x1F) << MAIL_TAG_SHIFT;
+    }
+
+    static int mailTag(int flags) {
+        return (flags & 0xff) >>> MAIL_TAG_SHIFT;
+    }
 
     /** Path loss (dB) bands. */
     static final int NEXT_TO_MAX_DB = 10;
@@ -314,6 +327,8 @@ final class ProximityRules {
         final long periodS;
         final List<String> members;
         final String me;
+        /** The offline family chat's key (a separate random key), or null from an older server. */
+        byte[] chatKey;
 
         Config(byte[] key, String keyId, long periodS, List<String> members, String me) {
             this.key = key;
@@ -337,7 +352,13 @@ final class ProximityRules {
                 if (!m.isEmpty() && !members.contains(m)) members.add(m);
             }
             String me = o.optString("me", "").trim().toLowerCase(java.util.Locale.ROOT);
-            return new Config(key, o.optString("key_id", ""), o.optLong("period_s", PERIOD_S), members, me);
+            Config c = new Config(key, o.optString("key_id", ""), o.optLong("period_s", PERIOD_S), members, me);
+            String chat = o.optString("chat_key", "");
+            if (!chat.isEmpty()) {
+                byte[] ck = java.util.Base64.getDecoder().decode(chat);
+                if (ck.length == 32) c.chatKey = ck;
+            }
+            return c;
         } catch (IllegalArgumentException e) {
             return null;
         }

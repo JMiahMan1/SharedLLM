@@ -52,6 +52,7 @@ import PlacesPanel from '../components/wander/PlacesPanel';
 import VehicleBluetoothPanel from '../components/wander/VehicleBluetoothPanel';
 import BluetoothDiagnostics from '../components/wander/BluetoothDiagnostics';
 import FamilyNearbyCard from '../components/wander/FamilyNearbyCard';
+import OfflineChatCard from '../components/wander/OfflineChatCard';
 import { bandLabel, nearOf, togetherLine } from '../lib/proximity';
 import { vehicleSourceLabel } from '../lib/vehicleBluetooth';
 import toast from 'react-hot-toast';
@@ -1093,6 +1094,16 @@ const Wander = () => {
         />
 
         <FamilyNearbyCard />
+
+        <OfflineChatCard
+          me={currentUsername}
+          room={user?.chat_default_token}
+          position={(() => {
+            const mine = familyMembers.find((m) => (memberPeople.get(m.id)?.username ?? m.id.replace(/^(person|user)\./, '')).toLowerCase() === currentUsername);
+            return mine && mine.lat != null && mine.lon != null ? { lat: mine.lat, lon: mine.lon } : null;
+          })()}
+          nameOf={(u) => peopleDirectory(u)?.display_name}
+        />
 
         {user?.is_admin && <BluetoothDiagnostics />}
       </div>

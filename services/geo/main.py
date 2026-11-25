@@ -3912,11 +3912,14 @@ def _proximity_key(user: str) -> str:
 
 async def _proximity_keys(r) -> dict:
     """The household's proximity key, made the first time it is asked for."""
-    stored = await r.hgetall(proximity.KEY_HASH) or {}
-    if not stored.get("key"):
-        stored = {"key": proximity.new_key(), "created_at": str(time.time())}
-        for field, value in stored.items():
-            await r.hset(proximity.KEY_HASH, field, value)
+    stored = dict(await r.hgetall(proximity.KEY_HASH) or {})
+    for field in ("key", "chat_key"):
+        if not stored.get(field):
+            stored[field] = proximity.new_key()
+            await r.hset(proximity.KEY_HASH, field, stored[field])
+    if not stored.get("created_at"):
+        stored["created_at"] = str(time.time())
+        await r.hset(proximity.KEY_HASH, "created_at", stored["created_at"])
     return stored
 
 
@@ -3957,6 +3960,10 @@ async def get_proximity_config(user: str = Query(...)):
     return {
         "key": keys["key"],
         "key_id": proximity.key_id(keys["key"]),
+        # The offline family chat's key (a separate random key, never derived):
+        # its messages are sealed with it, like the private chat's envelope.
+        "chat_key": keys["chat_key"],
+        "chat_key_id": proximity.key_id(keys["chat_key"]),
         "period_s": proximity.PERIOD_S,
         "members": members,
         "me": me,

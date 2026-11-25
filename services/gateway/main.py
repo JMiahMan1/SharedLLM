@@ -97,6 +97,7 @@ from services.gateway import (
     echo_ota_routes,
     echo_tunnel_routes,
     email_routes,
+    family_mesh,
     family_safety,
     fast_garden,
     fast_lights,
@@ -972,6 +973,7 @@ app.add_middleware(
 
 app.include_router(info_router)
 app.include_router(family_safety.router)
+app.include_router(family_mesh.router)
 app.include_router(app_vetting_routes.router)
 app.include_router(collector_health_routes.router)
 app.include_router(profile_stats.router)  # Profile stats pages: each person's, and the admin's (docs/PROFILE_STATS.md)
