@@ -108,6 +108,12 @@ async def test_resolve_stream(mocker):
     # Mock search_youtube and download_video_progressive
     mocker.patch("services.execution.handlers.video.search_youtube", return_value="https://youtube.com/watch?v=123")
     mocker.patch("services.execution.handlers.video.download_video_progressive", return_value=("vid-123", "Resolved Title"))
+    # The result is screened before it plays (video_safety.py): a fake all-ages rating, no blocklist.
+    from services.execution import video_safety
+    video_safety._checked.clear()
+    mocker.patch("services.execution.handlers.video.inspect_video",
+                 return_value={"title": "Yesterday", "channel": "", "age_limit": 0})
+    mocker.patch.object(video_safety, "_setting", return_value="")
 
     # Temporarily override config value
     import services.config

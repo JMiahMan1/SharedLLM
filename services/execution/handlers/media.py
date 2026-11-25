@@ -653,6 +653,8 @@ async def _play_something(req: MediaPlayRequest, entity_id: str, mass_entity: st
 
 async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play video via yt-dlp stream. Routes through Roku ECP for Roku devices."""
+    from services.execution import media_finder, video_safety
+
     from . import roku as roku_handler
     from . import video as video_handler
 
@@ -661,9 +663,14 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     # Check if already a URL
     video_url = video_handler.extract_video_url(query)
     if not video_url:
-        video_url = await video_handler.search_youtube(query)
-        if not video_url:
-            return ExecutionResult(status="FAILURE", message=f"Could not find video for '{query}'.", service="media_play")
+        # Words, not a link: safe search, then play only a suitable strong match (ask about a weaker one).
+        return await media_finder.find_video_and_play(req, query, entity_id, ctx)
+    # Every video is screened before it reaches a screen: its age rating and the household blocklist.
+    verdict = await video_safety.screen_url(video_url, ctx)
+    if not verdict.ok:
+        log.info(f"[media.video] refused a video ({verdict.why}, age_limit={verdict.age_limit})")
+        return ExecutionResult(status="FAILURE", message=video_safety.refusal_message(verdict.why),
+                               service="media_play", detail={"playback": "not_started", "reason": verdict.why})
 
     # Roku: download optimized format with progressive playback, then launch via ECP
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)

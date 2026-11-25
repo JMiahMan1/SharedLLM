@@ -600,8 +600,13 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Arm/disarm alarm panels and query security state.",
      "payload fields: action, entity_id."),
     ("AnnouncementRequest", SVC_EXECUTION, "POST", "/execute/announce", False,
-     "Broadcast a text announcement to speakers/displays.",
-     "payload fields: entity_id, device_name, entity_ids, rooms, group_id, message, volume, tts_engine, storybook, save_path."),
+     "Speak an announcement on the home's speakers, Echos and TVs. It always has a target: leave the device out "
+     "to announce where the person is (their voice satellite) or, from chat, in every room; everywhere=true for the "
+     "whole house; person=<family member> for their own speakers plus their phone; device_name or rooms for one "
+     "place. TVs that are off are turned on first, offline devices are skipped and named in the result, so call it "
+     "instead of deciding from a search that nothing is available.",
+     "payload fields: message, device_name, rooms, person, everywhere, entity_id, entity_ids, volume, tts_engine, "
+     "storybook, save_path."),
     ("HAServiceRequest", SVC_EXECUTION, "POST", "/execute/ha_service", False,
      "Call any Home Assistant service directly (domain.service + data).",
      "payload fields: domain, service, entity_id, service_data."),
@@ -642,7 +647,9 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "payload fields: action, list_name, item, items, include_completed. action is add, list, complete, uncomplete, "
      "remove or lists; list_name is the list as the person said it (leave it out when they named none)."),
     ("TalkRequest", SVC_EXECUTION, "POST", "/execute/talk", False,
-     "Conversations/voice: list conversations, read messages, send.",
+     "The family chat (Nextcloud Talk): list conversations, read messages, send. To send a family member a "
+     "message, action=send with target_user=<their name> and message: it goes to their phone from the person "
+     "asking, in their one-to-one chat.",
      "payload fields: action, token, target_user, message, text_to_voice, limit."),
     ("WebSearchRequest", SVC_EXECUTION, "POST", "/execute/web_search", False,
      "Web search for current/external information.",
@@ -757,7 +764,8 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Read Home Assistant configuration snapshot.",
      "payload fields: action, domain, entity_domain, keyword."),
     ("EntitySearchRequest", SVC_EXECUTION, "POST", "/execute/entity_search", False,
-     "Search known HA entities by name/domain.",
+     "Search the home's devices by name/domain/area: reachable ones first, duplicates folded, at most 25. "
+     "Not needed before an announcement (AnnouncementRequest finds its own speakers).",
      "payload fields: query, domain, area, state, limit, controllable_only."),
     ("LogbookRequest", SVC_EXECUTION, "POST", "/execute/ha_logbook", False,
      "Query the Home Assistant logbook.",

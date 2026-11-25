@@ -361,6 +361,17 @@ def clear_choice(user_id: str) -> None:
     redis_cache_delete(_choice_key(user_id))
 
 
+#: A "no" to a pending question: it is dropped, and nothing plays.
+_NO = frozenset({"no", "nope", "nah", "no thanks", "no thank you", "don't", "do not", "don't play it",
+                 "cancel", "never mind", "nevermind", "no don't", "not that one", "no not that"})
+
+
+def declines_choice(answer: str) -> bool:
+    """True when ``answer`` turns down a pending media question ("no", "no thanks", "cancel")."""
+    text = " ".join(re.sub(r"[^a-z0-9' ]+", " ", strip_request_filler(answer).lower()).split())
+    return text in _NO or (text.startswith(("no ", "nope ", "nah ")) and len(text.split()) <= 4)
+
+
 _ORDINALS = {"first": 0, "1st": 0, "one": 0, "second": 1, "2nd": 1, "two": 1, "last": -1}
 #: Words an answer may use for each kind of option, beyond the option's own ("the audio", "the song one").
 KIND_WORDS = {
