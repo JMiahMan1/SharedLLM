@@ -26,14 +26,15 @@ on:
         required: false
         default: ""
 
-# A new push to a pull request cancels that PR's previous build, which only
-# checks that the images still build. Pushes to a branch publish images and
-# pick their services from the diff against the previous push, so a cancelled
-# or superseded push run would never publish its services: each push run gets
-# a group of its own and always finishes.
+# One image build per branch at a time. A new push to a pull request cancels that PR's previous
+# build (it only checks that the images still build). On a branch, a push waits for the running
+# build and GitHub keeps only the newest waiting one: that run builds every service changed since
+# the last SUCCESSFUL build (see "Determine base commit"), so the pushes it replaces lose nothing,
+# five quick merges make one build instead of five, and images are published in commit order.
 concurrency:
-  group: build-images-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  group: build-images-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 
 permissions:
   contents: read
@@ -62,9 +63,21 @@ jobs:
 
       - name: Determine base commit for path filtering
         id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+            # Everything since the last successful build of this branch, so pushes whose own
+            # (waiting) runs were replaced are still built; the previous push when there is none.
+            LAST=$(gh run list --repo "${{ github.repository }}" --workflow build-images.yml \
+                     --branch "${{ github.ref_name }}" --event push --status success --limit 1 \
+                     --json headSha -q '.[0].headSha' 2>/dev/null || true)
+            if [ -n "$LAST" ] && git merge-base --is-ancestor "$LAST" HEAD 2>/dev/null; then
+              echo "Building everything changed since the last successful build: $LAST"
+              echo "ref=$LAST" >> $GITHUB_OUTPUT
+            else
+              echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+            fi
           else
             echo "ref=$(git rev-parse HEAD~1 2>/dev/null || git rev-list --max-parents=0 HEAD | head -1)" >> $GITHUB_OUTPUT
           fi
