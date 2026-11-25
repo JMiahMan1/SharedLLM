@@ -157,3 +157,40 @@ def test_read_scripture_is_read_not_searched_as_an_audiobook(monkeypatch):
     _said, executed = _ask(monkeypatch, "Read John 3:16", "play_media", voice=VOICE, cache=TV, reply="John 3:16 text")
     [(path, payload)] = executed
     assert path == "/bible" and payload["ref"] == "John 3:16"
+
+
+VIDEO_OFFER = {"query": "keeping up beyond", "entity_id": "media_player.den", "options": [
+    {"label": "play it", "words": ["yes", "yeah", "sure", "play it", "okay", "ok"],
+     "pick": {"source": "web_video", "kind": "video", "ident": "https://youtube.test/watch?v=v1"}},
+]}
+
+
+@pytest.mark.parametrize("answer", ["no", "No thanks.", "nope", "cancel", "no, not that one"])
+def test_a_no_turns_down_a_pending_question(answer):
+    assert fast_media.declines_choice(answer)
+
+
+@pytest.mark.parametrize("answer", ["yes", "play it", "Nothing Else Matters", "notifications"])
+def test_other_answers_are_not_a_no(answer):
+    assert not fast_media.declines_choice(answer)
+
+
+def test_yes_to_a_youtube_offer_plays_the_video_found(monkeypatch):
+    from services.gateway.tests.test_fast_media import TV, VOICE, _ask
+
+    fast_media.remember_choice("sam", VIDEO_OFFER)
+    said, executed = _ask(monkeypatch, "Yes.", "unknown", voice=VOICE, cache=TV, reply="Playing it.")
+    assert said == "Playing it."
+    [(path, payload)] = executed
+    assert path == "/media/play" and payload["pick"]["ident"] == "https://youtube.test/watch?v=v1"
+    assert fast_media.pending_choice("sam") is None
+
+
+def test_no_to_a_youtube_offer_plays_nothing_and_forgets_it(monkeypatch):
+    from services.gateway.tests.test_fast_media import TV, VOICE, _ask
+
+    fast_media.remember_choice("sam", VIDEO_OFFER)
+    said, executed = _ask(monkeypatch, "No.", "unknown", voice=VOICE, cache=TV, reply="Playing it.")
+    assert said == "Okay."
+    assert executed == []
+    assert fast_media.pending_choice("sam") is None

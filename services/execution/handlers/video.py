@@ -58,8 +58,41 @@ async def _get_searxng_url() -> str | None:
     return None
 
 
-async def search_youtube(query: str) -> str | None:
-    """Search YouTube via yt-dlp ytsearch: (most reliable), with SearXNG/Playwright fallback."""
+#: YouTube's own Restricted Mode, as its web pages set it (the PREF cookie's f2 flag).
+_RESTRICTED_PREF = "f2=8000000"
+
+
+def _restricted(safe_search: str) -> bool:
+    """YouTube has Restricted Mode on or off: on for strict and moderate (only "off" turns it off)."""
+    return safe_search != "off"
+
+
+def _apply_restricted_mode(ydl, safe_search: str) -> None:
+    """Ask YouTube for Restricted Mode on this yt-dlp session (best effort; screening still applies)."""
+    if not _restricted(safe_search):
+        return
+    import http.cookiejar
+
+    try:
+        ydl.cookiejar.set_cookie(http.cookiejar.Cookie(
+            0, "PREF", _RESTRICTED_PREF, None, False, ".youtube.com", True, True, "/", True, True,
+            int(time.time()) + 3600, False, None, None, {}))
+    except Exception as e:
+        log.warning(f"[video] could not set YouTube Restricted Mode: {e}")
+
+
+def _searxng_safesearch(safe_search: str) -> int:
+    from services.execution.video_safety import SEARXNG_SAFESEARCH
+
+    return SEARXNG_SAFESEARCH.get(safe_search, SEARXNG_SAFESEARCH["strict"])
+
+
+async def search_youtube(query: str, safe_search: str = "strict") -> str | None:
+    """Search YouTube via yt-dlp ytsearch: (most reliable), with SearXNG/Playwright fallback.
+
+    ``safe_search`` (strict, moderate, off; video_safety.safe_search_level) is sent to every
+    backend: YouTube's Restricted Mode and SearXNG's ``safesearch``.
+    """
     try:
         import yt_dlp
         def _yt_search():
@@ -70,6 +103,7 @@ async def search_youtube(query: str) -> str | None:
                 "playlistend": 1,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
+                _apply_restricted_mode(ydl, safe_search)
                 info = ydl.extract_info(f"ytsearch1:{query}", download=False)
                 raw_entries = info.get("entries")
                 if raw_entries:
@@ -96,6 +130,7 @@ async def search_youtube(query: str) -> str | None:
                 "format": "html",
                 "categories": "videos",
                 "engines": "youtube",
+                "safesearch": _searxng_safesearch(safe_search),
             })
             search_url = f"{searxng_url}/search?{params}"
             log.info(f"[video] SearXNG YouTube search (HTML): {search_url}")
@@ -118,7 +153,11 @@ async def search_youtube(query: str) -> str | None:
         from playwright.async_api import async_playwright
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"])
-            page = await browser.new_page()
+            context = await browser.new_context()
+            if _restricted(safe_search):
+                await context.add_cookies([{"name": "PREF", "value": _RESTRICTED_PREF,
+                                            "domain": ".youtube.com", "path": "/"}])
+            page = await context.new_page()
             await page.goto(f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}", timeout=15000, wait_until="domcontentloaded")
             await page.wait_for_selector("a#video-title", timeout=10000)
             links = await page.query_selector_all("a#video-title")
@@ -137,32 +176,70 @@ async def search_youtube(query: str) -> str | None:
     return None
 
 
-async def search_youtube_entry(query: str) -> tuple[str | None, str | None]:
-    """(url, title) of YouTube's first result for ``query``; the title is None when only a link was found.
+#: How many search results a spoken request chooses among.
+SEARCH_RESULTS = 5
 
-    The title lets an answer say what is playing. yt-dlp's flat search carries it; when
-    yt-dlp cannot search, ``search_youtube``'s fallbacks still find a link.
+
+async def search_youtube_entries(query: str, safe_search: str = "strict",
+                                 limit: int = SEARCH_RESULTS) -> list[dict]:
+    """YouTube's first ``limit`` results for ``query``: [{"url", "title", "channel", "age_limit"}].
+
+    yt-dlp's flat search carries titles and channels; when yt-dlp cannot search,
+    ``search_youtube``'s fallbacks still find one link (no title: screening reads it).
     """
     try:
         import yt_dlp
 
-        def _first() -> tuple[str | None, str | None]:
-            opts: dict[str, object] = {"quiet": True, "no_warnings": True, "extract_flat": True, "playlistend": 1}
+        def _entries() -> list[dict]:
+            opts: dict[str, object] = {"quiet": True, "no_warnings": True, "extract_flat": True,
+                                       "playlistend": limit}
+            out: list[dict] = []
             with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[arg-type]
-                info = ydl.extract_info(f"ytsearch1:{query}", download=False) or {}
-                for entry in list(info.get("entries") or [])[:1]:
+                _apply_restricted_mode(ydl, safe_search)
+                info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False) or {}
+                for entry in list(info.get("entries") or [])[:limit]:
                     url = entry.get("url") or entry.get("webpage_url")
                     if url:
-                        return url, entry.get("title") or None
-            return None, None
+                        out.append({"url": url, "title": entry.get("title") or "",
+                                    "channel": entry.get("channel") or entry.get("uploader") or "",
+                                    "age_limit": entry.get("age_limit")})
+            return out
 
-        url, title = await asyncio.get_running_loop().run_in_executor(None, _first)
-        if url:
-            log.info(f"[video] yt-dlp ytsearch '{query}' -> {url} ({title})")
-            return url, title
+        found = await asyncio.get_running_loop().run_in_executor(None, _entries)
+        if found:
+            log.info(f"[video] yt-dlp ytsearch '{query}' -> {len(found)} result(s)")
+            return found
     except Exception as e:
-        log.warning(f"[video] yt-dlp ytsearch with title failed: {e}")
-    return await search_youtube(query), None
+        log.warning(f"[video] yt-dlp ytsearch with titles failed: {e}")
+    url = await search_youtube(query, safe_search)
+    return [{"url": url, "title": "", "channel": "", "age_limit": None}] if url else []
+
+
+async def search_youtube_entry(query: str, safe_search: str = "strict") -> tuple[str | None, str | None]:
+    """(url, title) of YouTube's first result for ``query``; the title is None when only a link was found."""
+    found = await search_youtube_entries(query, safe_search, limit=1)
+    if not found:
+        return None, None
+    return found[0]["url"], found[0]["title"] or None
+
+
+async def inspect_video(url: str) -> dict:
+    """{"title", "channel", "age_limit"} of one video, read from the site (not a flat search).
+
+    A flat search does not carry the age rating, so this is what screening relies on. It
+    raises when the site will not describe the video (an age gate says so in its error).
+    """
+    import yt_dlp
+
+    def _inspect() -> dict:
+        opts: dict[str, object] = {"quiet": True, "no_warnings": True, "skip_download": True,
+                                   "noplaylist": True}
+        with yt_dlp.YoutubeDL(opts) as ydl:  # type: ignore[arg-type]
+            info = ydl.extract_info(url, download=False, process=False) or {}
+        return {"title": info.get("title") or "", "channel": info.get("channel") or info.get("uploader") or "",
+                "age_limit": info.get("age_limit")}
+
+    return await asyncio.get_running_loop().run_in_executor(None, _inspect)
 
 
 async def extract_audio_stream_url(video_url: str) -> tuple[str | None, str | None]:
@@ -504,16 +581,34 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     log.info(f"[video/play] user={ctx.user} entity={full_entity_id} query='{req.query}'")
 
-    # Step 1: Resolve to a video URL
+    # Step 1: Resolve to a video URL: a suitable, strong match only (video_safety.py)
+    from services.execution import media_finder, video_safety
+
     video_url = extract_video_url(req.query)
     if not video_url:
-        video_url = await search_youtube(req.query)
-        if not video_url:
+        vids = await media_finder.search_web_video(media_finder.search_words(req.query), ctx)
+        action, cand, why = await media_finder.choose_video(vids, req.query, ctx)
+        level = str((vids[0].extra if vids else {}).get("safe_search") or video_safety.DEFAULT_LEVEL)
+        video_safety.log_decision(req.query, cand.title if cand else "", cand.score if cand else 0.0, level,
+                                  action if action == "play" else "refuse", why)
+        if action == "ask" and cand is not None:
+            return ExecutionResult(
+                status="FAILURE", service="video_play",
+                message=(f"The closest video I found is '{cand.title}', which isn't a close match for "
+                         f"'{req.query}', so I didn't play it. Ask for it by its title to play it."),
+                detail={"reason": why, "found": cand.as_pick()})
+        if action != "play" or cand is None:
             return ExecutionResult(
                 status="FAILURE",
-                message=f"Could not find a video for '{req.query}'.",
+                message=f"Could not find a suitable video for '{req.query}'.",
                 service="video_play",
+                detail={"reason": why},
             )
+        video_url = cand.ident
+    verdict = await video_safety.screen_url(video_url, ctx)
+    if not verdict.ok:
+        return ExecutionResult(status="FAILURE", message=video_safety.refusal_message(verdict.why),
+                               service="video_play", detail={"reason": verdict.why})
 
     # Step 2: Check if device is Roku
     from . import roku as roku_handler

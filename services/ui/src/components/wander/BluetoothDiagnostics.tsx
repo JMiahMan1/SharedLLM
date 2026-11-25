@@ -4,6 +4,7 @@ import { Stethoscope, RefreshCw } from 'lucide-react';
 import VehicleBluetooth, { type VehicleBtDiagnostics } from '../../plugins/vehicleBluetooth';
 import Proximity, { type ProximityDiagnostics } from '../../plugins/proximity';
 import { bandLabel } from '../../lib/proximity';
+import FamilyMesh, { type MeshDiagnostics } from '../../plugins/familyMesh';
 
 /** One line of the panel: what is checked, and what this phone says. */
 export function DiagRow({ label, value, ok, testId }: { label: string; value: string; ok?: boolean | null; testId?: string }) {
@@ -27,19 +28,26 @@ function when(ms: number | null | undefined): string {
  * without a cable. Vehicle detection: the Nearby devices permission,
  * Bluetooth, the linked car connected now (what the next fix carries).
  * Family nearby: the advertiser (on, or unsupported on a scan-only tablet),
- * the scan, and the phones heard with their band and signal.
+ * the scan, and the phones heard with their band and signal. Offline chat:
+ * the last message sent and received, and the last phone-to-phone sync.
  */
 export default function BluetoothDiagnostics() {
   const android = Capacitor.getPlatform() === 'android';
   const [vehicle, setVehicle] = useState<VehicleBtDiagnostics | null>(null);
   const [nearby, setNearby] = useState<ProximityDiagnostics | null>(null);
+  const [mesh, setMesh] = useState<MeshDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    Promise.all([VehicleBluetooth.getDiagnostics(), Proximity.getDiagnostics().catch(() => null)])
-      .then(([v, n]) => {
+    Promise.all([
+      VehicleBluetooth.getDiagnostics(),
+      Proximity.getDiagnostics().catch(() => null),
+      FamilyMesh.getDiagnostics().catch(() => null),
+    ])
+      .then(([v, n, m]) => {
         setVehicle(v);
         setNearby(n);
+        setMesh(m);
         setError(null);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not read this phone'));
@@ -108,6 +116,26 @@ export default function BluetoothDiagnostics() {
                 testId="diag-peers"
               />
               <DiagRow label="Sightings waiting to send" value={`${nearby.outbox}, last sent ${when(nearby.uploadedAt)}`} />
+            </dl>
+          </section>
+        )}
+        {mesh && (
+          <section>
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Offline chat</h4>
+            <dl className="divide-y divide-white/5">
+              <DiagRow label="Turned on" value={mesh.enabled ? 'Yes' : 'No'} ok={mesh.enabled} />
+              <DiagRow label="Nearby devices (connect)" value={mesh.connectPermission ? 'Allowed' : 'Not allowed'} ok={mesh.connectPermission} />
+              <DiagRow label="Accepts connections" value={mesh.server ? 'Yes' : 'No (connects out only)'} ok={mesh.server ? true : null} />
+              <DiagRow label="Last offline message sent" value={when(mesh.lastSentAt)} testId="diag-mesh-sent" />
+              <DiagRow label="Last offline message received" value={when(mesh.lastReceivedAt)} testId="diag-mesh-received" />
+              <DiagRow
+                label="Last phone-to-phone sync"
+                value={mesh.lastPeerSync ? `${mesh.lastPeerSync.peer || 'a phone'} at ${when(mesh.lastPeerSync.at)}: sent ${mesh.lastPeerSync.sent}, got ${mesh.lastPeerSync.received}` : 'never'}
+                testId="diag-mesh-peer"
+              />
+              <DiagRow label="Held on this phone" value={`${mesh.stored} (${mesh.unsynced} of mine not yet in the family chat)`} />
+              <DiagRow label="Last sent to the family chat" value={when(mesh.lastServerSyncAt)} />
+              {mesh.lastError && <DiagRow label="Last problem" value={mesh.lastError} ok={false} />}
             </dl>
           </section>
         )}

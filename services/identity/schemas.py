@@ -39,6 +39,8 @@ class ResolvedCredentials(BaseModel):
     user: str
     id: int | None = None              # numeric PK, needed for ownership checks
     is_admin: bool = False
+    #: A child or teen (family_role): web video is searched and screened strictly for them.
+    is_minor: bool = False
     #: "device" when the person was named by the voice satellite assigned to them.
     identified_by: str | None = None
     api_key: str | None = None         # decrypted at resolution time for tool usage
