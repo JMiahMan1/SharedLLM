@@ -443,3 +443,19 @@ async def test_whisper_mode_is_a_hub_setting(env, monkeypatch):
     assert bad.status_code == 400 and "volume" in bad.json()["detail"]
     assert client.put("/hub/voice/settings", headers=h, json={"enabled": True}).status_code == 400
     await drv.async_unload()
+
+
+
+@pytest.mark.parametrize(("voiced", "hnr", "level", "expected"), [
+    # Real whispers at the Office Echo (2026-11-25), usual level -34 dBFS: all three are whispers.
+    (0.36, -2.5, -54.4, True),
+    (0.43, -2.2, -48.1, True),   # missed at the old 0.40 voiced bar
+    (0.41, -1.6, -41.9, True),   # 7.9 dB under: missed at the old 8 dB default
+    # Ordinary commands there, and speech from across the room, are not.
+    (0.85, 7.4, -29.9, False),
+    (0.90, 8.2, -29.8, False),
+    (0.56, 0.2, -48.0, False),   # the quietest, least voiced spoken clip measured, 14 dB under
+])
+def test_real_whispers_are_caught_and_speech_is_not(voiced, hnr, level, expected):
+    f = voice_whisper.Features(level_db=level, voiced_ratio=voiced, hnr_db=hnr, tilt_db=-16.0, speech_frames=60)
+    assert voice_whisper.decide(f, usual_db=-34.0) is expected
