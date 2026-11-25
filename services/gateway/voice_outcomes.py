@@ -81,6 +81,8 @@ class Record:
     user: str = ""
     tools: list[tuple[str, bool]] = field(default_factory=list)
     outcome: str | None = None
+    #: How a spoken request was attributed: identified, device-assigned or default (``set_identity``).
+    identity: str | None = None
     deferred: bool = False
     done: bool = False
 
@@ -112,6 +114,16 @@ def set_user(user: str | None) -> None:
         record.user = str(user).strip().lower()
 
 
+IDENTITY_DECISIONS = ("identified", "device-assigned", "default")
+
+
+def set_identity(decision: str | None) -> None:
+    """How a spoken request was attributed (gateway ``voice_decision``)."""
+    record = _current.get()
+    if record is not None and decision in IDENTITY_DECISIONS:
+        record.identity = decision
+
+
 def note_outcome(outcome: str) -> None:
     """An answer that is not the model's (``offline``)."""
     record = _current.get()
@@ -138,7 +150,8 @@ def defer() -> dict | None:
     if record is None or not record.user:
         return None
     record.deferred = True
-    return {"source": record.source, "t0": record.t0, "tools": [list(t) for t in record.tools], "outcome": record.outcome}
+    return {"source": record.source, "t0": record.t0, "tools": [list(t) for t in record.tools], "outcome": record.outcome,
+            "identity": record.identity}
 
 
 def resume(payload: dict | None, user: str) -> Record | None:
@@ -148,7 +161,7 @@ def resume(payload: dict | None, user: str) -> Record | None:
         return None
     record = Record(source=str(info.get("source") or "chat"), t0=float(info.get("t0") or time.time()), user=user,
                     tools=[(str(t[0]), bool(t[1])) for t in info.get("tools") or [] if isinstance(t, list | tuple) and len(t) == 2],
-                    outcome=info.get("outcome"))
+                    outcome=info.get("outcome"), identity=info.get("identity"))
     _current.set(record)
     return record
 
@@ -182,6 +195,8 @@ def finish(record: Record | None, outcome: str | None = None, *, queued: bool = 
         counts[(record.user, day, f"h:{hour}:slow")] += 1
     if queued:
         counts[(record.user, day, "q")] += 1
+    if record.identity in IDENTITY_DECISIONS:
+        counts[(record.user, day, f"i:{record.identity}")] += 1
     for name, ok in record.tools:
         counts[(record.user, day, f"t:{name}:calls")] += 1
         if not ok:
@@ -233,6 +248,7 @@ def finish_job(job: dict, *, failed: bool, error: str = "", detail: dict | None 
     if record is None:
         record = Record(source=str(info.get("source") or "chat"), t0=float(info.get("t0") or time.time()),
                         user=str(job.get("user_id") or "").strip().lower(), outcome=info.get("outcome"),
+                        identity=info.get("identity"),
                         tools=[(str(t[0]), bool(t[1])) for t in info.get("tools") or [] if isinstance(t, list | tuple) and len(t) == 2])
     outcome = None
     if failed:
@@ -355,6 +371,7 @@ async def summary(user: str, days: int = 30, today: date | None = None) -> dict 
     hours_n: Counter[int] = Counter()
     hours_slow: Counter[int] = Counter()
     sources: Counter[str] = Counter()
+    identity: Counter[str] = Counter()
     per_day = []
     queued = 0
     for day, row in zip(day_list, rows, strict=True):
@@ -371,6 +388,8 @@ async def summary(user: str, days: int = 30, today: date | None = None) -> dict 
                 buckets[k[2:]] += v
             elif k.startswith("s:"):
                 sources[k[2:]] += v
+            elif k.startswith("i:"):
+                identity[k[2:]] += v
             elif k.startswith("t:"):
                 name, _, kind = k[2:].rpartition(":")
                 (tools_fail if kind == "fail" else tools_calls)[name] += v
@@ -390,6 +409,9 @@ async def summary(user: str, days: int = 30, today: date | None = None) -> dict 
         "total": total,
         "outcomes": dict(outcomes),
         "sources": dict(sources),
+        # How spoken requests were attributed to this person: by their voice, by
+        # the satellite assigned to them, or as the default user.
+        "identity": dict(identity),
         "latency": {"buckets": dict(buckets), "p50_ms": _percentile(buckets, 0.5), "p90_ms": _percentile(buckets, 0.9),
                     "slow_ms": SLOW_MS},
         "per_day": per_day,

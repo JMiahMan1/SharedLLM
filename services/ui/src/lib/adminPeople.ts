@@ -46,6 +46,8 @@ export interface AdminVoice {
   per_day: Array<{ day: string; total: number; ok: number; failed: number }>;
   tools: Array<{ tool: string; failures: number; calls?: number }>;
   slow_hours: Array<{ hour: number; slow: number; total: number }>;
+  /** How spoken requests were attributed: identified by voice, by the satellite assigned to them, or default. */
+  identity?: Record<string, number>;
 }
 
 export interface AdminFlag { area: string; level: 'watch' | 'fix'; text: string }

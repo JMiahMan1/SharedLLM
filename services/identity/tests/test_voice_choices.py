@@ -10,8 +10,17 @@
 from sqlmodel import Session, select
 
 import services.identity.main as identity_main
+from services.identity import hub_devices
 from services.identity.models import DeviceAssignment, GlobalSetting, User
 from services.identity.tests.test_entity_protection import _lock, _permissions, client_fixture, session_fixture  # noqa: F401
+
+
+def _hub_device(session: Session, entity_id: str, owner: str | None) -> None:
+    """A HomeHub satellite synced into identity and assigned (owner None: shared)."""
+    hardware = "mac:" + entity_id.split(".")[1]
+    hub_devices.sync(session, [{"hardware_id": hardware, "kind": "voice_satellite", "name": entity_id,
+                                "entity_ids": [entity_id]}])
+    hub_devices.assign(session, "hub:" + hardware, {"owner_username": owner})
 
 
 def _voice_for(client, **params):
@@ -47,8 +56,8 @@ def test_a_device_assigned_to_one_person_speaks_with_their_voice(client, session
     bob = session.exec(select(User).where(User.username == "bob")).first()
     bob.preferred_tts_voice = "bm_fable"
     session.add(bob)
-    session.add(DeviceAssignment(device_id="assist_satellite.bobs_room", user_id=bob.id))
     session.commit()
+    _hub_device(session, "assist_satellite.bobs_room", owner="bob")
     # No speaker recognised (or one with no voice of their own): the owner's.
     assert _voice_for(client, entity_id="assist_satellite.bobs_room")["voice"] == "bm_fable"
     assert _voice_for(client, speaker="alice", entity_id="assist_satellite.bobs_room")["why"] == "device"
@@ -58,10 +67,12 @@ def test_a_shared_or_unassigned_device_speaks_as_jarvis(client, session: Session
     alice = session.exec(select(User).where(User.username == "alice")).first()
     bob = session.exec(select(User).where(User.username == "bob")).first()
     alice.preferred_tts_voice, bob.preferred_tts_voice = "af_bella", "bm_fable"
+    # A control grant to two people says nothing about whose satellite it is.
     session.add_all([alice, bob,
                      DeviceAssignment(device_id="assist_satellite.living_room", user_id=alice.id),
                      DeviceAssignment(device_id="assist_satellite.living_room", user_id=bob.id)])
     session.commit()
+    _hub_device(session, "assist_satellite.living_room", owner=None)
     assert _voice_for(client, entity_id="assist_satellite.living_room") == {"voice": None, "person": None, "why": "jarvis"}
     assert _voice_for(client, entity_id="assist_satellite.nobodys")["why"] == "jarvis"
     assert _voice_for(client)["why"] == "jarvis"

@@ -7,7 +7,7 @@ import type {
   InternetOutage, NetworkDevice, NetworkDeviceFields, NetworkStatus, NetworkUsage, RouterLogLine,
 } from '../lib/network';
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
-import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel, TtsVoices } from '../types/api';
+import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, HubDevice, NotifyLevel, TtsVoices, VoiceAdminOverview, VoiceCalibration } from '../types/api';
 import type {
   GardenPlant, GardenSpecies, GardenLocation, GardenProfile,
   GardenTodaySummary, GardenCareLog, GardenCareRule,
@@ -1901,6 +1901,54 @@ export const api = {
 
   async forgetMyVoice(): Promise<VoiceStatus> {
     const resp = await apiClient.delete('/api/users/me/voice');
+    return resp.data;
+  },
+
+  /** Admin: enrolled voices (counts only), the calibration, and candidate samples to review. */
+  async getVoiceAdmin(): Promise<VoiceAdminOverview> {
+    const resp = await apiClient.get('/api/admin/voice');
+    return resp.data;
+  },
+
+  /** Admin: calibrate the voice threshold again from the enrolled voices. */
+  async recalibrateVoice(): Promise<VoiceCalibration> {
+    const resp = await apiClient.post('/api/admin/voice/calibrate');
+    return resp.data;
+  },
+
+  /** Admin: add a candidate sample to its person's voice (an auto sample). */
+  async approveVoiceCandidate(id: number): Promise<{ status: string; samples: number }> {
+    const resp = await apiClient.post(`/api/admin/voice/candidates/${id}`);
+    return resp.data;
+  },
+
+  /** Admin: reject a candidate sample. */
+  async rejectVoiceCandidate(id: number): Promise<{ status: string }> {
+    const resp = await apiClient.delete(`/api/admin/voice/candidates/${id}`);
+    return resp.data;
+  },
+
+  /** Admin: remove every auto-added sample from a person's voice. */
+  async clearAutoVoiceSamples(username: string): Promise<{ status: string; samples: number }> {
+    const resp = await apiClient.delete(`/api/admin/voice/${encodeURIComponent(username)}/auto`);
+    return resp.data;
+  },
+
+  /** Admin: HomeHub's voice satellites, speakers and TVs, with their assignments. */
+  async getHubDevices(): Promise<HubDevice[]> {
+    const resp = await apiClient.get('/api/admin/hub-devices');
+    return resp.data?.devices ?? [];
+  },
+
+  /** Admin: read HomeHub's devices now. */
+  async refreshHubDevices(): Promise<HubDevice[]> {
+    const resp = await apiClient.post('/api/admin/hub-devices/refresh');
+    return resp.data?.devices ?? [];
+  },
+
+  /** Admin: assign a shared device to a person (null: shared) and/or a room. */
+  async assignHubDevice(deviceKey: string, change: { owner_username?: string | null; room?: string | null }): Promise<HubDevice> {
+    const resp = await apiClient.patch(`/api/admin/hub-devices/${encodeURIComponent(deviceKey)}`, change);
     return resp.data;
   },
 

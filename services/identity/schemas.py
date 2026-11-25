@@ -24,6 +24,10 @@ class ResolveRequest(BaseModel):
     # need the household's Home Assistant and media credentials but must not
     # inherit the system administrator's powers or personal accounts.
     household: bool = False
+    # The hub entity (assist_satellite.*) a spoken request came from. Set only
+    # by the gateway, from an internal caller's voice context; it names the
+    # satellite's assigned person when no voice was recognised (hub_devices.py).
+    voice_device: str | None = None
 
 
 class ResolvedCredentials(BaseModel):
@@ -35,6 +39,8 @@ class ResolvedCredentials(BaseModel):
     user: str
     id: int | None = None              # numeric PK, needed for ownership checks
     is_admin: bool = False
+    #: "device" when the person was named by the voice satellite assigned to them.
+    identified_by: str | None = None
     api_key: str | None = None         # decrypted at resolution time for tool usage
     nextcloud_url: str | None = None
     nextcloud_user: str | None = None
