@@ -1444,8 +1444,8 @@ function AuditLogPanel() {
 const DEVICE_TABS = [
   { id: 'devices', label: 'Your devices', anchors: ['devices-hardware', 'devices-echo-fleet', 'devices-light-groups', 'devices-duplicates'] },
   { id: 'add', label: 'Add devices', anchors: ['devices-new', 'add-fix'] },
-  { id: 'places', label: 'Rooms & places', anchors: ['devices-areas', 'devices-labels', 'devices-zones'] },
-  { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-voice-hold-music', 'devices-persons', 'devices-logins', 'devices-rooms', 'devices-archived'] },
+  { id: 'places', label: 'Rooms & places', anchors: ['devices-areas', 'devices-rooms', 'devices-labels', 'devices-zones'] },
+  { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-voice-hold-music', 'devices-persons', 'devices-logins', 'devices-archived'] },
   { id: 'family', label: 'Family', anchors: ['devices-family', 'devices-windows', 'devices-folders', 'devices-activity'] },
 ] as const;
 type DeviceTab = (typeof DEVICE_TABS)[number]['id'];
@@ -1753,6 +1753,8 @@ export default function Devices() {
       {user?.is_admin && tab === 'places' && (
         <div id="devices-tab-places" role="tabpanel" className="space-y-4">
           <div id="devices-areas" className="scroll-mt-4"><AreasPanel /></div>
+          {/* Room detection (Bluetooth listeners and the room map) sits with the rooms it is about; it used to be under Setup. */}
+          <div id="devices-rooms" className="scroll-mt-4"><RoomMapPanel /></div>
           <div id="devices-labels" className="scroll-mt-4"><LabelsPanel /></div>
           <div id="devices-zones" className="scroll-mt-4"><ZonesPanel /></div>
         </div>
@@ -1764,7 +1766,6 @@ export default function Devices() {
           <div id="devices-voice-hold-music" className="scroll-mt-4"><VoiceHoldMusicPanel /></div>
           <div id="devices-persons" className="scroll-mt-4"><PersonsPanel /></div>
           <div id="devices-logins" className="scroll-mt-4"><LoginProvidersPanel /></div>
-          <div id="devices-rooms" className="scroll-mt-4"><RoomMapPanel /></div>
           <div id="devices-archived" className="scroll-mt-4"><ArchivedDevicesPanel /></div>
         </div>
       )}

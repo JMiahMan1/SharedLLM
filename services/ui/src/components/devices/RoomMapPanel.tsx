@@ -30,6 +30,7 @@ import {
 import { holdScreenOn, type AwakeHold } from '../../lib/keepAwake';
 import { relativeTime } from '../../lib/wanderTrips';
 import { confirmDialog } from '../ui/confirmDialog';
+import BluetoothListeners from './BluetoothListeners';
 
 const MAP_KEY = ['room-map'];
 const button = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-white/10 px-3 text-sm text-slate-200 hover:bg-white/5 disabled:opacity-50';
@@ -292,6 +293,7 @@ export default function RoomMapPanel() {
         />
       ) : (
         <div className="space-y-4 p-4">
+          <BluetoothListeners areas={areas.data ?? []} />
           <div>
             <h3 className="flex items-center gap-2 text-sm font-semibold text-white"><MapPinned size={16} className="text-sky-400" /> Map rooms</h3>
             <p className="mt-1 text-xs text-slate-400">
