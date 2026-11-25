@@ -1,6 +1,8 @@
 import type { VehicleBtLink } from '../lib/vehicleBluetooth';
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { CollectorHealth } from '../lib/collectorHealth';
+import type { ProfileStats, SharingState, ShareArea } from '../lib/profileStats';
+import type { AdminPersonStats } from '../lib/adminPeople';
 import type {
   InternetOutage, NetworkDevice, NetworkDeviceFields, NetworkStatus, NetworkUsage, RouterLogLine,
 } from '../lib/network';
@@ -246,6 +248,10 @@ import type {
   LibraryBook,
   LibraryAudit,
   BookInspection,
+  BookCatalogueId,
+  BookCatalogueReport,
+  BookCatalogues,
+  BookCatalogueTest,
   HealthCycleSummary,
   HealthCyclePeriod,
   HealthCycleLog,
@@ -1361,6 +1367,29 @@ export const api = {
    * left every non-admin with an empty picker and "Everyone" as their only
    * choice. This returns username + display name and nothing else.
    */
+  /** One person's profile stats as the caller may see them (docs/PROFILE_STATS.md). */
+  async getProfileStats(username: string, fresh = false): Promise<ProfileStats> {
+    const resp = await apiClient.get(`/api/profile/stats/${encodeURIComponent(username || 'me')}`, { params: fresh ? { fresh: 1 } : undefined });
+    return resp.data;
+  },
+
+  /** Admin > People: one person's stats without the opt-in (admins only, refused on the server otherwise). */
+  async getAdminPersonStats(username: string, fresh = false): Promise<AdminPersonStats> {
+    const resp = await apiClient.get(`/api/profile/admin/${encodeURIComponent(username)}`, { params: fresh ? { fresh: 1 } : undefined });
+    return resp.data;
+  },
+
+  /** The caller's own sharing choice, with the switches other areas already have. */
+  async getProfileSharing(): Promise<SharingState> {
+    const resp = await apiClient.get('/api/profile/sharing');
+    return resp.data;
+  },
+
+  async setProfileSharing(areas: ShareArea[]): Promise<SharingState> {
+    const resp = await apiClient.put('/api/profile/sharing', { areas });
+    return resp.data;
+  },
+
   /** Everyone in the household with their chat picture and Talk account. */
   async getFamilyDirectory(): Promise<FamilyMember[]> {
     const resp = await apiClient.get('/api/users/family-directory');
@@ -3422,9 +3451,21 @@ export const api = {
   /** The reply says what Jarvis filled in, or (identified false) that it could not identify the book. */
   async libraryAddBook(form: FormData): Promise<{
     book_id: number; title: string; tags: string[]; path: string;
-    identified?: boolean; filled?: Record<string, string>; message?: string;
+    identified?: boolean; filled?: Record<string, string>; message?: string; catalogues?: BookCatalogueReport;
   }> {
     const resp = await apiClient.post('/api/library/books', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600_000 });
+    return resp.data;
+  },
+
+  /** The book catalogues (Google Books, Open Library) as they apply to the caller, with each one's last answer. */
+  async libraryCatalogues(): Promise<BookCatalogues> {
+    const resp = await apiClient.get('/api/library/catalogues', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** The Test button on a book catalogue card: one lookup with the typed (else saved) key or email. */
+  async testBookCatalogue(body: { source: BookCatalogueId; api_key?: string; contact_email?: string }): Promise<BookCatalogueTest> {
+    const resp = await apiClient.post('/api/users/me/book-metadata/test', body, { timeout: 30_000 });
     return resp.data;
   },
 

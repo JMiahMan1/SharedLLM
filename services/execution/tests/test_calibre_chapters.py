@@ -255,6 +255,19 @@ def test_a_close_title_is_enough_when_the_author_was_misheard_too():
     assert row["book_id"] == 8 and row["asked_for"] == query
 
 
+def test_a_title_that_sounds_right_but_reads_wrong_finds_the_book():
+    # Heard over a speaker: "Wild Apart" for "Wild at Heart". Few words in common, but it sounds the same.
+    assert not match_books(MISHEARD_ROWS, "Wild Apart")[0]
+    row = pick_book(MISHEARD_ROWS, "Wild Apart")
+    assert row["book_id"] == 7 and row["asked_for"] == "Wild Apart"
+
+
+@pytest.mark.parametrize("query", ["Wild Ones", "Something Else Entirely", "Wid"])
+def test_a_title_that_sounds_like_nothing_on_the_shelf_is_still_refused(query):
+    with pytest.raises(CalibreLibraryError):
+        pick_book(MISHEARD_ROWS, query)
+
+
 def test_two_close_candidates_stay_a_refusal_not_a_guess():
     rows = [calibre_client._book_row(e) for e in [*MISHEARD_SHELF, _entry(15, "Wild at Heart Study Guide", "John Eldredge")]]
     with pytest.raises(CalibreLibraryError) as caught:

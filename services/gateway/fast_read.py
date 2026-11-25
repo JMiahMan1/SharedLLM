@@ -59,10 +59,16 @@ def object_of(query: str) -> str:
     """The words after "read (me)": "Read me chapter 1 of X, please" -> "chapter 1 of X"."""
     text = (query or "").strip().strip("?.!").strip()
     text = re.sub(r"^(?:(?:hey|ok|okay)\s+)?jarvis[\s,.!]*", "", text, flags=re.IGNORECASE)
-    m = _VERB.match(text)
+    m = _VERB.match(text) or _HEARD_AS_READ.match(text)
     if not m:
         return ""
     return _TAIL.sub("", text[m.end():]).strip(" ,.!?\"'")
+
+
+#: "Read" as speech recognition sometimes writes it ("Re-Chapter 1 of ...", "Red chapter 1 of
+#: ..."): taken as "read" only before "chapter N", where no other meaning is likely.
+_HEARD_AS_READ = re.compile(
+    r"^(?:re|red|rid|reid|wreath|reads?)[\s,-]+(?=(?:the\s+)?(?:chapter|ch\.)\s*\w)", re.IGNORECASE)
 
 
 def reads_something_else(query: str) -> bool:

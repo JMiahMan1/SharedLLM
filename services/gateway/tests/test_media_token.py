@@ -89,3 +89,14 @@ async def test_endpoint_token_is_user_specific(client):
     resp = client.post("/api/media/token")
     token = resp.json()["token"]
     assert verify(token, "someone-else", now=int(time.time())) is False
+
+
+def test_why_invalid_names_the_reason_without_the_token():
+    from services.shared.media_token import sign, why_invalid
+
+    good, _exp = sign("household", now=1_000_000, ttl=100)
+    assert why_invalid(good, "household", now=1_000_050) is None
+    assert why_invalid(good, "household", now=1_000_130) == "expired 30 s ago"
+    assert why_invalid(good, "someone", now=1_000_050) == "bad signature"
+    assert why_invalid("garbage", "household") == "malformed"
+    assert why_invalid(good, "", now=1_000_050) == "no user"

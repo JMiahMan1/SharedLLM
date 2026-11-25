@@ -116,10 +116,12 @@ from services.gateway import (
     private_chat_messages,
     private_chat_preview,
     private_chat_reminders,
+    profile_stats,
     push_routes,
     recipe_images,
     room_presence,
     todo_routes,
+    voice_outcomes,
     weather_routes,
 )
 from services.gateway import beloved as beloved_routes
@@ -215,7 +217,8 @@ from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WOR
 from services.health import challenges as _challenges
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
-from services.shared.media_token import sign, verify
+from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS, sign, verify
+from services.shared.media_token import why_invalid as media_token_why_invalid
 
 START_TIME = time.time()
 
@@ -266,8 +269,29 @@ def _split_reasoning(message: str, thinking: str | None) -> tuple[str, str | Non
 _REPLY_VOICE: ContextVar[str | None] = ContextVar("reply_voice", default=None)
 
 
+#: Fast answers whose words are logged (one line, ``REPLY_LOG_CHARS``), so a voice test can be
+#: graded from the gateway log: what was played, read, or done. Only these: other answers can
+#: be personal (a recap, a location, a private chat) and stay out of the log.
+LOGGED_REPLY_INTENTS = frozenset({
+    "play_media", "pause_media", "media_transport", "read_aloud", "turn_on", "turn_off", "timer_stop",
+    "device_state",
+})
+REPLY_LOG_CHARS = 200
+
+
+def _log_reply(message: str, intent: str | None) -> None:
+    """``[Reply] <intent>: <what is said>`` for a fast answer in ``LOGGED_REPLY_INTENTS``."""
+    if intent not in LOGGED_REPLY_INTENTS:
+        return
+    text = " ".join(str(message or "").split())
+    if len(text) > REPLY_LOG_CHARS:
+        text = text[:REPLY_LOG_CHARS] + f"... ({len(text)} characters)"
+    log.info(f"[Reply] {intent}: {text}")
+
+
 def _make_ollama_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
+    _log_reply(message, intent)
     if not stream:
         message, thinking = _split_reasoning(message, thinking)
         msg: dict[str, Any] = {"role": "assistant", "content": message}
@@ -322,6 +346,7 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: s
 
 def _make_openai_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
+    _log_reply(message, intent)
     if not stream:
         message, thinking = _split_reasoning(message, thinking)
         msg: dict[str, Any] = {"role": "assistant", "content": message}
@@ -472,6 +497,7 @@ def _offline_chat_reply(model: str, is_openai: bool, *, voice: bool, user: str |
     """The answer to a question that needs the local AI while it is known to be offline:
     at once, in plain words, 503. Typed chat is promised a notice when it is back."""
     exc = local_ai.LLM.unavailable()
+    voice_outcomes.note_outcome("offline")
     body = local_ai.offline_body(exc, voice=voice)
     if not voice:
         local_ai.remember_waiting(user)
@@ -948,6 +974,7 @@ app.include_router(info_router)
 app.include_router(family_safety.router)
 app.include_router(app_vetting_routes.router)
 app.include_router(collector_health_routes.router)
+app.include_router(profile_stats.router)  # Profile stats pages: each person's, and the admin's (docs/PROFILE_STATS.md)
 app.include_router(push_routes.router)
 app.include_router(network_routes.router)
 app.include_router(weather_routes.router)
@@ -1438,6 +1465,24 @@ async def _execution_post(path: str, payload: dict, timeout: float = 120.0) -> d
             text = await resp.text()
             return {"status": "FAILURE", "message": f"The {path} call answered HTTP {resp.status}: {text[:200]}"}
         return await resp.json()
+
+
+async def _misheard_play(query: str, creds: Any) -> str | None:
+    """ "Play <title>" when ``query`` is a misheard play whose rest the libraries clearly have, else None."""
+    for guess in fast_media.misheard_play(query):
+        try:
+            data = await _execution_post("/execute/media/find", {
+                "user_context": creds.model_dump(), "query": guess}, timeout=20.0)
+        except Exception as exc:
+            log.warning(f"[FastPath] could not check {guess!r} as a misheard play: {exc}")
+            return None
+        detail = data.get("detail") or {}
+        if detail.get("action") == "play" and float(detail.get("score") or 0) >= fast_media.MISHEARD_PLAY_MIN_SCORE:
+            best = detail.get("best") or {}
+            log.info(f"[FastPath] heard {query!r} as 'Play {guess}' (the library has {best.get('title')!r}, "
+                     f"{detail.get('score')})")
+            return f"Play {guess}"
+    return None
 
 
 async def _answer_media_choice(query: str, user_id: str, creds: Any) -> str | None:
@@ -2767,10 +2812,17 @@ async def _resolve_identity_from_media_token(request: Request) -> Any | None:
     if not mt:
         return None
     user = request.query_params.get("user", "")
-    if not user or not verify(mt, user):
+    why = media_token_why_invalid(mt, user)
+    if why:
+        log.info(f"[media token] refused for user={user!r} on {request.url.path}: {why}")
         raise HTTPException(status_code=403, detail="Invalid or expired media token")
+    # A voice satellite that did not recognise the speaker acts as the household, and its
+    # streams are signed for that name. The household is not a user: Identity answers it
+    # only when asked for it as the household (a "rag_user" lookup is a 401, and every
+    # audiobook or podcast started by an unrecognised voice failed on its first request).
+    who = {"household": True} if user == fast_media.HOUSEHOLD_USER else {"rag_user": user}
     try:
-        return await resolve_identity({"rag_user": user})
+        return await resolve_identity(who)
     except HTTPException as e:
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
 
@@ -4247,6 +4299,25 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None):
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
+    """Answer one request to Jarvis, and count how it went for the admin page
+    (voice_outcomes: counts and timings only, written off this path)."""
+    record = voice_outcomes.begin("chat")  # "voice" once the handler sees a satellite's room
+    try:
+        response = await _chat_handler_impl(request, background_tasks)
+    except HTTPException as exc:
+        if exc.status_code >= 500:
+            voice_outcomes.finish(record, "timeout" if exc.status_code == 504 else "error")
+        raise
+    except TimeoutError:
+        voice_outcomes.finish(record, "timeout")
+        raise
+    except Exception:
+        voice_outcomes.finish(record, "error")
+        raise
+    return voice_outcomes.finish_response(record, response)
+
+
+async def _chat_handler_impl(request: Request, background_tasks=None):
     log.info("Chat handler entered")
     client = get_http_client()
     # 1. Resolve Identity
@@ -4267,6 +4338,10 @@ async def chat_handler(request: Request, background_tasks=None):
             return JSONResponse(status_code=401, content={"error": {"message": msg, "type": "unauthorized"}})
         return JSONResponse(status_code=401, content={"error": msg})
     voice_context = _voice_context_from(request, body)
+    if voice_context:
+        record = voice_outcomes.current()
+        if record is not None:
+            record.source = "voice"
 
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -4364,6 +4439,7 @@ async def chat_handler(request: Request, background_tasks=None):
         # Everything this chat turn controls is Jarvis acting: only entities exposed to voice (exposure.py).
         creds.via = "assistant"
         user_id = creds.user
+        voice_outcomes.set_user(user_id)
         if voice_speaker_name and creds.user == voice_speaker_name:
             creds.identified_by = "voice"
             log.info(f"[ChatHandler] Answering as {user_id}, recognised by voice")
@@ -4524,6 +4600,13 @@ async def chat_handler(request: Request, background_tasks=None):
             if is_openai:
                 return _make_openai_response(choice_answer, selected_model, "play_media")
             return _make_ollama_response(choice_answer, selected_model, "play_media")
+
+    # "Play" heard as another word ("Late <title>"): played only when the libraries have a
+    # strong match for the rest; anything else goes on as it was heard (fast_media.misheard_play).
+    if not grounded and not engine.is_fast_path(intent, confidence):
+        heard_as = await _misheard_play(query, creds)
+        if heard_as:
+            query, intent, confidence = heard_as, "play_media", 1.0
 
     # "Read John 3:16", "Read chapter 1 of <Title>", "Read <Title>", "Keep reading": read aloud
     # from the Bible service or the book library (fast_read.py). A title the library does not
@@ -5193,6 +5276,10 @@ async def chat_handler(request: Request, background_tasks=None):
         # streamed (speech_stream.py), and the end of the stream says what is left to say.
         "speech_stream": speech_stream,
     }
+    # How this request goes is counted when its job ends (voice_outcomes).
+    carried = voice_outcomes.defer()
+    if carried:
+        job_payload["_outcome"] = carried
 
     assert job_queue is not None, "Job queue not initialized"
     job_id = await job_queue.enqueue_job(user_id, job_payload)
@@ -12471,8 +12558,9 @@ async def library_book_tags(book_id: int, request: Request):
 @app.post("/api/library/books/inspect")
 async def library_inspect_book(request: Request):
     """Fill in a book before adding it: the file's own details, Google Books and
-    Open Library, and suggested tags. Nothing is saved."""
-    await _require_admin(request)
+    Open Library (the ones the admin turned on in Accounts & Integrations), and
+    suggested tags. Nothing is saved."""
+    who = await _require_admin(request)
     form = await request.form()
     upload = form.get("file")
     if upload is None or not hasattr(upload, "read"):
@@ -12480,6 +12568,7 @@ async def library_inspect_book(request: Request):
     out = aiohttp.FormData()
     out.add_field("library_path", await _library_path())
     out.add_field("online", "false" if str(form.get("online") or "").lower() == "false" else "true")
+    out.add_field("user", who)
     out.add_field("file", await upload.read(), filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     return await _storage_library("POST", "/calibre/books/inspect", data=out, timeout=120.0)
 
@@ -12500,6 +12589,8 @@ async def library_add_book(request: Request):
     for key in ("title", "authors", "tags", "series", "comments", "publisher", "published", "isbn", "language", "cover_url",
                 "online"):
         out.add_field(key, str(form.get(key) or "")[:8000])
+    # Whose catalogue integrations (Accounts & Integrations) fill the book in.
+    out.add_field("user", who)
     out.add_field("file", data, filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     log.info("[library] %s adds %s (%d bytes)", who, getattr(upload, "filename", "book"), len(data))
     return await _storage_library("POST", "/calibre/books/add", data=out, timeout=600.0)
@@ -12523,8 +12614,16 @@ async def library_enrich_books(request: Request):
     log.info("[library] %s fills in books (dry_run=%s, limit=%s)", who, dry_run, limit)
     return await _storage_library("POST", "/calibre/books/enrich", json_body={
         "library_path": await _library_path(), "dry_run": dry_run, "limit": limit,
-        "book_ids": book_ids, "online": body.get("online", True) is not False,
+        "book_ids": book_ids, "online": body.get("online", True) is not False, "user": who,
     }, timeout=600.0)
+
+
+@app.get("/api/library/catalogues")
+async def library_catalogues(request: Request):
+    """The book catalogues (Google Books, Open Library) as they apply to the caller:
+    on or off, ready or why not, and each one's last answer. Never a key."""
+    who = await _signed_in(request)
+    return await _storage_library("POST", "/calibre/catalogues", json_body={"user": who}, timeout=30.0)
 
 
 #: Topics a feature may ask for (rag topics.py): a Calibre tag such as
@@ -20829,7 +20928,9 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
         raise HTTPException(status_code=400, detail="Audiobookshelf URL not configured")
 
     user = request.query_params.get("user") or creds.get("user") or creds.get("username") or ""
-    mt = request.query_params.get("mt") or (sign(user)[0] if user else None)
+    # The segments get a token of their own, minted now for the device's lifetime: reusing the
+    # incoming one made every segment expire with the first URL, part way into a long book.
+    mt = sign(user, ttl=DEVICE_TOKEN_TTL_SECONDS)[0] if user else None
 
     track_url = f"{abs_url}/public/session/{session_id}/track/{track_index}"
     playlist_url: str | None = None

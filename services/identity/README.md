@@ -112,6 +112,14 @@ The current resolved credential payload can include:
 - Audiobookshelf: `audiobookshelf_url`, `audiobookshelf_user`,
   `audiobookshelf_pass`, `audiobookshelf_api_key`
 - Music Assistant: `mass_url`, `mass_token` (token only)
+- Book catalogues: `book_metadata` (Google Books / Open Library: on or off,
+  order, Open Library contact email, and the Google Books API key), from
+  `services/common/book_metadata.py`. The user's own settings and key, else the
+  system default user's (the household default, no grant needed). Set in
+  Settings > Accounts & Integrations > Google Books / Open Library
+  (`PATCH /api/users/me` with `google_books_key` and `book_metadata`); the
+  cards' Test button is `POST /api/users/me/book-metadata/test`. The key is
+  write-only: `GET /api/users/me` returns `book_metadata_status` without it.
 
 Alongside the credentials, `/api/resolve` returns `credential_sources`
 (`own` / `granted` / `shared` / `absent` per service) and

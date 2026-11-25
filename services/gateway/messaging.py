@@ -77,6 +77,17 @@ return 1
 """
 
 
+def _count_outcome(job: dict[str, Any], *, failed: bool, error: str = "", detail: dict[str, Any] | None = None) -> None:
+    """Count how a request to Jarvis went (voice_outcomes, in memory only). A job
+    that was never a person's request (a mission) carries no record and is skipped."""
+    try:
+        from services.gateway import voice_outcomes
+
+        voice_outcomes.finish_job(job, failed=failed, error=error, detail=detail)
+    except Exception as exc:  # counting must never fail a job
+        log.warning(f"[voice-outcomes] could not count job {job.get('job_id')}: {exc}")
+
+
 class JobStatus:
     QUEUED = "queued"
     PROCESSING = "processing"
@@ -302,6 +313,7 @@ class InferenceJobQueue:
         await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[misc]
         await self._publish_status(job_id, JobStatus.COMPLETED)
         await self._finalize_job(job_id)
+        _count_outcome(job, failed=False)
         log.info(f"Job {job_id} completed.")
 
     async def fail_job(self, job_id: str, error: str, detail: dict[str, Any] | None = None):
@@ -330,6 +342,7 @@ class InferenceJobQueue:
         await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[misc]
         await self._publish_status(job_id, JobStatus.FAILED)
         await self._finalize_job(job_id)
+        _count_outcome(job, failed=True, error=error, detail=detail)
         log.error(f"Job {job_id} failed: {error}")
 
     async def peek_job(self) -> dict[str, Any] | None:

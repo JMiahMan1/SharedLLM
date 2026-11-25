@@ -175,14 +175,29 @@ Routes (storage, internal): `POST /calibre/books` (search, `tag`, `untagged`), `
 **Auto-fill before adding** (`services/storage/book_lookup.py`, `POST /calibre/books/inspect`, gateway
 `POST /api/library/books/inspect`, admins): Jarvis reads the file's own details (an EPUB's OPF: title,
 authors, subjects, description, ISBN, publisher, date, language, cover; a PDF's document info via
-`pypdf`), then asks Google Books and Open Library (by ISBN, else title and author) for what is
-missing, and falls back to a "Title - Author" file name. Each field comes from the first source that
+`pypdf`), then asks the book catalogues turned on in Settings > Accounts & Integrations (Google
+Books, with its API key; Open Library) in the order set there (by ISBN, else title and author) for
+what is missing, and falls back to a "Title - Author" file name. Each field comes from the first source that
 has it, and the form says which. Tags are suggested from the library's own tags that the subjects
 name, and the app's topics (fasting, prayer, lent, bible-study, early-church, health) when the
 title, subjects or description use their words (whole words: "breakfast" is not a fast). Every
 field stays editable and nothing is saved until "Add to the library". A catalogue cover is fetched
 only from the catalogues' own hosts, over HTTPS. Publisher, date, ISBN and language are written to
 Calibre's own tables.
+
+**Book catalogues are integrations** (`services/common/book_metadata.py`, docs/INTEGRATIONS.md >
+Google Books / Open Library). Storage asks identity (`/api/resolve`, cached a minute) for the
+requesting person's settings: their own, else the household's on the default user, else the
+defaults (Open Library on; Google Books off until it has a key). **The Google Books API key goes
+in Settings > Accounts & Integrations > Google Books**, never in `.env`: the
+`GOOGLE_BOOKS_API_KEY` variable is gone and is not read (there was no env-to-settings migration;
+a key put in `.env` for it does nothing). A catalogue that is off, or on without what it needs,
+is skipped and every reply says so (`catalogues.skipped`: "Google Books: turned on but no API key
+is set in Settings > Accounts & Integrations"); one that answers with an error (a refused key,
+429) is in `catalogues.errors` and the reply's message. Add a book shows which catalogues fill a
+book in (`GET /api/library/catalogues`, with each one's last answer), and the enrich reply has a
+`catalogues` summary for the whole run. When identity cannot be asked, no catalogue is asked and
+the reply says why.
 
 The audit lists duplicate copies (same title and author, keeping the readable, tagged one), other
 editions ("(Annotated)", "Revised edition"...; numbered volumes are never merged), records with no
