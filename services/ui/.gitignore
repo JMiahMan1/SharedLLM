@@ -26,6 +26,3 @@ dist-ssr
 # Test results and reports
 test-results/
 playwright-report/
-
-# The development-mode build CI serves to the Playwright shards
-dist-e2e/
