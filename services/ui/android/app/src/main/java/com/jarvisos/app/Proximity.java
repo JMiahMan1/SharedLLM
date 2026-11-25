@@ -147,14 +147,21 @@ final class Proximity {
                 android.content.BroadcastReceiver r = new android.content.BroadcastReceiver() {
                     @Override
                     public void onReceive(Context ctx, android.content.Intent intent) {
+                        if (android.content.Intent.ACTION_AIRPLANE_MODE_CHANGED.equals(intent.getAction())) {
+                            // A child's phone keeps when it was cut off, for the parents (OfflineMode).
+                            OfflineMode.radioChanged(ctx, "airplane", intent.getBooleanExtra("state", false));
+                            return;
+                        }
                         int st = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
                         if (st == BluetoothAdapter.STATE_ON || st == BluetoothAdapter.STATE_OFF) {
+                            OfflineMode.radioChanged(ctx, "bluetooth", st == BluetoothAdapter.STATE_OFF);
                             Handler h = handler;
                             if (h != null) h.post(Proximity::apply);
                         }
                     }
                 };
                 android.content.IntentFilter f = new android.content.IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+                f.addAction(android.content.Intent.ACTION_AIRPLANE_MODE_CHANGED);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     app.registerReceiver(r, f, Context.RECEIVER_EXPORTED);
                 } else {
@@ -176,6 +183,11 @@ final class Proximity {
             }
         }
         return config;
+    }
+
+    /** Whether a family phone was heard within {@code ms}. */
+    static boolean heardWithin(long ms) {
+        return lastResultAt > 0 && System.currentTimeMillis() - lastResultAt <= ms;
     }
 
     static Handler handler() {

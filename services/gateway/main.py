@@ -111,6 +111,9 @@ from services.gateway import (
     mdm,
     network_routes,
     notices,
+    offline_cache,
+    offline_guard,
+    offline_relay,
     phone_routes,
     private_chat,
     private_chat_export,
@@ -1028,6 +1031,9 @@ app.add_middleware(
 app.include_router(info_router)
 app.include_router(family_safety.router)
 app.include_router(family_mesh.router)
+app.include_router(offline_relay.router)
+app.include_router(offline_cache.router)
+app.include_router(offline_guard.router)
 app.include_router(app_vetting_routes.router)
 app.include_router(collector_health_routes.router)
 app.include_router(profile_stats.router)  # Profile stats pages: each person's, and the admin's (docs/PROFILE_STATS.md)
@@ -9345,6 +9351,10 @@ _TAMPER_EVENTS = {
     "factory_reset_or_users": "tried to factory reset the device or add another user",
     "jarvis_install": "tried to install or update Jarvis",
     "offline_unlock": "was unlocked with a parent's offline code",
+    # Reported by the phone once it is back online, with when it started and ended.
+    "bluetooth_off": "had Bluetooth off",
+    "airplane_mode": "was in airplane mode",
+    "offline_parent_command": "applied a parent's command sent over Bluetooth",
     "filter_disabled": "turned off Jarvis's web filter",
     # Ways around the web filter the guard found (FilterBypass on the phone).
     "bypass_app": "has an app that gets around the web filter (closed while the filter is on)",
@@ -9366,6 +9376,8 @@ _TAMPER_EVENTS = {
 _TAMPER_WITH_DETAIL = {
     "offline_unlock": "was unlocked with {detail}'s offline code",
     "offline_code_wrong": "had {detail} typed in at its offline unlock",
+    "bluetooth_off": "had Bluetooth off {detail}",
+    "airplane_mode": "was in airplane mode {detail}",
 }
 
 #: Longest detail kept with a tamper report (an app's name, a DNS host, a count).

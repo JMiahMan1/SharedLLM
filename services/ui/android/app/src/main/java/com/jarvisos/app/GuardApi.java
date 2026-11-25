@@ -29,6 +29,8 @@ final class GuardApi {
 
     static final String KEY_STATUS = "guard_status";
     static final String KEY_UNLOCKED_UNTIL = "guard_unlocked_until";
+    /** When the server's status was last read: a parent's offline command newer than it wins (OfflineMode). */
+    static final String KEY_STATUS_AT = "guard_status_at";
     static final String KEY_LAST_PAUSED_AT = "guard_last_paused_at";
     static final String KEY_SERVER_THEME_ID = "guard_server_theme_id";
     /** The parents' offline-code verifiers, from the last status refresh (or approval) that carried them. */
@@ -77,7 +79,8 @@ final class GuardApi {
             String pausedAt = rules != null ? rules.optString("paused_at", "") : "";
             String lastPausedAt = p.getString(KEY_LAST_PAUSED_AT, "");
             boolean freshPause = nowPaused && (!wasPaused || (!pausedAt.isEmpty() && !pausedAt.equals(lastPausedAt)));
-            SharedPreferences.Editor ed = p.edit().putString(KEY_STATUS, body);
+            SharedPreferences.Editor ed = p.edit().putString(KEY_STATUS, body)
+                    .putLong(KEY_STATUS_AT, System.currentTimeMillis());
             String codes = offlineCodesToKeep(next);
             if (codes != null) ed.putString(KEY_OFFLINE_CODES, codes);
             if (!pausedAt.isEmpty()) {
@@ -225,6 +228,12 @@ final class GuardApi {
      */
     static boolean isLocked(Context context) {
         JSONObject s = lastStatus(context);
+        // A parent's command that reached this phone over Bluetooth, newer than the server's last word.
+        Boolean offline = OfflineMode.overlayLock(context, prefs(context).getLong(KEY_STATUS_AT, 0L), s.optString("reason", ""));
+        if (Boolean.TRUE.equals(offline)) return true;
+        if (Boolean.FALSE.equals(offline)) {
+            return LockWarning.lockedByClock(System.currentTimeMillis(), nextLockAt(context), nextLockReason(context));
+        }
         if (!s.optBoolean("locked", false)) {
             return LockWarning.lockedByClock(System.currentTimeMillis(), nextLockAt(context), nextLockReason(context));
         }

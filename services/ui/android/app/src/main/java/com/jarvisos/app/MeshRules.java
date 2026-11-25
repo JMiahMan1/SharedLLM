@@ -12,11 +12,10 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Deque;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
@@ -54,7 +53,18 @@ final class MeshRules {
     static final int TEXT_MAX = 2000;
     static final int THUMB_MAX = 24 * 1024;
     static final long TTL_S = 72 * 3600;
-    static final int STORE_MAX = 200;
+    static final int STORE_MAX = 300;
+    /** Cached household information is offered for up to a week (its age is shown). */
+    static final long CACHE_TTL_S = 7 * 86400;
+
+    /** Item types: a family chat message; a Jarvis request and its answer (relayed);
+     *  a cached household item (newest wins); a parent's command and the child's acknowledgement. */
+    static final String T_CHAT = "chat";
+    static final String T_REQUEST = "rq";
+    static final String T_ANSWER = "rs";
+    static final String T_CACHE = "cache";
+    static final String T_COMMAND = "gc";
+    static final String T_ACK = "ga";
     static final int HOP_LIMIT = 4;
     static final int ID_BYTES = 16;
 
@@ -152,6 +162,12 @@ final class MeshRules {
         final long expiresS;
         final int hops;
         final JSONObject env;
+        /** One of the T_* types (chat when absent, as older phones send). */
+        String type = T_CHAT;
+        /** For a cached item: the server's version (ms); newer replaces older. */
+        long version;
+        /** Clear fields a type carries beside its envelope (a request's signature, an item's addressee). */
+        JSONObject meta;
         /** Written on this phone (it is this phone's job to post it). */
         boolean mine;
         /** Known to be in the family chat. */
@@ -166,7 +182,15 @@ final class MeshRules {
         }
 
         JSONObject wire() throws Exception {
-            return new JSONObject().put("id", id).put("exp", expiresS).put("hops", hops).put("env", env);
+            JSONObject o = new JSONObject().put("id", id).put("exp", expiresS).put("hops", hops).put("env", env);
+            if (!T_CHAT.equals(type)) o.put("type", type);
+            if (version != 0) o.put("ver", version);
+            if (meta != null) o.put("meta", meta);
+            return o;
+        }
+
+        boolean isCache() {
+            return T_CACHE.equals(type);
         }
 
         JSONObject toJson() throws Exception {
@@ -179,6 +203,10 @@ final class MeshRules {
             JSONObject env = o.optJSONObject("env");
             if (!id.matches("[0-9a-f]{32}") || env == null || !"sealed".equals(env.optString("kind"))) return null;
             Item i = new Item(id, o.optLong("exp", 0L), Math.max(0, o.optInt("hops", 0)), env);
+            i.type = o.optString("type", T_CHAT);
+            if (!java.util.Arrays.asList(T_CHAT, T_REQUEST, T_ANSWER, T_CACHE, T_COMMAND, T_ACK).contains(i.type)) return null;
+            i.version = o.optLong("ver", 0L);
+            i.meta = o.optJSONObject("meta");
             i.mine = o.optBoolean("mine", false);
             i.synced = o.optBoolean("synced", false);
             i.receivedAtMs = o.optLong("rx", 0L);
@@ -191,8 +219,16 @@ final class MeshRules {
 
         /** Keep a message unless it is a duplicate, expired, too far travelled or junk; true when it is new. */
         boolean add(Item item, long nowS) {
-            if (item == null || items.containsKey(item.id)) return false;
-            if (item.expiresS <= nowS || item.expiresS > nowS + TTL_S + 3600 || item.hops > HOP_LIMIT) return false;
+            if (item == null) return false;
+            long ttl = item.isCache() ? CACHE_TTL_S : TTL_S;
+            if (item.expiresS <= nowS || item.expiresS > nowS + ttl + 3600) return false;
+            if (!item.isCache() && item.hops > HOP_LIMIT) return false;
+            Item had = items.get(item.id);
+            if (had != null) {
+                // Cached information: the newest server version wins, whoever brought it.
+                if (!item.isCache() || !had.isCache() || item.version <= had.version) return false;
+                items.remove(item.id);
+            }
             items.put(item.id, item);
             trim(nowS);
             return true;
@@ -212,19 +248,38 @@ final class MeshRules {
             for (int k = 0; items.size() > STORE_MAX && k < order.size(); k++) items.remove(order.get(k).id);
         }
 
-        /** The ids a peer can be offered (messages that may still travel). */
+        /** What a peer can be offered: each id, and a cached item's version ({@code id@version}). */
         List<String> digest(long nowS) {
             List<String> out = new ArrayList<>();
-            for (Item i : items.values()) if (i.expiresS > nowS) out.add(i.id);
+            for (Item i : items.values()) if (i.expiresS > nowS) out.add(i.isCache() ? i.id + "@" + i.version : i.id);
             Collections.sort(out);
             return out;
         }
 
-        /** What a peer holding {@code theirs} lacks and may still be given. */
-        List<Item> missingFrom(Set<String> theirs, long nowS) {
+        /** What a peer holding {@code theirs} (id -> version) lacks or holds an older version of. */
+        List<Item> missingFrom(Map<String, Long> theirs, long nowS) {
             List<Item> out = new ArrayList<>();
             for (Item i : items.values()) {
-                if (i.expiresS > nowS && i.hops < HOP_LIMIT && !theirs.contains(i.id)) out.add(i);
+                if (i.expiresS <= nowS) continue;
+                Long v = theirs.get(i.id);
+                if (i.isCache()) {
+                    if (v == null || v < i.version) out.add(i);
+                } else if (i.hops < HOP_LIMIT && v == null) {
+                    out.add(i);
+                }
+            }
+            return out;
+        }
+
+        static Map<String, Long> parseDigest(List<String> tokens) {
+            Map<String, Long> out = new HashMap<>();
+            for (String t : tokens) {
+                int at = t.indexOf('@');
+                try {
+                    out.put(at < 0 ? t : t.substring(0, at), at < 0 ? 0L : Long.parseLong(t.substring(at + 1)));
+                } catch (NumberFormatException ignored) {
+                    // A damaged token is just not offered.
+                }
             }
             return out;
         }
@@ -233,7 +288,10 @@ final class MeshRules {
         boolean receive(JSONObject wire, long nowS, long nowMs) {
             Item i = Item.fromWire(wire);
             if (i == null) return false;
-            Item kept = new Item(i.id, i.expiresS, i.hops + 1, i.env);
+            Item kept = new Item(i.id, i.expiresS, i.isCache() ? 0 : i.hops + 1, i.env);
+            kept.type = i.type;
+            kept.version = i.version;
+            kept.meta = i.meta;
             kept.receivedAtMs = nowMs;
             return add(kept, nowS);
         }
@@ -396,7 +454,7 @@ final class MeshRules {
         final long nowMs;
         private final Reassembler in = new Reassembler();
         private final Deque<byte[]> out = new ArrayDeque<>();
-        private Set<String> theirs;
+        private Map<String, Long> theirs;
         boolean authorised;
         boolean done;
         int received;
@@ -415,11 +473,11 @@ final class MeshRules {
             return new JSONArray(ids).toString().getBytes(StandardCharsets.UTF_8);
         }
 
-        private static Set<String> parseDigest(byte[] body) throws Exception {
+        private static Map<String, Long> parseDigest(byte[] body) throws Exception {
             JSONArray a = new JSONArray(new String(body, StandardCharsets.UTF_8));
-            Set<String> s = new HashSet<>();
-            for (int i = 0; i < a.length(); i++) s.add(a.optString(i));
-            return s;
+            List<String> tokens = new ArrayList<>();
+            for (int i = 0; i < a.length(); i++) tokens.add(a.optString(i));
+            return Store.parseDigest(tokens);
         }
 
         private void queue(byte type, byte[] body) {
@@ -481,7 +539,7 @@ final class MeshRules {
             }
             if (!authorised) return false;
             if (type == F_DIGEST) {
-                Set<String> client = parseDigest(body);
+                Map<String, Long> client = parseDigest(body);
                 queue(F_DIGEST, digestBody(store.digest(nowS)));
                 queueItems(store.missingFrom(client, nowS));
             } else if (type == F_ITEM) {

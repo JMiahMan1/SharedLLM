@@ -13,6 +13,7 @@ import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
 import MobileShell from './components/layout/MobileShell';
 import DeployBanner from './components/layout/DeployBanner';
+import OfflineModeBanner from './components/layout/OfflineModeBanner';
 import LocalAIBanner from './components/layout/LocalAIBanner';
 import ActivityBeacon from './components/layout/ActivityBeacon';
 import PhoneUsageSync from './components/layout/PhoneUsageSync';
@@ -117,6 +118,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
         <Header />
+        <OfflineModeBanner />
         <DeployBanner />
         <LocalAIBanner />
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 scroll-smooth">

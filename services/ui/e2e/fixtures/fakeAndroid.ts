@@ -16,12 +16,15 @@ export interface FakeAndroidState {
   proximity?: Record<string, unknown>;
   mesh?: Record<string, unknown>;
   messages?: unknown[];
+  /** Offline mode: cached items, queued requests, parent commands, diagnostics. */
+  offline?: { cache?: unknown[]; requests?: unknown[]; commands?: unknown[]; diag?: Record<string, unknown>; peerNearby?: boolean };
 }
 
 const PLUGINS: Record<string, string[]> = {
   JarvisVehicleBluetooth: ['getStatus', 'requestPermission', 'listDevices', 'setVehicles', 'getDiagnostics', 'openSettings', 'openBluetoothSettings'],
   JarvisProximity: ['getDiagnostics', 'enable', 'disable'],
   JarvisFamilyMesh: ['getDiagnostics', 'enable', 'disable', 'setRoom', 'send', 'list'],
+  JarvisOfflineMode: ['queue', 'requests', 'cache', 'sendCommand', 'commands', 'getDiagnostics'],
 };
 
 export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<void> {
@@ -65,6 +68,27 @@ export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<
         }
         if (method === 'setRoom') return {};
         return s.mesh;
+      }
+      if (plugin === 'JarvisOfflineMode') {
+        const o = (s.offline ?? {}) as Bag & { requests?: Bag[]; commands?: Bag[] };
+        if (method === 'cache') return { items: o.cache ?? [] };
+        if (method === 'requests') return { requests: o.requests ?? [], online: false, peerNearby: Boolean(o.peerNearby) };
+        if (method === 'commands') return { commands: o.commands ?? [] };
+        if (method === 'getDiagnostics') return o.diag ?? {};
+        if (method === 'queue') {
+          const id = String(Date.now()).padStart(32, '0');
+          o.requests = [...(o.requests ?? []), { id, kind: options.kind, body: options.body, issued_at: 1, expires_at: 2,
+            status: o.peerNearby ? 'waiting_for_online_phone' : 'no_family_phone_nearby' }];
+          s.offline = o;
+          return { id };
+        }
+        if (method === 'sendCommand') {
+          const id = String(Date.now()).padStart(32, '1');
+          o.commands = [...(o.commands ?? []), { id, child: options.child, action: options.action, arg: options.minutes ?? 0,
+            issued_at: Math.floor(Date.now() / 1000), reported: false }];
+          s.offline = o;
+          return { id };
+        }
       }
       return {};
     };

@@ -5,6 +5,7 @@ import VehicleBluetooth, { type VehicleBtDiagnostics } from '../../plugins/vehic
 import Proximity, { type ProximityDiagnostics } from '../../plugins/proximity';
 import { bandLabel } from '../../lib/proximity';
 import FamilyMesh, { type MeshDiagnostics } from '../../plugins/familyMesh';
+import OfflineMode, { type OfflineDiagnostics } from '../../plugins/offlineMode';
 
 /** One line of the panel: what is checked, and what this phone says. */
 export function DiagRow({ label, value, ok, testId }: { label: string; value: string; ok?: boolean | null; testId?: string }) {
@@ -36,6 +37,7 @@ export default function BluetoothDiagnostics() {
   const [vehicle, setVehicle] = useState<VehicleBtDiagnostics | null>(null);
   const [nearby, setNearby] = useState<ProximityDiagnostics | null>(null);
   const [mesh, setMesh] = useState<MeshDiagnostics | null>(null);
+  const [offlineDiag, setOfflineDiag] = useState<OfflineDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -43,11 +45,13 @@ export default function BluetoothDiagnostics() {
       VehicleBluetooth.getDiagnostics(),
       Proximity.getDiagnostics().catch(() => null),
       FamilyMesh.getDiagnostics().catch(() => null),
+      OfflineMode.getDiagnostics().catch(() => null),
     ])
-      .then(([v, n, m]) => {
+      .then(([v, n, m, o]) => {
         setVehicle(v);
         setNearby(n);
         setMesh(m);
+        setOfflineDiag(o);
         setError(null);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not read this phone'));
@@ -136,6 +140,24 @@ export default function BluetoothDiagnostics() {
               <DiagRow label="Held on this phone" value={`${mesh.stored} (${mesh.unsynced} of mine not yet in the family chat)`} />
               <DiagRow label="Last sent to the family chat" value={when(mesh.lastServerSyncAt)} />
               {mesh.lastError && <DiagRow label="Last problem" value={mesh.lastError} ok={false} />}
+            </dl>
+          </section>
+        )}
+        {offlineDiag && (
+          <section>
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Offline mode</h4>
+            <dl className="divide-y divide-white/5">
+              <DiagRow label="Server reachable" value={offlineDiag.online ? 'Yes' : 'No'} ok={offlineDiag.online} />
+              <DiagRow label="Family phone heard (5 min)" value={offlineDiag.peerNearby ? 'Yes' : 'No'} ok={offlineDiag.peerNearby ? true : null} />
+              <DiagRow label="My Jarvis requests waiting" value={String(offlineDiag.queued)} testId="diag-offline-queued" />
+              <DiagRow label="Carrying for others" value={String(offlineDiag.carrying)} />
+              <DiagRow label="Last relayed to Jarvis" value={when(offlineDiag.lastRelayAt)} testId="diag-offline-relay" />
+              <DiagRow label="Household information" value={`${offlineDiag.cacheItems} items, refreshed ${when(offlineDiag.snapshotAt)}`} />
+              <DiagRow label="Parent commands waiting" value={String(offlineDiag.commandsWaiting)} />
+              {offlineDiag.protectedPhone && (
+                <DiagRow label="Parent keys trusted" value={`${offlineDiag.parentKeys} (version ${offlineDiag.keysVersion || 'none'})`}
+                  ok={offlineDiag.parentKeys > 0} testId="diag-offline-parent-keys" />
+              )}
             </dl>
           </section>
         )}
