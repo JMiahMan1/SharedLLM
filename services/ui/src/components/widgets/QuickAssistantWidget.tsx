@@ -1,3 +1,6 @@
+import { Capacitor } from '@capacitor/core';
+import { isUnreachable } from '../../hooks/useOfflineMode';
+import { offlineReply } from '../../lib/offlineReply';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
@@ -65,6 +68,14 @@ const QuickAssistantWidget = ({ settingsButton }: IWidgetProps) => {
           { id: `assistant-${Date.now()}`, role: 'assistant', content: said, timestamp: Date.now(), notice: true },
         ]);
         if (!isOfflineFailure(err)) setInput('');
+      } else if (Capacitor.getPlatform() === 'android' && isUnreachable(err)) {
+        // The server cannot be reached: answer from this phone's saved information
+        // when it can, otherwise queue it for a family phone that is online.
+        const reply = await offlineReply(text);
+        setMessages((prev) => [
+          ...prev,
+          { id: `assistant-${Date.now()}`, role: 'assistant', content: reply, timestamp: Date.now(), notice: true },
+        ]);
       } else {
         toast.error('Failed to send message');
         setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));

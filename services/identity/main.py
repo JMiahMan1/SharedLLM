@@ -62,6 +62,7 @@ from services.identity import (
     new_voices,
     onboarding,
     profile_sharing,
+    prompt_seed,
     push,
     roles,
     sign_in_reset,
@@ -89,6 +90,7 @@ from services.identity.models import (
     GuardRequest,
     GuardUnlockRequest,
     LinkedAccount,
+    PromptSeed,
     RavenMission,
     RecommendationLanes,
     Role,
@@ -5375,6 +5377,38 @@ def manual_seed(body: _SeedRequest | None = None, force: bool = False, session: 
     should_force = (body.force if body else False) or force
     count = seed_from_env(session, force=should_force)
     return {"status": "SUCCESS", "count": count}
+
+
+@app.get("/api/admin/prompts")
+def list_prompt_seeds(session: Session = Depends(get_session), _auth: bool = Depends(require_admin_or_internal)):
+    """Each prompts/*.md setting against its repo file.
+
+    ``state`` is current, outdated (untouched; replaced at the next start), edited or
+    missing; ``repo_has_newer_version`` marks an edited prompt whose repo file changed
+    since it was seeded.
+    """
+    return {"prompts": prompt_seed.prompt_statuses(session)}
+
+
+@app.get("/api/admin/prompts/{key}")
+def view_prompt_seed(key: str, session: Session = Depends(get_session), _auth: bool = Depends(require_admin_or_internal)):
+    """One prompt's live value beside the repo's text, to compare before replacing."""
+    repo_text = prompt_seed.repo_prompts().get(key)
+    if repo_text is None:
+        raise HTTPException(status_code=404, detail=f"No prompts/{key}.md in the repo")
+    setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+    live = setting.value if setting else None
+    status = prompt_seed.status_of(live, repo_text, session.get(PromptSeed, key))
+    return {"key": key, **status, "live": live, "repo": repo_text}
+
+
+@app.post("/api/admin/prompts/{key}/replace")
+def replace_prompt_seed(key: str, session: Session = Depends(get_session), _auth: bool = Depends(require_admin_or_internal)):
+    """Replace an edited prompt with the repo's version; it follows the repo again after."""
+    result = prompt_seed.replace_with_repo(session, key)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No prompts/{key}.md in the repo")
+    return result
 
 # DNS Management
 

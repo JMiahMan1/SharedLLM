@@ -3,6 +3,7 @@ import BottomNav from './BottomNav';
 import Header from './Header';
 import ServerConfigBanner from './ServerConfigBanner';
 import DeployBanner from './DeployBanner';
+import OfflineModeBanner from './OfflineModeBanner';
 import LocalAIBanner from './LocalAIBanner';
 
 let shellsMounted = 0;
@@ -34,6 +35,7 @@ const MobileShell = ({ children }: MobileShellProps) => {
       <div className="safe-area-top app-bar backdrop-blur-md z-40 border-b border-white/5 transition-all duration-300">
         <ServerConfigBanner />
         <Header />
+        <OfflineModeBanner />
         <DeployBanner />
         <LocalAIBanner />
       </div>
