@@ -498,9 +498,11 @@ final class Proximity {
             if (h == null) continue;
             long now = System.currentTimeMillis();
             lastResultAt = now;
-            aggregator.add(h.member, result.getRssi(), h.txAt1m, now);
+            // The person's own other device is not a sighting: a trip is never "with" yourself.
+            if (!h.ownDevice) aggregator.add(h.member, result.getRssi(), h.txAt1m, now);
             synchronized (peers) {
-                peers.put(h.member, new Object[] {ProximityRules.band(result.getRssi(), h.txAt1m), result.getRssi(), now});
+                peers.put(h.member, new Object[] {ProximityRules.band(result.getRssi(), h.txAt1m), result.getRssi(), now,
+                        h.ownDevice});
             }
             FamilyMesh.onPeer(app, h.member, h.flags, result.getDevice());
             return;
@@ -603,7 +605,8 @@ final class Proximity {
                 for (Map.Entry<String, Object[]> e : peers.entrySet()) {
                     Object[] v = e.getValue();
                     list.put(new JSONObject().put("person", e.getKey())
-                            .put("band", v[0] == null ? "too_far" : v[0]).put("rssi", v[1]).put("at", v[2]));
+                            .put("band", v[0] == null ? "too_far" : v[0]).put("rssi", v[1]).put("at", v[2])
+                            .put("ownDevice", v.length > 3 && Boolean.TRUE.equals(v[3])));
                 }
             }
             o.put("peers", list);

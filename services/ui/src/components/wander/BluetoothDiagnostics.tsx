@@ -115,7 +115,7 @@ export default function BluetoothDiagnostics() {
               <DiagRow
                 label="Phones heard"
                 value={nearby.peers.length
-                  ? nearby.peers.map((p) => `${p.person}: ${bandLabel(p.band)} (${p.rssi} dBm, ${when(p.at)})`).join('; ')
+                  ? nearby.peers.map((p) => `${p.ownDevice ? 'Your other device' : p.person}: ${bandLabel(p.band)} (${p.rssi} dBm, ${when(p.at)})`).join('; ')
                   : 'None yet'}
                 testId="diag-peers"
               />

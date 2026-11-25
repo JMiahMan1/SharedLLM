@@ -149,11 +149,14 @@ final class ProximityRules {
         final String member;
         final int flags;
         final int txAt1m;
+        /** Another device of this phone's own person (a phone never hears its own advertisement). */
+        final boolean ownDevice;
 
-        Heard(String member, int flags, int txAt1m) {
+        Heard(String member, int flags, int txAt1m, boolean ownDevice) {
             this.member = member;
             this.flags = flags;
             this.txAt1m = txAt1m;
+            this.ownDevice = ownDevice;
         }
     }
 
@@ -163,16 +166,24 @@ final class ProximityRules {
         /** The service UUIDs to filter for (previous, current, next period). */
         final List<UUID> uuids = new ArrayList<>();
         private final Map<String, String> byId = new HashMap<>();
+        private final String me;
 
+        /**
+         * Every member is resolved, this phone's own person too: a phone never receives its own
+         * advertisement, so the person's identifier heard here is that person's other phone or tablet,
+         * which must find this one (offline chat, offline mode and the person's own data sync with it).
+         */
         Resolver(byte[] key, List<String> members, String me, long period) {
             this.period = period;
+            this.me = me;
             for (long p = period - 1; p <= period + 1; p++) {
                 UUID u = serviceUuid(key, p);
                 uuids.add(u);
                 for (String m : members) {
-                    if (m == null || m.isEmpty() || m.equals(me)) continue;
+                    if (m == null || m.isEmpty()) continue;
                     byId.put(u + "/" + hex(memberId(key, m, p), ID_BYTES), m);
                 }
+                if (me != null && !me.isEmpty()) byId.put(u + "/" + hex(memberId(key, me, p), ID_BYTES), me);
             }
         }
 
@@ -181,7 +192,7 @@ final class ProximityRules {
             String member = byId.get(uuid + "/" + hex(data, ID_BYTES));
             if (member == null) return null;
             int tx = data[ID_BYTES + 1];
-            return new Heard(member, data[ID_BYTES] & 0xff, tx == 0 ? DEFAULT_TX_AT_1M : tx);
+            return new Heard(member, data[ID_BYTES] & 0xff, tx == 0 ? DEFAULT_TX_AT_1M : tx, member.equals(me));
         }
     }
 
