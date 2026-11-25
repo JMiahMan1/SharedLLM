@@ -2228,7 +2228,7 @@ def _voice_calibration(session: Session, profiles: list[dict] | None = None) -> 
     profiles = _voice_profiles(session) if profiles is None else profiles
     key = voice.profiles_key(profiles)
     cached = _calibration_cache.get("value")
-    if cached and cached.get("key") == key:
+    if voice.calibration_is_current(cached, key):
         return cached
     row = session.exec(select(GlobalSetting).where(GlobalSetting.key == CALIBRATION_SETTING)).first()
     stored = None
@@ -2237,7 +2237,7 @@ def _voice_calibration(session: Session, profiles: list[dict] | None = None) -> 
             stored = json.loads(row.value or "{}")
         except ValueError:
             stored = None
-    if isinstance(stored, dict) and stored.get("key") == key:
+    if voice.calibration_is_current(stored, key):
         _calibration_cache["value"] = stored
         return stored
     result = {**voice.calibrate(profiles), "calibrated_at": datetime.now(UTC).isoformat()}

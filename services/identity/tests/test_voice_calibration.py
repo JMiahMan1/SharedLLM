@@ -234,18 +234,19 @@ def test_a_quiet_household_still_names_the_right_person():
     assert result["relative"] >= result["relative_needed"]
 
 
-def test_the_measured_ambiguous_clip_is_decided_by_the_cohort():
-    """The live 0.78 vs 0.756 clip: too small a lead for a fixed margin, clear enough for the cohort."""
+def test_the_measured_ambiguous_clip_names_nobody():
+    """A live request scored 0.78 with the next person at 0.756: the cohort says
+    the leader is above the house mean, but two-hundredths is a coin toss, so it
+    falls back to the household rather than answer in the wrong person's voice."""
     candidates = [
         {"username": "jeremiah", "name": "Jeremiah", "score": 0.78, "group": "adult"},
         {"username": "zachary", "name": "Zachary", "score": 0.756, "group": "adult"},
         {"username": "noah", "name": "Noah", "score": 0.604, "group": "adult"},
     ]
     result = voice.decide(candidates, 0.752, 0.08, 0.03)
+    assert result["relative"] >= result["relative_needed"]
     assert result["margin"] < result["margin_needed"]
-    assert result["matched"] is True
-    assert result["matched_username"] == "jeremiah"
-    assert result["decided_by"] == "cohort"
+    assert result["matched"] is False
 
 
 def test_a_near_tie_inside_the_cohort_is_left_unmatched():
@@ -299,3 +300,37 @@ def test_calibration_derives_a_relative_lead_from_the_household():
     assert 0.02 <= calibration["relative"] <= 0.15
     assert calibration["relative_speaker"]["n"] >= 1
     assert calibration["relative_impostor"]["n"] >= 1
+
+
+def test_a_parent_is_not_refused_because_a_child_is_second():
+    """Three live requests were rejected this way: the parent led by 0.16-0.18
+    with their own child as runner-up, and the doubling asked for 0.20."""
+    candidates = [
+        {"username": "dad", "name": "Dad", "score": 0.813, "group": "adult"},
+        {"username": "kid", "name": "Kid", "score": 0.635, "group": "child"},
+        {"username": "other", "name": "Other", "score": 0.58, "group": "adult"},
+    ]
+    result = voice.decide(candidates, 0.72, 0.10, 0.03)
+    assert result["margin_needed"] == pytest.approx(0.10, abs=0.001)
+    assert result["matched_username"] == "dad" and result["decided_by"] == "score"
+
+
+def test_a_quiet_clip_beside_a_child_still_stands_out():
+    """Under the old floor this clip was 0.73 against 0.752 and went to the default."""
+    candidates = [
+        {"username": "dad", "name": "Dad", "score": 0.73, "group": "adult"},
+        {"username": "kid", "name": "Kid", "score": 0.60, "group": "child"},
+        {"username": "other", "name": "Other", "score": 0.52, "group": "adult"},
+    ]
+    result = voice.decide(candidates, 0.752, 0.08, 0.03)
+    assert result["score"] < result["threshold"]
+    assert result["matched_username"] == "dad" and result["decided_by"] == "cohort"
+
+
+def test_a_calibration_from_an_older_version_is_not_reused():
+    current = {"key": "ge2e:abc", "version": voice.CALIBRATION_VERSION, "threshold": 0.72}
+    assert voice.calibration_is_current(current, "ge2e:abc") is True
+    assert voice.calibration_is_current({**current, "version": voice.CALIBRATION_VERSION - 1}, "ge2e:abc") is False
+    assert voice.calibration_is_current({"key": "ge2e:abc", "threshold": 0.782}, "ge2e:abc") is False
+    assert voice.calibration_is_current(None, "ge2e:abc") is False
+    assert voice.calibration_is_current(current, "ge2e:other") is False
