@@ -20,6 +20,11 @@ on:
       - 'tools/**'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
+    inputs:
+      services:
+        description: "Comma-separated services to build (for example gateway,homehub,ui); empty builds what the last commit changed"
+        required: false
+        default: ""
 
 # A new push to a pull request cancels that PR's previous build, which only
 # checks that the images still build. Pushes to a branch publish images and
@@ -47,8 +52,8 @@ jobs:
     outputs:
       build_base: ${{ steps.set-outputs.outputs.build_base }}
       services: ${{ steps.set-outputs.outputs.services }}
-      ui: ${{ steps.filter.outputs.ui }}
-      caddy: ${{ steps.filter.outputs.caddy }}
+      ui: ${{ steps.set-outputs.outputs.ui }}
+      caddy: ${{ steps.set-outputs.outputs.caddy }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -187,8 +192,26 @@ jobs:
             fi
           fi
 
+          # A manual run can name the services to build (a build that was cancelled, for example).
+          REQUESTED="${{ github.event.inputs.services }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$REQUESTED" ]; then
+            SERVICES_JSON=$(echo "$REQUESTED" | tr ', ' '\n\n' | grep -v '^$' | grep -vxE 'ui|caddy' | jq -R . | jq -sc .)
+            BUILD_BASE='false'
+            echo "Manual run: building $SERVICES_JSON"
+          fi
+
+          UI='${{ steps.filter.outputs.ui }}'
+          CADDY='${{ steps.filter.outputs.caddy }}'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$REQUESTED" ]; then
+            UI=false; CADDY=false
+            echo ",$REQUESTED," | tr -d ' ' | grep -q ',ui,' && UI=true
+            echo ",$REQUESTED," | tr -d ' ' | grep -q ',caddy,' && CADDY=true
+          fi
+
           echo "build_base=$BUILD_BASE" >> $GITHUB_OUTPUT
           echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
+          echo "ui=$UI" >> $GITHUB_OUTPUT
+          echo "caddy=$CADDY" >> $GITHUB_OUTPUT
 
   build-base:
     name: Build & Push Shared Base
