@@ -4,8 +4,9 @@ import { animatedFrameSize, frameMs, looksAnimated, MAX_FRAMES, MAX_TOTAL_PIXELS
 import { applyLook, buildLut, FILTERS, grainAt, isNeutral, lookFor, NEUTRAL_LOOK } from './filters';
 import { cropFrame, downscale, fitCrop, fitScale, makeFrame, moveCrop, normaliseCrop, orient, resizeCrop, MIN_CROP } from './geometry';
 import { addStroke, contrastOn, drawingOf, EMOJI, pinchChange, removeOverlay, STICKERS, stickerSvg, thinPoints, undoStroke } from './overlays';
-import { emptyRecipe, FILTER_IDS, isIdentity, MAX_OVERLAYS, MAX_POINTS, NO_ADJUSTMENTS, parseRecipe, type EditRecipe } from './recipe';
+import { compactRecipe, emptyRecipe, FILTER_IDS, isIdentity, MAX_OVERLAYS, MAX_POINTS, NO_ADJUSTMENTS, parseRecipe, type EditRecipe } from './recipe';
 import { fakeGif, fakePngHeader, fakeWebpHeader } from '../../test/fakes/fakeGif';
+import { editedFile, editedFileName } from './files';
 
 /** A frame where pixel (x, y) has red x, green y, blue 7, so where each pixel went can be read back. */
 function grid(width: number, height: number, duration = 0): EditFrame {
@@ -343,5 +344,35 @@ describe('animated pictures', () => {
     expect(frameMs(0)).toBe(100);
     expect(frameMs(null)).toBe(100);
     expect(frameMs(15_000)).toBe(20);
+  });
+});
+
+describe('storing a recipe and naming the result', () => {
+  it('rounds positions to four decimals, reads back as the same edit, and leaves the recipe it was given alone', () => {
+    const recipe: EditRecipe = {
+      ...emptyRecipe(),
+      filter: 'film',
+      crop: { x: 0.1234567, y: 0.2, w: 0.5, h: 0.3333333 },
+      overlays: [
+        { id: 't', kind: 'text', text: 'Hi', font: 'sans', color: '#ffffff', pill: false, x: 0.333333333, y: 0.5, scale: 1.23456789, rotation: 12.3456789 },
+        { id: 'd', kind: 'drawing', strokes: [{ color: '#ff0000', width: 0.0123456, points: [[0.111111, 0.222222]] }] },
+      ],
+    };
+    const before = structuredClone(recipe);
+    const small = compactRecipe(recipe);
+    expect(recipe).toEqual(before);
+    expect(small.crop).toEqual({ x: 0.1235, y: 0.2, w: 0.5, h: 0.3333 });
+    expect(small.overlays[0]).toMatchObject({ x: 0.3333, scale: 1.2346, rotation: 12.3457 });
+    expect(small.overlays[1]).toMatchObject({ strokes: [{ width: 0.0123, points: [[0.1111, 0.2222]] }] });
+    expect(parseRecipe(JSON.parse(JSON.stringify(small)))).toEqual(small);
+  });
+
+  it('names an edited picture after the original, with the type it now is', () => {
+    expect(editedFileName('beach.HEIC', 'image/jpeg')).toBe('beach-edited.jpg');
+    expect(editedFileName('dance.webp', 'image/gif')).toBe('dance-edited.gif');
+    expect(editedFileName('dance-edited.gif', 'image/gif')).toBe('dance-edited.gif');
+    expect(editedFileName(undefined, 'image/png')).toBe('picture-edited.png');
+    const file = editedFile({ blob: new Blob([new Uint8Array([1])], { type: 'image/png' }), mime: 'image/png' }, 'cat.jpg');
+    expect(file).toMatchObject({ name: 'cat-edited.png', type: 'image/png', size: 1 });
   });
 });

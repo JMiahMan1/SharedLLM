@@ -1208,6 +1208,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           staged={staged}
           onStage={(files) => setStaged((current) => [...current, ...files])}
           onUnstage={(index) => setStaged((current) => current.filter((_, i) => i !== index))}
+          onReplaceStaged={(index, file) => setStaged((current) => current.map((f, i) => (i === index ? file : f)))}
           onSendFiles={async (caption) => {
             const local = showPendingFile(caption || staged[0]?.name || 'Attachment');
             try {

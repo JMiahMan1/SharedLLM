@@ -4,6 +4,7 @@ import type { PrivateVault } from '../../lib/privateChatCrypto';
 import {
   kenBurns,
   seededRandom,
+  shownPicture,
   SLIDE_INTERVALS,
   slideshowOrder,
   stepSlideshow,
@@ -111,7 +112,8 @@ function Slide({
   /** A clip that cannot play (not decrypted, refused, unplayable): why, so the show can say so and move on. */
   onVideoFailed: (reason: string) => void;
 }) {
-  const { url, failed } = usePrivatePicture(token, item.blob, item.mime, vault);
+  const shown = shownPicture(item);
+  const { url, failed } = usePrivatePicture(token, shown.blob, shown.mime, vault);
   const clip = usePrivateVideo(token, current && item.video ? item.video : null, vault);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -676,6 +678,7 @@ export default function PrivateSlideshow({
 
 /** Decrypt the next picture while this one is up, so the change is instant. */
 function Upcoming({ token, vault, item }: { token: string; vault: PrivateVault; item: GalleryItem }) {
-  usePrivatePicture(token, item.blob, item.mime, vault);
+  const shown = shownPicture(item);
+  usePrivatePicture(token, shown.blob, shown.mime, vault);
   return null;
 }

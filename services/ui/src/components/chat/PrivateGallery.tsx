@@ -4,7 +4,7 @@ import { Check, CheckSquare, ImageMinus, ImagePlus, Images, Loader2, MessageSqua
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { isSealedMessage, type PrivateVault } from '../../lib/privateChatCrypto';
-import { timeLabel, type TalkMessage } from './chatModel';
+import { MAX_ATTACHMENT_BYTES, timeLabel, type TalkMessage } from './chatModel';
 import {
   buildGallery,
   countLabel,
@@ -15,6 +15,7 @@ import {
   justifyRows,
   knownAspect,
   removable,
+  shownPicture,
   stampLabel,
   startCandidates,
   type GalleryFilter,
@@ -22,6 +23,10 @@ import {
   type Opened,
 } from './privateGalleryModel';
 import { recordMembership, useGalleryEntries, useMembership, writeGalleryStart } from './useGalleryMembership';
+import { currentEdits, withEdits } from './privateGalleryEdits';
+import { deleteGalleryEdits, originalPicture, readEditRecipe, revertGalleryEdit, saveGalleryEdit } from './useGalleryEdits';
+import { usePhotoEditGate } from '../photoEditor/usePhotoEditGate';
+import { isIdentity, type EditRecipe } from '../../lib/photoEdit/recipe';
 import { formatDuration } from '../../lib/privateVideoMedia';
 import { knownFrom } from '../../lib/galleryImport';
 import PrivateGalleryImport from './PrivateGalleryImport';
@@ -104,7 +109,9 @@ export default function PrivateGallery({
   // Everything in the chat that could be in the gallery, and what is.
   const everything = useMemo(() => buildGallery(all, opened, myActorIds, added), [all, opened, myActorIds, added]);
   const membership = useMembership(all, opened, added);
-  const items = useMemo(() => inGallery(everything, membership.members), [everything, membership.members]);
+  // Edited pictures show their newest edit; the original stays as it is, under the same blob.
+  const edits = useMemo(() => currentEdits(added), [added]);
+  const items = useMemo(() => withEdits(inGallery(everything, membership.members), edits), [everything, membership.members, edits]);
   const [filter, setFilter] = useState<GalleryFilter>('all');
   const videoCount = useMemo(() => items.filter((item) => item.video).length, [items]);
   // A filter with nothing left in it falls back to everything.
@@ -163,12 +170,13 @@ export default function PrivateGallery({
     void history.refetch();
   };
 
-  /** Remove a picture that was added to the gallery: its entry, then its encrypted blob. */
+  /** Remove a picture that was added to the gallery: its entry, then its encrypted blob (and its edits). */
   const removeEntry = async (item: GalleryItem, quiet = false) => {
     if (!item.entryId) return;
     try {
       await api.deletePrivateGalleryEntry(token, item.entryId);
       await api.deletePrivateBlob(token, item.blob).catch(() => {});
+      await deleteGalleryEdits(token, added, [item.blob]);
       setChosen(undefined);
       void entries.refetch();
     } catch (error) {
@@ -211,7 +219,7 @@ export default function PrivateGallery({
     for (const item of deletable) {
       try {
         if (item.entryId) await removeEntry(item, true);
-        else await onDelete(item.messageId, itemBlobs(item));
+        else await deleteSent(item.messageId, itemBlobs(item));
       } catch {
         failed += 1;
       }
@@ -224,6 +232,63 @@ export default function PrivateGallery({
     else toast.success(`Deleted ${countLabel(deletable)}`);
   };
 
+  /** Delete a message (a sent picture, or a comment); a picture's edits go with it. */
+  const deleteSent = async (messageId: number, blobs?: string[]) => {
+    await onDelete(messageId, blobs);
+    if (blobs?.length) {
+      await deleteGalleryEdits(token, added, blobs);
+      void refetchEntries();
+    }
+  };
+
+  // Editing a gallery picture: always from the original, saved as a new picture beside it.
+  const editGate = usePhotoEditGate({ maxBytes: MAX_ATTACHMENT_BYTES, doneLabel: 'Save', asIsLabel: 'Use the original' });
+  const [editBusy, setEditBusy] = useState('');
+  const editPicture = async (item: GalleryItem) => {
+    if (item.video || editBusy) return;
+    setEditBusy(item.blob);
+    let source: Blob;
+    let recipe: EditRecipe | null;
+    try {
+      [source, recipe] = await Promise.all([originalPicture(token, vault, item.blob, item.mime), readEditRecipe(token, vault, item.edit)]);
+    } catch (error) {
+      toast.error(errorText(error, 'Could not open the original'));
+      setEditBusy('');
+      return;
+    }
+    setEditBusy('');
+    const choice = await editGate.ask(source, recipe ?? undefined);
+    if (!choice) return;
+    setEditBusy(item.blob);
+    try {
+      if (choice.kind === 'as-is' || isIdentity(choice.result.recipe)) {
+        // Nothing changed from the original: show the original.
+        if (item.edit) await revertGalleryEdit(token, vault, item.blob, added);
+      } else {
+        const r = choice.result;
+        // No toast: the viewer's "Edited. The original is kept." line says so, and a toast would cover its buttons.
+        await saveGalleryEdit(token, vault, item.blob, { blob: r.blob, mime: r.mime, width: r.width, height: r.height, animated: r.animated, recipe: r.recipe }, added);
+      }
+      await refetchEntries();
+    } catch (error) {
+      toast.error(errorText(error, 'Could not save the edit'));
+    } finally {
+      setEditBusy('');
+    }
+  };
+  const revertPicture = async (item: GalleryItem) => {
+    if (!item.edit || editBusy) return;
+    setEditBusy(item.blob);
+    try {
+      await revertGalleryEdit(token, vault, item.blob, added);
+      await refetchEntries();
+    } catch (error) {
+      toast.error(errorText(error, 'Could not go back to the original'));
+    } finally {
+      setEditBusy('');
+    }
+  };
+
   const startSlideshow = (list: GalleryItem[], from?: GalleryItem) => {
     if (!list.length) return;
     const start = from ? Math.max(0, list.findIndex((item) => item.blob === from.blob)) : 0;
@@ -232,14 +297,14 @@ export default function PrivateGallery({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || chosen || importing || slideshow) return;
+      if (event.key !== 'Escape' || chosen || importing || slideshow || editGate.open) return;
       if (confirmDelete) setConfirmDelete(false);
       else if (selecting) stopSelecting();
       else onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [chosen, importing, slideshow, confirmDelete, selecting, onClose]);
+  }, [chosen, importing, slideshow, confirmDelete, selecting, onClose, editGate.open]);
 
   const filters: Array<{ value: GalleryFilter; label: string; count: number }> = [
     { value: 'all', label: 'All', count: items.length },
@@ -499,8 +564,12 @@ export default function PrivateGallery({
           onIndex={(index) => setChosen(viewList[index]?.blob)}
           onClose={() => setChosen(undefined)}
           onChanged={refresh}
+          editing={editBusy}
+          editorOpen={editGate.open}
+          onEdit={(item) => void editPicture(item)}
+          onRevert={(item) => void revertPicture(item)}
           onDelete={async (messageId, blobs) => {
-            await onDelete(messageId, blobs);
+            await deleteSent(messageId, blobs);
             if (blobs?.length) setChosen(undefined);
             void history.refetch();
           }}
@@ -539,6 +608,7 @@ export default function PrivateGallery({
           onAdded={() => void entries.refetch()}
         />
       )}
+      {editGate.element}
       {chosen && !viewing && !decrypting && (
         <div className="fixed inset-x-0 bottom-0 z-[90] p-3 pb-[max(0.75rem,var(--safe-bottom))]">
           <p className="rounded-xl border border-white/10 bg-slate-900 p-3 text-center text-sm text-slate-300" role="status" data-testid="private-gallery-not-here">
@@ -629,7 +699,8 @@ function Tile({
 }) {
   // A gallery can hold years of pictures: only the ones near the screen are fetched and decrypted.
   const [ref, near] = useNearScreen<HTMLButtonElement>();
-  const { url, failed } = usePrivatePicture(token, item.blob, item.mime, vault, near);
+  const shown = shownPicture(item);
+  const { url, failed } = usePrivatePicture(token, shown.blob, shown.mime, vault, near);
   const [loadedUrl, setLoadedUrl] = useState('');
   const loaded = Boolean(url) && loadedUrl === url;
   const when = item.entryId ? `taken ${stampLabel(item.when)}` : stampLabel(item.at);
@@ -659,7 +730,7 @@ function Tile({
       onPointerLeave={() => window.clearTimeout(holdTimer.current)}
       onPointerCancel={() => window.clearTimeout(holdTimer.current)}
       onContextMenu={(event) => event.preventDefault()}
-      aria-label={`${item.video ? 'Video' : 'Photo'} from ${item.actorName || 'the chat'}, ${when}${item.video?.duration ? `, ${formatDuration(item.video.duration)}` : ''}${item.comments.length ? `, ${item.comments.length} comments` : ''}`}
+      aria-label={`${item.video ? 'Video' : 'Photo'} from ${item.actorName || 'the chat'}, ${when}${item.edit ? ', edited' : ''}${item.video?.duration ? `, ${formatDuration(item.video.duration)}` : ''}${item.comments.length ? `, ${item.comments.length} comments` : ''}`}
       aria-pressed={selecting ? selected : undefined}
       style={{ flex: `${fill ? 1 : 0} 1 ${width}px`, backgroundColor: placeholderTint(item.blob) }}
       className={`group relative block h-full min-w-0 overflow-hidden rounded-md transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 ${
@@ -667,6 +738,7 @@ function Tile({
       }`}
       data-testid="private-gallery-tile"
       data-blob={item.blob}
+      data-edited={item.edit ? 'true' : undefined}
     >
       {!loaded && !failed && (
         <span

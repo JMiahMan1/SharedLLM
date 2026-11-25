@@ -25,7 +25,18 @@ interface Pending {
  * "Send as is" is one tap in the editor. The edit's recipe and the untouched
  * original come back on `choice.result` for whoever keeps them (the gallery).
  */
-export function usePhotoEditGate({ maxBytes, doneLabel, asIsLabel }: { maxBytes: number; doneLabel?: string; asIsLabel?: string }): {
+export function usePhotoEditGate({
+  maxBytes,
+  doneLabel,
+  asIsLabel,
+  offerAsIs = true,
+}: {
+  maxBytes: number;
+  doneLabel?: string;
+  asIsLabel?: string;
+  /** False when "as is" means nothing here (editing a picture already sent): the editor then offers only its done button and close. */
+  offerAsIs?: boolean;
+}): {
   ask: (blob: Blob, recipe?: EditRecipe) => Promise<EditChoice>;
   element: ReactNode;
   open: boolean;
@@ -63,7 +74,7 @@ export function usePhotoEditGate({ maxBytes, doneLabel, asIsLabel }: { maxBytes:
       doneLabel={doneLabel}
       asIsLabel={asIsLabel}
       onDone={(result) => settle({ kind: 'edited', result })}
-      onAsIs={() => settle({ kind: 'as-is' })}
+      onAsIs={offerAsIs ? () => settle({ kind: 'as-is' }) : undefined}
       onCancel={() => settle(null)}
     />
   ) : null;
