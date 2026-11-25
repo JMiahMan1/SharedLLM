@@ -76,3 +76,19 @@ def test_nothing_found_either_way_fails_after_one_relaxed_try(monkeypatch):
     result = _play(monkeypatch, ma, query="worship music", fallback_query="worship", media_content_type="genre")
     assert result.status == "FAILURE"
     assert ma.searched() == ["worship music", "worship"]
+
+
+def test_the_reply_names_the_station_and_the_players_name_never_its_entity_id(monkeypatch):
+    # 2026-11-24: "Playing 'worship' (radio) on media_player.office_..._media_player" was read aloud.
+    station = {"radio": [{"uri": "library://radio/3", "name": "Fake Praise FM"}]}
+    monkeypatch.setattr(media_handler.ha_client, "get_state", AsyncMock(
+        return_value={"attributes": {"friendly_name": "Den Echo"}}))
+    result = _play(monkeypatch, _MA({"worship": station}), query="worship", media_content_type="genre")
+    assert result.message == "Playing Fake Praise FM, the radio station, on Den Echo."
+
+
+def test_without_a_friendly_name_the_reply_makes_one_from_the_id(monkeypatch):
+    monkeypatch.setattr(media_handler.ha_client, "get_state", AsyncMock(return_value=None))
+    result = _play(monkeypatch, _MA({"worship": MIXED}), query="worship", media_content_type="genre")
+    assert "media_player." not in result.message
+    assert result.message == "Playing Fake Worship Mix, the playlist, on Den."

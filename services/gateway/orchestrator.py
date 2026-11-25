@@ -2233,16 +2233,21 @@ async def _closing_turn(
 
 
 def _speaker_line(creds: ResolvedCredentials | None) -> str:
-    """Who is asking, for the model: a person, or plainly that nobody was recognised.
+    """Who is asking, for the model: a person, or the household, the default user.
 
-    A shared voice satellite or kiosk asks as the household. Told nothing, the model
+    A request is answered as the speaker recognised by voice, else the person the device is
+    assigned to, else the household. The household is a user like any other: an ordinary
+    request (play, turn on, what's the weather) is done for it without asking anyone's name.
+    Told only "not identified", the model answered a play request with "I couldn't identify
+    your voice from this device. Could you tell me your name?" (2026-11-24). Told nothing, it
     answered "Who am I?" with an invented name ("You're Alex").
     """
     user = (getattr(creds, "user", "") or "").strip()
     if not user or user == "household":
-        return ("Speaker: not identified (a shared device such as a voice satellite or kiosk). If they ask "
-                "who they are, say you could not tell from their voice and they can tell you their name. "
-                "Never guess or invent a name.")
+        return ("Speaker: the household (the default user: a shared device such as a voice satellite or "
+                "kiosk, and the voice was not recognised). Do what is asked as the household; never ask "
+                "who is speaking or for a name to play, control or answer anything. Only if they ask who "
+                "they are, say you could not tell from their voice. Never guess or invent a name.")
     how = " (recognised by their voice)" if getattr(creds, "identified_by", None) == "voice" else ""
     return f"Speaker: {user}{how}."
 

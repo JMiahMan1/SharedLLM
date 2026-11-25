@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 
 log = logging.getLogger("gateway.fast_media")
 
@@ -372,27 +373,151 @@ def declines_choice(answer: str) -> bool:
 
 
 _ORDINALS = {"first": 0, "1st": 0, "one": 0, "second": 1, "2nd": 1, "two": 1, "last": -1}
+#: Words an answer may use for each kind of option, beyond the option's own ("the audio", "the song one").
+KIND_WORDS = {
+    "music": ("song", "songs", "music", "track", "tune", "album", "artist", "band", "playlist", "radio", "station",
+              "singer"),
+    "audiobook": ("audiobook", "audiobooks", "audio book", "audio", "book", "books", "story", "narrated", "reading"),
+    "podcast": ("podcast", "podcasts", "episode", "show"),
+    "video": ("video", "movie", "film", "youtube", "clip", "watch"),
+    "book": ("book", "read", "reading", "yes"),
+}
+_KIND_OF = {
+    "track": "music", "album": "music", "artist": "music", "playlist": "music", "radio": "music", "genre": "music",
+    "podcast": "podcast", "episode": "podcast", "podcast_episode": "podcast",
+    "audiobook": "audiobook", "series": "audiobook", "author": "audiobook",
+    "video": "video", "book": "book",
+}
+#: Verbs that open an answer but never name an option by their spelling ("play" is not "playlist").
+_VERBS = frozenset({"play", "plays", "start", "put", "give", "make"})
+#: Answers that call the question off.
+_CANCEL = re.compile(r"^(?:no|nope|neither|none|nothing|cancel|never\s*mind|forget\s+it|stop|no\s+thanks?|"
+                     r"no\s+thank\s+you|neither\s+one)$")
+#: A sentence that starts like a new request, not an answer ("turn off the lights", "what time is it").
+_NEW_REQUEST = re.compile(
+    r"^(?:play|read|turn|switch|set|stop|pause|skip|resume|start|put|open|close|lock|unlock|call|text|tell|"
+    r"show|add|remind|what|who|when|where|why|how|is|are|can|could|will|would|do|does|did|please|hey|jarvis|"
+    r"volume|louder|quieter|next|previous|good|thanks|thank|cancel)\b")
+
+
+def _answer_text(answer: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9' ]+", " ", strip_request_filler(answer).lower()).split())
+
+
+def _option_words(option: dict) -> list[str]:
+    """Every word that names ``option``: its own, its label's, and its kind's."""
+    words = [str(w).lower() for w in option.get("words") or [] if str(w).strip()]
+    label = re.sub(r"^the\s+", "", str(option.get("label") or "").lower()).strip()
+    if label:
+        words.append(label)
+    pick = option.get("pick") if isinstance(option.get("pick"), dict) else {}
+    group = _KIND_OF.get(str(pick.get("kind") or ""), "")
+    if not group and option.get("read"):
+        group = "book"
+    if not group:
+        for g, kind_words in KIND_WORDS.items():
+            if any(w in kind_words for w in words):
+                group = g
+                break
+    words += list(KIND_WORDS.get(group, ()))
+    return list(dict.fromkeys(words))
+
+
+def _names_option(text: str, tokens: list[str], word: str) -> bool:
+    """Whether the answer names ``word``: as words, or a token that is its start or a close spelling."""
+    if " " in word:
+        return re.search(rf"\b{re.escape(word)}\b", text) is not None
+    for t in tokens:
+        if t == word:
+            return True
+        if len(t) >= 4 and len(word) > len(t) and word.startswith(t) and t not in _VERBS:
+            return True  # "the audio" for "audiobook"
+        if len(t) >= 5 and len(word) >= 5 and SequenceMatcher(None, t, word).ratio() >= 0.85:
+            return True  # "audibook"
+    return False
 
 
 def match_choice(answer: str, choice: dict) -> dict | None:
-    """The option ``answer`` names ("the audiobook", "the song", "the first one", "yes"), or None.
+    """The option ``answer`` names ("the audiobook", "the audio", "the song one", "the first one", "yes"), or None.
 
-    An answer that names no option is not taken as one: it is a new request.
+    An answer that names no option, or names more than one, is not taken as one.
     """
     options = [o for o in choice.get("options") or [] if isinstance(o, dict)]
-    text = " ".join(re.sub(r"[^a-z0-9' ]+", " ", strip_request_filler(answer).lower()).split())
+    text = _answer_text(answer)
     if not text or not options or len(text.split()) > 8:
         return None
     if len(options) == 1 and (text in _YES or text.startswith(("yes ", "yeah ", "sure "))):
         return options[0]
-    hits = [o for o in options if any(re.search(rf"\b{re.escape(str(w).lower())}\b", text) for w in o.get("words") or [])]
+    tokens = [t for t in text.split() if t not in ("the", "a", "an", "one", "please", "that", "this", "it")]
+    hits = [o for o in options if any(_names_option(text, tokens, w) for w in _option_words(o))]
     if len(hits) == 1:
         return hits[0]
     m = re.search(r"\b(first|1st|second|2nd|last|one|two)\b(?:\s+one)?", text)
-    if m and len(text.split()) <= 4:
+    if not hits and m and len(text.split()) <= 4:
         idx = _ORDINALS[m.group(1)]
         return options[idx] if -len(options) <= idx < len(options) else None
     return None
+
+
+@dataclass(frozen=True)
+class ChoiceAnswer:
+    """How a reply to a pending media question is taken: ``option``, ``cancel``, ``new_request`` or ``unclear``."""
+
+    kind: str
+    option: dict | None = None
+
+
+def read_choice_answer(answer: str, choice: dict) -> ChoiceAnswer:
+    """What a reply to "<title>: the song, or the audiobook?" is.
+
+    An option it names is the answer; "no" / "never mind" calls the question off; a sentence
+    that starts like a new request ("turn off the lights") is one; anything else is unclear
+    and is asked again (``choice_reask``), never handed to the model.
+    """
+    text = _answer_text(answer)
+    option = match_choice(answer, choice)
+    if option is not None and _NEW_REQUEST.match(text) and len(_unexplained(text, choice)) >= 2:
+        option = None  # "Play the playlist <name>": a new request that happens to name a kind
+    if option is not None:
+        return ChoiceAnswer("option", option)
+    if _CANCEL.match(text):
+        return ChoiceAnswer("cancel")
+    if text and (_NEW_REQUEST.match(text) or len(text.split()) > 6):
+        return ChoiceAnswer("new_request")
+    return ChoiceAnswer("unclear")
+
+
+_FILLER = frozenset({"the", "a", "an", "one", "please", "that", "this", "it", "me", "us", "play", "read", "put", "on",
+                     "start", "of", "by", "as", "version", "kind", "jarvis"})
+
+
+def _unexplained(text: str, choice: dict) -> list[str]:
+    """The answer's words that are neither filler nor any option's words ("some favs" in "play the playlist some favs")."""
+    known = set(_FILLER)
+    for o in choice.get("options") or []:
+        if isinstance(o, dict):
+            for w in _option_words(o):
+                known.update(w.split())
+    return [t for t in text.split() if t not in known]
+
+
+def choice_reask(choice: dict) -> str:
+    """The question again, briefly: "Sorry, the song or the audiobook?"."""
+    labels: list[str] = []
+    for o in choice.get("options") or []:
+        label = str((o or {}).get("label") or "").strip() if isinstance(o, dict) else ""
+        if label and label not in labels:
+            labels.append(label)
+    if len(labels) == 1:
+        return f"Sorry, should I {labels[0]}? Say yes or no."
+    if not labels:
+        return "Sorry, which one did you mean?"
+    return f"Sorry, {', '.join(labels[:-1])} or {labels[-1]}?"
+
+
+def mark_reasked(user_id: str, choice: dict) -> None:
+    """Keep the question for one more answer, noting it has been asked again."""
+    remember_choice(user_id, {**choice, "reasked": True})
 
 
 # --------------------------------------------------------------------------- #
@@ -402,7 +527,7 @@ def match_choice(answer: str, choice: dict) -> dict | None:
 #: Words speech recognition writes for a spoken "play" (over a TV speaker, or a quick "play"):
 #: "Late <title>", "Player <name>". "Please" and "pray" are left out: they open too many
 #: real requests.
-PLAY_SOUNDALIKES = frozenset({"late", "plate", "played", "plays", "player", "clay", "lay", "slay", "flay",
+PLAY_SOUNDALIKES = frozenset({"late", "lake", "plate", "played", "plays", "player", "clay", "lay", "slay", "flay",
                               "blay", "ply", "pley", "plait", "plane"})
 #: A misheard request is played only when the library has this good a match for the rest.
 MISHEARD_PLAY_MIN_SCORE = 0.85
