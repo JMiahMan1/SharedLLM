@@ -210,6 +210,36 @@ Web video is guarded for the children who use the household's screens
 - Each decision is logged at INFO as `[Reply] video_search: query=... chosen=...
   score=... safe_search=... decision=... why=...`, with no user or device.
 
+YouTube at a speaker. "On YouTube" says where to look, never which device
+(`fast_media.split_youtube_source`): "Play X on YouTube" at a satellite with
+no device named goes to the satellite's own speaker, and "Play X on YouTube on
+the den TV" to that TV. A speaker shows no picture, so execution
+(`media_finder.find_and_play`):
+
+- plays the video's sound when only YouTube was named: the same search, safe
+  search, screening, blocklist and strong-match rule as a video ("I found 'X'
+  on YouTube. Play its audio?" for a weaker match). The audio stream
+  (`extract_audio_stream_url`, AAC first) goes to the speaker's Music
+  Assistant player, else straight to the player: "Playing the audio of 'X' from
+  YouTube on the Office speaker."
+- asks "Which TV should I put it on, the Den TV or the Playroom TV?" when the
+  picture was asked for ("the video of X", "watch X"), naming the household's
+  available screens; the TV named in the answer is where it plays (the option's
+  `entity_id`).
+
+What a screen is sent. YouTube offers almost every video only as separate video
+and audio streams now; the old single-file formats (22, 18) are gone or missing
+for some clients, and asking only for them failed with "Requested format is not
+available". `video.VIDEO_FORMAT` asks for H.264 video with AAC audio, merged by
+yt-dlp (ffmpeg, in the image) into one MP4 with its index first, then a
+single-file H.264/AAC MP4, then any pair, then anything. A merged file appears
+only once both streams are down; that is quick (a one-hour video at 1080p took
+26 s on the server).
+
+The gateway never crashes on an execution answer that is not a result (an HTTP
+error with a string or list `detail`, a bare JSON string): it is logged and the
+person hears a plain sentence (`read_execution_reply`).
+
 A disabled, not-loaded or failing source is skipped and named in the answer.
 Titles are compared by `services/common/media_titles.py` (case, punctuation,
 "(Unabridged)", leading articles and spoken numbers do not matter; a number

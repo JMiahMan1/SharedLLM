@@ -111,6 +111,21 @@ _KIND_HEAD = re.compile(
 _KIND_TAIL = re.compile(
     r"\s+(?:the\s+|an?\s+)?(?:" + "|".join(p for p, _g, _k in _KIND_WORDS) + r")$", re.IGNORECASE)
 _ON_YOUTUBE = re.compile(r"\s+(?:on|from)\s+youtube$", re.IGNORECASE)
+#: Words that ask for the picture, not only the sound: "the video", "watch", "the movie".
+#: "YouTube" alone is not one of them: "Play <song> on YouTube" at a speaker plays its audio.
+_PICTURE_WORDS = re.compile(r"\b(?:videos?|movies?|films?|clips?|trailers?|cartoons?|tv\s+shows?|watch)\b",
+                            re.IGNORECASE)
+_YOUTUBE = re.compile(r"\byoutube\b", re.IGNORECASE)
+
+
+def asks_for_picture(query: str) -> bool:
+    """True when the request asks to see something ("the video of X", "watch X"), not only to hear it."""
+    return bool(_PICTURE_WORDS.search(query or ""))
+
+
+def names_youtube(query: str) -> bool:
+    """True when the request names YouTube as where to find it ("X on YouTube", "X from YouTube")."""
+    return bool(_YOUTUBE.search(query or ""))
 
 
 def _kind_of(words: str) -> tuple[str | None, str | None]:
@@ -656,24 +671,29 @@ async def choose_video(vids: list[Candidate], what: str, ctx) -> tuple[str, Cand
 
 
 async def offer_or_play_video(vids: list[Candidate], what: str, req: MediaPlayRequest, entity_id: str, ctx,
-                              player: str) -> ExecutionResult:
-    """Play a strong, suitable YouTube match; ask about a weaker one; say so when none is suitable."""
+                              player: str, *, audio_only: bool = False) -> ExecutionResult:
+    """Play a strong, suitable YouTube match; ask about a weaker one; say so when none is suitable.
+
+    ``audio_only``: the player is a speaker, so the video's sound is played (the same safety rules).
+    """
     from services.execution import video_safety
 
     level = str((vids[0].extra if vids else {}).get("safe_search") or video_safety.DEFAULT_LEVEL)
     action, cand, why = await choose_video(vids, what, ctx)
     video_safety.log_decision(what, cand.title if cand else "", cand.score if cand else 0.0, level, action, why)
     if action == "play" and cand is not None:
-        return await play_candidate(cand, req, entity_id, ctx, player)
+        return await play_candidate(cand, req, entity_id, ctx, player, audio_only=audio_only)
     if action == "ask" and cand is not None:
         shown = clean_title(cand.title) if cand.extra.get("title_known", True) else "a video"
+        ask = f"I found '{shown}' on YouTube. Play its audio?" if audio_only else f"I found '{shown}' on YouTube. Play it?"
         return ExecutionResult.ok(
-            f"I found '{shown}' on YouTube. Play it?", service=SERVICE,
+            ask, service=SERVICE,
             detail={"route": "ask", "reason": why, "choice": {
                 "query": what, "entity_id": entity_id,
                 "options": [{"label": "play it", "words": _PLAY_IT_WORDS, "pick": cand.as_pick()}]}})
     name = clean_title(what) or "that"
     return ExecutionResult.fail(
+        f"I didn't find {name} on YouTube that's suitable to play here." if audio_only else
         f"I didn't find a video of {name} on YouTube that's suitable to play here.", service=SERVICE,
         detail={"route": "none", "reason": why, "searched": ["YouTube"]})
 
@@ -686,6 +706,23 @@ async def find_video_and_play(req: MediaPlayRequest, query: str, entity_id: str,
         return ExecutionResult.fail(f"Could not find video for '{query}'.", service=SERVICE,
                                     detail={"route": "none", "searched": ["YouTube"]})
     return await offer_or_play_video(vids, query, req, entity_id, ctx, player or entity_id)
+
+
+async def find_youtube_audio_and_play(req: MediaPlayRequest, what: str, entity_id: str, ctx,
+                                      player: str) -> ExecutionResult:
+    """ "Play X on YouTube" at a speaker: the sound of YouTube's best suitable match, on that speaker.
+
+    The same rules as a video on a screen: the ``voice_video_search`` setting, safe search,
+    the blocklist and age screening, and a strong match plays while a weaker one is asked about.
+    """
+    if await web_video_source(screen=False, wants_video=True) is None:
+        return ExecutionResult.fail("Searching YouTube by voice is turned off.", service=SERVICE,
+                                    detail={"route": "none", "reason": "video_search_off"})
+    vids = await search_web_video(search_words(what), ctx)
+    if not vids:
+        return ExecutionResult.fail(f"I couldn't find {clean_title(what) or 'that'} on YouTube.", service=SERVICE,
+                                    detail={"route": "none", "searched": ["YouTube"]})
+    return await offer_or_play_video(vids, what, req, entity_id, ctx, player, audio_only=True)
 
 
 async def _search(ctx, source: Source, query: str) -> list[Candidate]:
@@ -744,8 +781,8 @@ async def target_facts(ctx, entity_id: str) -> tuple[bool, str]:
     return screen, name
 
 
-async def screens_named(ctx, limit: int = 3) -> list[str]:
-    """Names of a few players that show video, to say where a video can play."""
+async def screens_listed(ctx, limit: int = 3) -> list[tuple[str, str]]:
+    """(entity_id, name) of a few available players that show video, from the hub's capability index."""
     from services.execution import ha_client
     from services.execution.handlers import media as media_handler
 
@@ -754,16 +791,56 @@ async def screens_named(ctx, limit: int = 3) -> list[str]:
         if idx is None:
             return []
         states = {s.get("entity_id"): s for s in await ha_client.get_states(ctx.ha_url, ctx.ha_token) or []}
-        names: list[str] = []
+        found: list[tuple[str, str]] = []
         for eid in idx.media_targets(available_only=True):
             if idx.is_screen(eid):
                 n = str(((states.get(eid) or {}).get("attributes") or {}).get("friendly_name") or "")
-                if n and n not in names:
-                    names.append(n)
-        return names[:limit]
+                if n and n not in (name for _e, name in found):
+                    found.append((eid, n))
+        return found[:limit]
     except Exception as exc:
         log.warning(f"[media/find] could not list the screens: {exc}")
         return []
+
+
+async def screens_named(ctx, limit: int = 3) -> list[str]:
+    """Names of a few players that show video, to say where a video can play."""
+    return [name for _eid, name in await screens_listed(ctx, limit)]
+
+
+#: Words in a TV's name that do not tell it from another TV ("Den TV Chrome": "den" does).
+_SCREEN_FILLER = frozenset({"the", "tv", "television", "cast", "chrome", "chromecast", "roku", "android", "google",
+                            "smart", "media", "player", "screen", "display", "fire", "stick", "apple"})
+
+
+def screen_words(name: str) -> list[str]:
+    """What an answer may call a TV: its whole name, and each word that tells it apart ("den")."""
+    plain = " ".join(re.sub(r"[^a-z0-9' ]+", " ", (name or "").lower()).split())
+    words = [plain] if plain else []
+    words += [w for w in plain.split() if w not in _SCREEN_FILLER and len(w) > 2 and w not in words]
+    return words
+
+
+def _spoken_list(names: list[str]) -> str:
+    named = [f"the {n}" for n in names]
+    return named[0] if len(named) == 1 else ", ".join(named[:-1]) + " or " + named[-1]
+
+
+async def ask_which_screen(req: MediaPlayRequest, what: str, entity_id: str, ctx, player: str) -> ExecutionResult:
+    """A video was asked for at a speaker: "Which TV should I put it on?", with the household's screens."""
+    screens = await screens_listed(ctx)
+    if not screens:
+        return ExecutionResult.fail(f"{player} can't show video, and I didn't find a TV to put {clean_title(what) or 'it'} on.",
+                                    service=SERVICE, detail={"route": "none", "reason": "no_screen"})
+    names = [name for _eid, name in screens]
+    question_text = (f"Should I put it on the {names[0]}?" if len(names) == 1
+                     else f"Which TV should I put it on, {_spoken_list(names)}?")
+    options = [{"label": name, "words": screen_words(name) + (_PLAY_IT_WORDS if len(screens) == 1 else []),
+                "entity_id": eid} for eid, name in screens]
+    log.info(f"[media/find] {what!r} asked for a video at {entity_id}, which shows none: asking which TV")
+    return ExecutionResult.ok(question_text, service=SERVICE, detail={
+        "route": "ask", "reason": "which_screen",
+        "choice": {"query": req.query, "entity_id": entity_id, "options": options}})
 
 
 async def find_and_play(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
@@ -775,6 +852,11 @@ async def find_and_play(req: MediaPlayRequest, entity_id: str, ctx) -> Execution
     screen, player = await target_facts(ctx, entity_id)
     wants_video = group == "video"
     if wants_video and not screen:
+        # At a speaker: "the video of X" is a question about which TV; "X on YouTube" is its sound, here.
+        if asks_for_picture(req.query or ""):
+            return await ask_which_screen(req, what if not by else title, entity_id, ctx, player)
+        if names_youtube(req.query or ""):
+            return await find_youtube_audio_and_play(req, what if not by else title, entity_id, ctx, player)
         where = await screens_named(ctx)
         tail = f" Say which one, for example 'on the {where[0]}'." if where else " Name a TV to play it on."
         return ExecutionResult.fail(f"{player} can't show video.{tail}", service=SERVICE,
@@ -909,7 +991,7 @@ async def play_pick(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResu
     sources = await discover_sources(ctx, screen=screen, wants_video=cand.group == "video")
     if not any(s.key == cand.source and s.ready for s in sources):
         return ExecutionResult.fail(f"{cand.title} came from a source that isn't available now.", service=SERVICE)
-    return await play_candidate(cand, req, entity_id, ctx, player)
+    return await play_candidate(cand, req, entity_id, ctx, player, audio_only=cand.source == "web_video" and not screen)
 
 
 def failed_message(cand: Candidate, why: str | None, player: str) -> str:
@@ -925,8 +1007,11 @@ def failed_message(cand: Candidate, why: str | None, player: str) -> str:
 
 
 async def play_candidate(cand: Candidate, req: MediaPlayRequest, entity_id: str, ctx,
-                         player: str | None = None) -> ExecutionResult:
-    """Hand the chosen item to the handler that already plays that kind on that player."""
+                         player: str | None = None, *, audio_only: bool = False) -> ExecutionResult:
+    """Hand the chosen item to the handler that already plays that kind on that player.
+
+    ``audio_only``: a YouTube video for a speaker, so only its sound is played.
+    """
     from services.execution.handlers import audiobookshelf as abs_handler
     from services.execution.handlers import media as media_handler
 
@@ -943,6 +1028,8 @@ async def play_candidate(cand: Candidate, req: MediaPlayRequest, entity_id: str,
         else:
             abs_req = AudiobookshelfRequest(action="play", book_id=cand.ident, user_context=ctx, entity_id=entity_id)
         result = await abs_handler.handle_audiobookshelf(abs_req)
+    elif cand.source == "web_video" and audio_only:
+        result = await media_handler.play_web_audio(cand.ident, entity_id, ctx)
     elif cand.source == "web_video":
         result = await media_handler.play_video(plain.model_copy(update={"query": cand.ident}), entity_id, ctx)
     elif cand.source == "music_assistant":
@@ -955,6 +1042,11 @@ async def play_candidate(cand: Candidate, req: MediaPlayRequest, entity_id: str,
         if (result.detail or {}).get("playback") == "not_started":
             return result.model_copy(update={"detail": detail})  # already says it plainly
         return result.model_copy(update={"detail": detail, "message": failed_message(cand, result.message, player)})
+    if cand.source == "web_video" and audio_only:
+        title = clean_title(cand.title) if cand.extra.get("title_known") else ""
+        return ExecutionResult.ok((f"Playing the audio of '{title}' from YouTube on {player}." if title
+                                   else f"Playing the audio of a YouTube video of {cand.title} on {player}."),
+                                  service=SERVICE, detail=detail)
     if cand.source == "web_video":
         said = f"the video {cand.title}" if cand.extra.get("title_known") else f"a video of {cand.title}"
     else:

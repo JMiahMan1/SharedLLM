@@ -259,7 +259,7 @@ async def _run(req, *, screen=False, sources=None, found=None, player="Den Speak
             patch.object(mf, "discover_sources", new=AsyncMock(return_value=sources or [])), \
             patch.object(mf, "_search", new=_found(found or {})), \
             patch.object(mf, "corrected_query", new=AsyncMock(return_value=None)), \
-            patch.object(mf, "screens_named", new=AsyncMock(return_value=["Den TV"])), \
+            patch.object(mf, "screens_listed", new=AsyncMock(return_value=[("media_player.den_tv", "Den TV")])), \
             patch.object(mf, "play_candidate", new=played):
         result = await mf.find_and_play(req, "media_player.den", req.user_context)
     return result, played
@@ -305,8 +305,19 @@ async def test_a_book_only_in_the_library_is_offered_to_be_read():
 
 
 @pytest.mark.asyncio
-async def test_a_video_on_a_speaker_names_a_screen_instead():
+async def test_a_video_on_a_speaker_asks_for_a_screen_instead():
     result, played = await _run(_req("the movie Pancake Robots"), screen=False, sources=_ready("music_assistant"))
+    assert played.await_count == 0 and result.detail["reason"] == "which_screen"
+    assert result.message == "Should I put it on the Den TV?"
+    [option] = result.detail["choice"]["options"]
+    assert option["entity_id"] == "media_player.den_tv"
+
+
+@pytest.mark.asyncio
+async def test_a_video_kind_with_no_picture_word_still_names_a_screen():
+    """media_type "video" from the caller, but neither a picture word nor YouTube: the old answer."""
+    result, played = await _run(_req("Pancake Robots", media_type="video"), screen=False,
+                                sources=_ready("music_assistant"))
     assert result.status == "FAILURE" and played.await_count == 0
     assert result.message == "Den Speaker can't show video. Say which one, for example 'on the Den TV'."
 
