@@ -30,6 +30,8 @@ on:
       - 'services/ui/e2e/**'
       - 'services/ui/src/**'
       - 'services/ui/playwright.config.ts'
+      - 'services/ui/vite.config.ts'
+      - 'services/ui/package-lock.json'
       - '.github/workflows/ui-e2e.yml'
 
 permissions:
@@ -114,6 +116,83 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.project }}-shard-${{ matrix.shard }}
+          path: |
+            services/ui/playwright-report
+            services/ui/test-results
+          retention-days: 7
+
+  # The layout checks again, against the production build the family runs
+  # (web, and the Android app's OTA bundle), at the two phone sizes. The dev
+  # server skips the build's CSS optimizer, so a stylesheet it rewrites breaks
+  # only the built app: lightningcss once dropped every unprefixed
+  # backdrop-filter, and pages measured as ending under the bottom bar.
+  # Runs every spec that checks the bottom bar, plus e2e/layout.
+  production-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - hermetic-mobile
+          - hermetic-small-phone
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: services/ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: services/ui
+        run: npm ci
+
+      # `vite build` alone: the OTA zip that `npm run build` adds is not needed
+      # to serve dist/.
+      - name: Production build
+        working-directory: services/ui
+        run: npx vite build
+
+      - name: Playwright version
+        id: playwright
+        working-directory: services/ui
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ hashFiles('services/ui/package-lock.json') }}
+
+      - name: Install Chromium and its system libraries
+        working-directory: services/ui
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
+
+      - name: Layout specs against the build (${{ matrix.project }})
+        working-directory: services/ui
+        env:
+          SKIP_VISUAL: '1'
+          UI_SERVE: preview
+        run: |
+          specs=$(grep -rlE 'expectClearOfBottomBar|expectLayoutSound' e2e --include='*.spec.ts' | sort)
+          test -n "$specs"
+          npx playwright test --project=${{ matrix.project }} --reporter=line,html --workers=2 e2e/layout $specs
+
+      - name: Upload the report and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-production-build-${{ matrix.project }}
           path: |
             services/ui/playwright-report
             services/ui/test-results

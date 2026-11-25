@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from services.common.media_titles import tidy_by
+
 log = logging.getLogger("gateway.fast_media")
 
 #: The identity a voice satellite answers as when it did not recognise the speaker (identity HOUSEHOLD_IDENTITY).
@@ -152,6 +154,7 @@ def parse_music_request(text: str | None) -> MusicAsk:
     t = _strip_repeat(_LEADING_VERB, t)
     t = _TRAILING_WORDS.sub("", t).strip(" ,.!?\"'")
     t = _strip_repeat(_LEADING_WORDS, t)
+    t = tidy_by(t)  # "Up by the artist, Example Singer" is "Up by Example Singer"
     by = _BY_NAME.match(t)
     if by:
         name = by.group("name").strip(" ,.!?\"'")

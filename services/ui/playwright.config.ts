@@ -1,3 +1,4 @@
+import { existsSync } from 'fs';
 import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test';
 
 // Override per checkout (HERMETIC_PORT) when several run the suite at once:
@@ -106,6 +107,16 @@ if (process.env.LIVE === '1') {
   }
 }
 
+// UI_SERVE=preview runs the suite against the production build (`vite build`
+// first, then `vite preview` serves dist/), which is what the family runs on
+// the web and in the Android app's OTA bundle. The dev server skips the build's
+// CSS optimizer, so a stylesheet the optimizer rewrites only breaks the built
+// app: lightningcss once dropped every unprefixed backdrop-filter.
+const SERVE_PREVIEW = process.env.UI_SERVE === 'preview';
+if (SERVE_PREVIEW && !existsSync(new URL('./dist/index.html', import.meta.url))) {
+  throw new Error('UI_SERVE=preview needs a production build: run `npx vite build` first.');
+}
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -114,9 +125,12 @@ export default defineConfig({
   workers: 1,
   reporter: 'html',
   webServer: {
-    command: `npx vite --port ${HERMETIC_PORT} --strictPort`,
+    command: SERVE_PREVIEW
+      ? `npx vite preview --port ${HERMETIC_PORT} --strictPort`
+      : `npx vite --port ${HERMETIC_PORT} --strictPort`,
     url: HERMETIC_BASE_URL,
-    reuseExistingServer: true,
+    // A dev server already on the port would quietly stand in for the build.
+    reuseExistingServer: !SERVE_PREVIEW,
   },
   use: {
     baseURL: HERMETIC_BASE_URL,

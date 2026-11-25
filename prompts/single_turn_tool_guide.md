@@ -20,9 +20,10 @@ Play music, podcasts, radio, or audio via Music Assistant, Home Assistant, or Ne
 
 ### MediaTransportRequest
 Transport controls for active media players.
-- Fields: `tool`, `command` (`pause`, `resume`, `stop`, `next`, `previous`, `volume_up`, `volume_down`).
-- Optional: `entity_id` or `device_name`.
-- Example: `{"tool": "MediaTransportRequest", "command": "pause"}`
+- Fields: `tool`, `command` (`pause`, `resume`, `stop`, `next`, `previous`, `volume_set`, `volume_up`, `volume_down`, `volume_mute`, `volume_unmute`).
+- Optional: `entity_id` or `device_name`; `volume_level` (0 to 1) with `volume_set`.
+- "Set the volume to N%" is `volume_set` with `volume_level` N/100; `volume_up`/`volume_down` are one small step.
+- Examples: `{"tool": "MediaTransportRequest", "command": "pause"}`, `{"tool": "MediaTransportRequest", "command": "volume_set", "volume_level": 0.6}`
 
 ### NoteRequest
 Create, read, append, or list notes in Nextcloud or local storage.

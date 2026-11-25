@@ -17,7 +17,10 @@ or a log. For each adopted hassmic Echo it then:
 On top of that it offers, on the device page: a "Wake word engine" select (Amazon or microWakeWord, installing
 ESPHome's official microWakeWord models first), an "Online updates" select (Off, Beta, Release; ``echo_ota.py``
 finds it by its ``_online_updates`` entity id and turns it to Release on adoption), a "Wake word models"
-diagnostic sensor, a "Microphone" problem sensor fed from the Echo's own log (with one automatic reboot an hour
+diagnostic sensor, a "Wake word sensitivity" select (Standard, More sensitive, Most sensitive: each model's
+published cutoff, lowered by 0.03, or by 0.06 with one inference less in its window, applied with the Echo's
+``/api/mww/edit``), a "Wake word detections" diagnostic sensor (the recent wake-ups and their probability, from
+the Echo's log), a "Microphone" problem sensor fed from the Echo's own log (with one automatic reboot an hour
 and an admin notice when a reboot did not help) and a "Management" diagnostic sensor that says what HomeHub
 could not do and why. Every failure is shown there with its reason; nothing falls back silently.
 
@@ -80,6 +83,33 @@ DEFAULT_WAKE_MODELS = ("hey_jarvis", "okay_nabu", "hey_mycroft", "alexa")
 MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 MODEL_MAX_BYTES = 1 << 20
 MANIFEST_MAX_BYTES = 8192
+
+#: Wake word sensitivity, per Echo (entry option ``echo_wake_sensitivity``): how far each model's published
+#: operating point moves. A detection is the mean of the model's last ``sliding_window_size`` probabilities (one
+#: every 30 ms) passing ``probability_cutoff`` (hassmic's ``wake_mww.c``, as ESPHome decides it). ESPHome's own
+#: manifests sit between 0.90 (alexa) and 0.97 (hey_jarvis, okay_nabu): the authors move a cutoff by 0.02 to 0.07
+#: between models to put each at a similar false-accept rate, so 0.03 and 0.06 are steps of that size, not a new
+#: model. microWakeWord's published ROC curves (benchmarks/*_roc_curve.png) are steep: on adult speakers the
+#: "Hey Jarvis" model reaches 0 false rejects at about 0.12 false accepts per hour, so a voice the model was not
+#: trained on (a child's: higher pitch, shorter vowels) is where a lower cutoff gains, and more accidental
+#: wake-ups is the price. "Most sensitive" also averages 4 inferences instead of 5 (120 ms instead of 150 ms),
+#: so a short, quick "Hey Jarvis" is not diluted by the frames around it. The firmware keeps two decimals
+#: (``mww_store.c`` writes ``%.2f``) and takes 0.50 to 0.99.
+SENSITIVITY_OPTIONS = {"standard": "Standard", "more": "More sensitive", "most": "Most sensitive"}
+#: level -> (cutoff change, sliding window change)
+SENSITIVITY_STEPS: dict[str, tuple[float, int]] = {"standard": (0.0, 0), "more": (-0.03, 0), "most": (-0.06, -1)}
+#: No level goes below this cutoff or this window, whatever a model publishes (hassmic itself takes 0.50 and 1).
+SENSITIVITY_CUTOFF_FLOOR = 0.80
+SENSITIVITY_WINDOW_FLOOR = 3
+SENSITIVITY_WARNING = ("More sensitive means more accidental wake-ups, especially near a TV or radio. Start with "
+                       "More sensitive, and go to Most sensitive only if the children are still not heard.")
+#: How many recent wake detections (with their probability) a device keeps for its diagnostics.
+DETECTIONS_KEPT = 20
+#: hassmic's line for a microWakeWord detection (``wake_mww.c``): the phrase and the window's mean in 255ths,
+#: after clock.c's stamp ("2026-10-06 15:18:02.417Z " or "boot+29935.512 ") and log_private's mark.
+WAKE_LINE = re.compile(r"^(?P<at>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?Z|boot\+\d+(?:\.\d+)?) +"
+                       r"(?:\(private\) +)?wake: (?P<word>.+) \(microwakeword, mean (?P<mean>\d{1,3})/255"
+                       r"(?P<second>, second wake word)?\)\s*$")
 
 #: hassmic's own line when its processed microphone stream stopped (``audio_mixer.c`` ``cap_read``).
 MIC_DEAD_LINE = "audio: micAsr delivers nothing"
@@ -725,6 +755,82 @@ def wake_models_option(options: dict[str, Any]) -> list[str]:
     return out
 
 
+def sensitivity_option(options: dict[str, Any]) -> str | None:
+    """The entry option ``echo_wake_sensitivity`` (a level key), or None when HomeHub was never asked to set it."""
+    raw = options.get("echo_wake_sensitivity")
+    if raw is None or raw == "":
+        return None
+    level = _sensitivity_key(str(raw))
+    if level is None:
+        raise HassmicError(f"echo_wake_sensitivity: {raw!r} is not one of {', '.join(SENSITIVITY_OPTIONS)}")
+    return level
+
+
+def _sensitivity_key(option: str) -> str | None:
+    want = option.strip().lower()
+    return next((k for k, v in SENSITIVITY_OPTIONS.items() if want in (k, v.lower())), None)
+
+
+def tuned(cutoff: float, window: int, level: str) -> tuple[float, int]:
+    """A model's ``(probability_cutoff, sliding_window_size)`` at a sensitivity level, from its published pair.
+
+    Standard is the published pair as it is (rounded to the firmware's two decimals). A lower level never raises
+    a cutoff that is already below the floor, and never goes below it otherwise.
+    """
+    if level not in SENSITIVITY_STEPS:
+        raise HassmicError(f"{level!r} is not a wake word sensitivity")
+    dc, dw = SENSITIVITY_STEPS[level]
+    published_c, published_w = round(float(cutoff), 2), int(window)
+    if level == "standard":
+        return _firmware_cutoff(published_c), published_w
+    c = round(max(published_c + dc, min(SENSITIVITY_CUTOFF_FLOOR, published_c)), 2)
+    w = max(published_w + dw, min(SENSITIVITY_WINDOW_FLOOR, published_w))
+    return _firmware_cutoff(c), w
+
+
+def _firmware_cutoff(c: float) -> float:
+    """hassmic takes cutoffs 0.50 to 0.99 (``MWW_CUTOFF_MIN``/``MAX``) and keeps two decimals."""
+    return round(min(max(c, 0.50), 0.99), 2)
+
+
+def published_point(model_id: str, manifest: bytes) -> tuple[float, int]:
+    """The ``(probability_cutoff, sliding_window_size)`` a model's own manifest publishes."""
+    micro = validate_manifest(model_id, manifest)["micro"]
+    return float(micro["probability_cutoff"]), int(micro.get("sliding_window_size", 5))
+
+
+def device_manifest(model_id: str, manifest: bytes, level: str) -> bytes:
+    """The manifest HomeHub hands one Echo: the published one with the level's cutoff and window, same model.
+
+    The ``homehub`` section records what it was made from; hassmic reads only what it knows (``mww_store.c``
+    writes its own copy), so the section is for anyone reading the JSON, and the bytes change with the level.
+    """
+    doc = validate_manifest(model_id, manifest)
+    cutoff, window = published_point(model_id, manifest)
+    c, w = tuned(cutoff, window, level)
+    micro = dict(doc["micro"])
+    micro["probability_cutoff"], micro["sliding_window_size"] = c, w
+    out = {**doc, "micro": micro,
+           "homehub": {"sensitivity": level, "published_probability_cutoff": round(cutoff, 2),
+                       "published_sliding_window_size": window}}
+    raw = json.dumps(out, indent=2).encode()
+    validate_manifest(model_id, raw)
+    return raw
+
+
+def parse_wake_detections(lines: list[str]) -> list[dict[str, Any]]:
+    """microWakeWord detections in hassmic log lines, oldest first: when, the phrase and the window's mean."""
+    out = []
+    for line in lines:
+        m = WAKE_LINE.match(line.strip())
+        if m is None:
+            continue
+        mean = min(int(m["mean"]), 255)
+        out.append({"at": m["at"], "wake_word": m["word"], "probability": round(mean / 255, 3),
+                    "second": bool(m["second"])})
+    return out
+
+
 # -- one Echo's management ----------------------------------------------------------------------------------
 
 Notifier = Callable[[dict[str, Any]], Awaitable[Any]]
@@ -755,6 +861,8 @@ class HassmicManager:
         "hassmic_wake_engine": ("select", "Wake word engine", "config", None),
         "hassmic_online_updates": ("select", "Online updates", "config", None),
         "hassmic_wake_models": ("sensor", "Wake word models", "diagnostic", None),
+        "hassmic_wake_sensitivity": ("select", "Wake word sensitivity", "config", None),
+        "hassmic_wake_detections": ("sensor", "Wake word detections", "diagnostic", None),
         "hassmic_microphone": ("binary_sensor", "Microphone", "diagnostic", "problem"),
         "hassmic_management": ("sensor", "Management", "diagnostic", None),
     }
@@ -774,6 +882,7 @@ class HassmicManager:
         self.online_updates: str | None = None
         self.mww: dict[str, Any] = {}
         self.models_reason: str | None = None
+        self.sensitivity_reason: str | None = None
         self.mic = _Mic()
         self.notifier: Notifier = _send_notice
         self.scanner: BeaconScanner | None = None  # tests: a fake; otherwise the hub's
@@ -804,6 +913,8 @@ class HassmicManager:
         ep = doc.get("mic_episode") or {}
         self.mic.since, self.mic.rebooted_at = ep.get("since"), ep.get("rebooted_at")
         self.mic.notified = bool(ep.get("notified"))
+        self.detections: list[dict[str, Any]] = [d for d in doc.get("wake_detections") or []
+                                                 if isinstance(d, dict)][-DETECTIONS_KEPT:]
 
     def _save(self) -> None:
         store = getattr(self.hub, "store", None)
@@ -813,7 +924,7 @@ class HassmicManager:
               if self.mic.since is not None else None)
         try:
             store.set_kv(self._kv_key, {"approved_pk": self._approved_pk, "last_reboot": self.last_reboot,
-                                        "mic_episode": ep})
+                                        "mic_episode": ep, "wake_detections": self.detections})
         except Exception as exc:
             self.log.warning("hassmic %s: its state could not be saved: %s", self.name, exc)
 
@@ -983,6 +1094,8 @@ class HassmicManager:
             await self.refresh()
             if self.engine == "microwakeword":
                 await self._ensure_models_shown()
+            else:
+                await self._tune_models_shown()  # installed models wait, tuned, for a switch to microWakeWord
             if network_error is not None:
                 self.reason = str(network_error)
                 self.log.warning("hassmic %s: %s (its settings are still reachable)", self.name, self.reason)
@@ -1008,7 +1121,7 @@ class HassmicManager:
         self.log.warning("hassmic %s: %s", self.name, reason)
         self._publish_management("error")
         attrs = {"reason": reason}
-        for key in ("hassmic_wake_engine", "hassmic_online_updates", "hassmic_wake_models"):
+        for key in ("hassmic_wake_engine", "hassmic_online_updates", "hassmic_wake_models", "hassmic_wake_sensitivity"):
             ent = self._entity(key)
             if ent is not None:
                 self.hub.publish(ent, UNAVAILABLE, attrs)
@@ -1115,6 +1228,8 @@ class HassmicManager:
         self.mww = await web.json("GET", "/api/mww")
         self._publish_settings()
         self._publish_models()
+        self._publish_sensitivity()
+        self._publish_detections()
 
     def _publish_settings(self) -> None:
         ent = self._entity("hassmic_wake_engine")
@@ -1174,6 +1289,8 @@ class HassmicManager:
         option = str(data.get("option") or "")
         if key == "hassmic_wake_engine":
             await self.set_engine(option)
+        elif key == "hassmic_wake_sensitivity":
+            await self.set_sensitivity(option)
         elif key == "hassmic_online_updates":
             await self.set_online_updates(option)
         else:
@@ -1233,7 +1350,10 @@ class HassmicManager:
             for model_id in wanted:
                 if model_id in installed:
                     continue
-                manifest, model = await self._cache().get(model_id)
+                published, model = await self._cache().get(model_id)
+                level = self._sensitivity_level()
+                # The Echo's own copy of the manifest carries this Echo's level; the .tflite is the same for all.
+                manifest = device_manifest(model_id, published, level) if level else published
                 body = str(len(manifest)).encode() + b"\n" + manifest + model
                 try:
                     doc = await web.json("POST", f"/api/mww/add/{model_id}", body, timeout=UPLOAD_TIMEOUT_S)
@@ -1246,6 +1366,7 @@ class HassmicManager:
                 added.append(model_id)
                 self.log.info("hassmic %s: installed wake word model %s", self.name, model_id)
             self.mww = await web.json("GET", "/api/mww")
+            await self.tune_models()
         except HassmicError as exc:
             self.models_reason = str(exc)
             with contextlib.suppress(HassmicError):  # what did get installed before the failure
@@ -1259,6 +1380,150 @@ class HassmicManager:
     async def _ensure_models_shown(self) -> None:
         with contextlib.suppress(HassmicError):  # the reason is on the models sensor; the Echo still works
             await self.ensure_models()
+
+    async def _tune_models_shown(self) -> None:
+        with contextlib.suppress(HassmicError):  # the reason is on the sensitivity select
+            await self.tune_models()
+
+    # -- wake word sensitivity ------------------------------------------------------------------------------------
+    def _sensitivity_level(self) -> str | None:
+        """The level HomeHub keeps this Echo at, or None when nobody chose one here (the Echo's own values stand)."""
+        return sensitivity_option(self.driver.entry.options)
+
+    def _installed(self) -> dict[str, dict[str, Any]]:
+        return {str(m.get("id")): m for m in self.mww.get("models") or [] if isinstance(m, dict) and m.get("id")}
+
+    async def _targets(self, level: str) -> dict[str, dict[str, Any]]:
+        """Per wanted, installed model: its published pair and the pair at ``level`` (from the cached manifest)."""
+        out: dict[str, dict[str, Any]] = {}
+        installed = self._installed()
+        for model_id in wake_models_option(self.driver.entry.options):
+            if model_id not in installed:
+                continue
+            published, _model = await self._cache().get(model_id)
+            cutoff, window = published_point(model_id, published)
+            c, w = tuned(cutoff, window, level)
+            out[model_id] = {"published_cutoff": round(cutoff, 2), "published_window": window,
+                             "cutoff": c, "window": w}
+        return out
+
+    @staticmethod
+    def _matches(model: dict[str, Any], cutoff: float, window: int) -> bool:
+        have_c, have_w = model.get("cutoff"), model.get("window")
+        return (isinstance(have_c, int | float) and abs(float(have_c) - cutoff) < 0.005
+                and isinstance(have_w, int) and have_w == window)
+
+    async def tune_models(self) -> list[str]:
+        """Put the wanted, installed models at this Echo's level (``POST /api/mww/edit/<id>``); the ids changed.
+
+        Only the cutoff and window change: the Echo rewrites its manifest and reloads the model at once
+        (``mww_edit``, ``core_wake_models_changed``), with no upload and no reflash. With no level chosen in
+        HomeHub nothing is touched, so values set on the Echo's own settings page stay.
+        """
+        level = self._sensitivity_level()
+        if level is None:
+            self.sensitivity_reason = None
+            self._publish_sensitivity()
+            return []
+        web = self._require_web()
+        changed: list[str] = []
+        try:
+            targets = await self._targets(level)
+            installed = self._installed()
+            for model_id, t in targets.items():
+                if self._matches(installed[model_id], t["cutoff"], t["window"]):
+                    continue
+                body = f"cutoff={t['cutoff']:.2f}\nwindow={t['window']}\n".encode()
+                doc = await web.json("POST", f"/api/mww/edit/{model_id}", body)
+                if not (isinstance(doc, dict) and doc.get("ok")):
+                    raise HassmicError(f"the Echo did not take the {SENSITIVITY_OPTIONS[level]} values for "
+                                       f"{model_id}: {doc.get('error') if isinstance(doc, dict) else doc}")
+                was = installed[model_id]
+                self.log.info("hassmic %s: wake word %s set to %s: cutoff %s -> %.2f, window %s -> %d",
+                              self.name, model_id, SENSITIVITY_OPTIONS[level], was.get("cutoff"), t["cutoff"],
+                              was.get("window"), t["window"])
+                changed.append(model_id)
+            if changed:
+                self.mww = await web.json("GET", "/api/mww")
+        except HassmicError as exc:
+            self.sensitivity_reason = str(exc)
+            self._publish_sensitivity()
+            raise
+        self.sensitivity_reason = None
+        self._publish_sensitivity()
+        return changed
+
+    async def set_sensitivity(self, option: str) -> None:
+        """Keep this Echo at a sensitivity level (saved on its entry) and apply it to its models now."""
+        level = _sensitivity_key(option)
+        if level is None:
+            raise HubError(f"{option!r} is not a wake word sensitivity: {', '.join(SENSITIVITY_OPTIONS.values())}")
+        self._require_web()  # nothing is saved for an Echo HomeHub cannot reach: the choice would only look applied
+        entry = self.driver.entry
+        before = self._sensitivity_level()
+        async with self._busy:
+            entry.options = {**dict(entry.options or {}), "echo_wake_sensitivity": level}
+            store = getattr(self.hub, "store", None)
+            if store is not None and hasattr(store, "save_config_entry"):
+                store.save_config_entry(entry)
+            self.log.info("hassmic %s: wake word sensitivity changed from %s to %s", self.name,
+                          SENSITIVITY_OPTIONS.get(before or "", "not set"), SENSITIVITY_OPTIONS[level])
+            await self.tune_models()
+
+    def _publish_sensitivity(self) -> None:
+        ent = self._entity("hassmic_wake_sensitivity")
+        if ent is None:
+            return
+        attrs: dict[str, Any] = {"options": list(SENSITIVITY_OPTIONS.values()), "warning": SENSITIVITY_WARNING}
+        try:
+            level = self._sensitivity_level()
+        except HassmicError as exc:
+            self.hub.publish(ent, UNKNOWN, {**attrs, "reason": str(exc)})
+            return
+        models = {mid: {"cutoff": m.get("cutoff"), "window": m.get("window")} for mid, m in self._installed().items()}
+        attrs["models"] = models
+        attrs["managed"] = level is not None
+        if self.engine and self.engine != "microwakeword":
+            attrs["note"] = "Applies when the wake word engine is microWakeWord."
+        if self.sensitivity_reason:
+            attrs["reason"] = self.sensitivity_reason
+        if level is None:
+            attrs["note"] = ("HomeHub has not set this Echo's sensitivity; its models use the values on the Echo "
+                             "(Standard unless they were changed on its settings page).")
+            self.hub.publish(ent, SENSITIVITY_OPTIONS["standard"], attrs)
+            return
+        self.hub.publish(ent, SENSITIVITY_OPTIONS[level], attrs)
+
+    def _note_detections(self, lines: list[str]) -> None:
+        seen = {(d.get("at"), d.get("wake_word"), d.get("probability")) for d in self.detections}
+        found = [d for d in parse_wake_detections(lines) if (d["at"], d["wake_word"], d["probability"]) not in seen]
+        if not found:
+            return
+        installed = self._installed()
+        by_name = {str(m.get("name") or ""): m for m in installed.values()}
+        for d in found:
+            model = by_name.get(d["wake_word"])
+            if model is not None:
+                d["model"] = model.get("id")
+                if isinstance(model.get("cutoff"), int | float):
+                    d["cutoff"] = model["cutoff"]
+            self.log.debug("hassmic %s: heard %r (probability %.2f%s)", self.name, d["wake_word"], d["probability"],
+                          f", cutoff {d['cutoff']:.2f}" if "cutoff" in d else "")
+        self.detections = (self.detections + found)[-DETECTIONS_KEPT:]
+        self._save()
+        self._publish_detections()
+
+    def _publish_detections(self) -> None:
+        ent = self._entity("hassmic_wake_detections")
+        if ent is None:
+            return
+        last = self.detections[-1] if self.detections else None
+        self.hub.publish(ent, str(len(self.detections)), {
+            "detections": list(reversed(self.detections)),  # newest first
+            "last": last,
+            "note": ("The Echo logs each wake-up with the probability that passed its cutoff; near misses are not "
+                     "logged. Wake-ups that pass with little to spare mean the setting is close; frequent ones "
+                     "nobody asked for mean it is too sensitive.")})
 
     # -- the microphone -------------------------------------------------------------------------------------------
     def _publish_mic(self, state: str, reason: str | None = None) -> None:
@@ -1298,6 +1563,10 @@ class HassmicManager:
             seen = next((i for i in range(len(lines) - 1, -1, -1) if lines[i] == self.mic.tail), None)
             if seen is not None:  # not found: the log rotated, so its newest lines are all new
                 new = lines[seen + 1:]
+        try:
+            self._note_detections(new)
+        except Exception as exc:  # the diagnostics must never cost the microphone check
+            self.log.warning("hassmic %s: reading its wake detections failed: %s", self.name, exc)
         hits = self.mic_dead(new)
         self.mic.tail = tail
         if not hits:
@@ -1381,6 +1650,8 @@ class HassmicManager:
     def status(self) -> dict[str, Any]:
         return {"in_network": self.in_network, "logged_in": self.logged_in, "reason": self.reason,
                 "engine": self.engine, "online_updates": self.online_updates, "models": self.installed_models(),
+                "wake_sensitivity": self.driver.entry.options.get("echo_wake_sensitivity"),
+                "wake_detections": list(reversed(self.detections)),
                 "microphone_dead": self.mic.dead, "web_url": self.web_url}
 
 

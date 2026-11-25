@@ -1517,13 +1517,115 @@ async def _transport_via_ha(req) -> ExecutionResult:
         service_cmd = "media_seek"
         data = {"seek_position": float(position)}
 
+    before = dict(attrs)
     result = await ha_client.call_service(
         ha_url, ha_token, domain, service_cmd, target_entity, data or None,
     )
 
+    if result.get("ok") and command in _VOLUME_COMMANDS:
+        return await _confirm_volume(ctx, full_entity_id, command, before, data or {})
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=transport_said(command, attrs, full_entity_id), service="media_transport")
     return ExecutionResult(status="FAILURE", message=f"Media command failed: {result.get('error')}", service="media_transport", detail=result)
+
+
+_VOLUME_COMMANDS = frozenset({"volume_set", "volume_up", "volume_down", "volume_mute", "mute", "volume_unmute"})
+
+#: How long a volume change is given to show up in the player's state before the reply says what
+#: the player reports. ESPHome and Music Assistant players report within a few hundred ms.
+VOLUME_READBACK_S = 1.5
+_VOLUME_READBACK_STEP_S = 0.25
+
+
+def _level(attrs: dict | None) -> float | None:
+    value = (attrs or {}).get("volume_level")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _volume_settled(command: str, data: dict, before: dict, now: dict) -> bool:
+    """Whether the player's state shows the change asked for."""
+    if command in ("volume_mute", "mute", "volume_unmute"):
+        return now.get("is_volume_muted") is not None and bool(now.get("is_volume_muted")) == bool(
+            data.get("is_volume_muted"))
+    level = _level(now)
+    if level is None:
+        return False
+    if "volume_level" in data:
+        return abs(level - float(data["volume_level"])) < 0.015
+    old = _level(before)
+    return old is None or abs(level - old) >= 0.005 or level in (0.0, 1.0)
+
+
+async def _confirm_volume(ctx, entity_id: str, command: str, before: dict, data: dict) -> ExecutionResult:
+    """Read the player back after a volume change and say what it reports, never what was asked.
+
+    An Echo has two players: its own (ESPHome, which sets the speaker's output, so voice replies
+    and every stream follow it) and Music Assistant's twin for its queue. The change goes to the
+    one named; its Music Assistant twin is then set to the same level so the music player's
+    slider and the speaker agree.
+    """
+    name = (before or {}).get("friendly_name") or entity_id.split(".", 1)[-1].replace("_", " ")
+    now: dict = {}
+    waited = 0.0
+    while True:
+        state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id) or {}
+        now = state.get("attributes") or {}
+        if _volume_settled(command, data, before, now) or waited >= VOLUME_READBACK_S:
+            break
+        await asyncio.sleep(_VOLUME_READBACK_STEP_S)
+        waited += _VOLUME_READBACK_STEP_S
+    level = _level(now)
+    muted = now.get("is_volume_muted")
+    detail: dict = {"entity_id": entity_id, "volume_level": level, "is_volume_muted": muted}
+    if not _volume_settled(command, data, before, now):
+        if level is None and muted is None:
+            # Accepted, and nothing says otherwise: a player that reports no volume cannot be read back.
+            detail["confirmed"] = False
+            return ExecutionResult(
+                status="SUCCESS", service="media_transport", detail=detail,
+                message=f"I sent the volume change to {name}, but it does not report its volume, so I can't confirm it.")
+        if "volume_level" in data:
+            message = (f"I asked {name} for {round(float(data['volume_level']) * 100)}%, "
+                       f"but it still reports {round((level or 0) * 100)}%.")
+        elif command in ("volume_mute", "mute", "volume_unmute"):
+            message = f"I asked {name} to {'mute' if data.get('is_volume_muted') else 'unmute'}, but its state did not change."
+        else:
+            message = f"I asked {name} to turn {'up' if command == 'volume_up' else 'down'}, but it still reports {round((level or 0) * 100)}%."
+        log.warning(f"[media/transport] {command} on {entity_id} not confirmed: {detail}")
+        return ExecutionResult(status="FAILURE", message=message, service="media_transport", detail=detail)
+    if level is not None and command not in ("volume_mute", "mute", "volume_unmute") \
+            and not is_music_assistant_player(before or {}, entity_id):
+        detail["mirrored_to"] = await _mirror_volume_to_twin(ctx, entity_id, level)
+    detail["confirmed"] = True
+    if command in ("volume_mute", "mute"):
+        message = f"Muted {name}."
+    elif command == "volume_unmute":
+        message = f"Unmuted {name}" + (f", volume is at {round(level * 100)}%." if level is not None else ".")
+    else:
+        message = f"Volume is at {round((level or 0) * 100)}% on {name}."
+    return ExecutionResult(status="SUCCESS", message=message, service="media_transport", detail=detail)
+
+
+async def _mirror_volume_to_twin(ctx, entity_id: str, level: float) -> str | None:
+    """Set the Music Assistant twin of ``entity_id`` to ``level`` when it reports something else."""
+    try:
+        twin = await resolve_mass_entity(ctx, entity_id)
+        if not twin or twin == entity_id:
+            return None
+        twin_state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, twin) or {}
+        twin_level = _level(twin_state.get("attributes"))
+        if twin_level is not None and abs(twin_level - level) < 0.015:
+            return None
+        res = await ha_client.call_service(ctx.ha_url, ctx.ha_token, "media_player", "volume_set", twin,
+                                           {"volume_level": level})
+        if not res.get("ok"):
+            log.warning(f"[media/transport] could not mirror volume to {twin}: {res.get('error')}")
+            return None
+        log.info(f"[media/transport] volume {level:.2f} on {entity_id} mirrored to its Music Assistant player {twin}")
+        return twin
+    except Exception as exc:  # the speaker itself is already set; the twin is a courtesy
+        log.warning(f"[media/transport] volume mirror for {entity_id} failed: {exc}")
+        return None
 
 async def handle_tv_cast(req) -> ExecutionResult:
     """Handle TV cast requests (legacy compatibility)."""
