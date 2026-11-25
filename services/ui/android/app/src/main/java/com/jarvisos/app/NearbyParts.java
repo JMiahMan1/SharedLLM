@@ -42,7 +42,7 @@ final class NearbyParts {
                 chat,
                 NearbyRules.migratedOffline(p.getBoolean(KEY_OFFLINE, false), p.contains(KEY_OFFLINE), chat),
                 p.getBoolean(KEY_CAR, true),
-                p.getBoolean(KEY_MINE, false),
+                p.getBoolean(KEY_MINE, true),
                 child(c));
     }
 

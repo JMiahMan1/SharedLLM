@@ -3,7 +3,7 @@ import { render, waitFor } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   server: {} as Record<string, unknown>,
-  device: { nearby: true, chat: true, offline: false, car: true, scanPermission: true, connectPermission: true },
+  device: { nearby: true, chat: true, offline: false, car: true, mine: true, scanPermission: true, connectPermission: true },
 }));
 const api = vi.hoisted(() => ({ getNearbySettings: vi.fn(), setNearbySettings: vi.fn() }));
 const plugin = vi.hoisted(() => ({ getState: vi.fn(), apply: vi.fn(), requestPermissions: vi.fn() }));
@@ -28,14 +28,14 @@ describe('NearbySync', () => {
   it('keeps and saves what the phone already runs when nothing is saved yet', async () => {
     state.server = { username: 'casey', settings: { nearby: false, chat: false, offline: false, car: true }, chosen: false };
     render(<NearbySync />);
-    await waitFor(() => expect(api.setNearbySettings).toHaveBeenCalledWith({ nearby: true, chat: true, offline: false, car: true, mine: false }));
+    await waitFor(() => expect(api.setNearbySettings).toHaveBeenCalledWith({ nearby: true, chat: true, offline: false, car: true, mine: true }));
     expect(plugin.apply).not.toHaveBeenCalled();
   });
 
   it('applies a saved choice to the phone', async () => {
     state.server = { username: 'casey', settings: { nearby: false, chat: true, offline: false, car: true }, chosen: true };
     render(<NearbySync />);
-    await waitFor(() => expect(plugin.apply).toHaveBeenCalledWith({ nearby: false, chat: true, offline: false, car: true, mine: false, ask: false }));
+    await waitFor(() => expect(plugin.apply).toHaveBeenCalledWith({ nearby: false, chat: true, offline: false, car: true, mine: true, ask: false }));
     expect(api.setNearbySettings).not.toHaveBeenCalled();
   });
 

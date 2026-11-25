@@ -37,8 +37,9 @@ from services.identity.models import User, UserNearbySetting
 #: The switches, in the order the settings page shows them.
 PARTS = ("nearby", "chat", "offline", "car", "mine")
 #: What a person gets before choosing: car detection was always on once a car
-#: was linked (PR #210), the rest were off until turned on.
-DEFAULTS = {"nearby": False, "chat": False, "offline": False, "car": True, "mine": False}
+#: was linked (PR #210), a person's own devices kept each other in step from the
+#: start (PR #254), the rest were off until turned on.
+DEFAULTS = {"nearby": False, "chat": False, "offline": False, "car": True, "mine": True}
 #: Always on for a minor, not a switch: a parent's offline commands and the
 #: Bluetooth-off reports (PR #216).
 MINOR_ALWAYS_ON = ("parent_link",)

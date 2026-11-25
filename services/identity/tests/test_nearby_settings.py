@@ -38,7 +38,7 @@ def as_user_fixture(session: Session):
 
 def test_defaults_keep_the_old_behaviour(as_user):
     body = as_user("casey").get("/api/users/me/nearby-settings").json()
-    assert body["settings"] == {"nearby": False, "chat": False, "offline": False, "car": True, "mine": False}
+    assert body["settings"] == {"nearby": False, "chat": False, "offline": False, "car": True, "mine": True}
     assert body["can_change"] is True
     assert body["managed_by_parent"] is False
     assert body["always_on"] == []
@@ -54,10 +54,10 @@ def test_a_saved_choice_is_marked_chosen(as_user):
 def test_a_grown_member_switches_their_own(as_user):
     client = as_user("casey")
     body = client.put("/api/users/me/nearby-settings", json={"settings": {"nearby": True, "car": False}}).json()
-    assert body["settings"] == {"nearby": True, "chat": False, "offline": False, "car": False, "mine": False}
+    assert body["settings"] == {"nearby": True, "chat": False, "offline": False, "car": False, "mine": True}
     # Only the parts sent change.
     body = client.put("/api/users/me/nearby-settings", json={"chat": True}).json()
-    assert body["settings"] == {"nearby": True, "chat": True, "offline": False, "car": False, "mine": False}
+    assert body["settings"] == {"nearby": True, "chat": True, "offline": False, "car": False, "mine": True}
     assert client.get("/api/users/me/nearby-settings").json()["settings"]["chat"] is True
 
 

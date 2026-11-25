@@ -9,8 +9,8 @@ export type NearbyParts = Record<NearbyPart, boolean>;
 /** The signed-in person's own parts in react-query. */
 export const NEARBY_QUERY_KEY = ['nearby-settings', 'me'] as const;
 
-/** What a person gets before choosing: car detection on, the rest off (as before these settings). */
-export const NEARBY_DEFAULTS: NearbyParts = { nearby: false, chat: false, offline: false, car: true, mine: false };
+/** What a person gets before choosing: car detection and own-device sync on, the rest off. */
+export const NEARBY_DEFAULTS: NearbyParts = { nearby: false, chat: false, offline: false, car: true, mine: true };
 
 /** One switch: its name and a one-line plain description. */
 export const NEARBY_LABELS: Record<NearbyPart, { title: string; description: string }> = {
