@@ -116,8 +116,9 @@ def test_a_childs_status_carries_their_parts_for_the_phones_guard(as_user):
 
 
 def test_my_devices_is_a_grown_members_own_choice_and_a_parents_for_a_child(as_user):
-    # Off until chosen, like the other radio parts.
-    assert as_user("casey").get("/api/users/me/nearby-settings").json()["settings"]["mine"] is False
+    # On to start with (a person's own devices were already in step), and still their own choice.
+    assert as_user("casey").get("/api/users/me/nearby-settings").json()["settings"]["mine"] is True
+    assert as_user("casey").put("/api/users/me/nearby-settings", json={"mine": False}).json()["settings"]["mine"] is False
     assert as_user("casey").put("/api/users/me/nearby-settings", json={"mine": True}).json()["settings"]["mine"] is True
     # A child follows a parent's choice and cannot change it.
     assert as_user("robin").put("/api/users/me/nearby-settings", json={"mine": True}).status_code == 403
