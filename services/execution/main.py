@@ -505,6 +505,9 @@ async def lifespan(app: FastAPI):
     # Home Assistant's speech-to-text, passed through, recognising who speaks
     from services.execution.wyoming_stt import serve as serve_voice_stt
     voice_stt_task = asyncio.create_task(serve_voice_stt())
+    # The household's names for Whisper's prompt, rebuilt from the integrations (stt_vocabulary.py)
+    from services.execution.stt_vocabulary import refresh_loop as stt_vocabulary_loop
+    stt_vocabulary_task = asyncio.create_task(stt_vocabulary_loop())
 
     # Start ESPresense BLE presence pipeline (E7: was never invoked)
     from services.config import REDIS_URL as _PRESENCE_REDIS_URL
@@ -570,7 +573,8 @@ async def lifespan(app: FastAPI):
     # Exception) when awaited; suppress(Exception) let it escape, so shutdown
     # failed ("Application shutdown failed. Exiting.") before stopping the rest,
     # and docker had to kill the container after its 10 s grace.
-    background = [telemetry_task, prune_task, glance_task, leave_by_task, *reminder_tasks, voice_stt_task]
+    background = [telemetry_task, prune_task, glance_task, leave_by_task, *reminder_tasks, voice_stt_task,
+                  stt_vocabulary_task]
     if config_task is not None:
         background.append(config_task)
     await _stop_background(background)
@@ -1277,6 +1281,14 @@ async def execute_ai_capabilities():
                 }
             ]
         }
+
+@app.get("/execute/voice/vocabulary")
+async def voice_vocabulary():
+    """The household's names for speech to text (stt_vocabulary.py): rooms, names in order, players."""
+    from services.execution import stt_vocabulary
+
+    return stt_vocabulary.served()
+
 
 @app.get("/execute/timers")
 async def list_timers(user_id: str | None = None):

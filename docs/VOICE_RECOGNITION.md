@@ -183,6 +183,43 @@ unlocks or opens a lock, opens a cover such as the garage, or disarms the
 alarm, even for an admin (`authorize_action` in
 `services/execution/ha_client.py`).
 
+## The household's words
+
+Whisper hears a name it has never seen as ordinary words ("plate random late"
+for an artist, "so fast" for a playlist, "Wilder Hart" for a book). Its
+`initial_prompt` biases it towards the words it is shown, and the Wyoming
+Whisper image (rhasspy/wyoming-whisper 3.8.1) has no per-request prompt: it
+builds one on every utterance from a Home Assistant names API (`--hass-api`,
+`--hass-token`), fetched while the person is still talking and awaited at most
+a second at the end, so it adds no wait. Jarvis serves that API itself:
+
+* execution builds the vocabulary from the integrations every 30 minutes
+  (`services/execution/stt_vocabulary.py`, `GET /execute/voice/vocabulary`):
+  what was played most recently first, then the family's first names, Music
+  Assistant's artists, playlists and stations (most played first),
+  Audiobookshelf's titles, series and authors (newest first) and the book
+  library's newest 40 titles, taken in turns, then the rooms and the players'
+  names. Nothing is written down anywhere: a new artist is in the next build.
+* the gateway answers the Whisper server's names commands from it
+  (`services/gateway/stt_vocabulary_routes.py`, `ws://<server>:11435/stt-vocabulary/websocket`),
+  read-only, for a caller inside the home network presenting a Jarvis API key.
+* the Whisper server keeps as many names as fit its 200-token budget
+  (`--hass-prompt-max-tokens`), in that order.
+
+Setting it up: make an API key (any account; an admin can make one for the
+household) and put it in `.env` as `WHISPER_VOCABULARY_KEY`; the `whisper`
+service then reads the names from this host's gateway. Any other Wyoming
+Whisper on the LAN (for example a faster machine first in
+`VOICE_STT_UPSTREAM`) takes the same two settings:
+
+```text
+WYO_WHISPER_HASS_API=http://<jarvis-server>:11435/stt-vocabulary
+WYO_WHISPER_HASS_TOKEN=<the key>
+WYO_WHISPER_HASS_REFRESH_SECONDS=60
+```
+
+Its log says "Biasing toward names from ..." at start.
+
 ## Setting it up
 
 1. Make Home Assistant's Whisper reachable from the Jarvis server: in Home
