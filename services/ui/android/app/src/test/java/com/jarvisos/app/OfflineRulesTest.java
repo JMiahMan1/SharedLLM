@@ -133,16 +133,16 @@ public class OfflineRulesTest {
         MeshRules.Store a = new MeshRules.Store();
         MeshRules.Store b = new MeshRules.Store();
         MeshRules.Store c = new MeshRules.Store();
-        a.add(cached("gracie", "locations", 300), NOW_S);
-        b.add(cached("gracie", "locations", 100), NOW_S);
-        c.add(cached("gracie", "locations", 200), NOW_S);
+        a.add(cached("jordan", "locations", 300), NOW_S);
+        b.add(cached("jordan", "locations", 100), NOW_S);
+        c.add(cached("jordan", "locations", 200), NOW_S);
         long period = 7;
         byte[] key = "0123456789abcdef0123456789abcdef".getBytes();
         syncPair(b, a, key, period);
         syncPair(c, b, key, period);
-        assertEquals(300, c.items.get(OfflineRules.cacheId("gracie", "locations")).version);
+        assertEquals(300, c.items.get(OfflineRules.cacheId("jordan", "locations")).version);
         // A cached item is passed on however many phones it has been through.
-        assertEquals(0, c.items.get(OfflineRules.cacheId("gracie", "locations")).hops);
+        assertEquals(0, c.items.get(OfflineRules.cacheId("jordan", "locations")).hops);
     }
 
     private static void syncPair(MeshRules.Store client, MeshRules.Store server, byte[] key, long period) throws Exception {
@@ -161,11 +161,11 @@ public class OfflineRulesTest {
     @Test
     public void aCachedItemIsReadableOnlyByWhoItIsFor() throws Exception {
         // The server seals each member's items with that member's key, after its sharing rules.
-        JSONObject inner = new JSONObject().put("to", "gracie").put("data", "x");
-        JSONObject env = MeshRules.seal(OfflineRules.deriveKeys("gracie-key")[1], inner, random);
+        JSONObject inner = new JSONObject().put("to", "jordan").put("data", "x");
+        JSONObject env = MeshRules.seal(OfflineRules.deriveKeys("jordan-key")[1], inner, random);
         assertNull(MeshRules.open(OfflineRules.deriveKeys(PAT_KEY)[1], env));
-        assertEquals("gracie", MeshRules.open(OfflineRules.deriveKeys("gracie-key")[1], env).getString("to"));
-        assertNotEquals(OfflineRules.cacheId("pat", "locations"), OfflineRules.cacheId("gracie", "locations"));
+        assertEquals("jordan", MeshRules.open(OfflineRules.deriveKeys("jordan-key")[1], env).getString("to"));
+        assertNotEquals(OfflineRules.cacheId("pat", "locations"), OfflineRules.cacheId("jordan", "locations"));
     }
 
     // -- parent commands ---------------------------------------------------------------------

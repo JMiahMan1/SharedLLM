@@ -25,7 +25,7 @@ describe('OfflineModePanel', () => {
     platform.name = 'android';
     offline.value = true;
     plugin.cache.mockResolvedValue({ items: [
-      { key: 'locations', version: at, data: { locations: [{ username: 'gracie', display_name: 'Gracie', zone: 'School' }] } },
+      { key: 'locations', version: at, data: { locations: [{ username: 'jordan', display_name: 'Jordan', zone: 'School' }] } },
       { key: 'shopping', version: at, data: { text: '- [ ] Milk\n- [x] Eggs' } },
     ] });
     plugin.requests.mockResolvedValue({ requests: [
@@ -49,11 +49,11 @@ describe('OfflineModePanel', () => {
   it('answers where someone is from the saved locations, with their age, and queues the rest', async () => {
     render(<OfflineModePanel />);
     await screen.findByTestId('offline-locations');
-    await userEvent.type(screen.getByLabelText('Question or command for Jarvis'), 'Where is Gracie?');
+    await userEvent.type(screen.getByLabelText('Question or command for Jarvis'), 'Where is Jordan?');
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
     expect(screen.getByTestId('offline-local-answer')).toHaveTextContent(
       // the date is shown too once the saved time is not today, so the test passes on any day
-      /Gracie was at School \(as of (\w+ \d+, )?3:41 PM/,
+      /Jordan was at School \(as of (\w+ \d+, )?3:41 PM/,
     );
     expect(plugin.queue).not.toHaveBeenCalled();
     await userEvent.type(screen.getByLabelText('Question or command for Jarvis'), 'Turn off the porch light');

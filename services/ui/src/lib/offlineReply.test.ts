@@ -8,12 +8,12 @@ import { offlineReply } from './offlineReply';
 describe('offlineReply', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    plugin.cache.mockResolvedValue({ items: [{ key: 'locations', version: Date.now(), data: [{ username: 'gracie', zone: 'Home' }] }] });
+    plugin.cache.mockResolvedValue({ items: [{ key: 'locations', version: Date.now(), data: [{ username: 'jordan', zone: 'Home' }] }] });
     plugin.queue.mockResolvedValue({ id: 'x' });
   });
 
   it('answers from saved information when it can', async () => {
-    expect(await offlineReply('Where is gracie?')).toMatch(/^gracie was at Home \(as of/);
+    expect(await offlineReply('Where is jordan?')).toMatch(/^jordan was at Home \(as of/);
     expect(plugin.queue).not.toHaveBeenCalled();
   });
 

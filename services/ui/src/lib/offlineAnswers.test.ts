@@ -4,13 +4,13 @@ import { asOf, localAnswer, locationRows, provisionalShopping, shoppingRows } fr
 const NOW = new Date(2026, 10, 24, 18, 0).getTime();
 const at = new Date(2026, 10, 24, 15, 41).getTime();
 const cache = [{ key: 'locations', version: at, data: { locations: [
-  { username: 'gracie', display_name: 'Gracie Example', zone: 'School' },
+  { username: 'jordan', display_name: 'Jordan Example', zone: 'School' },
   { username: 'sam', latitude: 39.7392, longitude: -104.9903 },
 ] } }];
 
 describe('offline answers', () => {
   it('answers where someone is from the last shared location, with its age', () => {
-    expect(localAnswer('Where is Gracie?', cache, NOW)).toBe('Gracie Example was at School (as of 3:41 PM, the last location this phone has).');
+    expect(localAnswer('Where is Jordan?', cache, NOW)).toBe('Jordan Example was at School (as of 3:41 PM, the last location this phone has).');
     expect(localAnswer("where's sam", cache, NOW)).toMatch(/39\.7392, -104\.9903 \(as of 3:41 PM/);
   });
 
@@ -18,7 +18,7 @@ describe('offline answers', () => {
     expect(localAnswer('Where is the nearest gas station near the highway exit please', cache, NOW)).toBeNull();
     expect(localAnswer('Turn off the lights', cache, NOW)).toBeNull();
     expect(localAnswer('Where is Robin?', cache, NOW)).toBeNull();
-    expect(localAnswer('Where is Gracie?', [], NOW)).toBeNull();
+    expect(localAnswer('Where is Jordan?', [], NOW)).toBeNull();
   });
 
   it('says the date when the data is from another day', () => {
