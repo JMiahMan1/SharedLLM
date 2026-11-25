@@ -99,19 +99,39 @@ def hub_beacon(report: dict[str, Any]) -> dict[str, Any] | None:
     return out
 
 
+def _same_device(model: str | None, device_name: str | None) -> bool:
+    """Whether the hub's stored model is the reporting device. The app says "Samsung SM-S947U" or
+    "AMAZO KFTRWI" (maker, then model) where the hub keeps "SM-S947U", so a trailing match counts."""
+    m, d = str(model or "").strip().lower(), str(device_name or "").strip().lower()
+    return bool(m and d) and (m == d or d.endswith(" " + m) or m.endswith(" " + d))
+
+
+#: The start of the reason given when the report comes from a device that is none of the user's phones.
+OTHER_DEVICE = "this device"
+
+
 def pick_phone(phones: list[dict[str, Any]], user: str, device_name: str | None) -> tuple[dict | None, str]:
-    """The user's phone on the hub, or ``(None, why)``. Several phones: the one whose model
-    is this device; still several, the one Jarvis feeds (``jarvis`` kind) if it is the only one."""
+    """The user's phone on the hub that sent this report, or ``(None, why)``.
+
+    The phone whose model is this device; with no model to compare, the only phone, else the one
+    Jarvis feeds (``jarvis`` kind) if it is the only one. A report from a device that is none of
+    the user's phones (their tablet) is not registered on one of them: on 2026-11-25 a Fire
+    tablet's report replaced a phone's beacon id, so the hub listened for a beacon nobody sent.
+    """
     mine = [p for p in phones if str(p.get("jarvis_user") or "").lower() == user
             and p.get("jarvis_fallback", True) is not False]
     if not mine:
         return None, f"the device hub has no phone for {user}; add one in Devices > Phones"
-    if len(mine) == 1:
-        return mine[0], ""
+    models = [str((p.get("app") or {}).get("model") or "") for p in mine]
     if device_name:
-        same = [p for p in mine if str((p.get("app") or {}).get("model") or "").lower() == device_name.lower()]
+        same = [p for p, m in zip(mine, models, strict=True) if _same_device(m, device_name)]
         if len(same) == 1:
             return same[0], ""
+        if not same and all(models):
+            return None, (f"{OTHER_DEVICE} ({device_name}) is not one of {user}'s phones on the device hub "
+                          f"({', '.join(models)}); add it in Devices > Phones")
+    if len(mine) == 1:
+        return mine[0], ""
     jarvis = [p for p in mine if p.get("kind") == "jarvis"]
     if len(jarvis) == 1:
         return jarvis[0], ""
@@ -121,11 +141,14 @@ def pick_phone(phones: list[dict[str, Any]], user: str, device_name: str | None)
 
 # -- the stored report --------------------------------------------------------------------------
 
-async def _save(user: str, record: dict[str, Any]) -> None:
+async def _save(user: str, record: dict[str, Any], device: str | None = None) -> None:
+    """The report under the user's key, or (``device``) under that device's own key, so a tablet's
+    report never replaces the phone's."""
     from services.gateway.notices import _redis
 
+    key = _REDIS_KEY.format(user=user) + (f":{device}" if device else "")
     async with _redis() as conn:
-        await conn.set(_REDIS_KEY.format(user=user), json.dumps(record), ex=_REDIS_TTL_S)
+        await conn.set(key, json.dumps(record), ex=_REDIS_TTL_S)
 
 
 async def load_beacons(users: list[str]) -> dict[str, dict[str, Any]]:
@@ -194,7 +217,8 @@ async def report_beacon(request: Request):
     record = {**report, "reported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "hub_registered": registered, "hub_detail": detail or None}
     try:
-        await _save(user, record)
+        other = None if registered or not detail.startswith(OTHER_DEVICE) else (report["device_name"] or "unknown")
+        await _save(user, record, other)
     except Exception as exc:
         log.error("[beacon] could not store %s's beacon report: %s", user, type(exc).__name__)
         raise HTTPException(status_code=503, detail="The beacon report could not be stored") from exc

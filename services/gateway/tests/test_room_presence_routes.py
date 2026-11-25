@@ -137,7 +137,9 @@ class TestBeaconReport:
 def test_pick_phone_prefers_this_model_then_the_jarvis_phone():
     two = [{**PHONES[0]}, {**PHONES[0], "entry_id": "x", "kind": "companion", "app": {"model": "Old"}}]
     assert room_presence.pick_phone(two, "robin", "Pixel 9")[0]["entry_id"] == ENTRY
-    assert room_presence.pick_phone(two, "robin", "Unknown")[0]["entry_id"] == ENTRY
+    # A device that is neither phone is registered on neither (it used to fall back to the Jarvis phone).
+    phone, why = room_presence.pick_phone(two, "robin", "Unknown")
+    assert phone is None and why.startswith(room_presence.OTHER_DEVICE)
     both_companion = [{**p, "kind": "companion"} for p in two]
     phone, why = room_presence.pick_phone(both_companion, "robin", None)
     assert phone is None and "2 phones" in why
@@ -318,3 +320,22 @@ class TestWhoSeesARoom:
         body = TestClient(app).get("/api/geo/people").json()
         assert _rooms(body) == {"person.alex": None, "person.sam": None, "person.robin": "Den",
                                 "device_tracker.robin_pixel": None}
+
+
+def test_the_app_names_maker_and_model_and_the_hub_the_model():
+    phones = [{**PHONES[0], "app": {"model": "SM-S942U1"}}]
+    assert room_presence.pick_phone(phones, "robin", "Samsung SM-S942U1")[0]["entry_id"] == ENTRY
+
+
+def test_a_tablet_never_takes_over_the_phones_beacon(client, env):
+    """2026-11-25: a Fire tablet signed in as a parent replaced the phone's beacon id on the hub."""
+    tablet = {**REPORT, "uuid": "11111111-2222-4333-8444-555555555555", "state": "unavailable",
+              "reason": "Bluetooth permission (Nearby devices) not granted to Jarvis", "device_name": "AMAZO KFTRWI"}
+    r = client.put("/api/phone/ble_beacon", headers=KID, json=tablet).json()
+    assert r["hub"]["registered"] is False and "AMAZO KFTRWI" in r["hub"]["detail"]
+    assert not any(m == "PATCH" for m, _p, _j in env["seen"])
+    assert "phone_beacon:robin" not in env["redis"].data
+    assert json.loads(env["redis"].data["phone_beacon:robin:AMAZO KFTRWI"])["state"] == "unavailable"
+    # The phone's own report still registers and is the user's report.
+    assert client.put("/api/phone/ble_beacon", headers=KID, json=REPORT).json()["hub"]["registered"] is True
+    assert json.loads(env["redis"].data["phone_beacon:robin"])["device_name"] == "Pixel 9"
