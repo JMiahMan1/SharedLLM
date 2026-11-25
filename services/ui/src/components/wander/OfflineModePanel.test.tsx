@@ -51,7 +51,10 @@ describe('OfflineModePanel', () => {
     await screen.findByTestId('offline-locations');
     await userEvent.type(screen.getByLabelText('Question or command for Jarvis'), 'Where is Gracie?');
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
-    expect(screen.getByTestId('offline-local-answer')).toHaveTextContent('Gracie was at School (as of 3:41 PM');
+    expect(screen.getByTestId('offline-local-answer')).toHaveTextContent(
+      // the date is shown too once the saved time is not today, so the test passes on any day
+      /Gracie was at School \(as of (\w+ \d+, )?3:41 PM/,
+    );
     expect(plugin.queue).not.toHaveBeenCalled();
     await userEvent.type(screen.getByLabelText('Question or command for Jarvis'), 'Turn off the porch light');
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
