@@ -63,14 +63,32 @@ public class ProximityRulesTest {
         assertEquals("gracie", h.member);
         assertEquals(ProximityRules.FLAG_MOVING, h.flags);
         assertEquals(-61, h.txAt1m);
-        // Its own advertisement, another household, a stale period or junk: nothing.
-        assertNull(r.resolve(ProximityRules.serviceUuid(KEY, p),
-                ProximityRules.payload(ProximityRules.memberId(KEY, "pat", p), 0, -59)));
+        assertFalse(h.ownDevice);
+        // Another household, a stale period or junk: nothing.
         assertNull(r.resolve(ProximityRules.serviceUuid(OTHER_KEY, p),
                 ProximityRules.payload(ProximityRules.memberId(OTHER_KEY, "gracie", p), 0, -59)));
         assertNull(r.resolve(ProximityRules.serviceUuid(KEY, p - 5),
                 ProximityRules.payload(ProximityRules.memberId(KEY, "gracie", p - 5), 0, -59)));
         assertNull(r.resolve(ProximityRules.serviceUuid(KEY, p), new byte[] {1, 2}));
+    }
+
+    @Test
+    public void aPersonsOtherDeviceIsResolvedAsTheirOwn() {
+        // A phone never hears its own advertisement, so "pat" heard here is Pat's tablet: it must be found
+        // (offline chat, offline mode and Pat's own data sync with it) and marked as Pat's own device.
+        long p = ProximityRules.period(T, 900);
+        ProximityRules.Resolver r = new ProximityRules.Resolver(KEY, MEMBERS, "pat", p);
+        ProximityRules.Heard h = r.resolve(ProximityRules.serviceUuid(KEY, p),
+                ProximityRules.payload(ProximityRules.memberId(KEY, "pat", p), ProximityRules.FLAG_CAN_CONNECT, -59));
+        assertNotNull(h);
+        assertEquals("pat", h.member);
+        assertTrue(h.ownDevice);
+        // Even when the config's member list leaves this phone's own person out.
+        ProximityRules.Resolver r2 = new ProximityRules.Resolver(KEY, java.util.Arrays.asList("gracie"), "pat", p);
+        ProximityRules.Heard h2 = r2.resolve(ProximityRules.serviceUuid(KEY, p),
+                ProximityRules.payload(ProximityRules.memberId(KEY, "pat", p), 0, -59));
+        assertNotNull(h2);
+        assertTrue(h2.ownDevice);
     }
 
     @Test

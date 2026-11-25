@@ -500,11 +500,13 @@ final class Proximity {
             if (h == null) continue;
             long now = System.currentTimeMillis();
             lastResultAt = now;
-            // Who was near is recorded only while Find family nearby is on; the
-            // chat and offline mode hear phones only to sync with them.
-            if (NearbyParts.sightings(app)) aggregator.add(h.member, result.getRssi(), h.txAt1m, now);
+            // Who was near is recorded only while Find family nearby is on, and never the person's own
+            // other device (a trip is never "with" yourself); the chat and offline mode hear phones only
+            // to sync with them.
+            if (!h.ownDevice && NearbyParts.sightings(app)) aggregator.add(h.member, result.getRssi(), h.txAt1m, now);
             synchronized (peers) {
-                peers.put(h.member, new Object[] {ProximityRules.band(result.getRssi(), h.txAt1m), result.getRssi(), now});
+                peers.put(h.member, new Object[] {ProximityRules.band(result.getRssi(), h.txAt1m), result.getRssi(), now,
+                        h.ownDevice});
             }
             FamilyMesh.onPeer(app, h.member, h.flags, result.getDevice());
             return;
@@ -607,7 +609,8 @@ final class Proximity {
                 for (Map.Entry<String, Object[]> e : peers.entrySet()) {
                     Object[] v = e.getValue();
                     list.put(new JSONObject().put("person", e.getKey())
-                            .put("band", v[0] == null ? "too_far" : v[0]).put("rssi", v[1]).put("at", v[2]));
+                            .put("band", v[0] == null ? "too_far" : v[0]).put("rssi", v[1]).put("at", v[2])
+                            .put("ownDevice", v.length > 3 && Boolean.TRUE.equals(v[3])));
                 }
             }
             o.put("peers", list);

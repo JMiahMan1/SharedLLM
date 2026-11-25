@@ -38,6 +38,7 @@ from services.gateway.device_claims import (
     claims_action,
     drop_repeated_request,
     honest_reply,
+    retry_note,
 )
 from services.gateway.history import get_history
 from services.gateway.intent_engine import is_raven_intent
@@ -2535,6 +2536,12 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     context_parts = [f"Current Date/Time: {now}", _speaker_line(creds)]
     if turn_note.strip():
         context_parts.append(turn_note.strip())
+    # An earlier refusal in the history ("Voice can't control the den TV") must not be copied as this
+    # turn's answer: the person may have turned voice control on since (device_claims.retry_note).
+    # With the question, not in the system message, so the warm cached prefix still holds.
+    retry = retry_note(history)
+    if retry:
+        context_parts.append(retry)
     context_parts.append(f"Retrieved Context:\n{rag_context}")
     if book_chapter.strip():
         context_parts.append(book_chapter.strip())

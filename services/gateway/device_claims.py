@@ -12,6 +12,11 @@ Two small guards:
 * ``drop_repeated_request``: a spoken request the person repeats is wanted
   again, so the earlier exchange for the same words is left out of the history the
   model reads (it is still in the stored history).
+* ``retry_note``: seen on 2026-11-24, a voice request was refused ("Voice can't control the office
+  TV"); the owner turned voice control on and asked again in other words, and the model copied the
+  old refusal from the history word for word without calling a tool. When the history holds such a
+  refusal, the question carries a note that permissions and states may have changed and the action
+  must be tried again with a tool call.
 * ``honest_reply``: when the question was a turn on/off command, and the model's
   answer says a device is now on or off (or was turned/switched), but no device
   tool succeeded in this turn, the answer is replaced by what is true: nothing was
@@ -71,6 +76,33 @@ def drop_repeated_request(history: list, query: str) -> list:
             continue
         out.append(message)
     return out
+
+
+#: An earlier answer that refused or failed to act on a device: worth a retry, never worth repeating.
+_REFUSAL = re.compile(
+    r"\b(?:can'?t|cannot|can not|couldn'?t|could not|wasn'?t able to|unable to|not allowed to|isn'?t allowed to)\s+"
+    r"(?:\w+\s+){0,3}?(?:control|find|reach|turn|switch|play|pause|resume|start|stop|use|access)\b"
+    r"|\bnot (?:exposed|permitted)\b|\bvoice can'?t control\b|\bno (?:permission|access) to\b",
+    re.IGNORECASE,
+)
+
+RETRY_NOTE = ("Note: an earlier answer in this conversation said a device could not be controlled or found. "
+              "Device permissions and states may have changed since then. If this question asks for an action, "
+              "call the tool again now; do not answer from the earlier reply.")
+
+
+def refused_before(history: list) -> bool:
+    """Whether an earlier assistant answer in ``history`` refused or failed to act on a device."""
+    return any(
+        isinstance(m, dict) and m.get("role") == "assistant"
+        and (str(m.get("content") or "").startswith(FAILED_PREFIXES) or _REFUSAL.search(str(m.get("content") or "")))
+        for m in history or []
+    )
+
+
+def retry_note(history: list) -> str:
+    """The note a question carries when the history holds an earlier refusal ("" otherwise)."""
+    return RETRY_NOTE if refused_before(history) else ""
 
 
 def tool_succeeded(result: str | None) -> bool:
