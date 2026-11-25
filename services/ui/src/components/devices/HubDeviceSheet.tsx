@@ -7,6 +7,7 @@ import LabelChips from './LabelChips';
 import RestartsSection from './RestartsSection';
 import DeviceLogsSection from './DeviceLogsSection';
 import TasmotaTemplateSection from './TasmotaTemplateSection';
+import WakeWordSection from './WakeWordSection';
 import DeviceControl from './controls/registry';
 import DeviceGlyph from './DeviceGlyph';
 import { accentFor, isActiveState } from '../../lib/deviceIcons';
@@ -26,6 +27,7 @@ import {
   entitySection, isOffline, plainName, primaryEntity, readingText, stateLine, tileKind, type EntitySection,
 } from '../../lib/deviceTiles';
 import { LABELS_KEY, getLabels, type Label } from '../../lib/homeSetup';
+import { wakeWordEntityIds } from '../../lib/wakeWord';
 
 const BTN = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm text-slate-200 hover:bg-white/10 disabled:opacity-50';
 const INPUT = 'min-h-11 w-full min-w-0 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-white placeholder:text-slate-500';
@@ -262,7 +264,10 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
   const offline = isOffline(device, primary);
   const allStates = device.entity_list.filter((e) => !e.disabled_by && e.state).map((e) => e.state as HubEntity);
   // What the main control already shows (a plug's power, a TV's remote, a vacuum's map) is not listed again.
-  const used = new Set(primary ? [primary.entity_id, ...usedSiblings(primary, allStates)] : []);
+  // An Echo's wake word sensitivity and wake-ups have their own section, with its warning.
+  const wakeIds = wakeWordEntityIds(device.entity_list);
+  const used = new Set([...(primary ? [primary.entity_id, ...usedSiblings(primary, allStates)] : []), ...wakeIds]);
+  const diagnostics = bySection.diagnostic.filter((e) => !wakeIds.has(e.entity_id));
   const controls = bySection.controls.filter((e) => !used.has(e.entity_id));
   const sensors = bySection.sensors.filter((e) => !used.has(e.entity_id));
   const configs = bySection.config.filter((e) => !used.has(e.entity_id));
@@ -318,6 +323,9 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
             {configs.map((e) => <EntityLine key={e.entity_id} entity={e} deviceName={device.name} />)}
           </div>
         </Section>
+      )}
+      {wakeIds.size > 0 && (
+        <div className={dim}><WakeWordSection entities={device.entity_list} onChanged={onChanged} /></div>
       )}
 
       <Section title="Settings" testId="section-settings">
@@ -398,11 +406,11 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
             <Info label="Last heard from" value={device.last_seen ? ago(device.last_seen) : null} />
             {device.children.length > 0 && <Info label="Connects" value={device.children.map((c) => c.name).join(', ')} />}
           </dl>
-          {bySection.diagnostic.length > 0 && (
+          {diagnostics.length > 0 && (
             <div className="border-t border-white/5" data-testid="section-diagnostic">
               <p className="pt-3 text-xs font-medium text-slate-400">Diagnostics</p>
               <div className="divide-y divide-white/5">
-                {bySection.diagnostic.map((e) => <EntityLine key={e.entity_id} entity={e} deviceName={device.name} />)}
+                {diagnostics.map((e) => <EntityLine key={e.entity_id} entity={e} deviceName={device.name} />)}
               </div>
             </div>
           )}

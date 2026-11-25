@@ -242,9 +242,20 @@ def _found(by_source: dict[str, list[C]]):
     return search
 
 
-async def _run(req, *, screen=False, sources=None, found=None, player="Den Speaker"):
+async def _run(req, *, screen=False, sources=None, found=None, player="Den Speaker", facts=None):
+    from services.execution import video_safety
+    from services.execution.handlers import video as video_handler
+
+    video_safety._checked.clear()
+    facts = facts or {}
+
+    async def inspect(url):
+        return {"title": "", "channel": "", "age_limit": 0, **facts.get(url, {})}
+
     played = AsyncMock(side_effect=lambda cand, *_a, **_k: ExecutionResult.ok(f"played {cand.ident}", service="t"))
-    with patch.object(mf, "target_facts", new=AsyncMock(return_value=(screen, player))), \
+    with patch.object(video_safety, "_setting", new=_settings({})), \
+            patch.object(video_handler, "inspect_video", new=inspect), \
+            patch.object(mf, "target_facts", new=AsyncMock(return_value=(screen, player))), \
             patch.object(mf, "discover_sources", new=AsyncMock(return_value=sources or [])), \
             patch.object(mf, "_search", new=_found(found or {})), \
             patch.object(mf, "corrected_query", new=AsyncMock(return_value=None)), \
@@ -499,3 +510,60 @@ async def test_find_only_names_the_best_match_and_plays_nothing():
     assert result.detail["action"] == "play" and result.detail["score"] == 1.0
     assert result.detail["best"]["ident"] == "abs-1"
     assert result.detail["searched"] == ["Audiobookshelf"]  # not the book library
+
+
+# --------------------------------------------------------------------------- an artist misheard
+
+def test_an_artist_that_sounds_the_same_picks_their_song():
+    # 2026-11-24: "Play Return by The Gray Havens" was heard "by the Great Evens" and nothing played.
+    found = [C("music_assistant", "track", "Harbor", "library://track/7", by="The Example Havens"),
+             C("audiobookshelf", "audiobook", "Harbor (Unabridged)", "abs-5", by="A. Writer")]
+    choice = mf.decide(mf.score_candidates(found, "Harbor", "the Example Evens"))
+    assert (choice.action, choice.best.ident) == ("play", "library://track/7")
+
+
+def test_an_artist_that_only_looks_a_little_alike_does_not_count():
+    found = [C("music_assistant", "track", "Harbor", "library://track/7", by="The Example Havens")]
+    choice = mf.decide(mf.score_candidates(found, "Harbor", "Totally Other Group"))
+    assert choice.action == "none"
+
+
+def test_a_misheard_artist_is_heard_as_the_librarys_when_one_sounds_like_it():
+    from services.execution import media_vocabulary
+
+    media_vocabulary.reset()
+    try:
+        media_vocabulary.remember("artist", ["The Example Havens", "Some Other Band"])
+        assert mf.known_name("the Example Evens") == "The Example Havens"
+        assert mf.known_name("Some Other Band") == "Some Other Band"
+        assert mf.known_name("Nobody We Know") == "Nobody We Know"
+    finally:
+        media_vocabulary.reset()
+
+
+@pytest.mark.asyncio
+async def test_title_by_artist_also_searches_the_title_with_the_artist():
+    queries: list[str] = []
+
+    async def search(_ctx, source, query):
+        queries.append(query)
+        if query == "Harbor The Example Havens":
+            return [C("music_assistant", "track", "Harbor", "library://track/7", by="The Example Havens")]
+        return [C("music_assistant", "track", "Harbor", "library://track/1", by="Somebody Else")]
+
+    from services.execution import media_vocabulary
+
+    media_vocabulary.reset()
+    media_vocabulary.remember("artist", ["The Example Havens"])
+    try:
+        played = AsyncMock(side_effect=lambda cand, *_a, **_k: ExecutionResult.ok(f"played {cand.ident}", service="t"))
+        with patch.object(mf, "target_facts", new=AsyncMock(return_value=(False, "Den Speaker"))), \
+                patch.object(mf, "discover_sources", new=AsyncMock(return_value=_ready("music_assistant"))), \
+                patch.object(mf, "_search", new=search), \
+                patch.object(mf, "corrected_query", new=AsyncMock(return_value=None)), \
+                patch.object(mf, "play_candidate", new=played):
+            result = await mf.find_and_play(_req("Harbor by the Example Evens"), "media_player.den", ctx())
+    finally:
+        media_vocabulary.reset()
+    assert "Harbor The Example Havens" in queries
+    assert result.message == "played library://track/7"

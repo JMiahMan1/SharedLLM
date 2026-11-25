@@ -227,8 +227,11 @@ jobs:
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=base
-          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,mode=max,scope=base' || '' }}
+          # Layer cache in the registry, next to the image (see build-services).
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base:buildcache
+            type=gha,scope=base
+          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && format('type=registry,ref={0}/{1}/{2}-base:buildcache,mode=max,image-manifest=true,oci-mediatypes=true', env.REGISTRY, env.IMAGE_NAMESPACE, env.REPO_NAME) || '' }}
           platforms: linux/amd64
 
   build-services:
@@ -312,14 +315,20 @@ jobs:
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # One cache scope per image. They all shared the default scope, so
-          # each matrix job overwrote the others' cache index and builds found
-          # nothing to reuse (workspace_runtime: 0 cached steps, 7 minutes, 3.5
-          # of them exporting a cache the next job overwrote). Only pushes
-          # write it: a pull request's cache is visible to that PR alone, and
-          # every PR reads the scopes its base branch writes.
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && format('type=gha,mode=max,scope={0}', matrix.service) || '' }}
+          # The layer cache lives in the registry, as a `buildcache` tag beside
+          # each image. It was in the Actions cache (one scope per image), but
+          # that holds 10 GB for the whole repository and the images' layers
+          # alone were 7 GB of it, so every build evicted another's blobs:
+          # execution's cache manifest was found, its layers were not ("blob
+          # ... not found"), and everything after the first apt step rebuilt
+          # on every run (6 minutes). The eviction also took the pip, npm and
+          # Playwright caches with it. Only pushes write the cache; pull
+          # requests read the one their base branch wrote. The gha scope is
+          # still read until the registry cache has been written once.
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-${{ matrix.service }}:buildcache
+            type=gha,scope=${{ matrix.service }}
+          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && format('type=registry,ref={0}/{1}/{2}-{3}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true', env.REGISTRY, env.IMAGE_NAMESPACE, env.REPO_NAME, matrix.service) || '' }}
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base:${{ steps.base-tag.outputs.tag }}
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
@@ -386,8 +395,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=ui
-          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,mode=max,scope=ui' || '' }}
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-ui:buildcache
+            type=gha,scope=ui
+          cache-to: ${{ format('type=registry,ref={0}/{1}/{2}-ui:buildcache,mode=max,image-manifest=true,oci-mediatypes=true', env.REGISTRY, env.IMAGE_NAMESPACE, env.REPO_NAME) }}
           build-args: |
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
@@ -442,6 +453,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=caddy
-          cache-to: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'type=gha,mode=max,scope=caddy' || '' }}
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-caddy:buildcache
+            type=gha,scope=caddy
+          cache-to: ${{ format('type=registry,ref={0}/{1}/{2}-caddy:buildcache,mode=max,image-manifest=true,oci-mediatypes=true', env.REGISTRY, env.IMAGE_NAMESPACE, env.REPO_NAME) }}
           platforms: linux/amd64

@@ -1384,6 +1384,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         user=HOUSEHOLD_IDENTITY if household else user.username,
         id=None if household else user.id,
         is_admin=False if (household or by_device) else user.is_admin,
+        is_minor=False if household else user.family_role in roles.MINOR_FAMILY_ROLES,
         identified_by="device" if by_device else None,
         api_key=None if household else (decrypt(user.api_key_enc) if user.api_key_enc else req.api_key),
         nextcloud_url=nextcloud["nextcloud_url"],
@@ -2186,6 +2187,19 @@ def internal_satellite_owner(entity_id: str, session: Session = Depends(get_sess
         "room": owner.get("room") if owner else None,
         "known": owner is not None,
     }
+
+
+@app.get("/api/internal/person-devices", dependencies=[Depends(require_internal)])
+def internal_person_devices(person: str, session: Session = Depends(get_session)):
+    """Internal: a family member, by the name someone said, and the hub devices assigned to them.
+
+    Execution announces "to <person>" on these (hub_devices.person_devices). 404
+    when the name is no one in the household.
+    """
+    found = hub_devices.person_devices(session, person)
+    if found is None:
+        raise HTTPException(status_code=404, detail="No one in the household by that name.")
+    return found
 
 
 CALIBRATION_SETTING = "voice_calibration"

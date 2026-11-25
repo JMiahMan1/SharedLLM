@@ -64,9 +64,12 @@ wake word:
    Still no answer ``HOMEHUB_VOICE_HOLD_MUSIC_AFTER_S`` after that (6 s; 0 or
    ``HOMEHUB_VOICE_HOLD_MUSIC=0`` turns it off), a playful line picked at random
    (``HOMEHUB_VOICE_HOLD_LINES``, "|"-separated; never the same one twice running)
-   is said and gentle hold music made in code (``hold_music_loop``: a soft I-vi-IV-V
-   at the stream's own rate, about -24 dBFS) is added a chunk at a time until the
-   answer's first sentence is ready; it then fades out over 0.3 s and the answer
+   is said and hold music is added a chunk at a time until the answer's first
+   sentence is ready. Which music is a HomeHub setting (``hold_music.py``, Devices >
+   Setup > Voice hold music): an original game-show "thinking" loop (the default),
+   the soft I-vi-IV-V made in code (``hold_music_loop``, also the fallback when a
+   clip cannot play), or a clip an admin uploaded; each at the stream's own rate,
+   about -24 dBFS RMS. The same setting can replace the hold lines; it then fades out over 0.3 s and the answer
    follows, never interleaved with it. Logged as ``music`` (ms of music).
    When Jarvis does not answer within ``HOMEHUB_VOICE_JARVIS_TIMEOUT_S``, or answers
    that it is busy (HTTP 503 or 429, a ``queue_timeout``), the run does not go quiet:
@@ -116,7 +119,7 @@ from aioesphomeapi import (
     VoiceAssistantFeature,
 )
 
-from services.homehub import voice_whisper
+from services.homehub import hold_music, voice_whisper
 from services.homehub.core import UNAVAILABLE, DeviceUnavailable, EntityEntry, HubError, utcnow
 
 log = logging.getLogger("homehub.voice")
@@ -174,6 +177,8 @@ DEFAULT_HOLD_LINES = (
     "Hang tight, I am checking under the couch cushions for that answer.",
     "Thanks for waiting. Enjoy some elevator music, on the house.",
     "Almost there. I would tell you a joke about waiting, but it takes too long.",
+    "Let me think about that... cue the thinking music.",
+    "Good question. The clock is ticking while I think it over.",
 )
 #: Said when Jarvis does not answer in time or is too busy to (HOMEHUB_VOICE_TIMEOUT_LINE).
 DEFAULT_TIMEOUT_LINE = "I'm still tied up with something. Please ask me again in a minute."
@@ -184,7 +189,7 @@ HOLD_MUSIC_LEAD_S = 0.6
 #: The music fades out over this long before the answer.
 HOLD_MUSIC_FADE_S = 0.3
 #: The music's level: well under speech (Kokoro speaks at about -18 to -14 dBFS RMS).
-HOLD_MUSIC_DBFS = -24.0
+HOLD_MUSIC_DBFS = hold_music.TARGET_DBFS
 #: Errors that mean "busy, try again later" rather than "broken": the ask-later line is said for them.
 ASK_LATER_CODES = frozenset({"intent-timeout", "intent-busy"})
 FOLLOW_UP_THRESHOLD_FACTOR = 1.5
@@ -1073,6 +1078,8 @@ class Run:
     whispered: bool = False
     #: Milliseconds of hold music put into the reply (0: none).
     music_ms: int = 0
+    #: Which hold music played ("gameshow", "builtin" or "upload"; "builtin" too when a clip could not play).
+    music_source: str | None = None
     #: The ask-later line was said (Jarvis timed out or was too busy).
     timeout_line: bool = False
     #: The whisper features of the command (numbers only), the satellite's usual level and what decided.
@@ -1117,6 +1124,7 @@ class Run:
                  "whispered": self.whispered, "timeout_line": self.timeout_line,
                 "whisper": self.whisper, "new_voice": self.new_voice, "new_voice_invited": self.new_voice_invited,
                 "volume": self.volume, "volume_restored": self.volume_restored,
+                "music_source": self.music_source,
                 "timings_ms": self.timings_ms()}
 
 
@@ -1146,6 +1154,7 @@ class _StreamSpeaker:
         self._music_task: asyncio.Task[None] | None = None
         self._music_stopped = False
         self._music_pos = 0  # bytes into the music loop
+        self._music_loop = b""  # the loop this run plays (hold_music.loop_for), chosen once when it starts
         self._music_bytes = 0  # music put into the stream, fade included
         self._task = asyncio.get_running_loop().create_task(self._work(), name=f"voice:{satellite.name}:speak")
 
@@ -1216,7 +1225,11 @@ class _StreamSpeaker:
                 self.stream.append(audio)
             if self.stream.rate is None:
                 return
-            hold_music_loop(self.stream.rate)  # made (once) before it is wanted
+            # Made (once per clip and rate, off the event loop) before it is wanted; never silence: a clip
+            # that cannot play is the built-in tune.
+            self._music_loop, source = await asyncio.to_thread(
+                hold_music.loop_for, getattr(self.satellite, "hub", None), self.stream.rate, hold_music_loop)
+            self.run.music_source = source
             if self._answer_coming():
                 return
             self._music_task = asyncio.get_running_loop().create_task(
@@ -1230,7 +1243,7 @@ class _StreamSpeaker:
     def _music_chunk(self, seconds: float, *, fade: bool = False) -> bytes:
         """The next ``seconds`` of the music loop (wrapping round), faded out to silence when ``fade``."""
         rate = self.stream.rate
-        loop = hold_music_loop(rate)
+        loop = self._music_loop or hold_music_loop(rate)
         size = int(seconds * rate) * 2
         out = bytearray()
         while len(out) < size:
@@ -1961,7 +1974,8 @@ class SatelliteVoice:
                                 await speaker.say(text, voice)
                             music_after = settings.hold_music_after_s if settings.hold_music else 0.0
                             speaker.start_hold(settings.hold_after_s, settings.hold_phrase, speaker.default_voice,
-                                               music_after_s=music_after, lines=settings.hold_lines)
+                                               music_after_s=music_after,
+                                               lines=hold_music.hold_lines(self.hub, settings.hold_lines))
                             try:
                                 reply = await BACKENDS.ask_stream(settings, text, self._context(run),
                                                                   _on_sentence)

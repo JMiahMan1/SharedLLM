@@ -128,6 +128,8 @@ class UserContext(BaseModel):
     model_config = {"extra": "ignore"}
     user: str
     is_admin: bool = False
+    #: A child or teen (Identity family_role): web video is always searched and screened strictly.
+    is_minor: bool = False
     #: "voice" when the person was recognised by their voice alone.
     identified_by: str | None = None
     #: "assistant" when voice or chat acts: only entities the hub exposes to voice may be controlled
@@ -397,6 +399,8 @@ class AnnouncementRequest(BaseRequest):
     entity_ids: list[str] | None = Field(None, description="Optional multi-target entity IDs (room/speaker fan-out)")
     rooms: list[str] | None = Field(None, description="Optional room names resolved via room_speakers config / HA areas")
     group_id: str | None = Field(None, description="Optional media group ID whose members receive the announcement")
+    person: str | None = Field(None, description="A family member to announce to: their assigned speakers and satellites, plus their phone")
+    everywhere: bool = Field(False, description="Announce on one reachable speaker in every room")
     message: str
     volume: float | None = Field(0.6, ge=0.0, le=1.0)
     tts_engine: Literal["kokoro", "piper"] | None = "kokoro"

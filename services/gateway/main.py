@@ -97,6 +97,7 @@ from services.gateway import (
     echo_ota_routes,
     echo_tunnel_routes,
     email_routes,
+    family_mesh,
     family_safety,
     fast_garden,
     fast_lights,
@@ -121,7 +122,9 @@ from services.gateway import (
     recipe_images,
     room_presence,
     todo_routes,
+    voice_hold_music_routes,
     voice_outcomes,
+    voice_transcript,
     weather_routes,
 )
 from services.gateway import beloved as beloved_routes
@@ -267,6 +270,37 @@ def _split_reasoning(message: str, thinking: str | None) -> tuple[str, str | Non
 #: chosen in their settings, set by the chat handler for the request in hand
 #: and added to the response by the two builders below.
 _REPLY_VOICE: ContextVar[str | None] = ContextVar("reply_voice", default=None)
+#: The friendly names of the devices this spoken request may name, by entity id; None when the
+#: reply is not spoken. A spoken reply never says an entity id (services/common/spoken_names.py).
+_SPOKEN_NAMES: ContextVar[dict[str, str] | None] = ContextVar("spoken_names", default=None)
+
+
+def _spoken(message: str) -> str:
+    """``message`` as a satellite may say it: every entity id replaced by the device's name."""
+    names = _SPOKEN_NAMES.get()
+    if names is None or not message:
+        return message
+    from services.common.spoken_names import has_entity_id, speakable
+
+    if not has_entity_id(message):
+        return message
+    said = speakable(message, names)
+    log.warning(f"[Reply] a spoken reply named an entity id; said instead: {said!r}")
+    return said
+
+
+def _note_spoken_names(entities: list[dict] | None) -> None:
+    """Remember the friendly names of ``entities`` for this spoken request's reply."""
+    names = _SPOKEN_NAMES.get()
+    if names is None:
+        return
+    for e in entities or []:
+        eid = e.get("entity_id") if isinstance(e, dict) else None
+        friendly = ((e.get("attributes") or {}).get("friendly_name") if isinstance(e, dict) else None)
+        if eid and friendly:
+            names[str(eid)] = str(friendly)
+
+
 #: A voice satellite's answer may say the speaker sounded like nobody enrolled (``new_voice``) and
 #: carry one line for the satellite to say after the answer (``voice_note``, the invitation to be
 #: learned, at most once a day per voice). Set by the chat handler (``_new_voice_check``).
@@ -306,6 +340,7 @@ def _log_reply(message: str, intent: str | None) -> None:
 
 def _make_ollama_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
+    message = _spoken(message)
     _log_reply(message, intent)
     if not stream:
         message, thinking = _split_reasoning(message, thinking)
@@ -363,6 +398,7 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: s
 
 def _make_openai_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
+    message = _spoken(message)
     _log_reply(message, intent)
     if not stream:
         message, thinking = _split_reasoning(message, thinking)
@@ -990,6 +1026,7 @@ app.add_middleware(
 
 app.include_router(info_router)
 app.include_router(family_safety.router)
+app.include_router(family_mesh.router)
 app.include_router(app_vetting_routes.router)
 app.include_router(collector_health_routes.router)
 app.include_router(profile_stats.router)  # Profile stats pages: each person's, and the admin's (docs/PROFILE_STATS.md)
@@ -1008,10 +1045,14 @@ app.include_router(camera_routes.router)
 from services.gateway import image_routes  # noqa: E402  (image entities: a vacuum's map)
 
 app.include_router(image_routes.router)
+from services.gateway import stt_vocabulary_routes  # noqa: E402
+
+app.include_router(stt_vocabulary_routes.router)  # The household's names for the Whisper servers' prompt
 app.include_router(camera_live_routes.router)  # Real-time camera video (go2rtc)
 app.include_router(discovery_routes.router)  # New devices
 app.include_router(echo_dropin_routes.router)  # Echo Drop-In status, hangup, and WebSocket audio proxy
 app.include_router(echo_ota_routes.router)  # Echo OTA status and update-all
+app.include_router(voice_hold_music_routes.router)  # Voice satellites' hold music (HomeHub setting)
 app.include_router(echo_tunnel_routes.router)  # Echo Reverse WSS Tunnel
 app.include_router(hub_registry_routes.router)  # Areas, floors, labels, zones, persons
 app.include_router(light_group_routes.router)  # Light groups (parents and admins)
@@ -1504,15 +1545,34 @@ async def _misheard_play(query: str, creds: Any) -> str | None:
 
 
 async def _answer_media_choice(query: str, user_id: str, creds: Any) -> str | None:
-    """Play or read the option a pending media question named, or None when there is none or this is not an answer."""
+    """The reply to a pending media question, or None when there is none or this is a new request.
+
+    The option named is played (or read) on the device that asked the question, never another
+    one; "no" calls it off; a reply that names nothing is asked about once more, briefly, and
+    then the question is dropped. The model never answers a pending question.
+    """
     pending = fast_media.pending_choice(user_id)
     if not pending:
         return None
-    option = fast_media.match_choice(query, pending)
-    if option is None:
+    answer = fast_media.read_choice_answer(query, pending)
+    if answer.kind == "new_request":
+        log.info(f"[FastPath] {query!r} is a new request, not an answer to the media question; dropping it")
+        fast_media.clear_choice(user_id)
         return None
+    if answer.kind == "cancel":
+        fast_media.clear_choice(user_id)
+        return "Okay."
+    if answer.kind == "unclear":
+        if pending.get("reasked"):
+            fast_media.clear_choice(user_id)
+            log.info(f"[FastPath] {query!r} still names no option of the media question; dropping it")
+            return "Sorry, I still didn't catch that. Ask me again when you're ready."
+        fast_media.mark_reasked(user_id, pending)
+        log.info(f"[FastPath] {query!r} names no option of the media question; asking again")
+        return fast_media.choice_reask(pending)
+    option = answer.option or {}
     fast_media.clear_choice(user_id)
-    log.info(f"[FastPath] answer to the media question: {option.get('label')}")
+    log.info(f"[FastPath] answer to the media question: {option.get('label')} on {pending.get('entity_id')}")
     if option.get("read"):
         book = option["read"]
         return await fast_read.read_book_chapter(
@@ -4407,6 +4467,7 @@ async def _fast_echo_bluetooth_answer(query: str, creds: dict, voice_context: di
 
 
 async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None,
+                             spoken_names: dict[str, str] | None = None,
                              new_fields: dict[str, Any] | None = None):
     """A voice satellite's answer as NDJSON: safe sentences as they are written, then what is left.
 
@@ -4416,11 +4477,13 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None,
     ``voice`` when the gateway chose one; the last one also ``new_voice`` and ``voice_note``
     (``_voice_new_fields``) when the speaker sounded like nobody enrolled.
     """
+    from services.common.spoken_names import speakable
     from services.gateway.speech_stream import speech_rest
 
     new_fields = new_fields or {}
 
     assert job_queue is not None, "Job queue not initialized"
+    spoken_names = dict(spoken_names or {})
     spoken: list[str] = []
     said = 0  # sentences relayed in all turns (``spoken`` keeps only the current turn's)
     while True:
@@ -4438,7 +4501,7 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None,
             if parsed.get("type") == "speech_turn":
                 spoken.clear()
             elif parsed.get("type") == "speech" and str(parsed.get("text") or "").strip():
-                text = str(parsed["text"]).strip()
+                text = speakable(str(parsed["text"]).strip(), spoken_names)
                 spoken.append(text)
                 said += 1
                 yield json.dumps(_make_ollama_chunk(text, model, speech=True, voice=reply_voice)) + "\n"
@@ -4447,7 +4510,7 @@ async def _speech_stream_gen(job_id: str, model: str, reply_voice: str | None,
             reply = str(ans) if ans is not None else ""
             if isinstance(ans, str):
                 _thinking, reply = extract_thinking_and_content(ans)
-            reply = reply.strip()
+            reply = speakable(reply.strip(), spoken_names)
             rest = speech_rest(reply, spoken)
             # What reached the satellite early, so a reply spoken whole can be told from one streamed.
             log.info(f"[speech_stream] job {job_id}: {said} sentences streamed before the end, "
@@ -4515,6 +4578,7 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         record = voice_outcomes.current()
         if record is not None:
             record.source = "voice"
+        _SPOKEN_NAMES.set({})
 
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -4657,6 +4721,26 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         if creds.identified_by != "voice":
             _VOICE_NEW.set(await _new_voice_check(str(query), voice_context))
 
+    # What speech to text wrote, made routable: "PlayDork Diaries" is "Play Dork Diaries",
+    # "Reach after one of <title>" is "Read chapter one of <title>" (voice_transcript.py).
+    if not grounded and voice_context:
+        heard = voice_transcript.normalize(str(query))
+        if heard != query:
+            log.info(f"[Heard] {query!r} taken as {heard!r}")
+            query = heard
+
+    # The answer to "Harbor: the song, or the audiobook?" (or "Do you want me to read it?"):
+    # the option the person named, played on the device that asked (fast_media.py). A pending
+    # question is answered here or asked again, never handed to the model.
+    if not grounded:
+        choice_answer = await _answer_media_choice(query, user_id, creds)
+        if choice_answer is not None:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", choice_answer)
+            if is_openai:
+                return _make_openai_response(choice_answer, selected_model, "play_media")
+            return _make_ollama_response(choice_answer, selected_model, "play_media")
+
     # A sentence an automation in the device hub owns (HA's conversation trigger) is answered by that
     # automation, before any shortcut or model (services/gateway/sentence_triggers.py).
     if not grounded:
@@ -4771,17 +4855,6 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         log.info(f"[FastPath] plain media command: {extract_media_transport_command(query)}")
         intent, confidence = "media_transport", 1.0
 
-    # The answer to "Harbor: the song, or the audiobook?" (or "Do you want me to read it?"):
-    # the option the person named, played or read as it was found (fast_media.py).
-    if not grounded:
-        choice_answer = await _answer_media_choice(query, user_id, creds)
-        if choice_answer is not None:
-            await update_history(user_id, "user", query)
-            await update_history(user_id, "assistant", choice_answer)
-            if is_openai:
-                return _make_openai_response(choice_answer, selected_model, "play_media")
-            return _make_ollama_response(choice_answer, selected_model, "play_media")
-
     # "Play" heard as another word ("Late <title>"): played only when the libraries have a
     # strong match for the rest; anything else goes on as it was heard (fast_media.misheard_play).
     if not grounded and not engine.is_fast_path(intent, confidence):
@@ -4850,6 +4923,7 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         cached_state = None
         if intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
             media_entities = await fetch_ha_entities(creds.model_dump())
+            _note_spoken_names(media_entities)
             cached_device_info = get_last_used_device(user_id)
             if cached_device_info and intent not in ("turn_on", "turn_off") \
                     and not str(cached_device_info.get("entity_id") or "").startswith("media_player."):
@@ -5477,7 +5551,7 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
     if is_standard_client:
         if should_stream and speech_stream:
             return StreamingResponse(_speech_stream_gen(job_id, selected_model, _REPLY_VOICE.get(),
-                                                        _voice_new_fields()),
+                                                        _SPOKEN_NAMES.get(), _voice_new_fields()),
                                      media_type="application/x-ndjson")
         if should_stream:
             async def standard_stream_gen():

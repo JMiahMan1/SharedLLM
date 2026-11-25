@@ -1925,9 +1925,13 @@ async def _run_single_tool(action: str, tool_data: dict, query: str, creds: Reso
                 else:
                     payload["action"] = "list"
 
-            if action == "announcementrequest" and not payload.get("entity_id") and not payload.get("device_name"):
+            if action == "announcementrequest" and not any(
+                    payload.get(k) for k in ("entity_id", "device_name", "entity_ids", "rooms", "person", "everywhere")):
                 device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Z][A-Za-z\s]+?)(?:\s+(?:speaker|tv|device|display|chromecast|cast))", query)
                 device_name = device_match.group(1).strip() if device_match else _trailing_place(query)
+                if device_name and device_name.lower() in str(payload.get("message") or "").lower():
+                    # "announce that the pizza is in the oven": the place is part of the message, not a target.
+                    device_name = None
                 if device_name:
                     if not any(t in device_name.lower() for t in ["tv", "speaker", "display", "cast"]):
                         type_match = re.search(r"(speaker|tv|display|chromecast|cast)", query, re.IGNORECASE)
@@ -2229,16 +2233,21 @@ async def _closing_turn(
 
 
 def _speaker_line(creds: ResolvedCredentials | None) -> str:
-    """Who is asking, for the model: a person, or plainly that nobody was recognised.
+    """Who is asking, for the model: a person, or the household, the default user.
 
-    A shared voice satellite or kiosk asks as the household. Told nothing, the model
+    A request is answered as the speaker recognised by voice, else the person the device is
+    assigned to, else the household. The household is a user like any other: an ordinary
+    request (play, turn on, what's the weather) is done for it without asking anyone's name.
+    Told only "not identified", the model answered a play request with "I couldn't identify
+    your voice from this device. Could you tell me your name?" (2026-11-24). Told nothing, it
     answered "Who am I?" with an invented name ("You're Alex").
     """
     user = (getattr(creds, "user", "") or "").strip()
     if not user or user == "household":
-        return ("Speaker: not identified (a shared device such as a voice satellite or kiosk). If they ask "
-                "who they are, say you could not tell from their voice and they can tell you their name. "
-                "Never guess or invent a name.")
+        return ("Speaker: the household (the default user: a shared device such as a voice satellite or "
+                "kiosk, and the voice was not recognised). Do what is asked as the household; never ask "
+                "who is speaking or for a name to play, control or answer anything. Only if they ask who "
+                "they are, say you could not tell from their voice. Never guess or invent a name.")
     how = " (recognised by their voice)" if getattr(creds, "identified_by", None) == "voice" else ""
     return f"Speaker: {user}{how}."
 

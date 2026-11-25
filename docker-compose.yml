@@ -1115,6 +1115,13 @@ services:
       - --language=${WHISPER_LANGUAGE:-en}
       - --beam-size=${WHISPER_BEAM_SIZE:-2}
       - --data-dir=/data
+    environment:
+      # The household's names in Whisper's prompt (docs/VOICE_RECOGNITION.md, "The household's
+      # words"): the gateway serves them in the shape of Home Assistant's names API, which this
+      # image reads on every utterance. WHISPER_VOCABULARY_KEY is a Jarvis API key; unset, no biasing.
+      - WYO_WHISPER_HASS_TOKEN=${WHISPER_VOCABULARY_KEY:-}
+      - WYO_WHISPER_HASS_API=${WHISPER_VOCABULARY_API:-http://127.0.0.1:11435/stt-vocabulary}
+      - WYO_WHISPER_HASS_REFRESH_SECONDS=${WHISPER_VOCABULARY_REFRESH_S:-60}
     volumes:
       - ./data/whisper:/data
 

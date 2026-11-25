@@ -43,8 +43,9 @@ import java.util.UUID;
  * only moment the Nearby devices permission is asked for (Android 12+; before
  * that, scanning uses the location permission Wander already holds).
  *
- * Discreet: no device name, no connectable advertisement, no pairing, no
- * prompt on anyone's phone; the advertisement is a rotating service UUID and
+ * Discreet: no device name, no pairing, no prompt on anyone's phone (the
+ * advertisement is connectable only while the offline chat is on, for its
+ * short syncs); the advertisement is a rotating service UUID and
  * eight bytes only the family can resolve. A device that cannot advertise (some
  * tablets) still scans, and says so in diagnostics and the health report.
  *
@@ -165,9 +166,37 @@ final class Proximity {
         handler.post(Proximity::apply);
     }
 
+    /** The household config this phone holds (null before the first online start). */
+    static ProximityRules.Config config(Context c) {
+        if (config == null) {
+            try {
+                config = ProximityRules.parseConfig(new JSONObject(prefs(c).getString(KEY_CONFIG, "{}")));
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        return config;
+    }
+
+    static Handler handler() {
+        return handler;
+    }
+
+    /** Whether this phone accepts offline chat connections now (advertising and serving). */
+    static boolean canServe() {
+        return running && ProximityRules.ADV_ON.equals(advertising) && app != null && FamilyMesh.active(app);
+    }
+
+    /** The offline chat's messages changed: say so in the advertisement. */
+    static void mailChanged() {
+        Handler h = handler;
+        if (h != null && running) h.post(Proximity::restartAdvertising);
+    }
+
     static void stop() {
         Handler h = handler;
         if (h != null) h.post(() -> {
+            FamilyMesh.closeServer();
             running = false;
             stopScan();
             stopAdvertising();
@@ -292,6 +321,8 @@ final class Proximity {
         Context c = app;
         if (c == null || config == null || config.me.isEmpty()) return;
         String capability = advertiseCapability(c);
+        boolean mesh = FamilyMesh.active(c);
+        if (!mesh) FamilyMesh.closeServer();
         if (!ProximityRules.ADV_ON.equals(capability)) {
             advertising = capability;
             return;
@@ -303,12 +334,17 @@ final class Proximity {
         BluetoothLeAdvertiser adv = VehicleBluetooth.adapter(c).getBluetoothLeAdvertiser();
         long p = ProximityRules.period(System.currentTimeMillis(), config.periodS);
         UUID uuid = ProximityRules.serviceUuid(config.key, p);
+        int flags = (driving ? ProximityRules.FLAG_MOVING : 0)
+                | (mesh ? ProximityRules.FLAG_CAN_CONNECT : 0)
+                | (mesh && FamilyMesh.hasMail(c) ? ProximityRules.FLAG_HAS_MAIL | FamilyMesh.mailTagBits(c) : 0);
         byte[] data = ProximityRules.payload(ProximityRules.memberId(config.key, config.me, p),
-                driving ? ProximityRules.FLAG_MOVING : 0, ProximityRules.DEFAULT_TX_AT_1M);
+                flags, ProximityRules.DEFAULT_TX_AT_1M);
+        // Connectable only for the offline chat (a short GATT sync, no pairing, no prompt).
+        if (mesh) FamilyMesh.ensureServer(c, config, p);
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
                 .setAdvertiseMode(driving ? AdvertiseSettings.ADVERTISE_MODE_BALANCED : AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
-                .setConnectable(false)
+                .setConnectable(mesh)
                 .setTimeout(0)
                 .build();
         AdvertiseData ad = new AdvertiseData.Builder()
@@ -454,6 +490,7 @@ final class Proximity {
             synchronized (peers) {
                 peers.put(h.member, new Object[] {ProximityRules.band(result.getRssi(), h.txAt1m), result.getRssi(), now});
             }
+            FamilyMesh.onPeer(app, h.member, h.flags, result.getDevice());
             return;
         }
     }
@@ -462,6 +499,7 @@ final class Proximity {
 
     private static final Runnable FLUSH = () -> {
         flush(false);
+        if (app != null) FamilyMesh.trySyncWithServer(app, false);
         if (running) handler.postDelayed(Proximity.FLUSH, FLUSH_MS);
     };
 

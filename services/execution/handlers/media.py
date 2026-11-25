@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import cast
 
 from services.common import ma_identity
+from services.common.media_titles import clean_title
 from services.config import MASS_CONFIG_ENTRY_ID
 from services.execution import abs_session_state, activity, ha_client, ha_health, media_vocabulary
 from services.execution.media_links import media_file_url
@@ -297,6 +298,24 @@ def _direct_hit(mass_client, results: list[dict], genre: bool) -> tuple[str, str
     return None
 
 
+#: How a Music Assistant search category is said in a reply.
+_SPOKEN_CATEGORY = {"tracks": "song", "albums": "album", "artists": "artist", "playlists": "playlist",
+                    "radio": "radio station"}
+
+
+async def spoken_player_name(ctx, entity_id: str) -> str:
+    """The player's friendly name for a reply ("Office Echo"), never its entity id."""
+    from services.common.spoken_names import humanize
+
+    try:
+        state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id) if ctx.ha_url else None
+        name = str(((state or {}).get("attributes") or {}).get("friendly_name") or "").strip()
+    except Exception as exc:  # a name for a sentence is never worth failing a play for
+        log.info(f"[media/play] could not read {entity_id}'s name: {exc}")
+        name = ""
+    return name or humanize(entity_id)
+
+
 async def play_music_direct(req: MediaPlayRequest, entity_id: str, ctx, why: str) -> ExecutionResult:
     """Play on a speaker straight through Music Assistant, without Home Assistant.
 
@@ -434,7 +453,8 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx, correct
             )
             log.info(f"[media/play] play_media service call response for direct URI: {result}")
             if result.get("ok"):
-                return ExecutionResult(status="SUCCESS", message=f"Playing media on {entity_id}.", service="media_play")
+                return ExecutionResult(status="SUCCESS", message=f"Playing on {await spoken_player_name(ctx, entity_id)}.",
+                                       service="media_play")
             else:
                 log.error(f"[media/play] play_media direct call failed: {result.get('error')}")
                 return ExecutionResult(status="FAILURE", message=f"Failed to play direct URI: {result.get('error')}", service="media_play")
@@ -462,6 +482,7 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx, correct
             raw = search_result["service_response"]
             resp = raw.get("service_response", raw)
             uri = None
+            items_title = None
             media_type_label = ""
             order = GENRE_CATEGORIES if genre else ["tracks", "albums", "artists", "playlists", "radio"]
             for category in order:
@@ -469,6 +490,7 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx, correct
                 log.info(f"[media/play] Category '{category}' items count: {len(items)}")
                 if items:
                     uri = items[0].get("uri")
+                    items_title = items[0].get("name")
                     media_type_label = category
                     log.info(f"[media/play] Best match in category '{category}': name='{items[0].get('name')}', uri='{uri}'")
                     break
@@ -493,7 +515,11 @@ async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx, correct
                 )
                 log.info(f"[media/play] play_media service call response: {result}")
                 if result.get("ok"):
-                    return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' ({media_type_label}) on {entity_id}.", service="media_play")
+                    title = clean_title(str(items_title or req.query))
+                    kind = _SPOKEN_CATEGORY.get(media_type_label, "")
+                    player = await spoken_player_name(ctx, entity_id)
+                    said = f"{title}, the {kind}," if kind else f"{title}"
+                    return ExecutionResult(status="SUCCESS", message=f"Playing {said} on {player}.", service="media_play")
                 else:
                     log.error(f"[media/play] play_media service call failed: {result.get('error')}")
                     return ExecutionResult(status="FAILURE", message=f"Failed to play '{req.query}': {result.get('error')}", service="media_play")
@@ -627,6 +653,8 @@ async def _play_something(req: MediaPlayRequest, entity_id: str, mass_entity: st
 
 async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play video via yt-dlp stream. Routes through Roku ECP for Roku devices."""
+    from services.execution import media_finder, video_safety
+
     from . import roku as roku_handler
     from . import video as video_handler
 
@@ -635,9 +663,14 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     # Check if already a URL
     video_url = video_handler.extract_video_url(query)
     if not video_url:
-        video_url = await video_handler.search_youtube(query)
-        if not video_url:
-            return ExecutionResult(status="FAILURE", message=f"Could not find video for '{query}'.", service="media_play")
+        # Words, not a link: safe search, then play only a suitable strong match (ask about a weaker one).
+        return await media_finder.find_video_and_play(req, query, entity_id, ctx)
+    # Every video is screened before it reaches a screen: its age rating and the household blocklist.
+    verdict = await video_safety.screen_url(video_url, ctx)
+    if not verdict.ok:
+        log.info(f"[media.video] refused a video ({verdict.why}, age_limit={verdict.age_limit})")
+        return ExecutionResult(status="FAILURE", message=video_safety.refusal_message(verdict.why),
+                               service="media_play", detail={"playback": "not_started", "reason": verdict.why})
 
     # Roku: download optimized format with progressive playback, then launch via ECP
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)

@@ -60,6 +60,8 @@ class ResolvedCredentials(BaseModel):
     mass_user_id: str | None = None
     mass_error: str | None = None
     is_admin: bool = False
+    #: A child or teen (Identity family_role): execution searches and screens web video strictly for them.
+    is_minor: bool = False
     #: Branch patterns the workspace runtime must never push to (from identity).
     forbidden_branches: list[str] | None = None
     #: "voice" when the chat request's speaker was recognised by voice alone.
@@ -190,7 +192,10 @@ class SystemLearningRequest(BaseModel):
     category: str = "general"
 
 class AnnouncementRequest(BaseModel):
-    entity_id: str
+    entity_id: str | None = None
+    device_name: str | None = None
+    person: str | None = None
+    everywhere: bool = False
     message: str
     volume: float | None = 0.6
     tts_engine: Literal["kokoro", "piper"] | None = "kokoro"

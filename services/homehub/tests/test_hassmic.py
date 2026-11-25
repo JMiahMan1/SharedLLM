@@ -79,6 +79,8 @@ class FakeEcho:
         self.nonces: dict[bytes, bytes] = {}
         self.settings = {"wake_engine": "amazon", "online_updates": "off"}
         self.models: dict[str, dict[str, Any]] = {}
+        self.manifests_added: list[bytes] = []
+        self.edits: list[tuple[str, str]] = []
         self.log_lines: list[str] = ["hassmic: started", "voice: listening"]
         self.reboots = 0
         self.github = True
@@ -189,7 +191,9 @@ class FakeEcho:
                 self.settings[name] = value
             return self._answer(req, pub, 200, {"applied": 0 if errors else 1, "errors": errors, "github_unreachable": ""})
         if path == "/api/mww":
-            models = [{"id": i, "name": m["wake_word"], "size": m["size"]} for i, m in sorted(self.models.items())]
+            # mww_list_json: the cutoff as "%.2f", the window, the manifest's phrase as the name
+            models = [{"id": i, "name": m["wake_word"], "cutoff": round(m["cutoff"], 2), "window": m["window"],
+                       "size": m["size"]} for i, m in sorted(self.models.items())]
             return self._answer(req, pub, 200, {"engine": self.settings["wake_engine"], "active": None, "second": None,
                                                 "max": 1 << 20, "models": models})
         if path.startswith("/api/mww/add/"):
@@ -198,7 +202,26 @@ class FakeEcho:
             manifest, model = json.loads(rest[:n]), rest[n:]
             if manifest.get("type") != "micro" or not manifest.get("wake_word") or not model:
                 return self._answer(req, pub, 400, {"error": "manifest"})
-            self.models[path.rsplit("/", 1)[1]] = {"wake_word": manifest["wake_word"], "size": len(model)}
+            micro = manifest.get("micro") or {}
+            self.manifests_added.append(rest[:n])
+            self.models[path.rsplit("/", 1)[1]] = {  # mww_add clamps the cutoff to 0.50-0.99
+                "wake_word": manifest["wake_word"], "size": len(model), "model": bytes(model),
+                "cutoff": min(max(float(micro.get("probability_cutoff", 0.97)), 0.5), 0.99),
+                "window": int(micro.get("sliding_window_size", 5))}
+            return self._answer(req, pub, 200, {"ok": True})
+        if path.startswith("/api/mww/edit/"):
+            model_id = path.rsplit("/", 1)[1]
+            if model_id not in self.models:
+                return self._answer(req, pub, 400, {"error": "no such model"})
+            self.edits.append((model_id, body.decode()))
+            fields = dict(line.split("=", 1) for line in body.decode().splitlines() if "=" in line)
+            if "cutoff" in fields:
+                c = float(fields["cutoff"])
+                if not 0.5 - 1e-6 <= c <= 0.99 + 1e-6:
+                    return self._answer(req, pub, 400, {"error": "cutoff 0.50 to 0.99"})
+                self.models[model_id]["cutoff"] = c
+            if "window" in fields:
+                self.models[model_id]["window"] = int(fields["window"])
             return self._answer(req, pub, 200, {"ok": True})
         if path == "/api/log/0":
             return self._answer(req, pub, 200, ("\n".join(self.log_lines) + "\n").encode(), text=True)
@@ -914,3 +937,172 @@ async def test_a_gzipped_model_download_is_not_mistaken_for_a_short_one(tmp_path
         assert set(seen_encodings) == {"identity"}
     finally:
         await runner.cleanup()
+
+
+# -- wake word sensitivity ------------------------------------------------------------------------------------
+
+def _published(cutoff: float = 0.97, window: int = 5, word: str = "Hey Jarvis") -> bytes:
+    """A v2 manifest as ESPHome publishes it (hey_jarvis.json's fields)."""
+    return json.dumps({"type": "micro", "wake_word": word, "author": "test", "website": "https://example.invalid/",
+                       "model": "hey_jarvis.tflite", "trained_languages": ["en"], "version": 2,
+                       "micro": {"probability_cutoff": cutoff, "feature_step_size": 10, "sliding_window_size": window,
+                                 "tensor_arena_size": 22860, "minimum_esphome_version": "2024.7.0"}}).encode()
+
+
+def test_sensitivity_levels_move_the_published_operating_point():
+    assert hassmic.tuned(0.97, 5, "standard") == (0.97, 5)
+    assert hassmic.tuned(0.97, 5, "more") == (0.94, 5)
+    assert hassmic.tuned(0.97, 5, "most") == (0.91, 4)
+    assert hassmic.tuned(0.9, 5, "more") == (0.87, 5)  # alexa
+    assert hassmic.tuned(0.9, 5, "most") == (0.84, 4)
+    assert hassmic.tuned(0.95, 5, "most") == (0.89, 4)  # hey_mycroft
+    # never below the floor, and a model published below it is not lowered further
+    assert hassmic.tuned(0.82, 5, "most") == (0.80, 4)
+    assert hassmic.tuned(0.70, 3, "most") == (0.70, 3)
+    assert hassmic.tuned(0.70, 2, "most") == (0.70, 2)
+    # what hassmic takes: 0.50 to 0.99, two decimals
+    assert hassmic.tuned(0.995, 5, "standard") == (0.99, 5)
+    with pytest.raises(hassmic.HassmicError):
+        hassmic.tuned(0.97, 5, "loudest")
+
+
+def test_the_device_manifest_is_the_published_one_with_the_level_applied():
+    published = _published()
+    for level, (cutoff, window) in {"standard": (0.97, 5), "more": (0.94, 5), "most": (0.91, 4)}.items():
+        raw = hassmic.device_manifest("hey_jarvis", published, level)
+        doc = hassmic.validate_manifest("hey_jarvis", raw)  # hassmic's own rules still hold
+        assert doc["micro"]["probability_cutoff"] == cutoff and doc["micro"]["sliding_window_size"] == window
+        assert doc["micro"]["feature_step_size"] == 10 and doc["micro"]["tensor_arena_size"] == 22860
+        assert doc["wake_word"] == "Hey Jarvis" and doc["model"] == "hey_jarvis.tflite" and doc["version"] == 2
+        assert doc["homehub"] == {"sensitivity": level, "published_probability_cutoff": 0.97,
+                                  "published_sliding_window_size": 5}
+    # each level is a different manifest (its bytes, so any digest of it, change)
+    assert len({hashlib.sha256(hassmic.device_manifest("hey_jarvis", published, lv)).hexdigest()
+                for lv in hassmic.SENSITIVITY_OPTIONS}) == 3
+    with pytest.raises(hassmic.HassmicError):
+        hassmic.device_manifest("hey_jarvis", b"{}", "more")
+
+
+def test_sensitivity_option_is_checked():
+    assert hassmic.sensitivity_option({}) is None
+    assert hassmic.sensitivity_option({"echo_wake_sensitivity": "most"}) == "most"
+    assert hassmic.sensitivity_option({"echo_wake_sensitivity": "More sensitive"}) == "more"
+    with pytest.raises(hassmic.HassmicError, match="loudest"):
+        hassmic.sensitivity_option({"echo_wake_sensitivity": "loudest"})
+
+
+def test_echo_wake_sensitivity_is_an_esphome_option():
+    from services.homehub.entries import ENTRY_OPTIONS
+
+    assert "echo_wake_sensitivity" in ENTRY_OPTIONS["esphome"]
+
+
+def test_wake_detections_are_read_from_hassmic_log_lines():
+    lines = [
+        "2026-11-20 18:02:11.417Z (private) wake: Hey Jarvis (microwakeword, mean 241/255)",
+        "boot+812.004 (private) wake: Alexa (microwakeword, mean 233/255, second wake word)",
+        "2026-11-20 18:02:12.000Z voice: listening",
+        "2026-11-20 18:02:13.000Z wake: Alexa (amazon)",  # Amazon's engine reports no probability
+        "garbage wake: x (microwakeword, mean 9/255)",
+    ]
+    assert hassmic.parse_wake_detections(lines) == [
+        {"at": "2026-11-20 18:02:11.417Z", "wake_word": "Hey Jarvis", "probability": 0.945, "second": False},
+        {"at": "boot+812.004", "wake_word": "Alexa", "probability": 0.914, "second": True}]
+
+
+async def _mww_echo(env, options=None):
+    """An Echo on microWakeWord with hey_jarvis and okay_nabu installed at their published values."""
+    hub, drv = env.build(options={"echo_wake_models": ["hey_jarvis", "okay_nabu"], **(options or {})})
+    mgr = await env.up(drv)
+    await mgr.bring_up()
+    eid = _state(hub, "hassmic_wake_engine")[0].entity_id
+    await hub.call_service("select", "select_option", {"entity_id": eid, "option": "microWakeWord"})
+    return hub, drv, mgr
+
+
+async def test_the_sensitivity_select_tunes_the_installed_models_without_an_upload(env, caplog):
+    hub, drv, mgr = await _mww_echo(env)
+    ent, st = _state(hub, "hassmic_wake_sensitivity")
+    assert ent.entity_category == "config"
+    assert st.state == "Standard" and st.attributes["options"] == ["Standard", "More sensitive", "Most sensitive"]
+    assert st.attributes["managed"] is False and "accidental wake-ups" in st.attributes["warning"]
+    assert env.echo.edits == []  # with no level chosen in HomeHub, nothing on the Echo is touched
+    uploads = len(env.echo.manifests_added)
+
+    caplog.set_level("INFO")
+    await hub.call_service("select", "select_option", {"entity_id": ent.entity_id, "option": "More sensitive"})
+    assert drv.entry.options["echo_wake_sensitivity"] == "more"
+    assert {m: (v["cutoff"], v["window"]) for m, v in env.echo.models.items()} == {
+        "hey_jarvis": (0.94, 5), "okay_nabu": (0.94, 5)}
+    assert len(env.echo.manifests_added) == uploads  # the same .tflite stays: only the manifest's values change
+    st = hub.states.get(ent.entity_id)
+    assert st.state == "More sensitive" and st.attributes["managed"] is True and "reason" not in st.attributes
+    assert st.attributes["models"]["hey_jarvis"] == {"cutoff": 0.94, "window": 5}
+    assert "wake word sensitivity changed from not set to More sensitive" in caplog.text
+    assert "hey_jarvis set to More sensitive: cutoff 0.97 -> 0.94" in caplog.text
+
+    await hub.call_service("select", "select_option", {"entity_id": ent.entity_id, "option": "Most sensitive"})
+    assert env.echo.models["hey_jarvis"]["cutoff"] == 0.91 and env.echo.models["hey_jarvis"]["window"] == 4
+    assert "changed from More sensitive to Most sensitive" in caplog.text
+
+    edits = len(env.echo.edits)
+    await mgr.bring_up()  # reconciling an Echo already at its level sends nothing
+    assert len(env.echo.edits) == edits
+
+    await hub.call_service("select", "select_option", {"entity_id": ent.entity_id, "option": "Standard"})
+    assert env.echo.models["hey_jarvis"]["cutoff"] == 0.97 and env.echo.models["hey_jarvis"]["window"] == 5
+    # "Hey Jarvis" and the other wanted words are all still there
+    assert sorted(env.echo.models) == ["hey_jarvis", "okay_nabu"]
+
+
+async def test_a_model_installed_later_gets_this_echos_manifest(env):
+    hub, drv = env.build(options={"echo_wake_models": ["hey_jarvis"], "echo_wake_sensitivity": "most"})
+    mgr = await env.up(drv)
+    await mgr.bring_up()
+    eid = _state(hub, "hassmic_wake_engine")[0].entity_id
+    await hub.call_service("select", "select_option", {"entity_id": eid, "option": "microWakeWord"})
+    [manifest] = env.echo.manifests_added
+    doc = json.loads(manifest)
+    assert doc["micro"]["probability_cutoff"] == 0.91 and doc["micro"]["sliding_window_size"] == 4
+    assert doc["homehub"]["sensitivity"] == "most"
+    assert env.echo.models["hey_jarvis"]["cutoff"] == 0.91 and env.echo.edits == []  # right the first time
+    assert _state(hub, "hassmic_wake_sensitivity")[1].state == "Most sensitive"
+
+
+async def test_a_reconnect_puts_back_a_level_changed_on_the_echo(env):
+    _hub, _drv, mgr = await _mww_echo(env, {"echo_wake_sensitivity": "more"})
+    env.echo.models["hey_jarvis"]["cutoff"] = 0.97  # someone used the Echo's own settings page
+    await mgr.bring_up()
+    assert env.echo.models["hey_jarvis"]["cutoff"] == 0.94
+
+
+async def test_an_unknown_sensitivity_is_refused_and_nothing_is_saved(env):
+    hub, drv, _mgr = await _mww_echo(env)
+    eid = _state(hub, "hassmic_wake_sensitivity")[0].entity_id
+    with pytest.raises(HubError, match="not a wake word sensitivity"):
+        await hub.call_service("select", "select_option", {"entity_id": eid, "option": "Loudest"})
+    assert "echo_wake_sensitivity" not in drv.entry.options and env.echo.edits == []
+
+
+async def test_a_refused_edit_is_shown_on_the_select(env):
+    hub, _drv, _mgr = await _mww_echo(env)
+    del env.echo.models["okay_nabu"]  # gone from the Echo after HomeHub listed it
+    eid = _state(hub, "hassmic_wake_sensitivity")[0].entity_id
+    with pytest.raises(HubError, match="okay_nabu"):
+        await hub.call_service("select", "select_option", {"entity_id": eid, "option": "More sensitive"})
+    assert "okay_nabu" in hub.states.get(eid).attributes["reason"]
+
+
+async def test_recent_wake_detections_are_shown_with_their_probability(env):
+    hub, _drv, mgr = await _mww_echo(env, {"echo_wake_sensitivity": "more"})
+    env.echo.log_lines += stamped("(private) wake: Hey Jarvis (microwakeword, mean 243/255)", "voice: listening",
+                                  "(private) wake: Okay Nabu (microwakeword, mean 251/255)")
+    await mgr.check_microphone()
+    await mgr.check_microphone()  # the same lines read again are not counted twice
+    ent, st = _state(hub, "hassmic_wake_detections")
+    assert ent.entity_category == "diagnostic" and st.state == "2"
+    newest, oldest = st.attributes["detections"]
+    assert oldest["wake_word"] == "Hey Jarvis" and oldest["probability"] == 0.953 and oldest["model"] == "hey_jarvis"
+    assert oldest["cutoff"] == 0.94 and newest["wake_word"] == "Okay Nabu" and st.attributes["last"] == newest
+    # kept with the Echo's state, so a HomeHub restart keeps them
+    assert len(hub.store.kv[mgr._kv_key]["wake_detections"]) == 2

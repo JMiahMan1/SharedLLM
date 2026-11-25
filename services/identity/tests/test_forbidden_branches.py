@@ -69,3 +69,13 @@ def test_resolve_carries_protected_branches_to_the_runtime(client):
 
     assert resp.status_code == 200
     assert resp.json()["forbidden_branches"] == ["main", "master"]
+
+
+def test_resolve_says_whether_the_person_is_a_child(client, session):
+    """Execution searches and screens web video strictly for a child or teen (video_safety.py)."""
+    assert client.post("/api/resolve", json={"rag_user": "sam"}).json()["is_minor"] is False
+    sam = session.exec(select(User).where(User.username == "sam")).first()
+    sam.family_role = "child"
+    session.add(sam)
+    session.commit()
+    assert client.post("/api/resolve", json={"rag_user": "sam"}).json()["is_minor"] is True

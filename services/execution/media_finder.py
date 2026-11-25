@@ -21,7 +21,9 @@ title. A source is searched only when its integration is configured and usable n
 * ``web_video``: YouTube through yt-dlp, which execution has built in. Searched only
   when the target can show video (a screen in the hub's capability index) or the
   request asks for a video, and never when the ``voice_video_search`` setting is
-  "off".
+  "off". Always the last resort, always with safe search, and a result plays only when
+  it is suitable and a strong match for what was asked; a weaker one is asked about
+  ("I found 'X' on YouTube. Play it?"). See video_safety.py.
 
 Each kind of integration needs an adapter here (how to search it, how to play its
 items); adding, removing, disabling or breaking a configured instance changes what
@@ -35,7 +37,14 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from services.common.media_titles import clean_title, main_title, names_match, normalize, title_score
+from services.common.media_titles import (
+    clean_title,
+    main_title,
+    names_sound_alike,
+    normalize,
+    sounds_like,
+    title_score,
+)
 from services.execution.schemas import AudiobookshelfRequest, CalibreRequest, ExecutionResult, MediaPlayRequest
 
 log = logging.getLogger("execution.media_finder")
@@ -203,12 +212,16 @@ class Candidate:
 
 
 def score_candidates(cands: list[Candidate], query: str, by: str = "") -> list[Candidate]:
-    """Each candidate scored against ``query`` (and ``by``, the artist or author said), best first."""
+    """Each candidate scored against ``query`` (and ``by``, the artist or author said), best first.
+
+    The artist or author counts when it is the same name or sounds like it ("Return by the
+    Great Evens" is the song by The Gray Havens).
+    """
     for c in cands:
         cap = {"series": 0.97, "author": 0.96}.get(c.kind, 1.0)
         c.score = title_score(query, c.title, cap=cap)
         if by:
-            if c.by and names_match(by, c.by):
+            if c.by and names_sound_alike(by, c.by):
                 c.score = min(1.0, c.score + 0.05)
             elif c.kind not in ("artist", "author"):
                 c.score *= 0.6  # "Harbor by The Example Band" is not the audiobook Harbor
@@ -521,7 +534,7 @@ async def _abs_login(ctx) -> tuple[str, str]:
 
 
 async def abs_catalogue(ctx) -> list[dict]:
-    """Every playable item in every Audiobookshelf library: id, kind, title, author, series."""
+    """Every playable item in every Audiobookshelf library: id, kind, title, author, series, added (ms)."""
     import time
 
     from services.execution import abs_client
@@ -551,7 +564,8 @@ async def abs_catalogue(ctx) -> list[dict]:
             items.append({"id": item["id"], "kind": "podcast" if podcast else "audiobook",
                           "title": str(meta.get("title") or ""),
                           "author": str(meta.get("authorName") or meta.get("author") or ""),
-                          "series": [] if podcast else _series_names(meta)})
+                          "series": [] if podcast else _series_names(meta),
+                          "added": item.get("addedAt") or 0})
     _abs_catalogues[url] = (time.monotonic(), items)
     return items
 
@@ -594,13 +608,96 @@ async def search_calibre(ctx, query: str) -> list[Candidate]:
     return [c for c in out if c.title and c.ident]
 
 
-async def search_web_video(query: str) -> list[Candidate]:
+async def search_web_video(query: str, ctx=None) -> list[Candidate]:
+    """YouTube's first few results for ``query``, searched at the request's safe-search level."""
+    from services.execution import video_safety
     from services.execution.handlers import video as video_handler
 
-    url, title = await video_handler.search_youtube_entry(query)
-    if not url:
-        return []
-    return [Candidate("web_video", "video", title or query, url, extra={"title_known": bool(title)})]
+    level = await video_safety.safe_search_level(ctx)
+    found = await video_handler.search_youtube_entries(query, level)
+    return [Candidate("web_video", "video", e.get("title") or query, e["url"], by=str(e.get("channel") or ""),
+                      extra={"title_known": bool(e.get("title")), "age_limit": e.get("age_limit"),
+                             "safe_search": level})
+            for e in found if e.get("url")]
+
+
+#: At most this many results are checked with the site before giving up (each check is a request).
+VIDEO_CHECKS = 3
+#: What a "yes" to "Play it?" may be said as (one option: any yes works too, fast_media.match_choice).
+_PLAY_IT_WORDS = ["yes", "yeah", "yep", "sure", "please", "okay", "ok", "play it", "go ahead"]
+
+
+async def choose_video(vids: list[Candidate], what: str, ctx) -> tuple[str, Candidate | None, str]:
+    """("play" | "ask" | "none", the video, why): the best suitable match among YouTube's results.
+
+    Results whose title or channel is on the blocklist, or whose rating a shared screen or a
+    child may not see, are skipped; the rest are ranked by how well they match ``what``. A
+    strong match plays; anything weaker is offered with a question, never played unasked.
+    """
+    from services.execution import video_safety
+
+    words = await video_safety.blocklist()
+    ranked = sorted(vids, key=lambda c: -video_safety.match_score(what, c.title if c.extra.get("title_known", True) else "",
+                                                                  c.by))
+    reasons: list[str] = []
+    checks = 0
+    for c in ranked:
+        if video_safety.blocked_by(c.title, c.by, words):
+            reasons.append("blocked")
+            continue
+        if c.extra.get("age_limit") is not None and video_safety.age_refused(c.extra["age_limit"], ctx):
+            reasons.append("age_restricted")
+            continue
+        if checks >= VIDEO_CHECKS:
+            break
+        checks += 1
+        verdict = await video_safety.screen_url(c.ident, ctx, words=words)
+        if not verdict.ok:
+            reasons.append(verdict.why)
+            continue
+        if verdict.title:
+            c.title, c.extra["title_known"] = verdict.title, True
+        if verdict.channel:
+            c.by = verdict.channel
+        c.extra["age_limit"] = verdict.age_limit
+        c.score = video_safety.match_score(what, c.title if c.extra.get("title_known", True) else "", c.by)
+        if c.score >= video_safety.STRONG_MATCH:
+            return "play", c, "strong_match"
+        return "ask", c, "weak_match"
+    return "none", None, ",".join(dict.fromkeys(reasons)) or "no_results"
+
+
+async def offer_or_play_video(vids: list[Candidate], what: str, req: MediaPlayRequest, entity_id: str, ctx,
+                              player: str) -> ExecutionResult:
+    """Play a strong, suitable YouTube match; ask about a weaker one; say so when none is suitable."""
+    from services.execution import video_safety
+
+    level = str((vids[0].extra if vids else {}).get("safe_search") or video_safety.DEFAULT_LEVEL)
+    action, cand, why = await choose_video(vids, what, ctx)
+    video_safety.log_decision(what, cand.title if cand else "", cand.score if cand else 0.0, level, action, why)
+    if action == "play" and cand is not None:
+        return await play_candidate(cand, req, entity_id, ctx, player)
+    if action == "ask" and cand is not None:
+        shown = clean_title(cand.title) if cand.extra.get("title_known", True) else "a video"
+        return ExecutionResult.ok(
+            f"I found '{shown}' on YouTube. Play it?", service=SERVICE,
+            detail={"route": "ask", "reason": why, "choice": {
+                "query": what, "entity_id": entity_id,
+                "options": [{"label": "play it", "words": _PLAY_IT_WORDS, "pick": cand.as_pick()}]}})
+    name = clean_title(what) or "that"
+    return ExecutionResult.fail(
+        f"I didn't find a video of {name} on YouTube that's suitable to play here.", service=SERVICE,
+        detail={"route": "none", "reason": why, "searched": ["YouTube"]})
+
+
+async def find_video_and_play(req: MediaPlayRequest, query: str, entity_id: str, ctx,
+                              player: str | None = None) -> ExecutionResult:
+    """Search YouTube for ``query`` and play (strong match), ask (weak match) or refuse (unsuitable)."""
+    vids = await search_web_video(search_words(query), ctx)
+    if not vids:
+        return ExecutionResult.fail(f"Could not find video for '{query}'.", service=SERVICE,
+                                    detail={"route": "none", "searched": ["YouTube"]})
+    return await offer_or_play_video(vids, query, req, entity_id, ctx, player or entity_id)
 
 
 async def _search(ctx, source: Source, query: str) -> list[Candidate]:
@@ -611,7 +708,7 @@ async def _search(ctx, source: Source, query: str) -> list[Candidate]:
     if source.key == "calibre":
         return await search_calibre(ctx, query)
     if source.key == "web_video":
-        return await search_web_video(query)
+        return await search_web_video(query, ctx)
     return []
 
 
@@ -701,14 +798,26 @@ async def find_and_play(req: MediaPlayRequest, entity_id: str, ctx) -> Execution
                                     service=SERVICE, detail={"route": "none", "searched": []})
     # The players' libraries first; the book library and the web only when they found nothing to play.
     library = [s for s in sources if s.key not in ("web_video", "calibre")]
-    cands, searched, skipped = await search_sources(ctx, library, search_words(what))
+    if by:
+        heard_by, by = by, known_name(by)
+        if by != heard_by:
+            log.info(f"[media/find] heard the artist or author {heard_by!r} as the library's {by!r}")
+    if by:
+        # "Return by <artist>": a one-word title is common; the title with its artist finds this one.
+        (cands, searched, skipped), (more, _s, _k) = await asyncio.gather(
+            search_sources(ctx, library, search_words(what)),
+            search_sources(ctx, library, f"{search_words(what)} {by}"))
+        cands = cands + more
+    else:
+        cands, searched, skipped = await search_sources(ctx, library, search_words(what))
     if by and not any(title_score(what, c.title) >= PLAY_THRESHOLD for c in cands):
         # "X by Y" may be one title ("Murder by Death"): search the words as said too.
         more, _s, _k = await search_sources(ctx, library, search_words(title))
         cands += more
     ranked = score_candidates(dedupe(cands), what, by)
     if by:
-        whole = score_candidates(dedupe(cands), title)
+        # Scored on copies: scoring writes each candidate's score, and the "by" scores above must stay.
+        whole = score_candidates([Candidate(**c.as_pick()) for c in dedupe(cands)], title)
         if whole and (not ranked or whole[0].score > ranked[0].score):
             ranked, what, by = whole, title, ""
     if not screen:
@@ -741,7 +850,8 @@ async def find_and_play(req: MediaPlayRequest, entity_id: str, ctx) -> Execution
         searched += v_searched
         skipped += v_skipped
         if vids:
-            return await play_candidate(vids[0], req, entity_id, ctx, player)
+            # Never the first result blindly: a suitable, strong match plays; a weaker one is asked about.
+            return await offer_or_play_video(vids, what if not by else title, req, entity_id, ctx, player)
     if wants_video:
         return ExecutionResult.fail(not_found_message(what, searched, skipped), service=SERVICE,
                                     detail={"route": "none", "searched": searched, "skipped": skipped})
@@ -764,6 +874,26 @@ async def find_and_play(req: MediaPlayRequest, entity_id: str, ctx) -> Execution
             )
     return ExecutionResult.fail(not_found_message(what, searched, skipped), service=SERVICE,
                                 detail={"route": "none", "searched": searched, "skipped": skipped})
+
+
+def known_name(heard: str) -> str:
+    """The library's artist or author ``heard`` sounds like, when exactly one does; else ``heard``.
+
+    From the names the libraries have listed (``media_vocabulary``, kept fresh by
+    ``stt_vocabulary``): "the Great Evens" is "The Gray Havens" when that band is in the library.
+    """
+    from services.execution import media_vocabulary
+
+    names = media_vocabulary.names("artist", "author")
+    if not names or any(normalize(heard) == normalize(n) for n in names):
+        return heard
+    hit = media_vocabulary.best_match(heard, names)
+    if hit:
+        return hit
+    alike = sorted(((sounds_like(heard, n), n) for n in names), reverse=True)
+    if alike and alike[0][0] and (len(alike) == 1 or alike[0][0] - alike[1][0] >= media_vocabulary.MATCH_MARGIN):
+        return alike[0][1]
+    return heard
 
 
 async def corrected_query(ctx, sources: list[Source], what: str) -> str | None:
@@ -869,6 +999,10 @@ async def play_candidate(cand: Candidate, req: MediaPlayRequest, entity_id: str,
         if (result.detail or {}).get("playback") == "not_started":
             return result.model_copy(update={"detail": detail})  # already says it plainly
         return result.model_copy(update={"detail": detail, "message": failed_message(cand, result.message, player)})
+    if cand.source != "web_video":
+        from services.execution import stt_vocabulary
+
+        stt_vocabulary.note_used(cand.title, *re.split(r",\s*|\s+&\s+", cand.by or ""))
     if cand.source == "web_video":
         said = f"the video {cand.title}" if cand.extra.get("title_known") else f"a video of {cand.title}"
     else:

@@ -152,6 +152,12 @@ def names_match(a: str, b: str) -> bool:
         or SequenceMatcher(None, an, bn).ratio() >= 0.85
 
 
+def names_sound_alike(a: str, b: str) -> bool:
+    """``names_match``, or the two names sound the same as speech recognition writes them
+    ("the Great Evens" for "The Gray Havens"; ``sounds_like``)."""
+    return names_match(a, b) or sounds_like(a, b) > 0
+
+
 def clean_title(title: str) -> str:
     """A title as it is said: no "(Unabridged)" or "[B07...]" tags."""
     t = re.sub(r"\s*\((?:unabridged|abridged|amazonclassics edition)\)", "", str(title or ""), flags=re.IGNORECASE)

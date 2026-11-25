@@ -139,8 +139,21 @@ Set or check timers and alarms.
 - Fields: `tool`, `action` (`add`, `list`, `delete`), optional `duration_str` (e.g. "10 minutes"), `title`.
 
 ### EntitySearchRequest
-Search for Home Assistant entities/devices by name, domain, or area.
+Search for Home Assistant entities/devices by name, domain, or area. Reachable devices are listed first; a device that is `off` can still be turned on. Not needed before an announcement.
 - Fields: `tool`, `query`, optional `domain` (`light`, `switch`, `climate`, `media_player`).
+
+### AnnouncementRequest
+Speak a message on the home's speakers, Echos and TVs. It always finds its own speakers, so call it directly; never search first and never decide that nothing is available.
+- Fields: `tool`, `message`, and at most one target: `device_name` or `rooms` (one place), `person` (a family member: their own speakers plus their phone), `everywhere: true` (the whole house). With no target it plays where the person is talking from, or, from chat, in every room.
+- A TV that is off is turned on first; offline devices are skipped and the result names them. Tell the person what the result says.
+- Examples:
+  - `{"tool": "AnnouncementRequest", "message": "Dinner is ready", "everywhere": true}`
+  - `{"tool": "AnnouncementRequest", "message": "Time to get ready for bed", "person": "<family member>"}`
+  - `{"tool": "AnnouncementRequest", "message": "The movie starts in five minutes", "device_name": "living room TV"}`
+
+### TalkRequest
+The family chat (Nextcloud Talk). To send a family member a message, send it to them by name: it reaches their phone, from the person asking.
+- Example: `{"tool": "TalkRequest", "action": "send", "target_user": "<family member>", "message": "Please call me when you can"}`
 
 ### HAServiceRequest
 Generic Home Assistant service call.

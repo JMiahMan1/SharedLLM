@@ -4,6 +4,10 @@
 |---|---|
 | ``GET /hub/voice`` | ``settings`` (the hub's ``HOMEHUB_VOICE_*`` values and any ``problems`` naming the one to fix) and ``satellites``: each ESPHome voice satellite with its entity, area, features, audio path, ``enabled``, ``subscribed``, run count, ``last_run`` (outcome, what ended it, error, microphone ``levels``, per-stage ``timings_ms``), ``history`` (the last 20 runs, kept across restarts) and ``last_error`` |
 | ``PATCH /hub/voice/{entry_id}`` | ``{"enabled": bool}``: turn one satellite's pipeline on or off (entry option ``voice_pipeline``), applied on its live connection |
+| ``GET /hub/voice/hold-music`` | The hold music setting (``hold_music.py``): ``source`` (``gameshow``, ``builtin`` or ``upload``), the ``sources`` to choose from, the hold ``lines`` (empty: the defaults), the ``upload`` kept (name, type, seconds) and the upload ``limits`` |
+| ``PUT /hub/voice/hold-music`` | ``{"source"?: ..., "lines"?: [...]}``: change it; applies to the next wait, no restart |
+| ``POST /hub/voice/hold-music/clip?filename=`` | The audio file itself as the body (wav, mp3, ogg or m4a; at most 5 MB and 60 s): decoded once, kept in the hub's data (never served back) and made the hold music. 400 (cannot be decoded, too long), 413 (too big), 415 (not one of those types) |
+| ``DELETE /hub/voice/hold-music/clip`` | Remove the uploaded clip (the game-show clip plays instead if it was playing) |
 | ``GET /hub/voice/settings`` | ``whisper``: whisper mode as set (``enabled``, the reply ``volume`` 0 to 1, ``level_drop_db``) and its ``defaults`` |
 | ``PUT /hub/voice/settings`` | ``{"whisper": {...}}`` with any of those fields; kept in the hub's store and used from the next command, no restart. An invalid value is a 400 naming it |
 | ``GET /hub/voice/devices`` | ``devices``: every voice satellite and speaker/TV media player, one per physical device, keyed by a stable ``hardware_id`` (its MAC, else its first identifier, else the hub's device id), with its ``kind``, name, area and ``entity_ids``. Identity copies these so an admin can assign each to a person (services/identity/hub_devices.py) |
@@ -12,12 +16,13 @@ No transcript or reply is ever returned. Admins only, like the rest of ``/hub/*`
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from services.homehub import voice_pipeline, voice_whisper
+from services.homehub import hold_music, voice_pipeline, voice_whisper
 from services.homehub.auth import Auth, bearer
 from services.homehub.core import HubError
 
@@ -169,5 +174,48 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         if client is not None and getattr(driver, "_device_info", None) is not None:
             voice.attach(client, driver._device_info)
         return voice.status()
+
+    @router.get("/hub/voice/hold-music")
+    async def get_hold_music(request: Request) -> dict[str, Any]:
+        admin(request)
+        return hold_music.settings(hub)
+
+    @router.put("/hub/voice/hold-music")
+    async def put_hold_music(request: Request) -> dict[str, Any]:
+        admin(request)
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            raise HTTPException(400, detail="The body must be a JSON object")
+        try:
+            return hold_music.save_settings(hub, body)
+        except hold_music.ClipError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from exc
+
+    @router.post("/hub/voice/hold-music/clip")
+    async def upload_hold_music(request: Request, filename: str = "") -> dict[str, Any]:
+        admin(request)
+        declared = request.headers.get("content-length") or ""
+        if declared.isdigit() and int(declared) > hold_music.MAX_UPLOAD_BYTES:
+            raise HTTPException(413, detail=f"The most is {hold_music.MAX_UPLOAD_BYTES // 1048576} MB")
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > hold_music.MAX_UPLOAD_BYTES:
+                raise HTTPException(413, detail=f"The most is {hold_music.MAX_UPLOAD_BYTES // 1048576} MB")
+        try:  # ffmpeg and the resampling are slow next to the event loop
+            return await asyncio.to_thread(hold_music.store_upload, hub, bytes(data), filename)
+        except hold_music.ClipError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from exc
+
+    @router.delete("/hub/voice/hold-music/clip")
+    async def delete_hold_music(request: Request) -> dict[str, Any]:
+        admin(request)
+        try:
+            return hold_music.delete_upload(hub)
+        except hold_music.ClipError as exc:
+            raise HTTPException(exc.status, detail=str(exc)) from exc
 
     return router
