@@ -18,10 +18,13 @@ on:
       - '.github/workflows/ui-tests.yml'
 
 jobs:
-  # Every check on its own runner, all at once. Lint and typecheck used to share
-  # a job (one waited for the other), and the unit suite ran on one runner for
-  # ~6 minutes, which made it the whole workflow's critical path.
-  lint:
+  # The checks run side by side. The unit suite ran on one runner for ~6
+  # minutes, which made it the whole workflow's critical path, so it is split
+  # in four. Lint and typecheck share a runner, one after the other: with
+  # node_modules restored from the cache each takes about a minute, inside the
+  # unit shards' time, and that is two runners fewer queueing behind the
+  # 20-runner limit (the split needed a third job just to report this name).
+  lint-and-typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -31,10 +34,18 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: 22
-        cache: 'npm'
-        cache-dependency-path: services/ui/package-lock.json
+
+    # node_modules itself, keyed on the lockfile: `npm ci` from the npm cache
+    # still took ~50 s a job (it unpacks and links every package again).
+    - name: Restore node_modules
+      id: node-modules
+      uses: actions/cache@v4
+      with:
+        path: services/ui/node_modules
+        key: ui-node-modules-${{ runner.os }}-latest-node22-${{ hashFiles('services/ui/package-lock.json') }}
 
     - name: Install dependencies
+      if: steps.node-modules.outputs.cache-hit != 'true'
       working-directory: services/ui
       run: npm ci
 
@@ -42,27 +53,11 @@ jobs:
       working-directory: services/ui
       run: npm run lint
 
-  typecheck:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 22
-        cache: 'npm'
-        cache-dependency-path: services/ui/package-lock.json
-
-    - name: Install dependencies
-      working-directory: services/ui
-      run: npm ci
-
     # The root tsconfig only references the real configs ("files": []), so
     # plain `tsc -p .` checks nothing, and the Vite build strips types without
     # checking them. This is the step that actually typechecks the UI.
     - name: Typecheck
+      if: ${{ !cancelled() }}
       working-directory: services/ui
       run: npm run typecheck
 
@@ -84,12 +79,18 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: 22
-        cache: 'npm'
-        cache-dependency-path: services/ui/package-lock.json
 
-    # msw is a devDependency already: `npm install -D msw` here re-resolved the
-    # whole lockfile on every run for nothing.
+    # node_modules itself, keyed on the lockfile: `npm ci` from the npm cache
+    # still took ~50 s a job (it unpacks and links every package again).
+    - name: Restore node_modules
+      id: node-modules
+      uses: actions/cache@v4
+      with:
+        path: services/ui/node_modules
+        key: ui-node-modules-${{ runner.os }}-latest-node22-${{ hashFiles('services/ui/package-lock.json') }}
+
     - name: Install dependencies
+      if: steps.node-modules.outputs.cache-hit != 'true'
       working-directory: services/ui
       run: npm ci
 
@@ -107,10 +108,18 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: 22
-        cache: 'npm'
-        cache-dependency-path: services/ui/package-lock.json
+
+    # node_modules itself, keyed on the lockfile: `npm ci` from the npm cache
+    # still took ~50 s a job (it unpacks and links every package again).
+    - name: Restore node_modules
+      id: node-modules
+      uses: actions/cache@v4
+      with:
+        path: services/ui/node_modules
+        key: ui-node-modules-${{ runner.os }}-latest-node22-${{ hashFiles('services/ui/package-lock.json') }}
 
     - name: Install dependencies
+      if: steps.node-modules.outputs.cache-hit != 'true'
       working-directory: services/ui
       run: npm ci
 
@@ -118,9 +127,8 @@ jobs:
       working-directory: services/ui
       run: npm run build
 
-  # The check names this workflow had before the split, so anything that waits
-  # on "unit-tests" or "lint-and-typecheck" still sees one result for each.
-  # They pass only when every job they stand for passed.
+  # The check name this workflow had before the split, so anything that waits
+  # on "unit-tests" still sees one result. It passes only when every shard did.
   unit-tests:
     needs: unit-tests-shard
     if: ${{ !cancelled() }}
@@ -129,14 +137,3 @@ jobs:
     steps:
     - name: Every unit-test shard passed
       run: test "${{ needs.unit-tests-shard.result }}" = "success"
-
-  lint-and-typecheck:
-    needs: [lint, typecheck]
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-    - name: Lint and typecheck both passed
-      run: |
-        test "${{ needs.lint.result }}" = "success"
-        test "${{ needs.typecheck.result }}" = "success"

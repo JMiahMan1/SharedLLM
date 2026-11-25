@@ -8,12 +8,11 @@ concurrency:
 
 # The hermetic Playwright suite in Chromium at every size the app is used at:
 # desktop, Pixel 7, a small phone (360x740) and a tablet in portrait and
-# landscape. It runs on every push that touches the UI's source, so each UI
-# change is checked across formats. A nightly run is
-# enough to notice drift in the app; on `microservices` it also runs whenever a
-# spec or this file changes, because GitHub only schedules and dispatches the
-# default branch's workflows. Once this file is on `main`, the schedule and
-# workflow_dispatch are the whole story.
+# landscape. It runs on every pull request that touches the UI (so a UI change
+# is checked across formats before it merges), on every push to microservices
+# that does, and nightly. A pull request that touches nothing the suite runs
+# still gets a passing `ui-e2e` check, from the summary job at the end, so the
+# check can be made required without blocking Python-only pull requests.
 #
 # The media visual baselines are per-platform (`*-darwin.png`), so SKIP_VISUAL
 # keeps a Linux runner from comparing a Mac render with a Linux one (see
@@ -29,23 +28,97 @@ on:
     paths:
       - 'services/ui/e2e/**'
       - 'services/ui/src/**'
+      - 'services/ui/index.html'
+      - 'services/ui/vite.config.ts'
       - 'services/ui/playwright.config.ts'
+      - 'services/ui/package-lock.json'
       - '.github/workflows/ui-e2e.yml'
+  pull_request:
+    branches: [microservices, main]
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  # Pull requests run the workflow whatever they touch (so the summary check
+  # always reports) and decide here whether the suite has anything to check.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ui: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ui == 'true' }}
+    steps:
+      - name: Changed files
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ui:
+              - 'services/ui/e2e/**'
+              - 'services/ui/src/**'
+              - 'services/ui/index.html'
+              - 'services/ui/vite.config.ts'
+              - 'services/ui/playwright.config.ts'
+              - 'services/ui/package-lock.json'
+              - '.github/workflows/ui-e2e.yml'
+
+  # Build the app once for every shard. Each of fifteen jobs used to serve it
+  # from the Vite dev server, which transforms modules on demand and sends every
+  # fresh browser context hundreds of unbundled files. This is a
+  # development-mode build (import.meta.env.DEV stays true, so the dev-only
+  # test hooks the specs drive are kept), served by `vite preview`.
+  build:
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: services/ui/node_modules
+          key: ui-node-modules-${{ runner.os }}-2404-node22-${{ hashFiles('services/ui/package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        working-directory: services/ui
+        run: npm ci
+
+      - name: Build for the suite
+        working-directory: services/ui
+        env:
+          NODE_ENV: development
+        run: npx vite build --mode development --outDir dist-e2e
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-build
+          path: services/ui/dist-e2e
+          retention-days: 1
+
   hermetic:
+    needs: [changes, build]
     # `ubuntu-latest` moved to 26.04, which Playwright 1.59.1 refuses to install
     # Chromium on ("not officially supported"); 24.04 is a supported image.
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
-      # Five screen sizes x three thirds: fifteen runners. Halves still took
-      # 9 to 16 minutes each (about a minute of it setup), so the slowest half
-      # was the whole workflow; a failure names the third it came from.
+      # Every screen size in its own pair of jobs: ten runners. Fifteen (three
+      # per size, two workers each, against the dev server) took 7 to 16
+      # minutes each and queued behind the 20-runner limit with every other
+      # workflow; served from one build with four workers, two per size do it.
       matrix:
         project:
           - hermetic-desktop
@@ -53,7 +126,7 @@ jobs:
           - hermetic-small-phone
           - hermetic-tablet-portrait
           - hermetic-tablet-landscape
-        shard: [1, 2, 3]
+        shard: [1, 2]
 
     steps:
       - uses: actions/checkout@v4
@@ -62,15 +135,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
-          cache-dependency-path: services/ui/package-lock.json
+
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: services/ui/node_modules
+          key: ui-node-modules-${{ runner.os }}-2404-node22-${{ hashFiles('services/ui/package-lock.json') }}
 
       - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
         working-directory: services/ui
         run: npm ci
 
+      - name: Download the build
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-e2e-build
+          path: services/ui/dist-e2e
+
       # The browser download is ~150MB per run and changes only when Playwright
-      # does: key the cache on the version in the lockfile.
+      # does: key the cache on its version.
       - name: Playwright version
         id: playwright
         working-directory: services/ui
@@ -81,7 +166,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ hashFiles('services/ui/package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
       - name: Install Chromium and its system libraries
         working-directory: services/ui
@@ -93,20 +178,82 @@ jobs:
             npx playwright install --with-deps chromium
           fi
 
-      - name: Run the hermetic suite (${{ matrix.project }})
+      # The blob report carries every result and attachment (the per-page,
+      # per-format screenshots included); merge-reports turns all ten into one
+      # HTML report.
+      - name: Run the hermetic suite (${{ matrix.project }}, shard ${{ matrix.shard }} of 2)
         working-directory: services/ui
         env:
           SKIP_VISUAL: '1'
-        run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/3 --reporter=line,html --workers=2
+          E2E_PREVIEW_DIR: dist-e2e
+          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.project }}-${{ matrix.shard }}.zip
+        run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/2 --reporter=line,blob --workers=4
 
-      # Every run, not only a failed one: the per-page, per-format screenshots
-      # are attached to the report.
-      - name: Upload the report and screenshots
-        if: always()
+      - name: Upload the blob report
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.project }}-shard-${{ matrix.shard }}
-          path: |
-            services/ui/playwright-report
-            services/ui/test-results
+          name: blob-report-${{ matrix.project }}-${{ matrix.shard }}
+          path: services/ui/blob-report
+          retention-days: 1
+
+  # One HTML report for the whole run, every format and shard together.
+  merge-reports:
+    needs: hermetic
+    if: ${{ !cancelled() && needs.hermetic.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: services/ui/node_modules
+          key: ui-node-modules-${{ runner.os }}-2404-node22-${{ hashFiles('services/ui/package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        working-directory: services/ui
+        run: npm ci
+
+      - name: Download the blob reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: blob-report-*
+          path: services/ui/all-blob-reports
+          merge-multiple: true
+
+      - name: Merge into one HTML report
+        working-directory: services/ui
+        run: npx playwright merge-reports --reporter html ./all-blob-reports
+
+      - name: Upload the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: services/ui/playwright-report
           retention-days: 7
+
+  # The one check to require: it passes when the suite passed, or when the
+  # pull request changed nothing the suite runs.
+  ui-e2e:
+    needs: [changes, hermetic]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The suite passed or had nothing to check
+        run: |
+          test "${{ needs.changes.result }}" = "success"
+          if [ "${{ needs.changes.outputs.ui }}" != "true" ]; then
+            echo "No UI change: nothing for the suite to check."
+            exit 0
+          fi
+          test "${{ needs.hermetic.result }}" = "success"

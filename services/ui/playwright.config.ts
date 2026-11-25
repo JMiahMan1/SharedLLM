@@ -113,8 +113,15 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   reporter: 'html',
+  // E2E_PREVIEW_DIR serves a build already made (CI builds it once for every
+  // shard, see .github/workflows/ui-e2e.yml) through `vite preview` instead of the dev
+  // server, which transforms each module on demand and serves hundreds of them
+  // to every fresh browser context. The build keeps import.meta.env.DEV, so the
+  // dev-only test hooks the specs use are still there.
   webServer: {
-    command: `npx vite --port ${HERMETIC_PORT} --strictPort`,
+    command: process.env.E2E_PREVIEW_DIR
+      ? `npx vite preview --outDir ${process.env.E2E_PREVIEW_DIR} --port ${HERMETIC_PORT} --strictPort`
+      : `npx vite --port ${HERMETIC_PORT} --strictPort`,
     url: HERMETIC_BASE_URL,
     reuseExistingServer: true,
   },
