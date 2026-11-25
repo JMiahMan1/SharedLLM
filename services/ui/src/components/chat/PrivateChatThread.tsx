@@ -1024,15 +1024,17 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
             type="button"
             onClick={() => void nudge()}
             disabled={nudging}
+            aria-label={nudgeSent ? 'Nudged' : 'Nudge'}
+            title="Nudge"
             data-testid="private-nudge"
-            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-amber-200 hover:bg-amber-400/10 disabled:opacity-50"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-amber-200 hover:bg-amber-400/10 disabled:opacity-50"
           >
             {nudgeSent ? (
               <Heart size={14} className="fill-rose-400 text-rose-300 motion-safe:animate-[nudge-beat_1.1s_ease-in-out_infinite]" aria-hidden />
             ) : (
               <BellRing size={14} aria-hidden />
-            )}{' '}
-            {nudgeSent ? 'Nudged' : 'Nudge'}
+            )}
+            <span className="hidden sm:inline">{nudgeSent ? 'Nudged' : 'Nudge'}</span>
           </button>
         )}
         {belovedAllowed && (
@@ -1082,10 +1084,12 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
         <button
           type="button"
           onClick={() => lockNow(token)}
+          aria-label="Lock now"
+          title="Lock now"
           data-testid="private-lock-now"
-          className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
         >
-          <Lock size={14} aria-hidden /> Lock
+          <Lock size={14} aria-hidden /> <span className="hidden sm:inline">Lock</span>
         </button>
       </div>
       {secure === 'unsupported' && (
