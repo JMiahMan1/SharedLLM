@@ -128,6 +128,8 @@ class UserContext(BaseModel):
     model_config = {"extra": "ignore"}
     user: str
     is_admin: bool = False
+    #: A child or teen (Identity family_role): web video is always searched and screened strictly.
+    is_minor: bool = False
     #: "voice" when the person was recognised by their voice alone.
     identified_by: str | None = None
     #: "assistant" when voice or chat acts: only entities the hub exposes to voice may be controlled

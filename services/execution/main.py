@@ -1,5 +1,6 @@
 # services/execution/main.py
 import asyncio
+import functools
 import base64
 import hashlib
 import logging
@@ -1001,6 +1002,17 @@ async def execute_media_play(req: MediaPlayRequest):
     return await MediaPlaybackService.play(req)
 
 
+@app.post("/execute/media/find", response_model=ExecutionResult)
+async def execute_media_find(req: MediaPlayRequest):
+    """What "Play <query>" would play from the libraries, without playing it (media_finder.find_only).
+
+    The gateway asks before treating a misheard request ("Late <title>") as a play.
+    """
+    from services.execution import media_finder
+
+    return await media_finder.find_only(_with_hub_login(req))
+
+
 @app.post("/execute/media/resolve_stream", response_model=ExecutionResult)
 async def execute_media_resolve_stream(req: ResolveStreamRequest):
     from services.execution.handlers import video as video_handler
@@ -1008,10 +1020,18 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
     query = req.query
     log.info(f"[media/resolve_stream] Resolving audio stream URL for query='{query}'")
 
-    # Step 1: Find a YouTube page URL for the query
-    video_url = await video_handler.search_youtube(query)
+    from services.execution import video_safety
+
+    # Step 1: Find a YouTube page URL for the query (safe search), screened before it plays anywhere
+    level = await video_safety.safe_search_level(req.user_context)
+    video_url = await video_handler.search_youtube(query, level)
     if not video_url:
         return ExecutionResult(status="FAILURE", message="Could not find stream on YouTube", service="resolve_stream")
+    verdict = await video_safety.screen_url(video_url, req.user_context)
+    if not verdict.ok:
+        log.info(f"[media/resolve_stream] refused a result ({verdict.why}) at safe_search={level}")
+        return ExecutionResult(status="FAILURE", message=video_safety.refusal_message(verdict.why),
+                               service="resolve_stream", detail={"reason": verdict.why})
 
     # Step 2: Extract a direct, in-memory audio stream URL; no download needed
     stream_url, title = await video_handler.extract_audio_stream_url(video_url)
@@ -1221,7 +1241,8 @@ async def voice_signature(file: UploadFile = File(...), x_internal_secret: str =
 
     audio = await file.read(voiceprint.MAX_AUDIO_BYTES + 1)
     try:
-        return await asyncio.to_thread(voiceprint.embed, audio)
+        # Enrollment and the household's voice check: refuse noisy or clipped takes (voiceprint.check_quality).
+        return await asyncio.to_thread(functools.partial(voiceprint.embed, audio, enrollment=True))
     except voiceprint.VoiceprintError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
 

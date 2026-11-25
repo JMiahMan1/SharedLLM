@@ -32,7 +32,7 @@ from pydantic import Field as PydField
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from services.common import app_vetting, device_noun, ha_redirect, video_calls
+from services.common import app_vetting, book_metadata, device_noun, ha_redirect, video_calls
 from services.common import concern_monitor as concern_levels
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import (
@@ -51,7 +51,21 @@ from services.config import (
     IDENTITY_DATABASE_URL,
     INTERNAL_SECRET,
 )
-from services.identity import abuse_ch, audit, battery_alerts, device_archive, music_assistant, onboarding, push, roles, sign_in_reset, voice
+from services.identity import (
+    abuse_ch,
+    audit,
+    battery_alerts,
+    book_metadata_check,
+    device_archive,
+    hub_devices,
+    music_assistant,
+    onboarding,
+    profile_sharing,
+    push,
+    roles,
+    sign_in_reset,
+    voice,
+)
 from services.identity.crypto import decrypt, digest_candidates, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
@@ -84,11 +98,13 @@ from services.identity.models import (
     UserAvatarImage,
     UserCalendarSetting,
     UserCredentialShare,
+    UserProfileSharing,
     UserRole,
     UserThemeSetting,
     UserWeatherSetting,
     UserWidget,
     UserWorkspaceSession,
+    VoiceCandidate,
     VoicePendingEnrolment,
     VoiceSignature,
     WorkspaceChat,
@@ -246,6 +262,8 @@ SCHEMA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR"),
     ("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR"),
     ("user", "malwarebazaar_key_enc", "ALTER TABLE user ADD COLUMN malwarebazaar_key_enc VARCHAR"),
+    ("user", "google_books_key_enc", "ALTER TABLE user ADD COLUMN google_books_key_enc VARCHAR"),
+    ("user", "book_metadata", "ALTER TABLE user ADD COLUMN book_metadata VARCHAR"),
     ("user", "is_test_account", "ALTER TABLE user ADD COLUMN is_test_account BOOLEAN NOT NULL DEFAULT 0"),
     ("apikey", "key_hash", "ALTER TABLE apikey ADD COLUMN key_hash VARCHAR"),
     ("apikey", "key_prefix", "ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR"),
@@ -260,6 +278,11 @@ SCHEMA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("device", "agent_key_hash", "ALTER TABLE device ADD COLUMN agent_key_hash VARCHAR NOT NULL DEFAULT ''"),
     ("device", "agent_key_created_at", "ALTER TABLE device ADD COLUMN agent_key_created_at VARCHAR"),
     ("device", "archived_at", "ALTER TABLE device ADD COLUMN archived_at VARCHAR"),
+    ("device", "hardware_id", "ALTER TABLE device ADD COLUMN hardware_id VARCHAR"),
+    ("device", "hub_device_id", "ALTER TABLE device ADD COLUMN hub_device_id VARCHAR"),
+    ("device", "entity_ids", "ALTER TABLE device ADD COLUMN entity_ids VARCHAR NOT NULL DEFAULT '[]'"),
+    ("device", "room", "ALTER TABLE device ADD COLUMN room VARCHAR"),
+    ("device", "hub_area", "ALTER TABLE device ADD COLUMN hub_area VARCHAR"),
     ("useravatarimage", "original", "ALTER TABLE useravatarimage ADD COLUMN original BLOB"),
     ("useravatarimage", "original_mime", "ALTER TABLE useravatarimage ADD COLUMN original_mime VARCHAR"),
     ("useravatarimage", "crop", "ALTER TABLE useravatarimage ADD COLUMN crop VARCHAR"),
@@ -381,8 +404,9 @@ SHARED_CREDENTIAL_SERVICES = (
 # Services whose system default user's credentials are the household default:
 # every user who has not set their own uses them, with no admin grant. Only
 # the abuse.ch Auth-Key app vetting looks app file hashes up with
-# (services/identity/abuse_ch.py): a lookup key, not a personal account.
-HOUSEHOLD_DEFAULT_SERVICES = (abuse_ch.SERVICE,)
+# (services/identity/abuse_ch.py) and the Google Books key the library looks
+# books up with (services/common/book_metadata.py): lookup keys, not personal accounts.
+HOUSEHOLD_DEFAULT_SERVICES = (abuse_ch.SERVICE, book_metadata.KEY_SERVICE)
 
 
 #: The identity a kiosk or voice satellite acts as when it names no person
@@ -480,6 +504,8 @@ def _own_service_creds(user: User, service: str) -> dict[str, str | None]:
         }
     if service == abuse_ch.SERVICE:
         return {abuse_ch.FIELD: _decrypt_field(user.malwarebazaar_key_enc)}
+    if service == book_metadata.KEY_SERVICE:
+        return {book_metadata.KEY_FIELD: _decrypt_field(user.google_books_key_enc)}
     raise ValueError(f"Unknown credential service: {service}")
 
 
@@ -509,6 +535,31 @@ def abuse_ch_status(session: Session, user: User) -> str:
         return "own"
     default_user = None if _is_system_default_user(user) else _system_default_user(session)
     return abuse_ch.status_for(None, default_user.malwarebazaar_key_enc if default_user else None)
+
+
+def book_metadata_for(session: Session, user: User) -> dict:
+    """The book catalogue integrations as they apply to ``user``, the Google Books key included.
+
+    Each choice is the user's own, else the system default user's (the household
+    default), else book_metadata's default; the key the same way, with no grant.
+    """
+    values, source = _resolve_household_default_creds(session, user, book_metadata.KEY_SERVICE)
+    default_user = None if _is_system_default_user(user) else _system_default_user(session)
+    return book_metadata.resolve(user.book_metadata, default_user.book_metadata if default_user else None,
+                                 key=values.get(book_metadata.KEY_FIELD), key_source=source)
+
+
+def _merge_book_metadata(user: User, update_data: dict) -> None:
+    """Turn a book_metadata update into the JSON stored on the row, merged over what is saved."""
+    if "book_metadata" not in update_data:
+        return
+    update = update_data.pop("book_metadata")
+    if update is None:
+        return
+    try:
+        user.book_metadata = book_metadata.clean_update(update, user.book_metadata)
+    except book_metadata.SettingsError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 def _check_abuse_ch_key(update_data: dict) -> None:
@@ -814,10 +865,13 @@ async def lifespan(app: FastAPI):
             session.commit()
     # Registered devices that stopped checking in are archived, and deleted a year later (device_archive.py).
     archive_task = asyncio.create_task(device_archive.run(engine), name="device-archive")
+    # HomeHub's voice satellites, speakers and TVs, for assigning to people (hub_devices.py).
+    hub_task = asyncio.create_task(hub_devices.run(engine), name="hub-devices")
     try:
         yield
     finally:
         archive_task.cancel()
+        hub_task.cancel()
 
 from services.common.logging_utils import redact_access_log  # noqa: E402
 
@@ -1113,6 +1167,9 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
 # Push topics, notification preferences, UnifiedPush (docs/PUSH.md)
 app.include_router(push.build_router(get_session, require_api_key, require_internal))
 
+# Profile stats: the areas the family may see, and the admin's usage read (docs/PROFILE_STATS.md)
+app.include_router(profile_sharing.build_router(get_session, require_api_key, require_internal))
+
 
 def _require_admin_user(user: User = Depends(require_api_key)) -> User:
     if not user.is_admin:
@@ -1187,6 +1244,20 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             log.info(f"[resolve] Resolved by voice_id={req.voice_id}: user={user.username}")
         else:
             log.warning(f"[resolve] No user found for voice_id={req.voice_id}")
+
+    # A voice satellite (or another shared hub device) a spoken request came
+    # from, when no voice was recognised: the person an admin assigned it to
+    # (hub_devices.py). A shared or unknown satellite says nothing, and the
+    # request goes on to the default user. A device stands in for a person it
+    # cannot prove is speaking, so it never carries administrator powers.
+    by_device = False
+    if not user and req.voice_device:
+        owner = hub_devices.owner_for(session, req.voice_device)
+        if owner and owner.get("username"):
+            user = session.exec(select(User).where(User.username == owner["username"])).first()
+            by_device = user is not None
+            if by_device:
+                log.info(f"[resolve] Resolved by voice device {owner['device_key']}: user={owner['username']}")
 
     device_known = False
     if not user and req.device_id is not None:
@@ -1311,7 +1382,9 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     return ResolvedCredentials(
         user=HOUSEHOLD_IDENTITY if household else user.username,
         id=None if household else user.id,
-        is_admin=False if household else user.is_admin,
+        is_admin=False if (household or by_device) else user.is_admin,
+        is_minor=False if household else user.family_role in roles.MINOR_FAMILY_ROLES,
+        identified_by="device" if by_device else None,
         api_key=None if household else (decrypt(user.api_key_enc) if user.api_key_enc else req.api_key),
         nextcloud_url=nextcloud["nextcloud_url"],
         nextcloud_user=nextcloud["nextcloud_user"],
@@ -1357,6 +1430,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             decrypt(user.huggingface_token_enc) if user.huggingface_token_enc else None
         ),
         malwarebazaar_key=household_default[abuse_ch.SERVICE][abuse_ch.FIELD],
+        book_metadata=book_metadata_for(session, user),
         skylight_url=skylight_user.skylight_url if skylight_user else None,
         skylight_email=(skylight_user.skylight_email if skylight_user else None) or user.username,
         skylight_pass=(
@@ -1445,6 +1519,7 @@ def get_me(user: User = Depends(require_api_key), session: Session = Depends(get
     me = _user_read(session, user)
     me.skylight_status = skylight_status(session, user)
     me.abuse_ch_status = abuse_ch_status(session, user)
+    me.book_metadata_status = book_metadata.public(book_metadata_for(session, user))
     return me
 
 
@@ -1697,9 +1772,13 @@ async def _voice_signature_of(file: UploadFile) -> dict:
 
 
 def _voice_profiles(session: Session) -> list[dict]:
-    names = {u.username: (u.display_name or u.username) for u in session.exec(select(User)).all()}
+    names = {
+        u.username: (u.display_name or u.username, getattr(u, "family_role", None))
+        for u in session.exec(select(User)).all()
+    }
     return [
-        {"username": row.username, "name": names[row.username], "samples": voice.load_samples(row.samples)}
+        {"username": row.username, "name": names[row.username][0], "role": names[row.username][1],
+         "samples": voice.load_samples(row.samples)}
         for row in session.exec(select(VoiceSignature).where(VoiceSignature.model == voice.MODEL)).all()
         if row.username in names
     ]
@@ -1789,8 +1868,9 @@ def approve_pending_voice(
                     "Discard them, or erase your profile first if it was not you."
                 ),
             )
-    added = pending[:max(0, voice.MAX_SAMPLES - len(existing))]
-    samples = existing + added
+    enrolled = [x for x in existing if x.get("source") != voice.AUTO_SOURCE]
+    added = pending[:max(0, voice.MAX_SAMPLES - len(enrolled))]
+    samples = voice.trim(existing + added)
     if profile is None:
         profile = VoiceSignature(username=user.username, model=voice.MODEL)
     profile.model = voice.MODEL
@@ -1857,9 +1937,10 @@ async def enroll_voice(
     samples.append({
         "embedding": signature["embedding"],
         "speech_seconds": signature.get("speech_seconds"),
+        "snr_db": signature.get("snr_db"),
         "recorded_at": datetime.now(UTC).isoformat(),
     })
-    samples = samples[-voice.MAX_SAMPLES:]
+    samples = voice.trim(samples)
     if row is None:
         row = VoiceSignature(username=user.username, model=voice.MODEL)
     row.model = voice.MODEL
@@ -1872,7 +1953,8 @@ async def enroll_voice(
     _audit(request, session, "user.voice_enroll", user.username, actor=user,
            changes=[{"field": "voice_samples", "change": str(len(samples))}])
     log.info(f"[voice] {user.username} enrolled sample {len(samples)} ({signature.get('speech_seconds')}s of speech)")
-    return {"status": "SUCCESS", "speech_seconds": signature.get("speech_seconds"), **_voice_status(row)}
+    return {"status": "SUCCESS", "speech_seconds": signature.get("speech_seconds"), "snr_db": signature.get("snr_db"),
+            **_voice_status(row)}
 
 
 @app.delete("/api/users/me/voice")
@@ -1909,7 +1991,8 @@ async def check_my_voice(
     if not any(p["username"] == user.username and len(p["samples"]) >= voice.MIN_SAMPLES for p in profiles):
         raise HTTPException(status_code=409, detail=f"Record at least {voice.MIN_SAMPLES} samples before testing.")
     signature = await _voice_signature_of(file)
-    result = voice.decide(voice.rank(signature["embedding"], profiles))
+    calibration = _voice_calibration(session, profiles)
+    result = voice.decide(voice.rank(signature["embedding"], profiles), calibration["threshold"], calibration["margin"])
     return {**result, "is_me": result["matched_username"] == user.username}
 
 
@@ -1962,7 +2045,7 @@ def learn_voice(request: Request, req: VoiceLearnRequest, session: Session = Dep
         "recorded_at": datetime.now(UTC).isoformat(),
         "source": "learned",
     })
-    samples = samples[-voice.MAX_SAMPLES:]
+    samples = voice.trim(samples)
     row.model = voice.MODEL
     row.samples = json.dumps(samples)
     row.updated_at = datetime.now(UTC)
@@ -2039,7 +2122,7 @@ def enroll_voice_from_satellite(request: Request, req: VoiceEnrollRequest, sessi
                 status_code=422,
                 detail=f"That take does not sound like {against} (similarity {score:.2f}).",
             )
-        samples = [*samples, take][-voice.MAX_SAMPLES:]
+        samples = voice.trim([*samples, take])
         row.model = voice.MODEL
         row.samples = json.dumps(samples)
         row.updated_at = datetime.now(UTC)
@@ -2085,30 +2168,73 @@ def enroll_voice_from_satellite(request: Request, req: VoiceEnrollRequest, sessi
 
 @app.get("/api/internal/satellite-owner", dependencies=[Depends(require_internal)])
 def internal_satellite_owner(entity_id: str, session: Session = Depends(get_session)):
-    """Internal: the one person a voice satellite is assigned to, if exactly one.
+    """Internal: the one person a voice satellite is assigned to, if any.
 
-    ``owners`` says how many people share it: 0 (unassigned) and more than
-    one both leave ``username`` empty, because a teaching session must know
-    whose voice it is learning.
+    The assignment is the satellite's hub device row (hub_devices.py), set in
+    Admin, Users & Devices. ``owners`` is 1 when a person is assigned and 0
+    when it is shared or unknown. (It used to read ``DeviceAssignment``, which
+    is who may *control* an entity: every discovered entity is granted to the
+    default user there, so a satellite looked "assigned" to the default user.)
     """
-    rows = session.exec(
-        select(DeviceAssignment).where(
-            DeviceAssignment.device_id == entity_id.strip(),
-            DeviceAssignment.revoked == False,  # noqa: E712
-        )
-    ).all()
-    owners = {r.user_id for r in rows}
-    person = session.get(User, next(iter(owners))) if len(owners) == 1 else None
+    owner = hub_devices.owner_for(session, entity_id)
+    person = owner.get("username") if owner else None
     return {
-        "username": person.username if person else None,
-        "name": (person.display_name or person.username) if person else None,
-        "owners": len(owners),
+        "username": person,
+        "name": owner.get("name") if person else None,
+        "owners": 1 if person else 0,
+        "device_key": owner.get("device_key") if owner else None,
+        "room": owner.get("room") if owner else None,
+        "known": owner is not None,
     }
+
+
+CALIBRATION_SETTING = "voice_calibration"
+_calibration_cache: dict[str, Any] = {}
+
+
+def _voice_calibration(session: Session, profiles: list[dict] | None = None) -> dict:
+    """The household's calibrated threshold and margin (voice.calibrate).
+
+    Made again, and stored in ``GlobalSetting`` for the admin page, whenever a
+    profile has changed since the last one; otherwise read from memory.
+    """
+    profiles = _voice_profiles(session) if profiles is None else profiles
+    key = voice.profiles_key(profiles)
+    cached = _calibration_cache.get("value")
+    if cached and cached.get("key") == key:
+        return cached
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == CALIBRATION_SETTING)).first()
+    stored = None
+    if row is not None:
+        try:
+            stored = json.loads(row.value or "{}")
+        except ValueError:
+            stored = None
+    if isinstance(stored, dict) and stored.get("key") == key:
+        _calibration_cache["value"] = stored
+        return stored
+    result = {**voice.calibrate(profiles), "calibrated_at": datetime.now(UTC).isoformat()}
+    if row is None:
+        row = GlobalSetting(key=CALIBRATION_SETTING, value="{}",
+                            description="Voice recognition threshold and margin, calibrated on the enrolled voices")
+    row.value = json.dumps(result)
+    session.add(row)
+    session.commit()
+    _calibration_cache["value"] = result
+    log.info(
+        f"[voice] calibrated on {result['people']} enrolled voice(s): threshold {result['threshold']}, "
+        f"margin {result['margin']} ({result['status']})"
+    )
+    return result
 
 
 @app.post("/api/voice/identify", dependencies=[Depends(require_internal)])
 def identify_voice(req: VoiceIdentifyRequest, session: Session = Depends(get_session)):
-    """Which enrolled family member a signature belongs to (internal)."""
+    """Which enrolled family member a signature belongs to (internal).
+
+    The threshold and margin are the household's calibrated ones
+    (``_voice_calibration``) unless the caller names a threshold.
+    """
     if req.model != voice.MODEL:
         raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
     try:
@@ -2117,10 +2243,276 @@ def identify_voice(req: VoiceIdentifyRequest, session: Session = Depends(get_ses
         raise HTTPException(status_code=422, detail=str(e)) from None
     if req.threshold is not None and not 0.0 < req.threshold <= 1.0:
         raise HTTPException(status_code=422, detail="threshold must be in (0, 1].")
-    candidates = voice.rank(embedding, _voice_profiles(session))
+    profiles = _voice_profiles(session)
+    candidates = voice.rank(embedding, profiles)
     if not candidates:
         raise HTTPException(status_code=404, detail="Nobody has enrolled a voice yet.")
-    return voice.decide(candidates, req.threshold)
+    calibration = _voice_calibration(session, profiles)
+    threshold = req.threshold if req.threshold is not None else calibration["threshold"]
+    return {**voice.decide(candidates, threshold, calibration["margin"]), "calibration": calibration["status"]}
+
+
+class VoiceCandidateRequest(BaseModel):
+    #: The hub entity the command was spoken at; identity looks up whom it is assigned to.
+    satellite: str
+    embedding: list[float]
+    speech_seconds: float | None = None
+    model: str = voice.MODEL
+
+
+@app.post("/api/voice/candidate", dependencies=[Depends(require_internal)])
+def offer_voice_candidate(request: Request, req: VoiceCandidateRequest, session: Session = Depends(get_session)):
+    """A command heard at a satellite assigned to one person that was not
+    recognised: kept as a candidate sample of their voice for an admin to review
+    (internal; the gateway offers it).
+
+    Identity decides who it would belong to from the satellite's own assignment,
+    never from the caller. It is kept only when it passes ``voice.candidate_gate``
+    (enough speech, close to that person's profile, nobody else closer) and is
+    not a near-duplicate of one already waiting; at most ``voice.MAX_CANDIDATES``
+    wait per person, the oldest going first. Nothing touches the profile until an
+    admin approves it.
+    """
+    if req.model != voice.MODEL:
+        raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
+    try:
+        embedding = voice.valid_embedding(req.embedding)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    device = hub_devices.owner_for(session, req.satellite)
+    username = device.get("username") if device else None
+    if not username:
+        return {"status": "SKIPPED", "reason": "the satellite is not assigned to one person"}
+    ok, why, ranked = voice.candidate_gate(embedding, username, _voice_profiles(session), req.speech_seconds)
+    if not ok:
+        return {"status": "SKIPPED", "reason": why}
+    waiting = session.exec(
+        select(VoiceCandidate).where(VoiceCandidate.username == username).order_by(VoiceCandidate.created_at)  # type: ignore[arg-type]
+    ).all()
+    for row in waiting:
+        try:
+            if voice.cosine(embedding, json.loads(row.embedding)) >= voice.DUPLICATE_SAMPLE:
+                return {"status": "SKIPPED", "reason": "already waiting"}
+        except (ValueError, TypeError):
+            continue
+    for row in waiting[: max(0, len(waiting) - voice.MAX_CANDIDATES + 1)]:
+        session.delete(row)
+    mine = next(c for c in ranked if c["username"] == username)
+    others = [c for c in ranked if c["username"] != username]
+    candidate = VoiceCandidate(
+        username=username, model=voice.MODEL, embedding=json.dumps(embedding),
+        speech_seconds=req.speech_seconds, score=mine["score"],
+        runner_up=others[0]["score"] if others else None, satellite=req.satellite.strip()[:120],
+    )
+    session.add(candidate)
+    session.commit()
+    _audit(request, session, "user.voice_candidate", username,
+           note=f"candidate sample from {device.get('label') or req.satellite} (score {mine['score']})")
+    log.info(f"[voice] candidate sample for {username} from {device.get('device_key')} (score {mine['score']}, "
+             f"{req.speech_seconds}s of speech)")
+    return {"status": "PENDING", "id": candidate.id, "score": mine["score"]}
+
+
+def _require_voice_admin(caller: User, session: Session) -> None:
+    if not roles.has_permission(session, caller, "devices.assign"):
+        raise HTTPException(status_code=403, detail="Only an admin can manage voice recognition")
+
+
+def _candidate_read(row: VoiceCandidate, names: dict[str, str]) -> dict:
+    return {
+        "id": row.id,
+        "username": row.username,
+        "name": names.get(row.username, row.username),
+        "score": row.score,
+        "runner_up": row.runner_up,
+        "speech_seconds": row.speech_seconds,
+        "satellite": row.satellite,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+@app.get("/api/admin/voice")
+def admin_voice_overview(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Admin: who is enrolled (counts only), the calibration, and candidates to review."""
+    _require_voice_admin(caller, session)
+    profiles = _voice_profiles(session)
+    calibration = _voice_calibration(session, profiles)
+    users = session.exec(select(User)).all()
+    names = {u.username: (u.display_name or u.username) for u in users}
+    by_user = {p["username"]: p for p in profiles}
+    people = []
+    for u in users:
+        if u.is_system_default or getattr(u, "is_test_account", False):
+            continue
+        samples = by_user.get(u.username, {}).get("samples", [])
+        people.append({
+            "username": u.username,
+            "name": names[u.username],
+            "family_role": getattr(u, "family_role", None),
+            "samples": len(samples),
+            "auto_samples": sum(1 for x in samples if x.get("source") == voice.AUTO_SOURCE),
+            "satellite_samples": sum(1 for x in samples if x.get("source") in ("satellite", "learned")),
+            "enrolled": len(samples) >= voice.MIN_SAMPLES,
+            "consistency": voice.consistency(samples),
+        })
+    candidates = session.exec(select(VoiceCandidate).order_by(VoiceCandidate.created_at.desc())).all()  # type: ignore[attr-defined]
+    return {
+        "calibration": calibration,
+        "min_samples": voice.MIN_SAMPLES,
+        "people": sorted(people, key=lambda p: (not p["enrolled"], p["name"].lower())),
+        "candidates": [_candidate_read(c, names) for c in candidates],
+    }
+
+
+@app.post("/api/admin/voice/calibrate")
+def admin_voice_calibrate(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Admin: calibrate again now, from the enrolled voices as they are."""
+    _require_voice_admin(caller, session)
+    _calibration_cache.clear()
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == CALIBRATION_SETTING)).first()
+    if row is not None:
+        row.value = "{}"
+        session.add(row)
+        session.commit()
+    return _voice_calibration(session)
+
+
+@app.post("/api/admin/voice/candidates/{candidate_id}")
+def admin_approve_voice_candidate(
+    candidate_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: add a candidate to its person's profile as an auto sample.
+
+    Auto samples have their own cap (``voice.MAX_AUTO_SAMPLES``) and never
+    displace a sample the person recorded.
+    """
+    _require_voice_admin(caller, session)
+    row = session.get(VoiceCandidate, candidate_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such candidate sample.")
+    profile = session.get(VoiceSignature, row.username)
+    samples = voice.load_samples(profile.samples) if profile and profile.model == voice.MODEL else []
+    if len(samples) < voice.MIN_SAMPLES:
+        raise HTTPException(status_code=409, detail="That person no longer has an enrolled voice.")
+    samples = voice.trim([*samples, {
+        "embedding": json.loads(row.embedding),
+        "speech_seconds": row.speech_seconds,
+        "recorded_at": row.created_at.isoformat(),
+        "source": voice.AUTO_SOURCE,
+        "satellite": row.satellite,
+    }])
+    profile.samples = json.dumps(samples)
+    profile.updated_at = datetime.now(UTC)
+    session.add(profile)
+    person = session.exec(select(User).where(User.username == row.username)).first()
+    if person is not None:
+        person.voice_fingerprint = voice.fingerprint(samples)
+        session.add(person)
+    username = row.username
+    session.delete(row)
+    session.commit()
+    _audit(request, session, "user.voice_candidate_approve", username, actor=caller,
+           changes=[{"field": "voice_samples", "change": str(len(samples))}])
+    return {"status": "SUCCESS", "samples": len(samples)}
+
+
+@app.delete("/api/admin/voice/candidates/{candidate_id}")
+def admin_reject_voice_candidate(
+    candidate_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: reject (delete) a candidate sample."""
+    _require_voice_admin(caller, session)
+    row = session.get(VoiceCandidate, candidate_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such candidate sample.")
+    username = row.username
+    session.delete(row)
+    session.commit()
+    _audit(request, session, "user.voice_candidate_reject", username, actor=caller)
+    return {"status": "SUCCESS"}
+
+
+@app.delete("/api/admin/voice/{username}/auto")
+def admin_clear_auto_samples(
+    username: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: remove every auto-added sample from a person's profile (enrolled ones stay)."""
+    _require_voice_admin(caller, session)
+    profile = session.get(VoiceSignature, username.strip().lower())
+    if profile is None:
+        raise HTTPException(status_code=404, detail="That person has no voice profile.")
+    samples = [x for x in voice.load_samples(profile.samples) if x.get("source") != voice.AUTO_SOURCE]
+    profile.samples = json.dumps(samples)
+    profile.updated_at = datetime.now(UTC)
+    session.add(profile)
+    person = session.exec(select(User).where(User.username == profile.username)).first()
+    if person is not None:
+        person.voice_fingerprint = voice.fingerprint(samples) if len(samples) >= voice.MIN_SAMPLES else None
+        session.add(person)
+    session.commit()
+    _audit(request, session, "user.voice_auto_clear", profile.username, actor=caller)
+    return {"status": "SUCCESS", "samples": len(samples)}
+
+
+# --- Shared hub devices (hub_devices.py) ------------------------------------------------
+
+
+@app.get("/api/admin/hub-devices")
+def admin_hub_devices(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Admin: HomeHub's voice satellites, speakers and TVs, with whom each is assigned to."""
+    if not roles.has_permission(session, caller, "devices.assign"):
+        raise HTTPException(status_code=403, detail="Only an admin can assign shared devices")
+    return {"devices": hub_devices.listing(session)}
+
+
+@app.post("/api/admin/hub-devices/refresh")
+async def admin_hub_devices_refresh(session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Admin: read HomeHub's devices now instead of waiting for the next sync."""
+    if not roles.has_permission(session, caller, "devices.assign"):
+        raise HTTPException(status_code=403, detail="Only an admin can assign shared devices")
+    try:
+        devices = await asyncio.to_thread(hub_devices.fetch_from_hub)
+    except hub_devices.HubDeviceError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from None
+    result = hub_devices.sync(session, devices)
+    return {**result, "devices": hub_devices.listing(session)}
+
+
+@app.patch("/api/admin/hub-devices/{device_key}")
+async def admin_hub_device_assign(
+    device_key: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: assign a shared device to a person (``owner_username``; null is
+    shared) and/or give it a ``room`` (null clears it)."""
+    if not roles.has_permission(session, caller, "devices.assign"):
+        raise HTTPException(status_code=403, detail="Only an admin can assign shared devices")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or not ({"owner_username", "room"} & set(body)):
+        raise HTTPException(status_code=422, detail="Send owner_username and/or room.")
+    try:
+        row, changes = hub_devices.assign(session, device_key, body)
+    except hub_devices.HubDeviceError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from None
+    if changes:
+        _audit(request, session, "device.hub_assign", row.owner_username, actor=caller, changes=changes,
+               note=row.device_key)
+    names = {u.username: (u.display_name or u.username) for u in session.exec(select(User)).all()}
+    return hub_devices.read(row, names)
 
 
 @app.get("/api/voice/profiles", dependencies=[Depends(require_internal)])
@@ -2316,6 +2708,7 @@ def update_me(body: UserUpdate, request: Request, session: Session = Depends(get
 
     _check_abuse_ch_key(update_data)
     before = audit.snapshot(user)
+    _merge_book_metadata(user, update_data)
     _apply_user_update(user, update_data, clear_fields)
     session.add(user)
     session.commit()
@@ -2330,6 +2723,28 @@ def update_me(body: UserUpdate, request: Request, session: Session = Depends(get
             remove_if_unconfigured=bool(_ABS_CREDENTIAL_FIELDS.intersection(clear_fields or [])),
         )
     return user
+
+@app.post("/api/users/me/book-metadata/test")
+def test_book_metadata(body: dict, user: User = Depends(require_api_key), session: Session = Depends(get_session)):
+    """The Test button on the Google Books / Open Library cards: one lookup, the exact outcome.
+
+    ``{"source": "google_books" | "open_library"}``, plus the ``api_key`` or
+    ``contact_email`` being typed, which take the place of the saved (or
+    household) ones. Nothing is saved. The answer never carries the key.
+    """
+    source = str((body or {}).get("source") or "")
+    if source not in book_metadata.SOURCES:
+        raise HTTPException(status_code=422, detail=f"source must be one of {', '.join(book_metadata.SOURCES)}")
+    resolved = book_metadata_for(session, user)["sources"]
+    typed_key = str((body or {}).get("api_key") or "").strip()
+    typed_email = str((body or {}).get("contact_email") or "").strip()
+    log.info("[book_metadata] %s tests %s (typed key: %s)", user.username, source, bool(typed_key))
+    return book_metadata_check.test_source(
+        source,
+        api_key=typed_key or resolved[book_metadata.GOOGLE_BOOKS].get("api_key"),
+        contact_email=typed_email or resolved[book_metadata.OPEN_LIBRARY].get("contact_email") or "",
+    )
+
 
 @app.patch("/api/users/{username}", response_model=UserRead)
 def update_user(username: str, body: UserUpdate, request: Request, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
@@ -2352,6 +2767,7 @@ def update_user(username: str, body: UserUpdate, request: Request, session: Sess
         user, is_admin=update_data.get("is_admin"), is_system_default=update_data.get("is_system_default"),
     )
     before = audit.snapshot(user)
+    _merge_book_metadata(user, update_data)
     _apply_user_update(user, update_data, clear_fields)
     session.add(user)
     session.commit()
@@ -2595,6 +3011,7 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     for model, column in (
         (UserWidget, UserWidget.username),
         (UserActivitySharing, UserActivitySharing.username),
+        (UserProfileSharing, UserProfileSharing.username),
         (ScreenRules, ScreenRules.username),
         (DeviceEvent, DeviceEvent.username),
         (Device, Device.owner_username),
@@ -3513,15 +3930,9 @@ def internal_voice_for(
         if chosen(person):
             return {"voice": chosen(person), "person": person.username, "why": "speaker"}
     if entity_id:
-        rows = session.exec(
-            select(DeviceAssignment).where(
-                DeviceAssignment.device_id == entity_id.strip(),
-                DeviceAssignment.revoked == False,  # noqa: E712
-            )
-        ).all()
-        owners = {r.user_id for r in rows}
-        if len(owners) == 1:
-            owner = session.get(User, next(iter(owners)))
+        device = hub_devices.owner_for(session, entity_id)
+        if device and device.get("username"):
+            owner = session.exec(select(User).where(User.username == device["username"])).first()
             if chosen(owner):
                 return {"voice": chosen(owner), "person": owner.username, "why": "device"}
     return {"voice": None, "person": None, "why": "jarvis"}
@@ -9886,7 +10297,8 @@ def list_user_panel_devices(
     the app itself and not just from an admin screen. Archived devices
     (device_archive.py) are left out unless ``include_archived``.
     """
-    stmt = select(Device)
+    # HomeHub's satellites, speakers and TVs have their own admin list (hub_devices.py).
+    stmt = select(Device).where(Device.hardware_id.is_(None))  # type: ignore[union-attr]
     if not include_archived:
         stmt = stmt.where(Device.archived_at.is_(None))  # type: ignore[union-attr]
     if not _is_device_admin(caller, session):

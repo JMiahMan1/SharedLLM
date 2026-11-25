@@ -223,7 +223,7 @@ class TestPlaybackIsVerified:
             result = await handle_audiobookshelf(_req())
 
         assert result.status == "FAILURE"
-        assert "did not start" in result.message
+        assert "isn't playing it" in result.message and result.detail["playback"] == "not_started"
         assert "abs-session" not in result.message
 
     @pytest.mark.asyncio
@@ -236,8 +236,8 @@ class TestPlaybackIsVerified:
             result = await handle_audiobookshelf(_req())
 
         # An operator reading the log needs to know this is the URL-as-title bug.
-        assert "stream URL" in result.message
-        assert "title" in result.message
+        assert "stream URL" in result.detail["reason"]
+        assert "title" in result.detail["reason"]
 
     @pytest.mark.asyncio
     async def test_plain_idle_is_reported_as_never_started(self):
@@ -249,8 +249,8 @@ class TestPlaybackIsVerified:
             result = await handle_audiobookshelf(_req())
 
         assert result.status == "FAILURE"
-        assert "never started playing" in result.message
-        assert "idle" in result.message
+        assert "never started playing" in result.detail["reason"]
+        assert "idle" in result.detail["reason"]
 
     @pytest.mark.asyncio
     async def test_buffering_counts_as_playing(self):

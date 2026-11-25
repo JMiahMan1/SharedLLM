@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { BookOpen, Check, ChevronRight, Crown, Gamepad2, Library, ListOrdered, Loader2, PenLine, RotateCcw, Star, Timer, Trophy, X, Zap } from 'lucide-react';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { BibleGame, BibleGameInfo, BibleGameMode, BibleGameResult, BibleGameReviewItem } from '../../types/api';
 import { pageStyle } from './readingPage';
 import { errorText } from '../../lib/errorText';
+import { readQuizChallenge, type QuizChallenge } from '../../lib/profileStats';
 
 const ICONS: Record<BibleGameMode, typeof Gamepad2> = {
   daily: Crown,
@@ -94,6 +96,9 @@ function GameLobby({
   page?: string;
 }) {
   const [reviewing, setReviewing] = useState<{ id: number; mine: boolean } | null>(null);
+  // A score tapped on someone's profile arrives as a challenge (?beat=&score=&of=).
+  const [searchParams] = useSearchParams();
+  const challenge = readQuizChallenge(searchParams);
   const { data: catalogue, error: catalogueError } = useQuery({
     queryKey: ['bible-games'],
     queryFn: () => api.getBibleGames(),
@@ -147,6 +152,7 @@ function GameLobby({
                   You scored {played.correct}/{played.total} today. Play again for practice.
                 </p>
               )}
+              {challenge && <ChallengeNote challenge={challenge} played={played ?? null} />}
             </div>
           </div>
           <button
@@ -534,5 +540,27 @@ function AttemptReview({
         {data && <ReviewList results={data.results} page={page} who={mine ? 'you' : data.username} />}
       </div>
     </div>
+  );
+}
+
+/** "Beat Robin's 8/10": the challenge a profile's quiz score carries here, and how it went. */
+function ChallengeNote({ challenge, played }: { challenge: QuizChallenge; played: { correct: number; total: number } | null }) {
+  const target = `${challenge.name}'s ${challenge.score}/${challenge.of}`;
+  const text = !played
+    ? `Challenge: beat ${target}.`
+    : played.correct > challenge.score
+      ? `You beat ${target} with ${played.correct}/${played.total}.`
+      : played.correct === challenge.score
+        ? `You tied ${target}.`
+        : `${target} still stands today. Try again tomorrow.`;
+  return (
+    <p
+      className="mt-2 flex w-fit items-center gap-1.5 rounded-xl border border-sky-300/30 bg-sky-400/15 px-3 py-1 text-xs font-semibold text-sky-100"
+      data-testid="bible-daily-challenge"
+      role="status"
+    >
+      <Trophy size={13} aria-hidden />
+      {text}
+    </p>
   );
 }

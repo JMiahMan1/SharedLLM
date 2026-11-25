@@ -25,6 +25,18 @@ operations. Local workspaces remain authoritative for active code changes.
 | `/index/pause` | POST | Pause active indexing work for up to 60 seconds. |
 | `/index/resume` | POST | Resume indexing work immediately. |
 
+## Book details for the family library
+
+Adding a book (`/calibre/books/add`, `/calibre/books/inspect`) and filling in
+books already on the shelf (`/calibre/books/enrich`) look books up in Google
+Books and Open Library. Both are integrations in **Settings > Accounts &
+Integrations** (the Google Books API key goes there, not in `.env`), resolved
+per requesting person through identity (`book_sources.py`, cached a minute).
+Only the catalogues turned on are asked, in the order set; every reply says
+which were asked, which were skipped and why, and which answered with an error.
+`/calibre/catalogues` reports each one's state and last answer. See
+docs/CALIBRE_LIBRARY.md and docs/INTEGRATIONS.md.
+
 ## Provider Support
 
 Current provider support:

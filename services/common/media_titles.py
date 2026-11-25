@@ -75,11 +75,72 @@ def title_score(query: str, title: str, *, cap: float = 1.0) -> float:
         else:
             ratio = SequenceMatcher(None, qn, tn).ratio()
             score = top * 0.9 * ratio if ratio >= 0.8 else 0.0
-        q_nums = {w for w in qw if w.isdigit()}
-        if q_nums and not q_nums <= {w for w in tw if w.isdigit()}:
+            if not score:
+                # Misheard but sounding the same ("moon gardin", "the grey harbors"): the last resort.
+                sound = sounds_like(qn, tn)
+                score = top * 0.85 * sound if sound else 0.0
+        q_nums = set(re.findall(r"\d+", qn))
+        if q_nums and not q_nums <= set(re.findall(r"\d+", tn)):
             score *= 0.5
         best = max(best, score)
     return round(best, 4)
+
+
+#: A phonetic match counts only at or above this similarity of the two keys, and only when
+#: the keys are at least ``PHONETIC_MIN_KEY`` long; shorter keys must be identical ("kay 9" /
+#: "KAY9"). Short keys are too easy to share ("dune" and "june" are one consonant apart).
+PHONETIC_MIN_RATIO = 0.85
+PHONETIC_MIN_KEY = 5
+
+
+def phonetic_key(text: str | None) -> str:
+    """A rough sound of a title: its consonants, a word's first vowel as "a", similar letters merged.
+
+    "Sunny Bee Days" and "Sunny B. Days" are both "snbds"; numbers stay as digits, so a
+    number heard is still a number required. Not a full phonetic algorithm: enough to forgive
+    what speech recognition does to a name, which is mostly vowels and silent letters.
+    """
+    out = []
+    for w in normalize(text).split():
+        if w.isdigit():
+            out.append(w)
+            continue
+        w = w.replace("ph", "f")
+        w = re.sub(r"c(?=[eiy])", "s", w)
+        w = re.sub(r"ck|c|q", "k", w)
+        w = w.replace("x", "ks").replace("z", "s")
+        w = re.sub(r"gh|h", "", w)
+        if not w:
+            continue
+        first = "a" if w[0] in "aeiouy" else w[0]
+        out.append(re.sub(r"(.)\1+", r"\1", first + re.sub(r"[aeiouyw]", "", w[1:])))
+    return "".join(out)
+
+
+def sounds_like(a: str, b: str) -> float:
+    """How alike two titles sound (0 when they do not, by the ``PHONETIC_*`` rules), 0..1."""
+    ka, kb = phonetic_key(a), phonetic_key(b)
+    if not ka or not kb:
+        return 0.0
+    if ka == kb:
+        return 1.0 if min(len(ka), len(kb)) >= 3 else 0.0
+    if min(len(ka), len(kb)) < PHONETIC_MIN_KEY:
+        return 0.0
+    ratio = SequenceMatcher(None, ka, kb).ratio()
+    return ratio if ratio >= PHONETIC_MIN_RATIO else 0.0
+
+
+def spoken_similarity(a: str, b: str) -> float:
+    """How alike two titles are as heard, 0..1: their sound (``phonetic_key``) and their letters, averaged.
+
+    The sound forgives vowels and silent letters; the letters keep two titles that share a
+    rough sound but not their spelling ("Wild Youth" for "Wild Apart") further apart.
+    """
+    ka, kb = phonetic_key(a), phonetic_key(b)
+    la, lb = normalize(a).replace(" ", ""), normalize(b).replace(" ", "")
+    if not (ka and kb and la and lb):
+        return 0.0
+    return (SequenceMatcher(None, ka, kb).ratio() + SequenceMatcher(None, la, lb).ratio()) / 2
 
 
 def names_match(a: str, b: str) -> bool:

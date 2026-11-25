@@ -242,9 +242,20 @@ def _found(by_source: dict[str, list[C]]):
     return search
 
 
-async def _run(req, *, screen=False, sources=None, found=None, player="Den Speaker"):
+async def _run(req, *, screen=False, sources=None, found=None, player="Den Speaker", facts=None):
+    from services.execution import video_safety
+    from services.execution.handlers import video as video_handler
+
+    video_safety._checked.clear()
+    facts = facts or {}
+
+    async def inspect(url):
+        return {"title": "", "channel": "", "age_limit": 0, **facts.get(url, {})}
+
     played = AsyncMock(side_effect=lambda cand, *_a, **_k: ExecutionResult.ok(f"played {cand.ident}", service="t"))
-    with patch.object(mf, "target_facts", new=AsyncMock(return_value=(screen, player))), \
+    with patch.object(video_safety, "_setting", new=_settings({})), \
+            patch.object(video_handler, "inspect_video", new=inspect), \
+            patch.object(mf, "target_facts", new=AsyncMock(return_value=(screen, player))), \
             patch.object(mf, "discover_sources", new=AsyncMock(return_value=sources or [])), \
             patch.object(mf, "_search", new=_found(found or {})), \
             patch.object(mf, "corrected_query", new=AsyncMock(return_value=None)), \
@@ -420,3 +431,82 @@ def test_the_same_audiobook_with_a_subtitle_in_music_assistant_is_one_item():
 def test_a_name_split_by_speech_recognition_still_matches():
     assert title_score("Kay 9", "KAY9") >= 0.98
     assert title_score("Kay Nine", "KAY9") >= 0.98
+
+
+def test_a_refused_item_is_named_with_the_reason_in_plain_words():
+    cand = C("music_assistant", "playlist", "Road Songs", "library://playlist/2")
+    assert mf.failed_message(cand, "Failed to play direct URI: HA returned 400: 999: No playable items found",
+                             "Den Speaker") == "I found Road Songs, the playlist, but there's nothing in it I can play."
+    assert mf.failed_message(cand, "HA returned 500: device offline", "Den Speaker") == (
+        "I found Road Songs, the playlist, but Den Speaker wouldn't play it: device offline")
+
+
+@pytest.mark.asyncio
+async def test_call_service_passes_on_the_hubs_reason(monkeypatch):
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    from services.execution import ha_client
+
+    async def refuse(_request):
+        return web.json_response({"message": "999: No playable items found"}, status=400)
+
+    app = web.Application()
+    app.router.add_post("/api/services/music_assistant/play_media", refuse)
+    async with TestServer(app) as server:
+        monkeypatch.setattr(ha_client.ha_health, "skip_reason", lambda _url: None)
+        url = str(server.make_url("")).rstrip("/")
+        res = await ha_client.call_service(url, "tok", "music_assistant", "play_media", "media_player.den",
+                                           {"media_id": "library://playlist/2"})
+    assert res["ok"] is False and res["status_code"] == 400
+    assert res["error"] == "HA returned 400: 999: No playable items found"
+
+
+# --------------------------------------------------------------------------- #
+# Heard wrong: titles that sound right                                         #
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize(("said", "title"), [
+    ("moon gardin", "Moon Garden (Unabridged)"),
+    ("sunny bee days", "Sunny B. Days"),
+    ("the grey harbors", "The Gray Harbors"),
+    ("kay nine", "KAY9"),
+])
+def test_a_title_that_sounds_the_same_is_matched(said, title):
+    assert title_score(said, title) >= 0.7
+
+
+@pytest.mark.parametrize(("said", "title"), [
+    ("dune", "June"), ("genesis", "Exodus"), ("return", "Reunion"), ("wild at heart", "Wild Things"),
+    ("moon garden 3", "Moon Garden 2"),
+])
+def test_a_title_that_only_looks_or_sounds_a_little_alike_is_not(said, title):
+    assert title_score(said, title) < 0.7
+
+
+@pytest.mark.asyncio
+async def test_music_assistants_stations_and_playlists_are_matched_by_sound_too():
+    src = mf.Source("music_assistant", "Music Assistant", True, route="hub", entry_id="ma1")
+    library = [C("music_assistant", "radio", "ARE7", "library://radio/1"),
+               C("music_assistant", "playlist", "Road Songs", "library://playlist/2")]
+    with patch.object(mf, "_search_music_assistant", new=AsyncMock(return_value=[])), \
+            patch.object(mf, "_ma_library_names", new=AsyncMock(return_value=library)):
+        found = await mf.search_music_assistant(ctx(), src, "er seven")  # "Play ARE7" heard as "Player seven"
+    choice = mf.decide(mf.score_candidates(found, "er seven"))
+    assert choice.action == "play" and choice.best.ident == "library://radio/1"
+    assert library[0].score == 0.0  # the cached list is not scored in place
+
+
+@pytest.mark.asyncio
+async def test_find_only_names_the_best_match_and_plays_nothing():
+    req = _req("Moon Garden")
+    played = AsyncMock()
+    with patch.object(mf, "discover_sources", new=AsyncMock(return_value=_ready("audiobookshelf", "calibre"))), \
+            patch.object(mf, "_search", new=_found({"audiobookshelf": _series_shelf()[:1],
+                                                    "calibre": [C("calibre", "book", "Moon Garden", "1")]})), \
+            patch.object(mf, "play_candidate", new=played):
+        result = await mf.find_only(req)
+    assert played.await_count == 0
+    assert result.detail["action"] == "play" and result.detail["score"] == 1.0
+    assert result.detail["best"]["ident"] == "abs-1"
+    assert result.detail["searched"] == ["Audiobookshelf"]  # not the book library

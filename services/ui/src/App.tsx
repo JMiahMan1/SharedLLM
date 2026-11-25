@@ -34,6 +34,7 @@ const Admin = lazy(() => import('./pages/Admin'));
 const Identity = lazy(() => import('./pages/Identity'));
 const Notes = lazy(() => import('./pages/Notes'));
 const Recipes = lazy(() => import('./pages/Recipes'));
+const Profile = lazy(() => import('./pages/Profile'));
 const Family = lazy(() => import('./pages/Family'));
 const Calendar = lazy(() => import('./pages/Calendar'));
 const JarvisLab = lazy(() => import('./pages/JarvisLab'));
@@ -215,6 +216,7 @@ function App() {
             <Route path="/fitness" element={<ProtectedRoute isMobile={isMobile}><Health /></ProtectedRoute>} />
             <Route path="/garden" element={<ProtectedRoute isMobile={isMobile}><Garden /></ProtectedRoute>} />
             <Route path="/garden/plants/:id" element={<ProtectedRoute isMobile={isMobile}><PlantDetail /></ProtectedRoute>} />
+            <Route path="/profile/:username?" element={<ProtectedRoute isMobile={isMobile}><Profile /></ProtectedRoute>} />
             <Route path="/family/member/:username?" element={<ProtectedRoute isMobile={isMobile}><FamilyMember /></ProtectedRoute>} />
             {/* The family guardian hub; `/guardian?child=…` (older notices) still
                 opens that child's family member page. */}

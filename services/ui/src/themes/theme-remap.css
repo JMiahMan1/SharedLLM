@@ -44,6 +44,7 @@
 [data-site-theme-active] .bg-violet-500 { background-color: var(--site-accent) !important; }
 [data-site-theme-active] .bg-violet-500\/15 { background-color: color-mix(in srgb, var(--site-accent) 15%, transparent) !important; }
 [data-site-theme-active] .bg-violet-500\/20 { background-color: color-mix(in srgb, var(--site-accent) 20%, transparent) !important; }
+[data-site-theme-active] .bg-violet-500\/5 { background-color: color-mix(in srgb, var(--site-accent) 5%, transparent) !important; }
 [data-site-theme-active] .bg-violet-500\/70 { background-color: color-mix(in srgb, var(--site-accent) 70%, transparent) !important; }
 [data-site-theme-active] .bg-violet-600\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .border-indigo-300\/10 { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
@@ -434,6 +435,7 @@
 [data-theme-scheme="light"] .text-green-200\/90 { color: color-mix(in srgb, oklch(52.7% 0.154 150.069) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-green-300 { color: oklch(52.7% 0.154 150.069) !important; }
 [data-theme-scheme="light"] .text-green-400 { color: oklch(52.7% 0.154 150.069) !important; }
+[data-theme-scheme="light"] .text-lime-200 { color: oklch(53.2% 0.157 131.589) !important; }
 [data-theme-scheme="light"] .text-lime-300 { color: oklch(53.2% 0.157 131.589) !important; }
 [data-theme-scheme="light"] .text-orange-100 { color: oklch(55.3% 0.195 38.402) !important; }
 [data-theme-scheme="light"] .text-orange-200 { color: oklch(55.3% 0.195 38.402) !important; }

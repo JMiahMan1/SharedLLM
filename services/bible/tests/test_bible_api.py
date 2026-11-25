@@ -420,6 +420,24 @@ def test_stats_count_days_and_chapters(loaded_client: TestClient):
     assert body["window"][today] == 2
 
 
+def test_stats_count_chapters_per_day_apart_from_other_events(loaded_client: TestClient):
+    today = date.today().isoformat()
+    for kind, ref in (("app_open", ""), ("search", "light"), ("chapter_complete", "Gen 1"),
+                      ("chapter_complete", "Gen 1"), ("chapter_complete", "Gen 2")):
+        loaded_client.post("/events", params={"username": "sam"}, json={"kind": kind, "ref": ref})
+    body = loaded_client.get("/stats", params={"username": "sam"}).json()
+    # Every event counts in the activity window; only distinct chapters in the chapter one.
+    assert body["window"][today] == 5
+    assert body["chapters_window"] == {today: 2}
+
+
+def test_stats_name_the_plan_the_reader_last_opened(loaded_client: TestClient):
+    assert loaded_client.get("/stats", params={"username": "sam"}).json()["last_plan_id"] is None
+    loaded_client.put("/state", params={"username": "sam"}, json={"plan_id": "made-up-plan", "plan_day": 3})
+    body = loaded_client.get("/stats", params={"username": "sam"}).json()
+    assert body["last_plan_id"] == "made-up-plan"
+
+
 def test_streaks_are_reported_separately_from_reading(loaded_client: TestClient):
     loaded_client.post("/events", params={"username": "sam"}, json={"kind": "app_open"})
     body = loaded_client.get("/streaks", params={"username": "sam"}).json()

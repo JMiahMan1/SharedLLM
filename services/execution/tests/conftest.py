@@ -15,6 +15,16 @@ _REAL_FETCH_INDEX = capability_index._fetch_index
 
 
 @pytest.fixture(autouse=True)
+def _playback_check_at_once(monkeypatch):
+    """Playback confirmation (playback_check.py) decides on the states the test gives, without waiting."""
+    from services.execution import playback_check
+
+    monkeypatch.setattr(playback_check, "START_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(playback_check, "HOLD_S", 0.0)
+    monkeypatch.setattr(playback_check, "POLL_S", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def _plain_home_assistant(monkeypatch):
     async def no_index(key, ha_token):
         return None

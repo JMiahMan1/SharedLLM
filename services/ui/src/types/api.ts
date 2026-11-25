@@ -168,7 +168,68 @@ export interface UserProfileRaw {
   /** Whose abuse.ch Auth-Key this person's app checks use (GET /api/users/me): their own, the
    *  household default (the default user's), or none. Never the key. */
   abuse_ch_status?: 'own' | 'household' | 'not_set_up' | null;
+  /** The book catalogues (Google Books, Open Library) as they apply to this person
+   *  (GET /api/users/me). Never the key. */
+  book_metadata_status?: BookCatalogues | null;
+  /** A partial update of the catalogue settings (PATCH): merged over what is saved; null follows the household. */
+  book_metadata?: BookCatalogueSettings | null;
   [key: string]: unknown;
+}
+
+export type BookCatalogueId = 'google_books' | 'open_library';
+
+/** What a person can set for the book catalogues (services/common/book_metadata.py). */
+export interface BookCatalogueSettings {
+  google_books_enabled?: boolean | null;
+  open_library_enabled?: boolean | null;
+  open_library_email?: string | null;
+  order?: BookCatalogueId[] | null;
+}
+
+/** Where a setting came from: the person, the household (the default user), or the built-in default. */
+export type BookSettingFrom = 'own' | 'household' | 'default';
+
+export interface BookCatalogueSource {
+  name: string;
+  enabled: boolean;
+  enabled_from: BookSettingFrom;
+  /** Asked on a lookup: on, with what it needs. */
+  ready: boolean;
+  /** Why it is not asked, in words to show as is ("" when ready). */
+  reason: string;
+  /** Google Books: whether a key applies, and whose. */
+  key_set?: boolean;
+  key_source?: 'own' | 'household' | 'absent';
+  /** Open Library: the contact email its User-Agent names. */
+  contact_email?: string;
+  contact_email_from?: BookSettingFrom;
+  /** The library page's status (GET /api/library/catalogues): this catalogue's last answer. */
+  last?: { ok: boolean; error: string | null; at: string };
+}
+
+export interface BookCatalogues {
+  order: BookCatalogueId[];
+  order_from?: BookSettingFrom;
+  sources: Partial<Record<BookCatalogueId, BookCatalogueSource>>;
+  /** Set when the settings could not be read: no catalogue is asked. */
+  error?: string;
+}
+
+/** One Test button press: the exact outcome. */
+export interface BookCatalogueTest {
+  ok: boolean;
+  source: BookCatalogueId;
+  status: number | null;
+  message: string;
+}
+
+/** Which catalogues a lookup asked, used (matched the book), skipped and why, and which answered with an error. */
+export interface BookCatalogueReport {
+  asked: string[];
+  used: string[];
+  skipped: { source: string; reason: string }[];
+  errors: { source: string; error: string }[];
+  message?: string;
 }
 
 /**
@@ -227,6 +288,76 @@ export interface VoiceCandidate {
   username: string;
   name: string;
   score: number;
+}
+
+/** Score spread of one side of a calibration (scores only, never a signature). */
+export interface ScoreSpread {
+  n: number;
+  min: number;
+  p10: number;
+  median: number;
+  max: number;
+}
+
+/** The household's calibrated voice threshold (identity voice.calibrate). */
+export interface VoiceCalibration {
+  status: 'default' | 'single' | 'separated' | 'overlap';
+  threshold: number;
+  margin: number;
+  people: number;
+  same_speaker: ScoreSpread | null;
+  other_speaker: ScoreSpread | null;
+  per_person: Array<{ username: string; samples: number; same_min: number; group: string }>;
+  calibrated_at?: string;
+}
+
+/** A command heard at someone's own satellite, waiting for an admin to approve it as their voice. */
+export interface VoiceSampleCandidate {
+  id: number;
+  username: string;
+  name: string;
+  score: number | null;
+  runner_up: number | null;
+  speech_seconds: number | null;
+  satellite: string | null;
+  created_at: string;
+}
+
+export interface VoiceAdminPerson {
+  username: string;
+  name: string;
+  family_role: string | null;
+  samples: number;
+  auto_samples: number;
+  satellite_samples: number;
+  enrolled: boolean;
+  consistency: number | null;
+}
+
+export interface VoiceAdminOverview {
+  calibration: VoiceCalibration;
+  min_samples: number;
+  people: VoiceAdminPerson[];
+  candidates: VoiceSampleCandidate[];
+}
+
+/** A voice satellite, speaker or TV HomeHub knows, and whom it is assigned to. */
+export interface HubDevice {
+  device_key: string;
+  hardware_id: string;
+  hub_device_id: string | null;
+  kind: 'voice_satellite' | 'speaker' | 'tv';
+  label: string;
+  entity_ids: string[];
+  owner_username: string | null;
+  owner_name: string | null;
+  assignment: 'person' | 'shared';
+  room: string | null;
+  hub_area: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  last_seen_at: string | null;
+  archived_at: string | null;
 }
 
 /** A "who is speaking?" answer, scored against everyone enrolled. */
@@ -3611,7 +3742,12 @@ export interface BibleStats extends BibleStreaks {
   bookmarks: number;
   position: BiblePosition | null;
   last_read_at: string | null;
+  /** Every reading event per day (opening the app, searching, reading), keyed YYYY-MM-DD. */
   window: Record<string, number>;
+  /** Distinct chapters finished per day over the same window; days with none are left out. */
+  chapters_window: Record<string, number>;
+  /** The reading plan the reader last opened, or null. */
+  last_plan_id: string | null;
 }
 
 export interface BibleEarnedAchievement {
@@ -4613,6 +4749,8 @@ export interface BookInspection {
   tags: { name: string; why: string; existing: boolean }[];
   /** Where each field came from: "the file", "Google Books", "Open Library", "the file name". */
   sources: Record<string, string>;
+  /** Which catalogues were asked, skipped and why, or answered with an error. */
+  catalogues?: BookCatalogueReport;
 }
 
 export interface LibraryAuditGroup {

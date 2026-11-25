@@ -24,6 +24,10 @@ class ResolveRequest(BaseModel):
     # need the household's Home Assistant and media credentials but must not
     # inherit the system administrator's powers or personal accounts.
     household: bool = False
+    # The hub entity (assist_satellite.*) a spoken request came from. Set only
+    # by the gateway, from an internal caller's voice context; it names the
+    # satellite's assigned person when no voice was recognised (hub_devices.py).
+    voice_device: str | None = None
 
 
 class ResolvedCredentials(BaseModel):
@@ -35,6 +39,10 @@ class ResolvedCredentials(BaseModel):
     user: str
     id: int | None = None              # numeric PK, needed for ownership checks
     is_admin: bool = False
+    #: A child or teen (family_role): web video is searched and screened strictly for them.
+    is_minor: bool = False
+    #: "device" when the person was named by the voice satellite assigned to them.
+    identified_by: str | None = None
     api_key: str | None = None         # decrypted at resolution time for tool usage
     nextcloud_url: str | None = None
     nextcloud_user: str | None = None
@@ -71,6 +79,10 @@ class ResolvedCredentials(BaseModel):
     #: user's own, else the household default (the system default user's), with
     #: no grant needed. credential_sources["abuse_ch"] says which.
     malwarebazaar_key: str | None = None
+    #: The book catalogue integrations (services/common/book_metadata.py ``resolve``):
+    #: order and, per catalogue, enabled, ready and why not, and the Google Books key
+    #: (the user's own, else the household's). credential_sources["google_books"] says which.
+    book_metadata: dict = {}
     #: Branch patterns the workspace runtime must never push to directly
     #: (docs/INTEGRATIONS.md, GitHub > Protected Branches). Empty leaves the
     #: runtime's own default patterns in force.
@@ -180,6 +192,12 @@ class UserUpdate(BaseModel):
     huggingface_token: str | None = None
     #: abuse.ch Auth-Key; checked with abuse.ch before it is saved.
     malwarebazaar_key: str | None = None
+    #: Google Books API key for the library's book lookups (write-only).
+    google_books_key: str | None = None
+    #: The book catalogue integrations: a partial update merged over what is saved
+    #: (book_metadata.clean_update): google_books_enabled, open_library_enabled,
+    #: open_library_email, order.
+    book_metadata: dict | None = None
     #: Branch patterns Jarvis must never push to directly (GitHub > Protected
     #: Branches). Stored as a JSON array string; sent as a list.
     forbidden_branches: list[str] | None = None
@@ -230,11 +248,12 @@ CREDENTIAL_COLUMNS: dict[str, str] = {
     "huggingface_token": "huggingface_token_enc",
     "skylight_pass": "skylight_pass_enc",
     "malwarebazaar_key": "malwarebazaar_key_enc",
+    "google_books_key": "google_books_key_enc",
 }
 
 #: Credentials that are written and cleared but never read back, not even by
 #: the reveal eye: the UI only learns whether one is set and where it comes from.
-WRITE_ONLY_CREDENTIALS = frozenset({"malwarebazaar_key"})
+WRITE_ONLY_CREDENTIALS = frozenset({"malwarebazaar_key", "google_books_key"})
 
 
 def forbidden_branch_list(raw: Any) -> list[str]:
@@ -315,6 +334,9 @@ class UserRead(BaseModel):
     #: "own", "household" (the household default, set on the system default
     #: user) or "not_set_up". Never the key.
     abuse_ch_status: str | None = None
+    #: The book catalogue integrations as they apply to this user (GET /api/users/me):
+    #: book_metadata.public(resolve(...)), never the key.
+    book_metadata_status: dict | None = None
     voice_fingerprint: str | None = None
     preferred_tts_voice: str | None = None
     phone_number: str | None = None

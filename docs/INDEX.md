@@ -31,6 +31,7 @@
 - `docs/PUSH.md`: phone notifications over self-hosted ntfy: publishing notices, the phone stream, categories and preferences, action buttons, UnifiedPush for other apps
 - `docs/BIBLE_STUDY.md`: Bible reader, study help, plans, games, memorization, interlinear
 - `docs/ACHIEVEMENTS.md`: goals, achievements, opt-in sharing, stars
+- `docs/PROFILE_STATS.md`: each person's profile stats across Jarvis (opt-in per area for the family) and the admin's per-person page (devices, collector health, features, errors, trends)
 - `docs/HEALTH_STEPS.md`: pedometer capture, device ledger, widgets
 - `docs/HEALTH_HUB.md`: Health hub service and UI: profiles, open metric ingestion, sleep, readiness, nutrition, sharing
 - `docs/PLANT_CARE.md`: Garden hub (planned): species-specific houseplant care, personal plant names, kitchen herbs, family-sized outdoor garden planner, harvest-driven recipes, food preservation & Put-Up Pantry, weather automation, and opt-in Home Hub sensors/valves

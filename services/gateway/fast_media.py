@@ -360,6 +360,17 @@ def clear_choice(user_id: str) -> None:
     redis_cache_delete(_choice_key(user_id))
 
 
+#: A "no" to a pending question: it is dropped, and nothing plays.
+_NO = frozenset({"no", "nope", "nah", "no thanks", "no thank you", "don't", "do not", "don't play it",
+                 "cancel", "never mind", "nevermind", "no don't", "not that one", "no not that"})
+
+
+def declines_choice(answer: str) -> bool:
+    """True when ``answer`` turns down a pending media question ("no", "no thanks", "cancel")."""
+    text = " ".join(re.sub(r"[^a-z0-9' ]+", " ", strip_request_filler(answer).lower()).split())
+    return text in _NO or (text.startswith(("no ", "nope ", "nah ")) and len(text.split()) <= 4)
+
+
 _ORDINALS = {"first": 0, "1st": 0, "one": 0, "second": 1, "2nd": 1, "two": 1, "last": -1}
 
 
@@ -382,3 +393,39 @@ def match_choice(answer: str, choice: dict) -> dict | None:
         idx = _ORDINALS[m.group(1)]
         return options[idx] if -len(options) <= idx < len(options) else None
     return None
+
+
+# --------------------------------------------------------------------------- #
+# "Play" heard as another word                                                 #
+# --------------------------------------------------------------------------- #
+
+#: Words speech recognition writes for a spoken "play" (over a TV speaker, or a quick "play"):
+#: "Late <title>", "Player <name>". "Please" and "pray" are left out: they open too many
+#: real requests.
+PLAY_SOUNDALIKES = frozenset({"late", "plate", "played", "plays", "player", "clay", "lay", "slay", "flay",
+                              "blay", "ply", "pley", "plait", "plane"})
+#: A misheard request is played only when the library has this good a match for the rest.
+MISHEARD_PLAY_MIN_SCORE = 0.85
+
+
+def misheard_play(query: str) -> list[str]:
+    """What may have been asked for when "play" was heard as another word, most likely first; [] when not.
+
+    "Late call to harbor" -> ["call to harbor"]; "Player seven" -> ["seven", "er seven"] (the end of
+    "player" may be the start of the name: "Play ARE7"). Only a library match decides
+    (``MISHEARD_PLAY_MIN_SCORE``): these are guesses.
+    """
+    text = strip_request_filler(query or "")
+    words = text.split()
+    if len(words) < 2 or len(words) > 10:
+        return []
+    first = words[0].lower().strip(",.!?-")
+    if first not in PLAY_SOUNDALIKES:
+        return []
+    rest = " ".join(words[1:]).strip(" ,.!?\"'")
+    if not rest:
+        return []
+    guesses = [rest]
+    if first == "player":
+        guesses.append(f"er {rest}")  # "Player one": the "er" may be the start of the name
+    return guesses

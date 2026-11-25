@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import LibraryPanel from './LibraryPanel';
 import { api } from '../../services/api';
-import type { LibraryBook } from '../../types/api';
+import type { BookCatalogues, LibraryBook } from '../../types/api';
 import toast from 'react-hot-toast';
 
 vi.mock('react-hot-toast', () => {
@@ -23,6 +24,7 @@ vi.mock('../../services/api', async (importOriginal) => {
       libraryTagBook: vi.fn(),
       libraryAddBook: vi.fn(),
       libraryInspectBook: vi.fn(),
+      libraryCatalogues: vi.fn(),
     },
   };
 });
@@ -37,7 +39,9 @@ function renderPanel(isAdmin: boolean) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <LibraryPanel isAdmin={isAdmin} />
+      <MemoryRouter>
+        <LibraryPanel isAdmin={isAdmin} />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -46,7 +50,19 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.libraryBooks).mockResolvedValue({ total: 2, books: [LENT, WESLEY] });
   vi.mocked(api.libraryTags).mockResolvedValue({ tags: [{ name: 'Lent', books: 1 }] });
+  vi.mocked(api.libraryCatalogues).mockResolvedValue(OPEN_LIBRARY_ONLY);
 });
+
+/** Open Library on; Google Books turned on with no key anywhere. */
+const OPEN_LIBRARY_ONLY: BookCatalogues = {
+  order: ['google_books', 'open_library'],
+  sources: {
+    google_books: { name: 'Google Books', enabled: true, enabled_from: 'own', ready: false, key_set: false, key_source: 'absent',
+      reason: 'Google Books: turned on but no API key is set in Settings > Accounts & Integrations' },
+    open_library: { name: 'Open Library', enabled: true, enabled_from: 'default', ready: true, reason: '',
+      last: { ok: false, error: 'Open Library answered 429: too many requests. Try again in a few minutes.', at: '2026-01-01T00:00:00' } },
+  },
+};
 
 describe('LibraryPanel', () => {
   it('lists books with their tags and says when Jarvis can only see a title', async () => {
@@ -164,5 +180,56 @@ describe('LibraryPanel', () => {
     const audit = await screen.findByTestId('library-audit');
     await waitFor(() => expect(audit).toHaveTextContent('could remove id 8 (PDF)'));
     expect(audit).toHaveTextContent('nothing is removed');
+  });
+});
+
+
+describe('LibraryPanel book catalogues', () => {
+  it('says where book details come from, why a catalogue is not used, and links to the settings', async () => {
+    renderPanel(true);
+    fireEvent.click(await screen.findByTestId('library-add-button'));
+    const note = await screen.findByTestId('library-catalogues');
+    expect(note).toHaveTextContent('Book details from Open Library.');
+    expect(note).toHaveTextContent('Not used: Google Books: turned on but no API key is set in Settings > Accounts & Integrations.');
+    expect(note).toHaveTextContent('Last lookup: Open Library answered 429');
+    expect(within(note).getByRole('link', { name: 'Settings > Accounts & Integrations' })).toHaveAttribute('href', '/identity');
+  });
+
+  it('says plainly when the settings could not be read', async () => {
+    vi.mocked(api.libraryCatalogues).mockResolvedValue({ order: [], sources: {},
+      error: 'the catalogue integrations in Settings > Accounts & Integrations could not be read (identity did not answer)' });
+    renderPanel(true);
+    fireEvent.click(await screen.findByTestId('library-add-button'));
+    expect(await screen.findByTestId('library-catalogues')).toHaveTextContent('could not be read (identity did not answer). No catalogue is asked');
+  });
+
+  it("shows a lookup's catalogues: asked, errors and skipped", async () => {
+    vi.mocked(api.libraryInspectBook).mockResolvedValue({
+      title: 'Harbor Lights', authors: [], comments: '', publisher: '', published: '', isbn: '', language: '', series: '',
+      subjects: [], cover_url: '', cover_preview: '', tags: [], sources: {},
+      catalogues: { asked: ['Google Books', 'Open Library'], used: ['Open Library'],
+        errors: [{ source: 'Google Books', error: "Google Books answered 429: the API key's daily quota is used up." }],
+        skipped: [] },
+    });
+    renderPanel(true);
+    fireEvent.click(await screen.findByTestId('library-add-button'));
+    fireEvent.change(screen.getByTestId('library-add-file'), { target: { files: [new File(['x'], 'harbor.epub')] } });
+    const lines = await screen.findByTestId('library-found-catalogues');
+    expect(lines).toHaveTextContent('Asked Google Books and Open Library.');
+    expect(within(lines).getByText("Google Books answered 429: the API key's daily quota is used up.")).toHaveClass('text-rose-300');
+  });
+
+  it('tells the person when a catalogue answered with an error while adding', async () => {
+    vi.mocked(api.libraryAddBook).mockResolvedValue({
+      book_id: 15, title: 'Harbor Lights', tags: [], path: 'x', identified: true,
+      message: 'Added “Harbor Lights”. Filled in from the file and the catalogues: comments. Google Books answered 429.',
+      catalogues: { asked: ['Google Books'], used: [], skipped: [], errors: [{ source: 'Google Books', error: 'Google Books answered 429.' }] },
+    });
+    renderPanel(true);
+    fireEvent.click(await screen.findByTestId('library-add-button'));
+    fireEvent.click(screen.getByLabelText('Auto-fill and tag'));
+    fireEvent.change(screen.getByTestId('library-add-file'), { target: { files: [new File(['x'], 'harbor.epub')] } });
+    fireEvent.submit(screen.getByTestId('library-add'));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining('Google Books answered 429'), { duration: 10_000 }));
   });
 });
