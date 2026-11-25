@@ -163,3 +163,24 @@ def test_edits_are_applied_in_the_order_they_were_made(env):
     earlier = request("pat", kind="shopping_add", text="y", req_id="c" * 32, issued=NOW - 20, life=3600)
     submit("alex", later, earlier)
     assert [a[3]["text"] for a in acted] == ["y", "x"]
+
+
+@pytest.mark.asyncio
+async def test_a_self_call_passes_its_query_string_to_the_route(monkeypatch):
+    """"/api/geo/trips?limit=10" used to be sent as the path, matched no route and was a 404, so the
+    offline snapshot never carried trips or today's calendar (2026-11-25)."""
+    from fastapi import FastAPI, Request
+
+    probe = FastAPI()
+    seen: dict = {}
+
+    @probe.get("/api/geo/trips")
+    async def trips(request: Request):
+        seen["query"] = dict(request.query_params)
+        seen["auth"] = request.headers.get("authorization")
+        return {"trips": []}
+
+    monkeypatch.setattr(gateway_main, "app", probe)
+    code, data = await offline_relay._call_self("GET", "/api/geo/trips?limit=10&start=2026-11-25", "member-key", {})
+    assert code == 200 and data == {"trips": []}
+    assert seen == {"query": {"limit": "10", "start": "2026-11-25"}, "auth": "Bearer member-key"}

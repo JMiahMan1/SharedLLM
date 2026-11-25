@@ -164,9 +164,12 @@ async def _call_self(method: str, path: str, api_key: str, body: dict) -> tuple[
     from services.gateway.main import app
 
     raw = json.dumps(body).encode("utf-8")
+    # A query string belongs in the scope's query_string, not the path: "/api/geo/trips?limit=10" as
+    # a path matched no route, so offline snapshots never carried trips or today's calendar (404).
+    path, _, query = path.partition("?")
     scope = {
         "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": method,
-        "scheme": "http", "path": path, "raw_path": path.encode(), "query_string": b"",
+        "scheme": "http", "path": path, "raw_path": path.encode(), "query_string": query.encode(),
         "root_path": "", "server": ("offline-relay", 80), "client": ("127.0.0.1", 0),
         "headers": [(b"host", b"offline-relay"), (b"content-type", b"application/json"),
                     (b"authorization", f"Bearer {api_key}".encode()),
