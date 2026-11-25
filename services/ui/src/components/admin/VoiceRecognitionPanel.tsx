@@ -105,7 +105,7 @@ export const VoiceRecognitionPanel: FC = () => {
             <div className="rounded-xl border border-white/5 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-wider text-slate-500">Threshold</p><p className="text-lg font-bold text-white">{pct(cal.threshold)}</p></div>
             <div className="rounded-xl border border-white/5 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-wider text-slate-500">Lead needed</p><p className="text-lg font-bold text-white">{pct(cal.margin)}</p></div>
             <div className="rounded-xl border border-white/5 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-wider text-slate-500">Enrolled</p><p className="text-lg font-bold text-white">{cal.people}</p></div>
-            <div className="rounded-xl border border-white/5 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-wider text-slate-500">To review</p><p className="text-lg font-bold text-white">{data?.candidates.length ?? 0}</p></div>
+            <div className="rounded-xl border border-white/5 bg-white/5 p-3"><p className="text-[11px] uppercase tracking-wider text-slate-500">To review</p><p className="text-lg font-bold text-white">{data?.candidates?.length ?? 0}</p></div>
           </div>
           <p className="text-sm text-slate-300">{STATUS_WORDS[cal.status]}</p>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -119,7 +119,7 @@ export const VoiceRecognitionPanel: FC = () => {
         <div className="mb-5">
           <p className="px-1 pb-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">People</p>
           <ul className="space-y-2">
-            {data.people.map((p) => (
+            {(data.people ?? []).map((p) => (
               <li key={p.username} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2 text-sm" data-testid="voice-person">
                 <span className="min-w-0 truncate text-white">{p.name}</span>
                 <span className={`shrink-0 text-xs ${p.enrolled ? 'text-emerald-200' : 'text-amber-200'}`}>
@@ -169,11 +169,11 @@ export const VoiceRecognitionPanel: FC = () => {
         </div>
       )}
 
-      {data && data.candidates.length > 0 && (
+      {data && (data.candidates ?? []).length > 0 && (
         <div>
           <p className="px-1 pb-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">Heard at their own satellite</p>
           <ul className="space-y-2" data-testid="voice-candidates">
-            {data.candidates.map((c) => (
+            {(data.candidates ?? []).map((c) => (
               <li key={c.id} className="flex min-w-0 flex-col gap-2 rounded-xl border border-violet-400/20 bg-violet-500/5 p-3 text-sm sm:flex-row sm:items-center">
                 <p className="min-w-0 flex-1 text-slate-200">
                   Sounded like <span className="font-semibold text-white">{c.name}</span> ({pct(c.score)}
