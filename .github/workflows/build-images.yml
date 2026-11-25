@@ -20,6 +20,11 @@ on:
       - 'tools/**'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
+    inputs:
+      services:
+        description: "Comma-separated services to build (for example gateway,homehub,ui); empty builds what the last commit changed"
+        required: false
+        default: ""
 
 # A new push to a pull request cancels that PR's previous build, which only
 # checks that the images still build. Pushes to a branch publish images and
@@ -47,8 +52,8 @@ jobs:
     outputs:
       build_base: ${{ steps.set-outputs.outputs.build_base }}
       services: ${{ steps.set-outputs.outputs.services }}
-      ui: ${{ steps.filter.outputs.ui }}
-      caddy: ${{ steps.filter.outputs.caddy }}
+      ui: ${{ steps.set-outputs.outputs.ui }}
+      caddy: ${{ steps.set-outputs.outputs.caddy }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,15 +79,12 @@ jobs:
             # and rebuilding it makes every deploy pull gigabytes again.
             base:
               - 'docker/Dockerfile.base'
-              - '.github/workflows/build-images.yml'
             caddy:
               - 'Caddyfile'
               - 'docker/Dockerfile.caddy'
-              - '.github/workflows/build-images.yml'
             ui:
               - 'services/ui/**'
               - 'services/config.py'
-              - '.github/workflows/build-images.yml'
             identity:
               - 'services/identity/**'
               - 'services/common/**'
@@ -103,7 +105,6 @@ jobs:
               - 'tools/webscraper.py'
               - 'tools/vision_ocr.py'
               - 'scripts/index_capabilities.py'
-              - '.github/workflows/build-images.yml'
             storage:
               - 'services/storage/**'
               - 'services/common/**'
@@ -125,7 +126,6 @@ jobs:
               - 'services/common/**'
               - 'services/config.py'
               - 'services/workspace_sandbox.py'
-              - '.github/workflows/build-images.yml'
             control_plane:
               - 'services/control_plane/**'
               - 'services/common/**'
@@ -142,7 +142,6 @@ jobs:
               - 'services/health/**'
               - 'services/common/**'
               - 'services/config.py'
-              - '.github/workflows/build-images.yml'
             homehub:
               - 'services/homehub/**'
               - 'services/common/**'
@@ -151,14 +150,12 @@ jobs:
               - 'services/dns/**'
               - 'services/common/**'
               - 'services/config.py'
-              - '.github/workflows/build-images.yml'
             garden:
               - 'services/garden/**'
               - 'services/common/**'
               - 'services/config.py'
               - 'data/plants_seed/**'
               - 'scripts/build_plants_seed.py'
-              - '.github/workflows/build-images.yml'
 
       - name: Set Outputs
         id: set-outputs
@@ -176,8 +173,45 @@ jobs:
             BUILD_BASE='false'
           fi
           
+          # A pull request's image build only checks that the image still builds; its code is checked by
+          # the test suites and the image is built once, after merge. So a PR builds a service only when
+          # something the image is made from changed: its Dockerfile, its requirements, or docker/.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only "${{ steps.base.outputs.ref }}" HEAD)
+            if echo "$CHANGED" | grep -q '^docker/'; then
+              echo "docker/ changed: building every changed service"
+            else
+              KEEP='[]'
+              for svc in $(echo "$SERVICES_JSON" | jq -r '.[]'); do
+                if echo "$CHANGED" | grep -qE "^services/${svc}/(Dockerfile[^/]*|requirements[^/]*\.txt)$"; then
+                  KEEP=$(echo "$KEEP" | jq -c --arg s "$svc" '. + [$s]')
+                fi
+              done
+              echo "Pull request: building only services whose Dockerfile or requirements changed: $KEEP"
+              SERVICES_JSON="$KEEP"
+            fi
+          fi
+
+          # A manual run can name the services to build (a build that was cancelled, for example).
+          REQUESTED="${{ github.event.inputs.services }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$REQUESTED" ]; then
+            SERVICES_JSON=$(echo "$REQUESTED" | tr ', ' '\n\n' | grep -v '^$' | grep -vxE 'ui|caddy' | jq -R . | jq -sc .)
+            BUILD_BASE='false'
+            echo "Manual run: building $SERVICES_JSON"
+          fi
+
+          UI='${{ steps.filter.outputs.ui }}'
+          CADDY='${{ steps.filter.outputs.caddy }}'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$REQUESTED" ]; then
+            UI=false; CADDY=false
+            echo ",$REQUESTED," | tr -d ' ' | grep -q ',ui,' && UI=true
+            echo ",$REQUESTED," | tr -d ' ' | grep -q ',caddy,' && CADDY=true
+          fi
+
           echo "build_base=$BUILD_BASE" >> $GITHUB_OUTPUT
           echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
+          echo "ui=$UI" >> $GITHUB_OUTPUT
+          echo "caddy=$CADDY" >> $GITHUB_OUTPUT
 
   build-base:
     name: Build & Push Shared Base
