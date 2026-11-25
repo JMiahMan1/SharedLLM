@@ -88,6 +88,9 @@ def view(session: Session, subject: User, caller: User, may_manage: Callable[[Us
     return {
         "username": subject.username,
         "settings": stored(session, subject.username),
+        # Whether anyone has saved a choice: until then the settings are the defaults, and a grown
+        # member's phone keeps (and saves) what it already runs instead of taking them.
+        "chosen": session.get(UserNearbySetting, subject.username) is not None,
         # A minor's parents set them; the minor sees them read-only.
         "managed_by_parent": minor,
         "can_change": (caller.username == subject.username and not minor)

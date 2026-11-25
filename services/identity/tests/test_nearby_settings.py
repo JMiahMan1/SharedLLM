@@ -42,6 +42,13 @@ def test_defaults_keep_the_old_behaviour(as_user):
     assert body["can_change"] is True
     assert body["managed_by_parent"] is False
     assert body["always_on"] == []
+    assert body["chosen"] is False  # only defaults: the phone keeps what it already runs
+
+
+def test_a_saved_choice_is_marked_chosen(as_user):
+    client = as_user("casey")
+    client.put("/api/users/me/nearby-settings", json={"settings": {"nearby": True}})
+    assert client.get("/api/users/me/nearby-settings").json()["chosen"] is True
 
 
 def test_a_grown_member_switches_their_own(as_user):
