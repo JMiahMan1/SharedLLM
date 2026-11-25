@@ -38,6 +38,8 @@ export interface NearbySettingsState {
   settings: NearbyParts;
   /** A minor's parts: set by their parents. */
   managed_by_parent: boolean;
+  /** Whether a choice has been saved; until then `settings` are only the defaults. */
+  chosen: boolean;
   /** Whether the caller may change them. */
   can_change: boolean;
   /** Always on for a minor: "parent_link". */
@@ -53,6 +55,8 @@ export function nearbyState(value: unknown): NearbySettingsState {
     username: String(o.username ?? ''),
     settings,
     managed_by_parent: o.managed_by_parent === true,
+    // An older server does not say: treat its answer as a saved choice, as before.
+    chosen: o.chosen !== false,
     can_change: o.can_change === true,
     always_on: Array.isArray(o.always_on) ? o.always_on.filter((x): x is string => typeof x === 'string') : [],
   };

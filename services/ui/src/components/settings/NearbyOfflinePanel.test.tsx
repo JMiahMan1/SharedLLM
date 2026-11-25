@@ -26,11 +26,11 @@ const device: NearbyDeviceState = {
 };
 const adult: NearbySettingsState = {
   username: 'casey', settings: { nearby: false, chat: false, offline: false, car: true },
-  managed_by_parent: false, can_change: true, always_on: [],
+  managed_by_parent: false, chosen: true, can_change: true, always_on: [],
 };
 const child: NearbySettingsState = {
   username: 'robin', settings: { nearby: true, chat: false, offline: true, car: true },
-  managed_by_parent: true, can_change: false, always_on: ['parent_link'],
+  managed_by_parent: true, chosen: true, can_change: false, always_on: ['parent_link'],
 };
 
 const draw = (path = '/settings') =>
