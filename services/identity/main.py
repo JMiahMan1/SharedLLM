@@ -2187,6 +2187,19 @@ def internal_satellite_owner(entity_id: str, session: Session = Depends(get_sess
     }
 
 
+@app.get("/api/internal/person-devices", dependencies=[Depends(require_internal)])
+def internal_person_devices(person: str, session: Session = Depends(get_session)):
+    """Internal: a family member, by the name someone said, and the hub devices assigned to them.
+
+    Execution announces "to <person>" on these (hub_devices.person_devices). 404
+    when the name is no one in the household.
+    """
+    found = hub_devices.person_devices(session, person)
+    if found is None:
+        raise HTTPException(status_code=404, detail="No one in the household by that name.")
+    return found
+
+
 CALIBRATION_SETTING = "voice_calibration"
 _calibration_cache: dict[str, Any] = {}
 
