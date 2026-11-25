@@ -234,6 +234,21 @@ const BIBLE_ADMIN: Record<string, unknown> = {
 };
 
 const GET: Record<string, unknown> = {
+  // Admin > Users & Devices > voice recognition: the shape identity answers (the catch-all `{}` crashed the panel).
+  // Whisper mode (HomeHub voice settings) and HomeHub's devices with their assignments: none yet.
+  '/api/dashboard/voice/settings': {
+    whisper: { enabled: true, volume: 0.3, level_drop_db: 8 },
+    defaults: { whisper: { enabled: true, volume: 0.3, level_drop_db: 8 } },
+    level_drop_range_db: [4, 16],
+  },
+  '/api/admin/hub-devices': { devices: [] },
+  '/api/admin/voice': {
+    calibration: { status: 'single', threshold: 0.76, margin: 0.05, people: 1, same_speaker: null, other_speaker: null, per_person: [] },
+    min_samples: 3,
+    people: [{ username: 'robin', name: 'Robin', family_role: 'teen', samples: 4, auto_samples: 1, satellite_samples: 2, enrolled: true, consistency: 0.82 }],
+    candidates: [],
+    new_voices: [],
+  },
   // Shell and profile
   '/api/users/me': ME,
   '/api/users': USERS,
