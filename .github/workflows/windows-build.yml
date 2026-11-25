@@ -57,6 +57,11 @@ jobs:
 
     - name: Build the Setup.exe
       shell: bash
+      env:
+        # Git Bash rewrites anything that starts with a slash into a Windows path,
+        # which turns ISCC's /D switches into extra script filenames.
+        MSYS_NO_PATHCONV: "1"
+        MSYS2_ARG_CONV_EXCL: "*"
       run: |
         # One version for the whole product: the APK and both Windows assets land
         # in the same release, so the tag is read from services/ui/package.json.
