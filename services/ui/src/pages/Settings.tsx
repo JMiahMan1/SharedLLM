@@ -40,6 +40,7 @@ import {
   downloadAndInstallApk,
   downloadApkWithProgress,
   getApkInstallPermission,
+  buildLabel,
   getRunningVersion,
   hasVerifiedInstallFlow,
   installVerifiedApk,
@@ -758,7 +759,7 @@ const AppUpdatesSection = () => {
           App &amp; OTA Updates
         </h2>
         <span className="min-w-0 break-all text-[10px] text-slate-500 font-mono">
-          {updateInfo.version ? `v${updateInfo.version} ` : ''}({updateInfo.gitSha})
+          {buildLabel(updateInfo.version, apk?.nativeBuildNumber, updateInfo.gitSha)}
         </span>
       </div>
 
@@ -776,7 +777,7 @@ const AppUpdatesSection = () => {
             </p>
             {updateInfo.remoteSha && updateInfo.remoteSha !== 'unknown' && (
               <p className="text-[10px] text-slate-500 font-mono mt-1 break-all">
-                Server: {updateInfo.remoteVersion ? `${updateInfo.remoteVersion} ` : ''}({updateInfo.remoteSha})
+                Server: {buildLabel(updateInfo.remoteVersion, apk?.apkVersionCode, updateInfo.remoteSha)}
                 {lastChecked && ` · checked ${lastChecked.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
               </p>
             )}

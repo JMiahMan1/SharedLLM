@@ -888,3 +888,17 @@ export function __resetAutoApk(): void {
   autoApkRunning = false;
   updateBusy = () => false;
 }
+
+
+/**
+ * "v1.7.0 · build 799 · 39a8de3": the version name alone does not tell two builds apart (the
+ * name changes only on a release, the build number on every APK), so all three are shown.
+ * Parts that are unknown are left out.
+ */
+export function buildLabel(version?: string, build?: number, gitSha?: string): string {
+  const parts: string[] = [];
+  if (version) parts.push(`v${version.replace(/^v/, '')}`);
+  if (typeof build === 'number' && build > 0) parts.push(`build ${build}`);
+  if (gitSha && gitSha !== 'unknown') parts.push(gitSha.slice(0, 9));
+  return parts.join(' \u00b7 ') || '\u2026';
+}
