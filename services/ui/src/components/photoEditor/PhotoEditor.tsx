@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { Crop, FlipHorizontal2, FlipVertical2, Loader2, Minus, Pencil, Plus, RotateCcw, RotateCw, SendHorizontal, SlidersHorizontal, Smile, Trash2, Type, Undo2, Wand2, X } from 'lucide-react';
+import { Crop, FlipHorizontal2, FlipVertical2, Glasses, Loader2, Minus, Pencil, Plus, RotateCcw, RotateCw, SendHorizontal, SlidersHorizontal, Smile, Trash2, Type, Undo2, Wand2, X } from 'lucide-react';
 import { applyRecipe, type EditFrame } from '../../lib/photoEdit/apply';
 import { decodePicture, PhotoEditError, type Decoded } from '../../lib/photoEdit/decode';
 import { exportEdit, type EditResult } from '../../lib/photoEdit/encode';
@@ -27,17 +27,20 @@ import {
 } from '../../lib/photoEdit/overlays';
 import { emptyRecipe, isIdentity, MAX_OVERLAYS, MAX_TEXT, NO_ADJUSTMENTS, type Adjustments, type AspectId, type CropRect, type EditRecipe, type PlacedOverlay, type Point, type Rotation, type Stroke, type TextOverlay } from '../../lib/photoEdit/recipe';
 import { drawStrokes } from '../../lib/photoEdit/render';
+import { lensById, lensDataUrl, lensPlacement, LENSES, type PhotoLens } from '../../lib/photoEdit/lenses';
+import { FaceFindError, findFaces, type FoundFace } from '../../lib/photoEdit/faceDetect';
 import CropBox from './CropBox';
 import FilterStrip from './FilterStrip';
 
 export type { EditResult } from '../../lib/photoEdit/encode';
 
-type Tool = 'filters' | 'adjust' | 'crop' | 'text' | 'stickers' | 'draw';
+type Tool = 'filters' | 'adjust' | 'crop' | 'lenses' | 'text' | 'stickers' | 'draw';
 
 const TOOLS: ReadonlyArray<{ id: Tool; label: string; Icon: typeof Wand2 }> = [
   { id: 'filters', label: 'Filters', Icon: Wand2 },
   { id: 'adjust', label: 'Adjust', Icon: SlidersHorizontal },
   { id: 'crop', label: 'Crop', Icon: Crop },
+  { id: 'lenses', label: 'Lenses', Icon: Glasses },
   { id: 'text', label: 'Text', Icon: Type },
   { id: 'stickers', label: 'Stickers', Icon: Smile },
   { id: 'draw', label: 'Draw', Icon: Pencil },
@@ -127,6 +130,9 @@ export default function PhotoEditor({ source, initialRecipe, maxBytes, doneLabel
   const [binHot, setBinHot] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [liveStroke, setLiveStroke] = useState<Stroke | null>(null);
+  const [faces, setFaces] = useState<FoundFace[] | null>(null);
+  const [lensLooking, setLensLooking] = useState(false);
+  const [lensNote, setLensNote] = useState('');
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLCanvasElement | null>(null);
@@ -240,31 +246,41 @@ export default function PhotoEditor({ source, initialRecipe, maxBytes, doneLabel
 
   const ow = oriented?.width ?? 1;
   const oh = oriented?.height ?? 1;
-  const setAspect = (aspect: AspectId) => update((r) => ({ ...r, aspect, crop: normaliseCrop(fitCrop(aspectRatio(aspect), ow, oh)) }));
-  const turn = (by: 90 | -90) =>
+  const setAspect = (aspect: AspectId) => {
+    setFaces(null);
+    update((r) => ({ ...r, aspect, crop: normaliseCrop(fitCrop(aspectRatio(aspect), ow, oh)) }));
+  };
+  const turn = (by: 90 | -90) => {
+    setFaces(null);
     update((r) => {
       const rotate = (((r.rotate + by) % 360) + 360) % 360 as Rotation;
       // A quarter turn swaps the sides: start the crop again in the chosen shape.
       return { ...r, rotate, crop: normaliseCrop(fitCrop(aspectRatio(r.aspect), oh, ow)) };
     });
-  const flip = (axis: 'h' | 'v') =>
+  };
+  const flip = (axis: 'h' | 'v') => {
+    setFaces(null);
     update((r) => ({
       ...r,
       flipH: axis === 'h' ? !r.flipH : r.flipH,
       flipV: axis === 'v' ? !r.flipV : r.flipV,
       crop: r.crop && (axis === 'h' ? { ...r.crop, x: 1 - r.crop.x - r.crop.w } : { ...r.crop, y: 1 - r.crop.y - r.crop.h }),
     }));
+  };
   const cropRect: CropRect = recipe.crop ?? { x: 0, y: 0, w: 1, h: 1 };
 
   // --- Overlays --------------------------------------------------------------------
 
-  const place = (o: Omit<PlacedOverlay, 'id' | 'x' | 'y' | 'scale' | 'rotation'>) => {
+  const place = (
+    o: Omit<PlacedOverlay, 'id' | 'x' | 'y' | 'scale' | 'rotation'>,
+    at: { x: number; y: number; scale: number; rotation: number } = { x: 0.5, y: 0.5, scale: 1, rotation: 0 },
+  ) => {
     if (recipe.overlays.length >= MAX_OVERLAYS) {
       setError('That is as many as one picture can carry.');
       return;
     }
     const id = newOverlayId();
-    update((r) => ({ ...r, overlays: [...r.overlays, { id, x: 0.5, y: 0.5, scale: 1, rotation: 0, ...o } as PlacedOverlay] }));
+    update((r) => ({ ...r, overlays: [...r.overlays, { id, ...at, ...o } as PlacedOverlay] }));
     setSelected(id);
   };
 
@@ -292,6 +308,52 @@ export default function PhotoEditor({ source, initialRecipe, maxBytes, doneLabel
     if (!selected) return;
     update((r) => removeOverlay(r, selected));
     setSelected(null);
+  };
+
+  /**
+   * A clean copy of the picture as it will be, for face finding: the same
+   * turn, crop and size, but without the colour work, which can only make a
+   * face harder to find.
+   */
+  const faceFrame = useCallback((): EditFrame | null => {
+    if (!previewSource) return null;
+    const [clean] = applyRecipe([previewSource], { ...recipe, filter: null, adjust: { ...NO_ADJUSTMENTS }, overlays: [], crop: cropping ? null : recipe.crop });
+    return clean;
+  }, [previewSource, recipe.filter, recipe.rotate, recipe.flipH, recipe.flipV, recipe.crop, cropping]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Put a lens on. The faces are found once and remembered for the next lens,
+   * so trying three pairs of glasses on one picture reads the picture once.
+   * When a face cannot be found (a picture of a pet, a detector this phone
+   * cannot run) the lens still lands in the middle, where it can be dragged
+   * onto whatever should wear it.
+   */
+  const addLens = async (lens: PhotoLens) => {
+    const frame = faceFrame();
+    if (!frame) return;
+    setLensNote('');
+    let found = faces;
+    let note = '';
+    if (!found) {
+      setLensLooking(true);
+      try {
+        found = await findFaces(frame);
+        setFaces(found);
+      } catch (e) {
+        note = e instanceof FaceFindError ? e.message : 'Face finding did not work on this phone. Drag the lens onto the face.';
+        found = [];
+        setFaces([]);
+      } finally {
+        setLensLooking(false);
+      }
+    }
+    if (!found.length) {
+      place({ kind: 'lens', lens: lens.id } as never);
+      setLensNote(note || 'No face found: drag the lens onto the face.');
+      return;
+    }
+    for (const face of found) place({ kind: 'lens', lens: lens.id } as never, lensPlacement(lens, face, frame));
+    setLensNote(note || (found.length === 1 ? 'Found one face.' : `Found ${found.length} faces.`));
   };
 
   const stagePoint = (event: PointerEvent<HTMLElement>): Point => [event.clientX, event.clientY];
@@ -547,7 +609,16 @@ export default function PhotoEditor({ source, initialRecipe, maxBytes, doneLabel
                 if (o.kind === 'drawing') return null;
                 const size = overlaySize(o, box.width);
                 const f = o.kind === 'text' ? fontFor(o.font) : null;
-                const label = o.kind === 'text' ? `Words: ${o.text}` : o.kind === 'emoji' ? `Emoji ${o.emoji}` : `${STICKERS.find((s) => s.id === o.sticker)?.label ?? 'Sticker'} sticker`;
+                const lens = o.kind === 'lens' ? lensById(o.lens) : null;
+                const origin = lens?.origin ?? ([0.5, 0.5] as Point);
+                const label =
+                  o.kind === 'text'
+                    ? `Words: ${o.text}`
+                    : o.kind === 'emoji'
+                      ? `Emoji ${o.emoji}`
+                      : o.kind === 'lens'
+                        ? `${lens?.label ?? 'Face'} lens`
+                        : `${STICKERS.find((s) => s.id === o.sticker)?.label ?? 'Sticker'} sticker`;
                 return (
                   <div
                     key={o.id}
@@ -563,7 +634,7 @@ export default function PhotoEditor({ source, initialRecipe, maxBytes, doneLabel
                     style={{
                       left: o.x * box.width,
                       top: o.y * box.height,
-                      transform: `translate(-50%, -50%) rotate(${o.rotation}deg)`,
+                      transform: `translate(-${origin[0] * 100}%, -${origin[1] * 100}%) rotate(${o.rotation}deg)`,
                       ...(o.kind === 'text'
                         ? {
                             fontFamily: f!.family,
@@ -577,10 +648,18 @@ export default function PhotoEditor({ source, initialRecipe, maxBytes, doneLabel
                           }
                         : o.kind === 'emoji'
                           ? { fontSize: size, lineHeight: 1 }
-                          : { width: size, height: size }),
+                          : o.kind === 'lens'
+                            ? { width: size, height: size / (lens?.aspect ?? 1) }
+                            : { width: size, height: size }),
                     }}
                   >
-                    {o.kind === 'text' ? o.text : o.kind === 'emoji' ? o.emoji : <img src={stickerDataUrl(o.sticker) ?? ''} alt="" draggable={false} className="h-full w-full" />}
+                    {o.kind === 'text' ? (
+                      o.text
+                    ) : o.kind === 'emoji' ? (
+                      o.emoji
+                    ) : (
+                      <img src={(o.kind === 'lens' ? lensDataUrl(o.lens) : stickerDataUrl(o.sticker)) ?? ''} alt="" draggable={false} className="h-full w-full" />
+                    )}
                   </div>
                 );
               })}
@@ -756,6 +835,43 @@ export default function PhotoEditor({ source, initialRecipe, maxBytes, doneLabel
             </div>
           )}
 
+          {tool === 'lenses' && (
+            <div className="max-h-44 space-y-2 overflow-y-auto px-3" data-testid="photo-editor-lenses">
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 text-xs text-slate-300">
+                  {lensLooking ? 'Looking for faces' : lensNote || 'A lens goes on every face it finds. Drag, pinch and turn to fit.'}
+                </p>
+                <button
+                  type="button"
+                  className={chip(false)}
+                  disabled={lensLooking}
+                  onClick={() => {
+                    setFaces(null);
+                    setLensNote('');
+                  }}
+                  data-testid="photo-editor-lenses-find"
+                >
+                  {faces ? 'Look again' : 'Find faces'}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1" role="group" aria-label="Face lenses">
+                {LENSES.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    aria-label={`Add the ${l.label.toLowerCase()} lens`}
+                    onClick={() => void addLens(l)}
+                    disabled={lensLooking}
+                    className="flex h-12 w-14 items-center justify-center rounded-xl bg-white/10 px-1 disabled:opacity-40"
+                    data-testid={`photo-editor-lens-${l.id}`}
+                  >
+                    <img src={lensDataUrl(l.id) ?? ''} alt="" className="max-h-9 w-full object-contain" draggable={false} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {tool === 'stickers' && (
             <div className="max-h-40 space-y-2 overflow-y-auto px-3" data-testid="photo-editor-stickers">
               <div className="flex flex-wrap gap-1" role="group" aria-label="Stickers">
@@ -794,7 +910,7 @@ export default function PhotoEditor({ source, initialRecipe, maxBytes, doneLabel
             </div>
           )}
 
-          <nav className="grid grid-cols-6 gap-1 px-1 pb-[max(0.5rem,var(--safe-bottom))]" aria-label="Editing tools">
+          <nav className="grid grid-cols-7 gap-1 px-1 pb-[max(0.5rem,var(--safe-bottom))]" aria-label="Editing tools">
             {TOOLS.map(({ id, label, Icon }) => (
               <button
                 key={id}

@@ -1,3 +1,4 @@
+import { LENS_SIZE } from './lenses';
 import type { DrawingOverlay, EditRecipe, FontId, Overlay, PlacedOverlay, Point, Stroke } from './recipe';
 
 /**
@@ -13,8 +14,12 @@ export const TEXT_SIZE = 0.075;
 export const EMOJI_SIZE = 0.16;
 export const STICKER_SIZE = 0.24;
 
+/**
+ * How big an overlay is, in pixels: the words' type size, the emoji's, or the
+ * width of a sticker's or a lens's picture.
+ */
 export function overlaySize(o: PlacedOverlay, width: number): number {
-  const base = o.kind === 'text' ? TEXT_SIZE : o.kind === 'emoji' ? EMOJI_SIZE : STICKER_SIZE;
+  const base = o.kind === 'text' ? TEXT_SIZE : o.kind === 'emoji' ? EMOJI_SIZE : o.kind === 'lens' ? LENS_SIZE : STICKER_SIZE;
   return base * width * o.scale;
 }
 
