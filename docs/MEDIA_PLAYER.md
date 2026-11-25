@@ -188,8 +188,27 @@ best match plays on the player:
 |---|---|---|
 | Music Assistant | the hub's `music_assistant` entry is loaded, or the person's own MA server (Identity) | tracks, artists, albums, playlists, radio, podcasts, audiobooks |
 | Audiobookshelf | an Audiobookshelf login in Accounts & Integrations | audiobooks, series, authors, podcasts |
-| YouTube (yt-dlp, built in) | the player is a screen (capability index) or a video was asked for; `voice_video_search` is not `off` | one video |
+| YouTube (yt-dlp, built in) | the player is a screen (capability index) or a video was asked for; `voice_video_search` is not `off`; only when the libraries had nothing | a few results, screened (below) |
 | The book library (Calibre) | `calibre_library_path` and a Nextcloud login; only when nothing playable matched | a book, offered to be read aloud |
+
+Web video is guarded for the children who use the household's screens
+(`services/execution/video_safety.py`):
+
+- Safe search is the `video_safe_search` setting: `strict` (default; also what
+  an unreadable or unknown value means), `moderate` or `off`. Only an admin can
+  change it, and it stays strict for a child or teen (`is_minor`, from the
+  Identity family role) and for a speaker nobody recognised. It is sent as
+  YouTube Restricted Mode and as SearXNG `safesearch` (2 when strict).
+- Before anything plays on a device, each video is read from the site: rated
+  13+ is refused (every TV is a shared screen; a child's request too), 18+
+  always, a title or channel matching the `video_blocklist` setting (empty by
+  default) is refused, and a video whose rating cannot be read is not played.
+- Only a strong title match (`video_safety.match_score` >= 0.85, by the library
+  title rules on the title, its parts and channel plus title) plays without
+  asking. A weaker one is offered: "I found 'X' on YouTube. Play it?" with a
+  one-option `detail.choice`; "yes" plays it (screened again), "no" drops it.
+- Each decision is logged at INFO as `[Reply] video_search: query=... chosen=...
+  score=... safe_search=... decision=... why=...`, with no user or device.
 
 A disabled, not-loaded or failing source is skipped and named in the answer.
 Titles are compared by `services/common/media_titles.py` (case, punctuation,

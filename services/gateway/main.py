@@ -1492,6 +1492,10 @@ async def _answer_media_choice(query: str, user_id: str, creds: Any) -> str | No
     pending = fast_media.pending_choice(user_id)
     if not pending:
         return None
+    if fast_media.declines_choice(query):
+        fast_media.clear_choice(user_id)
+        log.info("[FastPath] answer to the media question: no")
+        return "Okay."
     option = fast_media.match_choice(query, pending)
     if option is None:
         return None
