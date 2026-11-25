@@ -165,7 +165,15 @@ function Recorder({ room, tracker, thisPhone, onBack, onFinished }: {
           </label>
           <button type="button" className={`${primary} w-full sm:w-auto`} onClick={() => void start()} disabled={phase === 'starting'}
             data-testid="room-map-start">
-            {phase === 'starting' ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />} Start
+            {phase === 'starting' ? (
+              <>
+                <Loader2 size={16} className="animate-spin" /> Looking for your phone...
+              </>
+            ) : (
+              <>
+                <Play size={16} /> Start
+              </>
+            )}
           </button>
         </>
       )}

@@ -5,7 +5,7 @@
 | ``GET /hub/bluetooth`` | The host adapter (configured, resolved, scan mode and why, or why it is off), every scanner (area, ``ref_power``, ``rssi_offset``, online, advertisements and rate per minute, last seen, error), trackers, parser libraries |
 | ``GET /hub/bluetooth/devices?seconds=300`` | Devices heard recently: address, name, RSSI per scanner, parser match, iBeacon id, entry |
 | ``PATCH /hub/bluetooth/scanners/{id}`` | ``{"area_id"?, "ref_power"?, "rssi_offset"?}``; ``null`` clears one |
-| ``POST /hub/bluetooth/map/sessions`` | ``{"area_id", "tracker", "duration_s"? (30-300, default 60)}`` -> ``{session_id, area_id, tracker, ends_at}``; 409 when the tracker was not heard in the last 30 s, 404 for an unknown area or tracker |
+| ``POST /hub/bluetooth/map/sessions`` | ``{"area_id", "tracker", "duration_s"? (30-300, default 60)}`` -> ``{session_id, area_id, tracker, ends_at}``; waits up to 20 s for a tracker heard before but quiet now, then 409 if it is still not heard; 404 for an unknown area or tracker |
 | ``GET /hub/bluetooth/map/sessions/{id}`` | ``{status: recording|done|failed, samples, scanners_heard, seconds_left, error?}`` |
 | ``DELETE /hub/bluetooth/map/sessions/{id}`` | Cancel; nothing of it is kept |
 | ``GET /hub/bluetooth/map`` | ``{method, areas: [{area_id, name, samples, sessions, last_recorded, accuracy}], scanners, confusion, overall_accuracy, stale_reason}`` |
@@ -17,13 +17,15 @@ The manager is ``hub.bluetooth`` (set by main.py).
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from services.homehub.auth import Auth, bearer
-from services.homehub.bluetooth import BluetoothError
+from services.homehub.bluetooth import HEARD_WAIT_S, BluetoothError
 
 
 def build_router(runtime: Any, auth: Auth) -> APIRouter:
@@ -78,8 +80,18 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
     async def start_session(request: Request) -> Any:
         admin(request)
         body = await body_of(request)
+        tracker = body.get("tracker")
         try:
-            return manager().start_session(body.get("area_id"), body.get("tracker"), body.get("duration_s"))
+            mgr = manager()
+            # A phone's beacon goes quiet when Android pauses the radio, and a tap made in that
+            # gap used to be refused outright. A tracker the hub has heard before is waited for
+            # instead of making the person tap again; one it has never heard is still refused at
+            # once, because there is nothing to wait for.
+            if mgr.has_ever_been_heard(tracker):
+                deadline = time.monotonic() + HEARD_WAIT_S
+                while not mgr.heard_recently(tracker) and time.monotonic() < deadline:
+                    await asyncio.sleep(0.5)
+            return mgr.start_session(body.get("area_id"), tracker, body.get("duration_s"))
         except BluetoothError as exc:
             return failed(exc)
 
