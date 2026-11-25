@@ -144,7 +144,13 @@ _CLAIMED_ACTION = re.compile(
     rf"|reading\s|open(?:ing|ed)\s|sending\s|sent\s|adding\s|added\s|saving\s|saved\s|queu(?:ing|ed)\s)"
     rf"|\bi(?:'ve|\s+have|'m|\s+am)?\s+(?:just\s+|now\s+|also\s+)?(?:{_ACTION_DONE})\b"
     rf"|\b(?:is|are)\s+now\s+(?:playing|on|off|set)\b|\bnow\s+playing\b"
-    rf"|\b(?:has|have)\s+been\s+(?:played|started|turned|switched|set|sent|added|saved|opened|queued)\b",
+    rf"|\b(?:has|have)\s+been\s+(?:played|started|turned|switched|set|sent|added|saved|opened|queued)\b"
+    # A level or a check it reports: "Volume is at 50% on Office TV Cast." and "Yes, it's confirmed at
+    # 50%." were both said with no tool call while the TV sat at 31% (2026-11-24).
+    rf"|\bvolume\s+(?:is|'s)\s+(?:now\s+)?(?:at|set\s+to)\s+\d"
+    rf"|\b(?:it|that)(?:'s|\s+is)\s+(?:now\s+)?(?:at|set\s+to)\s+\d+\s*(?:%|percent)"
+    rf"|\bconfirmed\s+(?:at|to\s+be|it(?:'s|\s+is))\b|\bi(?:'ve|\s+have)\s+(?:checked|confirmed|verified)\b"
+    rf"|\bturned\s+(?:it|the\s+volume)\s+(?:up|down)\b",
     re.IGNORECASE,
 )
 #: A sentence that asks, offers or says it could not: not a claim that something was done.
