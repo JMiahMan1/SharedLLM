@@ -214,3 +214,88 @@ def test_recalibrating_is_admin_only_and_reports_scores_only(client, session):
     app.dependency_overrides[require_api_key] = _kid
     assert client.post("/api/admin/voice/calibrate").status_code == 403
     assert client.get("/api/admin/voice").status_code == 403
+
+
+def _household(people: int = 3) -> list[dict]:
+    return [_profile(f"person{i}", _direction(i + 1)) for i in range(people)]
+
+
+def test_a_quiet_household_still_names_the_right_person():
+    """Every score sits under the absolute floor, yet the right person leads the cohort."""
+    profiles = _household(3)
+    quiet = [_mix(_direction(1), _direction(9), 0.5)]
+    candidates = voice.rank(quiet[0], profiles)
+    calibration = voice.calibrate(profiles)
+    assert candidates[0]["score"] < calibration["threshold"]
+    result = voice.decide(candidates, calibration["threshold"], calibration["margin"], calibration["relative"])
+    assert result["matched"] is True
+    assert result["matched_username"] == "person0"
+    assert result["decided_by"] == "cohort"
+    assert result["relative"] >= result["relative_needed"]
+
+
+def test_the_measured_ambiguous_clip_is_decided_by_the_cohort():
+    """The live 0.78 vs 0.756 clip: too small a lead for a fixed margin, clear enough for the cohort."""
+    candidates = [
+        {"username": "jeremiah", "name": "Jeremiah", "score": 0.78, "group": "adult"},
+        {"username": "zachary", "name": "Zachary", "score": 0.756, "group": "adult"},
+        {"username": "noah", "name": "Noah", "score": 0.604, "group": "adult"},
+    ]
+    result = voice.decide(candidates, 0.752, 0.08, 0.03)
+    assert result["margin"] < result["margin_needed"]
+    assert result["matched"] is True
+    assert result["matched_username"] == "jeremiah"
+    assert result["decided_by"] == "cohort"
+
+
+def test_a_near_tie_inside_the_cohort_is_left_unmatched():
+    candidates = [
+        {"username": "jeremiah", "name": "Jeremiah", "score": 0.78, "group": "adult"},
+        {"username": "zachary", "name": "Zachary", "score": 0.775, "group": "adult"},
+        {"username": "noah", "name": "Noah", "score": 0.77, "group": "adult"},
+    ]
+    result = voice.decide(candidates, 0.752, 0.08, 0.03)
+    assert result["matched"] is False
+    assert result["decided_by"] is None
+
+
+def test_a_lone_profile_has_no_cohort_and_falls_back_to_the_score():
+    candidates = [{"username": "only", "name": "Only", "score": 0.83, "group": "adult"}]
+    result = voice.decide(candidates, 0.78, 0.08, 0.03)
+    assert result["relative"] is None
+    assert result["matched"] is True
+    assert result["decided_by"] == "score"
+    weak = voice.decide([{"username": "only", "name": "Only", "score": 0.70, "group": "adult"}], 0.78, 0.08, 0.03)
+    assert weak["matched"] is False
+
+
+def test_a_stranger_never_rides_a_quiet_cohort():
+    """Leading a cohort of quiet scores is not enough when the absolute score is weak."""
+    candidates = [
+        {"username": "a", "name": "A", "score": 0.62, "group": "adult"},
+        {"username": "b", "name": "B", "score": 0.55, "group": "adult"},
+        {"username": "c", "name": "C", "score": 0.54, "group": "adult"},
+    ]
+    result = voice.decide(candidates, 0.78, 0.08, 0.03)
+    assert result["relative"] >= result["relative_needed"]
+    assert result["score"] < result["relative_floor"]
+    assert result["matched"] is False
+
+
+def test_a_child_and_an_adult_need_double_the_relative_lead():
+    candidates = [
+        {"username": "dad", "name": "Dad", "score": 0.79, "group": "adult"},
+        {"username": "kid", "name": "Kid", "score": 0.76, "group": "child"},
+        {"username": "other", "name": "Other", "score": 0.60, "group": "adult"},
+    ]
+    result = voice.decide(candidates, 0.752, 0.08, 0.03)
+    assert result["cross_age"] is True
+    assert result["relative_needed"] == pytest.approx(0.06, abs=0.001)
+    assert result["matched"] is False
+
+
+def test_calibration_derives_a_relative_lead_from_the_household():
+    calibration = voice.calibrate(_household(4))
+    assert 0.02 <= calibration["relative"] <= 0.15
+    assert calibration["relative_speaker"]["n"] >= 1
+    assert calibration["relative_impostor"]["n"] >= 1

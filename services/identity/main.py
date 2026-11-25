@@ -2001,7 +2001,12 @@ async def check_my_voice(
         raise HTTPException(status_code=409, detail=f"Record at least {voice.MIN_SAMPLES} samples before testing.")
     signature = await _voice_signature_of(file)
     calibration = _voice_calibration(session, profiles)
-    result = voice.decide(voice.rank(signature["embedding"], profiles), calibration["threshold"], calibration["margin"])
+    result = voice.decide(
+        voice.rank(signature["embedding"], profiles),
+        calibration["threshold"],
+        calibration["margin"],
+        calibration.get("relative"),
+    )
     return {**result, "is_me": result["matched_username"] == user.username}
 
 
@@ -2271,7 +2276,10 @@ def identify_voice(req: VoiceIdentifyRequest, session: Session = Depends(get_ses
         raise HTTPException(status_code=404, detail="Nobody has enrolled a voice yet.")
     calibration = _voice_calibration(session, profiles)
     threshold = req.threshold if req.threshold is not None else calibration["threshold"]
-    return {**voice.decide(candidates, threshold, calibration["margin"]), "calibration": calibration["status"]}
+    return {
+        **voice.decide(candidates, threshold, calibration["margin"], calibration.get("relative")),
+        "calibration": calibration["status"],
+    }
 
 
 class VoiceCandidateRequest(BaseModel):
