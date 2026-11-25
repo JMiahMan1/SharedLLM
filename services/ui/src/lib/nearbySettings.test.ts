@@ -25,8 +25,8 @@ describe('nearbySettings', () => {
     expect(deviceLine({ ...device, scanPermission: false }, on)).toMatch(/Allow Nearby devices/);
     expect(deviceLine({ ...device, host: 'own' }, on)).toMatch(/location sharing is off/);
     // Nothing on (car detection off too): nothing to say.
-    expect(deviceLine({ ...device, bluetoothOn: false }, { ...NEARBY_DEFAULTS, car: false })).toBeNull();
+    expect(deviceLine({ ...device, bluetoothOn: false }, { ...NEARBY_DEFAULTS, car: false, mine: false })).toBeNull();
     // A child's parent link counts even with every switch off.
-    expect(deviceLine({ ...device, connectPermission: false }, { ...NEARBY_DEFAULTS, car: false }, true)).toMatch(/pass messages/);
+    expect(deviceLine({ ...device, connectPermission: false }, { ...NEARBY_DEFAULTS, car: false, mine: false }, true)).toMatch(/pass messages/);
   });
 });
