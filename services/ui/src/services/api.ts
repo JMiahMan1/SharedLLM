@@ -2,11 +2,13 @@ import type { NearPerson } from '../lib/proximity';
 import type { VehicleBtLink } from '../lib/vehicleBluetooth';
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { CollectorHealth } from '../lib/collectorHealth';
+import type { ProfileStats, SharingState, ShareArea } from '../lib/profileStats';
+import type { AdminPersonStats } from '../lib/adminPeople';
 import type {
   InternetOutage, NetworkDevice, NetworkDeviceFields, NetworkStatus, NetworkUsage, RouterLogLine,
 } from '../lib/network';
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
-import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel, TtsVoices } from '../types/api';
+import type { WindowsInstallerInfo, AppAction, AppPolicy, AppRating, GuardianApps, HubDevice, NotifyLevel, TtsVoices, VoiceAdminOverview, VoiceCalibration } from '../types/api';
 import type {
   GardenPlant, GardenSpecies, GardenLocation, GardenProfile,
   GardenTodaySummary, GardenCareLog, GardenCareRule,
@@ -247,6 +249,10 @@ import type {
   LibraryBook,
   LibraryAudit,
   BookInspection,
+  BookCatalogueId,
+  BookCatalogueReport,
+  BookCatalogues,
+  BookCatalogueTest,
   HealthCycleSummary,
   HealthCyclePeriod,
   HealthCycleLog,
@@ -1362,6 +1368,29 @@ export const api = {
    * left every non-admin with an empty picker and "Everyone" as their only
    * choice. This returns username + display name and nothing else.
    */
+  /** One person's profile stats as the caller may see them (docs/PROFILE_STATS.md). */
+  async getProfileStats(username: string, fresh = false): Promise<ProfileStats> {
+    const resp = await apiClient.get(`/api/profile/stats/${encodeURIComponent(username || 'me')}`, { params: fresh ? { fresh: 1 } : undefined });
+    return resp.data;
+  },
+
+  /** Admin > People: one person's stats without the opt-in (admins only, refused on the server otherwise). */
+  async getAdminPersonStats(username: string, fresh = false): Promise<AdminPersonStats> {
+    const resp = await apiClient.get(`/api/profile/admin/${encodeURIComponent(username)}`, { params: fresh ? { fresh: 1 } : undefined });
+    return resp.data;
+  },
+
+  /** The caller's own sharing choice, with the switches other areas already have. */
+  async getProfileSharing(): Promise<SharingState> {
+    const resp = await apiClient.get('/api/profile/sharing');
+    return resp.data;
+  },
+
+  async setProfileSharing(areas: ShareArea[]): Promise<SharingState> {
+    const resp = await apiClient.put('/api/profile/sharing', { areas });
+    return resp.data;
+  },
+
   /** Everyone in the household with their chat picture and Talk account. */
   async getFamilyDirectory(): Promise<FamilyMember[]> {
     const resp = await apiClient.get('/api/users/family-directory');
@@ -1873,6 +1902,54 @@ export const api = {
 
   async forgetMyVoice(): Promise<VoiceStatus> {
     const resp = await apiClient.delete('/api/users/me/voice');
+    return resp.data;
+  },
+
+  /** Admin: enrolled voices (counts only), the calibration, and candidate samples to review. */
+  async getVoiceAdmin(): Promise<VoiceAdminOverview> {
+    const resp = await apiClient.get('/api/admin/voice');
+    return resp.data;
+  },
+
+  /** Admin: calibrate the voice threshold again from the enrolled voices. */
+  async recalibrateVoice(): Promise<VoiceCalibration> {
+    const resp = await apiClient.post('/api/admin/voice/calibrate');
+    return resp.data;
+  },
+
+  /** Admin: add a candidate sample to its person's voice (an auto sample). */
+  async approveVoiceCandidate(id: number): Promise<{ status: string; samples: number }> {
+    const resp = await apiClient.post(`/api/admin/voice/candidates/${id}`);
+    return resp.data;
+  },
+
+  /** Admin: reject a candidate sample. */
+  async rejectVoiceCandidate(id: number): Promise<{ status: string }> {
+    const resp = await apiClient.delete(`/api/admin/voice/candidates/${id}`);
+    return resp.data;
+  },
+
+  /** Admin: remove every auto-added sample from a person's voice. */
+  async clearAutoVoiceSamples(username: string): Promise<{ status: string; samples: number }> {
+    const resp = await apiClient.delete(`/api/admin/voice/${encodeURIComponent(username)}/auto`);
+    return resp.data;
+  },
+
+  /** Admin: HomeHub's voice satellites, speakers and TVs, with their assignments. */
+  async getHubDevices(): Promise<HubDevice[]> {
+    const resp = await apiClient.get('/api/admin/hub-devices');
+    return resp.data?.devices ?? [];
+  },
+
+  /** Admin: read HomeHub's devices now. */
+  async refreshHubDevices(): Promise<HubDevice[]> {
+    const resp = await apiClient.post('/api/admin/hub-devices/refresh');
+    return resp.data?.devices ?? [];
+  },
+
+  /** Admin: assign a shared device to a person (null: shared) and/or a room. */
+  async assignHubDevice(deviceKey: string, change: { owner_username?: string | null; room?: string | null }): Promise<HubDevice> {
+    const resp = await apiClient.patch(`/api/admin/hub-devices/${encodeURIComponent(deviceKey)}`, change);
     return resp.data;
   },
 
@@ -3429,9 +3506,21 @@ export const api = {
   /** The reply says what Jarvis filled in, or (identified false) that it could not identify the book. */
   async libraryAddBook(form: FormData): Promise<{
     book_id: number; title: string; tags: string[]; path: string;
-    identified?: boolean; filled?: Record<string, string>; message?: string;
+    identified?: boolean; filled?: Record<string, string>; message?: string; catalogues?: BookCatalogueReport;
   }> {
     const resp = await apiClient.post('/api/library/books', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600_000 });
+    return resp.data;
+  },
+
+  /** The book catalogues (Google Books, Open Library) as they apply to the caller, with each one's last answer. */
+  async libraryCatalogues(): Promise<BookCatalogues> {
+    const resp = await apiClient.get('/api/library/catalogues', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** The Test button on a book catalogue card: one lookup with the typed (else saved) key or email. */
+  async testBookCatalogue(body: { source: BookCatalogueId; api_key?: string; contact_email?: string }): Promise<BookCatalogueTest> {
+    const resp = await apiClient.post('/api/users/me/book-metadata/test', body, { timeout: 30_000 });
     return resp.data;
   },
 

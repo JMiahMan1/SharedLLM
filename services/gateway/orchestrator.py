@@ -13,7 +13,7 @@ import aiohttp
 from services.common.backend_health import BackendUnavailable
 from services.common.circuit_breaker import CircuitOpenError, get_breaker
 from services.common.rag_collections import HOME_DEVICES, canonical_collection
-from services.gateway import context_router, library_names, prompt_budget, tool_cache
+from services.gateway import context_router, library_names, prompt_budget, tool_cache, voice_outcomes
 from services.gateway.config import (
     CHAPTER_PREFETCH_MAX_CHARS,
     CONTROL_PLANE_URL,
@@ -1783,12 +1783,19 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
     norm = re.sub(r"[\s_]+", "", action or "").lower()
     tool = _REGISTRY_NAMES.get(norm, action)
     payload = tool_data.get("payload", tool_data)
-    return await tool_cache.call(
-        tool,
-        dict(payload) if isinstance(payload, dict) else {},
-        user=str(getattr(creds, "user", "") or ""),
-        fetch=lambda: _run_single_tool(action, tool_data, query, creds, workspace_id=workspace_id),
-    )
+    try:
+        result = await tool_cache.call(
+            tool,
+            dict(payload) if isinstance(payload, dict) else {},
+            user=str(getattr(creds, "user", "") or ""),
+            fetch=lambda: _run_single_tool(action, tool_data, query, creds, workspace_id=workspace_id),
+        )
+    except Exception:
+        voice_outcomes.note_tool(tool, False)
+        raise
+    # Which tool, and whether it did the thing: counted for the admin page, never its arguments.
+    voice_outcomes.note_tool(tool, not voice_outcomes.tool_failed(result))
+    return result
 
 
 async def _run_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials, workspace_id: str | None = None) -> str:

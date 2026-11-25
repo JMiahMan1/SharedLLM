@@ -23,7 +23,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { History as HistoryIcon, House, Thermometer, Zap } from 'lucide-react';
-import { CalendarClock, ListTodo, Workflow } from 'lucide-react';
+import { CalendarClock, ListTodo, Trophy, Workflow } from 'lucide-react';
 
 /**
  * The app's pages, in one list for every navigator: the desktop sidebar, the
@@ -110,6 +110,8 @@ export const NAV_PAGES: NavPage[] = [
   { icon: Flower, label: 'Garden', path: '/garden', keywords: 'plants houseplants herbs watering care cadence soil light', group: 'everyday' },
   { icon: Users, label: 'Family', path: '/family', keywords: 'games talk chores rewards together recipes timers alarms announcements speakers devices notifications', pinnedOnMobile: 3, group: 'everyday' },
   { icon: ShieldHalf, label: 'Guardian', path: '/guardian', keywords: 'family guardian parental controls screen time safety children kids wellbeing', group: 'everyday' },
+  // Each person's stats across Jarvis (docs/PROFILE_STATS.md): streaks, scores and habits, opt-in for the family.
+  { icon: Trophy, label: 'Profile', path: '/profile', keywords: 'profile stats streaks scores high scores trivia quiz achievements badges me family', group: 'everyday' },
   { icon: House, label: 'Rooms', path: '/rooms', keywords: 'rooms areas lights switches thermostats media sensors home control', requires: 'homehub', group: 'home' },
   { icon: Thermometer, label: 'Climate', path: '/climate', keywords: 'thermostat temperature humidity heating cooling ac air handler', requires: 'homehub', group: 'home' },
   { icon: Cctv, label: 'Cameras', path: '/cameras', keywords: 'cameras live view security footage recordings garage backyard reolink doorbell', requires: 'homehub', group: 'home' },

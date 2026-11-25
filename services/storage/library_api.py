@@ -21,7 +21,8 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from services.storage import book_cache, book_chapters, book_lookup
+from services.common import book_metadata
+from services.storage import book_cache, book_chapters, book_lookup, book_sources
 from services.storage.artifacts_api import require_internal_secret
 from services.storage.calibre_writer import MAX_BOOK_BYTES, LibraryWriteError, LibraryWriter
 from services.storage.models import IndexScanRequest, ProviderConfig
@@ -447,19 +448,35 @@ async def _tag_usage(library_path: str) -> tuple[list[str], dict[str, int]]:
     return sorted(usage), dict(usage)
 
 
+class CataloguesQuery(BaseModel):
+    #: The person whose integrations apply; empty is the household's.
+    user: str = ""
+
+
+@router.post("/catalogues")
+async def catalogues(req: CataloguesQuery):
+    """The book catalogue integrations as they apply to ``user``: on, ready, why not, last answer."""
+    return await book_sources.status_for(req.user)
+
+
 @router.post("/books/inspect")
 async def inspect_book(
     library_path: str = Form(...),
     file: UploadFile = File(...),
     online: bool = Form(default=True),
+    user: str = Form(default=""),
 ):
-    """Everything Jarvis can find about a book before it is added (nothing is saved)."""
+    """Everything Jarvis can find about a book before it is added (nothing is saved).
+
+    ``user`` is the person asking: their catalogue integrations are used."""
     data = await file.read(MAX_BOOK_BYTES + 1)
     if not data or len(data) > MAX_BOOK_BYTES:
         raise HTTPException(status_code=422, detail=f"Choose a book file under {MAX_BOOK_BYTES // (1024 * 1024)} MB.")
     # Suggestions without the library's own tags are still suggestions.
     existing, usage = await _tag_usage(library_path)
-    return await book_lookup.inspect(data, file.filename or "book", existing, online=online, usage=usage)
+    found = await book_sources.settings_for(user) if online else None
+    return await book_lookup.inspect(data, file.filename or "book", existing, online=online, usage=usage,
+                                     catalogues=found)
 
 
 @router.post("/books/add")
@@ -480,14 +497,16 @@ async def add_book(
     # A string, not a bool: an absent bool form field reads as False, which turned
     # the catalogue lookup off for every caller that did not send it.
     online: str = Form(default="true"),
+    user: str = Form(default=""),
 ):
     """Add a book, filled in the way Calibre's "Download metadata" does it.
 
     What the person typed always wins. Every field left empty is filled from the
-    file itself (EPUB OPF, PDF info), then from Google Books and Open Library (only
-    an answer that is the same book: ``book_lookup.same_book``), and the tags from
-    the library's most used tags that the book's subjects name. The reply says what
-    was filled in, or that the book could not be identified.
+    file itself (EPUB OPF, PDF info), then from the catalogues ``user`` has turned on
+    in Accounts & Integrations (only an answer that is the same book:
+    ``book_lookup.same_book``), and the tags from the library's most used tags that
+    the book's subjects name. The reply says what was filled in, or that the book
+    could not be identified, and which catalogues were asked or skipped and why.
     """
     data = await file.read(MAX_BOOK_BYTES + 1)
     filename = file.filename or "book"
@@ -497,10 +516,12 @@ async def add_book(
         "published": published, "isbn": isbn, "language": language,
     }
     existing, usage = await _tag_usage(library_path)
+    is_online = online.strip().lower() not in ("false", "0", "no")
     found = await book_lookup.lookup(
         book_lookup.file_details(data, filename) if data and len(data) <= MAX_BOOK_BYTES else book_lookup._blank(),
-        filename, existing, online=online.strip().lower() not in ("false", "0", "no"), usage=usage,
+        filename, existing, online=is_online, usage=usage,
         known={"title": title, "authors": given["authors"], "isbn": isbn},
+        catalogues=await book_sources.settings_for(user) if is_online else None,
     )
     merged, filled = book_lookup.merge(given, found)
     cover = None
@@ -527,8 +548,9 @@ async def add_book(
     result.update({
         "identified": identified,
         "filled": filled,
+        "catalogues": found.get("catalogues"),
         "message": book_lookup.report(result.get("title") or merged["title"], identified, filled,
-                                      found.get("rejected") or []),
+                                      found.get("rejected") or [], found.get("catalogues")),
     })
     log.info("[library] added book %s (%s): identified=%s filled=%s", result.get("book_id"),
              result.get("title"), identified, sorted(filled))
@@ -547,6 +569,8 @@ class EnrichRequest(BaseModel):
     limit: int = Field(default=10, ge=0, le=200)
     online: bool = True
     book_ids: list[int] = Field(default_factory=list, max_length=500)
+    #: The person asking: their catalogue integrations are used (empty: the household's).
+    user: str = ""
 
 
 def _missing(book: dict[str, Any]) -> list[str]:
@@ -573,7 +597,7 @@ def _known(book: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _proposal(provider, book: dict[str, Any], existing: list[str], usage: dict[str, int],
-                    online: bool) -> dict[str, Any]:
+                    online: bool, catalogues: dict[str, Any] | None = None) -> dict[str, Any]:
     known = _known(book)
     base = book_lookup._blank()
     if ("title" in _missing(book) or "authors" in _missing(book)) and book.get("text_path"):
@@ -582,12 +606,27 @@ async def _proposal(provider, book: dict[str, Any], existing: list[str], usage: 
         if data:
             base = book_lookup.file_details(data, book["text_path"].rsplit("/", 1)[-1])
     found = await book_lookup.lookup(base, str(book.get("text_path") or "book").rsplit("/", 1)[-1],
-                                     existing, online=online, usage=usage, known=known)
+                                     existing, online=online, usage=usage, known=known, catalogues=catalogues)
     merged, filled = book_lookup.merge(known, found)
     fields = {key: merged[key] for key in filled if key in merged}
     return {"book_id": book["id"], "title": book.get("title"), "missing": _missing(book),
             "identified": bool(found.get("identified")), "fill": fields,
-            "rejected": found.get("rejected") or []}
+            "rejected": found.get("rejected") or [], "catalogues": found.get("catalogues")}
+
+
+def _catalogue_summary(settings: dict[str, Any] | None, proposals: list[dict[str, Any]], online: bool) -> dict[str, Any]:
+    """For the whole run: the catalogues used, the ones skipped and why, and every distinct error."""
+    used: list[str] = []
+    errors: list[dict[str, str]] = []
+    for p in proposals:
+        report = p.get("catalogues") or {}
+        used += [s for s in report.get("used") or [] if s not in used]
+        errors += [e for e in report.get("errors") or [] if e not in errors]
+    plan, skipped = book_lookup._plan(settings, online)
+    out = {"asked": [book_metadata.NAMES[n] for n, _ in plan], "used": used,
+           "skipped": skipped, "errors": errors}
+    out["message"] = book_lookup.catalogue_line(out)
+    return out
 
 
 @router.post("/books/enrich")
@@ -605,16 +644,18 @@ async def enrich_books(req: EnrichRequest):
                   if _missing(b) and (not wanted or b["id"] in wanted)]
     counts = {field: sum(1 for b in candidates if field in _missing(b)) for field in ("title", "authors", "tags")}
     existing, usage = await _tag_usage(req.library_path)
+    settings = await book_sources.settings_for(req.user) if req.online else None
     proposals = []
     async with _opened(req.library_path) as provider:
         for book in candidates[:req.limit]:
             try:
-                proposals.append(await _proposal(provider, book, existing, usage, req.online))
+                proposals.append(await _proposal(provider, book, existing, usage, req.online, settings))
             except Exception as exc:  # one unreadable book is reported, never stops the rest
                 proposals.append({"book_id": book["id"], "title": book.get("title"), "error": str(exc)})
         out: dict[str, Any] = {"status": "SUCCESS", "dry_run": req.dry_run, "books_missing": len(candidates),
                                "missing": counts, "looked_up": len(proposals),
                                "identified": sum(1 for p in proposals if p.get("identified")),
+                               "catalogues": _catalogue_summary(settings, proposals, req.online),
                                "proposals": proposals}
         writes = {p["book_id"]: p["fill"] for p in proposals if p.get("fill")}
         if req.dry_run or not writes:

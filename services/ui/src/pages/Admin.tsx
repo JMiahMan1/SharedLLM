@@ -34,6 +34,7 @@ import {
   PowerOff,
   RefreshCw,
   Users,
+  UsersRound,
   Sparkles,
   BookMarked,
   Wifi,
@@ -60,6 +61,8 @@ import Modal from '../components/ui/Modal';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel';
 import { RolesPanel } from '../components/admin/RolesPanel';
+import { HubDevicesPanel } from '../components/admin/HubDevicesPanel';
+import { VoiceRecognitionPanel } from '../components/admin/VoiceRecognitionPanel';
 import FamilyPanel from '../components/settings/FamilyPanel';
 import { HomeAlertsPanel } from '../components/admin/HomeAlertsPanel';
 import { WeatherRemindersPanel } from '../components/admin/WeatherRemindersPanel';
@@ -80,15 +83,17 @@ import DnsManagementPanel from '../components/settings/DnsManagementPanel';
 import TelemetryAdminPanel from '../components/settings/TelemetryAdminPanel';
 import StarBalance from '../components/wander/StarBalance';
 import BibleAdminPanel from '../components/admin/BibleAdminPanel';
+import AdminPeople from '../components/admin/AdminPeople';
 import NetworkPanel from '../components/admin/NetworkPanel';
 import SystemStoragePanel from '../components/admin/SystemStoragePanel';
 import { confirmDialog } from '../components/ui/confirmDialog';
 import SignInResetPanel, { TestAccountBadge, UserSignInResetButton } from '../components/admin/SignInResetPanel';
 
-type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'storage' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
+type AdminTab = 'people' | 'users' | 'groups' | 'hardware' | 'telemetry' | 'storage' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield, path: '/admin/users' },
+  { id: 'people', label: 'People', icon: UsersRound, path: '/admin/people' },
   { id: 'groups', label: 'Device Groups', icon: Layers, path: '/admin/groups' },
   { id: 'hardware', label: 'Hardware', icon: Cpu, path: '/admin/hardware' },
   { id: 'telemetry', label: 'Telemetry', icon: Activity, path: '/admin/monitor' },
@@ -121,6 +126,7 @@ const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/users')) return 'users';
   if (pathname.startsWith('/admin/services')) return 'services';
   if (pathname.startsWith('/admin/bible')) return 'bible';
+  if (pathname.startsWith('/admin/people')) return 'people';
   return 'users';
 };
 
@@ -147,6 +153,7 @@ type UserFormState = {
   mass_url: string;
   mass_token: string;
   malwarebazaar_key: string;
+  google_books_key: string;
 };
 
 const emptyUserForm: UserFormState = {
@@ -172,6 +179,7 @@ const emptyUserForm: UserFormState = {
   mass_url: '',
   mass_token: '',
   malwarebazaar_key: '',
+  google_books_key: '',
 };
 
 const toUserForm = (user?: UserProfile | null): UserFormState => ({
@@ -197,6 +205,7 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   mass_url: String(user?.mass_url ?? ''),
   mass_token: '',
   malwarebazaar_key: '',
+  google_books_key: '',
 });
 
 const NO_SERVICE_DEFAULTS = { urls: {} as Record<string, string | null>, source: {} as Record<string, string> };
@@ -1071,6 +1080,10 @@ const Admin = () => {
             <CompanionDevicesPanel scope="all" />
           </section>
 
+          <HubDevicesPanel users={users} />
+
+          <VoiceRecognitionPanel />
+
           {/* Device assignments, Entity Protection and Home alerts work on the home
               hub's devices: with no hub they say so instead of failing. */}
           {anyHub ? (
@@ -1659,6 +1672,8 @@ const Admin = () => {
           <HardwarePanel />
         </section>
       )}
+
+      {activeTab === 'people' && <AdminPeople />}
 
       {activeTab === 'bible' && (
         <section className="space-y-6">
