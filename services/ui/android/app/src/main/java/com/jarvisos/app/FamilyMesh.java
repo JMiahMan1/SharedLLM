@@ -36,8 +36,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * The offline family chat over Bluetooth LE (see {@link MeshRules} for the
- * messages, the store and the sync, and the PR's design notes).
+ * The offline chat over Bluetooth LE, in every chat room the person is in (see
+ * {@link MeshRules} for the messages, the room keys, the store and the sync).
  *
  * Rides on {@link Proximity}: it hears the family's phones there, and the
  * advertisement says whether this phone has messages to pass on. Only then is a
@@ -45,16 +45,21 @@ import java.util.UUID;
  * sync, then disconnect. A phone that cannot advertise (some tablets) has no
  * GATT server; it connects out to the family's phones instead.
  *
- * Every phone's own messages go to the family chat when it is online again
- * (POST /api/family-mesh/sync, posted once by message id), and copies carried
- * for others are marked done when the family chat has them (/synced).
+ * Every family phone carries every family message, but opens only those of the
+ * rooms its person is in (a key per room, from GET /api/family-mesh/rooms while
+ * online). Every phone's own messages go to their own room when it is online
+ * again (POST /api/family-mesh/sync, posted once by message id), and copies
+ * carried for others are marked done when their room has them (/synced).
  */
 final class FamilyMesh {
     private static final String TAG = "FamilyMesh";
     static final String PREFS = "jarvis_family_mesh";
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_STORE = "store";
-    private static final String KEY_ROOM = "room";
+    /** The rooms this person is in, with their keys (GET /api/family-mesh/rooms), and when fetched. */
+    private static final String KEY_ROOMS = "rooms";
+    private static final String KEY_ROOMS_AT = "rooms_at";
+    private static final long ROOMS_REFRESH_MS = 15 * 60_000L;
     private static final String KEY_LAST_SENT = "last_sent";
     private static final String KEY_LAST_RECEIVED = "last_received";
     private static final String KEY_LAST_SYNC = "last_sync";
@@ -98,12 +103,27 @@ final class FamilyMesh {
         prefs(c).edit().putBoolean(KEY_ENABLED, on).apply();
     }
 
-    static void setRoom(Context c, String room) {
-        prefs(c).edit().putString(KEY_ROOM, room == null ? "" : room).apply();
+    /** The rooms this person is in, as last fetched (kept for offline). */
+    static List<MeshRules.Room> rooms(Context c) {
+        try {
+            return MeshRules.parseRooms(new JSONObject(prefs(c).getString(KEY_ROOMS, "{}")));
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
     }
 
-    static String room(Context c) {
-        return prefs(c).getString(KEY_ROOM, "");
+    /** Ask the server for this person's rooms and keys (online only; the caller's thread). */
+    static void refreshRooms(Context c) throws Exception {
+        JSONObject answer = WidgetApi.get(c, "/api/family-mesh/rooms");
+        if (answer == null || answer.optJSONArray("rooms") == null) return;
+        // Kept as the server sent it; a room the person left drops out with its keys.
+        prefs(c).edit().putString(KEY_ROOMS, answer.toString())
+                .putLong(KEY_ROOMS_AT, System.currentTimeMillis()).apply();
+        changed();
+    }
+
+    private static boolean roomsStale(Context c) {
+        return System.currentTimeMillis() - prefs(c).getLong(KEY_ROOMS_AT, 0L) > ROOMS_REFRESH_MS;
     }
 
     /** Connecting (GATT) needs Nearby devices' connect on Android 12+; earlier, nothing more. */
@@ -148,18 +168,20 @@ final class FamilyMesh {
 
     // -- writing ------------------------------------------------------------------------
 
-    /** Seal and keep a new message; returns its id. IllegalArgumentException says why not. */
-    static String send(Context context, String kind, JSONObject fields) throws Exception {
+    /** Seal a new message for its room and keep it; returns its id. IllegalArgumentException says why not. */
+    static String send(Context context, String room, String kind, JSONObject fields) throws Exception {
         Context c = context.getApplicationContext();
         ProximityRules.Config cfg = Proximity.config(c);
-        if (cfg == null || cfg.chatKey == null) throw new IllegalArgumentException("Open Jarvis online once so it can get the family key");
-        String room = room(c);
-        if (room.isEmpty()) throw new IllegalArgumentException("Choose your family chat in Chat first; offline messages go there");
+        if (cfg == null || cfg.me == null || cfg.me.isEmpty()) {
+            throw new IllegalArgumentException("Open Jarvis online once so it can get the family key");
+        }
+        MeshRules.Room r = MeshRules.findRoom(rooms(c), room == null ? "" : room);
+        if (r == null) {
+            throw new IllegalArgumentException("This chat is not ready to use offline yet. Open Jarvis with the internet on once.");
+        }
         long nowMs = System.currentTimeMillis();
-        JSONObject payload = MeshRules.payload(kind, cfg.me, room, fields, nowMs / 1000L);
-        MeshRules.Item item = new MeshRules.Item(MeshRules.newId(RANDOM), nowMs / 1000L + MeshRules.TTL_S, 0,
-                MeshRules.seal(cfg.chatKey, payload, RANDOM));
-        item.mine = true;
+        JSONObject payload = MeshRules.payload(kind, cfg.me, r.room, fields, nowMs / 1000L);
+        MeshRules.Item item = MeshRules.roomMessage(r, payload, nowMs / 1000L, RANDOM);
         item.receivedAtMs = nowMs;
         synchronized (LOCK) {
             MeshRules.Store s = store(c);
@@ -189,18 +211,23 @@ final class FamilyMesh {
         }
     }
 
-    /** Every message this phone holds, opened, for the chat sheet (oldest first). */
-    static JSONArray list(Context context) {
+    /**
+     * The messages this phone holds that its person may read (rooms they are in),
+     * opened, oldest first; only one room's when {@code room} is given. Messages
+     * of other rooms are carried for the family but never opened here.
+     */
+    static JSONArray list(Context context, String room) {
         Context c = context.getApplicationContext();
         JSONArray out = new JSONArray();
         ProximityRules.Config cfg = Proximity.config(c);
-        if (cfg == null || cfg.chatKey == null) return out;
+        byte[] household = cfg == null ? null : cfg.chatKey;
+        List<MeshRules.Room> rooms = rooms(c);
         List<MeshRules.Item> items = new ArrayList<>(store(c).items.values());
         items.sort((a, b) -> Long.compare(a.receivedAtMs, b.receivedAtMs));
         for (MeshRules.Item i : items) {
-            if (!MeshRules.T_CHAT.equals(i.type)) continue;
-            JSONObject p = MeshRules.open(cfg.chatKey, i.env);
+            JSONObject p = MeshRules.openChat(i, rooms, household);
             if (p == null) continue;
+            if (room != null && !room.isEmpty() && !room.equals(p.optString("room"))) continue;
             try {
                 p.put("id", i.id).put("mine", i.mine).put("synced", i.synced).put("hops", i.hops);
                 out.put(p);
@@ -357,7 +384,8 @@ final class FamilyMesh {
         Context c = context.getApplicationContext();
         if (!active(c) || device == null) return;
         ProximityRules.Config cfg = Proximity.config(c);
-        if (cfg == null || cfg.chatKey == null) return;
+        // The HELLO and the GATT ids are the household proximity key: every family phone relays.
+        if (cfg == null) return;
         long now = System.currentTimeMillis();
         MeshRules.Store s = store(c);
         long digest = MeshRules.digestHash(s, now / 1000L);
@@ -603,7 +631,7 @@ final class FamilyMesh {
         return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
     }
 
-    /** Post this phone's own messages and mark what the family chat already has (Proximity calls it every flush). */
+    /** Post this phone's own messages and mark what their rooms already have (Proximity calls it every flush). */
     static void trySyncWithServer(Context context, boolean now) {
         Context c = context.getApplicationContext();
         long t = System.currentTimeMillis();
@@ -616,6 +644,13 @@ final class FamilyMesh {
                 if (key == null || key.isEmpty()) return;
                 // Online: keys, the household snapshot, then everything carried for the server.
                 OfflineMode.onlineUpkeep(c);
+                if (now || roomsStale(c)) {
+                    try {
+                        refreshRooms(c);
+                    } catch (Exception e) {
+                        Log.i(TAG, "rooms not refreshed: " + e.getMessage());
+                    }
+                }
                 MeshRules.Store s = store(c);
                 List<String> done = new ArrayList<>();
                 done.addAll(submitRequests(c, s));
@@ -624,7 +659,8 @@ final class FamilyMesh {
                 for (MeshRules.Item i : s.unsyncedMine()) if (MeshRules.T_CHAT.equals(i.type)) mine.add(i);
                 if (!mine.isEmpty()) {
                     JSONArray items = new JSONArray();
-                    for (MeshRules.Item i : mine) items.put(i.wire());
+                    // Each with its room (a message from before room keys has none: the server reads it the old way).
+                    for (MeshRules.Item i : mine) items.put(i.room == null ? i.wire() : i.wire().put("room", i.room));
                     JSONObject answer = WidgetApi.post(c, "/api/family-mesh/sync", new JSONObject().put("items", items));
                     done.addAll(MeshRules.postedIds(answer));
                 }
@@ -700,7 +736,7 @@ final class FamilyMesh {
             MeshRules.Store s = store(c);
             o.put("enabled", enabled(c));
             o.put("connectPermission", connectPermission(c));
-            o.put("room", !room(c).isEmpty());
+            o.put("rooms", rooms(c).size());
             o.put("server", server != null);
             o.put("syncing", clientPeer == null ? JSONObject.NULL : clientPeer);
             o.put("stored", s.items.size());

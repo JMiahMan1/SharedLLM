@@ -10662,7 +10662,10 @@ async def proxy_delete_talk_conversation(request: Request, token: str):
         # Members only, and a deleted private chat takes its pictures with it.
         await private_chat._member_chat(request, token)
         return await private_chat.delete_room(request, token)
-    return await _proxy_execution_with_identity(request, "/execute/talk", {"action": "delete_conversation", "token": token})
+    resp = await _proxy_execution_with_identity(request, "/execute/talk", {"action": "delete_conversation", "token": token})
+    # Left (or deleted): the room's offline key is replaced on the next ask.
+    await family_mesh.forget_members(token)
+    return resp
 
 
 @app.get("/api/communication/talk/participants")
@@ -10675,14 +10678,20 @@ async def proxy_add_talk_participant(request: Request):
     body = await request.json()
     private_chat.guard_talk(body.get("token"), "add_participant")
     payload = {"action": "add_participant", "token": body.get("token"), "target_user": body.get("user")}
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    resp = await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    # A new member: the room's offline key is replaced on the next ask (family_mesh.py).
+    await family_mesh.forget_members(body.get("token"))
+    return resp
 
 
 @app.delete("/api/communication/talk/participants")
 async def proxy_remove_talk_participant(request: Request, token: str, attendee_id: int):
     private_chat.guard_talk(token, "remove_participant")
     payload = {"action": "remove_participant", "token": token, "attendee_id": attendee_id}
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    resp = await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    # Someone left: the room's offline key is replaced on the next ask, so they get nothing new.
+    await family_mesh.forget_members(token)
+    return resp
 
 
 @app.get("/api/communication/talk/people")

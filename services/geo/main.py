@@ -3960,8 +3960,9 @@ async def get_proximity_config(user: str = Query(...)):
     return {
         "key": keys["key"],
         "key_id": proximity.key_id(keys["key"]),
-        # The offline family chat's key (a separate random key, never derived):
-        # its messages are sealed with it, like the private chat's envelope.
+        # The household chat key (a separate random key, never derived): a parent's
+        # offline commands to a child's phone, and offline chat messages held from
+        # before each room had its own key (services/gateway/family_mesh.py).
         "chat_key": keys["chat_key"],
         "chat_key_id": proximity.key_id(keys["chat_key"]),
         "period_s": proximity.PERIOD_S,

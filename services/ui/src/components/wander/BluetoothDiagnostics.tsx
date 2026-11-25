@@ -129,6 +129,7 @@ export default function BluetoothDiagnostics() {
             <dl className="divide-y divide-white/5">
               <DiagRow label="Turned on" value={mesh.enabled ? 'Yes' : 'No'} ok={mesh.enabled} />
               <DiagRow label="Nearby devices (connect)" value={mesh.connectPermission ? 'Allowed' : 'Not allowed'} ok={mesh.connectPermission} />
+              <DiagRow label="Chats ready offline" value={String(mesh.rooms ?? 0)} ok={(mesh.rooms ?? 0) > 0} testId="diag-mesh-rooms" />
               <DiagRow label="Accepts connections" value={mesh.server ? 'Yes' : 'No (connects out only)'} ok={mesh.server ? true : null} />
               <DiagRow label="Last offline message sent" value={when(mesh.lastSentAt)} testId="diag-mesh-sent" />
               <DiagRow label="Last offline message received" value={when(mesh.lastReceivedAt)} testId="diag-mesh-received" />
@@ -137,8 +138,8 @@ export default function BluetoothDiagnostics() {
                 value={mesh.lastPeerSync ? `${mesh.lastPeerSync.peer || 'a phone'} at ${when(mesh.lastPeerSync.at)}: sent ${mesh.lastPeerSync.sent}, got ${mesh.lastPeerSync.received}` : 'never'}
                 testId="diag-mesh-peer"
               />
-              <DiagRow label="Held on this phone" value={`${mesh.stored} (${mesh.unsynced} of mine not yet in the family chat)`} />
-              <DiagRow label="Last sent to the family chat" value={when(mesh.lastServerSyncAt)} />
+              <DiagRow label="Held on this phone" value={`${mesh.stored} (${mesh.unsynced} of mine not yet in their chat)`} />
+              <DiagRow label="Last sent to the chats" value={when(mesh.lastServerSyncAt)} />
               {mesh.lastError && <DiagRow label="Last problem" value={mesh.lastError} ok={false} />}
             </dl>
           </section>

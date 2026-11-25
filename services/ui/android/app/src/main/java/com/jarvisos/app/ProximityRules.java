@@ -338,7 +338,11 @@ final class ProximityRules {
         final long periodS;
         final List<String> members;
         final String me;
-        /** The offline family chat's key (a separate random key), or null from an older server. */
+        /**
+         * The household chat key (a separate random key), or null from an older server: a
+         * parent's offline commands to a child's phone, and offline messages held from
+         * before each chat room had its own key (FamilyMesh, MeshRules.Room).
+         */
         byte[] chatKey;
 
         Config(byte[] key, String keyId, long periodS, List<String> members, String me) {

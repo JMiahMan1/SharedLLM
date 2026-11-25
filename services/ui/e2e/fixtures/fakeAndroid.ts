@@ -16,6 +16,8 @@ export interface FakeAndroidState {
   proximity?: Record<string, unknown>;
   mesh?: Record<string, unknown>;
   messages?: unknown[];
+  /** The chat rooms the phone holds an offline key for (JarvisFamilyMesh.rooms). */
+  meshRooms?: unknown[];
   /** Settings > Nearby & offline on the phone (JarvisNearby): the parts and what Android allows. */
   nearby?: Record<string, unknown>;
   /** Offline mode: cached items, queued requests, parent commands, diagnostics. */
@@ -25,7 +27,7 @@ export interface FakeAndroidState {
 const PLUGINS: Record<string, string[]> = {
   JarvisVehicleBluetooth: ['getStatus', 'requestPermission', 'listDevices', 'setVehicles', 'getDiagnostics', 'openSettings', 'openBluetoothSettings'],
   JarvisProximity: ['getDiagnostics', 'enable', 'disable'],
-  JarvisFamilyMesh: ['getDiagnostics', 'enable', 'disable', 'setRoom', 'send', 'list'],
+  JarvisFamilyMesh: ['getDiagnostics', 'enable', 'disable', 'rooms', 'refreshRooms', 'send', 'list', 'removeListener'],
   JarvisOfflineMode: ['queue', 'requests', 'cache', 'sendCommand', 'commands', 'getDiagnostics'],
   JarvisNearby: ['getState', 'apply', 'requestPermissions'],
 };
@@ -68,14 +70,18 @@ export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<
       if (plugin === 'JarvisFamilyMesh') {
         if (method === 'enable') s.mesh = { ...(s.mesh as Bag), enabled: true };
         if (method === 'disable') s.mesh = { ...(s.mesh as Bag), enabled: false };
-        if (method === 'list') return { messages: s.messages ?? [] };
+        if (method === 'list') {
+          const all = (s.messages ?? []) as Bag[];
+          return { messages: options?.room ? all.filter((m) => m.room === options.room) : all };
+        }
+        if (method === 'rooms') return { rooms: (s as Bag & { meshRooms?: unknown[] }).meshRooms ?? [] };
+        if (method === 'refreshRooms') return {};
         if (method === 'send') {
-          const m = { id: String(Date.now()).padStart(32, '0'), t: options.kind, from: 'parent', room: 'abcd1234',
+          const m = { id: String(Date.now()).padStart(32, '0'), t: options.kind, from: 'parent', room: options.room,
             sent_at: Date.now() / 1000, mine: true, synced: false, hops: 0, ...(options.fields as Bag) };
           s.messages = [...(s.messages ?? []), m];
           return { id: m.id };
         }
-        if (method === 'setRoom') return {};
         return s.mesh;
       }
       if (plugin === 'JarvisNearby') {
