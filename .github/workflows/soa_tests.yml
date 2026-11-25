@@ -92,6 +92,9 @@ jobs:
         SHAREDLLM_RUN_LIVE: "1"
         # One data file per shard, so the coverage job can combine them.
         COVERAGE_FILE: .coverage.${{ matrix.shard }}
+        # A session that stops reporting (every test done, then a hang at teardown)
+        # dumps every thread's stack and exits instead of eating the job's budget.
+        SHAREDLLM_PYTEST_EXIT_GUARD_S: "900"
       run: |
         # Excludes only the markers that genuinely need live infrastructure:
         # local_only (live Home Assistant / Nextcloud) and server_only (a
