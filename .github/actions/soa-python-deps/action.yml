@@ -45,7 +45,7 @@ runs:
         # and pip does not fetch the CUDA build (~3 GB of nvidia wheels). No
         # test needs a GPU; services/rag's test even asserts CPU-only torch.
         pip install torch --index-url https://download.pytorch.org/whl/cpu
-        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split "fakeredis[lua]" respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
+        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split pytest-timeout "fakeredis[lua]" respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
         # Heavy ML packages (fastembed models) are not installed: the tests
         # mock them, so only the API contracts are needed. RAG's requirements
         # (torch, models) are left out for the same reason.
