@@ -1284,6 +1284,26 @@ def skipped_version(entity: EntityEntry) -> str | None:
     return str(value) if value else None
 
 
+def _version_key(version: Any) -> tuple[int, ...] | None:
+    """The leading dotted numbers of a version ("2026.11.18", "1.5.20", "2024.12.1-dev" -> (2024, 12, 1)),
+    or None when it does not start with one."""
+    m = re.match(r"\s*v?(\d+(?:\.\d+)*)", str(version or ""))
+    return tuple(int(x) for x in m.group(1).split(".")) if m else None
+
+
+def is_newer_version(latest: Any, installed: Any) -> bool:
+    """Whether ``latest`` is an upgrade over ``installed``. Two readable versions compare by number, so
+    an older one is never offered (2026-11-25: an Echo on 2026.11.18 was offered 2026.10.17, and the
+    nightly rollout would have installed it). Unreadable versions fall back to "different"."""
+    if not latest or not installed or str(latest) == str(installed):
+        return False
+    a, b = _version_key(latest), _version_key(installed)
+    if a is not None and b is not None:
+        width = max(len(a), len(b))
+        return a + (0,) * (width - len(a)) > b + (0,) * (width - len(b))
+    return True
+
+
 def update_state(state: Any, attrs: dict[str, Any], skipped: str | None) -> Any:
     """HA's update state: ``on`` while a version newer than the installed one is offered and not skipped.
 
@@ -1294,7 +1314,7 @@ def update_state(state: Any, attrs: dict[str, Any], skipped: str | None) -> Any:
     latest, installed = attrs.get("latest_version"), attrs.get("installed_version")
     if not latest or not installed or str(state) == UNKNOWN:
         return state
-    return "on" if str(latest) != str(installed) and str(latest) != skipped else "off"
+    return "on" if is_newer_version(latest, installed) and str(latest) != skipped else "off"
 
 
 ENTITY_SERVICES: dict[str, tuple[str, ...]] = {

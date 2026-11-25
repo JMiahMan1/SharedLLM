@@ -102,6 +102,7 @@ from services.homehub.core import (
     HubError,
     ServiceCall,
     ServiceNotFound,
+    is_newer_version,
     utcnow,
 )
 from services.homehub.drivers.mjpeg import CameraTokens, camera_attributes
@@ -991,7 +992,7 @@ class ESPHomeDriver(Driver):
             in_progress = bool(getattr(st, "in_progress", False))
             has_progress = bool(getattr(st, "has_progress", False))
             progress = getattr(st, "progress", 0.0)
-            state = "on" if (latest and latest != installed) else "off"
+            state = "on" if is_newer_version(latest, installed) else "off"
             return state, {
                 "installed_version": installed,
                 "latest_version": latest,
