@@ -86,6 +86,16 @@ export interface StickerOverlay extends Placed {
   sticker: string;
 }
 
+/**
+ * A lens: a picture worn on a face (glasses, a hat, ears). `lens` names one in
+ * the catalogue in lenses.ts; the placement is an ordinary overlay's, so a
+ * lens found on a face can still be dragged, pinched and turned.
+ */
+export interface LensOverlay extends Placed {
+  kind: 'lens';
+  lens: string;
+}
+
 export interface Stroke {
   color: string;
   /** Line width as a fraction of the finished picture's width. */
@@ -99,7 +109,7 @@ export interface DrawingOverlay {
   strokes: Stroke[];
 }
 
-export type PlacedOverlay = TextOverlay | EmojiOverlay | StickerOverlay;
+export type PlacedOverlay = TextOverlay | EmojiOverlay | StickerOverlay | LensOverlay;
 export type Overlay = PlacedOverlay | DrawingOverlay;
 
 export interface EditRecipe {
@@ -179,6 +189,9 @@ function parseOverlay(raw: unknown, index: number, budget: { points: number }): 
   }
   if (o.kind === 'sticker') {
     return typeof o.sticker === 'string' && ID.test(o.sticker) ? { ...placed(o, index), kind: 'sticker', sticker: o.sticker } : null;
+  }
+  if (o.kind === 'lens') {
+    return typeof o.lens === 'string' && ID.test(o.lens) ? { ...placed(o, index), kind: 'lens', lens: o.lens } : null;
   }
   if (o.kind === 'drawing') {
     const strokes: Stroke[] = [];

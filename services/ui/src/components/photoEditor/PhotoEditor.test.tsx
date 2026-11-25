@@ -10,6 +10,12 @@ vi.mock('../../lib/photoEdit/decode', async (actual) => ({
   ...(await actual<typeof import('../../lib/photoEdit/decode')>()),
   decodePicture: (blob: Blob) => decodeMock(blob),
 }));
+// Finding a face needs the detector and a real canvas (the Playwright spec covers that); here it answers as told.
+const findFacesMock = vi.fn();
+vi.mock('../../lib/photoEdit/faceDetect', async (actual) => ({
+  ...(await actual<typeof import('../../lib/photoEdit/faceDetect')>()),
+  findFaces: (...args: unknown[]) => findFacesMock(...args),
+}));
 vi.mock('../../lib/photoEdit/encode', async (actual) => ({
   ...(await actual<typeof import('../../lib/photoEdit/encode')>()),
   exportEdit: (...args: unknown[]) => exportMock(...args),
@@ -29,6 +35,7 @@ const original = new Blob([new Uint8Array([0xff, 0xd8, 1, 2])], { type: 'image/j
 beforeEach(() => {
   decodeMock.mockReset();
   exportMock.mockReset();
+  findFacesMock.mockReset();
 });
 afterEach(() => vi.useRealTimers());
 
@@ -200,5 +207,51 @@ describe('usePhotoEditGate', () => {
     fireEvent.click(screen.getByTestId('photo-editor-done'));
     await expect(answer).resolves.toMatchObject({ kind: 'edited', result: { blob: original, original } });
     third.unmount();
+  });
+});
+
+describe('PhotoEditor: face lenses', () => {
+  const face = { eyeMid: [2, 1.2], nose: [2, 1.8], eyeDistance: 1, angle: 0, box: { x: 1, y: 0.6, width: 2, height: 2.6 } };
+
+  it('wears a lens on every face it finds, sized to the face', async () => {
+    decodeMock.mockResolvedValue(frames(1));
+    findFacesMock.mockResolvedValue([face, { ...face, eyeMid: [3, 2], eyeDistance: 0.6 }]);
+    const edited = new Blob(['x'], { type: 'image/jpeg' });
+    exportMock.mockImplementation(async (_d: Decoded, recipe: EditRecipe, source: Blob) => ({ blob: edited, mime: 'image/jpeg', width: 3, height: 3, animated: false, recipe, original: source }));
+    render(<PhotoEditor source={original} maxBytes={1000} onDone={vi.fn()} onCancel={() => {}} />);
+    await screen.findByTestId('photo-editor-tools');
+
+    fireEvent.click(screen.getByTestId('photo-editor-tool-lenses'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add the glasses lens' }));
+    await screen.findByText('Found 2 faces.');
+    expect(findFacesMock).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByTestId('photo-editor-done'));
+    await waitFor(() => expect(exportMock).toHaveBeenCalledOnce());
+    const recipe = exportMock.mock.calls[0][1] as EditRecipe;
+    const lenses = recipe.overlays.filter((o) => o.kind === 'lens');
+    expect(lenses).toHaveLength(2);
+    expect(lenses[0]).toMatchObject({ kind: 'lens', lens: 'glasses', x: 0.5, rotation: 0 });
+    // The eyes' middle, as a fraction of the picture's height.
+    expect((lenses[0] as { y: number }).y).toBeCloseTo(1.2 / 3);
+    // Glasses are span eye distances wide, and a scale of 1 covers 40% of the picture's width.
+    expect((lenses[0] as { scale: number }).scale).toBeCloseTo((2.2 * 1) / (0.4 * 4));
+  });
+
+  it('finds the faces once and reuses them, and still places a lens when it cannot find any', async () => {
+    decodeMock.mockResolvedValue(frames(1));
+    findFacesMock.mockResolvedValueOnce([face]);
+    render(<PhotoEditor source={original} maxBytes={1000} onDone={vi.fn()} onCancel={() => {}} />);
+    await screen.findByTestId('photo-editor-tools');
+    fireEvent.click(screen.getByTestId('photo-editor-tool-lenses'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add the cat ears lens' }));
+    await screen.findByText('Found one face.');
+    fireEvent.click(screen.getByRole('button', { name: 'Add the crown lens' }));
+    await waitFor(() => expect(findFacesMock).toHaveBeenCalledOnce());
+
+    findFacesMock.mockRejectedValueOnce(new Error('no detector here'));
+    fireEvent.click(screen.getByTestId('photo-editor-lenses-find'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add the bow lens' }));
+    await screen.findByText(/Face finding did not work on this phone/);
   });
 });
