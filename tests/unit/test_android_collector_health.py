@@ -100,7 +100,9 @@ def test_the_health_report_matches_what_the_server_keeps():
     for name in collector_health.WORKERS:
         assert f'workers.put("{name}"' in health, name
     names = re.search(r"NAMES = \{([^}]*)\}", _read("CollectorStatus.java")).group(1)
-    assert set(re.findall(r'"([a-z]+)"', names)) == set(collector_health.COLLECTORS)
+    recorded = set(re.findall(r'"([a-z]+)"', names))  # collectors that record their own runs
+    reported_directly = set(re.findall(r'collectors\.put\("([a-z]+)"', health))  # e.g. proximity, from its own health
+    assert recorded | reported_directly == set(collector_health.COLLECTORS)
     for worker in ("CommsSyncWorker.java", "UsageSyncWorker.java"):
         assert "DeviceHealth.reportIfDue(" in _read(worker)
 
