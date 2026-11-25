@@ -26,7 +26,9 @@ vi.mock('@capacitor/core', async (importOriginal) => {
   return { ...actual, Capacitor: { ...actual.Capacitor, isNativePlatform: () => mocks.native } };
 });
 
-vi.mock('../lib/appUpdater', () => ({
+vi.mock('../lib/appUpdater', async (importOriginal) => ({
+  // The real label formatter: Settings renders the running build through it.
+  buildLabel: (await importOriginal<typeof import('../lib/appUpdater')>()).buildLabel,
   checkApkUpdate: mocks.checkApkUpdate,
   checkForAppUpdates: mocks.checkForAppUpdates,
   downloadAndInstallApk: mocks.downloadAndInstallApk,
