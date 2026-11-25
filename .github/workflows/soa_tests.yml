@@ -15,7 +15,9 @@ on:
       - '!services/ui/**'
       - 'conftest.py'
       - 'pytest.ini'
+      - '.test_durations'
       - '.github/workflows/soa_tests.yml'
+      - '.github/actions/soa-python-deps/**'
   pull_request:
     # microservices too: every change reaches it by pull request, and without this
     # a test broken by one only showed on the push after the merge.
@@ -25,7 +27,9 @@ on:
       - '!services/ui/**'
       - 'conftest.py'
       - 'pytest.ini'
+      - '.test_durations'
       - '.github/workflows/soa_tests.yml'
+      - '.github/actions/soa-python-deps/**'
 
 jobs:
   # Static gate, on its own runner: it used to run first inside the single job,
@@ -38,34 +42,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        cache: 'pip'
-
+    # Python, the test tools and every service's requirements, from a cached
+    # virtualenv (see the action for what is in it and when it is rebuilt).
     # No `env:` block on purpose: conftest.py's _TEST_ENV_DEFAULTS is the single
     # source of truth for every value services/config.py reads, so a developer's
     # .env and a CI runner see identical configuration.
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split "fakeredis[lua]" respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
-        # Heavy ML packages (fastembed models, torch) are not installed here:
-        # the tests mock them, so only the API contracts are needed.
-
-    - name: Install service dependencies
-      run: |
-        pip install -r services/identity/requirements.txt
-        pip install -r services/execution/requirements.txt
-        pip install -r services/gateway/requirements.txt
-        pip install -r services/storage/requirements.txt
-        pip install -r services/bible/requirements.txt
-        pip install -r services/health/requirements.txt
-        pip install -r services/automation/requirements.txt
-        pip install -r services/telemetry/requirements.txt
-        pip install -r services/homehub/requirements.txt
-        # RAG has huge deps (Torch), so we mock it for CI unit tests.
+    - name: Python and service dependencies
+      uses: ./.github/actions/soa-python-deps
 
     - name: Ruff (syntax and undefined names)
       run: ruff check --select E9,F63,F7,F82 services/gateway services/garden services/execution
@@ -93,34 +76,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        cache: 'pip'
-
+    # Python, the test tools and every service's requirements, from a cached
+    # virtualenv (see the action for what is in it and when it is rebuilt).
     # No `env:` block on purpose: conftest.py's _TEST_ENV_DEFAULTS is the single
     # source of truth for every value services/config.py reads, so a developer's
     # .env and a CI runner see identical configuration.
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-mock pytest-asyncio pytest-split "fakeredis[lua]" respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
-        # Heavy ML packages (fastembed models, torch) are not installed here:
-        # the tests mock them, so only the API contracts are needed.
-
-    - name: Install service dependencies
-      run: |
-        pip install -r services/identity/requirements.txt
-        pip install -r services/execution/requirements.txt
-        pip install -r services/gateway/requirements.txt
-        pip install -r services/storage/requirements.txt
-        pip install -r services/bible/requirements.txt
-        pip install -r services/health/requirements.txt
-        pip install -r services/automation/requirements.txt
-        pip install -r services/telemetry/requirements.txt
-        pip install -r services/homehub/requirements.txt
-        # RAG has huge deps (Torch), so we mock it for CI unit tests.
+    - name: Python and service dependencies
+      uses: ./.github/actions/soa-python-deps
 
     - name: Run Pytest (shard ${{ matrix.shard }} of 6)
       env:
