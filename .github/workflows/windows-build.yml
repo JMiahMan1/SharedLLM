@@ -13,6 +13,9 @@ on:
       - '.github/workflows/windows-build.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-guard:
     runs-on: windows-latest
@@ -52,6 +55,26 @@ jobs:
         cp agent/jarvis-guard/install.ps1 agent/jarvis-guard/uninstall.ps1 agent/jarvis-guard/README.md dist/
         (cd dist && sha256sum jarvis-guard.exe | tee jarvis-guard.exe.sha256)
 
+    - name: Build the Setup.exe
+      shell: bash
+      run: |
+        # One version for the whole product: the APK and both Windows assets land
+        # in the same release, so the tag is read from services/ui/package.json.
+        VERSION=$(python3 -c "import json;print(json.load(open('services/ui/package.json'))['version'])")
+        choco install innosetup --no-progress -y >/dev/null
+        ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+        [ -x "$ISCC" ] || ISCC="/c/Program Files/Inno Setup 6/ISCC.exe"
+        "$ISCC" /DAppVersion="$VERSION" /DSourceDir="$GITHUB_WORKSPACE\\dist" agent/jarvis-guard/installer/jarvis-guard.iss
+        SETUP="agent/jarvis-guard/installer/output/JarvisGuard-Setup-$VERSION.exe"
+        ls -la "$SETUP"
+        size=$(stat -c%s "$SETUP")
+        if [ "$size" -lt 1000000 ]; then
+          echo "::error::The installer is only $size bytes; refusing to publish it."
+          exit 1
+        fi
+        sha256sum "$SETUP" | tee "$SETUP.sha256"
+        echo "[OK] $SETUP ($size bytes)"
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
@@ -62,6 +85,8 @@ jobs:
           dist/install.ps1
           dist/uninstall.ps1
           dist/README.md
+          agent/jarvis-guard/installer/output/JarvisGuard-Setup-*.exe
+          agent/jarvis-guard/installer/output/JarvisGuard-Setup-*.exe.sha256
         retention-days: 30
 
     # Mirror of the Android APK publish step: the exe lands in
@@ -121,3 +146,18 @@ jobs:
           exit 1
         fi
         echo "[OK] Published jarvis-guard build ${GIT_SHA:0:8}."
+
+    # The Releases page is where a parent looks for a Windows download. Until now
+    # the exe only existed as a 30-day workflow artifact, which is why there was
+    # nothing to install from GitHub.
+    - name: Publish to the GitHub release
+      if: github.event_name != 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION=$(python3 -c "import json;print(json.load(open('services/ui/package.json'))['version'])")
+        SETUP="agent/jarvis-guard/installer/output/JarvisGuard-Setup-$VERSION.exe"
+        gh release view "v$VERSION" >/dev/null 2>&1 || gh release create "v$VERSION" --title "Jarvis $VERSION" --generate-notes
+        gh release upload "v$VERSION" dist/jarvis-guard.exe dist/jarvis-guard.exe.sha256 "$SETUP" "$SETUP.sha256" --clobber
+        echo "[OK] v$VERSION now carries jarvis-guard.exe and $(basename "$SETUP")."
