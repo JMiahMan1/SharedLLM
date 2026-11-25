@@ -41,10 +41,13 @@ MAX_DEVICES = 10
 
 #: ``bluetooth`` is Android 12's Nearby devices (BLUETOOTH_CONNECT): without it
 #: Wander cannot tell which linked vehicle a trip was in.
-PERMISSIONS = ("read_sms", "read_call_log", "usage_access", "notification_listener", "location", "bluetooth")
+PERMISSIONS = ("read_sms", "read_call_log", "usage_access", "notification_listener", "location", "bluetooth",
+               "bluetooth_scan")
 WORKERS = ("comms_sync", "usage_sync", "photo_scan")
 #: ``listener`` is a comms run the notification listener started when a text or call came in.
-COLLECTORS = ("comms", "usage", "listener")
+#: ``proximity`` is Wander's family-nearby scan (Bluetooth LE); ``cannot_advertise``
+#: is how a device that only scans (some tablets) says so.
+COLLECTORS = ("comms", "usage", "listener", "proximity")
 #: WorkManager states that mean the work is still scheduled.
 SCHEDULED_STATES = frozenset({"ENQUEUED", "RUNNING", "BLOCKED"})
 _WORKER_STATES = SCHEDULED_STATES | {"SUCCEEDED", "FAILED", "CANCELLED", "NONE"}

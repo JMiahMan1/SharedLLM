@@ -329,6 +329,8 @@ public class LocationTrackingService extends Service {
         BleBeacon.ensure(this);
         // Which linked car's Bluetooth is connected: start from what Android says now.
         VehicleBluetooth.seed(this);
+        // Family phones nearby over Bluetooth LE (only when turned on in Wander).
+        Proximity.start(this);
         if (hasPlayServices(this)) {
             fused = LocationServices.getFusedLocationProviderClient(this);
             activityClient = ActivityRecognition.getClient(this);
@@ -568,6 +570,7 @@ public class LocationTrackingService extends Service {
             postDrivingEvents(drivingMonitor.finish());
         }
         crashDetector.setDriving(now == MotionModeSelector.Mode.DRIVING);
+        Proximity.setDriving(now == MotionModeSelector.Mode.DRIVING);
         syncCrashListening();
     }
 
@@ -1148,6 +1151,7 @@ public class LocationTrackingService extends Service {
         removeUpdates();
         stopCrashListening();
         unregisterStatusReceiver();
+        Proximity.stop();
         if (instance == this) instance = null;
         super.onDestroy();
     }

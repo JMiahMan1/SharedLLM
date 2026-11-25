@@ -18,6 +18,14 @@ describe('collectionNotices', () => {
     ]);
   });
 
+  it('says plainly that a tablet can only scan for family phones', () => {
+    const out = collectionNotices({ devices: [{ device_id: 'd1', problems: [
+      { kind: 'collector', what: 'proximity', outcome: 'cannot_advertise',
+        message: 'This device cannot advertise over Bluetooth LE: it sees family phones, but they do not see it' },
+    ] }] }, 'Robin', 'tablet', NOW).map((n) => n.text);
+    expect(out).toEqual(["Family nearby on Robin's tablet: This device cannot advertise over Bluetooth LE: it sees family phones, but they do not see it."]);
+  });
+
   it('names the missing permissions', () => {
     const out = texts({ devices: [{ device_id: 'd1', problems: [
       { kind: 'permission', what: 'read_sms' }, { kind: 'permission', what: 'read_call_log' },

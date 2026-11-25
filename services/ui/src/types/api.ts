@@ -2337,6 +2337,8 @@ export interface Trip {
   vehicle_source?: 'default' | 'bluetooth' | 'manual';
   /** The vehicle Bluetooth detected, kept when the owner chose another by hand (so it can be put back). */
   bt_vehicle_id?: string;
+  /** Family members this trip was taken with (phones close together, or the same linked car). */
+  together?: import('../lib/proximity').TripCompanion[];
   fuel_type?: string;
   mpg: number;
   cost_per_gallon: number;
