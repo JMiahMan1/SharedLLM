@@ -29,6 +29,22 @@ MIN_SAMPLES = 3
 MAX_SAMPLES = 6
 MATCH_THRESHOLD = 0.80
 MATCH_MARGIN = 0.04
+#: How far the best candidate must stand out from the mean of the household's
+#: other profiles when its absolute lead is too small to trust. Measured on the
+#: enrolled takes, every own take stood at least +0.04 clear of that mean and
+#: every other-speaker take below +0.02, so a score can be low and still be one
+#: voice by a wide margin where the absolute lead has shrunk away.
+REL_MARGIN = 0.03
+#: The relative route still refuses a weak absolute score: an unenrolled voice
+#: can lead a quiet cohort without being anybody in it.
+RELATIVE_SCORE_SLACK = 0.07
+#: The relative threshold sits just above the highest impostor standing, inside
+#: these bounds.
+MIN_REL_MARGIN = 0.02
+MAX_REL_MARGIN = 0.15
+#: Below this many cross-person scores, use the worst one as the floor: a
+#: quantile over a handful of numbers is not a distribution.
+CALIBRATION_TAIL = 8
 #: A new take that scores below this against the person's own earlier takes
 #: is almost certainly someone else, or mostly noise. Real-microphone
 #: same-speaker scores sit well above it; different speakers mostly below.
@@ -137,23 +153,49 @@ def age_group(role: str | None) -> str:
 
 
 def rank(embedding: list[float], profiles: list[dict]) -> list[dict]:
-    """``profiles`` are ``{username, name, samples, role?}``; best match first."""
-    scored = [
-        {
-            "username": p["username"],
-            "name": p["name"],
-            "score": round(cosine(embedding, centroid(p["samples"])), 3),
-            "group": age_group(p.get("role")),
-        }
-        for p in profiles
-        if len(p["samples"]) >= MIN_SAMPLES
-    ]
+    """``profiles`` are ``{username, name, samples, role?}``; best match first.
+
+    A profile is scored by its centroid and by its closest single take, and the
+    better of the two counts. A take recorded on a good microphone can sit much
+    closer to the voice than the mean of five takes does, and leaving it out is
+    what made quiet, short commands score just under the line.
+    """
+    scored = []
+    for p in profiles:
+        if len(p["samples"]) < MIN_SAMPLES:
+            continue
+        centroid_score = cosine(embedding, centroid(p["samples"]))
+        take_score = max(cosine(embedding, s["embedding"]) for s in p["samples"])
+        scored.append(
+            {
+                "username": p["username"],
+                "name": p["name"],
+                "score": round(max(centroid_score, take_score), 3),
+                "centroid_score": round(centroid_score, 3),
+                "take_score": round(take_score, 3),
+                "group": age_group(p.get("role")),
+            }
+        )
     return sorted(scored, key=lambda c: c["score"], reverse=True)
 
 
-def decide(candidates: list[dict], threshold: float | None = None, margin_needed: float | None = None) -> dict:
+def decide(
+    candidates: list[dict],
+    threshold: float | None = None,
+    margin_needed: float | None = None,
+    relative_needed: float | None = None,
+) -> dict:
     """Who it is, if anyone: the best candidate only when it clears the
-    threshold and leads the runner-up by the margin.
+    threshold and leads the runner-up by the margin - or when it stands clearly
+    out from the household's other profiles (``REL_MARGIN``).
+
+    The second route exists because a quiet take scores low against everyone:
+    the leader is still the leader, yet its lead over the runner-up shrinks with
+    every score and falls under a fixed margin. Measured on the enrolled takes,
+    the lead over the mean of the other profiles separates own from other takes
+    perfectly (every own take above +0.04, every other take below +0.02) where
+    the absolute score overlaps. It never accepts a weak score:
+    ``RELATIVE_SCORE_SLACK`` keeps it just under the calibrated threshold.
 
     When the two best are a child and an adult the bar is higher
     (``CROSS_AGE_*``): a weak score says nothing rather than risk naming a
@@ -161,14 +203,24 @@ def decide(candidates: list[dict], threshold: float | None = None, margin_needed
     """
     floor = MATCH_THRESHOLD if threshold is None else threshold
     lead = MATCH_MARGIN if margin_needed is None else margin_needed
+    rel_lead = REL_MARGIN if relative_needed is None else relative_needed
     best = candidates[0] if candidates else None
     runner = candidates[1] if len(candidates) > 1 else None
     margin = round(best["score"] - runner["score"], 3) if best and runner else None
+    cohort = [c["score"] for c in candidates[1:]] if best else []
+    relative = round(best["score"] - sum(cohort) / len(cohort), 3) if cohort else None
     cross_age = bool(best and runner and best.get("group") and runner.get("group")
                      and best["group"] != runner["group"])
     need_score = floor + (CROSS_AGE_SCORE_LIFT if cross_age else 0.0)
     need_margin = lead * (CROSS_AGE_MARGIN_FACTOR if cross_age else 1.0)
-    matched = bool(best and best["score"] >= need_score and (margin is None or margin >= need_margin))
+    need_relative = rel_lead * (CROSS_AGE_MARGIN_FACTOR if cross_age else 1.0)
+    relative_floor = round(max(0.0, need_score - RELATIVE_SCORE_SLACK), 3)
+    certain = bool(best and best["score"] >= need_score and (margin is None or margin >= need_margin))
+    # A child and an adult are never separated by cohort standing alone: the
+    # relative route is off in that case so a weak score says nothing at all.
+    stands_out = bool(best and relative is not None and relative >= need_relative
+                      and best["score"] >= relative_floor and not cross_age)
+    matched = certain or stands_out
     return {
         "matched": matched,
         "matched_username": best["username"] if matched else None,
@@ -177,6 +229,10 @@ def decide(candidates: list[dict], threshold: float | None = None, margin_needed
         "threshold": round(need_score, 3),
         "margin": margin,
         "margin_needed": round(need_margin, 3) if runner else None,
+        "relative": relative,
+        "relative_needed": round(need_relative, 3) if relative is not None else None,
+        "relative_floor": relative_floor if relative is not None else None,
+        "decided_by": ("score" if certain else "cohort") if matched else None,
         "cross_age": cross_age,
         "candidates": candidates,
     }
@@ -232,6 +288,8 @@ def calibrate(profiles: list[dict]) -> dict:
     same: list[float] = []
     other: list[float] = []
     leads: list[float] = []
+    rel_same: list[float] = []
+    rel_other: list[float] = []
     per_person = []
     centroids = {p["username"]: centroid(p["samples"]) for p in usable}
     for p in usable:
@@ -240,10 +298,21 @@ def calibrate(profiles: list[dict]) -> dict:
             rest = p["samples"][:i] + p["samples"][i + 1:]
             own = cosine(sample["embedding"], centroid(rest))
             own_scores.append(own)
-            others = [cosine(sample["embedding"], c) for u, c in centroids.items() if u != p["username"]]
+            scores = {u: cosine(sample["embedding"], c) for u, c in centroids.items()}
+            others = [s for u, s in scores.items() if u != p["username"]]
             other.extend(others)
             if others:
                 leads.append(own - max(others))
+                rel_same.append(own - sum(others) / len(others))
+                # How far every other person stands out when this take is scored
+                # against them: the highest of those is what a stranger could
+                # reach by luck, and the relative threshold sits just above it.
+                for u, score in scores.items():
+                    if u == p["username"]:
+                        continue
+                    rest_scores = [s for o, s in scores.items() if o != u]
+                    if rest_scores:
+                        rel_other.append(score - sum(rest_scores) / len(rest_scores))
         same.extend(own_scores)
         per_person.append({
             "username": p["username"],
@@ -256,22 +325,46 @@ def calibrate(profiles: list[dict]) -> dict:
         "per_person": per_person,
         "same_speaker": _spread(same),
         "other_speaker": _spread(other),
+        "relative_speaker": _spread(rel_same),
+        "relative_impostor": _spread(rel_other),
         "key": profiles_key(profiles),
     }
+    relative = (
+        min(MAX_REL_MARGIN, max(MIN_REL_MARGIN, max(rel_other) + IMPOSTOR_SAFETY / 3))
+        if rel_other
+        else REL_MARGIN
+    )
     if not usable:
-        return {**result, "status": "default", "threshold": MATCH_THRESHOLD, "margin": MATCH_MARGIN}
+        return {
+            **result,
+            "status": "default",
+            "threshold": MATCH_THRESHOLD,
+            "margin": MATCH_MARGIN,
+            "relative": REL_MARGIN,
+        }
     clamp = lambda x: min(CALIBRATED_MAX_THRESHOLD, max(CALIBRATED_MIN_THRESHOLD, x))  # noqa: E731
     if not other:
         threshold = clamp(min(same) - SINGLE_PROFILE_SLACK)
-        return {**result, "status": "single", "threshold": round(threshold, 3), "margin": MATCH_MARGIN}
-    threshold = clamp(max(other) + IMPOSTOR_SAFETY)
+        return {
+            **result,
+            "status": "single",
+            "threshold": round(threshold, 3),
+            "margin": MATCH_MARGIN,
+            "relative": REL_MARGIN,
+        }
+    # The worst other-speaker score is one unlucky take, and holding every
+    # recording above it rejects legitimate ones. A high quantile is the score a
+    # stranger actually reaches; the max is kept as the floor of last resort.
+    base = max(other) if len(other) < CALIBRATION_TAIL else _quantile(other, 0.90)
+    threshold = clamp(base + IMPOSTOR_SAFETY)
     margin = min(MAX_MARGIN, max(MIN_MARGIN, _quantile(leads, 0.5) / 2)) if leads else MATCH_MARGIN
-    separated = max(other) < threshold and _quantile(same, 0.10) >= threshold
+    separated = _quantile(other, 0.95) < threshold and _quantile(same, 0.10) >= threshold
     return {
         **result,
         "status": "separated" if separated else "overlap",
         "threshold": round(threshold, 3),
         "margin": round(margin, 3),
+        "relative": round(relative, 3),
     }
 
 
