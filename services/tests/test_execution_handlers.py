@@ -156,7 +156,15 @@ async def test_climate_handler(user_ctx):
 
 @pytest.mark.asyncio
 async def test_tv_cast_macro(user_ctx):
-    with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
+    # The cast itself is what is tested here; the video's age check is tested in test_video_safety.py,
+    # so this video is one the check passes (rated for everyone, no blocklist).
+    from services.execution import video_safety
+
+    video_safety._checked.clear()
+    with patch.object(video_safety, "_setting", new=AsyncMock(return_value="")), \
+         patch("services.execution.handlers.video.inspect_video", new=AsyncMock(
+             return_value={"title": "mock_title", "channel": "", "age_limit": 0})), \
+         patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("services.execution.ha_client.get_state", mock_get_state), \
          patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("services.execution.ha_client.call_service", mock_call), \
