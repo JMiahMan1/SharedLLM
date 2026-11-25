@@ -64,19 +64,19 @@ def _play(**body):
 def test_a_play_whose_query_is_the_device_name_resumes_that_device(sent):
     resp = _play(query="study tv", media_type="music", device_name="Study TV")
     assert resp.status_code == 200
-    assert sent == [("media_transport", None, "Study TV", "resume", None)]
+    assert sent == [("media_transport", "media_player.study_tv", "Study TV", "resume", None)]
 
 
 def test_a_play_with_no_query_on_a_device_resumes_it(sent):
     resp = _play(device_name="Study TV")
     assert resp.status_code == 200
-    assert sent == [("media_transport", None, "Study TV", "resume", None)]
+    assert sent == [("media_transport", "media_player.study_tv", "Study TV", "resume", None)]
 
 
 def test_a_play_whose_query_names_a_known_player_resumes_it(sent):
     resp = _play(query="the Study TV", media_type="music")
     assert resp.status_code == 200
-    assert sent == [("media_transport", None, "the Study TV", "resume", None)]
+    assert sent == [("media_transport", "media_player.study_tv", "the Study TV", "resume", None)]
 
 
 def test_a_real_search_still_plays(sent):
