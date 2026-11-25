@@ -1925,9 +1925,13 @@ async def _run_single_tool(action: str, tool_data: dict, query: str, creds: Reso
                 else:
                     payload["action"] = "list"
 
-            if action == "announcementrequest" and not payload.get("entity_id") and not payload.get("device_name"):
+            if action == "announcementrequest" and not any(
+                    payload.get(k) for k in ("entity_id", "device_name", "entity_ids", "rooms", "person", "everywhere")):
                 device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Z][A-Za-z\s]+?)(?:\s+(?:speaker|tv|device|display|chromecast|cast))", query)
                 device_name = device_match.group(1).strip() if device_match else _trailing_place(query)
+                if device_name and device_name.lower() in str(payload.get("message") or "").lower():
+                    # "announce that the pizza is in the oven": the place is part of the message, not a target.
+                    device_name = None
                 if device_name:
                     if not any(t in device_name.lower() for t in ["tv", "speaker", "display", "cast"]):
                         type_match = re.search(r"(speaker|tv|display|chromecast|cast)", query, re.IGNORECASE)

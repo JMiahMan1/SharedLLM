@@ -192,7 +192,10 @@ class SystemLearningRequest(BaseModel):
     category: str = "general"
 
 class AnnouncementRequest(BaseModel):
-    entity_id: str
+    entity_id: str | None = None
+    device_name: str | None = None
+    person: str | None = None
+    everywhere: bool = False
     message: str
     volume: float | None = 0.6
     tts_engine: Literal["kokoro", "piper"] | None = "kokoro"

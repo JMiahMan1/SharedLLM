@@ -399,6 +399,8 @@ class AnnouncementRequest(BaseRequest):
     entity_ids: list[str] | None = Field(None, description="Optional multi-target entity IDs (room/speaker fan-out)")
     rooms: list[str] | None = Field(None, description="Optional room names resolved via room_speakers config / HA areas")
     group_id: str | None = Field(None, description="Optional media group ID whose members receive the announcement")
+    person: str | None = Field(None, description="A family member to announce to: their assigned speakers and satellites, plus their phone")
+    everywhere: bool = Field(False, description="Announce on one reachable speaker in every room")
     message: str
     volume: float | None = Field(0.6, ge=0.0, le=1.0)
     tts_engine: Literal["kokoro", "piper"] | None = "kokoro"
