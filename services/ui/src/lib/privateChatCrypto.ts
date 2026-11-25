@@ -44,6 +44,7 @@
 
 import { deriveCallKey } from './callVerify';
 import { readLinkPreview, type LinkPreview } from './privateLinkPreview';
+import { parseRecipe, type EditRecipe } from './photoEdit/recipe';
 
 export const PBKDF2_ITERATIONS = 600_000;
 export const SALT_BYTES = 16;
@@ -120,7 +121,9 @@ export type PrivatePayload =
   /** Gallery membership (a sealed gallery entry, never a chat message): see GalleryMark. */
   | GalleryMark
   /** When this chat's gallery became opt-in (a sealed gallery entry): see GalleryStart. */
-  | GalleryStart;
+  | GalleryStart
+  /** An edit of a gallery picture, or going back to its original (a sealed gallery entry): see GalleryEdit. */
+  | GalleryEdit;
 
 /**
  * A message that answers a picture or clip in the chat, inside the encryption:
@@ -156,6 +159,35 @@ export interface GalleryMark {
 export interface GalleryStart {
   t: 'gallery_start';
   kept: string[];
+}
+
+/**
+ * An edit of a picture in the gallery (a sealed gallery entry, never a chat
+ * message). The original blob (`of`) is never changed or deleted: the edited
+ * picture is a new blob, and the recipe says how it was made from the
+ * original, so a later edit starts from the original again instead of
+ * stacking lossy edits. A record with `revert` puts the original back. For
+ * each original the newest record (server time, then id) is the one shown.
+ * Padded to the same size as every other gallery record.
+ */
+export interface GalleryEdit {
+  t: 'gallery_edit';
+  /** The original picture's blob (a sent picture's, or an added one's). */
+  of: string;
+  /** The edited picture: its blob and what it is. Absent on a revert. */
+  blob?: string;
+  mime?: string;
+  width?: number;
+  height?: number;
+  animated?: boolean;
+  /** How it was made from the original, when it fits in the record... */
+  recipe?: EditRecipe;
+  /** ...otherwise in its own encrypted blob (JSON). */
+  recipe_blob?: string;
+  /** Back to the original. */
+  revert?: true;
+  /** When it was edited (seconds). */
+  edited_at?: number;
 }
 
 /**
@@ -510,6 +542,7 @@ export async function openMessage(key: CryptoKey, raw: string | null | undefined
       if ((raw.op !== 'add' && raw.op !== 'remove') || !blobList(raw.blobs)) return null;
       return { t: 'gallery', op: raw.op, blobs: [...raw.blobs] };
     }
+    if (payload?.t === 'gallery_edit') return readGalleryEdit(payload as unknown as Record<string, unknown>, stamp);
     if (payload?.t === 'gallery_start') {
       const kept = (payload as { kept?: unknown }).kept ?? [];
       return blobList(kept) ? { t: 'gallery_start', kept: [...kept] } : null;
@@ -527,6 +560,26 @@ export const MAX_GALLERY_MARK_BLOBS = 180;
 
 function blobList(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= MAX_GALLERY_MARK_BLOBS && value.every((id) => typeof id === 'string' && BLOB_ID.test(id));
+}
+
+/** A gallery edit record, or null when it is not the right shape. */
+function readGalleryEdit(raw: Record<string, unknown>, stamp: (value: unknown) => number | undefined): GalleryEdit | null {
+  if (typeof raw.of !== 'string' || !BLOB_ID.test(raw.of)) return null;
+  const editedAt = stamp(raw.edited_at);
+  if (raw.revert === true) return { t: 'gallery_edit', of: raw.of, revert: true, ...(editedAt ? { edited_at: editedAt } : {}) };
+  if (typeof raw.blob !== 'string' || !BLOB_ID.test(raw.blob) || raw.blob === raw.of) return null;
+  if (typeof raw.mime !== 'string' || !IMAGE_TYPES.has(raw.mime)) return null;
+  const whole = (value: unknown) => (typeof value === 'number' && Number.isInteger(value) && value > 0 && value < 100_000 ? value : undefined);
+  const out: GalleryEdit = { t: 'gallery_edit', of: raw.of, blob: raw.blob, mime: raw.mime };
+  const width = whole(raw.width);
+  const height = whole(raw.height);
+  if (width && height) Object.assign(out, { width, height });
+  if (raw.animated === true) out.animated = true;
+  const recipe = raw.recipe === undefined ? null : parseRecipe(raw.recipe);
+  if (recipe) out.recipe = recipe;
+  else if (typeof raw.recipe_blob === 'string' && BLOB_ID.test(raw.recipe_blob)) out.recipe_blob = raw.recipe_blob;
+  if (editedAt) out.edited_at = editedAt;
+  return out;
 }
 
 function readQuote(value: unknown): Quote | null {

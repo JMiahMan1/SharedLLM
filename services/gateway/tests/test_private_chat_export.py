@@ -444,3 +444,63 @@ def test_gallery_membership_records_come_back_so_the_gallery_is_the_same(pc, bac
     files = _open(pc["client"].get(EXPORT, headers=_as(B)).content)
     for entry_id, _at, _record in records:
         assert f"gallery/{TOKEN}/{entry_id}.json" in files
+
+
+def _padded_bytes(record: dict) -> dict:
+    """A gallery record padded to 8192 UTF-8 bytes of JSON, as the app pads one with words in it (an edit's text)."""
+    bare = len(json.dumps({**record, "p": ""}, separators=(",", ":"), ensure_ascii=False).encode())
+    return {**record, "p": " " * max(0, 8192 - bare)}
+
+
+def _seal_like_the_app(dk: bytes, obj: dict) -> str:
+    """fixture.seal, but with words left as UTF-8 the way JSON.stringify writes them (Python escapes them by default)."""
+    import base64
+    import os
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    iv = os.urandom(12)
+    ct = AESGCM(dk).encrypt(iv, json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode(), None)
+    envelope = {"kind": "sealed", "title": "Encrypted message", "v": 1,
+                "iv": base64.b64encode(iv).decode(), "ct": base64.b64encode(ct).decode()}
+    return f"{fixture.LINE}\n\n{fixture.FENCE}\n{json.dumps(envelope, separators=(',', ':'))}\n{fixture.FENCE}"
+
+
+def test_gallery_edit_records_and_their_pictures_come_back_so_both_phones_show_the_same_version(pc, backup):
+    """A gallery edit is a sealed gallery entry naming the original and the edited picture's blob, padded to the
+    size of every other gallery record (words and emoji in its recipe included). A restore brings back the entries
+    under their own ids and times and the edited blob beside the original, which is never changed."""
+    root = backup["root"]
+    dk = fixture.data_key(CHAT, PASSWORD)
+    original = fixture._blob_id(1)
+    edited = "e" * 32
+    (root / "blobs" / TOKEN / edited).write_bytes(fixture.encrypt_bytes(dk, b"\xff\xd8 an edited picture"))
+    recipe = {"v": 1, "filter": "warm", "adjust": {"brightness": 10, "contrast": 0, "saturation": 0, "warmth": 0, "vignette": 0},
+              "rotate": 0, "flipH": False, "flipV": False, "aspect": "free", "crop": None,
+              "overlays": [{"id": "t", "kind": "text", "text": "Happy birthday \U0001F382 café", "font": "hand", "color": "#ffffff",
+                            "pill": True, "x": 0.5, "y": 0.5, "scale": 1, "rotation": 0}]}
+    records = [
+        ("8" * 32, fixture.T0 + 90_000, {"t": "gallery_edit", "of": original, "blob": edited, "mime": "image/jpeg", "recipe": recipe}),
+        ("9" * 32, fixture.T0 + 90_100, {"t": "gallery_edit", "of": original, "revert": True}),
+        ("a" * 32, fixture.T0 + 90_200, {"t": "gallery", "op": "add", "blobs": [original]}),
+    ]
+    for entry_id, at, record in records:
+        entry = {"id": entry_id, "by": A, "at": at, "sealed": _seal_like_the_app(dk, _padded_bytes(record))}
+        assert len(entry["sealed"].encode()) <= private_chat.MAX_GALLERY_ENTRY_BYTES
+        assert original not in entry["sealed"] and edited not in entry["sealed"]
+        (root / "gallery" / TOKEN / f"{entry_id}.json").write_text(json.dumps(entry))
+    sizes = {len(json.loads((root / "gallery" / TOKEN / f"{i}.json").read_text())["sealed"]) for i, _, _ in records}
+    assert len(sizes) == 1, "an edit, a revert and a membership record look the same size to the server"
+
+    before = (root / "blobs" / TOKEN / original).read_bytes()
+    _restore(pc, _device_payload(root))
+    store = pc["root"]
+    for entry_id, at, _record in records:
+        here = json.loads((store / "gallery" / TOKEN / f"{entry_id}.json").read_text())
+        assert here == json.loads((root / "gallery" / TOKEN / f"{entry_id}.json").read_text()) and here["at"] == at
+    assert (store / "blobs" / TOKEN / edited).read_bytes() == (root / "blobs" / TOKEN / edited).read_bytes()
+    assert (store / "blobs" / TOKEN / original).read_bytes() == before
+    files = _open(pc["client"].get(EXPORT, headers=_as(B)).content)
+    assert f"blobs/{TOKEN}/{edited}" in files
+    for entry_id, _at, _record in records:
+        assert f"gallery/{TOKEN}/{entry_id}.json" in files

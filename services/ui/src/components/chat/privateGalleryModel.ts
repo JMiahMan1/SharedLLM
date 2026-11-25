@@ -5,9 +5,11 @@
 // directly. Nothing here is stored: it is rebuilt from what was decrypted, and
 // dropped on lock.
 import { mayAnimate } from '../../lib/animatedImage';
+import type { EditRecipe } from '../../lib/photoEdit/recipe';
 import {
   MAX_GALLERY_MARK_BLOBS,
   type AddedPicture,
+  type GalleryEdit,
   type GalleryMark,
   type GalleryStart,
   type PrivatePayload,
@@ -49,6 +51,31 @@ export interface GalleryItem {
   /** What the original file said, for an added picture. */
   details?: Pick<AddedPicture, 'path' | 'taken_from' | 'camera' | 'gps' | 'width' | 'height' | 'source' | 'size'>;
   sha256?: string;
+  /** The edit shown in place of the original (the newest edit record, unless it went back to the original). */
+  edit?: ShownEdit;
+}
+
+/** What a gallery picture shows when it has been edited: the edited blob (the original `blob` is kept as it is). */
+export interface ShownEdit {
+  /** The edit record. */
+  entryId: string;
+  blob: string;
+  mime: string;
+  width?: number;
+  height?: number;
+  animated?: boolean;
+  /** The recipe, when it is in the record; else `recipeBlob` names the encrypted blob it is in. */
+  recipe?: EditRecipe;
+  recipeBlob?: string;
+  /** Server time of the record (seconds). */
+  at: number;
+  own: boolean;
+  byName: string;
+}
+
+/** The picture a gallery item shows: the current edit, or the original. */
+export function shownPicture(item: Pick<GalleryItem, 'blob' | 'mime' | 'edit'>): { blob: string; mime: string } {
+  return item.edit ? { blob: item.edit.blob, mime: item.edit.mime } : { blob: item.blob, mime: item.mime };
 }
 
 /** A gallery entry from the server, opened. */
@@ -209,6 +236,11 @@ export function clampAspect(aspect: number): number {
 
 /** Width over height of a picture when it is known before decrypting (an added picture's details). */
 export function knownAspect(item: GalleryItem): number | undefined {
+  if (item.edit) {
+    const ew = Number(item.edit.width);
+    const eh = Number(item.edit.height);
+    return ew > 0 && eh > 0 ? clampAspect(ew / eh) : undefined;
+  }
   const w = Number(item.details?.width);
   const h = Number(item.details?.height);
   return w > 0 && h > 0 ? clampAspect(w / h) : undefined;
@@ -451,10 +483,18 @@ export function startCandidates(messages: TalkMessage[], opened: Record<string, 
 /** Every gallery record is padded to this many bytes before sealing, so the server sees one size for all of them. */
 export const GALLERY_RECORD_BYTES = 8192;
 
-/** A record padded (with `p`) to GALLERY_RECORD_BYTES of JSON. */
-export function padded<T extends GalleryMark | GalleryStart>(record: T): T & { p: string } {
-  const bare = JSON.stringify({ ...record, p: '' }).length;
-  return { ...record, p: ' '.repeat(Math.max(0, GALLERY_RECORD_BYTES - bare)) };
+/** UTF-8 bytes of a record's JSON with an empty pad: what sealing encrypts, before padding. */
+export function bareRecordBytes(record: object): number {
+  return new TextEncoder().encode(JSON.stringify({ ...record, p: '' })).length;
+}
+
+/**
+ * A record padded (with `p`) to GALLERY_RECORD_BYTES bytes of JSON. Counted
+ * in UTF-8 bytes, not characters, so a record with words in it (an edit's
+ * text overlay) seals to the same size as every other.
+ */
+export function padded<T extends GalleryMark | GalleryStart | GalleryEdit>(record: T): T & { p: string } {
+  return { ...record, p: ' '.repeat(Math.max(0, GALLERY_RECORD_BYTES - bareRecordBytes(record))) };
 }
 
 function chunks(blobs: string[]): string[][] {

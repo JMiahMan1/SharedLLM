@@ -10,3 +10,4 @@ export { ASPECTS, aspectRatio, fitCrop, type Frame } from './geometry';
 export { applyRecipe, outputSize, type EditFrame, type Limits } from './apply';
 export { decodePicture, PhotoEditError, MAX_FRAMES, MAX_TOTAL_PIXELS, STILL_LIMITS, type Decoded } from './decode';
 export { exportEdit, needsExport, type EditResult, type Progress } from './encode';
+export { editedFile, editedFileName } from './files';

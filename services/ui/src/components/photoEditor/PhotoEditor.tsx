@@ -482,7 +482,7 @@ export default function PhotoEditor({ source, initialRecipe, maxBytes, doneLabel
   // --- Page --------------------------------------------------------------------------
 
   const notice = decoded?.firstFrameOnly
-    ? 'This phone can only edit the first frame: the edited picture will be still. Send as is keeps it moving.'
+    ? `This phone can only edit the first frame: the edited picture will be still.${onAsIs ? ` ${asIsLabel} keeps it moving.` : ''}`
     : decoded?.animated
       ? `Animated: your edit goes on all ${decoded.frames.length} frames${decoded.droppedFrames ? ` (the first ${decoded.frames.length}; ${decoded.droppedFrames} more are left out)` : ''}, sent as a GIF.`
       : '';

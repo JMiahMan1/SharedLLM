@@ -252,3 +252,25 @@ export function parseRecipe(input: unknown): EditRecipe | null {
     overlays,
   };
 }
+
+/** Round to 4 decimals: a ten-thousandth of the picture is far below a pixel on any phone. */
+const round4 = (v: number) => Math.round(v * 10_000) / 10_000;
+
+/**
+ * The same recipe with every position rounded to four decimals, so it is
+ * as small as it can be when stored. Rounding changes nothing anyone could
+ * see; `parseRecipe` reads the result back as the same edit.
+ */
+export function compactRecipe(recipe: EditRecipe): EditRecipe {
+  const placed = <T extends PlacedOverlay>(o: T): T => ({ ...o, x: round4(o.x), y: round4(o.y), scale: round4(o.scale), rotation: round4(o.rotation) });
+  return {
+    ...recipe,
+    adjust: { ...recipe.adjust },
+    crop: recipe.crop ? { x: round4(recipe.crop.x), y: round4(recipe.crop.y), w: round4(recipe.crop.w), h: round4(recipe.crop.h) } : null,
+    overlays: recipe.overlays.map((o) =>
+      o.kind === 'drawing'
+        ? { ...o, strokes: o.strokes.map((s) => ({ ...s, width: round4(s.width), points: s.points.map(([x, y]) => [round4(x), round4(y)] as Point) })) }
+        : placed(o),
+    ),
+  };
+}

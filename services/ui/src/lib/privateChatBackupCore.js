@@ -603,7 +603,9 @@ async function readKeepsake(opened) {
     const entry = await readJson(files, path);
     if (!entry) continue;
     const payload = await openSealed(key, entry.sealed);
-    if (payload && typeof payload.blob === 'string') pictures.push({ id: String(entry.id), by: String(entry.by || ''), at: whole(entry.at), payload });
+    // Pictures added to the gallery. Membership and edit records are not pictures of their own
+    // (an edit's picture is a version of one already listed; its original is kept as it is).
+    if (payload && typeof payload.blob === 'string' && payload.t !== 'gallery_edit') pictures.push({ id: String(entry.id), by: String(entry.by || ''), at: whole(entry.at), payload });
   }
   pictures.sort((a, b) => a.at - b.at);
 

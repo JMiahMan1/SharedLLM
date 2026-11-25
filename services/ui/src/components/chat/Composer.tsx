@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BarChart3,
   Camera,
@@ -23,6 +24,8 @@ import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { blobToBase64 } from '../../lib/base64';
 import type { SendAs } from './sendAsPref';
 import { isImeKey } from '../../lib/keyboard';
+import { usePhotoEditGate } from '../photoEditor/usePhotoEditGate';
+import { editedFile } from '../../lib/photoEdit/files';
 
 interface VoicePayload {
   audio_base64: string;
@@ -50,6 +53,8 @@ interface ComposerProps {
   staged: File[];
   onStage: (files: File[]) => void;
   onUnstage: (index: number) => void;
+  /** Put an edited picture in place of the staged one (the photo editor's result). */
+  onReplaceStaged?: (index: number, file: File) => void;
   onSendFiles: (caption: string) => Promise<boolean>;
   sendingFiles: boolean;
   onNewPoll: () => void;
@@ -104,6 +109,7 @@ export default function Composer({
   staged,
   onStage,
   onUnstage,
+  onReplaceStaged,
   onSendFiles,
   sendingFiles,
   onNewPoll,
@@ -253,6 +259,34 @@ export default function Composer({
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
+  // The photo editor, on the phone only: a picture is edited before it is attached, and only the
+  // edited picture is sent (family chats are not end-to-end encrypted, so no recipe is kept anywhere).
+  const editGate = usePhotoEditGate({ maxBytes: MAX_ATTACHMENT_BYTES, doneLabel: 'Done', asIsLabel: 'Use as is' });
+
+  /** Edit a staged picture; the edited one takes its place in the tray. */
+  const editStaged = async (index: number) => {
+    const file = staged[index];
+    if (!file || !onReplaceStaged) return;
+    const choice = await editGate.ask(file);
+    if (choice?.kind === 'edited' && choice.result.blob !== file) onReplaceStaged(index, editedFile(choice.result, file.name));
+  };
+
+  /**
+   * A picture from the photo picker or the camera opens the editor first
+   * (Done, or Use as is; closing it attaches nothing). Several at once, and
+   * anything else, go straight to the tray, where each picture has Edit.
+   */
+  const stagePicked = async (list: File[]) => {
+    const only = list.length === 1 ? list[0] : null;
+    if (!only || !editable(only) || only.size > MAX_ATTACHMENT_BYTES) {
+      stage(list);
+      return;
+    }
+    const choice = await editGate.ask(only);
+    if (!choice) return;
+    stage([choice.kind === 'edited' && choice.result.blob !== only ? editedFile(choice.result, only.name) : only]);
+  };
+
   const stage = (files: FileList | File[] | null) => {
     const list = Array.from(files || []);
     const tooBig = list.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
@@ -316,8 +350,9 @@ export default function Composer({
         }
       }}
     >
-      <input ref={photoRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => { stage(e.target.files); e.target.value = ''; }} />
-      <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { stage(e.target.files); e.target.value = ''; }} />
+      <input ref={photoRef} type="file" accept="image/*,video/*" multiple hidden data-testid="composer-photo-input" onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; void stagePicked(files); }} />
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden data-testid="composer-camera-input" onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; void stagePicked(files); }} />
+      {editGate.element && createPortal(editGate.element, document.body)}
       <input ref={fileRef} type="file" multiple hidden aria-label="Attach files" onChange={(e) => { stage(e.target.files); e.target.value = ''; }} />
 
       {editing && (
@@ -353,7 +388,12 @@ export default function Composer({
       {staged.length > 0 && (
         <div className="mb-2 flex gap-2 overflow-x-auto pb-1" data-testid="attachment-tray">
           {staged.map((file, index) => (
-            <StagedFile key={`${file.name}-${index}`} file={file} onRemove={() => onUnstage(index)} />
+            <StagedFile
+              key={`${file.name}-${file.lastModified}-${index}`}
+              file={file}
+              onRemove={() => onUnstage(index)}
+              onEdit={onReplaceStaged && editable(file) ? () => void editStaged(index) : undefined}
+            />
           ))}
         </div>
       )}
@@ -563,7 +603,12 @@ function MenuItem({ icon, label, onSelect, close }: { icon: ReactNode; label: st
   );
 }
 
-function StagedFile({ file, onRemove }: { file: File; onRemove: () => void }) {
+/** Pictures the photo editor can open (not a vector drawing, a HEIC the phone may not read, or anything else). */
+function editable(file: File): boolean {
+  return ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type);
+}
+
+function StagedFile({ file, onRemove, onEdit }: { file: File; onRemove: () => void; onEdit?: () => void }) {
   const isImage = file.type.startsWith('image/');
   const url = useMemo(() => (isImage ? URL.createObjectURL(file) : null), [file, isImage]);
   useEffect(() => () => {
@@ -572,7 +617,7 @@ function StagedFile({ file, onRemove }: { file: File; onRemove: () => void }) {
   return (
     <div className="relative shrink-0">
       {url ? (
-        <img src={url} alt={file.name} className="h-20 w-20 rounded-xl object-cover" />
+        <img src={url} alt={file.name} className="h-20 w-20 rounded-xl object-cover pointer-coarse:h-24 pointer-coarse:w-24" />
       ) : (
         <div className="flex h-20 w-40 flex-col justify-center rounded-xl bg-white/10 px-3">
           <FileText size={16} className="text-slate-300" />
@@ -580,13 +625,27 @@ function StagedFile({ file, onRemove }: { file: File; onRemove: () => void }) {
           <span className="text-[10px] text-slate-400">{formatBytes(file.size)}</span>
         </div>
       )}
+      {onEdit && (
+        <button
+          type="button"
+          aria-label={`Edit ${file.name}`}
+          onClick={onEdit}
+          data-testid="staged-edit"
+          className="absolute bottom-1 left-1 flex min-h-8 items-center gap-1 rounded-full bg-black/65 px-2 text-[11px] font-semibold text-white shadow pointer-coarse:min-h-11"
+        >
+          <Pencil size={11} aria-hidden /> Edit
+        </button>
+      )}
       <button
         type="button"
         aria-label={`Remove ${file.name}`}
         onClick={onRemove}
-        className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-slate-800 text-slate-200 shadow"
+        className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center pointer-coarse:right-0 pointer-coarse:top-0 pointer-coarse:h-11 pointer-coarse:w-11 pointer-coarse:items-start pointer-coarse:justify-end pointer-coarse:p-1"
       >
-        <X size={12} />
+        {/* A small round badge to look at; on a touch screen the button around it is a full 44px target. */}
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-800 text-slate-200 shadow" aria-hidden>
+          <X size={12} />
+        </span>
       </button>
     </div>
   );

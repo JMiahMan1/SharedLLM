@@ -64,6 +64,9 @@ import PrivateMessageSheet, { ReactionRow } from './PrivateMessageSheet';
 import ReactionBurst from './ReactionBurst';
 import { isImeKey } from '../../lib/keyboard';
 import { reminderText, replyFlag } from '../../lib/privateChatReminders';
+import { usePhotoEditGate } from '../photoEditor/usePhotoEditGate';
+import { editedFileName } from '../../lib/photoEdit/files';
+import { deleteGalleryEdits } from './useGalleryEdits';
 
 interface PrivateChatThreadProps {
   conversation: TalkConversation;
@@ -475,6 +478,10 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   const galleryEntries = useGalleryEntries(token, vault);
   const membership = useMembership(messages, opened, galleryEntries.opened);
   const refetchGallery = galleryEntries.query.refetch;
+  // The photo editor between choosing a picture on the phone and sending it (Edit, or Send as is),
+  // and for a picture already in the chat (a keyboard GIF, say): edit it and send the edited copy.
+  const pickGate = usePhotoEditGate({ maxBytes: MAX_ATTACHMENT_BYTES });
+  const resendGate = usePhotoEditGate({ maxBytes: MAX_ATTACHMENT_BYTES, offerAsIs: false });
   const changeGallery = async (op: 'add' | 'remove', blobs: string[]): Promise<boolean> => {
     if (!blobs.length) return false;
     try {
@@ -870,8 +877,13 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
     }
   };
 
-  /** A photo or a video from the picker, a paste or a drop. Anything else is refused. */
-  const sendPicture = async (file: File) => {
+  /**
+   * A photo or a video from the picker, a paste or a drop. Anything else is
+   * refused. A photo chosen in the picker (`edit`) opens the editor first:
+   * Edit, or Send as is; closing it sends nothing. A pasted or dropped one
+   * (a keyboard GIF) is sent as it is, and can be edited from its viewer.
+   */
+  const sendPicture = async (file: File, edit = false) => {
     if (isVideoFile(file)) {
       await sendPickedVideo(file);
       return;
@@ -884,9 +896,21 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       toast.error('Pictures are limited to 25 MB');
       return;
     }
+    let picture: Blob = file;
+    let mime = file.type;
+    let name = file.name;
+    if (edit) {
+      const choice = await pickGate.ask(file);
+      if (!choice) return;
+      if (choice.kind === 'edited' && choice.result.blob !== file) {
+        picture = choice.result.blob;
+        mime = choice.result.mime;
+        name = editedFileName(file.name, mime);
+      }
+    }
     setSending(true);
     try {
-      await sendImageBytes(new Uint8Array(await file.arrayBuffer()), file.type, file.name);
+      await sendImageBytes(new Uint8Array(await picture.arrayBuffer()), mime, name);
     } catch (error) {
       toast.error(errorText(error, 'Could not send the picture'));
     } finally {
@@ -909,12 +933,39 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       const res = await api.deletePrivateMessage(token, messageId);
       if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Could not delete the message');
       for (const blob of blobs) await api.deletePrivateBlob(token, blob).catch(() => {});
+      // A picture's gallery edits go with it.
+      if (blobs.length) {
+        await deleteGalleryEdits(token, galleryEntries.opened, blobs);
+        void refetchGallery();
+      }
       if (editing?.id === messageId) cancelEdit();
       onChanged();
       // Its edit and reactions went with it on the server.
       void refetchMarks();
     } catch (error) {
       toast.error(errorText(error, 'Could not delete the message'));
+    }
+  };
+
+  /** Edit a picture in the chat (from its viewer) and send the edited copy as a new picture; the first one stays as it was. */
+  const editAndSend = async (target: { url: string; name: string; mime: string }) => {
+    let source: Blob;
+    try {
+      const fetched = await fetch(target.url);
+      source = new Blob([await fetched.arrayBuffer()], { type: target.mime });
+    } catch {
+      toast.error('Could not open the picture');
+      return;
+    }
+    const choice = await resendGate.ask(source);
+    if (choice?.kind !== 'edited' || choice.result.blob === source) return;
+    setSending(true);
+    try {
+      await sendImageBytes(new Uint8Array(await choice.result.blob.arrayBuffer()), choice.result.mime, editedFileName(target.name, choice.result.mime));
+    } catch (error) {
+      toast.error(errorText(error, 'Could not send the picture'));
+    } finally {
+      setSending(false);
     }
   };
 
@@ -1310,7 +1361,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
             pickerDone(token);
             const file = event.target.files?.[0];
             event.target.value = '';
-            if (file) void sendPicture(file);
+            if (file) void sendPicture(file, true);
           }}
         />
         <button
@@ -1395,6 +1446,8 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
         />
       )}
       {beloved && belovedAllowed && <BelovedPage token={token} vault={vault} onClose={() => setBeloved(false)} onAddToHome={onAddBelovedToHome} />}
+      {pickGate.element}
+      {resendGate.element}
       {camera === 'photo' && (
         <PrivateCamera
           onClose={() => setCamera(null)}
@@ -1491,6 +1544,11 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
             typeof viewing.message.id === 'number' && viewing.blob ? (
               <MediaActions
                 kind="photo"
+                onEdit={() => {
+                  const target = { url: viewing.url, name: viewing.name, mime: viewing.mime };
+                  setViewing(null);
+                  void editAndSend(target);
+                }}
                 inGallery={membership.members.has(viewing.blob)}
                 onGallery={() => void changeGallery(membership.members.has(viewing.blob as string) ? 'remove' : 'add', [viewing.blob as string])}
                 onReply={() => {
@@ -1675,12 +1733,15 @@ function MediaActions({
   onGallery,
   onReply,
   onPick,
+  onEdit,
 }: {
   kind: 'photo' | 'video';
   inGallery: boolean;
   onGallery: () => void;
   onReply: () => void;
   onPick: () => void;
+  /** Edit the picture and send the edited copy (photos only). */
+  onEdit?: () => void;
 }) {
   const chip = 'flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold shadow-lg shadow-black/40';
   return (
@@ -1702,6 +1763,17 @@ function MediaActions({
       <button type="button" onClick={onPick} data-testid="private-media-pick" className={`${chip} border-white/15 bg-slate-800/95 text-white`}>
         <CheckSquare size={14} aria-hidden /> Pick several
       </button>
+      {onEdit && (
+        <button
+          type="button"
+          onClick={onEdit}
+          aria-label={`Edit this ${kind} and send the edited copy`}
+          data-testid="private-media-edit"
+          className={`${chip} border-white/15 bg-slate-800/95 text-white`}
+        >
+          <Pencil size={14} aria-hidden /> Edit
+        </button>
+      )}
     </div>
   );
 }
