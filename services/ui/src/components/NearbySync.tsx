@@ -27,7 +27,9 @@ export default function NearbySync() {
           // the defaults. Updating to the build with the new settings turned a parent's Find
           // family nearby off this way (2026-11-25).
           const device = await Nearby.getState();
-          await api.setNearbySettings({ nearby: device.nearby, chat: device.chat, offline: device.offline, car: device.car });
+          await api.setNearbySettings({
+            nearby: device.nearby, chat: device.chat, offline: device.offline, car: device.car, mine: device.mine === true,
+          });
           return;
         }
         const device = await Nearby.apply({ ...state.settings, ask: false });

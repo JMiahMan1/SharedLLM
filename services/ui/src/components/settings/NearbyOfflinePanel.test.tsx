@@ -20,16 +20,16 @@ vi.mock('../wander/OfflineModePanel', () => ({ default: () => <div data-testid="
 import NearbyOfflinePanel from './NearbyOfflinePanel';
 
 const device: NearbyDeviceState = {
-  nearby: false, chat: false, offline: false, car: true, parentLink: false,
+  nearby: false, chat: false, offline: false, car: true, mine: false, parentLink: false,
   scanPermission: true, advertisePermission: true, connectPermission: true, bluetoothOn: true,
   host: 'none', apiLevel: 36,
 };
 const adult: NearbySettingsState = {
-  username: 'casey', settings: { nearby: false, chat: false, offline: false, car: true },
+  username: 'casey', settings: { nearby: false, chat: false, offline: false, car: true, mine: false },
   managed_by_parent: false, chosen: true, can_change: true, always_on: [],
 };
 const child: NearbySettingsState = {
-  username: 'robin', settings: { nearby: true, chat: false, offline: true, car: true },
+  username: 'robin', settings: { nearby: true, chat: false, offline: true, car: true, mine: false },
   managed_by_parent: true, chosen: true, can_change: false, always_on: ['parent_link'],
 };
 
@@ -66,7 +66,7 @@ describe('NearbyOfflinePanel', () => {
     draw();
     await userEvent.click(await screen.findByRole('switch', { name: 'Offline family chat' }));
     expect(api.setNearbySettings).toHaveBeenCalledWith({ chat: true });
-    expect(nearby.apply).toHaveBeenCalledWith({ nearby: false, chat: true, offline: false, car: true, ask: true });
+    expect(nearby.apply).toHaveBeenCalledWith({ nearby: false, chat: true, offline: false, car: true, mine: false, ask: true });
     expect(await screen.findByTestId('nearby-device-line')).toHaveTextContent('location sharing is off');
   });
 

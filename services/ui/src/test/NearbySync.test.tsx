@@ -28,14 +28,14 @@ describe('NearbySync', () => {
   it('keeps and saves what the phone already runs when nothing is saved yet', async () => {
     state.server = { username: 'casey', settings: { nearby: false, chat: false, offline: false, car: true }, chosen: false };
     render(<NearbySync />);
-    await waitFor(() => expect(api.setNearbySettings).toHaveBeenCalledWith({ nearby: true, chat: true, offline: false, car: true }));
+    await waitFor(() => expect(api.setNearbySettings).toHaveBeenCalledWith({ nearby: true, chat: true, offline: false, car: true, mine: false }));
     expect(plugin.apply).not.toHaveBeenCalled();
   });
 
   it('applies a saved choice to the phone', async () => {
     state.server = { username: 'casey', settings: { nearby: false, chat: true, offline: false, car: true }, chosen: true };
     render(<NearbySync />);
-    await waitFor(() => expect(plugin.apply).toHaveBeenCalledWith({ nearby: false, chat: true, offline: false, car: true, ask: false }));
+    await waitFor(() => expect(plugin.apply).toHaveBeenCalledWith({ nearby: false, chat: true, offline: false, car: true, mine: false, ask: false }));
     expect(api.setNearbySettings).not.toHaveBeenCalled();
   });
 

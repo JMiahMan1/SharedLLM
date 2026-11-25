@@ -21,6 +21,7 @@ final class NearbyParts {
     static final String PREFS = "jarvis_nearby_parts";
     private static final String KEY_OFFLINE = "offline";
     private static final String KEY_CAR = "car";
+    private static final String KEY_MINE = "mine";
 
     private NearbyParts() {}
 
@@ -41,13 +42,15 @@ final class NearbyParts {
                 chat,
                 NearbyRules.migratedOffline(p.getBoolean(KEY_OFFLINE, false), p.contains(KEY_OFFLINE), chat),
                 p.getBoolean(KEY_CAR, true),
+                p.getBoolean(KEY_MINE, false),
                 child(c));
     }
 
     static void save(Context c, NearbyRules.Parts parts) {
         Proximity.setEnabled(c, parts.nearby);
         FamilyMesh.setEnabled(c, parts.chat);
-        prefs(c).edit().putBoolean(KEY_OFFLINE, parts.offline).putBoolean(KEY_CAR, parts.car).apply();
+        prefs(c).edit().putBoolean(KEY_OFFLINE, parts.offline).putBoolean(KEY_CAR, parts.car)
+                .putBoolean(KEY_MINE, parts.mine).apply();
     }
 
     /** Signed out: the next person starts from the defaults (car detection on, the rest off). */
@@ -56,6 +59,7 @@ final class NearbyParts {
         Proximity.setEnabled(c, false);
         FamilyMesh.setEnabled(c, false);
         prefs(c).edit().clear().putBoolean(KEY_OFFLINE, false).apply();
+        OwnSync.reset(c);
         ensure(c);
     }
 
@@ -79,6 +83,11 @@ final class NearbyParts {
         return parts(c).car;
     }
 
+    /** My devices: this person's own devices keep their data in step (OwnSync). */
+    static boolean mine(Context c) {
+        return parts(c).mine;
+    }
+
     /**
      * What the server says (a child's status from the guard, or Settings read by
      * the app): saved, then the engine is started or stopped to match.
@@ -89,7 +98,7 @@ final class NearbyParts {
         NearbyRules.Parts before = parts(c);
         NearbyRules.Parts after = NearbyRules.merge(before, server, child(c));
         if (after.nearby == before.nearby && after.chat == before.chat && after.offline == before.offline
-                && after.car == before.car) {
+                && after.car == before.car && after.mine == before.mine) {
             return;
         }
         save(c, after);

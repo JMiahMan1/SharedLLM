@@ -22,6 +22,8 @@ export interface FakeAndroidState {
   nearby?: Record<string, unknown>;
   /** Offline mode: cached items, queued requests, parent commands, diagnostics. */
   offline?: { cache?: unknown[]; requests?: unknown[]; commands?: unknown[]; diag?: Record<string, unknown>; peerNearby?: boolean };
+  /** My devices (JarvisOwnSync): the person's own data as this phone holds it, and the diagnostics. */
+  own?: { state?: Record<string, unknown>; diag?: Record<string, unknown> };
 }
 
 const PLUGINS: Record<string, string[]> = {
@@ -30,11 +32,12 @@ const PLUGINS: Record<string, string[]> = {
   JarvisFamilyMesh: ['getDiagnostics', 'enable', 'disable', 'rooms', 'refreshRooms', 'send', 'list', 'removeListener'],
   JarvisOfflineMode: ['queue', 'requests', 'cache', 'sendCommand', 'commands', 'getDiagnostics'],
   JarvisNearby: ['getState', 'apply', 'requestPermissions'],
+  JarvisOwnSync: ['state', 'getDiagnostics', 'noteWatch'],
 };
 
 /** A phone with every permission and nothing on yet but car detection. */
 export const NEARBY_DEVICE = {
-  nearby: false, chat: false, offline: false, car: true, parentLink: false,
+  nearby: false, chat: false, offline: false, car: true, mine: false, parentLink: false,
   scanPermission: true, advertisePermission: true, connectPermission: true, bluetoothOn: true, host: 'none', apiLevel: 37,
 };
 
@@ -87,12 +90,18 @@ export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<
       if (plugin === 'JarvisNearby') {
         const n = { ...((s.nearby ?? {}) as Bag) };
         if (method === 'apply') {
-          for (const k of ['nearby', 'chat', 'offline', 'car']) if (typeof options[k] === 'boolean') n[k] = options[k];
-          const radio = Boolean(n.nearby || n.chat || n.offline || n.parentLink);
+          for (const k of ['nearby', 'chat', 'offline', 'car', 'mine']) if (typeof options[k] === 'boolean') n[k] = options[k];
+          const radio = Boolean(n.nearby || n.chat || n.offline || n.mine || n.parentLink);
           n.host = radio ? 'own' : 'none';
           s.nearby = n;
         }
         return n;
+      }
+      if (plugin === 'JarvisOwnSync') {
+        const own = (s.own ?? {}) as Bag & { state?: Bag; diag?: Bag };
+        if (method === 'state') return own.state ?? { enabled: false, devices: [] };
+        if (method === 'getDiagnostics') return own.diag ?? { enabled: false, turnedOn: false, peers: [] };
+        return {};
       }
       if (plugin === 'JarvisOfflineMode') {
         const o = (s.offline ?? {}) as Bag & { requests?: Bag[]; commands?: Bag[] };
@@ -141,14 +150,14 @@ export async function mockNearbySettings(
   opts: { minor?: boolean; others?: Record<string, Record<string, boolean>> } = {},
 ): Promise<void> {
   const store: Record<string, Record<string, boolean>> = {
-    me: { nearby: false, chat: false, offline: false, car: true, ...mine },
-    ...Object.fromEntries(Object.entries(opts.others ?? {}).map(([u, s]) => [u, { nearby: false, chat: false, offline: false, car: true, ...s }])),
+    me: { nearby: false, chat: false, offline: false, car: true, mine: false, ...mine },
+    ...Object.fromEntries(Object.entries(opts.others ?? {}).map(([u, s]) => [u, { nearby: false, chat: false, offline: false, car: true, mine: false, ...s }])),
   };
   await page.route(/\/api\/users\/[^/]+\/nearby-settings$/, async (route) => {
     const who = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3]);
     const self = who === 'me';
     const minor = self ? Boolean(opts.minor) : true;
-    const saved = (store[who] ??= { nearby: false, chat: false, offline: false, car: true });
+    const saved = (store[who] ??= { nearby: false, chat: false, offline: false, car: true, mine: false });
     if (route.request().method() === 'PUT') {
       if (self && minor) return route.fulfill({ status: 403, json: { detail: 'A parent manages these on a child\'s phone' } });
       Object.assign(saved, (route.request().postDataJSON() as { settings?: Record<string, boolean> }).settings ?? {});

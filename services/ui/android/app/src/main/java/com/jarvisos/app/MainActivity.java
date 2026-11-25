@@ -58,6 +58,7 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(NearbyPlugin.class);
         registerPlugin(FamilyMeshPlugin.class);
         registerPlugin(OfflineModePlugin.class);
+        registerPlugin(OwnSyncPlugin.class);
         registerPlugin(SaveFilePlugin.class);
         registerPlugin(SecureWindowPlugin.class);
         registerPlugin(DeviceUnlockPlugin.class);

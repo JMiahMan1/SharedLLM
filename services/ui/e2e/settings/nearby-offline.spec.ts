@@ -46,7 +46,7 @@ test('a grown member switches a part on: saved, applied on the phone, asked for 
   const { errors } = await open(page, 'admin', '/settings#nearby-offline');
   const panel = page.getByTestId('nearby-offline-panel');
   await panel.scrollIntoViewIfNeeded();
-  for (const name of ['Find family nearby', 'Offline family chat', 'Offline mode', 'Car detection']) {
+  for (const name of ['Find family nearby', 'Offline family chat', 'Offline mode', 'Car detection', 'My devices']) {
     await expect(panel.getByRole('switch', { name })).toBeEnabled();
   }
   await expect(panel.getByRole('switch', { name: 'Car detection' })).toHaveAttribute('aria-checked', 'true');
@@ -57,7 +57,7 @@ test('a grown member switches a part on: saved, applied on the phone, asked for 
   expect((await saved).postDataJSON()).toEqual({ settings: { offline: true } });
   await expect(panel.getByRole('switch', { name: 'Offline mode' })).toHaveAttribute('aria-checked', 'true');
   await expect.poll(async () => (await calls(page)).filter((c) => c.method === 'apply').at(-1)?.options)
-    .toEqual({ nearby: false, chat: false, offline: true, car: true, ask: true });
+    .toEqual({ nearby: false, chat: false, offline: true, car: true, mine: false, ask: true });
   // Location sharing is off here: the engine runs on its own, with one quiet notification.
   await expect(page.getByTestId('nearby-device-line')).toContainText('location sharing is off');
   await expect(page.getByTestId('nearby-offline-mode')).toBeVisible();
@@ -73,7 +73,7 @@ test("a child sees the switches read-only, with the parent link always on", asyn
   const panel = page.getByTestId('nearby-offline-panel');
   await panel.scrollIntoViewIfNeeded();
   await expect(page.getByTestId('nearby-managed')).toContainText('A parent manages these');
-  for (const name of ['Find family nearby', 'Offline family chat', 'Offline mode', 'Car detection']) {
+  for (const name of ['Find family nearby', 'Offline family chat', 'Offline mode', 'Car detection', 'My devices']) {
     await expect(panel.getByRole('switch', { name })).toBeDisabled();
   }
   await expect(page.getByTestId('nearby-parent-link')).toContainText('lock, unlock or give more time');

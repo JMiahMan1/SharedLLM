@@ -3,7 +3,7 @@ import { NEARBY_DEFAULTS, deviceLine, nearbyState } from './nearbySettings';
 import type { NearbyDeviceState } from '../plugins/nearby';
 
 const device: NearbyDeviceState = {
-  nearby: true, chat: false, offline: false, car: true, parentLink: false,
+  nearby: true, chat: false, offline: false, car: true, mine: false, parentLink: false,
   scanPermission: true, advertisePermission: true, connectPermission: true, bluetoothOn: true,
   host: 'location', apiLevel: 36,
 };

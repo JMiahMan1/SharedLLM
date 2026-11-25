@@ -12,7 +12,9 @@ import java.util.List;
  *
  * The parts: {@code nearby} (Find family nearby), {@code chat} (offline family
  * chat), {@code offline} (offline mode: Voice Assistant requests and shared
- * information through nearby phones) and {@code car} (car detection). On a
+ * information through nearby phones), {@code car} (car detection) and
+ * {@code mine} (my devices: a person's own phone and tablet keep their data in
+ * step, see {@link OwnSyncRules}). On a
  * child's phone the parent link (a parent's offline lock, unlock and extra
  * time, and the Bluetooth-off reports) is always on, whatever the switches.
  */
@@ -21,7 +23,8 @@ final class NearbyRules {
     static final String CHAT = "chat";
     static final String OFFLINE = "offline";
     static final String CAR = "car";
-    static final String[] PARTS = {NEARBY, CHAT, OFFLINE, CAR};
+    static final String MINE = "mine";
+    static final String[] PARTS = {NEARBY, CHAT, OFFLINE, CAR, MINE};
 
     /** Who hosts the Bluetooth LE engine. */
     enum Host { NONE, LOCATION, OWN }
@@ -34,25 +37,32 @@ final class NearbyRules {
         final boolean chat;
         final boolean offline;
         final boolean car;
+        /** My devices: this person's own devices sync their data with each other. */
+        final boolean mine;
         /** A child's phone: the parent link is always on. */
         final boolean child;
 
         Parts(boolean nearby, boolean chat, boolean offline, boolean car, boolean child) {
+            this(nearby, chat, offline, car, false, child);
+        }
+
+        Parts(boolean nearby, boolean chat, boolean offline, boolean car, boolean mine, boolean child) {
             this.nearby = nearby;
             this.chat = chat;
             this.offline = offline;
             this.car = car;
+            this.mine = mine;
             this.child = child;
         }
 
         /** Advertise and scan (the radio every part but the car rides on). */
         boolean engine() {
-            return nearby || chat || offline || child;
+            return nearby || chat || offline || mine || child;
         }
 
-        /** The short phone-to-phone syncs (GATT): the chat, offline mode and the parent link. */
+        /** The short phone-to-phone syncs (GATT): the chat, offline mode, my devices and the parent link. */
         boolean mesh() {
-            return chat || offline || child;
+            return chat || offline || mine || child;
         }
 
         /** Record who was near and send it to Wander: only Find family nearby. */
@@ -68,7 +78,8 @@ final class NearbyRules {
         JSONObject toJson() {
             JSONObject o = new JSONObject();
             try {
-                o.put(NEARBY, nearby).put(CHAT, chat).put(OFFLINE, offline).put(CAR, car).put("parentLink", child);
+                o.put(NEARBY, nearby).put(CHAT, chat).put(OFFLINE, offline).put(CAR, car).put(MINE, mine)
+                        .put("parentLink", child);
             } catch (Exception ignored) {
                 // Plain values: org.json does not throw here.
             }
@@ -98,11 +109,11 @@ final class NearbyRules {
         List<String> out = new ArrayList<>();
         if (sdk < 31) return out;
         boolean newRadio = after.engine() && (!before.engine() || (after.nearby && !before.nearby)
-                || (after.chat && !before.chat) || (after.offline && !before.offline));
+                || (after.chat && !before.chat) || (after.offline && !before.offline) || (after.mine && !before.mine));
         if (newRadio && !scanGranted) out.add("scan");
         if (newRadio && !advertiseGranted) out.add("advertise");
         boolean newConnect = (after.mesh() && !before.mesh()) || (after.chat && !before.chat)
-                || (after.offline && !before.offline) || (after.car && !before.car);
+                || (after.offline && !before.offline) || (after.mine && !before.mine) || (after.car && !before.car);
         if (newConnect && !connectGranted) out.add("connect");
         return out;
     }
@@ -113,12 +124,13 @@ final class NearbyRules {
      * keeps the phone's own.
      */
     static Parts merge(Parts current, JSONObject server, boolean child) {
-        if (server == null) return new Parts(current.nearby, current.chat, current.offline, current.car, child);
+        if (server == null) return new Parts(current.nearby, current.chat, current.offline, current.car, current.mine, child);
         return new Parts(
                 bool(server, NEARBY, current.nearby),
                 bool(server, CHAT, current.chat),
                 bool(server, OFFLINE, current.offline),
                 bool(server, CAR, current.car),
+                bool(server, MINE, current.mine),
                 child);
     }
 

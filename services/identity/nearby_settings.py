@@ -8,6 +8,8 @@ The parts (PRs #210, #211, #212, #216):
 * ``offline``: offline mode (Voice Assistant requests through nearby phones,
   and the household's latest information shared between them).
 * ``car``: car detection (which linked car a trip was in).
+* ``mine``: my devices (a person's own phone and tablet keep their location,
+  steps, watch, chat rooms and offline data in step over Bluetooth).
 
 A grown member switches their own. A minor (``roles.MINOR_FAMILY_ROLES``)
 cannot: their parents set them (the same people who manage their screen
@@ -33,10 +35,10 @@ from services.identity import roles
 from services.identity.models import User, UserNearbySetting
 
 #: The switches, in the order the settings page shows them.
-PARTS = ("nearby", "chat", "offline", "car")
+PARTS = ("nearby", "chat", "offline", "car", "mine")
 #: What a person gets before choosing: car detection was always on once a car
 #: was linked (PR #210), the rest were off until turned on.
-DEFAULTS = {"nearby": False, "chat": False, "offline": False, "car": True}
+DEFAULTS = {"nearby": False, "chat": False, "offline": False, "car": True, "mine": False}
 #: Always on for a minor, not a switch: a parent's offline commands and the
 #: Bluetooth-off reports (PR #216).
 MINOR_ALWAYS_ON = ("parent_link",)
