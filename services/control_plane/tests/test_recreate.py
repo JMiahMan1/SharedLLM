@@ -502,3 +502,71 @@ def test_the_snapshot_is_json_for_the_self_update_helper(daemon):
     snap = recreate.snapshot_container(old)
     assert json.loads(json.dumps(snap))["name"] == "sharedllm_identity"
     assert snap["image_id"] == OLD_IMAGE
+
+
+# --- the swap must never leave a service stopped ---------------------------
+#
+# Incident 2026-11-25: the gateway's rename raised a Docker connection error
+# ("Bad file descriptor") right after the old container had been stopped. That
+# call was outside the rollback, so the gateway stayed stopped (Docker does not
+# restart a container that was stopped on purpose) until it was started by hand.
+
+class DaemonConnectionLost(OSError):
+    """What urllib3 raises when the pooled Docker socket is already closed."""
+
+    def __init__(self):
+        super().__init__(9, "Bad file descriptor")
+
+
+def test_a_connection_error_renaming_the_old_container_leaves_it_running(daemon):
+    old = _add_old(daemon, name="sharedllm_gateway", service="gateway", network_mode="host")
+    old.rename = lambda name: (_ for _ in ()).throw(DaemonConnectionLost())
+    notices = []
+    with pytest.raises(recreate.RecreateFailed):
+        recreate.recreate_container(Client(daemon), old, NEW_IMAGE, notify=notices.append, sleep=lambda s: None)
+    assert old.attrs["State"]["Status"] == "running"
+    assert _current(daemon, "sharedllm_gateway") is old
+    assert daemon.events[-1] == ("start", "sharedllm_gateway")
+    assert len(notices) == 1
+
+
+def test_a_connection_error_creating_the_replacement_restores_and_starts_the_old_one(daemon):
+    old = _add_old(daemon, name="sharedllm_gateway", service="gateway", network_mode="host")
+
+    def broken_create(body, name=None):
+        raise DaemonConnectionLost()
+
+    daemon.api.create_container_from_config = broken_create
+    with pytest.raises(recreate.RecreateFailed):
+        _run(daemon, old)
+    assert old.name == "sharedllm_gateway"
+    assert old.attrs["State"]["Status"] == "running"
+    backup = next(e[2] for e in daemon.events if e[0] == "rename" and len(e) == 3)
+    assert backup.startswith("sharedllm_gateway_backup_")
+    assert ("rename", backup, "sharedllm_gateway") in daemon.events
+    assert daemon.events[-1] == ("start", "sharedllm_gateway")
+
+
+def test_a_stop_that_breaks_the_connection_does_not_restart_a_running_container(daemon):
+    old = _add_old(daemon, name="sharedllm_gateway", service="gateway", network_mode="host")
+    old.stop = lambda timeout=10: (_ for _ in ()).throw(DaemonConnectionLost())
+    with pytest.raises(recreate.RecreateFailed):
+        _run(daemon, old)
+    # It never stopped, so it is already serving; no second start is needed.
+    assert old.attrs["State"]["Status"] == "running"
+    assert ("start", "sharedllm_gateway") not in daemon.events
+
+
+def test_a_restored_container_is_put_back_on_the_network_it_was_released_from(daemon):
+    old = _add_old(daemon, name="sharedllm_identity", service="identity",
+                   network_mode="sharedllm_default", static_ip="172.26.0.9")
+
+    def broken_create(body, name=None):
+        raise DaemonConnectionLost()
+
+    daemon.api.create_container_from_config = broken_create
+    with pytest.raises(recreate.RecreateFailed):
+        _run(daemon, old)
+    assert old.attrs["State"]["Status"] == "running"
+    assert "sharedllm_default" in old.attrs["NetworkSettings"]["Networks"]
+    assert ("connect", "sharedllm_identity", "sharedllm_default") in daemon.events
