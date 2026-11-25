@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import PasswordField from '../ui/PasswordField';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Camera, Heart, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, Pencil, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { BellRing, Camera, Heart, Check, CheckCheck, CheckSquare, Fingerprint, ImageMinus, ImagePlus, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, Pencil, Reply, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
-import { IMAGE_TYPES, PrivateVault, VIDEO_CHUNK_BYTES, VIDEO_TYPES, isSealedMessage, type PrivatePayload, type VideoPayload } from '../../lib/privateChatCrypto';
+import { IMAGE_TYPES, PrivateVault, VIDEO_CHUNK_BYTES, VIDEO_TYPES, isSealedMessage, type PrivatePayload, type Quote, type VideoPayload } from '../../lib/privateChatCrypto';
 import { isVideoFile, readClip, videoMimeOf, videoProblem } from '../../lib/privateVideoMedia';
 import { chatLeft, chatShown, lockNow, pickerDone, pickerOpening, vaultFor } from '../../lib/privateChatSession';
 import { sha256Hex } from '../../lib/galleryImport';
@@ -22,6 +22,8 @@ import PrivateCamera from './PrivateCamera';
 import PrivateVideoRecorder from './PrivateVideoRecorder';
 import { PrivateVideoBubble, PrivateVideoPlayer } from './PrivateVideo';
 import PrivateGallery from './PrivateGallery';
+import { commandOf, galleryCommand } from './privateGalleryModel';
+import { recordMembership, useGalleryEntries, useMembership } from './useGalleryMembership';
 import BelovedPage from './beloved/BelovedPage';
 import { Lily } from './beloved/BelovedArt';
 import { useLoveIndicator } from './beloved/useLoveIndicator';
@@ -388,6 +390,9 @@ interface UnlockedChatProps {
   onAddBelovedToHome?: () => void;
 }
 
+/** How long a picture is held to start picking pictures for the gallery. */
+const HOLD_MS = 450;
+
 /** The first web address in a message being written, or null. */
 function firstLink(text: string): string | null {
   const part = splitLinks(text).find((p) => p.kind === 'link');
@@ -431,11 +436,16 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
   const [nudgeSent, setNudgeSent] = useState(false);
   const { trigger } = useHaptics();
   const [selected, setSelected] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<{ url: string; name: string; mediaKey: string; mime: string; message: TalkMessage; own: boolean } | null>(null);
+  const [viewing, setViewing] = useState<{ url: string; name: string; mediaKey: string; mime: string; message: TalkMessage; own: boolean; blob?: string } | null>(null);
   const [watching, setWatching] = useState<{ video: VideoPayload; message: TalkMessage; own: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // A picture or clip being answered: the reply names it inside the encryption (never a plaintext reply_to).
+  const [replying, setReplying] = useState<(Quote & { video: boolean }) | null>(null);
+  // Picking pictures and clips in the thread to add to the gallery together (by blob; a clip by its poster).
+  const [picking, setPicking] = useState<string[] | null>(null);
+  const [addingPicked, setAddingPicked] = useState(false);
   // A message of mine being edited: the composer holds its text until saved or cancelled.
   const [editing, setEditing] = useState<{ id: number; original: string } | null>(null);
   const pageVisible = usePageVisible();
@@ -460,6 +470,53 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
       live = false;
     };
   }, [marksQuery.data, vault]);
+
+  // What of the chat is in the gallery: worked out here from sealed records, the same way on both phones.
+  const galleryEntries = useGalleryEntries(token, vault);
+  const membership = useMembership(messages, opened, galleryEntries.opened);
+  const refetchGallery = galleryEntries.query.refetch;
+  const changeGallery = async (op: 'add' | 'remove', blobs: string[]): Promise<boolean> => {
+    if (!blobs.length) return false;
+    try {
+      await recordMembership(token, vault, op, blobs);
+      await refetchGallery();
+      const what = blobs.length === 1 ? 'it' : `${blobs.length}`;
+      toast.success(op === 'add' ? (blobs.length === 1 ? 'Added to the gallery' : `Added ${what} to the gallery`) : 'Removed from the gallery. It is still in the chat.');
+      return true;
+    } catch (error) {
+      toast.error(errorText(error, op === 'add' ? 'Could not add it to the gallery' : 'Could not remove it from the gallery'));
+      return false;
+    }
+  };
+  const togglePicked = (blob: string) =>
+    setPicking((current) => (current ? (current.includes(blob) ? current.filter((b) => b !== blob) : [...current, blob]) : [blob]));
+  const addPicked = async () => {
+    if (!picking?.length) return;
+    setAddingPicked(true);
+    const ok = await changeGallery('add', picking);
+    setAddingPicked(false);
+    if (ok) setPicking(null);
+  };
+  // Holding a picture or clip starts picking (the click that ends the hold is swallowed).
+  const holdTimer = useRef<number | undefined>(undefined);
+  const held = useRef(false);
+  useEffect(() => () => window.clearTimeout(holdTimer.current), []);
+  const startHold = (blob: string) => {
+    held.current = false;
+    window.clearTimeout(holdTimer.current);
+    if (picking) return;
+    holdTimer.current = window.setTimeout(() => {
+      held.current = true;
+      trigger('light');
+      setPicking([blob]);
+    }, HOLD_MS);
+  };
+  const endHold = () => window.clearTimeout(holdTimer.current);
+  const startReply = (quote: Quote & { video: boolean }) => {
+    setEditing(null);
+    setReplying(quote);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  };
 
   // Only what was said in the chat: a picture added straight to the gallery is never part of the thread.
   const visible = threadMessages(messages, opened);
@@ -689,16 +746,21 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
     if (!body || sending) return;
     // Only a preview that is ready goes: a slow one is not waited for, and the message goes without it.
     const preview = draft?.status === 'ready' && body.includes(draft.url) ? draft.preview : undefined;
+    const quote = replying ? { quote: { m: replying.m, blob: replying.blob } } : {};
     setSending(true);
     try {
       try {
-        await post({ t: 'text', text: body, ...(preview ? { preview } : {}) });
+        await post({ t: 'text', text: body, ...(preview ? { preview } : {}), ...quote });
       } catch (error) {
         // A server from before previews refuses a message this size: send the words alone.
         if (!preview || !tooLarge(error)) throw error;
-        await post({ t: 'text', text: body });
+        await post({ t: 'text', text: body, ...quote });
         toast.error('Sent without the link preview: the server refused a message that size.');
       }
+      // "Save to gallery" answering a picture is itself the sealed record: both phones read it the same way.
+      const command = replying ? galleryCommand(body) : null;
+      if (command) toast.success(command === 'add' ? 'Saved to the gallery' : 'Removed from the gallery. It is still in the chat.');
+      setReplying(null);
       setText('');
       setPreviewDropped(new Set());
       onChanged();
@@ -1014,8 +1076,15 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
           const edit = textual ? mark?.edit : undefined;
           const chips = reactionChips(mark?.reactions ?? []);
           // A text bubble (either parent's) opens the message sheet; a picture opens the viewer and a comment the gallery.
-          const selectable = textual && messageId !== null;
+          const selectable = textual && messageId !== null && picking === null;
           const bursting = playing !== null && messageId !== null && playing.messageId === messageId;
+          // A picture or clip: held, it starts picking for the gallery; while picking, a tap picks it.
+          const mediaBlob = payload && payload !== 'unreadable' ? (payload.t === 'image' ? payload.blob : payload.t === 'video' ? payload.poster : null) : null;
+          const picked = mediaBlob !== null && (picking?.includes(mediaBlob) ?? false);
+          const quote = textual && payload.t === 'text' ? payload.quote : undefined;
+          const quoted = quote ? opened[String(quote.m)] : undefined;
+          const quotedKind = quoted && quoted !== 'unreadable' && quoted.t === 'video' ? 'video' : 'photo';
+          const command = commandOf(payload);
           return (
             <div key={key}>
               {separator}
@@ -1023,6 +1092,27 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
                 <div
                   data-message-id={messageId ?? undefined}
                   data-focus-id={messageId != null ? `msg-${messageId}` : undefined}
+                  data-testid={mediaBlob ? 'private-media-bubble' : undefined}
+                  data-picked={mediaBlob && picking ? String(picked) : undefined}
+                  onPointerDown={mediaBlob ? () => startHold(mediaBlob) : undefined}
+                  onPointerUp={mediaBlob ? endHold : undefined}
+                  onPointerLeave={mediaBlob ? endHold : undefined}
+                  onPointerCancel={mediaBlob ? endHold : undefined}
+                  onClickCapture={
+                    mediaBlob
+                      ? (event) => {
+                          if (held.current) {
+                            held.current = false;
+                            event.preventDefault();
+                            event.stopPropagation();
+                          } else if (picking) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            togglePicked(mediaBlob);
+                          }
+                        }
+                      : undefined
+                  }
                   role={selectable ? 'button' : undefined}
                   tabIndex={selectable ? 0 : undefined}
                   aria-haspopup={selectable ? 'dialog' : undefined}
@@ -1037,7 +1127,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
                     own
                       ? 'rounded-br-md bg-gradient-to-br from-rose-600 to-purple-600 text-white'
                       : 'rounded-bl-md border border-white/[0.06] bg-slate-800/90 text-slate-100'
-                  } ${isSelected ? 'ring-2 ring-rose-300/70' : ''} ${editing?.id === messageId ? 'ring-2 ring-amber-300/70' : ''} ${
+                  } ${isSelected || picked ? 'ring-2 ring-rose-300/70' : ''} ${editing?.id === messageId ? 'ring-2 ring-amber-300/70' : ''} ${
                     bursting ? 'motion-safe:animate-[reaction-bubble_600ms_ease-out]' : ''
                   }`}
                 >
@@ -1051,6 +1141,12 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
                     <span className="italic opacity-80">This message could not be decrypted.</span>
                   ) : payload.t === 'text' ? (
                     <>
+                      {quote && (
+                        <span className="mb-1 flex items-center gap-1 text-[11px] font-semibold opacity-80" data-testid="private-quote">
+                          <Reply size={11} aria-hidden />
+                          {quoted && quoted !== 'unreadable' ? `Answering a ${quotedKind}` : 'Answering a picture'}
+                        </span>
+                      )}
                       <LinkText text={edit ? edit.text : payload.text} />
                       {/* The sender's preview, from inside the message; gone if an edit took its link out. */}
                       {payload.preview && (edit ? edit.text : payload.text).includes(payload.preview.url) && (
@@ -1074,13 +1170,36 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
                       token={token}
                       payload={payload}
                       vault={vault}
-                      onOpen={(url) => setViewing({ url, name: payload.name || 'Picture', mediaKey: privatePictureKey(token, payload.blob), mime: payload.mime, message, own })}
+                      onOpen={(url) =>
+                        setViewing({ url, name: payload.name || 'Picture', mediaKey: privatePictureKey(token, payload.blob), mime: payload.mime, message, own, blob: payload.blob })
+                      }
                     />
                   ) : payload.t === 'video' ? (
                     <PrivateVideoBubble token={token} video={payload} vault={vault} onOpen={() => setWatching({ video: payload, message, own })} />
                   ) : null}
                   {bursting && playing && <ReactionBurst key={playing.id} emoji={playing.emoji} onDone={burstDone} />}
+                  {mediaBlob && picking && (
+                    <span
+                      className={`pointer-events-none absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 shadow ${
+                        picked ? 'border-rose-300 bg-rose-500 text-white' : 'border-white/80 bg-black/40'
+                      }`}
+                      aria-hidden
+                    >
+                      {picked && <Check size={15} strokeWidth={3} />}
+                    </span>
+                  )}
+                  {mediaBlob && picking && membership.members.has(mediaBlob) && (
+                    <span className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white" data-testid="private-in-gallery-badge">
+                      <Images size={10} aria-hidden /> In gallery
+                    </span>
+                  )}
                 </div>
+                {command && quote && (
+                  <span className="mt-0.5 flex items-center gap-1 px-2 text-[11px] font-medium text-rose-200" data-testid="private-gallery-command-note">
+                    {command.op === 'add' ? <ImagePlus size={11} aria-hidden /> : <ImageMinus size={11} aria-hidden />}
+                    {command.op === 'add' ? `Saved the ${quotedKind} to the gallery` : `Took the ${quotedKind} out of the gallery`}
+                  </span>
+                )}
                 {chips.length > 0 && (
                   <div className={`relative z-10 -mt-1.5 flex max-w-[82%] flex-wrap gap-1 px-2 ${own ? 'justify-end' : 'justify-start'}`}>
                     {chips.map((chip) => (
@@ -1136,6 +1255,50 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
         </p>
       )}
       {draft && <PrivateLinkDraft draft={draft} onDismiss={() => setPreviewDropped((dropped) => new Set(dropped).add(draft.url))} />}
+      {replying && !editing && !picking && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-rose-300/20 bg-rose-500/[0.07] pl-3 pr-1" data-testid="private-replying">
+          <Reply size={13} className="shrink-0 text-rose-200" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-rose-100">
+            Answering a {replying.video ? 'video' : 'photo'} &middot; &ldquo;save to gallery&rdquo; puts it in the gallery
+          </span>
+          <button
+            type="button"
+            onClick={() => setReplying(null)}
+            aria-label="Stop answering"
+            data-testid="private-reply-cancel"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-slate-200 hover:bg-white/10"
+          >
+            <X size={14} aria-hidden />
+          </button>
+        </div>
+      )}
+      {picking ? (
+        <div
+          className="flex shrink-0 items-center gap-2 border-t border-white/10 bg-slate-900/95 px-2 pb-[max(0.5rem,var(--safe-bottom))] pt-2"
+          data-testid="private-picking-bar"
+        >
+          <button
+            type="button"
+            onClick={() => setPicking(null)}
+            aria-label="Stop picking"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-200 hover:bg-white/10"
+          >
+            <X size={18} />
+          </button>
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white" data-testid="private-picking-count" aria-live="polite">
+            {picking.length ? `${picking.length} picked` : 'Tap pictures to pick them'}
+          </span>
+          <button
+            type="button"
+            onClick={() => void addPicked()}
+            disabled={!picking.length || addingPicked}
+            data-testid="private-picking-add"
+            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-2xl bg-rose-600 px-3 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {addingPicked ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <ImagePlus size={15} aria-hidden />} Add to gallery
+          </button>
+        </div>
+      ) : (
       <form onSubmit={(event) => void sendText(event)} className="flex shrink-0 items-end gap-2 border-t border-white/5 bg-slate-900/95 p-2">
         <input
           ref={fileRef}
@@ -1207,6 +1370,7 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
           {sending ? <Loader2 size={17} className="animate-spin" /> : editing ? <Check size={18} /> : <SendHorizontal size={17} />}
         </button>
       </form>
+      )}
 
       {sheetMessage && sheetId !== null && sheetText !== null && (
         <PrivateMessageSheet
@@ -1276,6 +1440,25 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
           video={watching.video}
           title={watching.video.name || 'Video'}
           onClose={() => setWatching(null)}
+          actions={
+            typeof watching.message.id === 'number' ? (
+              <MediaActions
+                kind="video"
+                inGallery={membership.members.has(watching.video.poster)}
+                onGallery={() => void changeGallery(membership.members.has(watching.video.poster) ? 'remove' : 'add', [watching.video.poster])}
+                onReply={() => {
+                  const target = { m: watching.message.id as number, blob: watching.video.poster, video: true };
+                  setWatching(null);
+                  startReply(target);
+                }}
+                onPick={() => {
+                  const blob = watching.video.poster;
+                  setWatching(null);
+                  setPicking([blob]);
+                }}
+              />
+            ) : undefined
+          }
           mine={new Set((typeof watching.message.id === 'number' ? marks[watching.message.id]?.reactions ?? [] : []).filter((r) => r.own).map((r) => r.emoji))}
           onReact={
             typeof watching.message.id === 'number'
@@ -1304,6 +1487,25 @@ function UnlockedChat({ partnerName, partner, token, conversation, messages, ope
           mediaKey={viewing.mediaKey}
           mime={viewing.mime}
           onClose={() => setViewing(null)}
+          actions={
+            typeof viewing.message.id === 'number' && viewing.blob ? (
+              <MediaActions
+                kind="photo"
+                inGallery={membership.members.has(viewing.blob)}
+                onGallery={() => void changeGallery(membership.members.has(viewing.blob as string) ? 'remove' : 'add', [viewing.blob as string])}
+                onReply={() => {
+                  const target = { m: viewing.message.id as number, blob: viewing.blob as string, video: false };
+                  setViewing(null);
+                  startReply(target);
+                }}
+                onPick={() => {
+                  const blob = viewing.blob as string;
+                  setViewing(null);
+                  setPicking([blob]);
+                }}
+              />
+            ) : undefined
+          }
           mine={new Set((typeof viewing.message.id === 'number' ? marks[viewing.message.id]?.reactions ?? [] : []).filter((r) => r.own).map((r) => r.emoji))}
           onReact={
             typeof viewing.message.id === 'number'
@@ -1402,12 +1604,15 @@ function PictureViewer({
   onDelete,
   onReact,
   mine,
+  actions,
 }: {
   url: string;
   name: string;
   mediaKey: string;
   mime: string;
   onClose: () => void;
+  /** Add to gallery, answer it, pick several (MediaActions). */
+  actions?: ReactNode;
   onDelete?: () => void;
   /** React to the picture (either parent's); the viewer closes so its bubble can play the animation. */
   onReact?: (emoji: string) => void;
@@ -1430,8 +1635,9 @@ function PictureViewer({
       >
         <X size={20} />
       </button>
-      {(onReact || onDelete) && (
+      {(onReact || onDelete || actions) && (
         <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 bg-gradient-to-t from-black/80 to-transparent px-3 pt-8 pb-[max(0.75rem,var(--safe-bottom))]">
+          {actions}
           {onReact && (
             <div className="w-full max-w-sm">
               <ReactionRow mine={mine} onReact={onReact} tone="viewer" />
@@ -1458,6 +1664,44 @@ function PictureViewer({
         wrapperClassName="flex h-full w-full items-center justify-center"
         toggleClassName="absolute left-3 top-[max(0.75rem,var(--safe-top))]"
       />
+    </div>
+  );
+}
+
+/** A picture's or clip's own actions in its viewer: in or out of the gallery, answer it, pick several. */
+function MediaActions({
+  kind,
+  inGallery,
+  onGallery,
+  onReply,
+  onPick,
+}: {
+  kind: 'photo' | 'video';
+  inGallery: boolean;
+  onGallery: () => void;
+  onReply: () => void;
+  onPick: () => void;
+}) {
+  const chip = 'flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold shadow-lg shadow-black/40';
+  return (
+    <div className="flex w-full max-w-sm flex-wrap items-center justify-center gap-2" data-testid="private-media-actions">
+      <button
+        type="button"
+        onClick={onGallery}
+        aria-pressed={inGallery}
+        aria-label={inGallery ? `Remove this ${kind} from the gallery (it stays in the chat)` : `Add this ${kind} to the gallery`}
+        data-testid="private-media-gallery"
+        className={`${chip} ${inGallery ? 'border-rose-300/40 bg-rose-500/25 text-rose-50' : 'border-white/15 bg-slate-800/95 text-white'}`}
+      >
+        {inGallery ? <ImageMinus size={14} aria-hidden /> : <ImagePlus size={14} aria-hidden />}
+        {inGallery ? 'Remove from gallery' : 'Add to gallery'}
+      </button>
+      <button type="button" onClick={onReply} data-testid="private-media-reply" className={`${chip} border-white/15 bg-slate-800/95 text-white`}>
+        <Reply size={14} aria-hidden /> Reply
+      </button>
+      <button type="button" onClick={onPick} data-testid="private-media-pick" className={`${chip} border-white/15 bg-slate-800/95 text-white`}>
+        <CheckSquare size={14} aria-hidden /> Pick several
+      </button>
     </div>
   );
 }

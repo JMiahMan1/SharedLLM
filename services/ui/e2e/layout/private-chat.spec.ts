@@ -247,6 +247,20 @@ async function serve(page: Page, server: Server): Promise<void> {
   });
 }
 
+type Entry = NonNullable<Server['entries']>[number];
+
+/** The gallery's sealed entries, opened and sorted by kind: pictures added straight to it, membership, the opt-in start. */
+async function galleryRecords(key: CryptoKey, server: Server): Promise<{ added: Entry[]; marks: Array<Entry & { payload: PrivatePayload }>; starts: Entry[] }> {
+  const out: { added: Entry[]; marks: Array<Entry & { payload: PrivatePayload }>; starts: Entry[] } = { added: [], marks: [], starts: [] };
+  for (const e of server.entries ?? []) {
+    const payload = await openMessage(key, e.sealed);
+    if (payload?.t === 'added') out.added.push(e);
+    else if (payload?.t === 'gallery') out.marks.push({ ...e, payload });
+    else if (payload?.t === 'gallery_start') out.starts.push(e);
+  }
+  return out;
+}
+
 /** A chat as the first version made it (the one already in use): its key is the password's. */
 async function v1Chat(password: string): Promise<{ key: CryptoKey; salt: string; iterations: number; verifier: { iv: string; ct: string } }> {
   const kdf = { salt: toBase64(randomBytes(16)), iterations: PBKDF2_ITERATIONS };
@@ -1422,6 +1436,113 @@ test.describe('private chat on every form factor', () => {
     done(run);
   });
 
+  test('the gallery is opt-in: old stills stay, GIFs leave, and pictures go in and out by button, by picking several or by a "save to gallery" reply', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    const still = 'a1'.repeat(16);
+    const gifB = 'b2'.repeat(16);
+    const gifC = 'c3'.repeat(16);
+    server.blobs[still] = Buffer.from(await encryptBytes(key, new Uint8Array(PNG)));
+    server.blobs[gifB] = Buffer.from(await encryptBytes(key, new Uint8Array(GIF)));
+    server.blobs[gifC] = Buffer.from(await encryptBytes(key, new Uint8Array(GIF)));
+    server.messages.push(
+      { id: 2, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 3 * 86400,
+        message_type: 'comment', message: await sealMessage(key, { t: 'image', blob: still, mime: 'image/png' }) },
+      { id: 3, token: TOKEN, actor_type: 'users', actor_id: 'parent', actor_display_name: 'Parent', timestamp: SEC - 2 * 86400,
+        message_type: 'comment', message: await sealMessage(key, { t: 'image', blob: gifB, mime: 'image/gif' }) },
+      { id: 4, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 86400,
+        message_type: 'comment', message: await sealMessage(key, { t: 'image', blob: gifC, mime: 'image/gif' }) },
+    );
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-media-bubble')).toHaveCount(3);
+
+    // The first gallery opening writes the start: the old still stays, the old GIFs (read on this phone) leave.
+    await page.getByTestId('private-gallery-open').click();
+    const gallery = page.getByTestId('private-gallery');
+    await expect.poll(async () => (await galleryRecords(key, server)).starts.length).toBe(1);
+    await expect(gallery.getByTestId('private-gallery-tile')).toHaveCount(1);
+    await expect(gallery.getByTestId('private-gallery-tile').first()).toHaveAttribute('data-blob', still);
+    await gallery.getByRole('button', { name: 'Close gallery' }).click();
+
+    // One GIF in from its viewer.
+    await page.getByRole('button', { name: 'View picture' }).nth(1).click();
+    const actions = page.getByTestId('private-media-actions');
+    await expect(actions.getByTestId('private-media-gallery')).toHaveText('Add to gallery');
+    await check(page, info, run, 'private picture viewer gallery actions', page.getByRole('dialog').last());
+    await actions.getByTestId('private-media-gallery').click();
+    await expect.poll(async () => (await galleryRecords(key, server)).marks.length).toBe(1);
+    await expect(actions.getByTestId('private-media-gallery')).toHaveText('Remove from gallery');
+    await page.getByRole('button', { name: 'Close picture' }).click();
+
+    // Several at once: Pick several, then tap the other GIF in the thread.
+    await page.getByRole('button', { name: 'View picture' }).nth(2).click();
+    await page.getByTestId('private-media-pick').click();
+    const bar = page.getByTestId('private-picking-bar');
+    await expect(bar.getByTestId('private-picking-count')).toHaveText('1 picked');
+    await page.getByTestId('private-media-bubble').first().click();
+    await expect(bar.getByTestId('private-picking-count')).toHaveText('2 picked');
+    await expect(page.getByTestId('private-media-bubble').first()).toHaveAttribute('data-picked', 'true');
+    await check(page, info, run, 'private thread picking for the gallery', page.getByTestId('private-chat'));
+    await bar.getByTestId('private-picking-add').click();
+    await expect(bar).toHaveCount(0);
+    await expect.poll(async () => (await galleryRecords(key, server)).marks.length).toBe(2);
+
+    // The server learns nothing: every record is sealed, names no picture and is the same size.
+    const records = await galleryRecords(key, server);
+    const sizes = new Set([...records.marks, ...records.starts].map((e) => e.sealed.length));
+    expect(sizes.size).toBe(1);
+    for (const e of server.entries ?? []) for (const blob of [still, gifB, gifC]) expect(e.sealed).not.toContain(blob);
+    expect(records.marks[1].payload).toMatchObject({ t: 'gallery', op: 'add' });
+
+    await page.getByTestId('private-gallery-open').click();
+    await expect(gallery.getByTestId('private-gallery-tile')).toHaveCount(3);
+
+    // Out of the gallery (not the chat), two at once.
+    await gallery.getByTestId('private-gallery-select').click();
+    await gallery.locator(`[data-testid="private-gallery-tile"][data-blob="${gifB}"]`).click();
+    await gallery.locator(`[data-testid="private-gallery-tile"][data-blob="${gifC}"]`).click();
+    await check(page, info, run, 'private gallery remove selection', gallery);
+    await gallery.getByTestId('private-gallery-selection-remove').click();
+    await expect(gallery.getByTestId('private-gallery-tile')).toHaveCount(1);
+    // And one from its viewer: the gallery is empty, the chat still has all three.
+    await gallery.getByTestId('private-gallery-tile').first().click();
+    await page.getByTestId('private-gallery-remove').click();
+    await expect(gallery.getByTestId('private-gallery-empty')).toBeVisible();
+    await gallery.getByRole('button', { name: 'Close gallery' }).click();
+    await expect(page.getByTestId('private-media-bubble')).toHaveCount(3);
+    expect(server.deleted ?? []).toEqual([]);
+
+    // A "save to gallery" reply to the still puts it back, on both phones (the reply is the sealed record).
+    await page.getByRole('button', { name: 'View picture' }).first().click();
+    await page.getByTestId('private-media-reply').click();
+    await expect(page.getByTestId('private-replying')).toContainText('Answering a photo');
+    await check(page, info, run, 'private thread answering a photo', page.getByTestId('private-chat'));
+    await page.getByTestId('private-input').fill('Save this to the gallery!');
+    await page.getByTestId('private-send').click();
+    await expect.poll(() => server.posted.length).toBe(1);
+    expect(server.posted[0]).not.toContain(still);
+    expect(server.posted[0]).not.toContain('gallery');
+    const reply = await openMessage(key, server.posted[0]);
+    expect(reply).toMatchObject({ t: 'text', text: 'Save this to the gallery!', quote: { m: 2, blob: still } });
+    await expect(page.getByTestId('private-gallery-command-note')).toHaveText('Saved the photo to the gallery');
+    await expect(page.getByTestId('private-quote')).toHaveText('Answering a photo');
+    // The same words with nothing answered are only words.
+    await page.getByTestId('private-input').fill('we should save to gallery later?');
+    await page.getByTestId('private-send').click();
+    await expect.poll(() => server.posted.length).toBe(2);
+    await expect(page.getByTestId('private-gallery-command-note')).toHaveCount(1);
+
+    await page.getByTestId('private-gallery-open').click();
+    await expect(gallery.getByTestId('private-gallery-tile')).toHaveCount(1);
+    await expect(gallery.getByTestId('private-gallery-tile').first()).toHaveAttribute('data-blob', still);
+    await check(page, info, run, 'private gallery after a save reply', gallery);
+    await gallery.getByRole('button', { name: 'Close gallery' }).click();
+    await page.getByTestId('private-lock-now').click();
+    expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
+    done(run);
+  });
+
   test('the gallery grid, filters, selecting, the viewer swiped and zoomed, and the slideshow with its settings', async ({ page }, info) => {
     const { server, key } = await v1Server();
     const run = await open(page, server);
@@ -1639,7 +1760,11 @@ test.describe('private chat on every form factor', () => {
     await expect(page.getByText('Sent before any change')).toBeVisible();
     await page.getByTestId('private-gallery-open').click();
     const gallery = page.getByTestId('private-gallery');
-    await expect(gallery.getByText(/No photos yet/)).toBeVisible();
+    await expect(gallery.getByTestId('private-gallery-empty')).toHaveText('Nothing in the gallery yet.');
+    await expect(gallery.getByText(/Add pictures from the chat with Add to gallery/)).toBeVisible();
+    // The first phone to open the gallery writes its opt-in start: one sealed entry, before anything is added.
+    await expect.poll(async () => (await galleryRecords(key, server)).starts.length).toBe(1);
+    await check(page, info, run, 'private gallery empty', gallery);
     await gallery.getByTestId('private-gallery-add').click();
     const sheet = page.getByTestId('private-gallery-import');
     await expect(sheet.getByRole('heading', { name: 'Import from Between' })).toBeVisible();
@@ -1663,12 +1788,13 @@ test.describe('private chat on every form factor', () => {
     // Encrypted before it left: the blobs are not the pictures, and the entries say nothing readable.
     expect(server.uploads?.length).toBe(2);
     expect(server.uploads?.some((u) => u.includes(first.subarray(0, 64)))).toBe(false);
-    expect(server.entries?.length).toBe(2);
-    for (const e of server.entries ?? []) {
+    const { added } = await galleryRecords(key, server);
+    expect(added.length).toBe(2);
+    for (const e of added) {
       expect(e.sealed).toContain('```jarvis-envelope');
       for (const secret of ['IMG_', 'Acme', '10.5', '2016']) expect(e.sealed).not.toContain(secret);
     }
-    const opened = await openMessage(key, server.entries![0].sealed);
+    const opened = await openMessage(key, added[0].sealed);
     // The first of the two identical files (in name order) is the one kept.
     expect(opened).toMatchObject({ t: 'added', name: 'IMG_0001 copy.jpg', camera: 'Acme Pocket 7', taken_from: 'exif', source: 'phone' });
     // Never a chat message: nothing was posted to Talk.
@@ -1712,7 +1838,7 @@ test.describe('private chat on every form factor', () => {
     // Removing it removes the entry and its encrypted picture.
     await viewer.getByTestId('private-gallery-delete').click();
     await expect(gallery.getByTestId('private-gallery-tile')).toHaveCount(2);
-    expect(server.entries?.length).toBe(2);
+    expect((await galleryRecords(key, server)).added.length).toBe(2);
     await gallery.getByRole('button', { name: 'Close gallery' }).click();
 
     // The thread shows the comment, never the added pictures themselves.

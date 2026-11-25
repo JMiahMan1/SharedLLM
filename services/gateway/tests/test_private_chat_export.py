@@ -406,3 +406,41 @@ def test_the_registry_keeps_only_public_fields(pc, backup):
     assert set(chat) <= {"token", "members", "created_by", "created_at", "storage", "version", "kdf", "wrapped_key",
                          "verifier", "auth_hash", "history", "backup_key", "backup_keys_retired", "restored_at",
                          "restored_by", "last_restored_at", "last_restored_by"}
+
+
+def _padded(record: dict) -> dict:
+    """A gallery record padded as the app pads it (privateGalleryModel.padded): one size for all of them."""
+    bare = len(json.dumps({**record, "p": ""}, separators=(",", ":")))
+    return {**record, "p": " " * max(0, 8192 - bare)}
+
+
+def test_gallery_membership_records_come_back_so_the_gallery_is_the_same(pc, backup):
+    """What is in the gallery is sealed gallery entries (the opt-in start, adds, removes): a restore
+    brings every one back under its own id and time, so both phones work out the same gallery."""
+    root = backup["root"]
+    dk = fixture.data_key(CHAT, PASSWORD)
+    photo, poster = fixture._blob_id(1), fixture._blob_id(2)
+    records = [
+        ("5" * 32, fixture.T0 + 90, {"t": "gallery_start", "kept": [photo]}),
+        ("6" * 32, fixture.T0 + 86_500, {"t": "gallery", "op": "add", "blobs": [poster]}),
+        ("7" * 32, fixture.T0 + 86_600, {"t": "gallery", "op": "remove", "blobs": [photo]}),
+    ]
+    for entry_id, at, record in records:
+        entry = {"id": entry_id, "by": A, "at": at, "sealed": fixture.seal(dk, _padded(record))}
+        # Under the gateway's limit, and nothing about which picture it names is in the clear.
+        assert len(entry["sealed"].encode()) <= private_chat.MAX_GALLERY_ENTRY_BYTES
+        assert photo not in entry["sealed"] and poster not in entry["sealed"]
+        (root / "gallery" / TOKEN / f"{entry_id}.json").write_text(json.dumps(entry))
+    sizes = {len(json.loads((root / "gallery" / TOKEN / f"{i}.json").read_text())["sealed"]) for i, _, _ in records}
+    assert len(sizes) == 1, "every membership record looks the same size to the server"
+
+    out = _restore(pc, _device_payload(root))
+    assert out["records"]["gallery"]["added"] == 4
+    for entry_id, at, _record in records:
+        here = json.loads((pc["root"] / "gallery" / TOKEN / f"{entry_id}.json").read_text())
+        there = json.loads((root / "gallery" / TOKEN / f"{entry_id}.json").read_text())
+        assert here == there and here["at"] == at
+    # And an export of the restored chat carries them again.
+    files = _open(pc["client"].get(EXPORT, headers=_as(B)).content)
+    for entry_id, _at, _record in records:
+        assert f"gallery/{TOKEN}/{entry_id}.json" in files

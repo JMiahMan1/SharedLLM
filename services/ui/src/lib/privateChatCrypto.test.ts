@@ -280,6 +280,43 @@ describe('picture and comment payloads', () => {
   }, 30_000);
 });
 
+describe('gallery membership payloads', () => {
+  const A = 'a1'.repeat(16);
+  const B = 'b2'.repeat(16);
+
+  it('a reply names the picture it answers inside the encryption, and a bad quote is dropped', async () => {
+    const { key } = await v1Chat('payload payload');
+    const wire = await sealMessage(key, { t: 'text', text: 'save to gallery', quote: { m: 12, blob: A } });
+    expect(wire).not.toContain(A);
+    expect(await openMessage(key, wire)).toEqual({ t: 'text', text: 'save to gallery', quote: { m: 12, blob: A } });
+    for (const quote of [{ m: 0, blob: A }, { m: 3, blob: 'not-a-blob' }, { m: 1.5, blob: A }, 'x']) {
+      const odd = await sealMessage(key, { t: 'text', text: 'hi', quote } as unknown as PrivatePayload);
+      expect(await openMessage(key, odd)).toEqual({ t: 'text', text: 'hi' });
+    }
+  }, 30_000);
+
+  it('add, remove and the opt-in start open checked; anything malformed is refused', async () => {
+    const { key } = await v1Chat('payload payload');
+    const add = await sealMessage(key, { t: 'gallery', op: 'add', blobs: [A, B] });
+    expect(add).not.toContain(A);
+    expect(await openMessage(key, add)).toEqual({ t: 'gallery', op: 'add', blobs: [A, B] });
+    // Padding (and any other extra field) is dropped on the way in.
+    const padded = await sealMessage(key, { t: 'gallery', op: 'remove', blobs: [A], p: '    ' } as unknown as PrivatePayload);
+    expect(await openMessage(key, padded)).toEqual({ t: 'gallery', op: 'remove', blobs: [A] });
+    expect(await openMessage(key, await sealMessage(key, { t: 'gallery_start', kept: [B] }))).toEqual({ t: 'gallery_start', kept: [B] });
+    expect(await openMessage(key, await sealMessage(key, { t: 'gallery_start' } as unknown as PrivatePayload))).toEqual({ t: 'gallery_start', kept: [] });
+    for (const bad of [
+      { t: 'gallery', op: 'move', blobs: [A] },
+      { t: 'gallery', op: 'add', blobs: ['nope'] },
+      { t: 'gallery', op: 'add', blobs: A },
+      { t: 'gallery', op: 'add', blobs: Array.from({ length: 181 }, () => A) },
+      { t: 'gallery_start', kept: [1] },
+    ]) {
+      expect(await openMessage(key, await sealMessage(key, bad as unknown as PrivatePayload))).toBeNull();
+    }
+  }, 30_000);
+});
+
 describe('a text message with a link preview', () => {
   // A real JPEG's first bytes, so the thumbnail check sees a JPEG.
   const JPEG = `data:image/jpeg;base64,${btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70))}`;
