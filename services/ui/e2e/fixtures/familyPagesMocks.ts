@@ -249,7 +249,9 @@ export const TRIPS = [
   trip('t1', 'parent', 'Parent', -90, 18, 6.4, { notes: 'Dropped the kids off, then the long way round past the farmers market.',
     vehicle_source: 'manual', bt_vehicle_id: 'v2' }),
   trip('t2', 'sky', LONG_NAME, -60 * 26, 42, 28.9, { is_shared: true, shared_with: [{ user_id: 'parent', user_name: 'Parent' }],
-    vehicle_source: 'bluetooth', bt_vehicle_id: 'v1' }),
+    vehicle_source: 'bluetooth', bt_vehicle_id: 'v1',
+    together: [{ user_id: 'parent', user_name: 'Parent', trip_id: 't1', via: ['nearby', 'same_vehicle'], vehicle_id: 'v1',
+      vehicle_name: VEHICLES[0].name }] }),
   trip('t3', 'robin', 'Robin', -60 * 24 * 3, 12, 3.1, { activity_type: 'cycling', vehicle_id: undefined, vehicle_name: undefined }),
   // More than the five recent ones, so "See all trips" shows.
   ...Array.from({ length: 5 }, (_, i) => trip(`t${4 + i}`, 'parent', 'Parent', -60 * 24 * (5 + i * 3), 25, 11.2 + i)),
@@ -518,6 +520,7 @@ function answer(p: string, url: URL, method: string, today?: Date): unknown {
       return { trips, total_trips: trips.length };
     }
     case '/api/geo/place-reminders': return { reminders: [] };
+    case '/api/geo/proximity/near': return { viewer: 'parent', near: [{ user_id: 'robin', band: 'same_room', last_seen: SEC - 60 }] };
     case '/api/geo/eta': {
       const user = url.searchParams.get('user_id') ?? '';
       return { user_id: user, to: url.searchParams.get('to') ?? 'home', arrived: user === 'jordan', duration_s: 1260, distance_m: 14800,

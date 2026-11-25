@@ -47,7 +47,8 @@ def authorize_action(user_context: dict, domain: str, action: str) -> bool:
     is_admin = user_context.get("is_admin", False)
     # A voice can be imitated or replayed, so recognising one never opens the
     # house, whoever it sounds like.
-    by_voice = user_context.get("identified_by") == "voice"
+    # A satellite assigned to someone stands in for them without proving who speaks: the same rule.
+    by_voice = user_context.get("identified_by") in ("voice", "device")
 
     # SENSITIVE ACTIONS (Admins Only)
     sensitive_actions = {

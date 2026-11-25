@@ -57,6 +57,7 @@ from services.geo import (
     map_regions,
     metric_history,
     place_reminders,
+    proximity,
     safety,
     step_history,
     vehicle_bluetooth,
@@ -3892,7 +3893,129 @@ async def get_trips(
 
     # Group shared trips
     trips = group_shared_trips(trips)
+    # Who each trip was taken with (family phones near each other, or the same
+    # linked car), only among trips this viewer may see.
+    try:
+        trips = proximity.annotate_together(trips, await _proximity_events_for_trips(r, trips))
+    except Exception as e:
+        log.warning(f"[Geo] Could not work out who travelled together: {e}")
     return {"trips": trips, "total_trips": len(trips)}
+
+
+# ---------------------------------------------------------------------------
+# Family phones near each other (Bluetooth LE, no network needed); see proximity.py
+# ---------------------------------------------------------------------------
+
+def _proximity_key(user: str) -> str:
+    return f"geo:proximity:{user}"
+
+
+async def _proximity_keys(r) -> dict:
+    """The household's proximity key, made the first time it is asked for."""
+    stored = await r.hgetall(proximity.KEY_HASH) or {}
+    if not stored.get("key"):
+        stored = {"key": proximity.new_key(), "created_at": str(time.time())}
+        for field, value in stored.items():
+            await r.hset(proximity.KEY_HASH, field, value)
+    return stored
+
+
+async def _proximity_events(r, users: list[str], lo: float, hi: float) -> list[dict]:
+    out: list[dict] = []
+    for u in users:
+        for raw in await r.zrangebyscore(_proximity_key(u), lo, hi + proximity.FUTURE_SLACK_S):
+            with contextlib.suppress(TypeError, ValueError):
+                event = json.loads(raw)
+                if isinstance(event, dict):
+                    out.append(event)
+    return out
+
+
+async def _proximity_events_for_trips(r, trips: list[dict]) -> list[dict]:
+    users = sorted({str(t.get("user_id") or "") for t in trips if t.get("user_id")})
+    if len(users) < 2:
+        return []
+    starts = [float(t.get("start_time") or 0) for t in trips]
+    ends = [float(t.get("end_time") or t.get("start_time") or 0) for t in trips]
+    return await _proximity_events(r, users, min(starts) - 3600, max(ends) + 3600)
+
+
+@app.get("/proximity/config")
+async def get_proximity_config(user: str = Query(...)):
+    """What a family phone needs to advertise and recognise the household:
+    the key, how long an identifier lives, and the members' usernames (the
+    phone resolves an identifier to one of them on the device)."""
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    me = (user or "").split(".")[-1].strip().lower()
+    keys = await _proximity_keys(r)
+    sharing = await _fetch_activity_sharing()
+    members = sorted({str(e.get("username") or "").strip().lower() for e in sharing.get("users", [])} - {""})
+    if me and me not in members:
+        members.append(me)
+    return {
+        "key": keys["key"],
+        "key_id": proximity.key_id(keys["key"]),
+        "period_s": proximity.PERIOD_S,
+        "members": members,
+        "me": me,
+    }
+
+
+@app.post("/proximity/key/rotate")
+async def rotate_proximity_key():
+    """A new household key (a lost phone, someone leaving): old identifiers stop resolving."""
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    key = proximity.new_key()
+    await r.hset(proximity.KEY_HASH, "key", key)
+    await r.hset(proximity.KEY_HASH, "created_at", str(time.time()))
+    return {"status": "ok", "key_id": proximity.key_id(key)}
+
+
+@app.post("/proximity/{user}")
+async def post_proximity(user: str, body: dict):
+    """Sightings a phone made of other family phones (sent when it is online)."""
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    observer = (user or "").split(".")[-1].strip().lower()
+    events_in = body.get("events") if isinstance(body, dict) else None
+    if not isinstance(events_in, list):
+        raise HTTPException(status_code=422, detail="events must be a list")
+    now = time.time()
+    sharing = await _fetch_activity_sharing()
+    paused = {str(e.get("username") or "").strip().lower() for e in sharing.get("users", []) if e.get("paused")}
+    if observer in paused:
+        return {"status": "ok", "kept": 0, "reason": "location sharing is paused"}
+    kept = 0
+    key = _proximity_key(observer)
+    for raw in events_in[: proximity.MAX_EVENTS]:
+        event = proximity.clean_event(raw, observer, now)
+        if event is None or event["person"] in paused:
+            continue
+        await r.zadd(key, {json.dumps(event, sort_keys=True): event["last_seen"]})
+        kept += 1
+    await r.zremrangebyscore(key, 0, now - proximity.RETENTION_S)
+    return {"status": "ok", "kept": kept}
+
+
+@app.get("/proximity/near")
+async def get_proximity_near(viewer: str = Query(...)):
+    """Who has been near ``viewer`` in the last few minutes, by band, among
+    the people whose location the viewer may see."""
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    me = (viewer or "").split(".")[-1].strip().lower()
+    now = time.time()
+    sharing = await _fetch_activity_sharing()
+    members = sorted({str(e.get("username") or "").strip().lower() for e in sharing.get("users", [])} | {me})
+    events = await _proximity_events(r, [m for m in members if m], now - proximity.NEAR_NOW_S, now)
+    near = [n for n in proximity.near_now(events, me, now) if await _viewer_may_see(me, n["user_id"], sharing)]
+    return {"viewer": me, "near": near}
 
 
 async def _trip_owners(r) -> list[str]:

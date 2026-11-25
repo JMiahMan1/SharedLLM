@@ -290,6 +290,76 @@ export interface VoiceCandidate {
   score: number;
 }
 
+/** Score spread of one side of a calibration (scores only, never a signature). */
+export interface ScoreSpread {
+  n: number;
+  min: number;
+  p10: number;
+  median: number;
+  max: number;
+}
+
+/** The household's calibrated voice threshold (identity voice.calibrate). */
+export interface VoiceCalibration {
+  status: 'default' | 'single' | 'separated' | 'overlap';
+  threshold: number;
+  margin: number;
+  people: number;
+  same_speaker: ScoreSpread | null;
+  other_speaker: ScoreSpread | null;
+  per_person: Array<{ username: string; samples: number; same_min: number; group: string }>;
+  calibrated_at?: string;
+}
+
+/** A command heard at someone's own satellite, waiting for an admin to approve it as their voice. */
+export interface VoiceSampleCandidate {
+  id: number;
+  username: string;
+  name: string;
+  score: number | null;
+  runner_up: number | null;
+  speech_seconds: number | null;
+  satellite: string | null;
+  created_at: string;
+}
+
+export interface VoiceAdminPerson {
+  username: string;
+  name: string;
+  family_role: string | null;
+  samples: number;
+  auto_samples: number;
+  satellite_samples: number;
+  enrolled: boolean;
+  consistency: number | null;
+}
+
+export interface VoiceAdminOverview {
+  calibration: VoiceCalibration;
+  min_samples: number;
+  people: VoiceAdminPerson[];
+  candidates: VoiceSampleCandidate[];
+}
+
+/** A voice satellite, speaker or TV HomeHub knows, and whom it is assigned to. */
+export interface HubDevice {
+  device_key: string;
+  hardware_id: string;
+  hub_device_id: string | null;
+  kind: 'voice_satellite' | 'speaker' | 'tv';
+  label: string;
+  entity_ids: string[];
+  owner_username: string | null;
+  owner_name: string | null;
+  assignment: 'person' | 'shared';
+  room: string | null;
+  hub_area: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  last_seen_at: string | null;
+  archived_at: string | null;
+}
+
 /** A "who is speaking?" answer, scored against everyone enrolled. */
 export interface VoiceCheck {
   matched: boolean;
@@ -2267,6 +2337,8 @@ export interface Trip {
   vehicle_source?: 'default' | 'bluetooth' | 'manual';
   /** The vehicle Bluetooth detected, kept when the owner chose another by hand (so it can be put back). */
   bt_vehicle_id?: string;
+  /** Family members this trip was taken with (phones close together, or the same linked car). */
+  together?: import('../lib/proximity').TripCompanion[];
   fuel_type?: string;
   mpg: number;
   cost_per_gallon: number;

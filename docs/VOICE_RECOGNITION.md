@@ -30,12 +30,71 @@ audiobook, Nextcloud and Skylight credentials but no administrator powers and
 no personal accounts. An unrecognised speaker therefore cannot administer the
 system, even though they can still ask the house to do ordinary things.
 
+## Who a spoken request is from
+
+The order is fixed, and every request logs one line saying which applied:
+
+1. **The identified speaker**, when their voice clears the calibrated threshold
+   and leads the next person by the calibrated margin.
+2. **Else the person the satellite is assigned to** (Admin > Users & Devices >
+   Voice satellites, speakers & TVs). The request is answered as them, but never
+   with administrator powers, and like a voice it cannot unlock, open or disarm
+   anything (`identified_by: "device"`).
+3. **Else the default user**: a shared or unassigned satellite.
+
+Every voice satellite, speaker and TV HomeHub knows appears in identity as a
+device by itself (`GET /hub/voice/devices`, copied every ten minutes and on
+"Refresh from HomeHub"; `services/identity/hub_devices.py`). Each is keyed by
+its hardware (its MAC, else an integration identifier, else HomeHub's device
+id), so renaming it or its entity keeps the assignment. New devices arrive
+shared. The gateway sends the satellite's entity as `voice_device` only when no
+voice was recognised; identity looks it up (cached 30 seconds, cleared on every
+change). `DeviceAssignment` is something else: who may *control* an entity.
+Every discovered entity is granted to the default user there, so it says
+nothing about whose satellite it is and is no longer read for that.
+
+```
+[VoiceDecision] decision=device-assigned user=kit satellite=assist_satellite.kids_room top=kit 0.66 second=- threshold=0.8 margin=None speech=1.9s
+```
+
+`docker logs sharedllm_gateway 2>&1 | grep VoiceDecision` measures accuracy;
+Admin > People shows the same counts per person ("Recognised by voice", "By
+their satellite", "As the default user").
+
 ## Enrolling
 
-Each person records three short samples in Settings (Vocal Signature). A match
-needs a score of 0.80 and a clear lead over the next person
-(`services/identity/voice.py`); short commands score lower, so a one-word
-command is often "not sure" and answered as the household.
+Each person records three short samples in Settings (Vocal Signature), on their
+own phone, somewhere quiet. A take with too little speech, too much background
+noise (speech under 12 dB above it) or clipping is refused with what to change
+(`services/execution/voiceprint.py` `check_quality`). More takes can be added
+any time; the newest six are kept.
+
+## The threshold is calibrated on the household
+
+Identity scores every enrolled sample against the rest of its own person's
+samples (same speaker) and against every other person's profile (other
+speakers), and sets the threshold just above the highest other-speaker score,
+between 0.72 and 0.90, and the margin to half the typical lead
+(`voice.calibrate`). It is redone whenever a profile changes and stored in the
+`voice_calibration` setting; Admin > Users & Devices > Voice recognition shows
+it and the two score spreads. With only one person enrolled there is no one to
+separate them from, so the threshold only stays just under their own scores.
+
+When the two best candidates are a child and an adult the bar is higher (twice
+the margin and 0.03 more score): a weak score says nothing rather than name a
+child as a parent or a parent as a child.
+
+## Candidate samples from assigned satellites
+
+A command heard at a satellite assigned to one person that was not recognised,
+but scored at least 0.55 against that person's profile (and nobody else
+scored higher, with at least 1.5 s of speech), is kept as a candidate sample
+(`POST /api/voice/candidate`, the `VoiceCandidate` table, at most twelve per
+person). It is never used until an admin approves it in Voice recognition;
+approved ones join the profile as `source: auto`, have their own cap of six and
+never push out a sample the person recorded. "Remove auto-added" takes them all
+out again. This is how a phone-enrolled profile learns how its owner sounds at
+the far-field satellite they use.
 
 ## Refreshing a voice by talking
 
