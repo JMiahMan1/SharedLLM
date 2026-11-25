@@ -104,6 +104,7 @@ from services.gateway import (
     fast_media,
     fast_read,
     fast_volume,
+    firmware_routes,
     garden_routes,
     helper_routes,
     hub_registry_routes,
@@ -1059,6 +1060,7 @@ app.include_router(camera_live_routes.router)  # Real-time camera video (go2rtc)
 app.include_router(discovery_routes.router)  # New devices
 app.include_router(echo_dropin_routes.router)  # Echo Drop-In status, hangup, and WebSocket audio proxy
 app.include_router(echo_ota_routes.router)  # Echo OTA status and update-all
+app.include_router(firmware_routes.router)  # Firmware page: versions, updates, install
 app.include_router(voice_hold_music_routes.router)  # Voice satellites' hold music (HomeHub setting)
 app.include_router(echo_tunnel_routes.router)  # Echo Reverse WSS Tunnel
 app.include_router(hub_registry_routes.router)  # Areas, floors, labels, zones, persons

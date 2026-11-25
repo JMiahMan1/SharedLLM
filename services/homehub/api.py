@@ -36,6 +36,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     entries_api,  # integrations: reconfigure, remove/unpair, add by address
     esphome_logs_api,  # /hub/devices/{id}/logs: an ESPHome node's live logs
     esphome_restarts,  # ESPHome restarts and drops, for /health
+    firmware,  # /hub/firmware: every device's version, what is offered, and installing it
     ha_auth_api,
     ha_ws_compat,
     hardware_api,  # the hardware list: integrations, devices, entities, disable, sync
@@ -1141,6 +1142,22 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             if st is not None and str(st.state).lower() == "on":
                 queued += 1
         return {"queued": queued}
+
+    @app.get("/hub/firmware")
+    async def firmware_list(request: Request) -> dict[str, Any]:
+        admin(request)
+        return firmware.report(hub)
+
+    @app.post("/hub/firmware/install")
+    async def firmware_install(request: Request) -> dict[str, Any]:
+        admin(request)
+        body = await request.json()
+        return await firmware.install(hub, str(body.get("entity_id") or ""))
+
+    @app.post("/hub/firmware/{device_id}/upgrade")
+    async def firmware_upgrade(device_id: str, request: Request) -> dict[str, Any]:
+        admin(request)
+        return await firmware.upgrade_tasmota(hub, device_id)
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

@@ -87,17 +87,19 @@ import StarBalance from '../components/wander/StarBalance';
 import BibleAdminPanel from '../components/admin/BibleAdminPanel';
 import AdminPeople from '../components/admin/AdminPeople';
 import NetworkPanel from '../components/admin/NetworkPanel';
+import { FirmwarePanel } from '../components/admin/FirmwarePanel';
 import SystemStoragePanel from '../components/admin/SystemStoragePanel';
 import { confirmDialog } from '../components/ui/confirmDialog';
 import SignInResetPanel, { TestAccountBadge, UserSignInResetButton } from '../components/admin/SignInResetPanel';
 
-type AdminTab = 'people' | 'users' | 'groups' | 'hardware' | 'telemetry' | 'storage' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
+type AdminTab = 'people' | 'users' | 'groups' | 'hardware' | 'firmware' | 'telemetry' | 'storage' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield, path: '/admin/users' },
   { id: 'people', label: 'People', icon: UsersRound, path: '/admin/people' },
   { id: 'groups', label: 'Device Groups', icon: Layers, path: '/admin/groups' },
   { id: 'hardware', label: 'Hardware', icon: Cpu, path: '/admin/hardware' },
+  { id: 'firmware', label: 'Firmware', icon: ArrowUpCircle, path: '/admin/firmware' },
   { id: 'telemetry', label: 'Telemetry', icon: Activity, path: '/admin/monitor' },
   { id: 'storage', label: 'Storage', icon: HardDrive, path: '/admin/storage' },
   { id: 'network', label: 'Network', icon: Wifi, path: '/admin/network' },
@@ -118,6 +120,7 @@ const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/ops')) return 'raven';
   if (pathname.startsWith('/admin/groups')) return 'groups';
   if (pathname.startsWith('/admin/hardware')) return 'hardware';
+  if (pathname.startsWith('/admin/firmware')) return 'firmware';
   if (pathname.startsWith('/admin/monitor')) return 'telemetry';
   if (pathname.startsWith('/admin/storage')) return 'storage';
   if (pathname.startsWith('/admin/network')) return 'network';
@@ -1665,6 +1668,8 @@ const Admin = () => {
           <RavenOpsPanel />
         </section>
       )}
+
+      {activeTab === 'firmware' && <FirmwarePanel />}
 
       {activeTab === 'hardware' && (
         <section className="glass-panel p-4 sm:p-8 border-emerald-500/20 space-y-6">
