@@ -148,17 +148,96 @@ describe('HardwarePanel', () => {
     await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledWith('sensor.porch_lamp_power', { disabled: true }));
   });
 
-  it('switches whether voice and chat may control an entity', async () => {
+  it('shows one obvious Voice Assistant switch near the top of the device sheet', async () => {
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, On, 50%' }));
+    const sheet = await screen.findByTestId('hardware-detail');
+    const device = within(sheet).getByRole('switch', { name: 'Voice Assistant can control Porch lamp' });
+    expect(device).toHaveAttribute('aria-checked', 'true');
+    expect(within(sheet).getByText('Voice Assistant can control this')).toBeInTheDocument();
+    expect(within(sheet).queryByText(/Jarvis/)).toBeNull();
+    // Before Settings, right after the main control.
+    const section = within(sheet).getByTestId('voice-assistant');
+    const settings = within(sheet).getByTestId('section-settings');
+    expect(section.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The per-entity rows are behind a collapsed Details disclosure.
+    const disclosure = within(section).getByRole('button', { name: 'Details' });
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(within(sheet).getByTestId('voice-access')).not.toBeVisible();
+  });
+
+  it('turns voice off for every voiceable entity from the device switch', async () => {
+    const two: HardwareDetail = { ...detail, entity_list: [
+      detail.entity_list[0],
+      { ...detail.entity_list[0], entity_id: 'light.porch_lamp_ring', name: 'Porch lamp Ring', state: null,
+        voice: { exposed: true, default: true, chosen: false } },
+      { ...detail.entity_list[0], entity_id: 'light.porch_lamp_hidden', name: 'Porch lamp Hidden', state: null,
+        disabled_by: 'user', voice: { exposed: true, default: true, chosen: false } },
+      detail.entity_list[1],
+    ] };
+    vi.mocked(hardware.getHardwareDevice).mockResolvedValue(two);
     vi.mocked(hardware.updateEntity).mockResolvedValue(detail.entity_list[0]);
     wrap();
     fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, On, 50%' }));
     const sheet = await screen.findByTestId('hardware-detail');
-    const toggle = within(sheet).getByRole('switch', { name: 'Voice can control Porch lamp' });
+    const device = within(sheet).getByRole('switch', { name: 'Voice Assistant can control Porch lamp' });
+    fireEvent.click(device);
+    expect(device).toHaveAttribute('aria-checked', 'false');
+    await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledTimes(2));
+    expect(hardware.updateEntity).toHaveBeenCalledWith('light.porch_lamp', { voice: false });
+    expect(hardware.updateEntity).toHaveBeenCalledWith('light.porch_lamp_ring', { voice: false });
+    // A disabled entity is not voiceable, and an entity without a setting is left alone.
+    expect(hardware.updateEntity).not.toHaveBeenCalledWith('light.porch_lamp_hidden', expect.anything());
+    expect(hardware.updateEntity).not.toHaveBeenCalledWith('sensor.porch_lamp_power', expect.anything());
+  });
+
+  it('shows a mixed state when only some parts are exposed, and turns them all on from it', async () => {
+    const mixed: HardwareDetail = { ...detail, entity_list: [
+      detail.entity_list[0],
+      { ...detail.entity_list[0], entity_id: 'light.porch_lamp_ring', name: 'Porch lamp Ring', state: null,
+        voice: { exposed: false, default: true, chosen: true } },
+    ] };
+    vi.mocked(hardware.getHardwareDevice).mockResolvedValue(mixed);
+    vi.mocked(hardware.updateEntity).mockResolvedValue(detail.entity_list[0]);
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, On, 50%' }));
+    const sheet = await screen.findByTestId('hardware-detail');
+    const device = within(sheet).getByRole('switch', { name: 'Voice Assistant can control Porch lamp' });
+    expect(device).toHaveAttribute('aria-checked', 'mixed');
+    expect(within(sheet).getByTestId('voice-assistant-state')).toHaveTextContent('Some parts: 1 of 2');
+    fireEvent.click(device);
+    expect(device).toHaveAttribute('aria-checked', 'true');
+    await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledWith('light.porch_lamp_ring', { voice: true }));
+    expect(hardware.updateEntity).toHaveBeenCalledWith('light.porch_lamp', { voice: true });
+  });
+
+  it('rolls the device switch back and shows the hub\'s words when it refuses', async () => {
+    vi.mocked(hardware.updateEntity).mockRejectedValue(new Error('The hub said no'));
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, On, 50%' }));
+    const sheet = await screen.findByTestId('hardware-detail');
+    const device = within(sheet).getByRole('switch', { name: 'Voice Assistant can control Porch lamp' });
+    fireEvent.click(device);
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    await waitFor(() => expect(device).toHaveAttribute('aria-checked', 'true'));
+  });
+
+  it('keeps one switch per entity under Details', async () => {
+    vi.mocked(hardware.updateEntity).mockResolvedValue(detail.entity_list[0]);
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, On, 50%' }));
+    const sheet = await screen.findByTestId('hardware-detail');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Details' }));
+    expect(within(sheet).getByTestId('voice-access')).toBeVisible();
+    expect(within(sheet).getByText('Voice Assistant, part by part')).toBeInTheDocument();
+    const toggle = within(sheet).getByRole('switch', { name: 'Voice Assistant can control the Porch lamp entity' });
     expect(toggle).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(toggle);
     await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledWith('light.porch_lamp', { voice: false }));
+    expect(within(sheet).getByRole('switch', { name: 'Voice Assistant can control Porch lamp' }))
+      .toHaveAttribute('aria-checked', 'false');
     // An entity the hub reports no setting for (an older hub) shows no switch.
-    expect(within(sheet).queryByRole('switch', { name: 'Voice can control Porch lamp Power' })).toBeNull();
+    expect(within(sheet).queryByRole('switch', { name: 'Voice Assistant can control the Porch lamp Power entity' })).toBeNull();
   });
 
   it('moves, turns off and removes the device from its sheet, asking before removing', async () => {

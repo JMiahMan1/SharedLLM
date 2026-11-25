@@ -90,9 +90,116 @@ async def resolve_room_player(ctx, name, purpose) -> str | None:
                 picked = idx.pick_player(area_id, name, purpose, states)
                 if picked:
                     return picked
+        # Not a room: a player's own name ("Office TV" -> media_player.office_tv_cast).
+        return await player_by_name(ctx, name, states)
     except Exception as exc:
         log.warning(f"[media/resolve_room_player] could not resolve {name!r}: {exc}")
     return None
+
+
+#: Words a spoken device name carries that no player name needs to.
+_NAME_FILLER = frozenset({"the", "my", "our", "a", "an", "on", "in"})
+
+
+def _name_words(text: str) -> list[str]:
+    return [w for w in _plain_name(text).split() if w not in _NAME_FILLER]
+
+
+def players_named(name: str, states: list[dict]) -> list[dict]:
+    """The media_player states whose friendly name or entity id holds every word of ``name`` (case-insensitive)."""
+    wanted = _name_words(name)
+    if not wanted:
+        return []
+    out = []
+    for s in states or []:
+        eid = str(s.get("entity_id") or "")
+        if not eid.startswith("media_player."):
+            continue
+        friendly = str((s.get("attributes") or {}).get("friendly_name") or "")
+        words = set(_name_words(friendly)) | set(_name_words(eid.split(".", 1)[1]))
+        if all(w in words for w in wanted):
+            out.append(s)
+    return out
+
+
+async def play_means_resume(req: MediaPlayRequest) -> str | None:
+    """The device a "play" request really asks to resume, or None when it is a real search.
+
+    "Hit play on the office TV" reached us as ``MediaPlayRequest(query="office tv", device_name="Office TV")``:
+    a library search for a song named after the device. A play request whose query is empty or only names
+    the target (the ``device_name``, or a media player's own name) is a transport ``resume`` on that device.
+    Returns the device name to resume on ("" when ``entity_id`` already pins it).
+    """
+    if req.pick or req.media_content_id:
+        return None
+    query = " ".join(_name_words(req.query or ""))
+    target = (req.device_name or "").strip()
+    if not query:
+        if req.entity_id:
+            return target
+        return target or None
+    if target and query == " ".join(_name_words(target)):
+        return target
+    if len(query.split()) > 6:
+        return None
+    ctx = req.user_context
+    ha_url, ha_token = getattr(ctx, "ha_url", None), getattr(ctx, "ha_token", None)
+    if not ha_url or not ha_token or ha_health.is_down(ha_url):
+        return None
+    try:
+        states = await ha_client.get_states(ha_url, ha_token) or []
+    except Exception as exc:
+        log.warning(f"[media/play] could not read players to check {req.query!r}: {exc}")
+        return None
+    for s in states:
+        eid = str(s.get("entity_id") or "")
+        if not eid.startswith("media_player."):
+            continue
+        friendly = str((s.get("attributes") or {}).get("friendly_name") or "")
+        names = {" ".join(_name_words(friendly)), " ".join(_name_words(eid.split(".", 1)[1]))}
+        if query in names and (not req.entity_id or req.entity_id == eid):
+            # The query names this player; resume on the device the caller named, else on this one.
+            return target or ("" if req.entity_id else (req.query or "").strip())
+    return None
+
+
+async def player_by_name(ctx, name: str, states: list[dict]) -> str | None:
+    """Pick the player a spoken device ``name`` means, from the hub's states; None when nothing matches.
+
+    Order: players voice may control first (when the request comes from the assistant), then one that is
+    playing or paused (so "resume" and "pause" land on the player holding the media), then the closest name
+    (fewest extra words), then the entity id. Never invents an entity id.
+    """
+    from services.execution import voice_exposure
+    from services.execution.capability_index import state_rank
+
+    matches = players_named(name, states)
+    if not matches:
+        return None
+    wanted = set(_name_words(name))
+    exposed: dict[str, int] = {}
+    if voice_exposure.gated(ctx):
+        from services.execution import hardware_router
+
+        ha_url, ha_token = hardware_router.hub_pair(ctx)
+        for s in matches:
+            eid = s["entity_id"]
+            try:
+                ok = bool(ha_url and ha_token) and await voice_exposure.fetch_exposed(ha_url, ha_token, eid)
+                exposed[eid] = 0 if ok else 2
+            except voice_exposure.EntityNotExposed:
+                exposed[eid] = 1  # the hub could not say: after the exposed ones, before the refused ones
+
+    def extra_words(s: dict) -> int:
+        friendly = str((s.get("attributes") or {}).get("friendly_name") or "")
+        return min(len(set(_name_words(friendly)) - wanted) if friendly else 99,
+                   len(set(_name_words(s["entity_id"].split(".", 1)[1])) - wanted))
+
+    ranked = sorted(matches, key=lambda s: (exposed.get(s["entity_id"], 0), state_rank(s.get("state")),
+                                             extra_words(s), s["entity_id"]))
+    picked = ranked[0]["entity_id"]
+    log.info(f"[media/resolve_room_player] {name!r} names player {picked} (of {len(matches)})")
+    return picked
 
 
 async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, media_type: str | None = None,

@@ -991,6 +991,13 @@ async def execute_esphome_pair(req: EsphomePairRequest):
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
     is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
+    # "Hit play on the office TV": a play whose query is empty or only names the device is a resume there,
+    # not a library search for a song named after the device.
+    resume_on = None if is_local else await media.play_means_resume(_with_hub_login(req))
+    if resume_on is not None:
+        log.info(f"[media/play] query {req.query!r} names the device: resume on {req.entity_id or resume_on!r}")
+        return await execute_media_transport(MediaTransportRequest(
+            user_context=req.user_context, entity_id=req.entity_id, device_name=resume_on or None, command="resume"))
     if not is_local:
         # The login first: a voice request's exposure check reads the hub with it.
         own_login = _has_own_hub_login(req.user_context)
