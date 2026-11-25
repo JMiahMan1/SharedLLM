@@ -560,6 +560,12 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
     }
     # Voice recognition (calibration, candidate samples) and the shared hub
     # devices assigned to people (Admin > Users & Devices) are identity's.
+    # The repo's prompts and whether each live copy is current (identity's prompt seeding).
+    handle /api/admin/prompts* {
+        reverse_proxy identity:8001 {
+            import patient
+        }
+    }
     handle /api/admin/voice* {
         reverse_proxy identity:8001 {
             import patient
