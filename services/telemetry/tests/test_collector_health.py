@@ -205,3 +205,14 @@ def test_a_missing_bluetooth_permission_is_kept_and_reported():
     report = ch.clean_report({"device_id": "dev-1", "permissions": {"bluetooth": False, "location": True}})
     assert report["permissions"] == {"bluetooth": False, "location": True}
     assert {"kind": "permission", "what": "bluetooth"} in ch.problems(report)
+
+
+def test_a_device_that_cannot_advertise_is_reported_as_such():
+    from services.telemetry import collector_health as ch
+
+    report = ch.clean_report({"device_id": "tablet-1", "permissions": {"bluetooth_scan": True},
+                              "collectors": {"proximity": {"at": 1, "ok": False, "outcome": "cannot_advertise",
+                                                           "message": "This device cannot advertise"}}})
+    assert report["collectors"]["proximity"]["outcome"] == "cannot_advertise"
+    assert {"kind": "collector", "what": "proximity", "outcome": "cannot_advertise",
+            "message": "This device cannot advertise"} in ch.problems(report)

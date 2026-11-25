@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Stethoscope, RefreshCw } from 'lucide-react';
 import VehicleBluetooth, { type VehicleBtDiagnostics } from '../../plugins/vehicleBluetooth';
+import Proximity, { type ProximityDiagnostics } from '../../plugins/proximity';
+import { bandLabel } from '../../lib/proximity';
 
 /** One line of the panel: what is checked, and what this phone says. */
 export function DiagRow({ label, value, ok, testId }: { label: string; value: string; ok?: boolean | null; testId?: string }) {
@@ -24,16 +26,20 @@ function when(ms: number | null | undefined): string {
  * Android app only): enough to verify each step of the manual checklist
  * without a cable. Vehicle detection: the Nearby devices permission,
  * Bluetooth, the linked car connected now (what the next fix carries).
+ * Family nearby: the advertiser (on, or unsupported on a scan-only tablet),
+ * the scan, and the phones heard with their band and signal.
  */
 export default function BluetoothDiagnostics() {
   const android = Capacitor.getPlatform() === 'android';
   const [vehicle, setVehicle] = useState<VehicleBtDiagnostics | null>(null);
+  const [nearby, setNearby] = useState<ProximityDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    VehicleBluetooth.getDiagnostics()
-      .then((v) => {
+    Promise.all([VehicleBluetooth.getDiagnostics(), Proximity.getDiagnostics().catch(() => null)])
+      .then(([v, n]) => {
         setVehicle(v);
+        setNearby(n);
         setError(null);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not read this phone'));
@@ -69,6 +75,39 @@ export default function BluetoothDiagnostics() {
               />
               <DiagRow label="Other devices connected" value={String(vehicle.otherConnectedCount)} />
               <DiagRow label="Household links known" value={`${vehicle.linkedCount}, read ${when(vehicle.linksRefreshedAt)}`} />
+            </dl>
+          </section>
+        )}
+        {nearby && (
+          <section>
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Family nearby</h4>
+            <dl className="divide-y divide-white/5">
+              <DiagRow label="Turned on" value={nearby.enabled ? 'Yes' : 'No'} ok={nearby.enabled} />
+              <DiagRow label="Nearby devices (scan)" value={nearby.scanPermission ? 'Allowed' : 'Not allowed'} ok={nearby.scanPermission} />
+              <DiagRow
+                label="Advertiser"
+                value={nearby.advertising === 'unsupported' ? 'Not supported on this device (scan only)'
+                  : nearby.advertising === 'failed' ? `Failed${nearby.advertiseError ? ` (error ${nearby.advertiseError})` : ''}`
+                  : nearby.advertising === 'on' ? 'On' : 'Off'}
+                ok={nearby.advertising === 'on' ? true : nearby.advertising === 'unsupported' ? null : false}
+                testId="diag-advertiser"
+              />
+              <DiagRow
+                label="Scan"
+                value={nearby.scanning ? `Running (${nearby.scanMode === 'balanced' ? 'trip' : 'low power'})`
+                  : nearby.running ? `Paused between bursts, last ${when(nearby.lastScanStartAt)}` : 'Not running'}
+                ok={nearby.running}
+                testId="diag-scan"
+              />
+              <DiagRow label="Family key" value={nearby.configured ? `${nearby.keyId} (${nearby.members} members)` : 'Not received yet'} ok={nearby.configured} />
+              <DiagRow
+                label="Phones heard"
+                value={nearby.peers.length
+                  ? nearby.peers.map((p) => `${p.person}: ${bandLabel(p.band)} (${p.rssi} dBm, ${when(p.at)})`).join('; ')
+                  : 'None yet'}
+                testId="diag-peers"
+              />
+              <DiagRow label="Sightings waiting to send" value={`${nearby.outbox}, last sent ${when(nearby.uploadedAt)}`} />
             </dl>
           </section>
         )}
