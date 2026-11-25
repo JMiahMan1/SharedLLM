@@ -234,7 +234,7 @@ public class OwnSyncRulesTest {
     }
 
     @Test
-    public void stepsFollowTheDailyMaximumRuleAndAreNeverDoubleCounted() {
+    public void stepsFollowTheDailyMaximumRuleAndAreNeverDoubleCounted() throws Exception {
         int[] morning = new int[24];
         morning[8] = 1500;
         morning[9] = 1500;
