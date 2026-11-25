@@ -339,3 +339,46 @@ def test_a_tablet_never_takes_over_the_phones_beacon(client, env):
     # The phone's own report still registers and is the user's report.
     assert client.put("/api/phone/ble_beacon", headers=KID, json=REPORT).json()["hub"]["registered"] is True
     assert json.loads(env["redis"].data["phone_beacon:robin"])["device_name"] == "Pixel 9"
+
+
+class TestBluetoothListeners:
+    SCANNER = "bluez_001122334455"
+
+    @pytest.mark.parametrize("verb,path", [
+        ("get", "/api/homehub/bluetooth/listeners"),
+        ("patch", f"/api/homehub/bluetooth/listeners/{SCANNER}"),
+    ])
+    def test_admins_only(self, client, env, verb, path):
+        assert client.request(verb.upper(), path, headers=KID, json={"area_id": "den"}).status_code == 403
+        assert client.request(verb.upper(), path, json={"area_id": "den"}).status_code == 401
+        assert env["seen"] == []
+
+    def test_lists_the_adapter_and_listeners_only(self, client, env):
+        env["answers"][("GET", "/hub/bluetooth")] = (200, {
+            "host_adapter": {"enabled": True}, "scanners": [{"id": self.SCANNER, "area_id": None}],
+            "trackers": [{"name": "Robin's Phone"}], "map": {}})
+        body = client.get("/api/homehub/bluetooth/listeners", headers=ADMIN).json()
+        assert body == {"host_adapter": {"enabled": True}, "scanners": [{"id": self.SCANNER, "area_id": None}]}
+
+    def test_sets_a_listeners_room_through_the_hub(self, client, env):
+        env["answers"][("PATCH", f"/hub/bluetooth/scanners/{self.SCANNER}")] = (200, {"id": self.SCANNER, "area_id": "den"})
+        r = client.patch(f"/api/homehub/bluetooth/listeners/{self.SCANNER}", headers=ADMIN, json={"area_id": "den"})
+        assert r.status_code == 200 and r.json()["area_id"] == "den"
+        assert env["seen"][-1] == ("PATCH", f"/hub/bluetooth/scanners/{self.SCANNER}", {"area_id": "den"})
+        # null gives it back its own device's room
+        client.patch(f"/api/homehub/bluetooth/listeners/{self.SCANNER}", headers=ADMIN, json={"area_id": None})
+        assert env["seen"][-1][2] == {"area_id": None}
+
+    @pytest.mark.parametrize("scanner,body,code", [
+        ("not-a-scanner", {"area_id": "den"}, 404),
+        (SCANNER, {}, 400),
+        (SCANNER, {"name": "x"}, 400),
+        (SCANNER, {"area_id": "../etc"}, 400),
+        (SCANNER, {"rssi_offset": 99}, 400),
+        (SCANNER, {"rssi_offset": True}, 400),
+        (SCANNER, {"ref_power": -5}, 400),
+    ])
+    def test_bad_requests_never_reach_the_hub(self, client, env, scanner, body, code):
+        r = client.patch(f"/api/homehub/bluetooth/listeners/{scanner}", headers=ADMIN, json=body)
+        assert r.status_code == code
+        assert env["seen"] == []

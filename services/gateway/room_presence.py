@@ -244,6 +244,42 @@ async def _map_call(method: str, path: str, *, json: Any = None) -> Any:
     raise HTTPException(status_code=502, detail="The device hub did not answer")
 
 
+#: A Bluetooth listener's id on the hub: ``bluez_<adapter mac>`` or ``esphome_<node mac>``.
+_SCANNER_ID = re.compile(r"^[a-z]+_[0-9a-f]{12}$")
+
+
+@router.get("/api/homehub/bluetooth/listeners")
+async def bluetooth_listeners(request: Request):
+    """Devices > Room detection > Bluetooth listeners: the hub's host adapter and every listener with its room."""
+    await _admin(request)
+    body = await _map_call("GET", "/hub/bluetooth")
+    if isinstance(body, JSONResponse):
+        return body
+    return {"host_adapter": body.get("host_adapter"), "scanners": body.get("scanners") or []}
+
+
+@router.patch("/api/homehub/bluetooth/listeners/{scanner_id}")
+async def update_bluetooth_listener(scanner_id: str, request: Request):
+    """``{"area_id"?, "rssi_offset"?, "ref_power"?}`` for one listener; ``null`` clears one (its own area again)."""
+    await _admin(request)
+    if not _SCANNER_ID.match(scanner_id or ""):
+        raise HTTPException(status_code=404, detail="No such listener")
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict) or not body or set(body) - {"area_id", "rssi_offset", "ref_power"}:
+        raise HTTPException(status_code=400, detail='The body must be {"area_id"?, "rssi_offset"?, "ref_power"?}')
+    area = body.get("area_id")
+    if area is not None and (not isinstance(area, str) or not _AREA_ID.match(area)):
+        raise HTTPException(status_code=400, detail="Choose a room")
+    for key, low, high in (("rssi_offset", -30, 30), ("ref_power", -100, -20)):
+        value = body.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int | float) or not low <= value <= high):
+            raise HTTPException(status_code=400, detail=f"{key} must be a number from {low} to {high}")
+    return await _map_call("PATCH", f"/hub/bluetooth/scanners/{scanner_id}", json=body)
+
+
 @router.get("/api/homehub/bluetooth/map")
 async def room_map(request: Request):
     await _admin(request)

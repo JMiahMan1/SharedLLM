@@ -16,7 +16,7 @@ async function openDevices(page: Page): Promise<{ mocks: HomeMocks; errors: stri
   const mocks = await mockHome(page, 'admin');
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/devices#devices-rooms');  // an old link: opens the Setup tab
+  await page.goto('/devices#devices-rooms');  // an old link: opens the Rooms & places tab
   await expect(page.getByTestId('page-header')).toBeVisible();
   return { mocks, errors };
 }
@@ -42,11 +42,32 @@ async function sessionProgress(page: Page) {
 test.describe('Room detection', () => {
   test.describe.configure({ timeout: 90_000 });
 
+  test('Bluetooth listeners: the server adapter gets a room', async ({ page }, info) => {
+    const run = await openDevices(page);
+    const patches: unknown[] = [];
+    await page.route((url) => url.pathname.startsWith('/api/homehub/bluetooth/listeners/'), async (route: Route) => {
+      if (route.request().method() !== 'PATCH') return route.fallback();
+      patches.push({ path: new URL(route.request().url()).pathname, body: route.request().postDataJSON() });
+      return route.fulfill({ json: { id: 'bluez_001122334455', area_id: 'bedroom' } });
+    });
+    const listeners = page.getByTestId('bluetooth-listeners');
+    await expect(listeners.getByTestId('bluetooth-listener')).toHaveCount(2);
+    await expect(listeners).toContainText("The server's Bluetooth");
+    await expect(listeners).toContainText('no room yet');
+    await expect(listeners.getByLabel('Room of Kitchen display')).toHaveValue('kitchen');
+    await expectNoHorizontalOverflow(page);
+    await expectTapTargets(listeners);
+    await snap(page, info, 'room-detection-listeners');
+    await listeners.getByLabel("Room of The server's Bluetooth").selectOption('bedroom');
+    await expect.poll(() => patches).toEqual([{ path: '/api/homehub/bluetooth/listeners/bluez_001122334455', body: { area_id: 'bedroom' } }]);
+    clean(run);
+  });
+
   test('Map rooms: pick the phone, record a room, another pass, the summary, clear a room and all', async ({ page }, info) => {
     const run = await openDevices(page);
     await sessionProgress(page);
-    // Room detection is on the Setup tab (the old link already opened it); the tab says so.
-    await expect(page.getByTestId('devices-sections').getByRole('tab', { name: 'Setup' })).toHaveAttribute('aria-selected', 'true');
+    // Room detection is with the rooms, on Rooms & places (the old link already opened it); the tab says so.
+    await expect(page.getByTestId('devices-sections').getByRole('tab', { name: 'Rooms & places' })).toHaveAttribute('aria-selected', 'true');
     const panel = page.getByTestId('room-map');
     await panel.scrollIntoViewIfNeeded();
 
@@ -124,6 +145,8 @@ test.describe('Room detection', () => {
 
   test("Devices > Phones shows the phone's beacon and its room", async ({ page }) => {
     const run = await openDevices(page);
+    // Phones are on Setup; room detection (where the old link lands) is on Rooms & places.
+    await page.getByTestId('devices-sections').getByRole('tab', { name: 'Setup' }).click();
     const phone = page.getByTestId('phones').getByTestId('phone').first();
     await phone.scrollIntoViewIfNeeded();
     await expect(phone.getByTestId('phone-beacon')).toHaveText(/Room beacon: on/);

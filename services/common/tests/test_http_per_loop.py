@@ -37,7 +37,9 @@ def _session_in_new_thread_loop(stop: threading.Event, ready: dict) -> None:
 def test_two_loops_get_their_own_session_and_keep_it():
     stop = threading.Event()
     ready: dict = {"event": threading.Event()}
-    worker = threading.Thread(target=_session_in_new_thread_loop, args=(stop, ready))
+    # daemon: a failure inside main() below must not leave a spinning non-daemon
+    # thread behind, which keeps the interpreter alive after the summary.
+    worker = threading.Thread(target=_session_in_new_thread_loop, args=(stop, ready), daemon=True)
 
     async def main():
         mine = http.get_client()._session

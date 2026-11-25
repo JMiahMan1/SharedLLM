@@ -728,6 +728,16 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     if (p === '/api/homehub/phones/settings') return json(PHONES.settings);
     if (p === '/api/homehub/voice/hold-music') return json(holdMusic);
     if (p === '/api/homehub/bluetooth/map') return json(ROOM_MAP);
+    // Room detection > Bluetooth listeners: the server's adapter with no room yet, and one proxy in the kitchen.
+    if (p === '/api/homehub/bluetooth/listeners') {
+      return json({
+        host_adapter: { configured: '00:11:22:33:44:55', enabled: true, reason: null },
+        scanners: [
+          { id: 'bluez_001122334455', name: null, area_id: null, online: true, advertisements: 41210 },
+          { id: 'esphome_aabbccddeeff', name: 'Kitchen display', area_id: 'kitchen', online: true, advertisements: 9120 },
+        ],
+      });
+    }
     if (p.startsWith('/api/homehub/bluetooth/map/sessions/')) {
       return json({ status: 'done', samples: 58, scanners_heard: 3, seconds_left: 0 });
     }

@@ -1,7 +1,10 @@
 import copy
+import faulthandler
 import os
 import sys
 import tempfile
+import threading
+import time
 
 import pytest
 from cryptography.fernet import Fernet
@@ -447,6 +450,82 @@ def temp_storage_dir():
 def temp_chroma_dir():
     with tempfile.TemporaryDirectory() as tmpdir:
         yield tmpdir
+
+
+#: Updated by every finished test; the exit guard watches it.
+_PROGRESS = {"at": time.time()}
+
+
+def pytest_sessionstart(session):
+    """A session that stops reporting gets its threads dumped instead of the job's budget.
+
+    Twice a CI shard finished every test and then sat for twenty minutes at teardown,
+    with nothing failing to look at: pytest times tests, so a hang outside one is
+    invisible and the job dies on its own timeout. With SHAREDLLM_PYTEST_EXIT_GUARD_S
+    set, a watchdog dumps every thread's stack once no test has finished for that long
+    and exits, so the log names what is holding the interpreter.
+    """
+    _PROGRESS["at"] = time.time()
+    limit = os.environ.get("SHAREDLLM_PYTEST_EXIT_GUARD_S")
+    if not limit:
+        return
+    try:
+        limit_s = float(limit)
+    except ValueError:
+        return
+
+    def watch() -> None:
+        while True:
+            time.sleep(5.0)
+            idle = time.time() - _PROGRESS["at"]
+            if idle >= limit_s:
+                print(
+                    f"\n[pytest-exit-guard] no test finished for {idle:.0f}s (limit {limit_s:.0f}s); "
+                    "dumping every thread and exiting",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                faulthandler.dump_traceback(all_threads=True, file=sys.stderr)
+                sys.stderr.flush()
+                os._exit(3)
+
+    threading.Thread(target=watch, name="pytest-exit-guard", daemon=True).start()
+
+
+def pytest_runtest_logreport(report):
+    _PROGRESS["at"] = time.time()
+
+
+#: The status pytest settled on, so the hard exit below can report it.
+_EXIT = {"status": 0}
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remember the status: the summary, the JUnit report and coverage follow this hook."""
+    _EXIT["status"] = int(exitstatus)
+
+
+def pytest_unconfigure(config):
+    """Leave without joining threads a library forgot to stop.
+
+    A CI shard that passed every test was killed by its own timeout: the interpreter
+    was sitting in ``threading._shutdown`` waiting for non-daemon threads that never
+    end. The thread dump named them - two pyrate_limiter bucket loops
+    (``pyrate_limiter/abstracts/bucket.py`` ``_run``, which calls ``asyncio.run`` and
+    loops forever) and urllib3's idle connection watcher
+    (``urllib3/connectionpool.py`` ``idle_conn_watch_task``). Neither belongs to this
+    suite and neither can be stopped from here, so the process leaves. Everything
+    pytest writes is already written by this point (the summary and the reports are
+    sessionfinish work). Set SHAREDLLM_PYTEST_HARD_EXIT=0 when something needs the
+    interpreter to unwind normally.
+    """
+    if os.environ.get("SHAREDLLM_PYTEST_HARD_EXIT", "1") != "1":
+        return
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os._exit(_EXIT["status"])
 
 
 def pytest_configure(config):
