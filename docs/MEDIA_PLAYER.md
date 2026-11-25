@@ -211,7 +211,7 @@ anything else in the gateway, and the model never sees a pending question:
   `entity_id`), never the household's last player;
 * "no" or "never mind" calls it off ("Okay.");
 * a sentence that starts like a new request ("turn off the lights", "Play the
-  playlist <name>") drops the question and is routed as itself;
+  playlist `<name>`") drops the question and is routed as itself;
 * anything else is asked again once, briefly ("Sorry, the song or the
   audiobook?"); a second unclear answer drops it ("Sorry, I still didn't catch
   that...").
@@ -244,7 +244,7 @@ a voice test can be graded from its log.
 Before any of this, a spoken request whose verb speech to text glued to the
 next word or misheard is repaired (`voice_transcript.py`, logged as `[Heard]`):
 "PlayDork Diaries 3" is "Play Dork Diaries 3", "ReDork Diaries" is "Read Dork
-Diaries", "Reach after one of <title>" is "Read chapter one of <title>". Only
+Diaries", "Reach after one of `<title>`" is "Read chapter one of `<title>`". Only
 those shapes at the start of the sentence; "After one of these" or "PlayStation"
 are left alone.
 
