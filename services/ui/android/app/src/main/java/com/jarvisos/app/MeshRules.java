@@ -71,6 +71,12 @@ final class MeshRules {
     static final String T_CACHE = "cache";
     static final String T_COMMAND = "gc";
     static final String T_ACK = "ga";
+    /**
+     * One of a person's own items (OwnSyncRules): sealed with that person's key,
+     * versioned like a cached item (newest wins), carried by every family phone
+     * and opened only by the person's own devices.
+     */
+    static final String T_OWN = "own";
     static final int HOP_LIMIT = 4;
     static final int ID_BYTES = 16;
 
@@ -78,6 +84,12 @@ final class MeshRules {
     static final byte F_DIGEST = 'D';
     static final byte F_ITEM = 'I';
     static final byte F_END = 'E';
+    /**
+     * Who is connecting, between two devices of one person: the device id and
+     * name sealed with that person's key (OwnSyncRules#who). An older phone
+     * ignores it, and a family phone cannot open it.
+     */
+    static final byte F_WHO = 'W';
     /** Frame header: type, and whether more pieces of the same frame follow. */
     static final int HEADER = 2;
 
@@ -333,6 +345,11 @@ final class MeshRules {
             return T_CACHE.equals(type);
         }
 
+        /** Newest version wins (cached household information, a person's own items); no hop limit. */
+        boolean isVersioned() {
+            return T_CACHE.equals(type) || T_OWN.equals(type);
+        }
+
         JSONObject toJson() throws Exception {
             JSONObject o = wire().put("mine", mine).put("synced", synced).put("rx", receivedAtMs);
             if (mine && room != null) o.put("room", room);
@@ -352,7 +369,7 @@ final class MeshRules {
             if (!id.matches("[0-9a-f]{32}") || env == null || !"sealed".equals(env.optString("kind"))) return null;
             Item i = new Item(id, o.optLong("exp", 0L), Math.max(0, o.optInt("hops", 0)), env);
             i.type = o.optString("type", T_CHAT);
-            if (!java.util.Arrays.asList(T_CHAT, T_REQUEST, T_ANSWER, T_CACHE, T_COMMAND, T_ACK).contains(i.type)) return null;
+            if (!java.util.Arrays.asList(T_CHAT, T_REQUEST, T_ANSWER, T_CACHE, T_COMMAND, T_ACK, T_OWN).contains(i.type)) return null;
             i.version = o.optLong("ver", 0L);
             i.meta = o.optJSONObject("meta");
             i.mine = o.optBoolean("mine", false);
@@ -364,19 +381,30 @@ final class MeshRules {
         }
     }
 
+    /** A check a store makes before keeping an item (OwnSyncRules#acceptable on the person's own devices). */
+    interface Acceptor {
+        boolean accept(Item item);
+    }
+
     static final class Store {
         final Map<String, Item> items = new LinkedHashMap<>();
+        /** Null: keep anything well formed (a store that holds no own key). */
+        Acceptor acceptor;
 
         /** Keep a message unless it is a duplicate, expired, too far travelled or junk; true when it is new. */
         boolean add(Item item, long nowS) {
             if (item == null) return false;
-            long ttl = item.isCache() ? CACHE_TTL_S : TTL_S;
+            long ttl = item.isVersioned() ? CACHE_TTL_S : TTL_S;
             if (item.expiresS <= nowS || item.expiresS > nowS + ttl + 3600) return false;
-            if (!item.isCache() && item.hops > HOP_LIMIT) return false;
+            if (!item.isVersioned() && item.hops > HOP_LIMIT) return false;
             Item had = items.get(item.id);
             if (had != null) {
-                // Cached information: the newest server version wins, whoever brought it.
-                if (!item.isCache() || !had.isCache() || item.version <= had.version) return false;
+                // Cached information and own items: the newest version wins, whoever brought it. An
+                // equal version is the same copy, so nothing moves and nothing flaps.
+                if (!item.isVersioned() || !item.type.equals(had.type) || item.version <= had.version) return false;
+            }
+            if (acceptor != null && !acceptor.accept(item)) return false;
+            if (had != null) {
                 items.remove(item.id);
             }
             items.put(item.id, item);
@@ -401,7 +429,7 @@ final class MeshRules {
         /** What a peer can be offered: each id, and a cached item's version ({@code id@version}). */
         List<String> digest(long nowS) {
             List<String> out = new ArrayList<>();
-            for (Item i : items.values()) if (i.expiresS > nowS) out.add(i.isCache() ? i.id + "@" + i.version : i.id);
+            for (Item i : items.values()) if (i.expiresS > nowS) out.add(i.isVersioned() ? i.id + "@" + i.version : i.id);
             Collections.sort(out);
             return out;
         }
@@ -412,7 +440,7 @@ final class MeshRules {
             for (Item i : items.values()) {
                 if (i.expiresS <= nowS) continue;
                 Long v = theirs.get(i.id);
-                if (i.isCache()) {
+                if (i.isVersioned()) {
                     if (v == null || v < i.version) out.add(i);
                 } else if (i.hops < HOP_LIMIT && v == null) {
                     out.add(i);
@@ -438,7 +466,7 @@ final class MeshRules {
         boolean receive(JSONObject wire, long nowS, long nowMs) {
             Item i = Item.fromWire(wire);
             if (i == null) return false;
-            Item kept = new Item(i.id, i.expiresS, i.isCache() ? 0 : i.hops + 1, i.env);
+            Item kept = new Item(i.id, i.expiresS, i.isVersioned() ? 0 : i.hops + 1, i.env);
             kept.type = i.type;
             kept.version = i.version;
             kept.meta = i.meta;
@@ -609,6 +637,16 @@ final class MeshRules {
         boolean done;
         int received;
         int sent;
+        /** The ids this sync brought in (new, or a newer version), in order. */
+        final List<String> receivedIds = new ArrayList<>();
+        /** Between two devices of one person (setOwn): this device, and the other one once it has said who it is. */
+        private byte[] ownKey;
+        private String myDevice;
+        private String myName;
+        private boolean askWho;
+        private SecureRandom random;
+        String peerDevice;
+        String peerName;
 
         Session(Store store, byte[] key, long period, int pieceSize, long nowMs) {
             this.store = store;
@@ -617,6 +655,27 @@ final class MeshRules {
             this.pieceSize = pieceSize;
             this.nowMs = nowMs;
             this.nowS = nowMs / 1000L;
+        }
+
+        /**
+         * This device can sync as one of its person's devices: the client
+         * ({@code ask}) says who it is after HELLO and the server, when that
+         * opens with the same person's key, answers with its own WHO.
+         */
+        void setOwn(byte[] key, String deviceId, String deviceName, boolean ask, SecureRandom r) {
+            this.ownKey = key;
+            this.myDevice = deviceId;
+            this.myName = deviceName;
+            this.askWho = ask;
+            this.random = r;
+        }
+
+        private void take(byte[] body) throws Exception {
+            JSONObject w = new JSONObject(new String(body, StandardCharsets.UTF_8));
+            if (store.receive(w, nowS, nowMs)) {
+                received++;
+                receivedIds.add(w.optString("id"));
+            }
         }
 
         private static byte[] digestBody(List<String> ids) {
@@ -645,6 +704,13 @@ final class MeshRules {
         /** Client: HELLO and DIGEST, to write. */
         List<byte[]> clientOpening() {
             List<byte[]> pieces = new ArrayList<>(frames(F_HELLO, hello(key, period), pieceSize));
+            if (ownKey != null && askWho) {
+                try {
+                    pieces.addAll(frames(F_WHO, OwnSyncRules.who(ownKey, myDevice, myName, period, random), pieceSize));
+                } catch (Exception ignored) {
+                    // Sealing plain JSON does not fail; without it the sync still runs, unnamed.
+                }
+            }
             pieces.addAll(frames(F_DIGEST, digestBody(store.digest(nowS)), pieceSize));
             return pieces;
         }
@@ -661,8 +727,14 @@ final class MeshRules {
             byte[] body = (byte[]) f[1];
             if (type == F_DIGEST) {
                 theirs = parseDigest(body);
+            } else if (type == F_WHO) {
+                String[] w = OwnSyncRules.openWho(ownKey, body, period);
+                if (w != null) {
+                    peerDevice = w[0];
+                    peerName = w[1];
+                }
             } else if (type == F_ITEM) {
-                if (store.receive(new JSONObject(new String(body, StandardCharsets.UTF_8)), nowS, nowMs)) received++;
+                take(body);
             } else if (type == F_END) {
                 if (theirs == null) throw new IllegalStateException("no digest");
                 // What the server lacks, now including nothing it just sent us.
@@ -688,12 +760,20 @@ final class MeshRules {
                 return authorised;
             }
             if (!authorised) return false;
-            if (type == F_DIGEST) {
+            if (type == F_WHO) {
+                // Only another device of this phone's own person opens it; anyone else's is ignored.
+                String[] w = OwnSyncRules.openWho(ownKey, body, period);
+                if (w != null && peerDevice == null) {
+                    peerDevice = w[0];
+                    peerName = w[1];
+                    queue(F_WHO, OwnSyncRules.who(ownKey, myDevice, myName, period, random));
+                }
+            } else if (type == F_DIGEST) {
                 Map<String, Long> client = parseDigest(body);
                 queue(F_DIGEST, digestBody(store.digest(nowS)));
                 queueItems(store.missingFrom(client, nowS));
             } else if (type == F_ITEM) {
-                if (store.receive(new JSONObject(new String(body, StandardCharsets.UTF_8)), nowS, nowMs)) received++;
+                take(body);
             } else if (type == F_END) {
                 done = true;
             }

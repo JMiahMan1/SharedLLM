@@ -95,3 +95,31 @@ describe('WatchPanel', () => {
     await waitFor(() => expect(sendNotification).toHaveBeenCalledWith('Jarvis', expect.any(String)));
   });
 });
+
+describe('WatchPanel asking through the watch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows the watch's answer, or says the question was queued while the watch is offline", async () => {
+    const ask = vi.fn(async () => ({ answered: 'Dentist at 3 PM.' }));
+    hook.useWatchBle.mockReturnValue({ ...base, connected: true, stats: STATS, ask });
+    render(<WatchPanel />);
+    fireEvent.change(screen.getByLabelText('Ask Jarvis through the watch'), { target: { value: 'What is on today?' } });
+    fireEvent.click(screen.getByRole('button', { name: /Ask/ }));
+    await waitFor(() => expect(screen.getByTestId('watch-answer')).toHaveTextContent('Dentist at 3 PM.'));
+    expect(ask).toHaveBeenCalledWith('What is on today?');
+
+    ask.mockResolvedValueOnce({ queued: 'f'.repeat(32) } as never);
+    fireEvent.change(screen.getByLabelText('Ask Jarvis through the watch'), { target: { value: 'Is it raining?' } });
+    fireEvent.click(screen.getByRole('button', { name: /Ask/ }));
+    await waitFor(() => expect(ask).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByTestId('watch-answer')).toBeNull());
+  });
+
+  it('has no ask box until the watch is connected', () => {
+    hook.useWatchBle.mockReturnValue({ ...base, ask: vi.fn() });
+    render(<WatchPanel />);
+    expect(screen.queryByTestId('watch-ask')).toBeNull();
+  });
+});

@@ -853,7 +853,7 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
       const self = nearbyUser === 'me' || nearbyUser === profile.username;
       const minor = self ? profile.is_minor === true : !['parent', 'robin'].includes(nearbyUser);
       const key = self ? String(profile.username) : nearbyUser;
-      const saved = (nearbySettings[key] ??= { nearby: false, chat: false, offline: false, car: true });
+      const saved = (nearbySettings[key] ??= { nearby: false, chat: false, offline: false, car: true, mine: false });
       if (method === 'PUT') {
         const body = (request.postDataJSON() ?? {}) as { settings?: Record<string, boolean> };
         Object.assign(saved, body.settings ?? {});

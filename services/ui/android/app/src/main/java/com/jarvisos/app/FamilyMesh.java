@@ -117,8 +117,19 @@ final class FamilyMesh {
         JSONObject answer = WidgetApi.get(c, "/api/family-mesh/rooms");
         if (answer == null || answer.optJSONArray("rooms") == null) return;
         // Kept as the server sent it; a room the person left drops out with its keys.
-        prefs(c).edit().putString(KEY_ROOMS, answer.toString())
-                .putLong(KEY_ROOMS_AT, System.currentTimeMillis()).apply();
+        long now = System.currentTimeMillis();
+        prefs(c).edit().putString(KEY_ROOMS, answer.toString()).putLong(KEY_ROOMS_AT, now).apply();
+        // The person's other devices get the same list (My devices), so a tablet that has not been
+        // online since joining a room can still read and write in it.
+        OwnSync.noteRooms(c, answer, now);
+        changed();
+    }
+
+    /** A room list one of the person's other devices fetched later than this one: kept as if fetched here. */
+    static void adoptRooms(Context c, JSONObject answer, long fetchedAtMs) {
+        if (answer == null || answer.optJSONArray("rooms") == null) return;
+        if (fetchedAtMs <= prefs(c).getLong(KEY_ROOMS_AT, 0L)) return;
+        prefs(c).edit().putString(KEY_ROOMS, answer.toString()).putLong(KEY_ROOMS_AT, fetchedAtMs).apply();
         changed();
     }
 
@@ -139,7 +150,10 @@ final class FamilyMesh {
 
     static MeshRules.Store store(Context c) {
         synchronized (LOCK) {
-            return MeshRules.Store.decode(prefs(c).getString(KEY_STORE, "[]"));
+            MeshRules.Store s = MeshRules.Store.decode(prefs(c).getString(KEY_STORE, "[]"));
+            // The person's own items are kept only as sealed (a copy whose clear version was raised is refused).
+            s.acceptor = OwnSync.acceptor(c);
+            return s;
         }
     }
 
@@ -331,6 +345,8 @@ final class FamilyMesh {
                     if (s == null) {
                         // The HELLO proves the household key the advertisement was made with.
                         s = new MeshRules.Session(store(c), cfg.key, period, 182, System.currentTimeMillis());
+                        // Answers a WHO from another device of this person (My devices).
+                        OwnSync.prepare(c, s, false);
                         serverSessions.put(device.getAddress(), s);
                     }
                     try {
@@ -394,6 +410,11 @@ final class FamilyMesh {
             if (client != null) return;
             long[] last = lastWith.get(member);
             int peerTag = ProximityRules.mailTag(flags);
+            // The person's own other device shares this phone's name, so the lower mail tag connects first.
+            boolean own = member.equals(cfg.me);
+            boolean sortsFirst = own
+                    ? OwnSyncRules.ownSortsFirst(ProximityRules.mailTag(ProximityRules.mailTagBits(digest)), peerTag)
+                    : cfg.me.compareTo(member) < 0;
             go = MeshRules.shouldConnect(
                     (flags & ProximityRules.FLAG_CAN_CONNECT) != 0,
                     (flags & ProximityRules.FLAG_HAS_MAIL) != 0,
@@ -401,7 +422,7 @@ final class FamilyMesh {
                     last == null ? Long.MAX_VALUE : now - last[0],
                     last == null || last[1] != digest,
                     last == null || last[2] != peerTag,
-                    cfg.me.compareTo(member) < 0,
+                    sortsFirst,
                     Proximity.canServe());
             if (go) {
                 lastWith.put(member, new long[] {now, digest, peerTag});
@@ -437,6 +458,8 @@ final class FamilyMesh {
                 int piece = Math.max(20, Math.min(182, mtu - 3));
                 MeshRules.Store s = store(c);
                 session[0] = new MeshRules.Session(s, cfg.key, period, piece, System.currentTimeMillis());
+                // To another device of this person: say which one this is (My devices).
+                OwnSync.prepare(c, session[0], member.equals(cfg.me));
                 try {
                     gatt.discoverServices();
                 } catch (SecurityException e) {
@@ -602,13 +625,20 @@ final class FamilyMesh {
     private static void finishSession(Context c, MeshRules.Session s, String peer) {
         synchronized (LOCK) {
             // The session worked on a copy of the store: merge what it received into the current one.
+            // Through add, so a newer version of a cached or own item replaces the older (it used to be
+            // skipped because the id was already there) and an equal or older one changes nothing.
             MeshRules.Store now = store(c);
             long nowS = System.currentTimeMillis() / 1000L;
+            for (String id : s.receivedIds) {
+                MeshRules.Item i = s.store.items.get(id);
+                if (i != null) now.add(i, nowS);
+            }
             for (MeshRules.Item i : s.store.items.values()) {
                 if (!now.items.containsKey(i.id)) now.add(i, nowS);
             }
             save(c, now);
         }
+        OwnSync.afterSession(c, s);
         long t = System.currentTimeMillis();
         SharedPreferences.Editor e = prefs(c).edit().putString(KEY_LAST_SYNC, t + "|" + (peer == null ? "" : peer)
                 + "|" + s.sent + "|" + s.received);

@@ -9,7 +9,7 @@ vi.mock('../../services/api', () => ({ api }));
 import NearbyChildCard from './NearbyChildCard';
 
 const state = {
-  username: 'robin', settings: { nearby: false, chat: false, offline: false, car: true },
+  username: 'robin', settings: { nearby: false, chat: false, offline: false, car: true, mine: false },
   managed_by_parent: true, chosen: true, can_change: true, always_on: ['parent_link'],
 };
 const draw = () =>

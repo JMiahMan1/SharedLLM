@@ -3,7 +3,7 @@ import { NEARBY_DEFAULTS, deviceLine, nearbyState } from './nearbySettings';
 import type { NearbyDeviceState } from '../plugins/nearby';
 
 const device: NearbyDeviceState = {
-  nearby: true, chat: false, offline: false, car: true, parentLink: false,
+  nearby: true, chat: false, offline: false, car: true, mine: false, parentLink: false,
   scanPermission: true, advertisePermission: true, connectPermission: true, bluetoothOn: true,
   host: 'location', apiLevel: 36,
 };
@@ -25,8 +25,8 @@ describe('nearbySettings', () => {
     expect(deviceLine({ ...device, scanPermission: false }, on)).toMatch(/Allow Nearby devices/);
     expect(deviceLine({ ...device, host: 'own' }, on)).toMatch(/location sharing is off/);
     // Nothing on (car detection off too): nothing to say.
-    expect(deviceLine({ ...device, bluetoothOn: false }, { ...NEARBY_DEFAULTS, car: false })).toBeNull();
+    expect(deviceLine({ ...device, bluetoothOn: false }, { ...NEARBY_DEFAULTS, car: false, mine: false })).toBeNull();
     // A child's parent link counts even with every switch off.
-    expect(deviceLine({ ...device, connectPermission: false }, { ...NEARBY_DEFAULTS, car: false }, true)).toMatch(/pass messages/);
+    expect(deviceLine({ ...device, connectPermission: false }, { ...NEARBY_DEFAULTS, car: false, mine: false }, true)).toMatch(/pass messages/);
   });
 });

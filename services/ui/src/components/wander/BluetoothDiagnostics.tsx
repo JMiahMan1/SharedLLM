@@ -6,6 +6,8 @@ import Proximity, { type ProximityDiagnostics } from '../../plugins/proximity';
 import { bandLabel } from '../../lib/proximity';
 import FamilyMesh, { type MeshDiagnostics } from '../../plugins/familyMesh';
 import OfflineMode, { type OfflineDiagnostics } from '../../plugins/offlineMode';
+import OwnSync, { type OwnSyncDiagnostics, type OwnSyncState } from '../../plugins/ownSync';
+import { OWN_SYNC_CATEGORIES, peerName, statusText } from '../../lib/ownSync';
 
 /** One line of the panel: what is checked, and what this phone says. */
 export function DiagRow({ label, value, ok, testId }: { label: string; value: string; ok?: boolean | null; testId?: string }) {
@@ -31,6 +33,8 @@ function when(ms: number | null | undefined): string {
  * Family nearby: the advertiser (on, or unsupported on a scan-only tablet),
  * the scan, and the phones heard with their band and signal. Offline chat:
  * the last message sent and received, and the last phone-to-phone sync.
+ * My devices: for each of this person's other devices, when it last synced and,
+ * per kind of data, "In sync" or "Updated from <device> at <time>".
  */
 export default function BluetoothDiagnostics() {
   const android = Capacitor.getPlatform() === 'android';
@@ -38,6 +42,8 @@ export default function BluetoothDiagnostics() {
   const [nearby, setNearby] = useState<ProximityDiagnostics | null>(null);
   const [mesh, setMesh] = useState<MeshDiagnostics | null>(null);
   const [offlineDiag, setOfflineDiag] = useState<OfflineDiagnostics | null>(null);
+  const [own, setOwn] = useState<OwnSyncDiagnostics | null>(null);
+  const [ownState, setOwnState] = useState<OwnSyncState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -46,12 +52,17 @@ export default function BluetoothDiagnostics() {
       Proximity.getDiagnostics().catch(() => null),
       FamilyMesh.getDiagnostics().catch(() => null),
       OfflineMode.getDiagnostics().catch(() => null),
+      // An app from before My devices has no such plugin: the section is left out.
+      OwnSync.getDiagnostics().catch(() => null),
+      OwnSync.state().catch(() => null),
     ])
-      .then(([v, n, m, o]) => {
+      .then(([v, n, m, o, od, os]) => {
         setVehicle(v);
         setNearby(n);
         setMesh(m);
         setOfflineDiag(o);
+        setOwn(od);
+        setOwnState(os);
         setError(null);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not read this phone'));
@@ -160,6 +171,50 @@ export default function BluetoothDiagnostics() {
                   ok={offlineDiag.parentKeys > 0} testId="diag-offline-parent-keys" />
               )}
             </dl>
+          </section>
+        )}
+        {own && (
+          <section data-testid="diag-own">
+            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">My devices</h4>
+            <dl className="divide-y divide-white/5">
+              <DiagRow label="Turned on" value={own.turnedOn ? (own.enabled ? 'Yes' : 'Yes, waiting for Nearby devices') : 'No'}
+                ok={own.enabled} testId="diag-own-on" />
+              {ownState?.steps && (
+                <DiagRow
+                  label="Steps today, all my devices"
+                  value={`${ownState.steps.total.toLocaleString('en-US')} (${ownState.steps.devices
+                    .map((d) => `${d.me ? 'this one' : d.name || 'another device'} ${d.steps.toLocaleString('en-US')}`).join(', ')})`}
+                  testId="diag-own-steps"
+                />
+              )}
+              {ownState?.latestFix && (
+                <DiagRow
+                  label="Latest location"
+                  value={`From ${ownState.latestFix.device === ownState.deviceId ? 'this one' : ownState.latestFix.name || 'another device'}, ${when(ownState.latestFix.at)}`}
+                  testId="diag-own-fix"
+                />
+              )}
+              {own.peers.length === 0 && (
+                <DiagRow label="My other devices" value="None synced yet" testId="diag-own-none" />
+              )}
+            </dl>
+            {own.peers.map((peer) => (
+              <div key={peer.device} className="mt-2 rounded-xl bg-white/5 px-3 py-1" data-testid="diag-own-peer">
+                <p className="break-words pt-1 text-xs font-semibold text-slate-200">{peerName(peer)}</p>
+                <dl className="divide-y divide-white/5">
+                  <DiagRow label="Last synced" value={when(peer.last_sync_at)} testId="diag-own-peer-synced" />
+                  {OWN_SYNC_CATEGORIES.map((c) => (
+                    <DiagRow
+                      key={c.id}
+                      label={c.label}
+                      value={statusText(peer.types[c.id])}
+                      ok={peer.types[c.id] ? true : null}
+                      testId={`diag-own-type-${c.id}`}
+                    />
+                  ))}
+                </dl>
+              </div>
+            ))}
           </section>
         )}
         <button type="button" onClick={load} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-purple-300 hover:bg-white/10">

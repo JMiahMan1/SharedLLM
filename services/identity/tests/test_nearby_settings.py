@@ -38,7 +38,7 @@ def as_user_fixture(session: Session):
 
 def test_defaults_keep_the_old_behaviour(as_user):
     body = as_user("casey").get("/api/users/me/nearby-settings").json()
-    assert body["settings"] == {"nearby": False, "chat": False, "offline": False, "car": True}
+    assert body["settings"] == {"nearby": False, "chat": False, "offline": False, "car": True, "mine": True}
     assert body["can_change"] is True
     assert body["managed_by_parent"] is False
     assert body["always_on"] == []
@@ -54,10 +54,10 @@ def test_a_saved_choice_is_marked_chosen(as_user):
 def test_a_grown_member_switches_their_own(as_user):
     client = as_user("casey")
     body = client.put("/api/users/me/nearby-settings", json={"settings": {"nearby": True, "car": False}}).json()
-    assert body["settings"] == {"nearby": True, "chat": False, "offline": False, "car": False}
+    assert body["settings"] == {"nearby": True, "chat": False, "offline": False, "car": False, "mine": True}
     # Only the parts sent change.
     body = client.put("/api/users/me/nearby-settings", json={"chat": True}).json()
-    assert body["settings"] == {"nearby": True, "chat": True, "offline": False, "car": False}
+    assert body["settings"] == {"nearby": True, "chat": True, "offline": False, "car": False, "mine": True}
     assert client.get("/api/users/me/nearby-settings").json()["settings"]["chat"] is True
 
 
@@ -113,3 +113,15 @@ def test_a_childs_status_carries_their_parts_for_the_phones_guard(as_user):
     assert rules["nearby"]["chat"] is True
     # A grown member's status has none: their own phone reads Settings.
     assert "nearby" not in as_user("casey").get("/api/screen-time/casey/rules").json()
+
+
+def test_my_devices_is_a_grown_members_own_choice_and_a_parents_for_a_child(as_user):
+    # On to start with (a person's own devices were already in step), and still their own choice.
+    assert as_user("casey").get("/api/users/me/nearby-settings").json()["settings"]["mine"] is True
+    assert as_user("casey").put("/api/users/me/nearby-settings", json={"mine": False}).json()["settings"]["mine"] is False
+    assert as_user("casey").put("/api/users/me/nearby-settings", json={"mine": True}).json()["settings"]["mine"] is True
+    # A child follows a parent's choice and cannot change it.
+    assert as_user("robin").put("/api/users/me/nearby-settings", json={"mine": True}).status_code == 403
+    as_user("mom").put("/api/users/robin/nearby-settings", json={"mine": True})
+    assert as_user("robin").get("/api/users/me/nearby-settings").json()["settings"]["mine"] is True
+    assert as_user("robin").get("/api/screen-time/robin/rules").json()["nearby"]["mine"] is True

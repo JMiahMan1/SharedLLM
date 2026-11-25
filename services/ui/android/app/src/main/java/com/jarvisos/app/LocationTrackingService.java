@@ -887,6 +887,14 @@ public class LocationTrackingService extends Service {
             Log.e(TAG, "could not build the upload", e);
             return;
         }
+        // My devices: the person's other devices learn this one's last fix and battery over Bluetooth.
+        try {
+            OwnSync.noteFix(this, location.getLatitude(), location.getLongitude(),
+                    location.hasAccuracy() ? location.getAccuracy() : Double.NaN, location.getTime(),
+                    body.optInt("battery", -1), body.has("charging") ? body.optBoolean("charging") : null);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "own fix not kept: " + e.getMessage());
+        }
         // Fixes kept from a stretch without signal go first, oldest first: the
         // server takes the last fix it gets as the current position, and Geo
         // skips a fix older than its newest when it builds trips.

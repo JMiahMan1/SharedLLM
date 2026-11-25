@@ -10,6 +10,8 @@ export interface NearbyDeviceState {
   chat: boolean;
   offline: boolean;
   car: boolean;
+  /** My devices: this person's own phone and tablet keep their data in step. */
+  mine: boolean;
   /** A child's phone: a parent's offline lock, unlock and extra time always reach it. */
   parentLink: boolean;
   scanPermission: boolean;
@@ -23,7 +25,7 @@ export interface NearbyDeviceState {
 export interface NearbyPluginInterface {
   getState(): Promise<NearbyDeviceState>;
   /** Save the parts; with `ask`, Android 12+ asks for what a part just turned on needs. */
-  apply(options: { nearby?: boolean; chat?: boolean; offline?: boolean; car?: boolean; ask?: boolean }): Promise<NearbyDeviceState>;
+  apply(options: { nearby?: boolean; chat?: boolean; offline?: boolean; car?: boolean; mine?: boolean; ask?: boolean }): Promise<NearbyDeviceState>;
   /** Ask for what the parts that are on still lack. */
   requestPermissions(): Promise<NearbyDeviceState>;
 }

@@ -119,4 +119,21 @@ public class NearbyRulesTest {
         assertFalse(o.getBoolean("car"));
         assertTrue(o.getBoolean("parentLink"));
     }
+    @Test
+    public void myDevicesRunsTheRadioAndThePhoneToPhoneSyncs() throws Exception {
+        NearbyRules.Parts mine = new NearbyRules.Parts(false, false, false, false, true, false);
+        assertTrue(mine.engine());
+        assertTrue(mine.mesh());
+        assertFalse(mine.sightings());
+        assertFalse(mine.snapshot());
+        assertTrue(mine.toJson().getBoolean("mine"));
+        // Turning it on asks for what it needs on Android 12+: scan, advertise and connect.
+        assertEquals(java.util.Arrays.asList("scan", "advertise", "connect"),
+                NearbyRules.toAsk(NONE, mine, 31, false, false, false));
+        // The server's choice reaches it; a missing value keeps the phone's.
+        assertTrue(NearbyRules.merge(NONE, new JSONObject().put("mine", true), false).mine);
+        assertTrue(NearbyRules.merge(mine, new JSONObject().put("chat", true), false).mine);
+        // A child's phone follows what the parent set, like the other parts.
+        assertFalse(NearbyRules.merge(mine, new JSONObject().put("mine", false), true).mine);
+    }
 }

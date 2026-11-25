@@ -517,7 +517,11 @@ final class Proximity {
 
     private static final Runnable FLUSH = () -> {
         flush(false);
-        if (app != null) FamilyMesh.trySyncWithServer(app, false);
+        if (app != null) {
+            FamilyMesh.trySyncWithServer(app, false);
+            // My devices: this device's own items (device, steps) when they changed.
+            OwnSync.publish(app, false);
+        }
         if (running) handler.postDelayed(Proximity.FLUSH, FLUSH_MS);
     };
 
