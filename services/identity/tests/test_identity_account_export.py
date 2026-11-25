@@ -20,6 +20,7 @@ from services.identity.models import (
     AuditEvent,
     ScreenRules,
     User,
+    UserProfileSharing,
     UserThemeSetting,
     UserWidget,
     WorkspaceChat,
@@ -45,6 +46,8 @@ def session_fixture():
             nextcloud_pass_enc=encrypt("nc-app-password"),
             ha_token_enc=encrypt("ha-long-lived-token"),
             push_topic="jarvis-sam-secret-topic",
+            google_books_key_enc=encrypt("fake-google-books-key"),
+            book_metadata=json.dumps({"google_books_enabled": True, "open_library_email": "sam@example.test"}),
         )
         session.add(sam)
         session.add(User(username="kid", display_name="Kid", family_role="child"))
@@ -60,6 +63,8 @@ def session_fixture():
         session.add(WorkspaceChat(id="p1", workspace_id="w", username="pat", title="Pat's", updated_at="2026-01-01T00:00:00"))
         session.add(WorkspaceChatMessage(chat_id="c1", role="user", parts='[{"type":"text","text":"hello"}]'))
         session.add(WorkspaceChatMessage(chat_id="p1", role="user", parts='[{"type":"text","text":"pat secret"}]'))
+        session.add(UserProfileSharing(username="sam", data=json.dumps({"areas": ["garden"]})))
+        session.add(UserProfileSharing(username="pat", data=json.dumps({"areas": ["recipes"]})))
         session.add(ScreenRules(username="kid", data=json.dumps({"daily_limit_min": 60})))
         session.commit()
         yield session
@@ -88,7 +93,8 @@ def test_routes_need_the_internal_secret(client):
 def test_export_holds_only_the_persons_rows_and_no_secrets(client):
     data = _export(client)
     text = json.dumps(data)
-    for leaked in ("nc-app-password", "ha-long-lived-token", "pbkdf2$", "deadbeef", "k-123", "secret-topic", "pat-only", "pat secret"):
+    for leaked in ("nc-app-password", "ha-long-lived-token", "pbkdf2$", "deadbeef", "k-123", "secret-topic", "pat-only", "pat secret",
+                   "fake-google-books-key"):
         assert leaked not in text
     for rows in data.values():
         for row in rows:
@@ -96,6 +102,7 @@ def test_export_holds_only_the_persons_rows_and_no_secrets(client):
     assert data["profile"][0]["username"] == "sam"
     assert data["profile"][0]["nextcloud_user"] == "sam"
     assert "api_keys" not in data
+    assert "google_books_key_enc" not in data["profile"][0]
     assert [w["widget_key"] for w in data["dashboard_widgets"]] == ["weather"]
     assert [c["id"] for c in data["workspace_chats"]] == ["c1"]
     assert len(data["workspace_chat_messages"]) == 1
@@ -206,3 +213,10 @@ def test_audit_records_export(client, session):
     event = session.exec(select(AuditEvent).where(AuditEvent.action == "account.export")).one()
     assert (event.actor, event.target) == ("admin", "kid")
     assert client.post("/api/internal/account/audit", headers=SECRET, json={"action": "user.delete"}).status_code == 422
+
+
+def test_export_holds_the_book_catalogue_choices_and_profile_sharing(client):
+    data = _export(client)
+    books = json.loads(data["profile"][0]["book_metadata"])
+    assert books == {"google_books_enabled": True, "open_library_email": "sam@example.test"}
+    assert [json.loads(r["data"]) for r in data["profile_sharing"]] == [{"areas": ["garden"]}]

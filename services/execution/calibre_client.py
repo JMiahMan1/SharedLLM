@@ -521,11 +521,11 @@ def clear_closest(rows: list[dict[str, Any]], query: str) -> dict[str, Any] | No
     """
     scored = sorted(((book_score(row, query), i, row) for i, row in enumerate(rows)), key=lambda t: (-t[0], t[1]))
     if not scored or scored[0][0] < CLOSEST_MIN_SCORE:
-        return None
+        return closest_by_sound(rows, query)
     top, _i, best = scored[0]
     second = next((score for score, _j, row in scored[1:] if not _same_book(row, best)), 0.0)
     if top - second < CLOSEST_MARGIN:
-        return None
+        return closest_by_sound(rows, query)
     asked_title, by, asked_author = str(query).rpartition(" by ")
     if not by:
         asked_title, asked_author = str(query), ""
@@ -535,7 +535,41 @@ def clear_closest(rows: list[dict[str, Any]], query: str) -> dict[str, Any] | No
         log.info("[calibre] %r read as the closest book %s (score %.2f, next %.2f, author %.2f, title %.2f)",
                  query, _named(best), top, second, author_ratio, title_ratio)
         return best
-    return None
+    return closest_by_sound(rows, query)
+
+
+#: A title heard wrong but sounding right ("Wild Apart" for "Wild at Heart"): the book whose
+#: title is most alike as heard (``spoken_similarity``), when it is at least this alike, beats every other
+#: book by ``CLOSEST_SOUND_MARGIN`` and the sound of what was said is at least
+#: ``CLOSEST_SOUND_MIN_KEY`` letters (a short sound is shared by too many titles).
+CLOSEST_SOUND_RATIO = 0.8
+CLOSEST_SOUND_MARGIN = 0.1
+CLOSEST_SOUND_MIN_KEY = 6
+
+
+def closest_by_sound(rows: list[dict[str, Any]], query: str) -> dict[str, Any] | None:
+    """The one book whose title sounds like the title said (``services.common.media_titles``), or None."""
+    from services.common.media_titles import main_title, phonetic_key, spoken_similarity
+
+    asked_title, by, _author = str(query).rpartition(" by ")
+    asked = asked_title if by else str(query)
+    if len(phonetic_key(asked)) < CLOSEST_SOUND_MIN_KEY:
+        return None
+    scored = []
+    for i, row in enumerate(rows):
+        title = str(row.get("title") or "")
+        ratio = max(spoken_similarity(asked, t) for t in {title, main_title(title)})
+        scored.append((ratio, i, row))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    if not scored or scored[0][0] < CLOSEST_SOUND_RATIO:
+        return None
+    top, _i, best = scored[0]
+    second = next((ratio for ratio, _j, row in scored[1:] if not _same_book(row, best)), 0.0)
+    if top - second < CLOSEST_SOUND_MARGIN:
+        return None
+    log.info("[calibre] %r read as %s, the title that sounds closest (%.2f, next %.2f)", query, _named(best),
+             top, second)
+    return best
 
 
 def _named(row: dict[str, Any]) -> str:
