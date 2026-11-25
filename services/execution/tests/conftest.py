@@ -25,6 +25,14 @@ def _playback_check_at_once(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _volume_readback_at_once(monkeypatch):
+    """A volume change is read back once, from the states the test gives, without waiting."""
+    from services.execution.handlers import media
+
+    monkeypatch.setattr(media, "VOLUME_READBACK_S", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def _plain_home_assistant(monkeypatch):
     async def no_index(key, ha_token):
         return None
