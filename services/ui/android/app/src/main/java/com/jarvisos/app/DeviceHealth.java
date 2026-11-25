@@ -102,6 +102,11 @@ final class DeviceHealth {
         perms.put("notification_listener", notificationListenerOn(app));
         perms.put("location", granted(app, Manifest.permission.ACCESS_FINE_LOCATION)
             || granted(app, Manifest.permission.ACCESS_COARSE_LOCATION));
+        // Nearby devices (Android 12+): which linked car a trip was in. Only once the
+        // household has linked a car; before that a missing grant costs nothing.
+        if (!VehicleBluetooth.linked(app).isEmpty()) {
+            perms.put("bluetooth", VehicleBluetooth.permissionGranted(app));
+        }
         body.put("permissions", perms);
         JSONObject workers = new JSONObject();
         workers.put("comms_sync", workerState(app, CommsSyncWorker.WORK_NAME));

@@ -221,7 +221,12 @@ const VISIT_SUGGESTIONS = [
 
 const VEHICLES = [
   { id: 'v1', name: 'Family minivan with the roof box', mpg: 22, cost_per_gallon: 3.65, fuel_type: 'gasoline',
-    fuel_price_location: 'Denver, CO', fuel_price_source: 'manual', fuel_price_updated_at: iso(-600) },
+    fuel_price_location: 'Denver, CO', fuel_price_source: 'manual', fuel_price_updated_at: iso(-600),
+    // Made-up hardware addresses; the long name is how a head unit may call itself.
+    bluetooth: [
+      { address: '00:1A:7D:DA:71:13', kind: 'classic', name: 'Uconnect Infotainment Head Unit With A Long Name', linked_by: 'parent', linked_at: SEC - 86400 },
+      { address: 'C4:7D:4F:12:34:56', kind: 'le_static', name: '', linked_by: 'robin', linked_at: SEC - 3600 },
+    ] },
   { id: 'v2', name: 'Hatchback', mpg: 34, cost_per_gallon: 3.65, fuel_type: 'gasoline' },
 ];
 
@@ -240,8 +245,11 @@ const trip = (id: string, user: string, name: string, startMin: number, minutes:
 };
 
 export const TRIPS = [
-  trip('t1', 'parent', 'Parent', -90, 18, 6.4, { notes: 'Dropped the kids off, then the long way round past the farmers market.' }),
-  trip('t2', 'sky', LONG_NAME, -60 * 26, 42, 28.9, { is_shared: true, shared_with: [{ user_id: 'parent', user_name: 'Parent' }] }),
+  // Chosen by hand although Bluetooth saw the hatchback: the edit sheet offers it back.
+  trip('t1', 'parent', 'Parent', -90, 18, 6.4, { notes: 'Dropped the kids off, then the long way round past the farmers market.',
+    vehicle_source: 'manual', bt_vehicle_id: 'v2' }),
+  trip('t2', 'sky', LONG_NAME, -60 * 26, 42, 28.9, { is_shared: true, shared_with: [{ user_id: 'parent', user_name: 'Parent' }],
+    vehicle_source: 'bluetooth', bt_vehicle_id: 'v1' }),
   trip('t3', 'robin', 'Robin', -60 * 24 * 3, 12, 3.1, { activity_type: 'cycling', vehicle_id: undefined, vehicle_name: undefined }),
   // More than the five recent ones, so "See all trips" shows.
   ...Array.from({ length: 5 }, (_, i) => trip(`t${4 + i}`, 'parent', 'Parent', -60 * 24 * (5 + i * 3), 25, 11.2 + i)),

@@ -15399,6 +15399,81 @@ async def assign_geo_vehicle(request: Request):
     raise HTTPException(status_code=resp.status if resp.status < 500 else 502, detail=f"Failed to assign vehicle: {err_msg}")
 
 
+@app.post("/api/geo/vehicles/{vehicle_id}/bluetooth")
+async def link_geo_vehicle_bluetooth(request: Request, vehicle_id: str):
+    """Link a Bluetooth device (by hardware address) to a household vehicle.
+
+    Any signed-in family member may: the person in the car with the phone
+    paired to it is the one who can. The phone says which device; geo checks
+    the address is a stable one and not already another vehicle's."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="A JSON object is required")
+    payload = {
+        "address": str(body.get("address") or ""),
+        "kind": str(body.get("kind") or "classic"),
+        "name": str(body.get("name") or ""),
+        "user": ident["user"],
+    }
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/vehicles/{quote(vehicle_id, safe='')}/bluetooth",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        await _raise_vehicle_link_failure(resp)
+
+
+@app.delete("/api/geo/vehicles/{vehicle_id}/bluetooth/{address}")
+async def unlink_geo_vehicle_bluetooth(request: Request, vehicle_id: str, address: str):
+    """Remove a Bluetooth link: an admin, or the person who made it."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    async with shared_http_client() as client:
+        if not ident.get("is_admin"):
+            resp = await client.get(
+                f"{GEO_SVC}/vehicles",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail="Geo service unavailable")
+            wanted = address.replace("-", ":").upper()
+            vehicles = (await resp.json()).get("vehicles") or []
+            vehicle = next((v for v in vehicles if isinstance(v, dict) and v.get("id") == vehicle_id), None)
+            link = next((lk for lk in (vehicle or {}).get("bluetooth") or []
+                         if isinstance(lk, dict) and str(lk.get("address") or "").upper() == wanted), None)
+            me = str(ident["user"]).split(".")[-1].lower()
+            if link is not None and str(link.get("linked_by") or "") != me:
+                raise HTTPException(status_code=403, detail="Only a parent or the person who linked it can remove it")
+        resp = await client.delete(
+            f"{GEO_SVC}/vehicles/{quote(vehicle_id, safe='')}/bluetooth/{quote(address, safe='')}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        await _raise_vehicle_link_failure(resp)
+
+
+async def _raise_vehicle_link_failure(resp) -> None:
+    """geo's own answer for a link it understood and refused (404/409/422); 502 otherwise."""
+    if resp.status in (404, 409, 422):
+        try:
+            detail = (await resp.json()).get("detail")
+        except Exception:
+            detail = None
+        raise HTTPException(status_code=resp.status, detail=detail or "The link was refused")
+    raise HTTPException(status_code=502, detail="Geo service unavailable")
+
+
 @app.get("/api/geo/fuel-prices")
 async def get_fuel_prices(request: Request, location: str = ""):
     """Proxy fuel price lookup to geo service."""

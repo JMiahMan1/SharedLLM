@@ -327,6 +327,8 @@ public class LocationTrackingService extends Service {
         CrashAlert.resume(this);
         // The room-detection beacon lives as long as this process; a sticky restart brings it back.
         BleBeacon.ensure(this);
+        // Which linked car's Bluetooth is connected: start from what Android says now.
+        VehicleBluetooth.seed(this);
         if (hasPlayServices(this)) {
             fused = LocationServices.getFusedLocationProviderClient(this);
             activityClient = ActivityRecognition.getClient(this);
@@ -925,6 +927,10 @@ public class LocationTrackingService extends Service {
         // uploads from both, and only one may say where they are.
         body.put("device_id", PushGateway.deviceId(this));
         body.put("device_name", deviceName());
+        // The linked vehicle devices connected now (hardware addresses only), so
+        // Wander knows which car this fix was taken in.
+        java.util.List<String> bt = VehicleBluetooth.linkedConnectedNow(this);
+        if (!bt.isEmpty()) body.put("bt_devices", new org.json.JSONArray(bt));
         body.put("user_id", userId != null ? userId : username);
         if (userId != null) {
             body.put("username", username);

@@ -59,6 +59,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   usage_access: 'Usage access (screen time)',
   notification_listener: 'Notification access (app messages)',
   location: 'Location',
+  bluetooth: 'Nearby devices (which car a trip was in)',
 };
 
 const WORKER_LABELS: Record<string, string> = {
