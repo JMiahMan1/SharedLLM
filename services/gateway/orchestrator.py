@@ -1,5 +1,6 @@
 # services/gateway/orchestrator.py
 import asyncio
+import functools
 import json
 import logging
 import re
@@ -1777,6 +1778,198 @@ def _registry_names() -> dict[str, str]:
 _REGISTRY_NAMES = _registry_names()
 
 
+_ROUTING_ONLY_KEYS = frozenset({"action", "payload", "function"})
+
+
+@functools.cache
+def _request_schema_fields() -> dict[str, frozenset[str]]:
+    """``{normalized request name: its declared fields}`` from execution's schemas.
+
+    The single-turn normalizer treats ``command``, ``id``, ``type`` and ``state``
+    as routing keys, but some requests declare them as real fields
+    (MediaTransportRequest.command, TimerRequest.id/type, EntitySearchRequest.state).
+    """
+    from pydantic import BaseModel
+
+    from services.execution import schemas as exec_schemas
+
+    fields: dict[str, frozenset[str]] = {}
+    for obj in vars(exec_schemas).values():
+        if isinstance(obj, type) and issubclass(obj, BaseModel) and obj.__name__.endswith("Request"):
+            fields[obj.__name__.lower()] = frozenset(obj.model_fields)
+    return fields
+
+
+def _routed_schema_fields(tool_data: dict) -> tuple[str, frozenset[str]]:
+    """The tool a call names (normalized) and the fields its request declares."""
+    known = _request_schema_fields()
+    for key in ("action", "tool", "name", "@type"):
+        norm = re.sub(r"[\s_]+", "", str(tool_data.get(key) or "")).lower()
+        if norm in known:
+            return norm, known[norm]
+    return "", frozenset()
+
+
+def _keeps_field(key: str, value: Any, routed: str, fields: frozenset[str], meta: set[str]) -> bool:
+    """Whether a top-level key of the model's call belongs in the tool's payload."""
+    if key not in meta:
+        return True
+    if key in _ROUTING_ONLY_KEYS or key not in fields:
+        return False
+    # {"name": "TimerRequest"} names the tool; {"type": "countdown"} is a field value.
+    return re.sub(r"[\s_]+", "", str(value)).lower() != routed
+
+
+def normalize_single_turn_call(tool_data: dict) -> dict:
+    """Turn the JSON the model emitted into ``{"action": <tool>, "payload": {...}}``.
+
+    Every field the routed tool's request schema declares reaches the payload,
+    even one whose name is also a routing key here (``command``, ``id``, ``type``):
+    MediaTransportRequest's ``command`` was dropped as a routing key, so
+    "set volume to 100%" reached execution as ``{"entity_id": ...}`` and failed
+    with 422 three times (2026-11-24).
+    """
+    # Normalize tool_data keys
+    if "arguments" in tool_data and "payload" not in tool_data:
+        tool_data["payload"] = tool_data.pop("arguments")
+    if "parameters" in tool_data and "payload" not in tool_data:
+        tool_data["payload"] = tool_data.pop("parameters")
+    if "function" in tool_data and "action" not in tool_data:
+        tool_data["action"] = tool_data["function"].get("name", "")
+        tool_data["payload"] = tool_data["function"].get("arguments", {})
+    if "operation" in tool_data and "action" not in tool_data:
+        tool_data["action"] = tool_data.pop("operation")
+    if "command" in tool_data and "action" not in tool_data:
+        tool_data["action"] = tool_data.pop("command")
+
+    # Normalize "state" to "action" for light/climate/HA payloads (not for a
+    # request that declares "state" itself, such as EntitySearchRequest's filter)
+    _routed, _fields = _routed_schema_fields(tool_data)
+    payload_for_state = tool_data.get("payload", tool_data)
+    if (isinstance(payload_for_state, dict) and "state" in payload_for_state
+            and "action" not in payload_for_state and "state" not in _fields):
+        state_val = payload_for_state.pop("state")
+        payload_for_state["action"] = state_val
+    if "state" in tool_data and "action" not in tool_data and "payload" not in tool_data:
+        tool_data["action"] = tool_data.pop("state")
+
+    # Smart routing: separate tool-name (for endpoint lookup) from HA action (for payload)
+    # The model emits several shapes:
+    #   {"name": "LightControlRequest", "arguments": {"action": "turn_off"}}
+    #   {"tool": "LightControlRequest", "action": "turn_off", "entity_id": "..."}
+    #   {"name": "LightControlRequest", "arguments": {"state": "off"}}
+    # We need: action = normalized tool name for routing, payload.action = HA action.
+    # A garden tool's own "action" field (water, mist, ...) is a care verb, not a tool
+    # name: route by the tool and keep every other field as its payload.
+    _named = re.sub(r'[\s_]+', '', str(tool_data.get("tool") or tool_data.get("name") or "")).lower()
+    if _named in _GARDEN_ACTIONS:
+        _gp = tool_data.get("payload")
+        if not isinstance(_gp, dict):
+            _gp = {k: v for k, v in tool_data.items() if k not in ("tool", "name", "payload")}
+        tool_data = {"action": _named, "payload": _gp}
+
+    # When a discriminator names a known tool but action is a verb (e.g. TimerRequest+add),
+    # promote the tool name to the routing action and keep the verb for payload dispatch.
+    promote_tool_discriminator(
+        tool_data,
+        lambda n: (
+            n in SINGLE_TURN_TOOL_ENDPOINTS
+            or n == "controlplanerequest"
+            or bool(studio_tools.tool_for(n))
+            or n in _GARDEN_ACTIONS
+            or n.endswith("request")
+        ),
+    )
+
+    _candidate = str(tool_data.get("action", "")).strip()
+    _cand_norm = re.sub(r'[\s_]+', '', _candidate).lower()
+    _is_ha_action = _cand_norm in ("turnon", "turnoff", "toggle", "play", "pause", "stop", "send", "messages", "list")
+
+    _META_KEYS = {"action", "tool", "name", "@type", "type", "payload", "function", "id", "operation", "command"}
+
+    if _is_ha_action:
+        # action is an HA action; look for a tool/name/@type to route with
+        for _k in ("tool", "name", "@type"):
+            if _k in tool_data:
+                _tn = tool_data.pop(_k)
+                _tn_norm = re.sub(r'[\s_]+', '', str(_tn)).lower()
+                if _tn_norm in SINGLE_TURN_TOOL_ENDPOINTS or _tn_norm == "controlplanerequest":
+                    _pl = tool_data.get("payload", {})
+                    if not isinstance(_pl, dict):
+                        _pl = {}
+                    _pl["action"] = _candidate
+                    # Merge remaining top-level fields (entity_id, brightness, etc.) into payload
+                    _routed, _fields = _routed_schema_fields({"action": _tn_norm})
+                    for _fk, _fv in list(tool_data.items()):
+                        if _keeps_field(_fk, _fv, _routed, _fields, _META_KEYS):
+                            _pl.setdefault(_fk, _fv)
+                    tool_data["payload"] = _pl
+                    tool_data["action"] = _tn_norm
+                    log.info(f"[_single_turn_inference] Remapped routing: {tool_data['action']} payload.action={_candidate}")
+                    break
+    else:
+        # action is a tool name (routing key); ensure payload has valid HA action
+        _is_tool_route = (
+            _cand_norm in SINGLE_TURN_TOOL_ENDPOINTS
+            or _cand_norm == "controlplanerequest"
+            or bool(studio_tools.tool_for(_cand_norm))
+            or _cand_norm in _GARDEN_ACTIONS
+            or _cand_norm.endswith("request")
+        )
+        if _is_tool_route:
+            _pl = tool_data.get("payload")
+            if not isinstance(_pl, dict):
+                _pl = {}
+            _pl_action_norm = re.sub(r"[\s_]+", "", str(_pl.get("action", ""))).lower()
+            if "action" in _pl and (
+                _pl_action_norm in SINGLE_TURN_TOOL_ENDPOINTS
+                or _pl_action_norm == "controlplanerequest"
+                or _pl_action_norm.endswith("request")
+            ):
+                # payload.action is also a tool name, not an HA action; remove it
+                _pl.pop("action")
+            if "action" not in _pl:
+                sub = _pl.get("sub_action") or _pl.get("device_action") or tool_data.get("sub_action") or tool_data.get("device_action")
+                if sub:
+                    _pl["action"] = sub
+            # Merge any top-level fields (e.g. hoisted by _normalize_tool) into payload
+            _routed, _fields = _routed_schema_fields(tool_data)
+            for _fk, _fv in list(tool_data.items()):
+                if _fk not in _pl and _keeps_field(_fk, _fv, _routed, _fields, _META_KEYS):
+                    _pl[_fk] = _fv
+            tool_data["payload"] = _pl
+
+    # agent_loop._normalize_tool renames path/relative_path to file_path; give a
+    # request that has no file_path its own name back (TTSRequest.relative_path).
+    _pl = tool_data.get("payload")
+    if isinstance(_pl, dict) and "file_path" in _pl:
+        _routed, _fields = _routed_schema_fields(tool_data)
+        if _fields and "file_path" not in _fields:
+            for _pk in ("path", "relative_path"):
+                if _pk in _fields and _pk not in _pl:
+                    _pl[_pk] = _pl.pop("file_path")
+                    break
+
+    # Last normalization: tool/name → action (only if action still unset)
+    if "action" not in tool_data:
+        if "tool" in tool_data:
+            tool_data["action"] = tool_data.pop("tool")
+        elif "name" in tool_data:
+            tool_data["action"] = tool_data.pop("name")
+
+    # Normalize hallucinated/shortened action names
+    action_aliases = {
+        "filewriterequest": "workspacefilewriterequest",
+        "filereadrequest": "workspacefilereadrequest",
+        "filepatchrequest": "workspacefilepatchrequest",
+    }
+    raw_action = tool_data.get("action", "").lower().strip()
+    if raw_action in action_aliases:
+        tool_data["action"] = action_aliases[raw_action]
+
+    return tool_data
+
+
 async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: ResolvedCredentials, workspace_id: str | None = None) -> str:
     """Run one tool call, reusing a result this conversation already fetched while its
     declared freshness allows (``tool_cache``; live tools always go to the source)."""
@@ -2528,127 +2721,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                     await chunk_callback({"type": "content", "text": clean_ans})
             break
 
-        # Normalize tool_data keys
-        if "arguments" in tool_data and "payload" not in tool_data:
-            tool_data["payload"] = tool_data.pop("arguments")
-        if "parameters" in tool_data and "payload" not in tool_data:
-            tool_data["payload"] = tool_data.pop("parameters")
-        if "function" in tool_data and "action" not in tool_data:
-            tool_data["action"] = tool_data["function"].get("name", "")
-            tool_data["payload"] = tool_data["function"].get("arguments", {})
-        if "operation" in tool_data and "action" not in tool_data:
-            tool_data["action"] = tool_data.pop("operation")
-        if "command" in tool_data and "action" not in tool_data:
-            tool_data["action"] = tool_data.pop("command")
-
-        # Normalize "state" to "action" for light/climate/HA payloads
-        payload_for_state = tool_data.get("payload", tool_data)
-        if isinstance(payload_for_state, dict) and "state" in payload_for_state and "action" not in payload_for_state:
-            state_val = payload_for_state.pop("state")
-            payload_for_state["action"] = state_val
-        if "state" in tool_data and "action" not in tool_data and "payload" not in tool_data:
-            tool_data["action"] = tool_data.pop("state")
-
-        # Smart routing: separate tool-name (for endpoint lookup) from HA action (for payload)
-        # The model emits several shapes:
-        #   {"name": "LightControlRequest", "arguments": {"action": "turn_off"}}
-        #   {"tool": "LightControlRequest", "action": "turn_off", "entity_id": "..."}
-        #   {"name": "LightControlRequest", "arguments": {"state": "off"}}
-        # We need: action = normalized tool name for routing, payload.action = HA action.
-        # A garden tool's own "action" field (water, mist, ...) is a care verb, not a tool
-        # name: route by the tool and keep every other field as its payload.
-        _named = re.sub(r'[\s_]+', '', str(tool_data.get("tool") or tool_data.get("name") or "")).lower()
-        if _named in _GARDEN_ACTIONS:
-            _gp = tool_data.get("payload")
-            if not isinstance(_gp, dict):
-                _gp = {k: v for k, v in tool_data.items() if k not in ("tool", "name", "payload")}
-            tool_data = {"action": _named, "payload": _gp}
-
-        # When a discriminator names a known tool but action is a verb (e.g. TimerRequest+add),
-        # promote the tool name to the routing action and keep the verb for payload dispatch.
-        promote_tool_discriminator(
-            tool_data,
-            lambda n: (
-                n in SINGLE_TURN_TOOL_ENDPOINTS
-                or n == "controlplanerequest"
-                or bool(studio_tools.tool_for(n))
-                or n in _GARDEN_ACTIONS
-                or n.endswith("request")
-            ),
-        )
-
-        _candidate = str(tool_data.get("action", "")).strip()
-        _cand_norm = re.sub(r'[\s_]+', '', _candidate).lower()
-        _is_ha_action = _cand_norm in ("turnon", "turnoff", "toggle", "play", "pause", "stop", "send", "messages", "list")
-
-        _META_KEYS = {"action", "tool", "name", "@type", "type", "payload", "function", "id", "operation", "command"}
-
-        if _is_ha_action:
-            # action is an HA action; look for a tool/name/@type to route with
-            for _k in ("tool", "name", "@type"):
-                if _k in tool_data:
-                    _tn = tool_data.pop(_k)
-                    _tn_norm = re.sub(r'[\s_]+', '', str(_tn)).lower()
-                    if _tn_norm in SINGLE_TURN_TOOL_ENDPOINTS or _tn_norm == "controlplanerequest":
-                        _pl = tool_data.get("payload", {})
-                        if not isinstance(_pl, dict):
-                            _pl = {}
-                        _pl["action"] = _candidate
-                        # Merge remaining top-level fields (entity_id, brightness, etc.) into payload
-                        for _fk, _fv in list(tool_data.items()):
-                            if _fk not in _META_KEYS:
-                                _pl.setdefault(_fk, _fv)
-                        tool_data["payload"] = _pl
-                        tool_data["action"] = _tn_norm
-                        log.info(f"[_single_turn_inference] Remapped routing: {tool_data['action']} payload.action={_candidate}")
-                        break
-        else:
-            # action is a tool name (routing key); ensure payload has valid HA action
-            _is_tool_route = (
-                _cand_norm in SINGLE_TURN_TOOL_ENDPOINTS
-                or _cand_norm == "controlplanerequest"
-                or bool(studio_tools.tool_for(_cand_norm))
-                or _cand_norm in _GARDEN_ACTIONS
-                or _cand_norm.endswith("request")
-            )
-            if _is_tool_route:
-                _pl = tool_data.get("payload")
-                if not isinstance(_pl, dict):
-                    _pl = {}
-                _pl_action_norm = re.sub(r"[\s_]+", "", str(_pl.get("action", ""))).lower()
-                if "action" in _pl and (
-                    _pl_action_norm in SINGLE_TURN_TOOL_ENDPOINTS
-                    or _pl_action_norm == "controlplanerequest"
-                    or _pl_action_norm.endswith("request")
-                ):
-                    # payload.action is also a tool name, not an HA action; remove it
-                    _pl.pop("action")
-                if "action" not in _pl:
-                    sub = _pl.get("sub_action") or _pl.get("device_action") or tool_data.get("sub_action") or tool_data.get("device_action")
-                    if sub:
-                        _pl["action"] = sub
-                # Merge any top-level fields (e.g. hoisted by _normalize_tool) into payload
-                for _fk, _fv in list(tool_data.items()):
-                    if _fk not in _META_KEYS and _fk not in _pl:
-                        _pl[_fk] = _fv
-                tool_data["payload"] = _pl
-
-        # Last normalization: tool/name → action (only if action still unset)
-        if "action" not in tool_data:
-            if "tool" in tool_data:
-                tool_data["action"] = tool_data.pop("tool")
-            elif "name" in tool_data:
-                tool_data["action"] = tool_data.pop("name")
-
-        # Normalize hallucinated/shortened action names
-        action_aliases = {
-            "filewriterequest": "workspacefilewriterequest",
-            "filereadrequest": "workspacefilereadrequest",
-            "filepatchrequest": "workspacefilepatchrequest",
-        }
-        raw_action = tool_data.get("action", "").lower().strip()
-        if raw_action in action_aliases:
-            tool_data["action"] = action_aliases[raw_action]
+        tool_data = normalize_single_turn_call(tool_data)
 
         action = tool_data.get("action", "").lower().strip()
         tools_called += 1

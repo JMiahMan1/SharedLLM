@@ -103,6 +103,7 @@ from services.gateway import (
     fast_lights,
     fast_media,
     fast_read,
+    fast_volume,
     garden_routes,
     helper_routes,
     hub_registry_routes,
@@ -4765,6 +4766,11 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
         # skipped and called nothing. A plain skip/stop/pause is never the model's job.
         log.info(f"[FastPath] plain media command: {extract_media_transport_command(query)}")
         intent, confidence = "media_transport", 1.0
+    # "Set volume to 100%", "turn it up a bit", "mute": one meaning, one tool (fast_volume.py).
+    volume_ask = None if grounded else fast_volume.parse(query)
+    if volume_ask is not None:
+        log.info(f"[FastPath] volume command: {volume_ask}")
+        intent, confidence = "media_transport", 1.0
 
     # "Play" heard as another word ("Late <title>"): played only when the libraries have a
     # strong match for the rest; anything else goes on as it was heard (fast_media.misheard_play).
@@ -4890,14 +4896,23 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
             # A named player ("on the den TV") or else the last one used while it plays;
             # of players that match, the one playing (resolve_media_target "transport").
             named = engine.extract_target(query, intent)
-            if not named and sat_player and sat_state in ACTIVE_MEDIA_STATES:
+            if volume_ask is not None:
+                named = fast_volume.place(query)
+            if volume_ask is not None and named:
+                resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
+                                                       requested_device=named)
+            elif volume_ask is not None and sat_player:
+                # A volume command names no device: it is for the speaker that heard it, playing or not.
+                resolved_entity = sat_player
+                log.info(f"[FastPath] volume with no device named; the satellite's own speaker {sat_player}")
+            elif not named and sat_player and sat_state in ACTIVE_MEDIA_STATES:
                 resolved_entity = sat_player
                 log.info(f"[FastPath] no player named; the satellite's own speaker {sat_player} is {sat_state}")
             else:
                 active_cache = cached_device_id if cached_state in ACTIVE_MEDIA_STATES else None
                 resolved_entity = resolve_media_target(query, media_entities or [], media_type="transport",
                                                        cached_device=None if named else active_cache, requested_device=named)
-            if not resolved_entity and media_entities:
+            if not resolved_entity and media_entities and not (volume_ask is not None and named):
                 for e in media_entities:
                     if e.get("entity_id", "").startswith("media_player.") and e.get("state") in ("playing", "paused"):
                         resolved_entity = e.get("entity_id")
@@ -5126,6 +5141,8 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
                     transport_cmd = "play"
                 area = (voice_context or {}).get("area") if isinstance(voice_context, dict) else None
                 _, named_device = extract_media_request(query)
+                if volume_ask is not None:
+                    named_device = fast_volume.place(query)
                 if not named_device and area:
                     transport_device_name = area
                 else:
@@ -5137,7 +5154,10 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
                     "command": transport_cmd,
                     **extract_media_transport_payload(query),
                 }
-                if transport_cmd == "volume_set":
+                if volume_ask is not None:
+                    exec_payload.update(fast_volume.transport_payload(
+                        volume_ask, fast_volume.current_level(resolved_entity, media_entities)))
+                elif transport_cmd == "volume_set":
                     exec_payload["volume_level"] = extract_volume_level(query)
                 svc_base = EXECUTION_SVC
             else:
