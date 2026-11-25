@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, MapPin, MessageSquare, Play, SendHorizontal, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ImageMinus, Loader2, MapPin, MessageSquare, Play, SendHorizontal, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { PrivateVault } from '../../lib/privateChatCrypto';
@@ -161,6 +161,7 @@ export default function PrivateGalleryViewer({
   onChanged,
   onDelete,
   onRemoveEntry,
+  onRemoveFromGallery,
   onSlideshow,
 }: {
   token: string;
@@ -173,6 +174,8 @@ export default function PrivateGalleryViewer({
   onChanged: () => void;
   onDelete: (messageId: number, blobs?: string[]) => Promise<void>;
   onRemoveEntry: (item: GalleryItem) => void;
+  /** Take a picture sent in the chat out of the gallery (it stays in the chat). */
+  onRemoveFromGallery?: (item: GalleryItem) => void;
   onSlideshow: (item: GalleryItem) => void;
 }) {
   const item = items[index];
@@ -297,6 +300,18 @@ export default function PrivateGalleryViewer({
         >
           <Play size={17} className="ml-0.5" />
         </button>
+        {!item.entryId && onRemoveFromGallery && (
+          <button
+            type="button"
+            onClick={() => onRemoveFromGallery(item)}
+            aria-label={`Remove this ${kind} from the gallery (it stays in the chat)`}
+            title="Remove from gallery"
+            data-testid="private-gallery-remove"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+          >
+            <ImageMinus size={17} />
+          </button>
+        )}
         {item.own && (
           <button
             type="button"

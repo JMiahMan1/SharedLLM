@@ -3,8 +3,17 @@ import type { TalkMessage } from './chatModel';
 import {
   buildGallery,
   clampAspect,
+  commandOf,
   countLabel,
   filterGallery,
+  galleryCommand,
+  galleryMembership,
+  GALLERY_RECORD_BYTES,
+  inGallery,
+  markRecords,
+  padded,
+  startCandidates,
+  startRecords,
   groupByDay,
   itemBlobs,
   justifyRows,
@@ -213,5 +222,169 @@ describe('the slideshow', () => {
     const move = kenBurns('abc');
     expect(Math.abs(move.fromX)).toBeLessThanOrEqual(4);
     expect(move.fromScale).not.toBe(move.toScale);
+  });
+});
+
+describe('gallery commands in the chat', () => {
+  it('reads a whole message asking to save or remove the picture it answers', () => {
+    for (const text of [
+      'save to gallery',
+      'Save to gallery!',
+      'Add to gallery.',
+      'save this to the gallery',
+      'Save it to our gallery please',
+      'please add this one to the gallery',
+      'put that photo in the gallery',
+      'Can you save this to the gallery?',
+      'keep this in the gallery, thanks',
+      '  SAVE   TO   GALLERY  ',
+    ]) {
+      expect(galleryCommand(text), text).toBe('add');
+    }
+    for (const text of ['remove from gallery', 'Remove this from the gallery.', 'take it out of the gallery', 'take this off the gallery please']) {
+      expect(galleryCommand(text), text).toBe('remove');
+    }
+  });
+
+  it('ignores ordinary sentences that only mention the gallery', () => {
+    for (const text of [
+      'we should save to gallery later?',
+      'did you save to gallery yet',
+      'save to gallery and then call me',
+      'I love our gallery',
+      'gallery',
+      'save',
+      'don\'t save to gallery',
+      'remove from gallery? no, keep it',
+      'add to the gallery of shame lol',
+      '',
+    ]) {
+      expect(galleryCommand(text), text).toBeNull();
+    }
+  });
+
+  it('counts only a reply that answers a picture: the same words with nothing quoted are just words', () => {
+    const blob = 'c'.repeat(32);
+    expect(commandOf({ t: 'text', text: 'save to gallery', quote: { m: 4, blob } })).toEqual({ op: 'add', blob });
+    expect(commandOf({ t: 'text', text: 'save to gallery' })).toBeNull();
+    expect(commandOf({ t: 'text', text: 'we should save to gallery later?', quote: { m: 4, blob } })).toBeNull();
+    expect(commandOf({ t: 'comment', blob, text: 'save to gallery' })).toBeNull();
+    expect(commandOf('unreadable')).toBeNull();
+  });
+});
+
+describe('gallery membership', () => {
+  const START = day(2026, 11, 20, 12);
+  const still = 'a'.repeat(32);
+  const gif = 'b'.repeat(32);
+  const png = 'c'.repeat(32);
+  const clip = 'd'.repeat(32);
+  const newStill = 'e'.repeat(32);
+  const newGif = 'f'.repeat(32);
+  const video = (poster: string): VideoPayload => ({ t: 'video', mime: 'video/mp4', size: 10, duration: 2, poster, chunks: ['1'.repeat(32)], clip: 'AAAAAAAAAAAAAAAAAAAAAA==', chunk_bytes: 10 });
+  const messages = [
+    msg(1, 'sam', START - 300),
+    msg(2, 'alex', START - 200),
+    msg(3, 'sam', START - 100),
+    msg(4, 'alex', START - 50),
+    msg(5, 'sam', START + 100),
+    msg(6, 'alex', START + 200),
+  ];
+  const opened: Record<string, Opened> = {
+    '1': { t: 'image', blob: still, mime: 'image/jpeg' },
+    '2': { t: 'image', blob: gif, mime: 'image/gif' },
+    '3': { t: 'image', blob: png, mime: 'image/png' },
+    '4': video(clip),
+    '5': { t: 'image', blob: newStill, mime: 'image/jpeg' },
+    '6': { t: 'image', blob: newGif, mime: 'image/gif' },
+  };
+  const entry = (id: string, at: number, payload: Opened): OpenedEntry => ({ id, at, own: true, byName: 'Alex', payload });
+  const start = (at: number, kept: string[], id = 's'.repeat(32)) => entry(id, at, { t: 'gallery_start', kept });
+
+  it('before the start: stills and clips stay, animated pictures and anything sent later leave', () => {
+    const m = galleryMembership(messages, opened, [start(START, [png])]);
+    expect(m.started).toBe(true);
+    expect(m.since).toBe(START);
+    // The PNG was read and found still, so it stays; the GIF was not kept; nothing sent after the start is in.
+    expect([...m.members].sort()).toEqual([still, png, clip].sort());
+  });
+
+  it('nothing sent after the start is in until added, by the button or by a "save to gallery" reply', () => {
+    const replies = [...messages, msg(7, 'sam', START + 300), msg(8, 'alex', START + 400)];
+    const said: Record<string, Opened> = {
+      ...opened,
+      '7': { t: 'text', text: 'Save to gallery!', quote: { m: 6, blob: newGif } },
+      // The same words with no picture answered do nothing.
+      '8': { t: 'text', text: 'save to gallery' },
+    };
+    const m = galleryMembership(replies, said, [start(START, []), entry('1'.repeat(32), START + 250, { t: 'gallery', op: 'add', blobs: [newStill] })]);
+    expect(m.members.has(newStill)).toBe(true);
+    expect(m.members.has(newGif)).toBe(true);
+  });
+
+  it('adds and removes apply oldest first; a removed picture stays in the chat but leaves the gallery', () => {
+    const entries = [
+      start(START, []),
+      entry('2'.repeat(32), START + 500, { t: 'gallery', op: 'remove', blobs: [still] }),
+      entry('3'.repeat(32), START + 400, { t: 'gallery', op: 'add', blobs: [still, newStill] }),
+    ];
+    const m = galleryMembership(messages, opened, entries);
+    expect(m.members.has(still)).toBe(false);
+    expect(m.members.has(newStill)).toBe(true);
+    // A reply after that puts it back.
+    const more = [...messages, msg(9, 'sam', START + 600)];
+    const back = galleryMembership(more, { ...opened, '9': { t: 'text', text: 'add this to the gallery', quote: { m: 1, blob: still } } }, entries);
+    expect(back.members.has(still)).toBe(true);
+  });
+
+  it('two phones racing to write the start agree: the earliest counts and the kept lists merge', () => {
+    const a = galleryMembership(messages, opened, [start(START + 150, [png], '7'.repeat(32)), start(START, [], '8'.repeat(32))]);
+    const b = galleryMembership(messages, opened, [start(START, [], '8'.repeat(32)), start(START + 150, [png], '7'.repeat(32))]);
+    expect([...a.members].sort()).toEqual([...b.members].sort());
+    expect(a.since).toBe(START);
+    // The still sent between the two starts is after the earliest: not in.
+    expect(a.members.has(newStill)).toBe(false);
+    expect(a.members.has(png)).toBe(true);
+  });
+
+  it('with no start written yet, it shows what the start would keep if written now', () => {
+    const m = galleryMembership(messages, opened, []);
+    expect(m.started).toBe(false);
+    expect([...m.members].sort()).toEqual([still, clip, newStill].sort());
+  });
+
+  it('a deleted picture is out whatever was recorded, and a record naming something not in the chat does nothing', () => {
+    const gone = messages.map((m) => (m.id === 1 ? { ...m, deleted: true } : m));
+    const m = galleryMembership(gone, opened, [start(START, []), entry('4'.repeat(32), START + 10, { t: 'gallery', op: 'add', blobs: [still, '9'.repeat(32)] })]);
+    expect(m.members.has(still)).toBe(false);
+    expect(m.members.has('9'.repeat(32))).toBe(false);
+  });
+
+  it('the gallery is its added pictures plus the chat pictures put in it', () => {
+    const items = buildGallery(messages, opened, me, [entry('5'.repeat(32), START, { t: 'added', blob: '6'.repeat(32), mime: 'image/jpeg' })]);
+    const shown = inGallery(items, new Set([still]));
+    expect(shown.map((i) => i.blob).sort()).toEqual([still, '6'.repeat(32)].sort());
+  });
+
+  it('the start reads only the pictures that might move', () => {
+    expect(startCandidates(messages, opened).map((c) => c.blob).sort()).toEqual([gif, png, newGif].sort());
+  });
+});
+
+describe('gallery records on the server', () => {
+  it('are all padded to one size, whatever they say and however many pictures they name', () => {
+    const one = padded({ t: 'gallery', op: 'add', blobs: ['a'.repeat(32)] });
+    const many = padded({ t: 'gallery', op: 'remove', blobs: Array.from({ length: 180 }, (_, i) => i.toString(16).padStart(32, '0')) });
+    const begin = padded({ t: 'gallery_start', kept: [] });
+    for (const record of [one, many, begin]) expect(JSON.stringify(record).length).toBe(GALLERY_RECORD_BYTES);
+  });
+
+  it('split long lists, drop repeats, and the start always writes at least one record', () => {
+    const blobs = Array.from({ length: 400 }, (_, i) => i.toString(16).padStart(32, '0'));
+    const records = markRecords('add', [...blobs, blobs[0]]);
+    expect(records.map((r) => r.blobs.length)).toEqual([180, 180, 40]);
+    expect(startRecords([])).toHaveLength(1);
+    expect(startRecords([])[0].kept).toEqual([]);
+    expect(markRecords('add', [])).toEqual([]);
   });
 });

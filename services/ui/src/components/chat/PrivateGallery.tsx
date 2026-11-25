@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, CheckSquare, ImagePlus, Images, Loader2, MessageSquare, Play, Trash2, X } from 'lucide-react';
+import { Check, CheckSquare, ImageMinus, ImagePlus, Images, Loader2, MessageSquare, Play, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { isSealedMessage, type PrivateVault } from '../../lib/privateChatCrypto';
@@ -10,15 +10,18 @@ import {
   countLabel,
   filterGallery,
   groupByDay,
+  inGallery,
   itemBlobs,
   justifyRows,
   knownAspect,
+  removable,
   stampLabel,
+  startCandidates,
   type GalleryFilter,
   type GalleryItem,
   type Opened,
-  type OpenedEntry,
 } from './privateGalleryModel';
+import { recordMembership, useGalleryEntries, useMembership, writeGalleryStart } from './useGalleryMembership';
 import { formatDuration } from '../../lib/privateVideoMedia';
 import { knownFrom } from '../../lib/galleryImport';
 import PrivateGalleryImport from './PrivateGalleryImport';
@@ -36,11 +39,12 @@ function detailMessages(response: unknown): TalkMessage[] {
 }
 
 /**
- * The private chat's encrypted gallery: every picture and video clip sent in
- * the chat and every picture added straight to it (Add pictures, an import
- * from Between; clips come in only by being sent),
- * newest first and grouped by day: a sent picture by when it was sent, an
- * added one by when it was taken. Either parent can open
+ * The private chat's encrypted gallery: the pictures and clips from the chat
+ * that were put in it (Add to gallery in the thread, or a "save to gallery"
+ * reply), and every picture added straight to it (Add pictures, an import from
+ * Between), newest first and grouped by day: a sent picture by when it was
+ * sent, an added one by when it was taken. Remove from gallery takes a chat
+ * picture out without deleting it from the chat. Either parent can open
  * one full screen and comment on it; a comment is a sealed message naming the
  * picture, so the server sees only ciphertext (not even how many comments a
  * picture has). Built from the chat's own messages and dropped on lock.
@@ -79,30 +83,7 @@ export default function PrivateGallery({
     return [...byId.values()].sort((a, b) => Number(a.id) - Number(b.id));
   }, [history.data, messages]);
 
-  const entries = useQuery({
-    queryKey: ['private-gallery-entries', token],
-    queryFn: () => api.getPrivateGallery(token),
-    staleTime: 0,
-  });
-  const [openedEntries, setOpenedEntries] = useState<Record<string, Opened>>({});
-  useEffect(() => {
-    const todo = (entries.data?.entries ?? []).filter((e) => !(e.id in openedEntries));
-    if (!todo.length) return;
-    let live = true;
-    void Promise.all(todo.map(async (e) => [e.id, (await vault.open(e.sealed).catch(() => null)) ?? 'unreadable'] as const)).then((pairs) => {
-      if (live && vault.unlocked) setOpenedEntries((current) => ({ ...current, ...Object.fromEntries(pairs) }));
-    });
-    return () => {
-      live = false;
-    };
-  }, [entries.data, openedEntries, vault]);
-  const added = useMemo<OpenedEntry[]>(
-    () =>
-      (entries.data?.entries ?? [])
-        .filter((e) => e.id in openedEntries)
-        .map((e) => ({ id: e.id, at: e.at, own: e.own, byName: e.by_name, payload: openedEntries[e.id] })),
-    [entries.data, openedEntries],
-  );
+  const { query: entries, opened: added, opening: entriesOpening } = useGalleryEntries(token, vault);
   const [importing, setImporting] = useState(false);
 
   const [opened, setOpened] = useState<Record<string, Opened>>({});
@@ -120,7 +101,10 @@ export default function PrivateGallery({
     };
   }, [all, opened, vault]);
 
-  const items = useMemo(() => buildGallery(all, opened, myActorIds, added), [all, opened, myActorIds, added]);
+  // Everything in the chat that could be in the gallery, and what is.
+  const everything = useMemo(() => buildGallery(all, opened, myActorIds, added), [all, opened, myActorIds, added]);
+  const membership = useMembership(all, opened, added);
+  const items = useMemo(() => inGallery(everything, membership.members), [everything, membership.members]);
   const [filter, setFilter] = useState<GalleryFilter>('all');
   const videoCount = useMemo(() => items.filter((item) => item.video).length, [items]);
   // A filter with nothing left in it falls back to everything.
@@ -133,11 +117,23 @@ export default function PrivateGallery({
   const viewList = chosen && !shown.some((item) => item.blob === chosen) ? items : shown;
   const viewIndex = chosen ? viewList.findIndex((item) => item.blob === chosen) : -1;
   const viewing = viewIndex >= 0 ? viewList[viewIndex] : undefined;
-  const decrypting =
-    history.isLoading ||
-    entries.isLoading ||
-    all.some((m) => isSealedMessage(m.message) && !(String(m.id) in opened)) ||
-    (entries.data?.entries ?? []).some((e) => !(e.id in openedEntries));
+  const decrypting = history.isLoading || entriesOpening || all.some((m) => isSealedMessage(m.message) && !(String(m.id) in opened));
+
+  // The first phone to open the gallery since it became opt-in writes the start (once, sealed):
+  // sent stills and clips from before it stay in, animated pictures from before it leave.
+  const canStart = !decrypting && !membership.started && !history.isError && !entries.isError && entries.isSuccess;
+  const refetchEntries = entries.refetch;
+  const startTried = useRef(false);
+  useEffect(() => {
+    if (!canStart || startTried.current) return;
+    startTried.current = true;
+    writeGalleryStart(token, vault, startCandidates(all, opened)).then(
+      () => void refetchEntries(),
+      () => {
+        // Tried again the next time the gallery opens; until then it shows what it would hold.
+      },
+    );
+  }, [canStart, token, vault, all, opened, refetchEntries]);
 
   // Each picture's shape, learnt when it is decrypted (numbers only), for the justified rows.
   const [aspects, setAspects] = useState<Record<string, number>>({});
@@ -181,7 +177,33 @@ export default function PrivateGallery({
     }
   };
 
+  /** Take chat pictures out of the gallery (sealed); they stay in the chat. */
+  const takeOut = async (list: GalleryItem[]) => {
+    const blobs = list.filter(removable).map((item) => item.blob);
+    if (!blobs.length) return false;
+    try {
+      await recordMembership(token, vault, 'remove', blobs);
+      await refetchEntries();
+      toast.success(blobs.length === 1 ? 'Removed from the gallery. It is still in the chat.' : `Removed ${blobs.length} from the gallery. They are still in the chat.`);
+      return true;
+    } catch (error) {
+      toast.error(errorText(error, 'Could not remove it from the gallery'));
+      return false;
+    }
+  };
+  const putIn = async (blob: string) => {
+    try {
+      await recordMembership(token, vault, 'add', [blob]);
+      await refetchEntries();
+      toast.success('Added to the gallery');
+    } catch (error) {
+      toast.error(errorText(error, 'Could not add it to the gallery'));
+    }
+  };
+  const [takingOut, setTakingOut] = useState(false);
+
   const chosenItems = shown.filter((item) => selectedSet.has(item.blob));
+  const takeOutable = chosenItems.filter(removable);
   const deletable = chosenItems.filter((item) => item.own);
   const deleteSelected = async () => {
     setDeleting(true);
@@ -331,8 +353,11 @@ export default function PrivateGallery({
         )}
         {!items.length && !decrypting && (
           <p className="flex flex-col items-center gap-2 py-12 text-center text-sm text-slate-400">
-            <Images size={28} aria-hidden /> No photos yet. Every photo and video sent in this chat appears here, encrypted, and you can add
-            pictures without sending them.
+            <Images size={28} aria-hidden />
+            <span className="font-semibold text-slate-200" data-testid="private-gallery-empty">Nothing in the gallery yet.</span>
+            <span className="max-w-sm">
+              Add pictures from the chat with Add to gallery (or answer one with &ldquo;save to gallery&rdquo;), or add pictures here without sending them.
+            </span>
           </p>
         )}
         <div ref={gridRef}>
@@ -410,6 +435,23 @@ export default function PrivateGallery({
           >
             <Play size={15} className="fill-white" aria-hidden /> Slideshow
           </button>
+          {takeOutable.length > 0 && (
+            <button
+              type="button"
+              disabled={takingOut}
+              onClick={() => {
+                setTakingOut(true);
+                void takeOut(takeOutable).then((ok) => {
+                  setTakingOut(false);
+                  if (ok) stopSelecting();
+                });
+              }}
+              data-testid="private-gallery-selection-remove"
+              className="flex min-h-11 items-center gap-1.5 rounded-2xl bg-white/10 px-4 text-sm font-semibold text-rose-100 hover:bg-white/15 disabled:opacity-60"
+            >
+              {takingOut ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <ImageMinus size={15} aria-hidden />} Remove from gallery
+            </button>
+          )}
           {deletable.length > 0 && (
             <button
               type="button"
@@ -463,6 +505,11 @@ export default function PrivateGallery({
             void history.refetch();
           }}
           onRemoveEntry={(item) => void removeEntry(item)}
+          onRemoveFromGallery={(item) => {
+            void takeOut([item]).then((ok) => {
+              if (ok) setChosen(undefined);
+            });
+          }}
           onSlideshow={(item) => {
             setChosen(undefined);
             startSlideshow(viewList, item);
@@ -493,9 +540,23 @@ export default function PrivateGallery({
         />
       )}
       {chosen && !viewing && !decrypting && (
-        <div className="fixed inset-x-0 bottom-0 z-[90] p-3">
-          <p className="rounded-xl border border-white/10 bg-slate-900 p-3 text-center text-sm text-slate-300" role="status">
-            That photo is no longer in the chat.
+        <div className="fixed inset-x-0 bottom-0 z-[90] p-3 pb-[max(0.75rem,var(--safe-bottom))]">
+          <p className="rounded-xl border border-white/10 bg-slate-900 p-3 text-center text-sm text-slate-300" role="status" data-testid="private-gallery-not-here">
+            {everything.some((item) => item.blob === chosen) ? (
+              <>
+                That {everything.find((item) => item.blob === chosen)?.video ? 'video' : 'photo'} is in the chat but not in the gallery.
+                <button
+                  type="button"
+                  onClick={() => void putIn(chosen)}
+                  data-testid="private-gallery-not-here-add"
+                  className="ml-2 min-h-11 font-semibold text-rose-200 underline"
+                >
+                  Add to gallery
+                </button>
+              </>
+            ) : (
+              'That photo is no longer in the chat.'
+            )}
             <button type="button" onClick={() => setChosen(undefined)} className="ml-2 min-h-11 font-semibold text-rose-200 underline">
               Show all
             </button>

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Loader2, Play, Trash2, X } from 'lucide-react';
 import type { PrivateVault, VideoPayload } from '../../lib/privateChatCrypto';
 import { formatDuration } from '../../lib/privateVideoMedia';
@@ -84,12 +84,15 @@ export function PrivateVideoPlayer({
   onDelete,
   onReact,
   mine,
+  actions,
 }: {
   token: string;
   vault: PrivateVault;
   video: VideoPayload;
   title: string;
   onClose: () => void;
+  /** More of the clip's own actions (the thread's: gallery, reply, pick several). */
+  actions?: ReactNode;
   onDelete?: () => void;
   /** React to the clip (either parent's); the player closes so its bubble can play the animation. */
   onReact?: (emoji: string) => void;
@@ -144,8 +147,9 @@ export function PrivateVideoPlayer({
           </>
         )}
       </div>
-      {(onReact || onDelete) && (
+      {(onReact || onDelete || actions) && (
         <div className="flex shrink-0 flex-col items-center gap-2 px-3 pt-2 pb-[max(0.75rem,var(--safe-bottom))]">
+          {actions}
           {onReact && (
             <div className="w-full max-w-sm">
               <ReactionRow mine={mine ?? new Set()} onReact={onReact} tone="viewer" />
@@ -163,7 +167,7 @@ export function PrivateVideoPlayer({
           )}
         </div>
       )}
-      {!(onReact || onDelete) && <div className="shrink-0 pb-[max(0.75rem,var(--safe-bottom))]" />}
+      {!(onReact || onDelete || actions) && <div className="shrink-0 pb-[max(0.75rem,var(--safe-bottom))]" />}
     </div>
   );
 }

@@ -54,6 +54,8 @@ async function serve(page: Page, server: Server): Promise<void> {
     if (p === `/api/private-chat/chats/${TOKEN}` && req.method() === 'GET') return route.fulfill({ json: server.chat });
     // The thread's edits and reactions (none here).
     if (p === `/api/private-chat/chats/${TOKEN}/marks`) return route.fulfill({ json: { marks: [] } });
+    // The gallery's sealed entries (the thread reads them to know what is in the gallery).
+    if (p === `/api/private-chat/chats/${TOKEN}/gallery` && req.method() === 'GET') return route.fulfill({ json: { entries: [] } });
     // Metadata-only endpoints: answered here (not by the generic regex below)
     // so no reading signal or preference is mixed into the sealed-record traffic.
     const signal = new RegExp(`^/api/private-chat/chats/${TOKEN}/beloved/(seen|activity|prefs)$`).exec(p);
