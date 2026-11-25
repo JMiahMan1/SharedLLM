@@ -207,7 +207,7 @@ Heard wrong: titles also match by how they sound (`phonetic_key` /
 short one identical, and a number said is still required), Music Assistant's
 playlists and stations are matched locally as well as through its search, and
 the book library reads the title that is clearly closest by sound. A request
-whose first word sounds like "play" ("Late <title>", "Player <name>") is played
+whose first word sounds like "play" (`Late <title>`, `Player <name>`) is played
 only when `POST /execute/media/find` (a search that plays nothing) finds a
 strong library match for the rest. The gateway logs what it said for fast media,
 read and device answers as one `[Reply] <intent>: ...` line (200 characters), so
