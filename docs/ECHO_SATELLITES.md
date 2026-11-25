@@ -54,8 +54,9 @@ command, no restart).
   trusted, whispers never move it);
 - *tilt* (2 to 5 kHz over 100 Hz to 1 kHz) is measured and logged but does not decide.
 
-A command is whispered when at most 40% of its frames are voiced, its HNR is at most -1.5 dB, and (once
-the usual level is known) it is at least `level_drop_db` (default 8 dB) under it. The satellite's own
+A command is whispered when at most 50% of its frames are voiced, its HNR is at most -1.0 dB, and (once
+the usual level is known) it is at least `level_drop_db` (default 6 dB) under it. The bars were
+0.40 / -1.5 dB / 8 dB until real whispers at the Office Echo (2026-11-25, last row) were missed. The satellite's own
 `last_request_whispered` sensor, where the firmware has one, also counts.
 
 Measured on 30 Kokoro clips (10 voices, 3 commands) at -26 dBFS, against the same clips whispered (each
@@ -67,6 +68,7 @@ frame's LPC envelope driven by noise instead of the voice) 12, 18 and 24 dB quie
 | Spoken across the room (-14 dB) | 0.56 to 0.93 | 0.2 to 11.6 dB | -10 to -16 dB | -22 to -11 dB | 0 of 30 |
 | Whispered | 0.00 to 0.25 | -5.5 to -2.7 dB | -9 to -24 dB | -16 to -4 dB | 90 of 90 |
 | Whispered right at the microphone | 0.02 to 0.22 | -4.6 to -2.8 dB | about 0 | -16 to -4 dB | 0 of 30 (not quieter) |
+| Real whispers, Office Echo (people) | 0.36 to 0.43 | -2.5 to -1.6 dB | -8 to -20 dB | -19 to -14 dB | 1 of 3 at the old bars, 3 of 3 at the new (one at 7.9 dB) |
 
 In a noisier room (noise at -50 dBFS) nothing spoken was taken for a whisper; the two quietest whisper
 levels sank into the noise and were answered at the normal volume (53 of 90 detected).

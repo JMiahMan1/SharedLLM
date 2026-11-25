@@ -52,16 +52,18 @@ SPEECH_RANGE_DB = 25.0
 OVER_FLOOR = 2.5
 
 # -- the decision (measured; see the module docstring) -------------------------------------
-#: Whispered clips had at most 0.25 of their speech frames voiced, spoken ones (near or far) at
-#: least 0.55: the bar sits between them.
-MAX_VOICED_RATIO = 0.40
-#: The median harmonics-to-noise ratio of whispered clips was -2.7 dB or lower, of spoken ones
-#: 0.0 dB or higher.
-MAX_HNR_DB = -1.5
+#: Synthetic whispered clips had at most 0.25 of their speech frames voiced, spoken ones (near or far)
+#: at least 0.55. Real whispers at the Office Echo (2026-11-25) were 0.36 to 0.43 voiced, and one at
+#: 0.43 was missed, so the bar sits just under the spoken floor.
+MAX_VOICED_RATIO = 0.50
+#: The median harmonics-to-noise ratio of synthetic whispered clips was -2.7 dB or lower, of real
+#: ones -1.6 to -2.5 dB, of spoken ones 0.0 dB or higher.
+MAX_HNR_DB = -1.0
 #: How much quieter than the satellite's usual speech counts as whispering, by default.
 #: Whispered clips sat 12 to 24 dB under their spoken level; a voice from across the room is
-#: also quieter, which is why level alone never decides.
-DEFAULT_LEVEL_DROP_DB = 8.0
+#: also quieter, which is why level alone never decides. Real whispers sat 8 to 20 dB under, one of
+#: them 7.9 dB, so the default leaves room below 8.
+DEFAULT_LEVEL_DROP_DB = 6.0
 #: Normal commands a satellite needs before its usual level is trusted; until then voicing and
 #: tilt decide alone.
 BASELINE_MIN_RUNS = 3
