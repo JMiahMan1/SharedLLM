@@ -202,6 +202,17 @@ named in the next turn (`pick`). The same audiobook in Audiobookshelf and Music
 Assistant plays from Audiobookshelf (progress, chapters, resume). Nothing found
 says which sources were searched.
 
+Heard wrong: titles also match by how they sound (`phonetic_key` /
+`spoken_similarity` in `media_titles.py`; a long sound key must be 85% alike, a
+short one identical, and a number said is still required), Music Assistant's
+playlists and stations are matched locally as well as through its search, and
+the book library reads the title that is clearly closest by sound. A request
+whose first word sounds like "play" (`Late <title>`, `Player <name>`) is played
+only when `POST /execute/media/find` (a search that plays nothing) finds a
+strong library match for the rest. The gateway logs what it said for fast media,
+read and device answers as one `[Reply] <intent>: ...` line (200 characters), so
+a voice test can be graded from its log.
+
 Spoken "Read ..." requests are the gateway's `fast_read.py`: scripture with a
 chapter ("Read John 3:16") from the Bible service, `Read chapter N of <title>`
 and `Read <title>` from the book library in voice-sized parts, "keep reading"

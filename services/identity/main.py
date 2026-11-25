@@ -9481,6 +9481,10 @@ class LocationUpdate(BaseModel):
     #: (location_devices). Newer app builds only.
     device_id: str | None = None
     device_name: str | None = None
+    #: Hardware addresses of the linked vehicle Bluetooth devices the phone was
+    #: connected to at the fix (geo's vehicle_bluetooth matches them to a
+    #: vehicle). Only linked ones, never a name. Newer app builds only.
+    bt_devices: list[str] | None = None
 
 
 async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
@@ -9639,6 +9643,8 @@ async def _forward_location_to_geo(user_id: str, location: LocationUpdate):
         if location.device_id:
             from services.identity.location_devices import device_key
             payload["device"] = device_key(location.device_id)[:12]
+        if location.bt_devices:
+            payload["bt"] = [str(a)[:32] for a in location.bt_devices[:8]]
         async with get_client_insecure() as client, client.post(
             f"{geo_url}/people/{clean_user}/record",
             headers={"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"},

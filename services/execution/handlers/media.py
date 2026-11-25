@@ -961,6 +961,46 @@ async def play_url(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResul
 
     return ExecutionResult(status="FAILURE", message=f"Failed to play URL on {entity_id}.", service="media_play")
 
+async def _confirm_started(result: ExecutionResult, entity_id: str, ctx) -> ExecutionResult:
+    """``result``, or a plain failure when the player (or its Music Assistant twin) did not really start.
+
+    Skipped when the handler already confirmed it (``detail.playback``). A player that does not
+    report playback at all keeps the success, with that logged.
+    """
+    from services.execution import playback_check
+
+    detail = dict(result.detail or {})
+    if detail.get("playback"):
+        return result
+    try:
+        twin = await resolve_mass_entity(ctx, entity_id)
+    except Exception:
+        twin = entity_id
+    held, why = await playback_check.confirm_playing(
+        lambda eid: ha_client.get_state(ctx.ha_url, ctx.ha_token, eid), [twin, entity_id])
+    if held is None:
+        log.info(f"[media/play] could not confirm playback on {entity_id}: {why}")
+        return result.model_copy(update={"detail": {**detail, "playback": "unconfirmed", "reason": why}})
+    if held:
+        return result.model_copy(update={"detail": {**detail, "playback": "confirmed"}})
+    state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, entity_id) or {}
+    player = (state.get("attributes") or {}).get("friendly_name") or entity_id
+    found = (detail.get("found") or {}).get("title")
+    what = f" {_spoken_title(found)}" if found else ""
+    log.warning(f"[media/play] said to play on {entity_id} but it did not: {why}")
+    return ExecutionResult(
+        status="FAILURE", service=result.service,
+        message=f"I started{what or ' it'}, but {player} isn't playing it. I'm looking into it.",
+        detail={**detail, "playback": "not_started", "reason": why},
+    )
+
+
+def _spoken_title(title: str) -> str:
+    from services.common.media_titles import clean_title
+
+    return clean_title(title)
+
+
 async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     """Unified media play handler supporting all content types and devices."""
     ctx = req.user_context
@@ -1033,6 +1073,8 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         # Log the play on the person's activity feed (music, video, podcast,
         # audiobook). Best effort: recording is never allowed to change the
         # playback result and never raises.
+        if result.status == "SUCCESS" and (result.detail or {}).get("route") not in ("ask", "offer_read"):
+            result = await _confirm_started(result, entity_id, ctx)
         if result.status == "SUCCESS" and (result.detail or {}).get("route") not in ("ask", "offer_read"):
             feature = {
                 "video": "video",

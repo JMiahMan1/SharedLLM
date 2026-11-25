@@ -1002,6 +1002,17 @@ async def execute_media_play(req: MediaPlayRequest):
     return await MediaPlaybackService.play(req)
 
 
+@app.post("/execute/media/find", response_model=ExecutionResult)
+async def execute_media_find(req: MediaPlayRequest):
+    """What "Play <query>" would play from the libraries, without playing it (media_finder.find_only).
+
+    The gateway asks before treating a misheard request ("Late <title>") as a play.
+    """
+    from services.execution import media_finder
+
+    return await media_finder.find_only(_with_hub_login(req))
+
+
 @app.post("/execute/media/resolve_stream", response_model=ExecutionResult)
 async def execute_media_resolve_stream(req: ResolveStreamRequest):
     from services.execution.handlers import video as video_handler

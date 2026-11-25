@@ -419,7 +419,50 @@ def _flatten_ma(resp: dict) -> list[Candidate]:
     return out
 
 
+#: Music Assistant library kinds small enough to match locally as well as through MA's search,
+#: so a name heard wrong ("er seven" for a station "ARE7") is still found by how it sounds.
+_MA_LOCAL_KINDS = ("playlist", "radio")
+MA_LIBRARY_TTL_S = 600.0
+_ma_library_cache: dict[str, tuple[float, list[Candidate]]] = {}
+
+
+async def _ma_library_names(ctx, source: Source) -> list[Candidate]:
+    """The library's playlists and radio stations (cached ``MA_LIBRARY_TTL_S``), through the hub."""
+    import time
+
+    from services.execution.handlers import mass_ha_client
+
+    if source.route != "hub":
+        return []
+    key = f"{ctx.ha_url}|{source.entry_id}"
+    cached = _ma_library_cache.get(key)
+    if cached and time.monotonic() - cached[0] < MA_LIBRARY_TTL_S:
+        return cached[1]
+    found: list[Candidate] = []
+    for kind in _MA_LOCAL_KINDS:
+        items = await mass_ha_client.get_library(ctx.ha_url, ctx.ha_token, kind, limit=500,
+                                                 mass_entry_id=source.entry_id)
+        found += [Candidate("music_assistant", kind, str(i.get("name") or ""), str(i["uri"]))
+                  for i in items or [] if i.get("uri") and i.get("name")]
+    _ma_library_cache[key] = (time.monotonic(), found)
+    return found
+
+
 async def search_music_assistant(ctx, source: Source, query: str) -> list[Candidate]:
+    """MA's own search, plus the library's playlists and stations whose names match ``query``."""
+    found = await _search_music_assistant(ctx, source, query)
+    try:
+        local = await _ma_library_names(ctx, source)
+    except Exception as exc:  # the search above is the answer; this only adds to it
+        log.warning(f"[media/find] could not list Music Assistant's playlists and stations: {exc}")
+        local = []
+    have = {c.ident for c in found}
+    found += [Candidate(**c.as_pick()) for c in local  # copies: scoring writes to them
+              if c.ident not in have and title_score(query, c.title) >= _CATALOGUE_FLOOR]
+    return found
+
+
+async def _search_music_assistant(ctx, source: Source, query: str) -> list[Candidate]:
     from services.common import ma_identity
     from services.execution import ha_client
 
@@ -737,6 +780,30 @@ async def corrected_query(ctx, sources: list[Source], what: str) -> str | None:
         return None
 
 
+async def find_only(req: MediaPlayRequest) -> ExecutionResult:
+    """The best library match for ``req.query`` and its score, playing nothing.
+
+    Music Assistant and Audiobookshelf only: the web always has some video, and the book
+    library is for reading. ``detail``: ``best`` (an item as ``pick`` takes it, or None),
+    ``score`` and ``action`` (play, ask or none).
+    """
+    ctx = req.user_context
+    title, group, _kind = split_kind(req.query or "", req.media_type)
+    what, by = split_by(title)
+    sources = [s for s in await discover_sources(ctx, screen=False, wants_video=False)
+               if s.key not in ("web_video", "calibre")]
+    cands, searched, skipped = await search_sources(ctx, sources, search_words(what))
+    ranked = score_candidates(dedupe(cands), what, by)
+    choice = decide(ranked, group)
+    best = choice.best
+    log.info(f"[media/find] lookup {what!r}: {choice.action}"
+             + (f" {best.source}:{best.kind}:{best.title!r}={best.score}" if best else ""))
+    return ExecutionResult.ok(
+        f"{best.spoken()} ({best.score})" if best else f"Nothing for {what}.", service=SERVICE,
+        detail={"best": best.as_pick() if best else None, "score": best.score if best else 0.0,
+                "action": choice.action, "searched": searched, "skipped": skipped})
+
+
 def not_found_message(what: str, searched: list[str], skipped: list[str]) -> str:
     name = clean_title(what) or "that"
     msg = (f"I couldn't find {name} in {searched_phrase(searched)}." if searched
@@ -757,6 +824,18 @@ async def play_pick(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResu
     if not any(s.key == cand.source and s.ready for s in sources):
         return ExecutionResult.fail(f"{cand.title} came from a source that isn't available now.", service=SERVICE)
     return await play_candidate(cand, req, entity_id, ctx, player)
+
+
+def failed_message(cand: Candidate, why: str | None, player: str) -> str:
+    """What to say when the player would not play what was found: the item, and the reason in plain words."""
+    name = cand.spoken()
+    text = str(why or "")
+    if re.search(r"no playable items", text, re.IGNORECASE):
+        return f"I found {name}, but there's nothing in it I can play."
+    if re.search(r"not connected to music assistant", text, re.IGNORECASE):
+        return text
+    reason = re.sub(r"^(?:Failed to play[^:]*:\s*)?(?:HA returned \d+:\s*)?(?:\d+:\s*)?", "", text).strip()
+    return f"I found {name}, but {player} wouldn't play it" + (f": {reason}" if reason else ".")
 
 
 async def play_candidate(cand: Candidate, req: MediaPlayRequest, entity_id: str, ctx,
@@ -787,7 +866,9 @@ async def play_candidate(cand: Candidate, req: MediaPlayRequest, entity_id: str,
         return ExecutionResult.fail(f"I can't play {cand.title} from {cand.source}.", service=SERVICE)
     detail = {**(result.detail or {}), "found": cand.as_pick()}
     if result.status != "SUCCESS":
-        return result.model_copy(update={"detail": detail})
+        if (result.detail or {}).get("playback") == "not_started":
+            return result.model_copy(update={"detail": detail})  # already says it plainly
+        return result.model_copy(update={"detail": detail, "message": failed_message(cand, result.message, player)})
     if cand.source == "web_video":
         said = f"the video {cand.title}" if cand.extra.get("title_known") else f"a video of {cand.title}"
     else:

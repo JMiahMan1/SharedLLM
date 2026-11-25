@@ -217,7 +217,8 @@ from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WOR
 from services.health import challenges as _challenges
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
-from services.shared.media_token import sign, verify
+from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS, sign, verify
+from services.shared.media_token import why_invalid as media_token_why_invalid
 
 START_TIME = time.time()
 
@@ -268,8 +269,29 @@ def _split_reasoning(message: str, thinking: str | None) -> tuple[str, str | Non
 _REPLY_VOICE: ContextVar[str | None] = ContextVar("reply_voice", default=None)
 
 
+#: Fast answers whose words are logged (one line, ``REPLY_LOG_CHARS``), so a voice test can be
+#: graded from the gateway log: what was played, read, or done. Only these: other answers can
+#: be personal (a recap, a location, a private chat) and stay out of the log.
+LOGGED_REPLY_INTENTS = frozenset({
+    "play_media", "pause_media", "media_transport", "read_aloud", "turn_on", "turn_off", "timer_stop",
+    "device_state",
+})
+REPLY_LOG_CHARS = 200
+
+
+def _log_reply(message: str, intent: str | None) -> None:
+    """``[Reply] <intent>: <what is said>`` for a fast answer in ``LOGGED_REPLY_INTENTS``."""
+    if intent not in LOGGED_REPLY_INTENTS:
+        return
+    text = " ".join(str(message or "").split())
+    if len(text) > REPLY_LOG_CHARS:
+        text = text[:REPLY_LOG_CHARS] + f"... ({len(text)} characters)"
+    log.info(f"[Reply] {intent}: {text}")
+
+
 def _make_ollama_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
+    _log_reply(message, intent)
     if not stream:
         message, thinking = _split_reasoning(message, thinking)
         msg: dict[str, Any] = {"role": "assistant", "content": message}
@@ -324,6 +346,7 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: s
 
 def _make_openai_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
+    _log_reply(message, intent)
     if not stream:
         message, thinking = _split_reasoning(message, thinking)
         msg: dict[str, Any] = {"role": "assistant", "content": message}
@@ -1442,6 +1465,24 @@ async def _execution_post(path: str, payload: dict, timeout: float = 120.0) -> d
             text = await resp.text()
             return {"status": "FAILURE", "message": f"The {path} call answered HTTP {resp.status}: {text[:200]}"}
         return await resp.json()
+
+
+async def _misheard_play(query: str, creds: Any) -> str | None:
+    """ "Play <title>" when ``query`` is a misheard play whose rest the libraries clearly have, else None."""
+    for guess in fast_media.misheard_play(query):
+        try:
+            data = await _execution_post("/execute/media/find", {
+                "user_context": creds.model_dump(), "query": guess}, timeout=20.0)
+        except Exception as exc:
+            log.warning(f"[FastPath] could not check {guess!r} as a misheard play: {exc}")
+            return None
+        detail = data.get("detail") or {}
+        if detail.get("action") == "play" and float(detail.get("score") or 0) >= fast_media.MISHEARD_PLAY_MIN_SCORE:
+            best = detail.get("best") or {}
+            log.info(f"[FastPath] heard {query!r} as 'Play {guess}' (the library has {best.get('title')!r}, "
+                     f"{detail.get('score')})")
+            return f"Play {guess}"
+    return None
 
 
 async def _answer_media_choice(query: str, user_id: str, creds: Any) -> str | None:
@@ -2776,10 +2817,17 @@ async def _resolve_identity_from_media_token(request: Request) -> Any | None:
     if not mt:
         return None
     user = request.query_params.get("user", "")
-    if not user or not verify(mt, user):
+    why = media_token_why_invalid(mt, user)
+    if why:
+        log.info(f"[media token] refused for user={user!r} on {request.url.path}: {why}")
         raise HTTPException(status_code=403, detail="Invalid or expired media token")
+    # A voice satellite that did not recognise the speaker acts as the household, and its
+    # streams are signed for that name. The household is not a user: Identity answers it
+    # only when asked for it as the household (a "rag_user" lookup is a 401, and every
+    # audiobook or podcast started by an unrecognised voice failed on its first request).
+    who = {"household": True} if user == fast_media.HOUSEHOLD_USER else {"rag_user": user}
     try:
-        return await resolve_identity({"rag_user": user})
+        return await resolve_identity(who)
     except HTTPException as e:
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
 
@@ -4648,6 +4696,13 @@ async def _chat_handler_impl(request: Request, background_tasks=None):
             if is_openai:
                 return _make_openai_response(choice_answer, selected_model, "play_media")
             return _make_ollama_response(choice_answer, selected_model, "play_media")
+
+    # "Play" heard as another word ("Late <title>"): played only when the libraries have a
+    # strong match for the rest; anything else goes on as it was heard (fast_media.misheard_play).
+    if not grounded and not engine.is_fast_path(intent, confidence):
+        heard_as = await _misheard_play(query, creds)
+        if heard_as:
+            query, intent, confidence = heard_as, "play_media", 1.0
 
     # "Read John 3:16", "Read chapter 1 of <Title>", "Read <Title>", "Keep reading": read aloud
     # from the Bible service or the book library (fast_read.py). A title the library does not
@@ -15440,6 +15495,81 @@ async def assign_geo_vehicle(request: Request):
     raise HTTPException(status_code=resp.status if resp.status < 500 else 502, detail=f"Failed to assign vehicle: {err_msg}")
 
 
+@app.post("/api/geo/vehicles/{vehicle_id}/bluetooth")
+async def link_geo_vehicle_bluetooth(request: Request, vehicle_id: str):
+    """Link a Bluetooth device (by hardware address) to a household vehicle.
+
+    Any signed-in family member may: the person in the car with the phone
+    paired to it is the one who can. The phone says which device; geo checks
+    the address is a stable one and not already another vehicle's."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="A JSON object is required")
+    payload = {
+        "address": str(body.get("address") or ""),
+        "kind": str(body.get("kind") or "classic"),
+        "name": str(body.get("name") or ""),
+        "user": ident["user"],
+    }
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/vehicles/{quote(vehicle_id, safe='')}/bluetooth",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        await _raise_vehicle_link_failure(resp)
+
+
+@app.delete("/api/geo/vehicles/{vehicle_id}/bluetooth/{address}")
+async def unlink_geo_vehicle_bluetooth(request: Request, vehicle_id: str, address: str):
+    """Remove a Bluetooth link: an admin, or the person who made it."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    async with shared_http_client() as client:
+        if not ident.get("is_admin"):
+            resp = await client.get(
+                f"{GEO_SVC}/vehicles",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail="Geo service unavailable")
+            wanted = address.replace("-", ":").upper()
+            vehicles = (await resp.json()).get("vehicles") or []
+            vehicle = next((v for v in vehicles if isinstance(v, dict) and v.get("id") == vehicle_id), None)
+            link = next((lk for lk in (vehicle or {}).get("bluetooth") or []
+                         if isinstance(lk, dict) and str(lk.get("address") or "").upper() == wanted), None)
+            me = str(ident["user"]).split(".")[-1].lower()
+            if link is not None and str(link.get("linked_by") or "") != me:
+                raise HTTPException(status_code=403, detail="Only a parent or the person who linked it can remove it")
+        resp = await client.delete(
+            f"{GEO_SVC}/vehicles/{quote(vehicle_id, safe='')}/bluetooth/{quote(address, safe='')}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        await _raise_vehicle_link_failure(resp)
+
+
+async def _raise_vehicle_link_failure(resp) -> None:
+    """geo's own answer for a link it understood and refused (404/409/422); 502 otherwise."""
+    if resp.status in (404, 409, 422):
+        try:
+            detail = (await resp.json()).get("detail")
+        except Exception:
+            detail = None
+        raise HTTPException(status_code=resp.status, detail=detail or "The link was refused")
+    raise HTTPException(status_code=502, detail="Geo service unavailable")
+
+
 @app.get("/api/geo/fuel-prices")
 async def get_fuel_prices(request: Request, location: str = ""):
     """Proxy fuel price lookup to geo service."""
@@ -20894,7 +21024,9 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
         raise HTTPException(status_code=400, detail="Audiobookshelf URL not configured")
 
     user = request.query_params.get("user") or creds.get("user") or creds.get("username") or ""
-    mt = request.query_params.get("mt") or (sign(user)[0] if user else None)
+    # The segments get a token of their own, minted now for the device's lifetime: reusing the
+    # incoming one made every segment expire with the first URL, part way into a long book.
+    mt = sign(user, ttl=DEVICE_TOKEN_TTL_SECONDS)[0] if user else None
 
     track_url = f"{abs_url}/public/session/{session_id}/track/{track_index}"
     playlist_url: str | None = None

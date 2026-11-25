@@ -111,3 +111,16 @@ def test_the_family_cards_get_a_charging_flag(monkeypatch):
     assert stored(1_800_000_010.0, battery_state="discharging", charging=True)["charging"] is False
     assert stored(1_800_000_020.0, charging=True)["charging"] is True  # an older build's flag
     assert stored(1_800_000_030.0)["charging"] is None  # not reported: not guessed
+
+
+def test_linked_bluetooth_addresses_reach_geo_as_bt(geo):
+    """The vehicle a fix was taken in comes from the linked devices it was connected to."""
+    _forward(bt_devices=["00:1A:7D:DA:71:13"] + [f"00:00:00:00:00:{i:02X}" for i in range(12)])
+    sent = geo[0][1]["bt"]
+    assert sent[0] == "00:1A:7D:DA:71:13"
+    assert len(sent) == 8
+
+
+def test_no_bluetooth_field_when_nothing_is_connected(geo):
+    _forward(bt_devices=[])
+    assert "bt" not in geo[0][1]

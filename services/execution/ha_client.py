@@ -85,6 +85,20 @@ def sanitize_entity_id(domain: str, llm_target: str) -> str:
     sanitized_name = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
     return f"{target_domain}.{sanitized_name}"
 
+def _error_message(body: str) -> str:
+    """The hub's (or HA's) own words from an error body: its "message", else the text, short."""
+    import json
+
+    text = (body or "").strip()
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text[:300]
+    if isinstance(data, dict):
+        return str(data.get("message") or data.get("detail") or text)[:300]
+    return text[:300]
+
+
 async def call_service(
     ha_url: str,
     ha_token: str,
@@ -119,21 +133,20 @@ async def call_service(
             log.info(f"HA CALL: {domain}.{service} -> {entity_id or '(no target)'} | url={url} | payload={payload}")
             async with client.post(url, headers=headers, json=payload, timeout=_TIMEOUT) as resp:
                 _note(ha_url)
-                resp.raise_for_status()
+                if resp.status >= 400:
+                    # The hub says why ({"message": ...}): "No playable items found" is an answer,
+                    # "400 Bad Request" is not.
+                    raise aiohttp.ClientResponseError(
+                        resp.request_info, resp.history, status=resp.status,
+                        message=_error_message(await resp.text()) or str(resp.reason or ""))
                 log.info(f"[ha_client] {domain}.{service} OK (HTTP {resp.status})")
                 if return_response:
                     service_response = await resp.json()
                     return {"ok": True, "status_code": resp.status, "service_response": service_response}
                 return {"ok": True, "status_code": resp.status}
         except aiohttp.ClientResponseError as e:
-            log.error(f"[ha_client] HTTP error: {e}")
-            detail = ""
-            try:
-                resp_detail = await client.get(url, headers=headers, json=payload, timeout=_TIMEOUT)
-                await resp_detail.release()
-                detail = str(e)
-            except Exception:
-                detail = str(e)
+            log.error(f"[ha_client] {domain}.{service} -> {entity_id or '(no target)'}: HTTP {e.status}: {e.message}")
+            detail = e.message or str(e)
             if e.status in (401, 403):
                 return {"ok": False, "error": "Your Home Assistant token is invalid or expired. Please update it in Jarvis.", "status_code": e.status}
             return {"ok": False, "error": f"HA returned {e.status}: {detail}", "status_code": e.status}

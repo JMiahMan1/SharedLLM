@@ -431,23 +431,28 @@ async def test_a_silent_bulb_cannot_hold_a_command_past_its_budget(monkeypatch):
     await drv.async_setup()
 
     async def hangs(method, params=None):
-        await asyncio.sleep(10)
+        await asyncio.sleep(3600)
 
     drv._request = hangs
-    loop = asyncio.get_running_loop()
-    started = loop.time()
+    # The budget, not the hour-long hang, ends it (wait_for would stop a missing budget at a
+    # minute with a TimeoutError, not DeviceUnavailable). No stopwatch: a shared runner can stall.
     with pytest.raises(DeviceUnavailable, match="within"):
-        await drv.async_call(drv.light, "light", "turn_on", {})
-    assert loop.time() - started < 1.0
+        await asyncio.wait_for(drv.async_call(drv.light, "light", "turn_on", {}), 60)
     assert hub.states.get(drv.light.entity_id).state == "unavailable"
 
 
 async def test_one_silent_bulb_does_not_stop_the_others_in_the_same_call(monkeypatch):
-    """A room is one call with several entities: each bulb is sent its command at once."""
+    """A room is one call with several entities: each bulb is sent its command at once.
+
+    Checked by order of events, not by a stopwatch: a wall-clock bound on a shared CI runner
+    failed once (1.1 s for a 0.3 s budget) when the runner stalled the loop. The silent bulb is
+    named first, so a call that waited for it before the next bulb would reach the good bulb
+    only after the budget had cut the silent one off.
+    """
     monkeypatch.setattr(wiz, "COMMAND_BUDGET_S", 0.3)
     hub, entry = make_hub("wiz", {"host": "192.0.2.12"}, tw_entities())
     good = WizDriver(hub, entry)
-    good._request = FakeBulb()  # type: ignore[method-assign]
+    bulb = FakeBulb()
     hub.drivers[entry.entry_id] = good
     from services.homehub.core import ConfigEntry, EntityEntry
 
@@ -456,16 +461,29 @@ async def test_one_silent_bulb_does_not_stop_the_others_in_the_same_call(monkeyp
     hub.entities["light.silent"] = EntityEntry(entity_id="light.silent", unique_id="02000000010b", platform="wiz",
                                                config_entry_id="entry2", device_id="dev1")
     silent = WizDriver(hub, other)
+    events: list[str] = []
 
     async def hangs(method, params=None):
-        await asyncio.sleep(10)
+        events.append("silent asked")
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            events.append("silent cut off")
+            raise
+
+    async def answers(method, params=None):
+        if method == "setPilot":
+            events.append("good asked")
+        return await bulb(method, params)
 
     silent._request = hangs  # type: ignore[method-assign]
     hub.drivers[other.entry_id] = silent
+    good._request = answers  # type: ignore[method-assign]
     await good.async_setup()
-    loop = asyncio.get_running_loop()
-    started = loop.time()
-    await hub.call_service("light", "turn_off", {"entity_id": [good.light.entity_id, "light.silent"]})
-    assert loop.time() - started < 1.0
+    await asyncio.wait_for(
+        hub.call_service("light", "turn_off", {"entity_id": ["light.silent", good.light.entity_id]}), 60)
+    # The good bulb was asked while the silent one was still waiting, and the budget (not the
+    # hour-long hang, which wait_for would have stopped at a minute) ended the silent one.
+    assert events == ["silent asked", "good asked", "silent cut off"]
     assert hub.states.get(good.light.entity_id).state == "off"
     assert hub.states.get("light.silent").state == "unavailable"
