@@ -1383,6 +1383,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         user=HOUSEHOLD_IDENTITY if household else user.username,
         id=None if household else user.id,
         is_admin=False if (household or by_device) else user.is_admin,
+        is_minor=False if household else user.family_role in roles.MINOR_FAMILY_ROLES,
         identified_by="device" if by_device else None,
         api_key=None if household else (decrypt(user.api_key_enc) if user.api_key_enc else req.api_key),
         nextcloud_url=nextcloud["nextcloud_url"],

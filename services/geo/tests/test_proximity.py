@@ -131,6 +131,9 @@ def test_config_makes_one_household_key_and_lists_the_members(client):
     assert first["key_id"] == px.key_id(first["key"])
     assert first["members"] == ["alex", "gracie", "pat"]
     assert first["period_s"] == px.PERIOD_S
+    # The offline chat has its own key, kept like the proximity one.
+    assert first["chat_key"] == again["chat_key"] and first["chat_key"] != first["key"]
+    assert first["chat_key_id"] == px.key_id(first["chat_key"])
     rotated = client.post("/proximity/key/rotate").json()
     assert rotated["key_id"] != first["key_id"]
 

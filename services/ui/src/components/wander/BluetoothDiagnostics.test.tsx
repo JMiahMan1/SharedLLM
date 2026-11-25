@@ -10,6 +10,8 @@ const plugin = vi.hoisted(() => ({ getDiagnostics: vi.fn() }));
 vi.mock('../../plugins/vehicleBluetooth', () => ({ default: plugin }));
 const nearby = vi.hoisted(() => ({ getDiagnostics: vi.fn() }));
 vi.mock('../../plugins/proximity', () => ({ default: nearby }));
+const mesh = vi.hoisted(() => ({ getDiagnostics: vi.fn() }));
+vi.mock('../../plugins/familyMesh', () => ({ default: mesh }));
 
 import BluetoothDiagnostics from './BluetoothDiagnostics';
 
@@ -27,6 +29,17 @@ describe('BluetoothDiagnostics', () => {
       lastHeardAt: 2, configured: true, keyId: 'abc123', members: 4, outbox: 0, uploadedAt: null,
       peers: [{ person: 'gracie', band: 'same_room', rssi: -72, at: 2 }],
     });
+    mesh.getDiagnostics.mockResolvedValue({
+      enabled: true, connectPermission: true, room: true, server: false, syncing: null, stored: 3, unsynced: 1,
+      hasMail: true, lastSentAt: null, lastReceivedAt: null, lastServerSyncAt: null,
+      lastPeerSync: { at: Date.UTC(2026, 10, 24, 18), peer: 'gracie', sent: 1, received: 2 }, lastError: null,
+    });
+  });
+
+  it('shows the offline chat: the last sync with a phone and what it moved', async () => {
+    render(<BluetoothDiagnostics />);
+    expect(await screen.findByTestId('diag-mesh-peer')).toHaveTextContent(/gracie at .*: sent 1, got 2/);
+    expect(screen.getByTestId('diag-mesh-sent')).toHaveTextContent('never');
   });
 
   it('shows a scan-only tablet, its scan and the phones it heard', async () => {
