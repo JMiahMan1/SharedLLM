@@ -1,56 +1,45 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { CheckSquare, Clock, CloudOff, Lock, ShoppingCart, Sparkles, Square, Unlock } from 'lucide-react';
+import { CheckSquare, CloudOff, ShoppingCart, Sparkles, Square } from 'lucide-react';
 import toast from 'react-hot-toast';
-import OfflineMode, { type CachedItem, type OfflineCommand, type OfflineRequest } from '../../plugins/offlineMode';
+import OfflineMode, { type CachedItem, type OfflineRequest } from '../../plugins/offlineMode';
 import { errorText } from '../../lib/errorText';
-import { asOf, commandDeliveryLine, localAnswer, locationRows, provisionalShopping, shoppingRows } from '../../lib/offlineAnswers';
+import { asOf, localAnswer, locationRows, provisionalShopping, shoppingRows } from '../../lib/offlineAnswers';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
-
-interface Child {
-  username: string;
-  name: string;
-}
-
-interface Props {
-  /** The family members the signed-in parent looks after (empty for anyone else). */
-  kids?: Child[];
-}
 
 const STATUS_WORDS: Record<OfflineRequest['status'], string> = {
   answered: 'Answered',
-  expired: 'Expired before a family phone could reach Jarvis',
+  expired: 'Expired before a family phone could reach the Voice Assistant',
   sending: 'Sending',
   waiting_for_online_phone: 'Waiting for a family phone that is online',
   no_family_phone_nearby: 'No family phone nearby yet; kept until one is',
 };
 
 /**
- * Wander's offline mode (Android app): Jarvis questions and quick commands
+ * Offline mode (Android app; Settings > Nearby & offline > Offline mode):
+ * Voice Assistant questions and quick commands
  * queued for a family phone that is online (answered from this phone's saved
  * information when it can), the household's latest information with how old
- * it is, shopping edits shown until the server confirms them, and, for a
- * parent, locking and unlocking a child's phone over Bluetooth.
+ * it is, and shopping edits shown until the server confirms them. A parent's
+ * offline lock and unlock for a child are in Guardian (OfflineGuardControls).
  */
-export default function OfflineModePanel({ kids = [] }: Props) {
+export default function OfflineModePanel() {
   const android = Capacitor.getPlatform() === 'android';
   const { offline } = useOfflineMode();
   const [cache, setCache] = useState<CachedItem[]>([]);
   const [requests, setRequests] = useState<OfflineRequest[]>([]);
   const [peerNearby, setPeerNearby] = useState(false);
-  const [commands, setCommands] = useState<OfflineCommand[]>([]);
   const [question, setQuestion] = useState('');
   const [localReply, setLocalReply] = useState<string | null>(null);
   const [newItem, setNewItem] = useState('');
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(() => {
-    Promise.all([OfflineMode.cache(), OfflineMode.requests(), OfflineMode.commands()])
-      .then(([c, r, k]) => {
+    Promise.all([OfflineMode.cache(), OfflineMode.requests()])
+      .then(([c, r]) => {
         setCache(c.items);
         setRequests(r.requests);
         setPeerNearby(r.peerNearby);
-        setCommands(k.commands);
       })
       .catch(() => undefined);
   }, []);
@@ -99,21 +88,8 @@ export default function OfflineModePanel({ kids = [] }: Props) {
   const shopping = provisionalShopping(shoppingRows(item('shopping')), edits);
   const asks = requests.filter((r) => r.kind === 'ask' || r.kind === 'command' || r.kind === 'location');
 
-  const command = async (child: string, action: OfflineCommand['action'], minutes = 0) => {
-    setBusy(true);
-    try {
-      await OfflineMode.sendCommand({ child, action, minutes });
-      toast.success('Sent to family phones nearby');
-      reload();
-    } catch (e) {
-      toast.error(errorText(e, 'Could not send that'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <div id="offline" className="glass-panel scroll-mt-4 space-y-4 rounded-2xl border border-white/5 p-4" data-testid="offline-mode">
+    <div className="space-y-4" data-testid="offline-mode">
       <div className="space-y-1">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <CloudOff size={15} className="text-sky-300" /> Offline mode
@@ -127,12 +103,12 @@ export default function OfflineModePanel({ kids = [] }: Props) {
         </p>
       </div>
 
-      <section className="space-y-2" aria-label="Ask Jarvis offline">
+      <section className="space-y-2" aria-label="Ask the Voice Assistant offline">
         <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-          <Sparkles size={12} /> Ask Jarvis
+          <Sparkles size={12} /> Ask the Voice Assistant
         </h4>
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void ask(); }}>
-          <label htmlFor="offline-ask" className="sr-only">Question or command for Jarvis</label>
+          <label htmlFor="offline-ask" className="sr-only">Question or command for the Voice Assistant</label>
           <input id="offline-ask" value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={1000}
             placeholder="Where is...? Turn off the lights..." className="glass-input min-h-11 min-w-0 flex-1 px-3 text-sm" />
           <button type="submit" disabled={busy || !question.trim()} className="min-h-11 rounded-lg bg-purple-600 px-3 text-xs font-semibold text-white disabled:opacity-50">
@@ -203,34 +179,6 @@ export default function OfflineModePanel({ kids = [] }: Props) {
         </details>
       ))}
 
-      {kids.length > 0 && (
-        <section className="space-y-2" aria-label="Parent controls nearby" data-testid="offline-parent">
-          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Parent controls over Bluetooth</h4>
-          {kids.map((c) => {
-            const mine = commands.filter((k) => k.child === c.username).sort((a, b) => b.issued_at - a.issued_at);
-            return (
-              <div key={c.username} className="space-y-1.5 rounded-lg bg-white/5 p-2" data-testid={`offline-child-${c.username}`}>
-                <p className="text-sm font-semibold text-white">{c.name}</p>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" disabled={busy} onClick={() => void command(c.username, 'lock')}
-                    className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-red-500/20 px-3 text-xs font-semibold text-red-100">
-                    <Lock size={13} /> Lock
-                  </button>
-                  <button type="button" disabled={busy} onClick={() => void command(c.username, 'unlock')}
-                    className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-emerald-500/20 px-3 text-xs font-semibold text-emerald-100">
-                    <Unlock size={13} /> Unlock
-                  </button>
-                  <button type="button" disabled={busy} onClick={() => void command(c.username, 'bonus', 15)}
-                    className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-white/10 px-3 text-xs font-semibold text-sky-100">
-                    <Clock size={13} /> 15 more minutes
-                  </button>
-                </div>
-                {mine[0] && <p className="text-xs text-slate-300" data-testid="offline-delivery">{commandDeliveryLine(mine[0], c.name)}</p>}
-              </div>
-            );
-          })}
-        </section>
-      )}
     </div>
   );
 }

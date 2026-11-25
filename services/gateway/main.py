@@ -9370,6 +9370,9 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
         # device can check a parent's offline code with no connection. Absent
         # for anyone else, and the device then keeps the set it has.
         **({"offline_codes": body["offline_codes"]} if isinstance(body.get("offline_codes"), list) else {}),
+        # A minor's Nearby & offline parts (Settings > Nearby & offline), set by
+        # their parents; the phone's guard applies them natively.
+        **({"nearby": body["nearby"]} if isinstance(body.get("nearby"), dict) else {}),
         "week": weekly_screen_time(usage, now.date()),
         **state,
     }
@@ -9861,6 +9864,26 @@ async def screen_time_set_rules(request: Request, username: str):
     status, body = await _identity_as_caller(request, "PUT", f"/api/screen-time/{username}/rules", json=await request.json())
     if status == 200:
         await _screen_time_refresh(str((body or {}).get("username") or username).strip().lower())
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.get("/api/users/{username}/nearby-settings")
+async def nearby_settings_get(request: Request, username: str):
+    """Settings > Nearby & offline: the caller's own parts (``me``), or a
+    minor's for that minor's parents (identity decides)."""
+    status, body = await _identity_as_caller(request, "GET", f"/api/users/{username}/nearby-settings")
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.put("/api/users/{username}/nearby-settings")
+async def nearby_settings_put(request: Request, username: str):
+    """A grown member changes their own parts; a minor's parents change the
+    minor's (the child's phone then re-reads its status at once)."""
+    status, body = await _identity_as_caller(
+        request, "PUT", f"/api/users/{username}/nearby-settings", json=await request.json()
+    )
+    if status == 200 and isinstance(body, dict) and body.get("managed_by_parent"):
+        await _screen_time_refresh(str(body.get("username") or username).strip().lower())
     return JSONResponse(status_code=status, content=body)
 
 

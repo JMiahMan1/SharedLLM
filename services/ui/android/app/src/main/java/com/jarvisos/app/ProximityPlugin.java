@@ -49,14 +49,14 @@ public class ProximityPlugin extends Plugin {
             requestPermissionForAlias("nearby", call, "answered");
             return;
         }
-        Proximity.refresh(getContext());
+        NearbyParts.ensure(getContext());
         DeviceHealth.reportAsync(getContext());
         call.resolve(diag());
     }
 
     @PermissionCallback
     private void answered(PluginCall call) {
-        Proximity.refresh(getContext());
+        NearbyParts.ensure(getContext());
         DeviceHealth.reportAsync(getContext());
         call.resolve(diag());
     }
@@ -64,7 +64,7 @@ public class ProximityPlugin extends Plugin {
     @PluginMethod
     public void disable(PluginCall call) {
         Proximity.setEnabled(getContext(), false);
-        Proximity.refresh(getContext());
+        NearbyParts.ensure(getContext());
         DeviceHealth.reportAsync(getContext());
         call.resolve(diag());
     }

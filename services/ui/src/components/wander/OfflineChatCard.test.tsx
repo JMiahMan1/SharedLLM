@@ -77,12 +77,13 @@ describe('OfflineChatCard', () => {
     expect(screen.getByTestId('offline-chat-permission')).toHaveTextContent(/Nearby devices/);
   });
 
-  it('is off until turned on, and not drawn in the browser', async () => {
+  it('is not drawn while off (switched in Settings) or in the browser', async () => {
     mesh.getDiagnostics.mockResolvedValue({ ...on, enabled: false });
-    mesh.enable.mockResolvedValue(on);
-    render(<OfflineChatCard me="pat" room="abcd1234" />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Turn on' }));
-    expect(mesh.enable).toHaveBeenCalled();
+    const off = render(<OfflineChatCard me="pat" room="abcd1234" />);
+    await waitFor(() => expect(mesh.getDiagnostics).toHaveBeenCalled());
+    expect(off.container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('button', { name: 'Turn on' })).not.toBeInTheDocument();
+    off.unmount();
     platform.name = 'web';
     const { container } = render(<OfflineChatCard me="pat" room="abcd1234" />);
     expect(container).toBeEmptyDOMElement();

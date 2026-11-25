@@ -59,6 +59,7 @@ from services.identity import (
     device_archive,
     hub_devices,
     music_assistant,
+    nearby_settings,
     new_voices,
     onboarding,
     profile_sharing,
@@ -1169,6 +1170,11 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
 
 # Push topics, notification preferences, UnifiedPush (docs/PUSH.md)
 app.include_router(push.build_router(get_session, require_api_key, require_internal))
+
+# Settings > Nearby & offline: the Bluetooth LE parts a person's phones run (a minor's set by their parents)
+app.include_router(nearby_settings.build_router(
+    get_session, require_api_key, lambda viewer, subject: _may_manage_screen_time(viewer, subject),
+))
 
 # Profile stats: the areas the family may see, and the admin's usage read (docs/PROFILE_STATS.md)
 app.include_router(profile_sharing.build_router(get_session, require_api_key, require_internal))
@@ -3158,6 +3164,7 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
         session.delete(stale_weather)
         session.commit()
     push.forget_user(session, user.username)
+    nearby_settings.forget_user(session, user.username)
     _audit(request, session, "user.delete", username.lower(), actor=admin,
            changes=[{"field": "account", "change": "cleared"}])
     return {"status": "SUCCESS"}
@@ -6962,6 +6969,9 @@ def get_screen_rules(
         "parent_contacts": _parent_contacts(session, subject),
         # The parents' offline-code verifiers, for the member's own device only.
         **({"offline_codes": _offline_verifiers(session, _parents_of(session, subject))} if own_device else {}),
+        # A minor's Nearby & offline parts, set by their parents: the phone's
+        # guard applies them on its next status read, with no app open.
+        **({"nearby": nearby_settings.stored(session, subject.username)} if nearby_settings.is_minor(subject) else {}),
     }
 
 

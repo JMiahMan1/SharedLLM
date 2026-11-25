@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { api } from '../services/api';
@@ -50,10 +50,6 @@ import {
 import { buildFamilyCards, groupByPlace, motionLabel, roomLabel, type FamilyMemberStatus, type MemberGroup, type Place } from '../lib/familyCards';
 import PlacesPanel from '../components/wander/PlacesPanel';
 import VehicleBluetoothPanel from '../components/wander/VehicleBluetoothPanel';
-import BluetoothDiagnostics from '../components/wander/BluetoothDiagnostics';
-import FamilyNearbyCard from '../components/wander/FamilyNearbyCard';
-import OfflineChatCard from '../components/wander/OfflineChatCard';
-import OfflineModePanel from '../components/wander/OfflineModePanel';
 import { bandLabel, nearOf, togetherLine } from '../lib/proximity';
 import { vehicleSourceLabel } from '../lib/vehicleBluetooth';
 import toast from 'react-hot-toast';
@@ -85,6 +81,7 @@ import {
   ChevronRight,
   ChevronDown,
   Layers,
+  Radio,
 } from 'lucide-react';
 
 interface VehicleOption {
@@ -196,18 +193,6 @@ const Wander = () => {
     ...houseConfigQueryOptions,
   });
   const peopleDirectory = useFamilyDirectory();
-  // A parent's children, for locking or unlocking their phones over Bluetooth when offline.
-  const isParent = ['mother', 'father'].includes(String((user as { family_role?: string } | null)?.family_role ?? ''));
-  const rosterQuery = useQuery({
-    queryKey: ['family-roster'],
-    queryFn: () => api.getFamily(),
-    enabled: isParent,
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
-  const myChildren = (rosterQuery.data ?? [])
-    .filter((m) => ['child', 'teen'].includes(String(m.family_role ?? '')))
-    .map((m) => ({ username: m.username.toLowerCase(), name: m.display_name || m.username }));
   // Family phones near mine lately (Bluetooth LE), within the family's location sharing.
   const nearQuery = useQuery({
     queryKey: ['geo-proximity-near'],
@@ -1106,21 +1091,15 @@ const Wander = () => {
           onChanged={() => void queryClient.invalidateQueries({ queryKey: vehiclesQueryKey() })}
         />
 
-        <FamilyNearbyCard />
-
-        <OfflineModePanel kids={myChildren} />
-
-        <OfflineChatCard
-          me={currentUsername}
-          room={user?.chat_default_token}
-          position={(() => {
-            const mine = familyMembers.find((m) => (memberPeople.get(m.id)?.username ?? m.id.replace(/^(person|user)\./, '')).toLowerCase() === currentUsername);
-            return mine && mine.lat != null && mine.lon != null ? { lat: mine.lat, lon: mine.lon } : null;
-          })()}
-          nameOf={(u) => peopleDirectory(u)?.display_name}
-        />
-
-        {user?.is_admin && <BluetoothDiagnostics />}
+        {/* Find family nearby, the offline chat, offline mode and car detection are
+            switched in Settings; the chat is in Chat and the parent controls in Guardian. */}
+        <Link
+          to="/settings#nearby-offline"
+          className="flex min-h-11 items-center gap-2 rounded-xl px-2 text-xs font-semibold text-purple-300 hover:bg-white/5"
+          data-testid="wander-nearby-link"
+        >
+          <Radio size={14} aria-hidden /> Nearby &amp; offline settings
+        </Link>
       </div>
 
       {/* Aggregate Statistics Ribbon */}

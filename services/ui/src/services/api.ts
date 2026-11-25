@@ -59,6 +59,7 @@ import type {
 } from '../lib/studio';
 import { Capacitor } from '@capacitor/core';
 import { nativeBinaryAdapter, wantsNativeBinary } from '../lib/nativeBinary';
+import { nearbyState, type NearbyParts, type NearbySettingsState } from '../lib/nearbySettings';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type { ActiveCall, DropInSettings, ArcadeCastResult, ArcadeScreen, PartyRoomSummary, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
 import type {
@@ -2404,6 +2405,17 @@ export const api = {
   async getEta(userId: string, to = 'home'): Promise<EtaResponse> {
     const resp = await apiClient.get('/api/geo/eta', { params: { user_id: userId, to } });
     return resp.data;
+  },
+
+  /** Settings > Nearby & offline: a person's parts (``me``, or a child's for their parents). */
+  async getNearbySettings(username = 'me'): Promise<NearbySettingsState> {
+    const resp = await apiClient.get(`/api/users/${encodeURIComponent(username)}/nearby-settings`);
+    return nearbyState(resp.data);
+  },
+
+  async setNearbySettings(settings: Partial<NearbyParts>, username = 'me'): Promise<NearbySettingsState> {
+    const resp = await apiClient.put(`/api/users/${encodeURIComponent(username)}/nearby-settings`, { settings });
+    return nearbyState(resp.data);
   },
 
   // Family arrival / departure notices for the signed-in user (on by default).

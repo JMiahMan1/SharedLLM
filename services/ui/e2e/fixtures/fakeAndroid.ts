@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 
 /**
- * The web app as the Android app runs it, with Wander's Bluetooth plugins
+ * The web app as the Android app runs it, with the Bluetooth plugins
  * answered by a stand-in (the emulator and a browser have no Bluetooth).
  *
  * Capacitor's custom platform makes getPlatform() say "android" while every
@@ -16,6 +16,8 @@ export interface FakeAndroidState {
   proximity?: Record<string, unknown>;
   mesh?: Record<string, unknown>;
   messages?: unknown[];
+  /** Settings > Nearby & offline on the phone (JarvisNearby): the parts and what Android allows. */
+  nearby?: Record<string, unknown>;
   /** Offline mode: cached items, queued requests, parent commands, diagnostics. */
   offline?: { cache?: unknown[]; requests?: unknown[]; commands?: unknown[]; diag?: Record<string, unknown>; peerNearby?: boolean };
 }
@@ -25,6 +27,13 @@ const PLUGINS: Record<string, string[]> = {
   JarvisProximity: ['getDiagnostics', 'enable', 'disable'],
   JarvisFamilyMesh: ['getDiagnostics', 'enable', 'disable', 'setRoom', 'send', 'list'],
   JarvisOfflineMode: ['queue', 'requests', 'cache', 'sendCommand', 'commands', 'getDiagnostics'],
+  JarvisNearby: ['getState', 'apply', 'requestPermissions'],
+};
+
+/** A phone with every permission and nothing on yet but car detection. */
+export const NEARBY_DEVICE = {
+  nearby: false, chat: false, offline: false, car: true, parentLink: false,
+  scanPermission: true, advertisePermission: true, connectPermission: true, bluetoothOn: true, host: 'none', apiLevel: 37,
 };
 
 export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<void> {
@@ -69,6 +78,16 @@ export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<
         if (method === 'setRoom') return {};
         return s.mesh;
       }
+      if (plugin === 'JarvisNearby') {
+        const n = { ...((s.nearby ?? {}) as Bag) };
+        if (method === 'apply') {
+          for (const k of ['nearby', 'chat', 'offline', 'car']) if (typeof options[k] === 'boolean') n[k] = options[k];
+          const radio = Boolean(n.nearby || n.chat || n.offline || n.parentLink);
+          n.host = radio ? 'own' : 'none';
+          s.nearby = n;
+        }
+        return n;
+      }
       if (plugin === 'JarvisOfflineMode') {
         const o = (s.offline ?? {}) as Bag & { requests?: Bag[]; commands?: Bag[] };
         if (method === 'cache') return { items: o.cache ?? [] };
@@ -102,5 +121,33 @@ export async function fakeAndroid(page: Page, state: FakeAndroidState): Promise<
         new Promise((resolve) => setTimeout(() => resolve(answer(plugin, method, options)), 10)),
       nativeCallback: () => 'cb',
     };
-  }, { plugins: PLUGINS, initial: state });
+  }, { plugins: PLUGINS, initial: { ...state, nearby: { ...NEARBY_DEVICE, ...(state.nearby ?? {}) } } });
+}
+
+/**
+ * Settings > Nearby & offline on the server for this test (GET and PUT, the
+ * caller's own under `me`, others by name); register it after the page mocks
+ * so it answers first. A child (`minor`) is read-only to themselves.
+ */
+export async function mockNearbySettings(
+  page: Page,
+  mine: Record<string, boolean>,
+  opts: { minor?: boolean; others?: Record<string, Record<string, boolean>> } = {},
+): Promise<void> {
+  const store: Record<string, Record<string, boolean>> = {
+    me: { nearby: false, chat: false, offline: false, car: true, ...mine },
+    ...Object.fromEntries(Object.entries(opts.others ?? {}).map(([u, s]) => [u, { nearby: false, chat: false, offline: false, car: true, ...s }])),
+  };
+  await page.route(/\/api\/users\/[^/]+\/nearby-settings$/, async (route) => {
+    const who = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3]);
+    const self = who === 'me';
+    const minor = self ? Boolean(opts.minor) : true;
+    const saved = (store[who] ??= { nearby: false, chat: false, offline: false, car: true });
+    if (route.request().method() === 'PUT') {
+      if (self && minor) return route.fulfill({ status: 403, json: { detail: 'A parent manages these on a child\'s phone' } });
+      Object.assign(saved, (route.request().postDataJSON() as { settings?: Record<string, boolean> }).settings ?? {});
+    }
+    return route.fulfill({ json: { username: who, settings: { ...saved }, managed_by_parent: minor,
+      can_change: self ? !minor : true, always_on: minor ? ['parent_link'] : [] } });
+  });
 }

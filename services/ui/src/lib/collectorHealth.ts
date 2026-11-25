@@ -124,9 +124,11 @@ export function collectionNotices(
       .filter((p) => p.kind === 'permission')
       .map((p) => PERMISSION_LABELS[p.what] ?? p.what);
     if (missing.length) {
+      // Nearby devices is asked for from Settings > Nearby & offline, so say where.
+      const bluetooth = problems.some((p) => p.kind === 'permission' && (p.what === 'bluetooth' || p.what === 'bluetooth_scan'));
       out.push({
         key: `${device.device_id}-permissions`,
-        text: `${which} is missing permission for ${listWords(missing)}. Open Jarvis on the ${noun} and allow ${missing.length === 1 ? 'it' : 'them'}.`,
+        text: `${which} is missing permission for ${listWords(missing)}. Open Jarvis on the ${noun} and allow ${missing.length === 1 ? 'it' : 'them'}${bluetooth ? ' (Settings, Nearby & offline)' : ''}.`,
       });
     }
     const signedOut = problems.some((p) => p.kind === 'collector' && p.outcome === 'signed_out');
@@ -145,7 +147,7 @@ export function collectionNotices(
         text: `Background collection of ${listWords(off)} is not running on ${which}. ${restart}`,
       });
     }
-    // Family nearby (Bluetooth LE): said plainly, e.g. a tablet that can only scan.
+    // Nearby & offline (Bluetooth LE): said plainly, e.g. a tablet that can only scan.
     const nearby = problems.find((p) => p.kind === 'collector' && p.what === 'proximity' && p.outcome !== 'no_permission');
     if (nearby?.message) {
       out.push({ key: `${device.device_id}-proximity`, text: `Family nearby on ${which}: ${nearby.message}.` });

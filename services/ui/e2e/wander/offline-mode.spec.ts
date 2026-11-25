@@ -3,24 +3,25 @@ import { mockHome } from '../fixtures/homeMocks';
 import { mockHealth } from '../fixtures/healthMocks';
 import { mockBible } from '../fixtures/bibleMocks';
 import { mockFamilyPages } from '../fixtures/familyPagesMocks';
-import { fakeAndroid } from '../fixtures/fakeAndroid';
+import { fakeAndroid, mockNearbySettings } from '../fixtures/fakeAndroid';
 import { quietHotReload, screenFindings, settle, shot, type Allowed } from '../fixtures/pageAudit';
 
 const expect = baseExpect.configure({ timeout: 20_000 });
 
 /**
  * Offline mode as the Android app shows it when the server cannot be reached,
- * at every size: the banner, Jarvis questions answered from saved information
- * or queued, shopping edits shown until confirmed, and a parent locking a child
- * nearby with delivery status. Bluetooth plugins: fixtures/fakeAndroid.ts.
- * Made-up family and data.
+ * at every size: the banner and its link to Settings > Nearby & offline >
+ * Offline mode, Voice Assistant questions answered from saved information or
+ * queued, shopping edits shown until confirmed, and (in Guardian) a parent
+ * locking a child nearby with delivery status. Bluetooth plugins:
+ * fixtures/fakeAndroid.ts. Made-up family and data.
  */
 
 const LEAFLET: Allowed[] = [{ where: /./, finding: /under 44px: (Leaflet|OpenStreetMap)\b/, why: 'map attribution' }];
 const AT = new Date();
 AT.setHours(15, 41, 0, 0);
 
-async function open(page: Page): Promise<string[]> {
+async function open(page: Page, path: string): Promise<string[]> {
   await quietHotReload(page);
   await mockHome(page, 'admin');
   await mockHealth(page);
@@ -35,6 +36,7 @@ async function open(page: Page): Promise<string[]> {
     mesh: { enabled: true, connectPermission: true, room: true, server: true, syncing: null, stored: 0, unsynced: 0, hasMail: false,
       lastSentAt: null, lastReceivedAt: null, lastServerSyncAt: null, lastError: null },
     messages: [],
+    nearby: { nearby: true, chat: true, offline: true, car: true, host: 'own' },
     offline: {
       peerNearby: true,
       cache: [
@@ -53,26 +55,32 @@ async function open(page: Page): Promise<string[]> {
   page.on('pageerror', (e) => {
     if (!/plugin is not implemented on android/.test(e.message)) errors.push(e.message);
   });
-  await page.goto('/wander');
-  await expect(page.getByTestId('trip-card').first()).toBeVisible();
+  // This parent's own Settings: offline mode on.
+  await mockNearbySettings(page, { nearby: true, chat: true, offline: true });
+  await page.goto(path);
   return errors;
 }
 
 test.setTimeout(150_000);
 
 test('offline: the banner, answers from saved information, queued questions and shopping edits', async ({ page }, info) => {
-  const errors = await open(page);
+  const errors = await open(page, '/wander');
   // The app's own health check decides (its retries take a while before it gives up).
-  await expect(page.getByTestId('offline-mode-banner')).toHaveText(/Offline, using nearby family phones/, { timeout: 90_000 });
+  const banner = page.getByTestId('offline-mode-banner');
+  await expect(banner).toHaveText(/Offline, using nearby family phones/, { timeout: 90_000 });
+  await expect(banner).toHaveAttribute('href', '/settings#offline');
+  await banner.click();
+  await expect(page).toHaveURL(/\/settings#offline$/);
+  await expect(page.getByTestId('nearby-offline-mode')).toHaveAttribute('open', '');
   const panel = page.getByTestId('offline-mode');
   await panel.scrollIntoViewIfNeeded();
   await expect(page.getByTestId('offline-mode-status')).toHaveText('Offline, using nearby family phones.');
 
-  await panel.getByLabel('Question or command for Jarvis').fill('Where is Robin?');
+  await panel.getByLabel('Question or command for the Voice Assistant').fill('Where is Robin?');
   await panel.getByRole('button', { name: 'Ask' }).click();
   await expect(page.getByTestId('offline-local-answer')).toContainText('Robin was at Riverside Elementary School (as of 3:41 PM');
 
-  await panel.getByLabel('Question or command for Jarvis').fill('Turn off the porch light');
+  await panel.getByLabel('Question or command for the Voice Assistant').fill('Turn off the porch light');
   await panel.getByRole('button', { name: 'Ask' }).click();
   await expect(page.getByTestId('offline-requests')).toContainText('Waiting for a family phone that is online');
 
@@ -82,19 +90,18 @@ test('offline: the banner, answers from saved information, queued questions and 
 
   await settle(page);
   expect(await screenFindings(page, panel, 'offline mode', LEAFLET)).toEqual([]);
-  await shot(page, info, 'wander-offline-mode');
+  await shot(page, info, 'settings-offline-mode');
   expect(errors).toEqual([]);
 });
 
-test('offline: a parent locks a child nearby and sees it has not reached the phone yet', async ({ page }, info) => {
-  const errors = await open(page);
-  const parent = page.getByTestId('offline-parent');
-  await parent.scrollIntoViewIfNeeded();
-  const kid = page.getByTestId('offline-child-jordan');
-  await kid.getByRole('button', { name: /Lock/ }).click();
-  await expect(kid.getByTestId('offline-delivery')).toContainText('Not reached yet', { timeout: 20_000 });
+test('offline: a parent locks a child from Guardian and sees it has not reached the phone yet', async ({ page }, info) => {
+  const errors = await open(page, '/guardian?area=safety&member=jordan');
+  const controls = page.getByTestId('guardian-offline-controls');
+  await controls.scrollIntoViewIfNeeded();
+  await controls.getByRole('button', { name: /Lock/ }).click();
+  await expect(controls.getByTestId('offline-delivery')).toContainText('Not reached yet', { timeout: 20_000 });
   await settle(page);
-  expect(await screenFindings(page, parent, 'offline parent controls', LEAFLET)).toEqual([]);
-  await shot(page, info, 'wander-offline-parent');
+  expect(await screenFindings(page, controls, 'guardian offline controls', LEAFLET)).toEqual([]);
+  await shot(page, info, 'guardian-offline-controls');
   expect(errors).toEqual([]);
 });

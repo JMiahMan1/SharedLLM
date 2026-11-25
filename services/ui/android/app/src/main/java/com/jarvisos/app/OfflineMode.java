@@ -116,7 +116,9 @@ final class OfflineMode {
             Log.i(TAG, "keys not refreshed: " + e.getMessage());
         }
         try {
-            if (now - p.getLong(KEY_SNAPSHOT_AT, 0L) > SNAPSHOT_REFRESH_MS) {
+            // The household's information only while offline mode is on (the keys
+            // above also serve a child's parent link, which is always on).
+            if (NearbyParts.offline(c) && now - p.getLong(KEY_SNAPSHOT_AT, 0L) > SNAPSHOT_REFRESH_MS) {
                 JSONObject snap = WidgetApi.get(c, "/api/offline/snapshot");
                 JSONArray items = snap.optJSONArray("items");
                 List<MeshRules.Item> cached = new ArrayList<>();

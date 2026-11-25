@@ -40,12 +40,15 @@ ARRIVALS_PREFIX = "tel:arrivals:"
 MAX_DEVICES = 10
 
 #: ``bluetooth`` is Android 12's Nearby devices (BLUETOOTH_CONNECT): without it
-#: Wander cannot tell which linked vehicle a trip was in.
+#: car detection (Settings > Nearby & offline) cannot tell which linked vehicle a
+#: trip was in. ``bluetooth_scan`` is the same permission's scan half, reported
+#: once any Nearby & offline part is on.
 PERMISSIONS = ("read_sms", "read_call_log", "usage_access", "notification_listener", "location", "bluetooth",
                "bluetooth_scan")
 WORKERS = ("comms_sync", "usage_sync", "photo_scan")
 #: ``listener`` is a comms run the notification listener started when a text or call came in.
-#: ``proximity`` is Wander's family-nearby scan (Bluetooth LE); ``cannot_advertise``
+#: ``proximity`` is the Nearby & offline engine (Bluetooth LE, Settings > Nearby &
+#: offline); ``cannot_advertise``
 #: is how a device that only scans (some tablets) says so.
 COLLECTORS = ("comms", "usage", "listener", "proximity")
 #: WorkManager states that mean the work is still scheduled.

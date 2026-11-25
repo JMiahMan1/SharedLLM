@@ -18,7 +18,7 @@ describe('OfflineModeBanner', () => {
     state.offline = true;
     rerender(<MemoryRouter><OfflineModeBanner /></MemoryRouter>);
     expect(screen.getByTestId('offline-mode-banner')).toHaveTextContent('Offline, using nearby family phones');
-    expect(screen.getByTestId('offline-mode-banner')).toHaveAttribute('href', '/wander#offline');
+    expect(screen.getByTestId('offline-mode-banner')).toHaveAttribute('href', '/settings#offline');
   });
 
   it('counts only a request with no answer at all as unreachable', () => {

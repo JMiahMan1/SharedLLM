@@ -9,6 +9,7 @@ import { LocationProvider } from './context/LocationContext';
 import { MediaPlayerProvider } from './context/MediaPlayerContext';
 import MediaOverlays from './features/media/components/MediaOverlays';
 import NativeBridge from './components/NativeBridge';
+import NearbySync from './components/NearbySync';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
 import MobileShell from './components/layout/MobileShell';
@@ -182,6 +183,7 @@ function App() {
         <MediaPlayerProvider>
         <Router>
           <NativeBridge />
+          <NearbySync />
           <ActivityBeacon />
           <PhoneUsageSync />
           <AppInventorySync />

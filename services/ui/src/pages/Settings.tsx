@@ -16,6 +16,7 @@ import AppCleanupPanel from '../components/settings/AppCleanupPanel';
 import MapStylePanel from '../components/settings/MapStylePanel';
 import MyVoicePanel from '../components/settings/MyVoicePanel';
 import MobileMenuPanel from '../components/settings/MobileMenuPanel';
+import NearbyOfflinePanel from '../components/settings/NearbyOfflinePanel';
 import NotificationPreferencesPanel from '../components/settings/NotificationPreferencesPanel';
 import PhoneReportsPanel from '../components/settings/PhoneReportsPanel';
 import RoomDetectionPanel from '../components/settings/RoomDetectionPanel';
@@ -138,6 +139,9 @@ const Settings = () => {
         <FamilyDropInSection />
         <TelemetryReportsPanel />
       </section>
+
+      {/* Bluetooth between family phones: each part's switch (a child's set by a parent). */}
+      <NearbyOfflinePanel />
 
       <section className="space-y-4" aria-labelledby="settings-device" data-focus-id="section-device">
         <h2 id="settings-device" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">This device</h2>

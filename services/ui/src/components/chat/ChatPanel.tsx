@@ -3,6 +3,7 @@ import { useOfflineMode } from '../../hooks/useOfflineMode';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
+import { useNearbyDevice } from '../../hooks/useNearbyDevice';
 import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { blobToBase64 } from '../../lib/base64';
@@ -126,6 +127,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const { offline } = useOfflineMode();
+  // Whether the offline family chat is on (Settings > Nearby & offline), for the folded card online.
+  const nearbyDevice = useNearbyDevice();
   const isAdmin = Boolean(me?.is_admin);
   const people = useFamilyDirectory();
   const myActorIds = useMemo(
@@ -786,11 +789,17 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     >
       {/* Inbox */}
       <aside className={`min-h-0 min-w-0 flex-col border-white/5 p-3 lg:flex lg:border-r ${showThread ? 'hidden' : 'flex'}`}>
-        {/* No server: the family chat goes through nearby family phones instead (Android). */}
-        {offline && (
+        {/* No server: the family chat goes through nearby family phones instead (Android),
+            pinned open; online it waits folded at the top, when the offline chat is on in Settings. */}
+        {offline ? (
           <div className="mb-3 max-h-[60vh] overflow-y-auto" data-testid="chat-offline">
             <OfflineChatCard me={(me?.username ?? '').toLowerCase()} room={me?.chat_default_token} />
           </div>
+        ) : nearbyDevice?.chat && (
+          <details className="mb-3 max-h-[60vh] overflow-y-auto rounded-2xl" data-testid="chat-offline-folded">
+            <summary className="min-h-11 cursor-pointer content-center px-2 text-xs font-semibold text-slate-300">Offline family chat</summary>
+            <OfflineChatCard me={(me?.username ?? '').toLowerCase()} room={me?.chat_default_token} />
+          </details>
         )}
         {conversationsError && conversations.length > 0 && (
           <div className="mb-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100" role="status">

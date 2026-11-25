@@ -97,6 +97,17 @@ final class GuardApi {
             }
             ed.apply();
             showQueuedNotices(context);
+            // A child's Nearby & offline parts, as their parents set them (and the
+            // parent link, always on now that the phone knows it is protected).
+            try {
+                if (next.optBoolean("protected", false)) {
+                    JSONObject nearby = next.optJSONObject("nearby");
+                    if (nearby != null) NearbyParts.applyFromServer(context, nearby);
+                    if (!prev.optBoolean("protected", false)) NearbyParts.ensure(context);
+                }
+            } catch (RuntimeException e) {
+                Log.w("JarvisGuard", "nearby parts not applied: " + e.getMessage());
+            }
             return true;
         } catch (Exception e) {
             return false;
