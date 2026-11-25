@@ -73,9 +73,13 @@ class SourceError(Exception):
 
 
 def _svc(attr: str) -> str:
+    """A service's base URL: the gateway's (tests replace it there), else services.config's. The
+    gateway never imported GARDEN_SVC, so the garden card asked for "/streaks" with no host and
+    failed on every profile (2026-11-25)."""
+    from services import config
     from services.gateway import main as gateway
 
-    return str(getattr(gateway, attr, "") or "").rstrip("/")
+    return str(getattr(gateway, attr, "") or getattr(config, attr, "") or "").rstrip("/")
 
 
 async def http_get(url: str, *, params: dict | None = None, headers: dict | None = None) -> Any:
