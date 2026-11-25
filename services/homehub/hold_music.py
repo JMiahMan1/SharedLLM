@@ -258,6 +258,99 @@ def make_loop(x: np.ndarray, rate: int, crossfade_s: float = LOOP_CROSSFADE_S) -
     return body
 
 
+#: A loop is cut to whole bars of this many beats, so the beat does not stumble at the seam.
+BEATS_PER_BAR = 4
+#: Tempo search range, and how clearly the tempo must stand out before the clip is cut to bars.
+TEMPO_MIN_BPM = 70.0
+TEMPO_MAX_BPM = 200.0
+TEMPO_MIN_CONFIDENCE = 3.5
+#: Onsets must stand out from the clip's level, or a steady tone or noise would be given a "beat".
+ONSET_MIN_VARIATION = 0.1
+_ONSET_HOP = 256
+
+
+def _onsets(x: np.ndarray) -> np.ndarray:
+    """Onset strength per hop: the positive rise of the short-term level."""
+    frames = len(x) // _ONSET_HOP
+    if frames < 4:
+        return np.zeros(0)
+    level = np.sqrt(np.mean(x[: frames * _ONSET_HOP].reshape(frames, _ONSET_HOP) ** 2, axis=1))
+    rise = np.maximum(0.0, np.diff(level, prepend=level[0]))
+    return rise - rise.mean()
+
+
+def _beat_scores(onsets: np.ndarray, period: float, phases: np.ndarray) -> np.ndarray:
+    """How strongly onsets land on a beat grid of ``period`` hops, for every phase at once.
+
+    Linear interpolation between hops; only the beats every phase has inside the clip are counted, so
+    the scores compare like with like. One numpy pass per period keeps a clip's first load fast.
+    """
+    beats = int((len(onsets) - 1 - phases.max()) // period)
+    if beats < 4:
+        return np.full(len(phases), -np.inf)
+    t = phases[:, None] + period * np.arange(beats)[None, :]
+    i = t.astype(int)
+    f = t - i
+    return np.mean(onsets[i] * (1 - f) + onsets[i + 1] * f, axis=1)
+
+
+def estimate_beat(x: np.ndarray, rate: int) -> tuple[float, float, float] | None:
+    """(bpm, first beat in samples, confidence), or None when the clip has no clear steady beat.
+
+    A coarse tempo comes from the onset autocorrelation; it is then refined, with the beat phase, by
+    fitting a beat grid to the onsets over the whole clip, since a loop of 48 beats shows even a
+    fraction of a BPM as a stumble at the seam.
+    """
+    on = _onsets(x)
+    if len(on) < 16:
+        return None
+    level = float(np.sqrt(np.mean(x ** 2)))
+    if level <= 1e-9 or float(on.std()) / level < ONSET_MIN_VARIATION:
+        return None
+    hop_s = _ONSET_HOP / rate
+    lo = max(1, int(60 / TEMPO_MAX_BPM / hop_s))
+    hi = min(len(on) - 1, int(60 / TEMPO_MIN_BPM / hop_s) + 1)
+    if hi <= lo + 1:
+        return None
+    ac = np.correlate(on, on, "full")[len(on) - 1:]
+    band = ac[lo:hi]
+    if band.size == 0 or np.mean(np.abs(band)) <= 0:
+        return None
+    confidence = float(band.max() / (np.mean(np.abs(band)) + 1e-12))
+    if confidence < TEMPO_MIN_CONFIDENCE:
+        return None
+    lag = lo + int(np.argmax(band))
+    best = (float("-inf"), float(lag), 0.0)
+    for period in np.linspace(lag * 0.97, lag * 1.03, 121):
+        phases = np.arange(0.0, period, 0.5)
+        scores = _beat_scores(on, float(period), phases)
+        k = int(np.argmax(scores))
+        if scores[k] > best[0]:
+            best = (float(scores[k]), float(period), float(phases[k]))
+    _, period, phase = best
+    return 60.0 / (period * hop_s), phase * _ONSET_HOP, confidence
+
+
+def bar_aligned(x: np.ndarray, rate: int, crossfade_s: float = LOOP_CROSSFADE_S) -> np.ndarray:
+    """Cut ``x`` so that, after ``make_loop`` folds the crossfade away, the loop is whole bars long.
+
+    It starts on the first beat and keeps as many whole bars as fit, plus the crossfade tail. A clip
+    with no clear steady beat (speech, ambient pads) is returned unchanged.
+    """
+    beat = estimate_beat(x, rate)
+    if beat is None:
+        return x
+    bpm, start, _ = beat
+    bar = BEATS_PER_BAR * 60.0 * rate / bpm
+    n = int(rate * crossfade_s)
+    s = round(start)
+    bars = int((len(x) - s - n) // bar)
+    if bars < 2:
+        return x
+    length = round(bars * bar)
+    return x[s: s + length + n]
+
+
 def _trim_silence(x: np.ndarray, rate: int, floor_db: float = -50.0) -> np.ndarray:
     """Leading and trailing near-silence off, so the loop is not a gap every time round."""
     win = max(1, rate // 50)
@@ -285,9 +378,15 @@ def normalise(x: np.ndarray, dbfs: float = TARGET_DBFS) -> np.ndarray:
     return y
 
 
-def prepare(x: np.ndarray, rate: int, out_rate: int, dbfs: float = TARGET_DBFS) -> bytes:
-    """Mono float samples at ``rate`` -> the loop: 16-bit little-endian PCM at ``out_rate``, at ``dbfs`` RMS."""
-    y = make_loop(resample(_trim_silence(x, rate), rate, out_rate), out_rate)
+def prepare(x: np.ndarray, rate: int, out_rate: int, dbfs: float = TARGET_DBFS, loop: bool = True) -> bytes:
+    """Mono float samples at ``rate`` -> 16-bit little-endian PCM at ``out_rate``, at ``dbfs`` RMS.
+
+    With ``loop`` (how every clip is played) it is cut to whole bars and its end folded into its start.
+    ``loop=False`` is for a stored clip: it is looped once, when it is loaded, never twice.
+    """
+    y = resample(_trim_silence(x, rate), rate, out_rate)
+    if loop:
+        y = make_loop(bar_aligned(y, out_rate), out_rate)
     y = normalise(y, dbfs)
     return np.clip(np.round(y * 32767), -32768, 32767).astype("<i2").tobytes()
 

@@ -68,7 +68,8 @@ def main() -> int:
     if args.raw:
         args.raw.write_bytes(raw)
     x, rate = hold_music.read_wav(raw)
-    pcm = hold_music.prepare(x, rate, OUT_RATE)
+    # stored unlooped: HomeHub cuts it to whole bars and loops it once, when it loads it
+    pcm = hold_music.prepare(x, rate, OUT_RATE, loop=False)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     import numpy as np
 

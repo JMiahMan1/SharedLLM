@@ -348,3 +348,62 @@ async def test_a_wait_plays_the_chosen_music_and_says_a_chosen_line(env, monkeyp
     assert drv.voice.last_run.music_source == source
     assert drv.voice.last_run.public()["music_source"] == source
     await drv.async_unload()
+
+
+def beat_track(seconds: float, rate: int, bpm: float, lead_s: float = 0.0) -> np.ndarray:
+    """A steady pulse: a short decaying tone on every beat over a quiet bed, starting after ``lead_s``."""
+    n = int(seconds * rate)
+    t = np.arange(n) / rate
+    x = 0.02 * np.sin(2 * np.pi * 110.0 * t)
+    period = 60.0 / bpm
+    hit = np.arange(int(0.08 * rate)) / rate
+    tone = 0.6 * np.sin(2 * np.pi * 880.0 * hit) * np.exp(-hit * 40)
+    k = 0
+    while lead_s + k * period < seconds:
+        i = round((lead_s + k * period) * rate)
+        j = min(n, i + len(tone))
+        x[i:j] += tone[: j - i]
+        k += 1
+    return x
+
+
+def test_a_clip_with_a_beat_loops_on_whole_bars():
+    """23.9 s at 122 bpm is 48.6 beats: looped as it is, the beat would stumble every time round."""
+    rate, bpm = 24000, 122.0
+    x = beat_track(23.94, rate, bpm, lead_s=0.29)
+    bpm_found, first, _ = hold_music.estimate_beat(x, rate)
+    assert abs(bpm_found - bpm) < 0.3
+    assert abs(first / rate - 0.29) < 0.02
+    loop = np.frombuffer(hold_music.prepare(x, rate, rate), "<i2")
+    beats = len(loop) / rate * bpm / 60
+    assert abs(beats / hold_music.BEATS_PER_BAR - round(beats / hold_music.BEATS_PER_BAR)) < 0.02
+    assert round(beats) % hold_music.BEATS_PER_BAR == 0
+    assert seam_ok(loop.tobytes())
+
+
+def test_a_clip_with_no_steady_beat_is_only_crossfaded():
+    rng = np.random.default_rng(7)
+    rate = 24000
+    x = 0.2 * rng.standard_normal(int(8 * rate))
+    assert hold_music.estimate_beat(x, rate) is None
+    assert len(hold_music.bar_aligned(x, rate)) == len(x)
+
+
+def test_a_stored_clip_is_looped_once_not_twice():
+    """The shipped clip is stored unlooped, so loading it folds the crossfade away once."""
+    rate = 24000
+    x = music(6.0, rate)
+    stored = np.frombuffer(hold_music.prepare(x, rate, rate, loop=False), "<i2")
+    assert len(stored) == len(x)
+    looped_once = np.frombuffer(hold_music.prepare(stored / 32767, rate, rate), "<i2")
+    assert len(looped_once) == len(np.frombuffer(hold_music.prepare(x, rate, rate), "<i2"))
+
+
+def test_the_shipped_game_show_clip_loops_on_whole_bars():
+    x, rate = hold_music.read_wav(hold_music.GAMESHOW_CLIP.read_bytes())
+    beat = hold_music.estimate_beat(x, rate)
+    assert beat is not None
+    loop = np.frombuffer(hold_music.prepare(x, rate, 24000), "<i2")
+    bars = len(loop) / 24000 * beat[0] / 60 / hold_music.BEATS_PER_BAR
+    assert abs(bars - round(bars)) < 0.02
+    assert seam_ok(loop.tobytes())
