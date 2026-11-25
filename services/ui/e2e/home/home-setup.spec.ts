@@ -229,7 +229,7 @@ test.describe('Devices: rooms, floors, labels, zones and people', () => {
     const form = panel.getByTestId('hub-user-editor');
     await form.getByLabel('Name', { exact: true }).fill('Guest');
     await form.getByLabel('Username').fill('Guest');
-    await form.getByLabel('Password').fill('made-up-pass');
+    await form.getByLabel('Password', { exact: true }).fill('made-up-pass');
     await expectTapTargets(form);
     await expectNoHorizontalOverflow(page);
     await form.scrollIntoViewIfNeeded();

@@ -78,7 +78,7 @@ test.describe('Devices: Matter over Bluetooth', () => {
     await expect(wifi.getByTestId('matter-bluetooth')).toContainText('ready');
     await expect(wifi.getByText('No network is set yet.')).toBeVisible();
     await wifi.getByLabel('Network name').fill('ExampleNet');
-    await wifi.getByLabel('Password').fill('short');
+    await wifi.getByLabel('Password', { exact: true }).fill('short');
     await wifi.getByRole('button', { name: /Save Wi-Fi/ }).click();
     await expect(wifi.getByRole('alert')).toContainText('8 to 63');
     expect(run.hub.wifiPuts).toEqual([]);
@@ -86,12 +86,12 @@ test.describe('Devices: Matter over Bluetooth', () => {
     await expectNoHorizontalOverflow(page);
     await snap(page, info, 'matter-wifi-form');
 
-    await wifi.getByLabel('Password').fill('example-passphrase');
+    await wifi.getByLabel('Password', { exact: true }).fill('example-passphrase');
     await wifi.getByRole('button', { name: /Save Wi-Fi/ }).click();
     await expect(wifi.getByTestId('matter-wifi-current')).toContainText('ExampleNet');
     await expect(wifi.getByTestId('matter-wifi-current')).toContainText('Password saved');
     expect(run.hub.wifiPuts).toEqual([{ ssid: 'ExampleNet', password: 'example-passphrase' }]);
-    await expect(wifi.getByLabel('Password')).toHaveCount(0);
+    await expect(wifi.getByLabel('Password', { exact: true })).toHaveCount(0);
     await expectTapTargets(wifi);
     await expectNoHorizontalOverflow(page);
     clean(run);

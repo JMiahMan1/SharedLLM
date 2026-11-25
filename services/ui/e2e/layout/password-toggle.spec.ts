@@ -46,8 +46,11 @@ test('a device flow\'s password field has a show/hide eye that fits every screen
   await expect(eye).toBeVisible();
   await expect(eye).toHaveAttribute('aria-pressed', 'false');
 
-  const e = (await eye.boundingBox())!;
-  const i = (await input.boundingBox())!;
+  // Both boxes from the same frame: the dialog slides up as it opens, so two separate reads can land on
+  // different frames and put the eye below an input that has since moved.
+  const inputHandle = (await input.elementHandle())!;
+  const [e, i] = await eye.evaluate((eyeEl, inputEl) =>
+    [eyeEl.getBoundingClientRect().toJSON(), (inputEl as Element).getBoundingClientRect().toJSON()] as DOMRect[], inputHandle);
   expect(e.width, 'the eye is a 44px target').toBeGreaterThanOrEqual(MIN_TARGET - 0.5);
   expect(e.height, 'the eye is a 44px target').toBeGreaterThanOrEqual(MIN_TARGET - 0.5);
   expect(e.x, 'the eye sits inside its input').toBeGreaterThanOrEqual(i.x - 1);
