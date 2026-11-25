@@ -150,6 +150,12 @@ public class TokenBridgePlugin extends Plugin {
         UsageSyncWorker.cancel(context);
         CommsSyncWorker.cancel(context);
         PhotoScanWorker.cancel(context);
+        // Nearby & offline is per person: back to the defaults, engine stopped.
+        try {
+            NearbyParts.reset(context);
+        } catch (Exception e) {
+            Log.w(TAG, "Could not reset Nearby & offline", e);
+        }
         Intent stopLocation = new Intent(context, LocationTrackingService.class);
         stopLocation.setAction("stop");
         Intent stopSteps = new Intent(context, StepSyncService.class);

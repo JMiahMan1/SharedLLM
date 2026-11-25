@@ -38,6 +38,8 @@ import GeofenceAlertsCard from '../components/guardian/GeofenceAlertsCard';
 import VideoCallsCard from '../components/guardian/VideoCallsCard';
 import NotificationLockCard from '../components/guardian/NotificationLockCard';
 import DevicePolicyCard from '../components/guardian/DevicePolicyCard';
+import NearbyChildCard from '../components/guardian/NearbyChildCard';
+import OfflineGuardControls from '../components/guardian/OfflineGuardControls';
 import ConcernsCard from '../components/member/ConcernsCard';
 import DevicesSection from '../components/member/sections/DevicesSection';
 import ScreenTimeControls from '../components/health/ScreenTimeControls';
@@ -458,6 +460,8 @@ function GuardianChildren() {
       )}
 
       <ChildStatusBanner child={child} status={status} />
+      {/* The same lock, unlock and extra time over Bluetooth, for when there is no internet (Android app). */}
+      {status?.can_manage && <OfflineGuardControls username={child.username} name={name} />}
 
       <div ref={contentTop} className="scroll-mt-4" aria-hidden />
       {/* Sticks flush under the app's header (the shell scrolls <main>, padded 1 rem on phones and 2 on desktop),
@@ -566,6 +570,7 @@ function GuardianChildren() {
             <GeofenceAlertsCard username={child.username} name={name} />
             <VideoCallsCard username={child.username} name={name} />
             <NotificationLockCard username={child.username} name={name} />
+            {status?.can_manage && <NearbyChildCard username={child.username} name={name} />}
             {/* Guard state, MDM device policies, and tamper reports: the father and admins only (the
                 server refuses anyone else, the mother included). */}
             {status?.technical && <DevicePolicyCard username={child.username} name={name} />}

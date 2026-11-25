@@ -18,7 +18,8 @@ interface Props {
 }
 
 /**
- * Wander's offline family chat (Android app): messages, a place or a small
+ * The offline family chat (Android app; in Chat, on when Settings > Nearby &
+ * offline says so): messages, a place or a small
  * photo preview to the family's phones nearby over Bluetooth, with no Wi-Fi or
  * data. Sealed with the household's chat key, passed from phone to phone, and
  * posted to the family chat once, when the sender is online again.
@@ -52,7 +53,8 @@ export default function OfflineChatCard({ me, room, position, nameOf }: Props) {
     if (android && room) void FamilyMesh.setRoom({ room }).catch(() => undefined);
   }, [android, room]);
 
-  if (!android || !diag) return null;
+  // Turned on and off in Settings > Nearby & offline.
+  if (!android || !diag || !diag.enabled) return null;
 
   const send = async (kind: 'text' | 'pin' | 'thumb', fields: Record<string, unknown>) => {
     setBusy(true);
@@ -63,17 +65,6 @@ export default function OfflineChatCard({ me, room, position, nameOf }: Props) {
     } catch (e) {
       toast.error(errorText(e, 'Could not keep that message'));
       return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggle = async () => {
-    setBusy(true);
-    try {
-      setDiag(diag.enabled ? await FamilyMesh.disable() : await FamilyMesh.enable());
-    } catch (e) {
-      toast.error(errorText(e, 'Could not change the offline chat'));
     } finally {
       setBusy(false);
     }
@@ -97,30 +88,21 @@ export default function OfflineChatCard({ me, room, position, nameOf }: Props) {
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <MessageCircle size={15} className="text-sky-300" /> Offline family chat
         </h3>
-        <button
-          type="button"
-          onClick={() => void toggle()}
-          disabled={busy}
-          className="min-h-11 rounded-lg px-3 text-xs font-semibold text-purple-300 hover:bg-white/10 disabled:opacity-50"
-        >
-          {diag.enabled ? 'Turn off' : 'Turn on'}
-        </button>
       </div>
       <p className="text-xs text-slate-400">
         With no Wi-Fi or signal, messages reach family phones nearby over Bluetooth and go to the family chat once someone is online.
       </p>
 
-      {diag.enabled && !diag.connectPermission && (
-        <p className="text-xs text-amber-200" data-testid="offline-chat-permission">Allow Nearby devices for Jarvis to pass messages between phones.</p>
+      {!diag.connectPermission && (
+        <p className="text-xs text-amber-200" data-testid="offline-chat-permission">Allow Nearby devices (Settings, Nearby &amp; offline) to pass messages between phones.</p>
       )}
-      {diag.enabled && !diag.room && (
+      {!diag.room && (
         <p className="text-xs text-amber-200" data-testid="offline-chat-room">
           Choose the chat to open on launch in Chat first: offline messages go there when back online.
         </p>
       )}
 
-      {diag.enabled && (
-        <>
+      <>
           <ul className="max-h-72 space-y-2 overflow-y-auto" aria-label="Offline messages" data-testid="offline-chat-messages">
             {messages.length === 0 && <li className="text-xs text-slate-500">No offline messages.</li>}
             {messages.map((m) => (
@@ -176,8 +158,7 @@ export default function OfflineChatCard({ me, room, position, nameOf }: Props) {
             <input ref={fileRef} type="file" accept="image/*" className="hidden" data-testid="offline-chat-photo"
               onChange={(e) => { void onPhoto(e.target.files?.[0]); e.target.value = ''; }} />
           </form>
-        </>
-      )}
+      </>
     </div>
   );
 }

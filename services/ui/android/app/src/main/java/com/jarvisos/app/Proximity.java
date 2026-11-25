@@ -37,7 +37,8 @@ import java.util.UUID;
  * Family phones near each other over Bluetooth LE, with no network (see
  * {@link ProximityRules} for the scheme, the bands and the battery budget).
  *
- * Runs inside Wander's location service, so it has no notification of its
+ * Runs inside Wander's location service when that runs, else in NearbyService (one quiet
+ * notification), so it has no notification of its
  * own and lives exactly as long as location sharing does. Turned on per
  * device by the person (Wander's "Find family nearby"), which is also the
  * only moment the Nearby devices permission is asked for (Android 12+; before
@@ -229,7 +230,7 @@ final class Proximity {
         });
     }
 
-    /** Turned on or off from Wander, or the permission changed. */
+    /** Turned on or off in Settings > Nearby & offline, or the permission changed. */
     static void refresh(Context context) {
         start(context);
     }
@@ -237,7 +238,8 @@ final class Proximity {
     private static void apply() {
         Context c = app;
         if (c == null) return;
-        boolean want = enabled(c) && scanPermission(c) && VehicleBluetooth.bluetoothOn(c);
+        // Any part of Nearby & offline (or a child's parent link) needs the radio.
+        boolean want = NearbyParts.engine(c) && scanPermission(c) && VehicleBluetooth.bluetoothOn(c);
         if (!want) {
             if (running) {
                 running = false;
@@ -498,8 +500,10 @@ final class Proximity {
             if (h == null) continue;
             long now = System.currentTimeMillis();
             lastResultAt = now;
-            // The person's own other device is not a sighting: a trip is never "with" yourself.
-            if (!h.ownDevice) aggregator.add(h.member, result.getRssi(), h.txAt1m, now);
+            // Who was near is recorded only while Find family nearby is on, and never the person's own
+            // other device (a trip is never "with" yourself); the chat and offline mode hear phones only
+            // to sync with them.
+            if (!h.ownDevice && NearbyParts.sightings(app)) aggregator.add(h.member, result.getRssi(), h.txAt1m, now);
             synchronized (peers) {
                 peers.put(h.member, new Object[] {ProximityRules.band(result.getRssi(), h.txAt1m), result.getRssi(), now,
                         h.ownDevice});
@@ -620,7 +624,7 @@ final class Proximity {
     static Object[] health(Context context) {
         Context c = context.getApplicationContext();
         String adv = running ? advertising : advertiseCapability(c);
-        String[] h = ProximityRules.healthOutcome(enabled(c), scanPermission(c), VehicleBluetooth.bluetoothOn(c), adv);
+        String[] h = ProximityRules.healthOutcome(NearbyParts.engine(c), scanPermission(c), VehicleBluetooth.bluetoothOn(c), adv);
         return new Object[] {"ok".equals(h[0]), h[0], h[1]};
     }
 }

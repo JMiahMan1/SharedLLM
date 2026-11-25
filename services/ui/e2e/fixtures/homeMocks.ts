@@ -387,6 +387,8 @@ export interface HomeOptions {
 /** Answer every server call for the home pages as `role`. */
 export async function mockHome(page: Page, role: Role, options: HomeOptions = {}): Promise<HomeMocks> {
   const unmocked: string[] = [];
+  // Settings > Nearby & offline per person, changed by PUTs so a switch stays where it was put.
+  const nearbySettings: Record<string, Record<string, boolean>> = {};
   // The Rooms page's answer, changed by room writes so a room added, renamed or removed shows on the next read.
   const rooms = structuredClone(options.rooms ?? ROOMS);
   const posts: HomeMocks['posts'] = [];
@@ -844,6 +846,20 @@ export async function mockHome(page: Page, role: Role, options: HomeOptions = {}
     }
     if (p === '/api/garden/species') {
       return json({ category: null, usda_zone: null, count: 0, results: [], seed_present: true });
+    }
+    // Settings > Nearby & offline (and Guardian's card for a child): a child's are their parents' to set.
+    const nearbyUser = p.match(/^\/api\/users\/([^/]+)\/nearby-settings$/)?.[1];
+    if (nearbyUser) {
+      const self = nearbyUser === 'me' || nearbyUser === profile.username;
+      const minor = self ? profile.is_minor === true : !['parent', 'robin'].includes(nearbyUser);
+      const key = self ? String(profile.username) : nearbyUser;
+      const saved = (nearbySettings[key] ??= { nearby: false, chat: false, offline: false, car: true });
+      if (method === 'PUT') {
+        const body = (request.postDataJSON() ?? {}) as { settings?: Record<string, boolean> };
+        Object.assign(saved, body.settings ?? {});
+      }
+      return json({ username: key, settings: { ...saved }, managed_by_parent: minor,
+        can_change: self ? !minor : minor && role === 'admin', always_on: minor ? ['parent_link'] : [] });
     }
     // No deploy under way (the "Jarvis is updating" flag, served from a file: 404 when there is none).
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });

@@ -73,6 +73,7 @@ import ServiceAccessSetup from '../components/admin/ServiceAccessSetup';
 import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
 import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
+import BluetoothDiagnostics from '../components/wander/BluetoothDiagnostics';
 import HardwarePanel from '../components/settings/HardwarePanel';
 import HubNotConnected from '../components/admin/HubNotConnected';
 import LightGroupsPanel from '../components/devices/LightGroupsPanel';
@@ -1175,6 +1176,9 @@ const Admin = () => {
           <WeatherRemindersPanel users={users} />
 
           <WeatherIntegrationsPanel />
+
+          {/* This phone's Bluetooth (car detection, Nearby & offline), for checking a real device: the Android app only. */}
+          <BluetoothDiagnostics />
         </div>
       )}
 

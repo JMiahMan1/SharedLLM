@@ -49,14 +49,14 @@ describe('OfflineModePanel', () => {
   it('answers where someone is from the saved locations, with their age, and queues the rest', async () => {
     render(<OfflineModePanel />);
     await screen.findByTestId('offline-locations');
-    await userEvent.type(screen.getByLabelText('Question or command for Jarvis'), 'Where is Jordan?');
+    await userEvent.type(screen.getByLabelText('Question or command for the Voice Assistant'), 'Where is Jordan?');
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
     expect(screen.getByTestId('offline-local-answer')).toHaveTextContent(
       // the date is shown too once the saved time is not today, so the test passes on any day
       /Jordan was at School \(as of (\w+ \d+, )?3:41 PM/,
     );
     expect(plugin.queue).not.toHaveBeenCalled();
-    await userEvent.type(screen.getByLabelText('Question or command for Jarvis'), 'Turn off the porch light');
+    await userEvent.type(screen.getByLabelText('Question or command for the Voice Assistant'), 'Turn off the porch light');
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
     expect(plugin.queue).toHaveBeenCalledWith({ kind: 'command', body: { text: 'Turn off the porch light' } });
   });
@@ -69,15 +69,11 @@ describe('OfflineModePanel', () => {
     expect(plugin.queue).toHaveBeenCalledWith({ kind: 'shopping_check', body: { item: 'Milk' } });
   });
 
-  it('lets a parent lock a child nearby and says whether it reached the phone', async () => {
-    plugin.commands.mockResolvedValue({ commands: [
-      { id: 'c', child: 'sam', action: 'lock', arg: 0, issued_at: at / 1000, reported: false },
-    ] });
-    render(<OfflineModePanel kids={[{ username: 'sam', name: 'Sam' }]} />);
-    const kid = await screen.findByTestId('offline-child-sam');
-    expect(await within(kid).findByTestId('offline-delivery')).toHaveTextContent('Locked sent at 3:41 PM. Not reached yet');
-    await userEvent.click(within(kid).getByRole('button', { name: /Lock/ }));
-    expect(plugin.sendCommand).toHaveBeenCalledWith({ child: 'sam', action: 'lock', minutes: 0 });
+  it('has no parent controls: those are in Guardian now', async () => {
+    render(<OfflineModePanel />);
+    await screen.findByTestId('offline-shopping');
+    expect(screen.queryByText(/Parent controls/)).not.toBeInTheDocument();
+    expect(plugin.commands).not.toHaveBeenCalled();
   });
 
   it('words a confirmed or refused command', () => {

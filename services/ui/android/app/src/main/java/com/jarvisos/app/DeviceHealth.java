@@ -104,7 +104,7 @@ final class DeviceHealth {
             || granted(app, Manifest.permission.ACCESS_COARSE_LOCATION));
         // Nearby devices (Android 12+): which linked car a trip was in. Only once the
         // household has linked a car; before that a missing grant costs nothing.
-        if (!VehicleBluetooth.linked(app).isEmpty()) {
+        if (NearbyParts.car(app) && !VehicleBluetooth.linked(app).isEmpty()) {
             perms.put("bluetooth", VehicleBluetooth.permissionGranted(app));
         }
         body.put("permissions", perms);
@@ -114,9 +114,9 @@ final class DeviceHealth {
         workers.put("photo_scan", workerState(app, PhotoScanWorker.WORK_NAME));
         body.put("workers", workers);
         JSONObject collectors = CollectorStatus.toJson(app);
-        // Family nearby (Bluetooth LE), once turned on: running, or plainly why not
+        // Nearby & offline (Bluetooth LE), once a part is on: running, or plainly why not
         // (a tablet that cannot advertise says so).
-        if (Proximity.enabled(app)) {
+        if (NearbyParts.engine(app)) {
             perms.put("bluetooth_scan", Proximity.scanPermission(app));
             Object[] h = Proximity.health(app);
             collectors.put("proximity", new JSONObject().put("at", System.currentTimeMillis())

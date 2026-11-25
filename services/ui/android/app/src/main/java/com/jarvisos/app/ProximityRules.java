@@ -319,7 +319,7 @@ final class ProximityRules {
      * the family's phones but they do not see it.
      */
     static String[] healthOutcome(boolean enabled, boolean permission, boolean bluetoothOn, String advertising) {
-        if (!enabled) return new String[] {"off", "Family nearby is not turned on on this device"};
+        if (!enabled) return new String[] {"off", "Nothing in Settings, Nearby & offline is turned on on this device"};
         if (!permission) return new String[] {"no_permission", "Nearby devices is not allowed for Jarvis"};
         if (!bluetoothOn) return new String[] {"bluetooth_off", "Bluetooth is off"};
         if (ADV_UNSUPPORTED.equals(advertising)) {

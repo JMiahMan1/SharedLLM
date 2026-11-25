@@ -38,6 +38,8 @@ public class BootReceiver extends BroadcastReceiver {
             StepSyncService.resumeIfEnabled(app);
             PushService.start(app);
             BleBeacon.ensure(app);
+            // Nearby & offline: inside the location service when it resumed, else its own.
+            NearbyParts.ensure(app);
             // The collecting workers, in case a sign-out cancelled them and the
             // sign-in after it never put them back (BackgroundWork).
             BackgroundWork.ensureScheduled(app);

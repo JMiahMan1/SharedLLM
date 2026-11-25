@@ -12,6 +12,7 @@ const sample: Record<string, Record<string, Record<string, unknown>[]>> = {
     weather: [{ username: 'sam', data: '{"units":"metric","follow":true,"location":{"name":"Home farm","latitude":1,"longitude":2}}' }],
     calendar_settings: [{ username: 'sam', data: '{"default_integration":"nextcloud"}' }],
     notification_preferences: [{ username: 'sam', data: '{"media":false,"weather":true}' }],
+    nearby_settings: [{ username: 'sam', data: '{"car":true,"chat":false,"nearby":true,"offline":false}', updated_by: 'sam', updated_at: '2026-01-06T09:00:00+00:00' }],
     activity_sharing: [{ username: 'sam', data: '{"steps":true,"location":false}' }],
     profile_sharing: [{ username: 'sam', data: '{"areas":["garden","jarvis_use"]}' }],
     dashboard_widgets: [{ id: ID, username: 'sam', widget_key: 'weather_card', visibility: 'visible', order_index: 1, size: 'medium', is_pinned: true, pinned_devices: '[]', config: '{}', updated_at: 1000 }],

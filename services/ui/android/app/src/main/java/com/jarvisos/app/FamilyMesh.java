@@ -113,7 +113,8 @@ final class FamilyMesh {
     }
 
     static boolean active(Context c) {
-        return enabled(c) && Proximity.enabled(c) && connectPermission(c);
+        // The offline chat, offline mode or a child's parent link (Settings > Nearby & offline).
+        return NearbyParts.mesh(c) && connectPermission(c);
     }
 
     static MeshRules.Store store(Context c) {
@@ -606,7 +607,7 @@ final class FamilyMesh {
     static void trySyncWithServer(Context context, boolean now) {
         Context c = context.getApplicationContext();
         long t = System.currentTimeMillis();
-        if (!enabled(c) || (!now && t - lastServerTry < SERVER_SYNC_MS) || !online(c)) return;
+        if (!NearbyParts.mesh(c) || (!now && t - lastServerTry < SERVER_SYNC_MS) || !online(c)) return;
         lastServerTry = t;
         new Thread(() -> {
             try {

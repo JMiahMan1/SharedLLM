@@ -207,6 +207,11 @@ public class LocationTrackingService extends Service {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_STEPS, enabled).apply();
     }
 
+    /** Whether this service is running now (it hosts the Nearby & offline engine then). */
+    static boolean running() {
+        return instance != null;
+    }
+
     /** Remembered so tracking can resume after a reboot or an app update. */
     static void setEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, enabled).apply();
@@ -329,8 +334,9 @@ public class LocationTrackingService extends Service {
         BleBeacon.ensure(this);
         // Which linked car's Bluetooth is connected: start from what Android says now.
         VehicleBluetooth.seed(this);
-        // Family phones nearby over Bluetooth LE (only when turned on in Wander).
-        Proximity.start(this);
+        // Settings > Nearby & offline (Bluetooth LE): ride on this service while it
+        // runs, so the engine's own service (NearbyService) and its notice stop.
+        NearbyParts.ensure(this);
         if (hasPlayServices(this)) {
             fused = LocationServices.getFusedLocationProviderClient(this);
             activityClient = ActivityRecognition.getClient(this);
@@ -932,7 +938,9 @@ public class LocationTrackingService extends Service {
         body.put("device_name", deviceName());
         // The linked vehicle devices connected now (hardware addresses only), so
         // Wander knows which car this fix was taken in.
-        java.util.List<String> bt = VehicleBluetooth.linkedConnectedNow(this);
+        // Only while car detection is on (Settings > Nearby & offline).
+        java.util.List<String> bt = NearbyParts.car(this)
+                ? VehicleBluetooth.linkedConnectedNow(this) : java.util.Collections.emptyList();
         if (!bt.isEmpty()) body.put("bt_devices", new org.json.JSONArray(bt));
         body.put("user_id", userId != null ? userId : username);
         if (userId != null) {
@@ -1151,8 +1159,10 @@ public class LocationTrackingService extends Service {
         removeUpdates();
         stopCrashListening();
         unregisterStatusReceiver();
-        Proximity.stop();
         if (instance == this) instance = null;
+        // Nearby & offline keeps running without location sharing when a part
+        // is on (NearbyService takes it over); otherwise the radio stops.
+        NearbyParts.ensure(this);
         super.onDestroy();
     }
 

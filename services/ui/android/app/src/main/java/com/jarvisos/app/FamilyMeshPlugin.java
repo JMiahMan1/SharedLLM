@@ -48,6 +48,7 @@ public class FamilyMeshPlugin extends Plugin {
     @PluginMethod
     public void enable(PluginCall call) {
         FamilyMesh.setEnabled(getContext(), true);
+        NearbyParts.ensure(getContext());
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !FamilyMesh.connectPermission(getContext())) {
             requestPermissionForAlias("connect", call, "answered");
             return;
@@ -65,7 +66,8 @@ public class FamilyMeshPlugin extends Plugin {
     @PluginMethod
     public void disable(PluginCall call) {
         FamilyMesh.setEnabled(getContext(), false);
-        FamilyMesh.closeServer();
+        if (!NearbyParts.mesh(getContext())) FamilyMesh.closeServer();
+        NearbyParts.ensure(getContext());
         Proximity.mailChanged();
         call.resolve(diag());
     }

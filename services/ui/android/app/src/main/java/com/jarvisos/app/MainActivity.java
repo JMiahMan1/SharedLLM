@@ -55,6 +55,7 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(BleBeaconPlugin.class);
         registerPlugin(VehicleBluetoothPlugin.class);
         registerPlugin(ProximityPlugin.class);
+        registerPlugin(NearbyPlugin.class);
         registerPlugin(FamilyMeshPlugin.class);
         registerPlugin(OfflineModePlugin.class);
         registerPlugin(SaveFilePlugin.class);

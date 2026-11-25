@@ -897,6 +897,21 @@ class UserNotificationPreference(SQLModel, table=True):  # type: ignore
     data: str = Field(default="{}")
 
 
+class UserNearbySetting(SQLModel, table=True):  # type: ignore
+    """Which "Nearby & offline" parts a person's Android phones run (docs in
+    services/identity/nearby_settings.py).
+
+    ``data`` is a JSON object ``{part: bool}`` for the parts in
+    ``nearby_settings.PARTS``. A grown member sets their own; a minor's are set
+    by their parents (``updated_by`` says who).
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+    updated_by: str | None = None
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+
 class UnifiedPushRegistration(SQLModel, table=True):  # type: ignore
     """One UnifiedPush registration: one app on one of a person's devices.
 

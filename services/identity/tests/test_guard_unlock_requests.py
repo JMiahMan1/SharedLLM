@@ -220,7 +220,7 @@ def test_an_approval_lifts_a_pause_given_before_it(family):
 def test_an_approval_also_carries_the_offline_verifiers(family):
     assert family("mom").put("/api/guard/offline-code", json={"code": "48291735"}).status_code == 200
     # Without naming a device of theirs, the child's own rules read has none.
-    assert "offline" not in str(family("kid").get("/api/screen-time/kid/rules").json())
+    assert "offline_codes" not in family("kid").get("/api/screen-time/kid/rules").json()
     rid = _ask(family)["request"]["id"]
     assert "offline_codes" not in family("kid", PC_KEY).get(f"/api/guard/unlock-requests/{rid}").json()
 

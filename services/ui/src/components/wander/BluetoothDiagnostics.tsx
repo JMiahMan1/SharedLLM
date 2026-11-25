@@ -24,8 +24,8 @@ function when(ms: number | null | undefined): string {
 }
 
 /**
- * Wander's Bluetooth diagnostics, for a parent checking a real phone (the
- * Android app only): enough to verify each step of the manual checklist
+ * This phone's Bluetooth diagnostics (Admin > Users & Devices), for a parent
+ * checking a real phone (the Android app only): enough to verify each step of the manual checklist
  * without a cable. Vehicle detection: the Nearby devices permission,
  * Bluetooth, the linked car connected now (what the next fix carries).
  * Family nearby: the advertiser (on, or unsupported on a scan-only tablet),
