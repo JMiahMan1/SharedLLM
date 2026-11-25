@@ -8,6 +8,8 @@ vi.mock('@capacitor/core', async (orig) => {
 });
 const plugin = vi.hoisted(() => ({ getDiagnostics: vi.fn() }));
 vi.mock('../../plugins/vehicleBluetooth', () => ({ default: plugin }));
+const nearby = vi.hoisted(() => ({ getDiagnostics: vi.fn() }));
+vi.mock('../../plugins/proximity', () => ({ default: nearby }));
 
 import BluetoothDiagnostics from './BluetoothDiagnostics';
 
@@ -19,6 +21,19 @@ describe('BluetoothDiagnostics', () => {
       linkedConnected: [{ address: '00:1A:7D:DA:71:13', vehicle: 'Van' }], otherConnectedCount: 2, linkedCount: 3,
       linksRefreshedAt: null,
     });
+    nearby.getDiagnostics.mockResolvedValue({
+      enabled: true, scanPermission: true, advertisePermission: true, bluetoothOn: true, running: true,
+      advertising: 'unsupported', scanning: true, scanMode: 'low_power', driving: false, lastScanStartAt: 1,
+      lastHeardAt: 2, configured: true, keyId: 'abc123', members: 4, outbox: 0, uploadedAt: null,
+      peers: [{ person: 'gracie', band: 'same_room', rssi: -72, at: 2 }],
+    });
+  });
+
+  it('shows a scan-only tablet, its scan and the phones it heard', async () => {
+    render(<BluetoothDiagnostics />);
+    expect(await screen.findByTestId('diag-advertiser')).toHaveTextContent('Not supported on this device (scan only)');
+    expect(screen.getByTestId('diag-scan')).toHaveTextContent('Running (low power)');
+    expect(screen.getByTestId('diag-peers')).toHaveTextContent('gracie: In the same room (-72 dBm');
   });
 
   it('shows the linked car the next fix will carry, and the permission', async () => {

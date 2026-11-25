@@ -232,7 +232,7 @@ async def handle_chores(req: ChoreRequest) -> ExecutionResult:
 
     ctx = req.user_context
     names = _names(req)
-    by_voice = ctx.identified_by == "voice"
+    by_voice = ctx.identified_by in ("voice", "device")  # an assigned satellite proves no more than a voice
     try:
         if req.action == "list":
             parent = await is_parent(req)

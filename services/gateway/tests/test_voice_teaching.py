@@ -23,7 +23,7 @@ import services.identity.main as identity_main
 from services.common import voice_enroll, voice_speaker
 from services.execution import wyoming_stt
 from services.gateway.schemas import ResolvedCredentials
-from services.identity import voice
+from services.identity import hub_devices, voice
 from services.identity.models import DeviceAssignment, User, VoicePendingEnrolment, VoiceSignature
 
 OFFICE = "assist_satellite.office_test_assist_satellite"
@@ -124,10 +124,17 @@ def world_fixture(monkeypatch):
     with Session(engine) as session:
         session.add(User(id=1, username="robin", display_name="Robin"))
         session.add(User(id=2, username="casey", display_name="Casey"))
-        session.add(DeviceAssignment(device_id=OFFICE, user_id=1))
-        session.add(DeviceAssignment(device_id=SHARED, user_id=1))
-        session.add(DeviceAssignment(device_id=SHARED, user_id=2))
+        # Control grants say nothing about whose satellite it is (the default user holds most of them).
+        session.add(DeviceAssignment(device_id=NOBODYS, user_id=1))
         session.commit()
+        # The satellites HomeHub reports, assigned by an admin: one to Robin, one shared.
+        hub_devices.clear_cache()
+        hub_devices.sync(session, [
+            {"hardware_id": f"mac:02:00:00:00:00:0{n}", "kind": "voice_satellite", "name": entity,
+             "entity_ids": [entity]}
+            for n, entity in enumerate((OFFICE, SHARED))
+        ])
+        hub_devices.assign(session, "hub:mac:02:00:00:00:00:00", {"owner_username": "robin"})
     monkeypatch.setattr(identity_main, "engine", engine)
 
     def _session():
@@ -449,7 +456,7 @@ async def test_an_unassigned_satellite_says_how_to_assign_it(world, monkeypatch)
 @pytest.mark.asyncio
 async def test_a_shared_satellite_does_not_guess_whose_voice(world, monkeypatch):
     _, reply = await _turn(world, monkeypatch, "learn my voice", _take("robin", 0), satellite=SHARED)
-    assert "shared by 2 people" in reply
+    assert "shared" in reply and "Users and Devices" in reply
     assert gateway_main._teaching_state(SHARED) is None
 
 
@@ -469,13 +476,12 @@ async def test_ordinary_requests_are_untouched_without_a_session(world):
 
 def test_identity_reports_the_one_owner(world):
     client = world["identity"].client
-    assert client.get("/api/internal/satellite-owner", params={"entity_id": OFFICE}).json() == {
-        "username": "robin", "name": "Robin", "owners": 1,
-    }
-    assert client.get("/api/internal/satellite-owner", params={"entity_id": SHARED}).json()["owners"] == 2
-    assert client.get("/api/internal/satellite-owner", params={"entity_id": NOBODYS}).json() == {
-        "username": None, "name": None, "owners": 0,
-    }
+    office = client.get("/api/internal/satellite-owner", params={"entity_id": OFFICE}).json()
+    assert (office["username"], office["name"], office["owners"], office["known"]) == ("robin", "Robin", 1, True)
+    shared = client.get("/api/internal/satellite-owner", params={"entity_id": SHARED}).json()
+    assert (shared["owners"], shared["known"]) == (0, True)
+    nobodys = client.get("/api/internal/satellite-owner", params={"entity_id": NOBODYS}).json()
+    assert (nobodys["username"], nobodys["owners"], nobodys["known"]) == (None, 0, False)
 
 
 def test_a_satellite_take_needs_a_known_person_and_a_session(world):

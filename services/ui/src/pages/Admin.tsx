@@ -61,6 +61,8 @@ import Modal from '../components/ui/Modal';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel';
 import { RolesPanel } from '../components/admin/RolesPanel';
+import { HubDevicesPanel } from '../components/admin/HubDevicesPanel';
+import { VoiceRecognitionPanel } from '../components/admin/VoiceRecognitionPanel';
 import FamilyPanel from '../components/settings/FamilyPanel';
 import { HomeAlertsPanel } from '../components/admin/HomeAlertsPanel';
 import { WeatherRemindersPanel } from '../components/admin/WeatherRemindersPanel';
@@ -1077,6 +1079,10 @@ const Admin = () => {
             <p className="mt-1 mb-4 text-sm text-slate-400">Phones register themselves when their owner signs in; watches and assistants are linked to whoever adds them (a watch with the code on its screen).</p>
             <CompanionDevicesPanel scope="all" />
           </section>
+
+          <HubDevicesPanel users={users} />
+
+          <VoiceRecognitionPanel />
 
           {/* Device assignments, Entity Protection and Home alerts work on the home
               hub's devices: with no hub they say so instead of failing. */}

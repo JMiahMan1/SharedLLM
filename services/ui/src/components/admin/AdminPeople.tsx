@@ -155,6 +155,10 @@ const OUTCOME_WORDS: Record<string, string> = {
   ok: 'Answered', timeout: 'Timed out', error: 'Failed', tool_failure: 'A tool failed', offline: 'Fell back: AI offline', queued: 'Waited in line',
 };
 
+const IDENTITY_WORDS: Record<string, string> = {
+  identified: 'Recognised by voice', 'device-assigned': 'By their satellite', default: 'As the default user',
+};
+
 function VoiceCard({ section }: { section: Section<AdminVoice | null> }) {
   const { error, data } = sectionState(section);
   const total = data?.total ?? 0;
@@ -178,6 +182,15 @@ function VoiceCard({ section }: { section: Section<AdminVoice | null> }) {
               </li>
             ))}
           </ul>
+          {data.identity && Object.values(data.identity).some((n) => n > 0) && (
+            <ul className="flex flex-wrap gap-1.5 text-[11px]" data-testid="admin-voice-identity">
+              {Object.entries(data.identity).filter(([, n]) => n > 0).map(([k, n]) => (
+                <li key={k} className="rounded-full border border-violet-400/30 px-2 py-0.5 text-violet-200">
+                  {IDENTITY_WORDS[k] ?? k}: {n}
+                </li>
+              ))}
+            </ul>
+          )}
           {data.per_day.length > 1 && (
             <DailyBars testId="admin-voice-days" title="Requests that did not go through, by day"
               data={data.per_day.map((d) => ({ key: d.day, label: d.day.slice(5), value: d.failed }))}

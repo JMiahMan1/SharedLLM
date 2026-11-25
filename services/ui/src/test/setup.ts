@@ -520,6 +520,17 @@ export const server = setupServer(
       credentialShares[username] ?? { username, services: [], shared_owner: 'default' },
     );
   }),
+  // Admin > Users & Devices mounts the shared-device and voice recognition panels.
+  http.get('/api/admin/hub-devices', () => HttpResponse.json({ devices: [] })),
+  http.get('/api/admin/voice', () => HttpResponse.json({
+    calibration: {
+      status: 'default', threshold: 0.8, margin: 0.04, people: 0,
+      same_speaker: null, other_speaker: null, per_person: [],
+    },
+    min_samples: 3,
+    people: [],
+    candidates: [],
+  })),
   http.get('/api/auth/discover', () => {
     console.log('[MSW] /api/auth/discover called, discoveredUsers:', JSON.stringify(discoveredUsers));
     return HttpResponse.json({

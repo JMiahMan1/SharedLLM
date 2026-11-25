@@ -498,6 +498,18 @@ class Device(SQLModel, table=True):  # type: ignore
     #: When it was archived for not checking in (services/identity/device_archive.py); None while it is not.
     archived_at: str | None = Field(default=None, index=True)
 
+    # A shared device HomeHub knows (a voice satellite, a speaker, a TV;
+    # services/identity/hub_devices.py). ``hardware_id`` is its stable identity
+    # (the MAC, else HomeHub's device id), never its name; ``device_key`` is
+    # "hub:<hardware_id>". ``owner_username`` is the person it is assigned to,
+    # None for "shared"; ``room`` is the admin's choice, ``hub_area`` HomeHub's.
+    hardware_id: str | None = Field(default=None, index=True)
+    hub_device_id: str | None = None
+    #: JSON list of the hub entities that belong to it (assist_satellite.*, media_player.*).
+    entity_ids: str = Field(default="[]")
+    room: str | None = None
+    hub_area: str | None = None
+
 
 class DeviceEvent(SQLModel, table=True):  # type: ignore
     """Append-only usage timeline for trends ("how often is the app used").
@@ -817,6 +829,29 @@ class VoicePendingEnrolment(SQLModel, table=True):  # type: ignore
     samples: str = "[]"
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class VoiceCandidate(SQLModel, table=True):  # type: ignore
+    """A command heard at a satellite assigned to one person that sounded close
+    to their voice profile but not close enough to name them.
+
+    Offered to an admin, never used on its own: approving it adds it to the
+    person's profile as an auto sample (``voice.AUTO_SOURCE``, its own cap, so it
+    never displaces an enrolled one); rejecting it deletes it. Kept beside
+    ``VoiceSignature`` in the same database and the same form (a speaker
+    embedding, never audio). A new table, made by ``create_all``.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    model: str
+    embedding: str = "[]"
+    speech_seconds: float | None = None
+    score: float | None = None
+    #: The best other person's score when it was heard, for the admin's judgement.
+    runner_up: float | None = None
+    satellite: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class UserAvatarImage(SQLModel, table=True):  # type: ignore
