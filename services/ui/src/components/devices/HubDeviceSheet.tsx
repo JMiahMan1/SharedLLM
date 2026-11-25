@@ -125,29 +125,100 @@ function EntityAdminRow({ entity, labels, deviceName, onChanged }: {
   );
 }
 
-/** "May voice and chat control it", one switch per entity (Home Assistant's Assist exposure). */
-function VoiceRow({ entity, deviceName, onChanged }: { entity: HardwareEntity; deviceName: string; onChanged: () => void }) {
-  const [shown, setShown] = useState<boolean | null>(null);
-  const exposed = shown ?? Boolean(entity.voice?.exposed);
-  const save = useMutation({
-    mutationFn: (voice: boolean) => updateEntity(entity.entity_id, { voice }),
-    onMutate: (voice) => setShown(voice),
-    onSuccess: () => onChanged(),
-    onError: (err) => { setShown(null); toast.error(failureText(err)); },
-  });
+/** The switch's track and knob; `mixed` sits the knob in the middle. */
+function SwitchTrack({ on, mixed = false }: { on: boolean; mixed?: boolean }) {
+  const bg = mixed ? 'bg-sky-700' : on ? 'bg-sky-500' : 'bg-slate-600';
+  const knob = mixed ? 'translate-x-[0.875rem]' : on ? 'translate-x-6' : 'translate-x-1';
   return (
-    <button type="button" role="switch" aria-checked={exposed} aria-label={`Voice can control ${entity.name}`}
-      data-testid="voice-exposure" disabled={save.isPending} onClick={() => save.mutate(!exposed)}
+    <span className={`relative h-7 w-12 shrink-0 rounded-full motion-safe:transition-colors ${bg}`} aria-hidden>
+      <span className={`absolute top-1 h-5 w-5 rounded-full bg-white motion-safe:transition-transform ${knob}`} />
+    </span>
+  );
+}
+
+/** "May the Voice Assistant control it", one switch per entity (Home Assistant's Assist exposure). */
+function VoiceRow({ entity, deviceName, exposed, busy, onToggle }: {
+  entity: HardwareEntity; deviceName: string; exposed: boolean; busy: boolean; onToggle: (voice: boolean) => void;
+}) {
+  const name = plainName(entity.name, deviceName);
+  return (
+    <button type="button" role="switch" aria-checked={exposed} aria-label={`Voice Assistant can control the ${entity.name} entity`}
+      data-testid="voice-exposure" disabled={busy} onClick={() => onToggle(!exposed)}
       className="flex min-h-12 w-full items-center justify-between gap-3 py-1 text-left disabled:opacity-60">
       <span className="min-w-0">
-        <span className="block truncate text-sm text-slate-200">{plainName(entity.name, deviceName)}</span>
-        <span className="block text-xs text-slate-500">{exposed ? 'Voice and chat can control this' : 'Voice and chat cannot control this'}
+        <span className="block truncate text-sm text-slate-200">{name}</span>
+        <span className="block text-xs text-slate-500">{exposed ? 'Voice Assistant can control this' : 'Voice Assistant cannot control this'}
           {entity.voice && !entity.voice.chosen ? ' (default)' : ''}</span>
       </span>
-      <span className={`relative h-7 w-12 shrink-0 rounded-full motion-safe:transition-colors ${exposed ? 'bg-sky-500' : 'bg-slate-600'}`} aria-hidden>
-        <span className={`absolute top-1 h-5 w-5 rounded-full bg-white motion-safe:transition-transform ${exposed ? 'translate-x-6' : 'translate-x-1'}`} />
-      </span>
+      <SwitchTrack on={exposed} />
     </button>
+  );
+}
+
+/**
+ * One obvious device-level switch, "Voice Assistant can control this": on when every voiceable entity is exposed,
+ * off when none is, mixed otherwise. The per-entity switches sit behind Details. Both draw the change at once and
+ * roll back (with the hub's words) what the hub refused.
+ */
+function VoiceAssistantSection({ device, voiceable, onChanged }: {
+  device: HardwareDetail; voiceable: HardwareEntity[]; onChanged: () => void;
+}) {
+  const [shown, setShown] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const [details, setDetails] = useState(false);
+  const detailsId = useId();
+  const exposedOf = (e: HardwareEntity) => shown[e.entity_id] ?? Boolean(e.voice?.exposed);
+  const on = voiceable.filter(exposedOf).length;
+  const all = on === voiceable.length;
+  const mixed = on > 0 && !all;
+
+  const apply = async (ids: string[], voice: boolean) => {
+    setBusy(true);
+    setShown((prev) => ({ ...prev, ...Object.fromEntries(ids.map((id) => [id, voice])) }));
+    const results = await Promise.allSettled(ids.map((id) => updateEntity(id, { voice })));
+    const failed = ids.filter((_, i) => results[i].status === 'rejected');
+    if (failed.length) {
+      setShown((prev) => {
+        const next = { ...prev };
+        for (const id of failed) delete next[id];
+        return next;
+      });
+      const first = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      toast.error(failureText(first?.reason));
+    }
+    setBusy(false);
+    if (failed.length < ids.length) onChanged();
+  };
+
+  return (
+    <section aria-label="Voice Assistant" data-testid="voice-assistant" className={`${CARD} p-3`}>
+      <button type="button" role="switch" aria-checked={mixed ? 'mixed' : all}
+        aria-label={`Voice Assistant can control ${device.name}`} data-testid="voice-assistant-switch" disabled={busy}
+        onClick={() => void apply(voiceable.map((e) => e.entity_id), !all)}
+        className="flex min-h-12 w-full items-center justify-between gap-3 text-left disabled:opacity-60">
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-slate-100">Voice Assistant can control this</span>
+          <span className="block text-xs text-slate-400" data-testid="voice-assistant-state">
+            {mixed ? `Some parts: ${on} of ${voiceable.length}` : all ? 'On' : 'Off'}
+          </span>
+        </span>
+        <SwitchTrack on={all} mixed={mixed} />
+      </button>
+      <button type="button" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails((v) => !v)}
+        className="mt-1 inline-flex min-h-11 items-center gap-1 text-xs font-medium text-slate-400 hover:text-slate-200">
+        <ChevronRight size={14} aria-hidden className={`motion-safe:transition-transform ${details ? 'rotate-90' : ''}`} />
+        Details
+      </button>
+      <div id={detailsId} hidden={!details} data-testid="voice-access">
+        <p className="text-xs font-medium text-slate-400">Voice Assistant, part by part</p>
+        <div className="divide-y divide-white/5">
+          {voiceable.map((e) => (
+            <VoiceRow key={e.entity_id} entity={e} deviceName={device.name} exposed={exposedOf(e)} busy={busy}
+              onToggle={(voice) => void apply([e.entity_id], voice)} />
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -303,6 +374,8 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
         </div>
       )}
 
+      {voiceable.length > 0 && <VoiceAssistantSection device={device} voiceable={voiceable} onChanged={onChanged} />}
+
       {controls.length > 0 && (
         <Section title="Controls" testId="section-controls">
           <div className={`${CARD} divide-y divide-white/5 px-3 ${dim}`}>
@@ -355,14 +428,6 @@ function Body({ device, kind, areas, onChanged, onRemoved }: {
                 onChange={(next) => label.mutate(next)} />
             )}
           </div>
-          {voiceable.length > 0 && (
-            <div data-testid="voice-access">
-              <p className="text-xs font-medium text-slate-400">Voice and chat</p>
-              <div className="divide-y divide-white/5">
-                {voiceable.map((e) => <VoiceRow key={e.entity_id} entity={e} deviceName={device.name} onChanged={onChanged} />)}
-              </div>
-            </div>
-          )}
           {device.entry && <ConnectionSettings key={device.entry.entry_id} entry={device.entry} onChanged={onChanged} />}
           <div className="flex flex-wrap gap-2 border-t border-white/5 pt-3">
             <button type="button" className={BTN} disabled={disable.isPending} onClick={() => disable.mutate()}>

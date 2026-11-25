@@ -90,3 +90,91 @@ async def test_abs_unresolvable_room_clear_failure(_patch):
     result = await audiobookshelf.handle_audiobookshelf(req)
     assert result.status == "FAILURE"
     assert result.message == "I couldn't find a speaker in kitchen."
+
+
+# A device named by its own name, not a room: four players for one TV, none in a known area.
+OFFICE_STATES = [
+    {"entity_id": "media_player.office_tv", "state": "idle", "attributes": {"friendly_name": "Office TV Remote"}},
+    {"entity_id": "media_player.office_tv_chrome", "state": "idle", "attributes": {"friendly_name": "Office TV"}},
+    {"entity_id": "media_player.office_tv_3", "state": "paused", "attributes": {"friendly_name": "Office TV"}},
+    {"entity_id": "media_player.office_tv_cast", "state": "idle", "attributes": {"friendly_name": "Office TV"}},
+    {"entity_id": "light.office_tv_backlight", "state": "on", "attributes": {"friendly_name": "Office TV backlight"}},
+    {"entity_id": "media_player.den_speaker", "state": "playing", "attributes": {"friendly_name": "Den speaker"}},
+]
+
+
+def _states(monkeypatch, states):
+    async def get_states(ha_url, ha_token):
+        return [dict(s) for s in states]
+
+    monkeypatch.setattr(ha_client, "get_states", get_states)
+
+
+@pytest.mark.asyncio
+async def test_device_name_resolves_to_the_paused_player_of_that_name(_patch, monkeypatch):
+    _states(monkeypatch, OFFICE_STATES)
+    ctx = SimpleNamespace(ha_url=HUB, ha_token="tok")
+    assert await media.resolve_room_player(ctx, "Office TV", None) == "media_player.office_tv_3"
+    assert await media.resolve_room_player(ctx, "the office tv", None) == "media_player.office_tv_3"
+
+
+@pytest.mark.asyncio
+async def test_device_name_with_nothing_active_is_deterministic(_patch, monkeypatch):
+    _states(monkeypatch, [dict(s, state="idle") for s in OFFICE_STATES])
+    ctx = SimpleNamespace(ha_url=HUB, ha_token="tok")
+    first = await media.resolve_room_player(ctx, "Office TV", None)
+    assert first == "media_player.office_tv"
+    _states(monkeypatch, [dict(s, state="idle") for s in reversed(OFFICE_STATES)])
+    assert await media.resolve_room_player(ctx, "Office TV", None) == first
+
+
+@pytest.mark.asyncio
+async def test_device_name_prefers_players_voice_may_control(_patch, monkeypatch):
+    from services.execution import hardware_router, voice_exposure
+
+    _states(monkeypatch, OFFICE_STATES)
+    monkeypatch.setattr(hardware_router, "hub_pair", lambda ctx: (HUB, "tok"))
+    exposed = {"media_player.office_tv_cast"}
+
+    async def fetch_exposed(ha_url, ha_token, entity_id):
+        return entity_id in exposed
+
+    monkeypatch.setattr(voice_exposure, "fetch_exposed", fetch_exposed)
+    ctx = SimpleNamespace(ha_url=HUB, ha_token="tok", via="assistant")
+    # The paused player may not be controlled by voice: the exposed one wins.
+    assert await media.resolve_room_player(ctx, "Office TV", None) == "media_player.office_tv_cast"
+
+
+@pytest.mark.asyncio
+async def test_device_name_matching_no_player_invents_nothing(_patch, monkeypatch):
+    _states(monkeypatch, OFFICE_STATES)
+    ctx = SimpleNamespace(ha_url=HUB, ha_token="tok")
+    assert await media.resolve_room_player(ctx, "Office speaker", None) is None
+    assert await media.resolve_room_player(ctx, "backlight", None) is None  # a light is not a player
+
+
+@pytest.mark.asyncio
+async def test_transport_resume_on_a_named_device(_patch, monkeypatch):
+    _states(monkeypatch, OFFICE_STATES)
+    seen = []
+
+    async def via_ha(req):
+        seen.append((req.entity_id, req.command))
+        return media.ExecutionResult(status="SUCCESS", message="ok", service="media_transport")
+
+    monkeypatch.setattr(media, "_transport_via_ha", via_ha)
+    req = MediaTransportRequest(
+        user_context=UserContext(user="tester", ha_url=HUB, ha_token="tok"),
+        entity_id=None, device_name="Office TV", command="resume",
+    )
+    result = await media.handle_media_transport(req)
+    assert result.status == "SUCCESS"
+    assert seen == [("media_player.office_tv_3", "resume")]
+
+
+@pytest.mark.asyncio
+async def test_abs_resolves_a_named_device_too(_patch, monkeypatch):
+    _states(monkeypatch, OFFICE_STATES)
+    ctx = SimpleNamespace(ha_url=HUB, ha_token="tok")
+    # audiobookshelf resolves through the same resolver.
+    assert await media.resolve_room_player(ctx, "Office TV", "music") == "media_player.office_tv_3"

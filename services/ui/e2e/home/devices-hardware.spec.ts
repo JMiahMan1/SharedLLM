@@ -239,24 +239,43 @@ test.describe('Devices: the tile grid', () => {
     clean(run);
   });
 
-  test('settings: renaming, voice and chat access, and an entity renamed under Device info', async ({ page }, info) => {
+  test('settings: renaming, Voice Assistant access, and an entity renamed under Device info', async ({ page }, info) => {
     const run = await open(page);
     const { dialog, detail } = await openDevice(page, 'Reading lamp');
     await expect(detail.getByRole('slider', { name: /Reading lamp with .* brightness/ })).toBeVisible();
-    const voice = detail.getByRole('switch', { name: 'Voice can control Reading lamp', exact: true });
+    // One obvious device switch near the top: the lamp is exposed, its power reading is not, so it is mixed.
+    const device = detail.getByRole('switch', { name: /^Voice Assistant can control Reading lamp with a rather long name/ });
+    await expect(device).toBeVisible();
+    await expect(device).toHaveAttribute('aria-checked', 'mixed');
+    await expect(detail.getByTestId('voice-assistant')).toContainText('Voice Assistant can control this');
+    await expect(detail.getByTestId('voice-assistant')).not.toContainText('Jarvis');
+    expect((await device.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expectFits(page, dialog);
+    await snap(page, info, 'devices-detail-voice-assistant');
+    await device.click();
+    await expect.poll(() => run.mocks.posts.find(
+      (p) => decodeURIComponent(p.path) === '/api/homehub/entities/sensor.reading_lamp_power')?.body).toEqual({ voice: true });
+    await expect.poll(() => run.mocks.posts.find(
+      (p) => decodeURIComponent(p.path) === '/api/homehub/entities/light.reading_lamp')?.body).toEqual({ voice: true });
+    await expect(device).toHaveAttribute('aria-checked', 'true');
+
+    // The per-entity switches are behind Details, collapsed until asked for.
+    const voice = detail.getByRole('switch', { name: 'Voice Assistant can control the Reading lamp entity', exact: true });
+    await expect(voice).toBeHidden();
+    const disclosure = detail.getByTestId('voice-assistant').getByRole('button', { name: 'Details' });
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await disclosure.click();
+    await expect(voice).toBeVisible();
     await expect(voice).toHaveAttribute('aria-checked', 'true');
     await voice.scrollIntoViewIfNeeded();
     expect((await voice.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await voice.click();
-    await expect.poll(() => run.mocks.posts.find(
+    await expect.poll(() => [...run.mocks.posts].reverse().find(
       (p) => decodeURIComponent(p.path) === '/api/homehub/entities/light.reading_lamp')?.body).toEqual({ voice: false });
     await expect(voice).toHaveAttribute('aria-checked', 'false');
-    // A diagnostic reading voice does not control by default can be allowed too.
-    const power = detail.getByRole('switch', { name: 'Voice can control Reading lamp Power', exact: true });
-    await expect(power).toHaveAttribute('aria-checked', 'false');
-    await power.click();
-    await expect.poll(() => run.mocks.posts.find(
-      (p) => decodeURIComponent(p.path) === '/api/homehub/entities/sensor.reading_lamp_power')?.body).toEqual({ voice: true });
+    await expect(device).toHaveAttribute('aria-checked', 'mixed');
+    const power = detail.getByRole('switch', { name: 'Voice Assistant can control the Reading lamp Power entity', exact: true });
+    await expect(power).toHaveAttribute('aria-checked', 'true');
     await expectFits(page, dialog);
     await snap(page, info, 'devices-detail-settings');
 
