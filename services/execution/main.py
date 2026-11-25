@@ -3157,10 +3157,27 @@ async def execute_ha_service(req: HAServiceRequest):
         except Exception as e:
             log.warning(f"[ha_service] Pre-flight state check failed for {req.entity_id}: {e}")
 
+    # A YouTube (or other video site) page sent to a player as-is would be opened by the TV's own
+    # app, if it can open it at all. Jarvis streams video itself: yt-dlp fetches it and the player
+    # gets execution's stream (handlers/media.py play_video), on every kind of TV.
+    if req.domain == "media_player" and req.service == "play_media":
+        content = str((req.service_data or {}).get("media_content_id") or "")
+        from services.execution.handlers import video as video_handler
+
+        if video_handler.extract_video_url(content):
+            log.info(f"[ha_service] {req.entity_id}: a video page; streaming it through yt-dlp, not the TV's app")
+            return await media.handle_media_play(MediaPlayRequest(
+                user_context=_with_hub_login_ctx(ctx), entity_id=req.entity_id, query=content, media_type="video"))
+
     # Unified hardware routing: HA first, direct ESPHome fallback when HA is unreachable.
     return await hardware_router.execute_device_command(
         ctx, req.domain, req.service, req.entity_id, req.service_data, service_name="ha_service"
     )
+
+
+def _with_hub_login_ctx(ctx):
+    """``ctx`` with the hub login a media command is sent with (``_with_hub_login``)."""
+    return _with_hub_login(MediaPlayRequest(user_context=ctx)).user_context
 
 def _detect_media_platform(entity_id: str, attrs: dict) -> str:
     """Detect the TV/media platform type from entity attributes via unified detect_tv_type."""
