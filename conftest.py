@@ -496,6 +496,38 @@ def pytest_runtest_logreport(report):
     _PROGRESS["at"] = time.time()
 
 
+#: The status pytest settled on, so the hard exit below can report it.
+_EXIT = {"status": 0}
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remember the status: the summary, the JUnit report and coverage follow this hook."""
+    _EXIT["status"] = int(exitstatus)
+
+
+def pytest_unconfigure(config):
+    """Leave without joining threads a library forgot to stop.
+
+    A CI shard that passed every test was killed by its own timeout: the interpreter
+    was sitting in ``threading._shutdown`` waiting for non-daemon threads that never
+    end. The thread dump named them - two pyrate_limiter bucket loops
+    (``pyrate_limiter/abstracts/bucket.py`` ``_run``, which calls ``asyncio.run`` and
+    loops forever) and urllib3's idle connection watcher
+    (``urllib3/connectionpool.py`` ``idle_conn_watch_task``). Neither belongs to this
+    suite and neither can be stopped from here, so the process leaves. Everything
+    pytest writes is already written by this point (the summary and the reports are
+    sessionfinish work). Set SHAREDLLM_PYTEST_HARD_EXIT=0 when something needs the
+    interpreter to unwind normally.
+    """
+    if os.environ.get("SHAREDLLM_PYTEST_HARD_EXIT", "1") != "1":
+        return
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os._exit(_EXIT["status"])
+
+
 def pytest_configure(config):
     # --run-live is the same opt-in as SHAREDLLM_RUN_LIVE=1 from the shell. It
     # is exported here, before collection imports any test module, so a module
