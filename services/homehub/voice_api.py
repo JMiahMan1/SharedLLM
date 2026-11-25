@@ -8,6 +8,8 @@
 | ``PUT /hub/voice/hold-music`` | ``{"source"?: ..., "lines"?: [...]}``: change it; applies to the next wait, no restart |
 | ``POST /hub/voice/hold-music/clip?filename=`` | The audio file itself as the body (wav, mp3, ogg or m4a; at most 5 MB and 60 s): decoded once, kept in the hub's data (never served back) and made the hold music. 400 (cannot be decoded, too long), 413 (too big), 415 (not one of those types) |
 | ``DELETE /hub/voice/hold-music/clip`` | Remove the uploaded clip (the game-show clip plays instead if it was playing) |
+| ``GET /hub/voice/settings`` | ``whisper``: whisper mode as set (``enabled``, the reply ``volume`` 0 to 1, ``level_drop_db``) and its ``defaults`` |
+| ``PUT /hub/voice/settings`` | ``{"whisper": {...}}`` with any of those fields; kept in the hub's store and used from the next command, no restart. An invalid value is a 400 naming it |
 | ``GET /hub/voice/devices`` | ``devices``: every voice satellite and speaker/TV media player, one per physical device, keyed by a stable ``hardware_id`` (its MAC, else its first identifier, else the hub's device id), with its ``kind``, name, area and ``entity_ids``. Identity copies these so an admin can assign each to a person (services/identity/hub_devices.py) |
 
 No transcript or reply is ever returned. Admins only, like the rest of ``/hub/*``. See ``voice_pipeline.py``.
@@ -20,7 +22,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from services.homehub import hold_music, voice_pipeline
+from services.homehub import hold_music, voice_pipeline, voice_whisper
 from services.homehub.auth import Auth, bearer
 from services.homehub.core import HubError
 
@@ -110,6 +112,40 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         except HubError as exc:
             settings = {"problems": [str(exc)]}
         return {"settings": settings, "satellites": voice_pipeline.satellites(hub)}
+
+    def whisper_defaults() -> voice_whisper.WhisperSettings:
+        try:
+            return voice_whisper.WhisperSettings(volume=voice_pipeline.current_settings().whisper_volume)
+        except HubError:
+            return voice_whisper.WhisperSettings()
+
+    def settings_payload() -> dict[str, Any]:
+        defaults = whisper_defaults()
+        current = voice_whisper.load_settings(runtime.store, defaults.volume)
+        return {"whisper": current.public(), "defaults": {"whisper": defaults.public()},
+                "level_drop_range_db": list(voice_whisper.LEVEL_DROP_RANGE)}
+
+    @router.get("/hub/voice/settings")
+    async def voice_settings(request: Request) -> dict[str, Any]:
+        admin(request)
+        return settings_payload()
+
+    @router.put("/hub/voice/settings")
+    async def put_voice_settings(request: Request) -> dict[str, Any]:
+        admin(request)
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict) or not isinstance(body.get("whisper"), dict) or set(body) - {"whisper"}:
+            raise HTTPException(400, detail='The body must be {"whisper": {"enabled"?, "volume"?, "level_drop_db"?}}')
+        current = voice_whisper.load_settings(runtime.store, whisper_defaults().volume)
+        try:
+            updated = voice_whisper.validate_settings(body["whisper"], current)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from None
+        runtime.store.set_kv(voice_whisper.SETTINGS_KV, updated.public())
+        return settings_payload()
 
     @router.get("/hub/voice/devices")
     async def voice_devices(request: Request) -> dict[str, Any]:

@@ -339,6 +339,32 @@ export interface VoiceAdminOverview {
   min_samples: number;
   people: VoiceAdminPerson[];
   candidates: VoiceSampleCandidate[];
+  /** Voices nobody enrolled that keep talking to one satellite: counts only, never a recording. */
+  new_voices?: NewVoiceSeen[];
+}
+
+/** An anonymous voice heard at a satellite this week (identity new_voices): never a profile. */
+export interface NewVoiceSeen {
+  id: string;
+  device: string;
+  label: string | null;
+  visits_week: number;
+  last_heard: string;
+}
+
+/** HomeHub's whisper mode (GET/PUT /api/dashboard/voice/settings). */
+export interface WhisperModeSettings {
+  enabled: boolean;
+  /** The satellite's volume (0 to 1) for a whispered command's reply. */
+  volume: number;
+  /** How much quieter than the satellite's usual speech counts as whispering. */
+  level_drop_db: number;
+}
+
+export interface HubVoiceSettings {
+  whisper: WhisperModeSettings;
+  defaults: { whisper: WhisperModeSettings };
+  level_drop_range_db: [number, number];
 }
 
 /** A voice satellite, speaker or TV HomeHub knows, and whom it is assigned to. */

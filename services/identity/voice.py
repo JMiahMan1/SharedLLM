@@ -296,3 +296,33 @@ def candidate_gate(
     if ranked[0]["username"] != username:
         return False, "closer to someone else", ranked
     return True, "", ranked
+
+
+# --- New voices (``new_voice_gate``, ``services/identity/new_voices.py``) ----------
+#: A command is a possible new voice only when it is far from every profile: under
+#: this score (``CANDIDATE_MIN_SCORE``, so it can never also be a candidate sample of
+#: someone) and ``NEW_VOICE_GAP`` under the threshold, with enrolment's minimum of
+#: speech. The same rule runs in execution (``services/common/voice_speaker.looks_new``);
+#: identity checks it again against its own profiles before counting anything.
+NEW_VOICE_MAX_SCORE = CANDIDATE_MIN_SCORE
+NEW_VOICE_GAP = 0.15
+NEW_VOICE_MIN_SPEECH_SECONDS = 2.0
+
+
+def new_voice_gate(
+    embedding: list[float], profiles: list[dict], threshold: float, speech_seconds: float | None
+) -> tuple[bool, str, float | None]:
+    """Whether a command sounds like nobody enrolled: (ok, why not, best score).
+
+    Nobody enrolled is not a new voice either: there is nothing to tell it apart from.
+    """
+    if not isinstance(speech_seconds, (int, float)) or speech_seconds < NEW_VOICE_MIN_SPEECH_SECONDS:
+        return False, "too little speech", None
+    ranked = rank(embedding, profiles)
+    if not ranked:
+        return False, "nobody enrolled", None
+    best = ranked[0]["score"]
+    if best >= NEW_VOICE_MAX_SCORE or best > threshold - NEW_VOICE_GAP:
+        return False, "close to someone enrolled", best
+    return True, "", best
+

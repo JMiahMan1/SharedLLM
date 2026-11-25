@@ -69,8 +69,12 @@ async def test_whisper_on_ducks_and_restores(monkeypatch):
     monkeypatch.setattr(hub, "call_service", fake_call_service)
     b = Backends(stt=FakeSTT(text="hi"), reply="Hello there.")
     b.install(monkeypatch)
+    # The volume comes back once the reply has played: no waiting for the stand-in clip here.
+    monkeypatch.setattr(voice_pipeline, "PLAYBACK_FETCH_S", 0.0)
+    monkeypatch.setattr(voice_pipeline, "PLAYBACK_TAIL_S", 0.0)
     client = VoiceClient.instances[-1]
     await run_turn(drv, client, [_tone(0.5), _silence(1.0)])
+    await drv.voice._volume.settled()
     duck_calls = [c for c in calls if c[1] == "set_value"]
     assert any(c[2].get("value") == 0.22 for c in duck_calls)
     assert any(c[2].get("value") == 0.8 for c in duck_calls)
@@ -267,8 +271,12 @@ async def test_whisper_volume_percentage_scale(monkeypatch):
     monkeypatch.setattr(hub, "call_service", fake_call_service)
     b = Backends(stt=FakeSTT(text="hi"), reply="Hello there.")
     b.install(monkeypatch)
+    # The volume comes back once the reply has played: no waiting for the stand-in clip here.
+    monkeypatch.setattr(voice_pipeline, "PLAYBACK_FETCH_S", 0.0)
+    monkeypatch.setattr(voice_pipeline, "PLAYBACK_TAIL_S", 0.0)
     client = VoiceClient.instances[-1]
     await run_turn(drv, client, [_tone(0.5), _silence(1.0)])
+    await drv.voice._volume.settled()
     duck_calls = [c for c in calls if c[1] == "set_value"]
     assert any(c[2].get("value") == 22.0 for c in duck_calls)
     assert any(c[2].get("value") == 60.0 for c in duck_calls)

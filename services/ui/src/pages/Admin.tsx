@@ -63,6 +63,7 @@ import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel
 import { RolesPanel } from '../components/admin/RolesPanel';
 import { HubDevicesPanel } from '../components/admin/HubDevicesPanel';
 import { VoiceRecognitionPanel } from '../components/admin/VoiceRecognitionPanel';
+import { WhisperModePanel } from '../components/admin/WhisperModePanel';
 import FamilyPanel from '../components/settings/FamilyPanel';
 import { HomeAlertsPanel } from '../components/admin/HomeAlertsPanel';
 import { WeatherRemindersPanel } from '../components/admin/WeatherRemindersPanel';
@@ -1083,6 +1084,9 @@ const Admin = () => {
           <HubDevicesPanel users={users} />
 
           <VoiceRecognitionPanel />
+
+          {/* Whisper mode is HomeHub's own setting: shown only with HomeHub connected. */}
+          {homehub && <WhisperModePanel />}
 
           {/* Device assignments, Entity Protection and Home alerts work on the home
               hub's devices: with no hub they say so instead of failing. */}
