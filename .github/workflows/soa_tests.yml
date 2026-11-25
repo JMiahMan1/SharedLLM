@@ -96,7 +96,11 @@ jobs:
         # Excludes only the markers that genuinely need live infrastructure:
         # local_only (live Home Assistant / Nextcloud) and server_only (a
         # running service mesh).
-        pytest           -m "not local_only and not server_only"           --splits 6 --group ${{ matrix.shard }}           --junitxml=pytest-report-${{ matrix.shard }}.xml           --cov=services/           --cov-report=xml:coverage-${{ matrix.shard }}.xml
+        # A test that wedges costs one failure naming it after five minutes, not
+        # the whole shard's 30-minute budget: three runs of this job were
+        # cancelled at the job timeout with no test named, which says nothing
+        # about which test hung.
+        pytest           -m "not local_only and not server_only"           --splits 6 --group ${{ matrix.shard }}           --timeout=300 --timeout-method=thread           --junitxml=pytest-report-${{ matrix.shard }}.xml           --cov=services/           --cov-report=xml:coverage-${{ matrix.shard }}.xml
 
     - name: Upload Coverage Report
       uses: actions/upload-artifact@v4
