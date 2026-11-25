@@ -215,6 +215,21 @@ class GlobalSetting(SQLModel, table=True):  # type: ignore
     value: str
     description: str | None = None
 
+class PromptSeed(SQLModel, table=True):  # type: ignore
+    """What identity last seeded into a prompt setting from prompts/<key>.md.
+
+    ``seeded_hash`` is the hash of the repo text last written into the setting, so a
+    live value with that hash is untouched and can follow the repo. None means the
+    seed is unknown (a row from before this table) and the live value counts as
+    edited. ``announced_hash`` is the repo version already logged as newer than an
+    edited value, so that line is written once per repo version, not on every start.
+    """
+    __table_args__ = {"extend_existing": True}
+    key: str = Field(primary_key=True)
+    seeded_hash: str | None = None
+    announced_hash: str | None = None
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
 class DnsRecord(SQLModel, table=True):  # type: ignore
     """DNS record configuration. Supports A (multiple IPs) and CNAME (single target)."""
     __table_args__ = {"extend_existing": True}
