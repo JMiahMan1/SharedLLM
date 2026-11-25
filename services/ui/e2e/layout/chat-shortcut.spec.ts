@@ -1,4 +1,4 @@
-import { test, expect as baseExpect, type Page, type Route, type TestInfo } from '@playwright/test';
+import { test, expect as baseExpect, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
 import { mockHome, type HomeMocks } from '../fixtures/homeMocks';
 import { mockHealth } from '../fixtures/healthMocks';
 import { mockBible } from '../fixtures/bibleMocks';
@@ -114,6 +114,21 @@ function done(run: Run) {
   expect(run.mocks.unmocked, `unmocked: ${run.mocks.unmocked.join(', ')}`).toEqual([]);
 }
 
+/**
+ * The CI job that checks layout against the production build (UI_SERVE=preview). src/plugins/chatShortcut.ts
+ * reads the stand-in only in a dev build, so there a stand-in a page script plants must change nothing: the
+ * sheet offers no shortcut and the plugin is never called. The dev-server jobs run the app flow itself.
+ */
+const PRODUCTION_BUILD = process.env.UI_SERVE === 'preview';
+
+async function standInIgnored(page: Page, sheet: Locator, run: Run): Promise<void> {
+  await expect(sheet.getByTestId('chat-delete')).toBeVisible();
+  await expect(sheet.getByTestId('chat-home-shortcut')).toHaveCount(0);
+  await expect(sheet.getByTestId('chat-beloved-shortcut')).toHaveCount(0);
+  expect(await page.evaluate(() => [window.__pinned, window.__offered, window.__disabled])).toEqual([[], [], []]);
+  done(run);
+}
+
 test.describe('chat home-screen shortcuts on every form factor', () => {
   test.describe.configure({ timeout: 90_000 });
 
@@ -130,6 +145,7 @@ test.describe('chat home-screen shortcuts on every form factor', () => {
     await nativeStandIn(page);
     const run = await open(page);
     const sheet = await details(page, /Jordan/);
+    if (PRODUCTION_BUILD) return standInIgnored(page, sheet, run);
     const add = sheet.getByTestId('chat-home-shortcut');
     await expect(add).toBeVisible();
     await expect(add).toContainText('Add to home screen');
@@ -149,6 +165,7 @@ test.describe('chat home-screen shortcuts on every form factor', () => {
     await nativeStandIn(page);
     const run = await open(page, true);
     const sheet = await details(page, /Private chat/);
+    if (PRODUCTION_BUILD) return standInIgnored(page, sheet, run);
     const add = sheet.getByTestId('chat-home-shortcut');
     await expect(add).toContainText('lock screen');
     await check(page, info, run, 'private chat details in the app');
@@ -176,6 +193,7 @@ test.describe('chat home-screen shortcuts on every form factor', () => {
     await nativeStandIn(page);
     const run = await open(page, true, true);
     const sheet = await details(page, /Private chat/);
+    if (PRODUCTION_BUILD) return standInIgnored(page, sheet, run);
     const add = sheet.getByTestId('chat-beloved-shortcut');
     await expect(add).toContainText('Add Beloved to home screen');
     await check(page, info, run, 'private chat details with Beloved in the app');
@@ -200,7 +218,8 @@ test.describe('chat home-screen shortcuts on every form factor', () => {
     await page.goto('/family?chat=room-gone');
     await expect(page.getByText('This chat is no longer available')).toBeVisible();
     await expect(page.getByRole('list', { name: 'Conversations' })).toBeVisible();
-    await expect.poll(() => page.evaluate(() => window.__disabled)).toEqual([
+    // The app takes the gone chat's shortcuts off the home screen; a production build never calls the stand-in.
+    await expect.poll(() => page.evaluate(() => window.__disabled)).toEqual(PRODUCTION_BUILD ? [] : [
       { id: 'chat:room-gone', message: 'This chat is no longer available' },
       { id: 'chat:room-gone:beloved', message: 'This chat is no longer available' },
     ]);

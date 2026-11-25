@@ -8,6 +8,9 @@ import { deriveKey, makeVerifier, openRecord, randomBytes, sealRecord, toBase64,
 
 const expect = baseExpect.configure({ timeout: 20_000 });
 
+/** The CI job that checks layout against the production build (UI_SERVE=preview), where dev-only stand-ins are ignored. */
+const PRODUCTION_BUILD = process.env.UI_SERVE === 'preview';
+
 /**
  * Beloved, the couple's page inside the private chat, on every form factor:
  * the home page with both pictures and the days-married counter, adding a
@@ -499,7 +502,12 @@ test.describe('Beloved on every form factor', () => {
     await check(page, info, run, 'just us planned and reminder', beloved);
     type Synced = Array<{ id: number; at: number; title: string; body: string }>;
     const lastSync = async () => ((await page.evaluate(() => (window as unknown as { __synced: Synced[] }).__synced)).at(-1) ?? []);
-    await expect.poll(async () => (await lastSync()).filter((r) => r.body === 'A little reminder for the two of you.').length).toBe(2);
+    if (PRODUCTION_BUILD) {
+      // src/plugins/belovedReminders.ts reads the stand-in only in a dev build: the production build never calls it.
+      expect(await page.evaluate(() => (window as unknown as { __synced: Synced[] }).__synced)).toEqual([]);
+    } else {
+      await expect.poll(async () => (await lastSync()).filter((r) => r.body === 'A little reminder for the two of you.').length).toBe(2);
+    }
     // Every reminder the phone holds is generic: no tab, no idea, no note, no word that says what it is.
     const reminderText = JSON.stringify(await lastSync());
     for (const word of [/intima/i, /\bsex/i, /night/i, /together/i, /\bbed\b/i, /romanc/i, /candle/i, /hotel/i, /sitter/i, /fire/i, /just us/i]) {

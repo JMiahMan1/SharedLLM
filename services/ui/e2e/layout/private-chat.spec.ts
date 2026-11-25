@@ -356,6 +356,13 @@ function done(run: Run) {
   expect(run.mocks.unmocked, `unmocked: ${run.mocks.unmocked.join(', ')}`).toEqual([]);
 }
 
+/**
+ * The CI job that checks layout against the production build (UI_SERVE=preview). The Android plugins'
+ * stand-ins (src/plugins/deviceUnlock.ts, privatePreview.ts, keyboardMedia.ts) are read only in a dev build,
+ * so there a stand-in a page script plants must change nothing; the dev-server jobs run the app flows.
+ */
+const PRODUCTION_BUILD = process.env.UI_SERVE === 'preview';
+
 test.describe('private chat on every form factor', () => {
   test.describe.configure({ timeout: 120_000 });
 
@@ -555,6 +562,11 @@ test.describe('private chat on every form factor', () => {
 
     await page.getByTestId('private-security-open').click();
     const toggle = page.getByTestId('private-phone-lock-toggle');
+    if (PRODUCTION_BUILD) {
+      await expect(page.getByTestId('private-security')).toBeVisible();
+      await expect(toggle).toHaveCount(0);
+      return done(run);
+    }
     await expect(toggle).toHaveAttribute('aria-checked', 'false');
     await check(page, info, run, 'private security phone', page.getByRole('dialog').last());
     await toggle.click();
@@ -1073,6 +1085,11 @@ test.describe('private chat on every form factor', () => {
     await expect(page.getByTestId('private-feed')).toBeVisible();
     await page.getByTestId('private-security-open').click();
     const toggle = page.getByTestId('private-preview-toggle');
+    if (PRODUCTION_BUILD) {
+      await expect(page.getByTestId('private-security')).toBeVisible();
+      await expect(toggle).toHaveCount(0);
+      return done(run);
+    }
     await expect(toggle).toHaveAttribute('aria-checked', 'false');
     await toggle.click();
     const sheet = page.getByTestId('private-preview-setup');
@@ -1145,6 +1162,11 @@ test.describe('private chat on every form factor', () => {
 
     // What KeyboardMediaPlugin.java hands the page when the keyboard inserts a GIF into the focused box.
     await page.getByTestId('private-input').focus();
+    if (PRODUCTION_BUILD) {
+      expect(await page.evaluate(() => typeof window.__jarvisKeyboardMedia)).toBe('undefined');
+      expect(server.posted).toEqual([]);
+      return done(run);
+    }
     const taken = await page.evaluate((data) => window.__jarvisKeyboardMedia!({ mime: 'image/gif', name: 'keyboard.gif', data }), GIF.toString('base64'));
     expect(taken).toBe(true);
     await expect.poll(() => server.posted.length).toBe(1);
