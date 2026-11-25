@@ -424,6 +424,9 @@ test.describe('home pages', () => {
   });
 
   test('locked mode: the locked shell keeps its bottom bar on screen', async ({ page }, info) => {
+    // The hook that turns locked mode on is dev-only (src/lib/lockedMode.ts), so a
+    // run against the production build (UI_SERVE=preview) cannot reach this screen.
+    test.skip(process.env.UI_SERVE === 'preview', 'locked mode is turned on through a dev-only hook');
     const run = await open(page, 'member', '/rooms');
     await page.evaluate(() => (window as unknown as { __jarvisSetLockedMode: (s: unknown) => void })
       .__jarvisSetLockedMode({ active: true, sections: ['chat', 'calls', 'bible'] }));

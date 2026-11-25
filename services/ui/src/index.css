@@ -158,11 +158,19 @@ body {
 /* Component Classes */
 @layer components {
 
+  /* The prefixed backdrop-filter goes FIRST everywhere in this file. The
+     production build minifies with lightningcss, which drops an unprefixed
+     backdrop-filter that is followed by the -webkit- one, so Chrome and the
+     Android WebView got no blur, and the panel stopped being the containing
+     block for its absolute children (they anchored to the app shell). The
+     dev server does not minify, so only the built app was wrong.
+     src/test/cssBuild.test.ts holds this. */
+
   /* Panels: primary containers */
   .glass-panel {
     background: linear-gradient(135deg, var(--site-panel-a) 0%, var(--site-panel-b) 100%);
-    backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(20px) saturate(160%);
     border: 1px solid var(--color-border-mid);
     border-radius: var(--radius-panel);
     box-shadow: var(--shadow-panel);
@@ -173,8 +181,8 @@ body {
     /* The gradient is translucent; the solid base under it keeps a menu
        readable where backdrop blur does not apply (a blurred ancestor). */
     background: linear-gradient(135deg, var(--site-menu-a) 0%, var(--site-menu-b) 100%), var(--color-bg-base);
-    backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
     border: 1px solid var(--color-border-mid);
     border-radius: var(--radius-panel);
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
@@ -183,8 +191,8 @@ body {
   /* Cards: widget inner cards */
   .glass-card {
     background: var(--site-card-bg);
-    backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
     border: 1px solid var(--color-border-soft);
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-card);
@@ -206,8 +214,8 @@ body {
     border-radius: var(--site-radius-input);
     color: var(--site-text);
     padding: 0.5rem 1rem;
-    backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
     outline: none;
   }
@@ -280,8 +288,8 @@ body {
   /* Sidebar */
   .glass-sidebar {
     background: color-mix(in srgb, var(--color-bg-base) 80%, transparent);
-    backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
     border-right: 1px solid var(--color-border-soft);
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
   }
@@ -517,8 +525,8 @@ input[type="range"] {
 
 [data-theme-scheme="light"] .glass-panel,
 [data-theme-scheme="light"] .glass-card {
-  backdrop-filter: blur(14px) saturate(120%);
   -webkit-backdrop-filter: blur(14px) saturate(120%);
+  backdrop-filter: blur(14px) saturate(120%);
 }
 
 /* A near-opaque dark menu would be a black rectangle on a light page. */
