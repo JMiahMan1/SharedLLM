@@ -20,7 +20,7 @@ Implemented in this repository:
 
 - Auto-provisioned Noise PSK (`services/homehub/flows.py`), `EventInfo`/`UpdateInfo`, zero-touch `tag_scanned` Echo mesh vouching (`services/homehub/drivers/esphome.py`), Music Assistant Sendspin pairing (`GET/POST /hub/music_assistant/sendspin/{device_id}`).
 - Native Echo↔Echo Drop-In (`services/execution/handlers/drop_in.py`, FastPath `services/gateway/fast_drop_in.py`, `DropInRequest` tool, BLE room-presence target resolution with `may_see_room` privacy enforcement).
-- True Whisper Mode (`HOMEHUB_VOICE_WHISPER_VOLUME`, `HOMEHUB_VOICE_WHISPER_TTS_VOICE` in `services/homehub/voice_pipeline.py`).
+- Whisper Mode, heard from the command's own audio (see "Whisper mode" below; `services/homehub/voice_whisper.py`, `services/homehub/voice_pipeline.py`).
 - Ambient Light Ring services (`services/homehub/echo_ring.py`: `notify`, `progress`, `music_mode`, `flash_all`, `clear`).
 - Corroborated Sound Guard (`services/homehub/sound_guard.py`: cross-room emergency corroboration + nursery/pet monitor alerts).
 - Phone/Web ↔ Echo Dot encrypted UDP Opus Drop-In Bridge (`services/homehub/echo_dropin_bridge.py`, `HOMEHUB_ECHO_MESH_KEY`, `/hub/echo_dropin/status`, `/hub/echo_dropin/ws/{node}`).
@@ -32,11 +32,56 @@ No hardcoded defaults or secrets are documented here; set these in your environm
 
 | Variable | Purpose |
 |---|---|
-| `HOMEHUB_VOICE_WHISPER_VOLUME` | Whisper Mode ducking volume (0 to 1] for an Echo satellite's assistant volume. |
+| `HOMEHUB_VOICE_WHISPER_VOLUME` | The default whisper reply volume (0 to 1] until one is saved in HomeHub's voice settings. |
 | `HOMEHUB_VOICE_WHISPER_TTS_VOICE` | TTS voice used when a run is whispered. |
 | `HOMEHUB_ECHO_MESH_KEY` | Shared key for the encrypted UDP Opus Drop-In Bridge between phone/web and Echo Dot. |
 | `HA_URL` | Optional Home Assistant URL (only when HA is used as an optional integration). |
 | `HA_TOKEN` | Optional Home Assistant token (only when HA is used as an optional integration). |
+
+## Whisper mode
+
+Whisper "Hey Jarvis, what time is it" at night and the answer comes back quietly. It is a HomeHub
+voice setting, on by default: Admin > Users & Devices > Whisper mode, or `GET/PUT /hub/voice/settings`
+(`{"whisper": {"enabled", "volume", "level_drop_db"}}`, kept in the hub's store, used from the next
+command, no restart).
+
+**Detection** (`services/homehub/voice_whisper.py`), on the command's own 30 ms frames, numbers only:
+
+- *voicing*: the share of speech frames with a pitch (normalised autocorrelation of at least 0.45 at
+  70 to 400 Hz) and their median harmonics-to-noise ratio;
+- *level*: the median speech level against that satellite's usual level, an exponential average of
+  its clearly spoken commands (`voice_level:<entry>` in the hub's store; three commands before it is
+  trusted, whispers never move it);
+- *tilt* (2 to 5 kHz over 100 Hz to 1 kHz) is measured and logged but does not decide.
+
+A command is whispered when at most 40% of its frames are voiced, its HNR is at most -1.5 dB, and (once
+the usual level is known) it is at least `level_drop_db` (default 8 dB) under it. The satellite's own
+`last_request_whispered` sensor, where the firmware has one, also counts.
+
+Measured on 30 Kokoro clips (10 voices, 3 commands) at -26 dBFS, against the same clips whispered (each
+frame's LPC envelope driven by noise instead of the voice) 12, 18 and 24 dB quieter, with room noise:
+
+| | voiced frames | HNR | level vs usual | tilt | called a whisper |
+|---|---|---|---|---|---|
+| Spoken | 0.55 to 0.92 | 0.0 to 11.7 dB | 0 | -22 to -11 dB | 0 of 30 |
+| Spoken across the room (-14 dB) | 0.56 to 0.93 | 0.2 to 11.6 dB | -10 to -16 dB | -22 to -11 dB | 0 of 30 |
+| Whispered | 0.00 to 0.25 | -5.5 to -2.7 dB | -9 to -24 dB | -16 to -4 dB | 90 of 90 |
+| Whispered right at the microphone | 0.02 to 0.22 | -4.6 to -2.8 dB | about 0 | -16 to -4 dB | 0 of 30 (not quieter) |
+
+In a noisier room (noise at -50 dBFS) nothing spoken was taken for a whisper; the two quietest whisper
+levels sank into the noise and were answered at the normal volume (53 of 90 detected).
+
+**The reply**: before Jarvis starts on the answer the satellite's `assistant_volume` (else its media
+player volume) is set to the whisper volume, so the holding phrase and hold music are quiet too. It is
+put back once the reply should have finished playing on the node (the stream's length from when it
+started, or the clip's length plus a second), not when the hub has merely handed it over. A failed run
+puts it back after whatever it said, or at once; a run that is cut off puts it back at once; a
+whispered follow-up keeps it low; an ordinary command puts it back first. A satellite with no volume
+to set gets the audio itself scaled by the whisper volume. Every run logs one line:
+
+```
+voice satellite office run 3f2a: whisper=yes (level -44.1 dBFS, usual -29.8, voiced 0.08, hnr -3.9 dB, tilt -8.7 dB, by audio); new_voice=no; volume=lowered 0.8 to 0.22, restored to 0.8
+```
 
 ## Mobile / Off-LAN Mode (HTTPS/WSS Tunnel)
 

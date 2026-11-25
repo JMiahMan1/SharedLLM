@@ -59,6 +59,7 @@ from services.identity import (
     device_archive,
     hub_devices,
     music_assistant,
+    new_voices,
     onboarding,
     profile_sharing,
     push,
@@ -2312,6 +2313,78 @@ def offer_voice_candidate(request: Request, req: VoiceCandidateRequest, session:
     return {"status": "PENDING", "id": candidate.id, "score": mine["score"]}
 
 
+_new_voice_redis: Any = None
+
+
+def _voice_redis() -> Any:
+    """Redis for the anonymous new-voice clusters (``new_voices``); made once, short timeouts."""
+    global _new_voice_redis
+    if _new_voice_redis is None:
+        import redis as _redis_sync
+
+        from services.config import REDIS_URL as _REDIS_URL
+
+        _new_voice_redis = _redis_sync.from_url(
+            _REDIS_URL, decode_responses=True, socket_timeout=1.0, socket_connect_timeout=1.0
+        )
+    return _new_voice_redis
+
+
+class NewVoiceRequest(BaseModel):
+    #: The hub entity the command was spoken at.
+    satellite: str
+    embedding: list[float]
+    speech_seconds: float | None = None
+    model: str = voice.MODEL
+
+
+@app.post("/api/voice/new_voice", dependencies=[Depends(require_internal)])
+def heard_new_voice(req: NewVoiceRequest, session: Session = Depends(get_session)):
+    """A command whose voice sounds like nobody enrolled (internal; the gateway asks).
+
+    Identity checks that against its own profiles (``voice.new_voice_gate``), then
+    counts it in an anonymous cluster for the satellite (``new_voices``, Redis, a
+    week) and says whether to invite the speaker to be learned: at most once a day
+    per voice and satellite. ``learn_here`` is true when "learn my voice" would work
+    at this satellite (it is assigned to one person who has no voice profile yet).
+    Nothing here makes or changes a profile; no signature is returned or logged.
+    """
+    if req.model != voice.MODEL:
+        raise HTTPException(status_code=422, detail=f"Signatures are {voice.MODEL}, not {req.model}.")
+    try:
+        embedding = voice.valid_embedding(req.embedding)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    satellite = req.satellite.strip()[:120]
+    if not satellite:
+        raise HTTPException(status_code=422, detail="satellite is required")
+    profiles = _voice_profiles(session)
+    calibration = _voice_calibration(session, profiles)
+    ok, why, best = voice.new_voice_gate(embedding, profiles, calibration["threshold"], req.speech_seconds)
+    if not ok:
+        return {"status": "SKIPPED", "reason": why, "new_voice": False, "ask": False}
+    device = hub_devices.owner_for(session, satellite)
+    device_key = (device or {}).get("device_key") or satellite
+    label = (device or {}).get("label") or None
+    try:
+        seen = new_voices.heard(_voice_redis(), device_key, label, embedding)
+    except Exception as e:  # the clusters are a courtesy: no Redis means no invitation, never an error
+        log.warning(f"[voice] new voice at {device_key} not counted: {type(e).__name__}")
+        return {"status": "SKIPPED", "reason": "the new-voice store is unavailable", "new_voice": True, "ask": False}
+    owner = (device or {}).get("username")
+    enrolled = {p["username"] for p in profiles if len(p["samples"]) >= voice.MIN_SAMPLES}
+    log.info(f"[voice] new voice at {device_key}: heard {seen['visits_week']} time(s) this week"
+             f"{' (first time)' if seen['new'] else ''}; best score {best}; "
+             f"{'inviting it' if seen['ask'] else 'already invited today'}")
+    return {
+        "status": "NEW_VOICE",
+        "new_voice": True,
+        "ask": seen["ask"],
+        "visits_week": seen["visits_week"],
+        "learn_here": bool(owner and owner not in enrolled),
+    }
+
+
 def _require_voice_admin(caller: User, session: Session) -> None:
     if not roles.has_permission(session, caller, "devices.assign"):
         raise HTTPException(status_code=403, detail="Only an admin can manage voice recognition")
@@ -2355,12 +2428,36 @@ def admin_voice_overview(session: Session = Depends(get_session), caller: User =
             "consistency": voice.consistency(samples),
         })
     candidates = session.exec(select(VoiceCandidate).order_by(VoiceCandidate.created_at.desc())).all()  # type: ignore[attr-defined]
+    try:
+        unknown = new_voices.overview(_voice_redis())
+    except Exception as e:  # counts only, and optional
+        log.warning(f"[voice] new voices could not be read: {type(e).__name__}")
+        unknown = []
     return {
         "calibration": calibration,
         "min_samples": voice.MIN_SAMPLES,
         "people": sorted(people, key=lambda p: (not p["enrolled"], p["name"].lower())),
         "candidates": [_candidate_read(c, names) for c in candidates],
+        "new_voices": [
+            {**v, "last_heard": datetime.fromtimestamp(v["last_heard"], UTC).isoformat()} for v in unknown
+        ],
     }
+
+
+@app.delete("/api/admin/voice/new_voices/{cluster_id}")
+def admin_forget_new_voice(
+    cluster_id: str, device: str = Query(...), session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Admin: stop mentioning one unknown voice (its counts are dropped; it was never a profile)."""
+    _require_voice_admin(caller, session)
+    try:
+        gone = new_voices.forget(_voice_redis(), device, cluster_id)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"The new-voice store is unavailable: {type(e).__name__}") from None
+    if not gone:
+        raise HTTPException(status_code=404, detail="That voice is no longer listed")
+    return {"status": "SUCCESS"}
 
 
 @app.post("/api/admin/voice/calibrate")

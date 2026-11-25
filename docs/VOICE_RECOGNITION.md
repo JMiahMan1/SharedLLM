@@ -96,6 +96,31 @@ never push out a sample the person recorded. "Remove auto-added" takes them all
 out again. This is how a phone-enrolled profile learns how its owner sounds at
 the far-field satellite they use.
 
+## A voice nobody enrolled
+
+A command whose voice is far from every enrolled one is answered as usual (the satellite's person, else
+the default user) and, at most once a day per voice and satellite, Jarvis adds one line after the
+answer: "By the way, I don't think I know your voice yet. Want me to learn it? Just say 'learn my
+voice'." That wording is only used where "learn my voice" works (a satellite assigned to one person
+with no voice profile yet); anywhere else it suggests asking a grown-up to set it up in the Jarvis app.
+A whispered command, or one already asking to be learned, is never invited.
+
+"Far from every enrolled one" is stricter than "not recognised": the best score must be under 0.55
+(the candidate-sample floor, so nothing that could be a sample of someone is called new) and at least
+0.15 under the threshold, with 2 s of speech at least 12 dB over the room. Unsure between two enrolled
+people, or a little under the threshold, is never a new voice. On the live satellites (one profile,
+2026-11) unrecognised commands scored in two groups, 0.45 to 0.55 and 0.58 to 0.70; 0.55 sits between.
+
+Execution keeps such a command's signature for 20 seconds under its transcript
+(`voice_speaker.looks_new`); the gateway hands it to identity (`POST /api/voice/new_voice`), which
+checks it again and counts it in an anonymous cluster per satellite in Redis (`new_voices.py`: commands
+at least 0.70 alike join one voice, a week's visits, when it was last asked; expires a week after it
+was last heard). A cluster has no name, is never used to answer as anyone and never becomes a
+profile: only "learn my voice" (the teaching session above, held for the owner's approval) or an admin
+approving samples makes one. Admin > Users & Devices > Voice recognition lists a voice heard three
+times or more this week, as counts only ("A new voice talked to the Office Echo 5 times this week"),
+with Dismiss. Gateway logs `[VoiceNewVoice] satellite=... visits_week=N invited=yes|no`.
+
 ## Refreshing a voice by talking
 
 Once enrolled, a person can add to their own profile without opening Settings.

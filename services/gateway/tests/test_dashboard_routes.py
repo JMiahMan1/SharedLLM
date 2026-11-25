@@ -199,6 +199,18 @@ def test_settings_are_admin_only_and_use_the_internal_secret(client, admin_hub):
                       headers={"Authorization": "Bearer admin-key"}).status_code == 200
 
 
+def test_homehub_voice_settings_are_admin_only_and_reach_the_hub(client, admin_hub):
+    body = {"whisper": {"enabled": False}}
+    assert client.put("/api/dashboard/voice/settings", json=body,
+                      headers={"Authorization": "Bearer kid"}).status_code == 403
+    assert client.get("/api/dashboard/voice/settings", headers={"Authorization": "Bearer admin-key"}).status_code == 200
+    assert admin_hub[-1][:2] == ("GET", admin_hub[-1][1]) and admin_hub[-1][1].endswith("/hub/voice/settings")
+    assert client.put("/api/dashboard/voice/settings", json=body,
+                      headers={"Authorization": "Bearer admin-key"}).status_code == 200
+    method, url, sent, _headers = admin_hub[-1]
+    assert (method, url.endswith("/hub/voice/settings"), sent) == ("PUT", True, body)
+
+
 CONTROLS = {
     "entity_id": "camera.yard",
     "actions": [ent("siren.yard_siren", group="actions", role="siren"),
