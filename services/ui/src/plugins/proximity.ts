@@ -6,6 +6,8 @@ export interface ProximityPeer {
   band: 'next_to' | 'same_room' | 'nearby' | 'too_far';
   rssi: number;
   at: number;
+  /** Another device of this phone's own person (shown as "Your other device"; never a sighting). */
+  ownDevice?: boolean;
 }
 
 /**
