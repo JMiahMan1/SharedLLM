@@ -45,6 +45,11 @@ MAX_REL_MARGIN = 0.15
 #: Below this many cross-person scores, use the worst one as the floor: a
 #: quantile over a handful of numbers is not a distribution.
 CALIBRATION_TAIL = 8
+
+#: Bumped whenever scoring or the thresholds change. A calibration stored by an
+#: older version is stale even though the enrolled samples are unchanged, and
+#: serving it kept the pre-0.72 floor long after the code that made it changed.
+CALIBRATION_VERSION = 2
 #: A new take that scores below this against the person's own earlier takes
 #: is almost certainly someone else, or mostly noise. Real-microphone
 #: same-speaker scores sit well above it; different speakers mostly below.
@@ -197,9 +202,13 @@ def decide(
     the absolute score overlaps. It never accepts a weak score:
     ``RELATIVE_SCORE_SLACK`` keeps it just under the calibrated threshold.
 
-    When the two best are a child and an adult the bar is higher
-    (``CROSS_AGE_*``): a weak score says nothing rather than risk naming a
-    child as a parent or a parent as a child.
+    When the two best are a child and an adult the score must clear a slightly
+    higher bar (``CROSS_AGE_SCORE_LIFT``) and lead by at least ``MAX_MARGIN``
+    rather than the calibrated margin, and the cohort route asks for double the
+    relative lead. It used to ask for double the absolute margin too, which
+    rejected a parent whose own child was simply the runner-up: in a house with
+    one adult and two children, every request is cross-age and a 0.18 lead is
+    not an ambiguity.
     """
     floor = MATCH_THRESHOLD if threshold is None else threshold
     lead = MATCH_MARGIN if margin_needed is None else margin_needed
@@ -212,14 +221,16 @@ def decide(
     cross_age = bool(best and runner and best.get("group") and runner.get("group")
                      and best["group"] != runner["group"])
     need_score = floor + (CROSS_AGE_SCORE_LIFT if cross_age else 0.0)
-    need_margin = lead * (CROSS_AGE_MARGIN_FACTOR if cross_age else 1.0)
+    need_margin = max(lead, MAX_MARGIN) if cross_age else lead
     need_relative = rel_lead * (CROSS_AGE_MARGIN_FACTOR if cross_age else 1.0)
     relative_floor = round(max(0.0, need_score - RELATIVE_SCORE_SLACK), 3)
     certain = bool(best and best["score"] >= need_score and (margin is None or margin >= need_margin))
-    # A child and an adult are never separated by cohort standing alone: the
-    # relative route is off in that case so a weak score says nothing at all.
+    # Standing out from the household still has to beat the runner-up by the
+    # margin the calibrated data asked for, so a near-tie is never settled by
+    # the cohort alone - naming the wrong person is worse than saying nothing.
     stands_out = bool(best and relative is not None and relative >= need_relative
-                      and best["score"] >= relative_floor and not cross_age)
+                      and best["score"] >= relative_floor
+                      and (margin is None or margin >= need_margin))
     matched = certain or stands_out
     return {
         "matched": matched,
@@ -341,6 +352,7 @@ def calibrate(profiles: list[dict]) -> dict:
             "threshold": MATCH_THRESHOLD,
             "margin": MATCH_MARGIN,
             "relative": REL_MARGIN,
+            "version": CALIBRATION_VERSION,
         }
     clamp = lambda x: min(CALIBRATED_MAX_THRESHOLD, max(CALIBRATED_MIN_THRESHOLD, x))  # noqa: E731
     if not other:
@@ -351,6 +363,7 @@ def calibrate(profiles: list[dict]) -> dict:
             "threshold": round(threshold, 3),
             "margin": MATCH_MARGIN,
             "relative": REL_MARGIN,
+            "version": CALIBRATION_VERSION,
         }
     # The worst other-speaker score is one unlucky take, and holding every
     # recording above it rejects legitimate ones. A high quantile is the score a
@@ -365,7 +378,18 @@ def calibrate(profiles: list[dict]) -> dict:
         "threshold": round(threshold, 3),
         "margin": round(margin, 3),
         "relative": round(relative, 3),
+        "version": CALIBRATION_VERSION,
     }
+
+
+def calibration_is_current(stored: dict | None, key: str) -> bool:
+    """Whether a stored calibration can still be served: same enrolled samples
+    and the same scoring, so a change of algorithm re-calibrates on first use."""
+    return bool(
+        isinstance(stored, dict)
+        and stored.get("key") == key
+        and stored.get("version") == CALIBRATION_VERSION
+    )
 
 
 def candidate_gate(
