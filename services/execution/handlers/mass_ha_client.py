@@ -238,6 +238,7 @@ async def get_library(
                 "type": media_type_norm,
                 "duration": item.get("duration", 0),
                 "num_tracks": item.get("num_tracks", item.get("track_count", 0)),
+                "artists": [a.get("name", "") for a in item.get("artists") or [] if isinstance(a, dict)],
             })
 
     return items

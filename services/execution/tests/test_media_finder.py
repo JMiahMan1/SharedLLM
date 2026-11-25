@@ -15,6 +15,21 @@ from services.execution.media_finder import Candidate as C
 from services.execution.schemas import ExecutionResult, MediaPlayRequest, UserContext
 
 
+@pytest.fixture
+def real_library_lists():
+    """Asks for the library lists as the fake hub serves them (see ``_no_library_lists``)."""
+
+
+@pytest.fixture(autouse=True)
+def _no_library_lists(request):
+    """The library's own lists (``search_ma_library``) are faked per test; by default they list nothing."""
+    if "real_library_lists" in request.fixturenames:
+        yield
+        return
+    with patch.object(mf, "search_ma_library", new=AsyncMock(return_value=[])):
+        yield
+
+
 def ctx(**kw) -> UserContext:
     base = {"user": "tester", "ha_url": "http://hub.test:8123", "ha_token": "hub-token"}
     return UserContext(**{**base, **kw})
@@ -567,3 +582,115 @@ async def test_title_by_artist_also_searches_the_title_with_the_artist():
         media_vocabulary.reset()
     assert "Harbor The Example Havens" in queries
     assert result.message == "played library://track/7"
+
+
+# --------------------------------------------------------------------------- short titles and joint artists
+# 2026-11-24: "Play Up by the artist, Forest Frank and Connor Price" found nothing. The library has
+# the track "UP!" credited to the one artist entry "Forrest Frank & Connor Price"; Music Assistant's
+# search misses a title that short, but its library list of tracks named "up" has it. Names are fake.
+
+_TRACKS = [
+    {"name": "UP!", "uri": "library://track/41", "artists": [{"name": "Forrest Fenn & Connor Pike"}]},
+    {"name": "Up and Away", "uri": "library://track/42", "artists": [{"name": "Somebody Else"}]},
+    {"name": "Glow", "uri": "library://track/43", "artists": [{"name": "Example Singer feat. Other Voice"}]},
+    {"name": "Don't Stop!", "uri": "library://track/44", "artists": [{"name": "Example Band"}]},
+]
+_ALBUMS = [{"name": "Rise Up", "uri": "library://album/9", "artists": [{"name": "Another Band"}]}]
+
+
+def _fake_hub(searched: list[str] | None = None):
+    """Patches for a hub whose Music Assistant ``search`` finds only the album "Rise Up" for "up",
+    and whose ``get_library`` filters its tracks and albums by the words, as MA's library does."""
+    from services.execution import ha_client
+    from services.execution.handlers import mass_ha_client
+
+    async def call_service(_url, _token, _domain, _service, **kw):
+        name = kw["service_data"]["name"]
+        if searched is not None:
+            searched.append(name)
+        albums = [dict(a, media_type="album") for a in _ALBUMS if name.lower() == "up"]
+        return {"ok": True, "service_response": {"albums": albums}}
+
+    async def ma_service(_url, _token, service, data):
+        assert service == "get_library"
+        items = {"track": _TRACKS, "album": _ALBUMS}.get(data["media_type"], [])
+        words = (data.get("search") or "").lower()
+        return {"service_response": {"items": [i for i in items if words in i["name"].lower()]}}
+
+    return (patch.object(ha_client, "call_service", new=call_service),
+            patch.object(mass_ha_client, "_call_ha_ma_service", new=ma_service))
+
+
+async def _lookup(query: str) -> ExecutionResult:
+    from services.execution import media_vocabulary
+
+    media_vocabulary.reset()
+    hub_search, hub_library = _fake_hub()
+    src = mf.Source("music_assistant", "Music Assistant", True, route="hub", entry_id="ma1")
+    mf._ma_library_cache.clear()
+    with hub_search, hub_library, patch.object(mf, "discover_sources", new=AsyncMock(return_value=[src])):
+        return await mf.find_only(MediaPlayRequest(user_context=ctx(), query=query, search_everywhere=True))
+
+
+def test_titles_ignore_punctuation_and_case():
+    assert normalize("UP!") == normalize("up") == "up"
+    assert normalize("Don't") == normalize("dont")
+    assert title_score("dont stop", "Don't Stop!") == 1.0
+
+
+def test_joint_artist_credits_match_any_order_and_spelling():
+    from services.common.media_titles import artists_match, split_artists
+
+    assert split_artists("Forrest Fenn & Connor Pike") == ["Forrest Fenn", "Connor Pike"]
+    assert split_artists("Example Singer feat. Other Voice") == ["Example Singer", "Other Voice"]
+    assert split_artists("A x B, C (ft. D) with E") == ["A", "B", "C", "D", "E"]
+    credit = "Forrest Fenn & Connor Pike"
+    for asked in ("Forest Fenn and Connor Pike", "Connor Pike and Forrest Fenn", "Forest Fenn", "connor pike"):
+        assert artists_match(asked, credit), asked
+    assert not artists_match("Totally Other Group", credit)
+    assert not artists_match("Forrest Fenn and Totally Other", credit)
+
+
+@pytest.mark.parametrize(("said", "expected"), [
+    ("up by the artist, Forest Fenn and Connor Pike", ("up", "Forest Fenn and Connor Pike")),
+    ("Up by the band Example Band", ("Up", "Example Band")),
+    ("Up by artist Example Band", ("Up", "Example Band")),
+])
+def test_by_the_artist_fillers_are_not_part_of_the_name(said, expected):
+    assert mf.split_by(said) == expected
+
+
+def test_a_short_title_is_never_found_inside_a_longer_one():
+    found = [C("music_assistant", "album", "Rise Up", "library://album/9")]
+    assert mf.decide(mf.score_candidates(found, "Up")).action == "none"
+    assert mf.decide(mf.score_candidates([C("music_assistant", "track", "UP!", "t")], "Up")).action == "play"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("said", [
+    "up by the artist, Forest Fenn and Connor Pike",
+    "song called Up by Forrest Fenn and Connor Pike",
+    "Up by Forrest Fenn",
+    "Up Forrest Fenn",
+    "Forrest Fenn Up",
+    "Up",
+])
+async def test_a_short_title_is_found_in_the_artists_library_tracks(said, real_library_lists):
+    result = await _lookup(said)
+    assert result.detail["action"] == "play", result.message
+    assert result.detail["best"]["ident"] == "library://track/41"
+    assert result.detail["best"]["by"] == "Forrest Fenn & Connor Pike"
+
+
+@pytest.mark.asyncio
+async def test_a_featured_artist_and_an_apostrophe_are_found(real_library_lists):
+    glow = await _lookup("Glow by Other Voice")
+    assert glow.detail["best"]["ident"] == "library://track/43"
+    dont = await _lookup("Dont Stop by Example Band")
+    assert dont.detail["best"]["ident"] == "library://track/44"
+
+
+@pytest.mark.asyncio
+async def test_a_short_title_by_the_wrong_artist_is_not_played(real_library_lists):
+    result = await _lookup("Up by Totally Other Group")
+    assert result.detail["action"] == "none"
