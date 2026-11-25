@@ -14,6 +14,7 @@ import os
 from dotenv import dotenv_values, load_dotenv
 from sqlmodel import Session, select
 
+from services.identity import prompt_seed
 from services.identity.crypto import encrypt
 from services.identity.models import DEFAULT_GLOBAL_SETTINGS, DnsRecord, GlobalSetting, User
 
@@ -501,33 +502,11 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.add(existing)
             log.info("[seed] Backfilled empty skylight_pass_enc")
 
-    # Seed prompts from prompts/*.md files
-    # Reads markdown files from the prompts/ directory and seeds them into
-    # GlobalSettings. The filename (minus .md) becomes the setting key.
-    # Never overwrites existing values unless force=True.
+    # Prompts from prompts/*.md: the filename (minus .md) is the setting key. A
+    # prompt nobody edited follows the repo; an edited one is kept and reported
+    # (prompt_seed.py). force=True overwrites every one.
     try:
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        prompts_dir = os.path.join(repo_root, "prompts")
-        if os.path.isdir(prompts_dir):
-            for filename in os.listdir(prompts_dir):
-                if not filename.endswith(".md"):
-                    continue
-                if filename == "README.md":
-                    continue
-                global_key = filename[:-3]  # strip .md
-                filepath = os.path.join(prompts_dir, filename)
-                with open(filepath) as f:
-                    content = f.read().strip()
-                if not content:
-                    continue
-                existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
-                if not existing:
-                    session.add(GlobalSetting(key=global_key, value=content, description=f"Prompt seeded from {filename}."))
-                    log.info(f"[seed] Prompt seeded: {global_key} from {filename}")
-                elif force:
-                    existing.value = content
-                    session.add(existing)
-                    log.info(f"[seed] Force-updated prompt: {global_key}")
+        prompt_seed.sync_prompts(session, force=force)
     except Exception as e:
         log.warning(f"[seed] Failed to seed prompts from .md files: {e}")
 
