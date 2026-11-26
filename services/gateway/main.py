@@ -20230,6 +20230,10 @@ async def set_abs_podcast_auto_download(item_id: str, request: Request):
         body = {}
     enabled = bool(body.get("enabled")) if isinstance(body, dict) else False
     try:
+        # The caller's own Audiobookshelf, credentials and all: execution reads
+        # user_context directly here (unlike the reads, which pass a user id and
+        # let execution resolve), so naming only the user left it with no server
+        # to talk to and every switch came back "Audiobookshelf URL not configured".
         async with shared_http_client() as client:
             resp = await client.post(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
@@ -20237,7 +20241,7 @@ async def set_abs_podcast_auto_download(item_id: str, request: Request):
                     "action": "podcast_auto_download",
                     "item_id": item_id,
                     "auto_download": enabled,
-                    "user_context": {"user": creds.get("user") or ""},
+                    "user_context": creds,
                 },
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT),
