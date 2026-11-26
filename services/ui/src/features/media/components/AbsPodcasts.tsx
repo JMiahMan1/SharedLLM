@@ -56,6 +56,7 @@ function ShowRow({ show }: { show: AbsPodcastShow }) {
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => setPodcastAutoDownload(show.id, enabled),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: mediaKeys.absPodcasts() }),
+    onError: () => queryClient.invalidateQueries({ queryKey: mediaKeys.absPodcasts() }),
   });
 
   return (
@@ -69,6 +70,13 @@ function ShowRow({ show }: { show: AbsPodcastShow }) {
             <span className="mt-1 inline-flex items-center gap-1 text-xs text-[var(--site-warn-text,inherit)]">
               <CircleAlert size={12} aria-hidden />
               {problemFor(show)}
+            </span>
+          ) : null}
+          {toggle.isError ? (
+            // A switch that quietly does nothing is the worst answer: say so, and
+            // let the button stay available so it can be tried again.
+            <span role="alert" className="mt-1 block text-xs text-[var(--site-warn-text,inherit)]">
+              Audiobookshelf did not change this. Try again in a moment.
             </span>
           ) : null}
         </Link>

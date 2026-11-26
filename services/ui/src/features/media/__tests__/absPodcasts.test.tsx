@@ -124,6 +124,23 @@ describe('podcasts in Audiobookshelf', () => {
     await waitFor(() => expect(screen.getByTestId('abs-podcast-auto-quiet')).toHaveTextContent('Downloading'));
   });
 
+  it('says so when Audiobookshelf refuses the change, instead of nothing happening', async () => {
+    server.use(
+      http.get('/api/media/audiobookshelf/podcasts', () =>
+        HttpResponse.json(report([show({ id: 'quiet', title: 'Quiet Show' })]))),
+      http.post('/api/media/audiobookshelf/podcasts/:id/auto-download', () =>
+        HttpResponse.json({ status: 'FAILURE', message: 'Audiobookshelf URL not configured.' }, { status: 502 })),
+    );
+
+    renderAt('/media/library/podcasts');
+
+    await userEvent.click(await screen.findByTestId('abs-podcast-auto-quiet'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Audiobookshelf did not change this');
+    // And the switch is still there to try again, not stuck.
+    expect(screen.getByTestId('abs-podcast-auto-quiet')).toBeEnabled();
+  });
+
   it('says where the schedule lives when nothing has been checked', async () => {
     server.use(http.get('/api/media/audiobookshelf/podcasts', () => HttpResponse.json(report([
       show({ id: 'quiet', title: 'Quiet Show', stale_check: true, never_checked: true, last_checked_at: null, days_since_check: null }),

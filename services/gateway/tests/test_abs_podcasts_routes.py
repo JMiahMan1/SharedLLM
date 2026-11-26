@@ -128,6 +128,12 @@ def test_auto_download_is_sent_for_one_show(client):
     assert len(sent) == 1
     assert sent[0]["json"]["item_id"] == "show-1"
     assert sent[0]["json"]["auto_download"] is True
+    # Execution reads user_context itself on this path, so the caller's own
+    # server and key have to travel with the request: naming only the user
+    # reached no server at all and every switch came back "not configured".
+    context = sent[0]["json"]["user_context"]
+    assert context["audiobookshelf_url"] == "http://abs.local:13378"
+    assert context["audiobookshelf_api_key"] == "test-abs-key"
 
 
 def test_a_refused_auto_download_is_reported_not_swallowed(client):
