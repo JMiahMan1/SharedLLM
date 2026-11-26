@@ -48,3 +48,39 @@ async def test_a_refused_list_is_a_failure_that_says_why(monkeypatch):
 
     assert result.status == "FAILURE"
     assert "Forbidden" in result.message
+
+
+@pytest.mark.asyncio
+async def test_a_new_account_carries_every_permission_abs_requires(monkeypatch):
+    """ABS validates the permissions object whole: a missing key is a 400.
+
+    ``createEreader`` was the one left out, and the server read it as a refusal
+    of the whole account rather than as an incomplete permission list.
+    """
+    seen = {}
+
+    async def fake_post(abs_url, abs_api_key, path, json=None):
+        seen["path"] = path
+        seen["body"] = json
+        return {"user": {"id": "u1", "username": json["username"], "type": "user", "token": "new-token"}}
+
+    monkeypatch.setattr(abs_client, "abs_post", fake_post)
+    reply = await abs_client.create_user("http://abs.local:13378", "admin-key", "Kaleb", "temp-pass")
+
+    assert seen["path"] == "/api/users"
+    assert reply["user"]["token"] == "new-token"
+    permissions = seen["body"]["permissions"]
+    assert set(permissions) == {
+        "download",
+        "update",
+        "delete",
+        "upload",
+        "createEreader",
+        "accessAllLibraries",
+        "accessAllTags",
+        "accessExplicitContent",
+    }
+    assert permissions["createEreader"] is True
+    # A family server: no deleting library items, no explicit content.
+    assert permissions["delete"] is False
+    assert permissions["accessExplicitContent"] is False

@@ -20286,6 +20286,27 @@ async def list_abs_users(request: Request):
     return {"status": "SUCCESS", "users": users}
 
 
+async def _abs_create_user(creds: Any, username: str, password: str) -> dict:
+    """Create one Audiobookshelf account through execution and return it.
+
+    This is a POST with a request body, not one of the read actions: the account
+    name and its password travel in ``AudiobookshelfRequest``, and the GET helper
+    only carries a user id and query parameters.
+    """
+    resp = await _execution_post_as(
+        creds,
+        "/execute/audiobookshelf",
+        {"action": "user_create", "username": username, "password": password},
+    )
+    try:
+        body = json.loads(bytes(resp.body) or b"{}")
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    if body.get("status") != "SUCCESS":
+        raise _MediaUpstreamError(body.get("message") or "Audiobookshelf refused the account")
+    return (body.get("detail") or {}).get("user") or {}
+
+
 @app.post("/api/media/audiobookshelf/users")
 async def create_abs_user(request: Request):
     """Make one Audiobookshelf account with the household's administrator token."""
@@ -20300,14 +20321,9 @@ async def create_abs_user(request: Request):
     if not username or not password:
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "A username and a password are required."})
     try:
-        detail = await _media_exec_audiobookshelf(
-            creds,
-            {"action": "user_create", "username": username, "password": password},
-            timeout=ABS_PODCAST_TIMEOUT,
-        )
+        user = await _abs_create_user(creds, username, password)
     except _MediaUpstreamError as e:
         return JSONResponse(status_code=502, content={"status": "FAILURE", "message": str(e)})
-    user = detail.get("user") or {}
     return {"status": "SUCCESS", "user": {"id": user.get("id"), "username": user.get("username"), "type": user.get("type"), "has_token": user.get("has_token", False)}}
 
 
@@ -20367,16 +20383,11 @@ async def provision_abs_users(request: Request):
         if username in accounts:
             continue
         try:
-            made = await _media_exec_audiobookshelf(
-                creds,
-                {"action": "user_create", "username": username, "password": password},
-                timeout=ABS_PODCAST_TIMEOUT,
-            )
+            user = await _abs_create_user(creds, username, password)
         except _MediaUpstreamError as e:
             skipped.append({"username": username, "reason": f"could not create: {e}"})
             reported.add(username)
             continue
-        user = made.get("user") or {}
         if not user:
             skipped.append({"username": username, "reason": "Audiobookshelf did not return the new account"})
             reported.add(username)
