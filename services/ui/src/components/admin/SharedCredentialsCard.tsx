@@ -66,11 +66,16 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
     onSuccess: (result) => {
       const issued = result.issued.length;
       const skipped = result.skipped;
+      const ma = result.music_assistant;
+      const maLine = ma && (ma.created.length || ma.updated.length)
+        ? `; Music Assistant ready for ${ma.created.length + ma.updated.length}`
+        : '';
       setTokenResult(
         `${issued} given their own token` +
           (skipped.length
             ? `; ${skipped.length} not: ` + skipped.map((s) => `${s.username} (${s.reason})`).join(', ')
-            : ''),
+            : '') +
+          maLine,
       );
       queryClient.invalidateQueries({ queryKey: ['me'] });
       toast.success(skipped.length ? `Filed ${issued} token(s); ${skipped.length} left alone` : `Filed ${issued} token(s)`);
