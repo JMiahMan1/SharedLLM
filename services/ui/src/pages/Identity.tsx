@@ -36,6 +36,7 @@ import SystemValueHint from '../components/ui/SystemValueHint';
 import { credentialPayload, inUse, integrationFor, isSecretKey, missingFields, prefill, type Defaults } from '../lib/credentialForm';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
+import { MusicAssistantUsersCard } from '../components/admin/MusicAssistantUsersCard';
 import CompanionDevicesPanel from '../components/settings/CompanionDevicesPanel';
 import VoiceSignaturePanel from '../components/settings/VoiceSignaturePanel';
 import SpotifyLinkPanel from '../components/settings/SpotifyLinkPanel';
@@ -410,6 +411,11 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
               isSystemDefault={!!userData.is_system_default}
             />
           )}
+
+          {/* The logins people open Music Assistant itself with. Jarvis makes an
+              account for each member but signs in with a token, so their password
+              is a random one until an administrator sets it here. */}
+          {isAdmin && <MusicAssistantUsersCard />}
 
           {testResult && (
             <div className={`p-4 rounded-xl flex items-center gap-3 border ${
