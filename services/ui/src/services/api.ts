@@ -5830,6 +5830,11 @@ export const api = {
     created: string[];
     filed: Array<{ username: string; audiobookshelf_user: string }>;
     skipped: Array<{ username: string; reason: string }>;
+    music_assistant?: {
+      created: string[];
+      updated: string[];
+      skipped: Array<{ username: string; reason: string }>;
+    };
   }> {
     const resp = await apiClient.post(
       '/api/media/audiobookshelf/users/provision',

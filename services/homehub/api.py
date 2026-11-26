@@ -44,6 +44,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     light_groups_api,  # /hub/light_groups: light groups (the group helper)
     live_video,
     live_video_api,
+    ma_users,  # /hub/music-assistant/users/reconcile: a member's own MA account and ABS view
     matter_ble,  # new Wi-Fi Matter devices over Bluetooth, and their household Wi-Fi
     mobile_app_api,
     prune_api,  # dry-run and apply pruning of stale imported HA data
@@ -1158,6 +1159,18 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     async def firmware_upgrade(device_id: str, request: Request) -> dict[str, Any]:
         admin(request)
         return await firmware.upgrade_tasmota(hub, device_id)
+
+    @app.post("/hub/music-assistant/users/reconcile")
+    async def ma_users_reconcile(request: Request) -> dict[str, Any]:
+        """Give every member an MA account pointed at their own Audiobookshelf."""
+        admin(request)
+        body = await request.json()
+        return await ma_users.reconcile(
+            hub,
+            [str(name) for name in (body.get("members") or [])],
+            password=body.get("password") or None,
+            display_names=body.get("display_names") or None,
+        )
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

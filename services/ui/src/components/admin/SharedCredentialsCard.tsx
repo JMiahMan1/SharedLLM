@@ -89,11 +89,16 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
       const created = result.created.length;
       const filed = result.filed.length;
       const skipped = result.skipped;
+      const ma = result.music_assistant;
+      const maLine = ma && ma.created.length + ma.updated.length > 0
+        ? `; Music Assistant set up for ${ma.created.length + ma.updated.length}`
+        : '';
       setTokenResult(
         `${created} account(s) created, ${filed} given a token` +
           (skipped.length
             ? `; ${skipped.length} not: ` + skipped.map((s) => `${s.username} (${s.reason})`).join(', ')
-            : ''),
+            : '') +
+          maLine,
       );
       setAbsPassword('');
       queryClient.invalidateQueries({ queryKey: ['me'] });

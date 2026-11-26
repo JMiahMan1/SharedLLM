@@ -190,12 +190,82 @@ def test_provisioning_never_creates_or_overwrites_the_system_default_account(cli
         made.append(payload["username"])
         return _Answer({"status": "SUCCESS", "detail": {"user": {"id": "u2", "username": payload["username"], "type": "user", "has_token": True, "token": "t"}}})
 
+    async def hub(method, path, *, json=None, **_kwargs):
+        return 200, {"created": [], "updated": ["sam"], "skipped": []}
+
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(gateway_main, "_media_exec_audiobookshelf", exec_abs)
         mp.setattr(gateway_main, "_execution_post_as", post_as)
         mp.setattr(gateway_main, "shared_http_client", lambda: _Ctx(fake))
+        mp.setattr("services.gateway.automation_routes._hub", hub)
         resp = client.post("/api/media/audiobookshelf/users/provision", json={"password": "temp-pass"})
 
     assert resp.status_code == 200, resp.text
     assert made == []
     assert [entry["username"] for entry in resp.json()["filed"]] == ["sam"]
+
+
+def test_provisioning_leaves_music_assistant_to_homehub_and_reports_it(client):
+    """A person's Music Assistant account is homehub's job, and it is told who to set up.
+
+    Music Assistant sits behind homehub (its token is homehub's config entry), so the
+    gateway asks homehub instead of talking to MA itself.
+    """
+    fake = _Client()
+    seen = {}
+
+    async def exec_abs(creds, params, *, timeout=10.0):
+        return _accounts({"id": "u1", "username": "sam", "type": "user", "has_token": True, "token": "sam-token"})
+
+    async def post_as(creds, endpoint, payload):
+        return _Answer({
+            "status": "SUCCESS",
+            "detail": {"user": {"id": "id-newbie", "username": payload["username"], "type": "user", "has_token": True, "token": "newbie-token"}},
+        })
+
+    async def hub(method, path, *, json=None, **_kwargs):
+        seen.update({"method": method, "path": path, "body": json})
+        return 200, {"created": ["newbie"], "updated": ["sam"], "skipped": []}
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(gateway_main, "_media_exec_audiobookshelf", exec_abs)
+        mp.setattr(gateway_main, "_execution_post_as", post_as)
+        mp.setattr(gateway_main, "shared_http_client", lambda: _Ctx(fake))
+        mp.setattr("services.gateway.automation_routes._hub", hub)
+        resp = client.post("/api/media/audiobookshelf/users/provision", json={"password": "temp-pass"})
+
+    assert resp.status_code == 200, resp.text
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/hub/music-assistant/users/reconcile"
+    assert seen["body"]["members"] == ["newbie", "sam"]
+    assert seen["body"]["password"] == "temp-pass"
+    assert resp.json()["music_assistant"] == {"created": ["newbie"], "updated": ["sam"], "skipped": []}
+
+
+def test_a_homehub_that_is_down_does_not_lose_the_filed_tokens(client):
+    fake = _Client()
+
+    async def exec_abs(creds, params, *, timeout=10.0):
+        return _accounts({"id": "u1", "username": "sam", "type": "user", "has_token": True, "token": "sam-token"})
+
+    async def post_as(creds, endpoint, payload):
+        return _Answer({
+            "status": "SUCCESS",
+            "detail": {"user": {"id": "id-newbie", "username": payload["username"], "type": "user", "has_token": True, "token": "newbie-token"}},
+        })
+
+    async def broken_hub(*_args, **_kwargs):
+        raise RuntimeError("down")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(gateway_main, "_media_exec_audiobookshelf", exec_abs)
+        mp.setattr(gateway_main, "_execution_post_as", post_as)
+        mp.setattr(gateway_main, "shared_http_client", lambda: _Ctx(fake))
+        mp.setattr("services.gateway.automation_routes._hub", broken_hub)
+        resp = client.post("/api/media/audiobookshelf/users/provision", json={"password": "temp-pass"})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body["filed"]) == 2
+    assert [entry["username"] for entry in body["music_assistant"]["skipped"]] == ["newbie", "sam"]
+    assert "HomeHub unreachable" in body["music_assistant"]["skipped"][0]["reason"]
