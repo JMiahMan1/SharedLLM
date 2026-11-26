@@ -2798,6 +2798,27 @@ async def _resolve_identity_allow_anonymous(
     return await resolve_identity(payload)
 
 
+def _credential_presented(request, body) -> bool:
+    """Whether the caller offered a credential at all.
+
+    Deliberately forgiving about the shape of ``request``: the voice context is
+    read by tests and by loose callers with request-likes that have no ``url``,
+    and a credential check must never be able to fail a turn. Only presence is
+    reported - the route itself is what verifies the key.
+    """
+    try:
+        headers = getattr(request, "headers", None) or {}
+        if headers.get("Authorization") or headers.get("authorization"):
+            return True
+        url = getattr(request, "url", None)
+        query = getattr(url, "query", "") if url is not None else str(getattr(request, "query_params", "") or "")
+        if query and ("token=" in query or "api_key=" in query):
+            return True
+    except Exception:
+        pass
+    return bool((body or {}).get("api_key"))
+
+
 def _presented_api_key(request: Request) -> str:
     """The API key this request presents, from the header or the query string."""
     auth_header = request.headers.get("Authorization")
@@ -4305,8 +4326,17 @@ def _voice_context_from(request: Request, body: dict) -> dict | None:
     if not isinstance(raw, dict):
         return None
     if not secret_matches(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET):
-        log.warning("[ChatHandler] voice_context ignored: the caller is not internal")
-        return None
+        # A phone signed in as a person may describe its own turn (the room it is
+        # in, the device, the conversation) but never an Echo's satellite or
+        # media player, which would move a timer or a speaker into another room
+        # (services/common/voice_phone.py, docs/VOICE_PHONE.md).
+        from services.common import voice_phone
+
+        context = voice_phone.app_context(
+            raw, authenticated=_credential_presented(request, body))
+        if context is None:
+            log.warning("[ChatHandler] voice_context ignored: the caller is not internal")
+        return context
 
     def text(key: str, limit: int = 120) -> str | None:
         value = raw.get(key)
@@ -19894,6 +19924,121 @@ async def get_windows_installer_file(name: str, request: Request):
 #: engine was still doing; the engine is the one place that should decide when
 #: it has taken too long.
 _STT_TIMEOUT = aiohttp.ClientTimeout(total=3600.0, connect=30.0)
+
+
+#: One spoken turn from a phone: 15 seconds of 16 kHz mono is 480 KB, so this is
+#: already generous, and it keeps a stray upload from filling the queue.
+_VOICE_MAX_AUDIO_BYTES = 8 * 1024 * 1024
+
+
+def _transcript_from(payload: object) -> str:
+    """Whisper's text out of whichever envelope the execution service used."""
+    for container in (payload, (payload or {}).get("detail") if isinstance(payload, dict) else None,
+                      (payload or {}).get("data") if isinstance(payload, dict) else None):
+        if isinstance(container, dict):
+            value = container.get("text")
+            if isinstance(value, str):
+                return value.strip()
+    return ""
+
+
+@app.post("/api/voice/listen")
+async def post_voice_listen(request: Request):
+    """A phone's recording as text (docs/VOICE_PHONE.md).
+
+    The capture runs in a native service, not in a browser, so the audio arrives
+    as base64 in one JSON body instead of multipart: one round trip, one answer.
+    Whisper reads the container it is handed, so the recording's own mime type
+    travels with it rather than being re-encoded here.
+    """
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in first")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    audio_b64 = str(body.get("audio_b64") or "").strip()
+    if not audio_b64:
+        raise HTTPException(status_code=400, detail="A recording is required.")
+    import base64 as _b64
+
+    try:
+        audio = _b64.b64decode(audio_b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="That is not a recording.") from None
+    if not audio:
+        raise HTTPException(status_code=400, detail="That recording is empty.")
+    if len(audio) > _VOICE_MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="That recording is too long.")
+
+    upload = aiohttp.FormData()
+    upload.add_field("model", str(body.get("model") or "base")[:32])
+    upload.add_field("language", str(body.get("language") or "en")[:16])
+    upload.add_field("file", audio, filename="turn.wav",
+                     content_type=str(body.get("mime") or "audio/wav")[:64])
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/stt/transcribe",
+            data=upload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=_STT_TIMEOUT,
+        )
+        if resp.status != 200:
+            log.warning(f"[voice] transcribe: execution answered HTTP {resp.status}")
+            raise HTTPException(status_code=502, detail="Hearing you is unavailable right now.")
+        payload = await resp.json(content_type=None)
+    text = _transcript_from(payload)
+    log.info(f"[voice] {len(audio)} bytes transcribed to {len(text)} characters for {user}")
+    return {"text": text}
+
+
+@app.post("/api/voice/speak")
+async def post_voice_speak(request: Request):
+    """Speak one line to a signed-in person's phone (docs/VOICE_PHONE.md).
+
+    The Echo gets its audio from the hub, which a phone cannot reach, and
+    ``/api/tts/sample`` only ever says one fixed sentence. This turns an
+    arbitrary line into audio in the person's own voice, which is what lets the
+    phone acknowledge a slow answer, say why something failed, or offer a
+    correction - spoken, rather than the silence Siri is criticised for.
+    """
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in first")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="A line to speak is required.")
+    # A short line is the whole point; anything longer is a reply that should
+    # have come through the chat stream instead.
+    text = text[:1200]
+    voice = str(body.get("voice") or "").strip()[:120] or await _voice_for_reply(user, None)
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/tts",
+            json={"user_context": {"user": user}, "text": text, "voice": voice},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=60.0),
+        )
+        if resp.status != 200:
+            log.warning(f"[voice] speak: execution answered HTTP {resp.status}")
+            raise HTTPException(status_code=502, detail="Speaking is unavailable right now.")
+        payload = await resp.json(content_type=None)
+    detail = (payload or {}).get("detail") if isinstance(payload, dict) else None
+    audio = (detail or {}).get("audio_base64") if isinstance(detail, dict) else None
+    if not audio:
+        raise HTTPException(status_code=502, detail="Speaking is unavailable right now.")
+    return {"audio_b64": audio, "mime": "audio/wav", "voice": voice, "text": text}
 
 
 @app.post("/api/stt/transcribe")

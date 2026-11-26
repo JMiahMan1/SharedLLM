@@ -44,6 +44,7 @@
 - `docs/WINDOWS_LOCK_SCREEN.md`: a Jarvis lock screen for Windows 10/11 family PCs - bedtime/school windows, time budgets, ask-to-time, managed-device signage, CI-built exe
 - `docs/MDM.md`: device management (MDM): tablet/phone awareness, ESPHome companion control/OTA, OS update policies, always-on VPN lockdown, Wi-Fi & CA cert provisioning, and audit log
 - `docs/VOICE_RECOGNITION.md`: recognising who speaks at a Home Assistant voice satellite
+- `docs/VOICE_PHONE.md`: the phone as a voice assistant (listen, think, answer out loud), the turn rules, and what is not built yet
 - `docs/THEMES.md`: Jarvis-wide theme packs, import/export, widget tinting
 
 ## Media

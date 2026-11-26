@@ -614,6 +614,13 @@
             android:name=".SelfUpdate$Receiver"
             android:exported="false" />
 
+        <!-- The phone's own voice assistant: hears one turn, answers in the person's voice. -->
+        <service
+            android:name=".AssistService"
+            android:exported="false"
+            android:foregroundServiceType="microphone"
+            android:stopWithTask="false" />
+
         <service
             android:name=".DropInService"
             android:exported="false"
