@@ -82,6 +82,9 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
   // you press something else first.
   useEffect(() => {
     if (!isOpen) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- opening the sheet is a
+       deliberate reset of the turn before it; it runs once per open, never in a
+       render loop. */
     setError('');
     setHeard('');
     setSaid('');
@@ -91,6 +94,7 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, user
       return;
     }
     setState('listening');
+    /* eslint-enable react-hooks/set-state-in-effect */
     JarvisAssist.start({ wake: false }).catch((e: Error) => {
       setState('idle');
       setTyping(true);
