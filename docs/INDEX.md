@@ -1,3 +1,4 @@
+- [VOICE_PHONE.md](VOICE_PHONE.md) - the phone as a voice assistant: the three verbs, the turn rules, and what is not built yet.
 # SharedLLM Documentation Index
 
 ## Start here

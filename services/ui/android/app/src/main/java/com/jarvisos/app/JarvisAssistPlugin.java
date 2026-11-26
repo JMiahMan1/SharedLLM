@@ -1,0 +1,106 @@
+package com.jarvisos.app;
+
+import android.Manifest;
+
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+
+/**
+ * The WebView's way into {@link AssistService}: start a turn, listen for the
+ * wake word, stop, and hear every state and word as it happens.
+ *
+ * The microphone permission is asked here rather than left to the WebView: a
+ * foreground service that cannot record is a notification with nothing behind
+ * it, and a refused permission must say so instead of showing "Listening".
+ */
+@CapacitorPlugin(
+        name = "JarvisAssist",
+        permissions = {@Permission(alias = "microphone", strings = {Manifest.permission.RECORD_AUDIO})}
+)
+public class JarvisAssistPlugin extends Plugin {
+
+    private final AssistService.Listener listener = (type, text, level) -> {
+        JSObject event = new JSObject();
+        event.put("type", type);
+        event.put("text", text);
+        event.put("level", level);
+        notifyListeners("assist", event);
+    };
+
+    @Override
+    protected void load() {
+        AssistService.addListener(listener);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        AssistService.removeListener(listener);
+        super.handleOnDestroy();
+    }
+
+    @PluginMethod
+    public void start(PluginCall call) {
+        if (getPermissionState("microphone") != com.getcapacitor.PermissionState.GRANTED) {
+            requestPermissionForAlias("microphone", call, "microphoneThenStart");
+            return;
+        }
+        begin(call);
+    }
+
+    @PermissionCallback
+    private void microphoneThenStart(PluginCall call) {
+        if (getPermissionState("microphone") != com.getcapacitor.PermissionState.GRANTED) {
+            call.reject("Jarvis needs the microphone to hear you.");
+            return;
+        }
+        begin(call);
+    }
+
+    private void begin(PluginCall call) {
+        if (!new VoiceClient(getContext()).signedIn()) {
+            call.reject("Sign in to Jarvis on this phone first.");
+            return;
+        }
+        AssistService.turn(getContext(), call.getBoolean("wake", false));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stop(PluginCall call) {
+        AssistService.stop(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopSpeaking(PluginCall call) {
+        AssistService.stopSpeaking(getContext());
+        call.resolve();
+    }
+
+    /** What the UI shows on open, so a running turn is never mistaken for silence. */
+    @PluginMethod
+    public void status(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("running", AssistService.running());
+        out.put("state", AssistService.state());
+        call.resolve(out);
+    }
+
+    /** The phrase the phone wakes to ("hey jarvis" unless the household set another). */
+    @PluginMethod
+    public void setWakePhrase(PluginCall call) {
+        String phrase = call.getString("phrase", "hey jarvis");
+        if (phrase == null || phrase.trim().isEmpty()) {
+            call.reject("A wake phrase cannot be empty.");
+            return;
+        }
+        getContext().getSharedPreferences(VoiceClient.PREFS, android.content.Context.MODE_PRIVATE)
+                .edit().putString("jarvis_wake_phrase", phrase.trim().toLowerCase()).apply();
+        call.resolve();
+    }
+}

@@ -1,152 +1,255 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
-import { X, Mic, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Loader2, Mic, Send, Square, X } from 'lucide-react';
 import { api } from '../../services/api';
-import toast from 'react-hot-toast';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Capacitor } from '@capacitor/core';
+import { JarvisAssist, type AssistState } from '../../plugins/jarvisAssist';
 
-interface VoiceAssistantOverlayProps {
+interface Props {
   isOpen: boolean;
   onClose: () => void;
   onCommand?: (transcript: string) => void;
   userId?: string;
 }
 
-const VoiceAssistantOverlay = ({ isOpen, onClose, onCommand, userId }: VoiceAssistantOverlayProps) => {
-  const { state, activate, deactivate, startAudioVisualization, stopAudioVisualization } = useVoiceAssistant();
-  const [bars, setBars] = useState<number[]>(Array.from({ length: 32 }, () => 0));
-  const [processing, setProcessing] = useState(false);
+/** The gateway answers a typed turn in one of these shapes; read the words out of whichever arrived. */
+function replyText(data: unknown): string {
+  if (!data || typeof data !== 'object') return typeof data === 'string' ? data : '';
+  const d = data as Record<string, unknown>;
+  const message = d.message as { content?: unknown } | undefined;
+  if (typeof d.reply === 'string') return d.reply;
+  if (typeof message?.content === 'string') return message.content;
+  const nested = d.data as Record<string, unknown> | undefined;
+  if (typeof nested?.reply === 'string') return nested.reply;
+  if (typeof d.response === 'string') return d.response;
+  return '';
+}
+
+const STATE_WORDS: Record<AssistState, string> = {
+  idle: 'Tap to talk',
+  listening: 'Listening',
+  thinking: 'Thinking',
+  speaking: 'Speaking',
+};
+
+/**
+ * The phone's voice assistant: press once, talk, hear the answer spoken back
+ * while it is still being written. Unlike a cloud assistant it never goes
+ * quiet — if the answer is slow it says so, and if it cannot hear you it says
+ * that too. Typing is always available, because a phone in a quiet room is not
+ * always a phone you can talk to.
+ */
+export default function VoiceAssistantOverlay({ isOpen, onClose, onCommand, userId }: Props) {
+  const [state, setState] = useState<AssistState>('idle');
+  const [level, setLevel] = useState(0);
+  const [heard, setHeard] = useState('');
+  const [said, setSaid] = useState('');
+  const [error, setError] = useState('');
+  const [typing, setTyping] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const native = Capacitor.isNativePlatform();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Every event the service emits lands here: state, mic level, what it heard,
+  // each sentence as it is spoken, and the whole reply at the end.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    let handle: { remove: () => Promise<void> } | undefined;
+    void JarvisAssist.addListener('assist', (event) => {
+      if (cancelled) return;
+      if (event.type === 'state' && event.text) setState(event.text as AssistState);
+      else if (event.type === 'level') setLevel(Math.max(0, Math.min(100, event.level || 0)));
+      else if (event.type === 'transcript') {
+        setHeard(event.text || '');
+        setSaid('');
+        if (event.text) onCommand?.(event.text);
+      } else if (event.type === 'sentence') setSaid((prev) => (prev ? `${prev} ${event.text || ''}` : event.text || ''));
+      else if (event.type === 'reply') setSaid(event.text || '');
+      else if (event.type === 'error') setError(event.text || 'That did not work.');
+    }).then((h) => {
+      if (cancelled) void h.remove();
+      else handle = h;
+    });
+    return () => {
+      cancelled = true;
+      void handle?.remove();
+    };
+  }, [isOpen, onCommand]);
+
+  // Opening the sheet starts a turn: pressing the microphone should never make
+  // you press something else first.
+  useEffect(() => {
+    if (!isOpen) return;
+    setError('');
+    setHeard('');
+    setSaid('');
+    setLevel(0);
+    if (!native) {
+      setTyping(true);
+      return;
+    }
+    setState('listening');
+    JarvisAssist.start({ wake: false }).catch((e: Error) => {
+      setState('idle');
+      setTyping(true);
+      setError(e?.message || 'Jarvis needs the microphone to hear you.');
+    });
+    return () => {
+      void JarvisAssist.stop();
+    };
+  }, [isOpen, native]);
 
   useEffect(() => {
-    if (state.isActive) {
-      startAudioVisualization((frequencies) => {
-        setBars(frequencies);
-      });
-    } else {
-      stopAudioVisualization();
-    }
-  }, [state.isActive, startAudioVisualization, stopAudioVisualization]);
+    if (typing) inputRef.current?.focus();
+  }, [typing]);
 
-  useEffect(() => {
-    if (isOpen) {
-      activate();
-    } else {
-      deactivate();
-    }
-  }, [isOpen, activate, deactivate]);
+  const close = useCallback(() => {
+    void JarvisAssist.stop();
+    onClose();
+  }, [onClose]);
 
-  const handleSubmit = useCallback(async () => {
-    if (!state.transcript.trim()) return;
-    setProcessing(true);
+  const send = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setError('');
+    setHeard(text);
+    setSaid('');
+    setDraft('');
+    onCommand?.(text);
     try {
-      if (userId) {
-        const result = await api.executeVoiceCommand(state.transcript, userId);
-        if (result.status === 'SUCCESS') {
-          toast.success(`Voice command executed: "${state.transcript}"`);
-        } else {
-          toast.error(result.message || 'Command failed');
-        }
-      }
-      onCommand?.(state.transcript);
-    } catch {
-      toast.error('Failed to execute voice command');
+      const data = await api.chat(text, undefined, userId, false);
+      const answer = replyText(data);
+      setSaid(answer || 'I did not get an answer to that.');
+      if (answer && native) void JarvisAssist.speak({ text: answer }).catch(() => {});
+    } catch (e) {
+      setError((e as Error)?.message || 'That did not reach the house.');
     } finally {
-      setProcessing(false);
-      onClose();
+      setBusy(false);
     }
-  }, [state.transcript, onCommand, onClose, userId]);
+  }, [busy, draft, native, onCommand, userId]);
+
+  if (!isOpen) return null;
+
+  const rings = state === 'listening' || state === 'speaking';
 
   return (
     <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-3xl"
-        >
-          <motion.div
-            initial={{ scale: 0.9, y: 20, opacity: 0 }}
-            animate={{ scale: 1, y: 0, opacity: 1 }}
-            exit={{ scale: 0.9, y: 20, opacity: 0 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-            className="flex flex-col items-center gap-6 w-full max-w-md px-6 relative"
-          >
-            <button
-              onClick={onClose}
-              className="absolute top-0 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-            >
-              <X size={20} className="text-white" />
-            </button>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[100] flex flex-col bg-black/70 backdrop-blur-3xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Jarvis voice assistant"
+      >
+        <div className="flex justify-end p-4 pt-[calc(1rem+var(--safe-top))]">
+          <button onClick={close} className="rounded-full p-3 text-slate-300 hover:bg-white/10" aria-label="Close assistant">
+            <X size={22} />
+          </button>
+        </div>
 
-            <div className="flex flex-col items-center gap-2 mt-8">
-              <div className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 ${
-                processing
-                  ? 'bg-cyan-500/30 border-2 border-cyan-400/50 shadow-lg shadow-cyan-500/20'
-                  : state.isListening
-                  ? 'bg-purple-500/30 border-2 border-purple-400/50 shadow-lg shadow-purple-500/20'
-                  : state.isSpeaking
-                  ? 'bg-cyan-500/30 border-2 border-cyan-400/50 shadow-lg shadow-cyan-500/20'
-                  : 'bg-white/10 border-2 border-white/20'
-              }`}>
-                {processing ? (
-                  <Loader2 size={32} className="text-cyan-400 animate-spin" />
-                ) : state.isListening ? (
-                  <Mic size={32} className="text-purple-400 animate-pulse" />
-                ) : state.isSpeaking ? (
-                  <Loader2 size={32} className="text-cyan-400 animate-spin" />
-                ) : (
-                  <Mic size={32} className="text-slate-400" />
-                )}
-              </div>
-              <p className="text-sm text-slate-400">
-                {processing ? 'Executing...' : state.isListening ? 'Listening...' : state.isSpeaking ? 'Processing...' : 'Tap to speak'}
-              </p>
-            </div>
-
-            <div className="w-full h-24 flex items-center justify-center gap-1">
-              {bars.map((height, i) => (
-                <div
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6">
+          <div className="relative flex h-40 w-40 items-center justify-center">
+            {rings &&
+              [0, 1, 2].map((i) => (
+                <span
                   key={i}
-                  className="w-1 rounded-full bg-gradient-to-t from-purple-500 to-cyan-400 transition-all duration-75"
+                  className="absolute rounded-full border border-white/20"
                   style={{
-                    height: `${Math.max(4, height)}%`,
-                    opacity: 0.4 + (height / 100) * 0.6,
+                    width: `${88 + i * 18 + level * 0.5}px`,
+                    height: `${88 + i * 18 + level * 0.5}px`,
+                    opacity: 0.5 - i * 0.12,
+                    transition: 'width 120ms linear, height 120ms linear',
                   }}
                 />
               ))}
+            <div className="glass-panel flex h-24 w-24 items-center justify-center rounded-full">
+              {state === 'thinking' ? (
+                <Loader2 className="animate-spin text-slate-200" size={30} />
+              ) : (
+                <Mic className={state === 'listening' ? 'text-emerald-300' : 'text-slate-200'} size={30} />
+              )}
             </div>
+          </div>
 
-            {state.transcript && (
-              <div className="w-full glass-panel p-4 min-h-[60px]">
-                <p className="text-sm text-slate-300 text-center">{state.transcript}</p>
-              </div>
-            )}
+          <p className="text-sm font-medium tracking-wide text-slate-300" aria-live="polite">
+            {STATE_WORDS[state]}
+          </p>
 
-            {state.error && (
-              <p className="text-sm text-red-400 text-center">{state.error}</p>
-            )}
+          {heard && <p className="max-w-md text-center text-lg text-white">{heard}</p>}
+          {said && <p className="max-w-md text-center text-base leading-relaxed text-slate-200" aria-live="polite">{said}</p>}
+          {error && <p className="max-w-md text-center text-sm text-amber-300/90">{error}</p>}
 
-            <div className="flex gap-4 w-full">
+          {typing && (
+            <form
+              className="flex w-full max-w-md items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void send();
+              }}
+            >
+              <input
+                ref={inputRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Ask Jarvis…"
+                className="glass-card min-h-11 flex-1 rounded-xl px-4 text-base text-white placeholder:text-slate-400"
+                aria-label="Ask Jarvis"
+              />
               <button
-                onClick={onClose}
-                className="flex-1 py-3 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition-colors"
+                type="submit"
+                disabled={busy || !draft.trim()}
+                className="min-h-11 min-w-11 rounded-xl bg-white/10 text-white disabled:opacity-40"
+                aria-label="Send"
               >
-                Cancel
+                <Send size={18} className="mx-auto" />
+              </button>
+            </form>
+          )}
+        </div>
+
+        <div className="flex items-center justify-center gap-3 p-6 pb-[calc(1.5rem+var(--safe-bottom))]">
+          {native && !typing && (
+            <>
+              <button
+                onClick={() => {
+                  void JarvisAssist.stopSpeaking();
+                  setState('listening');
+                }}
+                className="glass-card flex min-h-11 items-center gap-2 rounded-full px-5 text-sm text-slate-100"
+              >
+                <Square size={16} /> Stop talking
               </button>
               <button
-                onClick={handleSubmit}
-                disabled={!state.transcript.trim() || processing}
-                className="flex-1 py-3 rounded-xl bg-purple-500/30 border border-purple-500/30 text-white font-medium hover:bg-purple-500/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                onClick={() => {
+                  void JarvisAssist.stop().finally(() => setState('idle'));
+                  setTyping(true);
+                }}
+                className="glass-card min-h-11 rounded-full px-5 text-sm text-slate-100"
               >
-                {processing ? 'Executing...' : 'Send'}
+                Type instead
               </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
+            </>
+          )}
+          {native && typing && (
+            <button
+              onClick={() => {
+                setTyping(false);
+                setError('');
+                setState('listening');
+                void JarvisAssist.start({ wake: false }).catch((e: Error) => setError(e?.message || ''));
+              }}
+              className="glass-card flex min-h-11 items-center gap-2 rounded-full px-5 text-sm text-slate-100"
+            >
+              <Mic size={16} /> Talk instead
+            </button>
+          )}
+        </div>
+      </motion.div>
     </AnimatePresence>
   );
-};
-
-export default VoiceAssistantOverlay;
+}

@@ -52,6 +52,7 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(HealthConnectPlugin.class);
         registerPlugin(DeviceInfoPlugin.class);
         registerPlugin(DropInPlugin.class);
+        registerPlugin(JarvisAssistPlugin.class);
         registerPlugin(BleBeaconPlugin.class);
         registerPlugin(VehicleBluetoothPlugin.class);
         registerPlugin(ProximityPlugin.class);
