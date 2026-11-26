@@ -3913,8 +3913,21 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
 
 
 @app.get("/execute/audiobookshelf")
-async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = "", library_id: str = "", query: str = "", limit: int = 25):
-    """Handle Audiobookshelf GET requests (per-user credentials)."""
+async def handle_audiobookshelf_get(
+    action: str = "last_played",
+    user_id: str = "",
+    library_id: str = "",
+    query: str = "",
+    limit: int = 25,
+    page: int = 0,
+):
+    """Handle Audiobookshelf GET requests (per-user credentials).
+
+    ``page`` is part of the contract: the gateway turns the flat ``offset`` the
+    Media page sends into an ABS page number, and dropping it here made every
+    page ask for the first one, so a 199-book library showed the same 49 books
+    forever and nothing past them could be opened.
+    """
     try:
         from services.execution.handlers.audiobookshelf import handle_audiobookshelf
         from services.execution.schemas import AudiobookshelfRequest, UserContext
@@ -3939,6 +3952,7 @@ async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = 
             library_id=library_id or None,
             query=query or None,
             limit=limit,
+            page=page,
             book_id=None,
             entity_id=None,
         )
