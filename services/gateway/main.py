@@ -20771,6 +20771,24 @@ async def _media_abs_progress(client: aiohttp.ClientSession, creds: Any, item_id
     return data if isinstance(data, dict) else None
 
 
+def _abs_episode_number(value: Any, fallback: int) -> int:
+    """An episode's number, which ABS stores as the text its feed wrote.
+
+    ``"3"`` is 3, while ``""`` (most shows) and ``"Bonus"`` are not numbers at all.
+    The position in the list is a truer answer than a 500 for those, and the
+    schema refuses a string outright: a podcast opened as a book detail crashed
+    the whole response on one empty field (measured on a show with 11 episodes).
+    """
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return fallback
+
+
 async def _media_abs_item_detail(creds: Any, item_id: str) -> dict:
     """ABS item detail via direct ``GET /api/items/{id}?expanded=1`` (P2-T29).
 
@@ -20814,14 +20832,14 @@ async def _media_abs_item_detail(creds: Any, item_id: str) -> dict:
     is_podcast = bool(episodes)
     children = []
     if is_podcast:
-        for episode in episodes:
+        for position, episode in enumerate(episodes, start=1):
             children.append(
                 MediaItemChild(
                     uri=f"abs://{item_id}/{episode.get('id') or ''}",
                     name=episode.get("title") or "",
                     media_type="podcast_episode",
                     duration=episode.get("duration"),
-                    index=episode.get("episode"),
+                    index=_abs_episode_number(episode.get("episode"), position),
                 )
             )
     else:

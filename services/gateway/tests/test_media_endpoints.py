@@ -298,6 +298,34 @@ def test_item_abs_podcast_detail(client, upstream, ma):
     assert body["children"][0]["media_type"] == "podcast_episode"
 
 
+def test_item_abs_podcast_episode_numbers_that_are_not_numbers(client, upstream, ma):
+    """ABS keeps an episode number as the feed wrote it: "" or "Bonus" is normal."""
+    from conftest_media import TEST_ABS_URL
+
+    mock_upstream(
+        upstream,
+        "GET",
+        f"{TEST_ABS_URL}/api/items/pod2",
+        payload={
+            "media": {
+                "metadata": {"title": "Haunted Cosmos", "authorName": "Someone"},
+                "episodes": [
+                    {"id": "ep1", "title": "Mass Hysteria", "duration": 60, "episode": ""},
+                    {"id": "ep2", "title": "An Extra", "duration": 60, "episode": "Bonus"},
+                    {"id": "ep3", "title": "Third", "duration": 60, "episode": "3"},
+                ],
+            }
+        },
+    )
+
+    resp = client.get("/api/media/item", params={"uri": "abs://pod2"})
+
+    assert resp.status_code == 200, resp.text
+    indexes = [child["index"] for child in resp.json()["children"]]
+    # Position stands in for a number the feed did not write; a real one is kept.
+    assert indexes == [1, 2, 3]
+
+
 def test_item_unknown_ma_uri_is_404(client, ma):
     ma["responses"]["music/item_by_uri"] = {}
 
