@@ -459,6 +459,30 @@ async def get_libraries(abs_url: str, abs_api_key: str) -> dict:
     return await abs_get(abs_url, abs_api_key, "/api/libraries")
 
 
+async def create_user(abs_url: str, abs_api_key: str, username: str, password: str) -> dict:
+    """Create an Audiobookshelf account, which answers with that account's token.
+
+    An administrator makes the account (``POST /api/users``) and ABS hands back the
+    user object *with its token*, so one call both registers the person and yields
+    the credential Jarvis files on their behalf. There is no separate endpoint to
+    mint a token on 2.33 (``POST /api/users/{id}/token`` is a 404).
+    """
+    return await abs_post(abs_url, abs_api_key, "/api/users", {
+        "username": username,
+        "password": password,
+        "type": "user",
+        "permissions": {
+            "download": True,
+            "update": True,
+            "delete": False,
+            "upload": True,
+            "accessAllLibraries": True,
+            "accessAllTags": True,
+            "accessExplicitContent": True,
+        },
+    })
+
+
 async def get_users(abs_url: str, abs_api_key: str) -> dict:
     """List the server's users, and the API token each one carries.
 
