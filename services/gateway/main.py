@@ -20425,8 +20425,43 @@ async def provision_abs_users(request: Request):
                 continue
             filed.append({"username": username, "audiobookshelf_user": account.get("username")})
 
-    log.info(f"[abs/users] {admin} created {len(created)} account(s), filed {len(filed)} token(s), skipped {len(skipped)}")
-    return {"status": "SUCCESS", "created": created, "filed": filed, "skipped": skipped}
+    # The last step is the one a person would otherwise do by hand in Music Assistant:
+    # an MA account of their own, viewing their own Audiobookshelf. Music Assistant is
+    # homehub's integration, so homehub does it; a failure there is reported, never fatal.
+    music_assistant: dict[str, Any] = {"created": [], "updated": [], "skipped": []}
+    people = sorted({entry["username"] for entry in filed} | set(created))
+    if people:
+        try:
+            from services.gateway import automation_routes
+
+            status, body = await automation_routes._hub(
+                "POST",
+                "/hub/music-assistant/users/reconcile",
+                json={"members": people, "password": password},
+                timeout=aiohttp.ClientTimeout(total=60, connect=5),
+            )
+            if status == 200 and isinstance(body, dict):
+                music_assistant = {
+                    "created": body.get("created") or [],
+                    "updated": body.get("updated") or [],
+                    "skipped": body.get("skipped") or [],
+                }
+            else:
+                music_assistant["skipped"] = [{"username": name, "reason": f"HomeHub answered {status}"} for name in people]
+        except Exception as exc:  # reported, never fatal: the tokens are already filed
+            music_assistant["skipped"] = [{"username": name, "reason": f"HomeHub unreachable: {type(exc).__name__}"} for name in people]
+
+    log.info(
+        f"[abs/users] {admin} created {len(created)} account(s), filed {len(filed)} token(s), "
+        f"skipped {len(skipped)}, Music Assistant {len(music_assistant['created'])} new"
+    )
+    return {
+        "status": "SUCCESS",
+        "created": created,
+        "filed": filed,
+        "skipped": skipped,
+        "music_assistant": music_assistant,
+    }
 
 
 @app.post("/api/media/audiobookshelf/users/tokens")
