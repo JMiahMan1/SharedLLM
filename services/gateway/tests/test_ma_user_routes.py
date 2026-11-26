@@ -53,8 +53,9 @@ def test_setting_a_password_passes_it_to_homehub_and_never_echoes_it(client):
 
 
 def test_a_password_homehub_refuses_keeps_homehubs_reason(client):
+    """HomeHub's error handler says ``message``; FastAPI's own says ``detail``. Both are read."""
     async def hub(method, path, *, json=None, **_kwargs):
-        return 404, {"detail": "Music Assistant has no account called nobody"}
+        return 400, {"message": "A Music Assistant password needs at least 8 characters"}
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("services.gateway.automation_routes._hub", hub)
@@ -63,8 +64,19 @@ def test_a_password_homehub_refuses_keeps_homehubs_reason(client):
             json={"username": "nobody", "password": "long-enough"},
         )
 
-    assert resp.status_code == 404
-    assert "no account called nobody" in resp.json()["message"]
+    assert resp.status_code == 400
+    assert "at least 8 characters" in resp.json()["message"]
+
+    async def missing(method, path, *, json=None, **_kwargs):
+        return 404, {"detail": "Music Assistant has no account called nobody"}
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("services.gateway.automation_routes._hub", missing)
+        resp = client.post(
+            "/api/media/music-assistant/users/password",
+            json={"username": "nobody", "password": "long-enough"},
+        )
+    assert resp.status_code == 404 and "no account called nobody" in resp.json()["message"]
 
 
 def test_a_homehub_that_is_down_is_a_502_that_says_so(client):
