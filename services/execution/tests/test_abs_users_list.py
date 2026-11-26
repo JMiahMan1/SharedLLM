@@ -84,3 +84,30 @@ async def test_a_new_account_carries_every_permission_abs_requires(monkeypatch):
     # A family server: no deleting library items, no explicit content.
     assert permissions["delete"] is False
     assert permissions["accessExplicitContent"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_new_account_is_activated_or_its_token_is_useless(monkeypatch):
+    """ABS creates the account inactive, and an inactive token answers 401.
+
+    Activation is a second call, and it answers with the account rather than the
+    token, so the token from creation has to survive it.
+    """
+    calls = []
+
+    async def fake_post(abs_url, abs_api_key, path, json=None):
+        calls.append(("post", path, json))
+        return {"user": {"id": "u1", "username": "Kaleb", "type": "user", "isActive": False, "token": "new-token"}}
+
+    async def fake_patch(abs_url, abs_api_key, path, json=None):
+        calls.append(("patch", path, json))
+        return {"user": {"id": "u1", "username": "Kaleb", "type": "user", "isActive": True}}
+
+    monkeypatch.setattr(abs_client, "abs_post", fake_post)
+    monkeypatch.setattr(abs_client, "abs_patch", fake_patch)
+
+    reply = await abs_client.create_user("http://abs.local:13378", "admin-key", "Kaleb", "temp-pass")
+
+    assert calls[1] == ("patch", "/api/users/u1", {"isActive": True})
+    assert reply["user"]["isActive"] is True
+    assert reply["user"]["token"] == "new-token"

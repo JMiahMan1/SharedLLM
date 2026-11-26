@@ -466,14 +466,15 @@ async def create_user(abs_url: str, abs_api_key: str, username: str, password: s
     user object *with its token*, so one call both registers the person and yields
     the credential Jarvis files on their behalf. There is no separate endpoint to
     mint a token on 2.33 (``POST /api/users/{id}/token`` is a 404).
+
+    A new account arrives **inactive**: its token exists but answers 401 until the
+    account is activated, which the admin web UI does as a second step. So the
+    activation is done here, and the token from creation is carried through.
     """
-    return await abs_post(abs_url, abs_api_key, "/api/users", {
+    created = await abs_post(abs_url, abs_api_key, "/api/users", {
         "username": username,
         "password": password,
         "type": "user",
-        # ABS 2.33 validates this object whole: a permissions dict that leaves
-        # createEreader out is a 400 Bad Request, which reads as "the server
-        # refused the account" rather than "one key is missing".
         "permissions": {
             "download": True,
             "update": True,
@@ -485,6 +486,21 @@ async def create_user(abs_url: str, abs_api_key: str, username: str, password: s
             "accessExplicitContent": False,
         },
     })
+    user = dict((created or {}).get("user") or {})
+    if user and user.get("isActive") is not True:
+        token = user.get("token")
+        patched = await abs_patch(abs_url, abs_api_key, f"/api/users/{user['id']}", {"isActive": True})
+        user.update((patched or {}).get("user") or {})
+        user["isActive"] = True
+        # Activation answers with the account, not with its token: keep the one
+        # creation handed back, or the account would be made and left unusable.
+        if token:
+            user["token"] = token
+        if (patched or {}).get("error"):
+            user["activation_error"] = patched["error"]
+    if not user:
+        return created
+    return {"user": user}
 
 
 async def get_users(abs_url: str, abs_api_key: str) -> dict:
