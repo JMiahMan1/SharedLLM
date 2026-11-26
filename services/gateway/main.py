@@ -20908,6 +20908,21 @@ async def get_media_home(request: Request):
     return MediaHomeResponse(**payload).model_dump(by_alias=True)
 
 
+def _media_title_key(name: Any) -> str:
+    """A title reduced to what makes two listings the same show.
+
+    Music Assistant mirrors the Audiobookshelf podcast library, so one show can
+    arrive twice: as its ABS item and as MA's library://podcast entry. Case,
+    punctuation and a trailing edition note must not make them look different.
+    """
+    text = str(name or "").casefold()
+    text = re.sub(r"\(.*?\)|\[.*?\]", " ", text)
+    # An apostrophe joins the letters either side ("King's" is "kings"), where
+    # every other mark separates words.
+    text = text.replace("'", "").replace("\u2019", "")
+    return re.sub(r"[^0-9a-z]+", " ", text).strip()
+
+
 @app.get("/api/media/search")
 async def search_media(request: Request, q: str = "", types: str = "", limit: int = Query(20, ge=1, le=100)):
     """Unified MA + ABS search (§7.5); each side fails independently."""
@@ -20986,6 +21001,23 @@ async def search_media(request: Request, q: str = "", types: str = "", limit: in
                     "media_type": "author",
                 }
             )
+
+    # The same show can arrive twice: its Audiobookshelf item (abs://, with its
+    # episode list, artwork and download settings) and MA's mirror of that library
+    # (library://podcast/<n>, which opens onto episodes MA does not have). They
+    # looked identical in the results and only one of them worked, so the ABS
+    # entry wins and the mirrored copy is dropped by title. A show only MA knows
+    # is still listed.
+    abs_podcast_keys = {
+        _media_title_key(podcast.get("title")) for podcast in (abs_detail.get("podcasts") or [])
+    }
+    if abs_podcast_keys:
+        buckets["podcasts"] = [
+            item
+            for item in buckets["podcasts"]
+            if str(item.get("uri") or "").startswith("abs://")
+            or _media_title_key(item.get("name")) not in abs_podcast_keys
+        ]
 
     top = None
     for key in ("tracks", "albums", "artists", "playlists", "audiobooks", "podcasts"):
