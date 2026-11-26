@@ -1,8 +1,9 @@
 import { useState, type FC } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Eye, EyeOff, KeyRound, UserPlus, Users } from 'lucide-react';
+import { KeyRound, UserPlus, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import PasswordField from '../ui/PasswordField';
 import { useIntegrations } from '../../hooks/useIntegrations';
 import type { CredentialShares, ShareableService } from '../../types/api';
 
@@ -30,7 +31,6 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
   const [note, setNote] = useState('');
   const [tokenResult, setTokenResult] = useState<string>('');
   const [absPassword, setAbsPassword] = useState('');
-  const [showAbsPassword, setShowAbsPassword] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['credential-shares', username],
@@ -217,24 +217,14 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
             <label className="block text-[10px] text-slate-500" htmlFor="abs-account-password">
               Temporary password for any account created here
             </label>
-            <div className="flex items-center gap-2">
-              <input
-                id="abs-account-password"
-                type={showAbsPassword ? 'text' : 'password'}
-                value={absPassword}
-                onChange={(e) => setAbsPassword(e.target.value)}
-                autoComplete="new-password"
-                className="glass-input flex-1 text-xs py-2 bg-black/20 font-mono"
-              />
-              <button
-                type="button"
-                aria-label={showAbsPassword ? 'Hide password' : 'Show password'}
-                onClick={() => setShowAbsPassword((on) => !on)}
-                className="glass-button min-h-11 px-2"
-              >
-                {showAbsPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
+            <PasswordField
+              id="abs-account-password"
+              value={absPassword}
+              onChange={(e) => setAbsPassword(e.target.value)}
+              autoComplete="new-password"
+              aria-label="Temporary password for any account created here"
+              className="glass-input w-full text-xs py-2 bg-black/20 font-mono"
+            />
             <button
               type="button"
               data-testid="abs-provision-accounts"
