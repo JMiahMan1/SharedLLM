@@ -255,6 +255,26 @@ CREDENTIAL_COLUMNS: dict[str, str] = {
 #: the reveal eye: the UI only learns whether one is set and where it comes from.
 WRITE_ONLY_CREDENTIALS = frozenset({"malwarebazaar_key", "google_books_key"})
 
+#: Credential fields that are NOT secret: an integration's URL and its username.
+#: They are readable on the user row, but the read schema has to say which ones
+#: hold a value, or a form that shows them blank cannot tell "not set" from
+#: "saved and never sent", and a password change is refused for a missing URL.
+PLAIN_CREDENTIAL_FIELDS: tuple[str, ...] = (
+    "ha_url",
+    "nextcloud_url",
+    "nextcloud_user",
+    "github_url",
+    "github_user",
+    "gitlab_url",
+    "gitlab_user",
+    "audiobookshelf_url",
+    "audiobookshelf_user",
+    "mass_url",
+    "git_url",
+    "skylight_url",
+    "skylight_email",
+)
+
 
 def forbidden_branch_list(raw: Any) -> list[str]:
     """A user's protected-branch patterns, however they are stored.
@@ -354,11 +374,14 @@ class UserRead(BaseModel):
             # FastAPI dumps the User row to a dict first; the *_enc keys are
             # still there (and dropped below as unknown fields).
             if "saved_credentials" not in data:
-                data = {**data, "saved_credentials": [p for p, enc in CREDENTIAL_COLUMNS.items() if data.get(enc)]}
+                saved = [p for p, enc in CREDENTIAL_COLUMNS.items() if data.get(enc)]
+                saved += [k for k in PLAIN_CREDENTIAL_FIELDS if data.get(k)]
+                data = {**data, "saved_credentials": saved}
             if "forbidden_branches" in data:
                 data = {**data, "forbidden_branches": forbidden_branch_list(data.get("forbidden_branches"))}
             return data
         saved = [plain for plain, enc in CREDENTIAL_COLUMNS.items() if getattr(data, enc, None)]
+        saved += [k for k in PLAIN_CREDENTIAL_FIELDS if getattr(data, k, None)]
         values = {name: getattr(data, name, None) for name in cls.model_fields if name != "saved_credentials"}
         values = {k: v for k, v in values.items() if v is not None}
         values["saved_credentials"] = saved

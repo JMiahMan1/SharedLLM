@@ -278,6 +278,8 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                         value={String(form[key] ?? '')}
                         aria-label={label}
                         onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                        // Select what is there, so typing replaces it instead of appending.
+                        onFocus={(e) => e.currentTarget.select()}
                         disabled={isReadOnly}
                         className={`glass-input w-full text-sm py-3 bg-black/20 focus:bg-black/40 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
                         placeholder={isReadOnly ? 'Configured by system administrator' : `Enter ${label}...`}

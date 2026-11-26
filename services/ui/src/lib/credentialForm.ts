@@ -163,7 +163,10 @@ export function prefill<T extends Values>(values: T, defaults: Defaults, usernam
 function present(key: string, values: Values, saved: ReadonlySet<string>): boolean {
   const value = values[key];
   if (typeof value === 'string' && value.trim() !== '') return true;
-  return isSecretKey(key) && saved.has(key);
+  // A stored URL or username counts as present too: the form shows it blank
+  // (or as a suggestion), and demanding it again is what stopped a password
+  // change from saving. Only the field the user types is sent.
+  return saved.has(key);
 }
 
 /**
