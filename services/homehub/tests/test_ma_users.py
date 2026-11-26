@@ -121,3 +121,29 @@ async def test_one_refusal_does_not_stop_the_others():
     assert result["created"] == []
     assert [entry["username"] for entry in result["skipped"]] == ["alex", "sam"]
     assert "could not create" in result["skipped"][0]["reason"]
+
+
+async def test_a_member_who_already_has_a_view_is_not_given_a_second_one():
+    """An existing Audiobookshelf view stands; it is never joined by another.
+
+    The fallback is whatever instance nobody else claimed, so a member who
+    already inherits the household view must not also be handed someone else's
+    instance just because that instance was unused by the people in this call.
+    """
+    driver = FakeDriver(
+        users=[
+            {
+                "user_id": "u1",
+                "username": "sam",
+                "provider_filter": ["filesystem_local--1", FALLBACK],
+            }
+        ],
+        providers=[
+            {"domain": "audiobookshelf", "instance_id": FALLBACK, "name": "Audiobookshelf (house)"},
+            {"domain": "audiobookshelf", "instance_id": ALEX, "name": "Audiobookshelf (robin)"},
+        ],
+    )
+    result = await ma_users.reconcile(FakeHub(driver), ["sam"], password="longenough")
+
+    assert result["updated"] == []
+    assert [call for call in driver.calls if call[0] == "auth/user/update"] == []
