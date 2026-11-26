@@ -341,7 +341,7 @@ def test_item_abs_podcast_episode_numbers_that_are_not_numbers(client, upstream,
         f"{TEST_ABS_URL}/api/items/pod2",
         payload={
             "media": {
-                "metadata": {"title": "Haunted Cosmos", "authorName": "Someone"},
+                "metadata": {"title": "Night Signals", "authorName": "Someone"},
                 "episodes": [
                     {"id": "ep1", "title": "Mass Hysteria", "duration": 60, "episode": ""},
                     {"id": "ep2", "title": "An Extra", "duration": 60, "episode": "Bonus"},
@@ -960,7 +960,7 @@ def test_search_lists_a_mirrored_podcast_once_as_the_audiobookshelf_item(client,
     """
     ma["responses"]["music/search"] = {
         "podcasts": [
-            {"uri": "library://podcast/15", "name": "Haunted Cosmos", "media_type": "podcast"},
+            {"uri": "library://podcast/15", "name": "Night Signals", "media_type": "podcast"},
             {"uri": "library://podcast/22", "name": "Something MA Only Has", "media_type": "podcast"},
         ],
     }
@@ -972,7 +972,7 @@ def test_search_lists_a_mirrored_podcast_once_as_the_audiobookshelf_item(client,
             "status": "SUCCESS",
             "detail": {
                 "books": [],
-                "podcasts": [{"id": "abs-haunted", "title": "Haunted Cosmos"}],
+                "podcasts": [{"id": "abs-haunted", "title": "Night Signals"}],
                 "authors": [],
             },
         },
@@ -989,7 +989,7 @@ def test_search_lists_a_mirrored_podcast_once_as_the_audiobookshelf_item(client,
 def test_a_podcast_title_that_differs_only_in_punctuation_is_still_the_same_show(client, upstream, ma):
     ma["responses"]["music/search"] = {
         "podcasts": [
-            {"uri": "library://podcast/15", "name": "The King's Hall (Audio)", "media_type": "podcast"},
+            {"uri": "library://podcast/15", "name": "The Pioneer's Journal (Audio)", "media_type": "podcast"},
         ],
     }
     mock_upstream(
@@ -998,7 +998,7 @@ def test_a_podcast_title_that_differs_only_in_punctuation_is_still_the_same_show
         ABS_DETAIL_URL,
         payload={
             "status": "SUCCESS",
-            "detail": {"books": [], "podcasts": [{"id": "abs-kings", "title": "the kings hall"}], "authors": []},
+            "detail": {"books": [], "podcasts": [{"id": "abs-kings", "title": "the pioneers journal"}], "authors": []},
         },
     )
     body = client.get("/api/media/search", params={"q": "kings"}).json()

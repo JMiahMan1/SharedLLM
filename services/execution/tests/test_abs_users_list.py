@@ -65,7 +65,7 @@ async def test_a_new_account_carries_every_permission_abs_requires(monkeypatch):
         return {"user": {"id": "u1", "username": json["username"], "type": "user", "token": "new-token"}}
 
     monkeypatch.setattr(abs_client, "abs_post", fake_post)
-    reply = await abs_client.create_user("http://abs.local:13378", "admin-key", "Kaleb", "temp-pass")
+    reply = await abs_client.create_user("http://abs.local:13378", "admin-key", "Robin", "temp-pass")
 
     assert seen["path"] == "/api/users"
     assert reply["user"]["token"] == "new-token"
@@ -97,16 +97,16 @@ async def test_a_new_account_is_activated_or_its_token_is_useless(monkeypatch):
 
     async def fake_post(abs_url, abs_api_key, path, json=None):
         calls.append(("post", path, json))
-        return {"user": {"id": "u1", "username": "Kaleb", "type": "user", "isActive": False, "token": "new-token"}}
+        return {"user": {"id": "u1", "username": "Robin", "type": "user", "isActive": False, "token": "new-token"}}
 
     async def fake_patch(abs_url, abs_api_key, path, json=None):
         calls.append(("patch", path, json))
-        return {"user": {"id": "u1", "username": "Kaleb", "type": "user", "isActive": True}}
+        return {"user": {"id": "u1", "username": "Robin", "type": "user", "isActive": True}}
 
     monkeypatch.setattr(abs_client, "abs_post", fake_post)
     monkeypatch.setattr(abs_client, "abs_patch", fake_patch)
 
-    reply = await abs_client.create_user("http://abs.local:13378", "admin-key", "Kaleb", "temp-pass")
+    reply = await abs_client.create_user("http://abs.local:13378", "admin-key", "Robin", "temp-pass")
 
     assert calls[1] == ("patch", "/api/users/u1", {"isActive": True})
     assert reply["user"]["isActive"] is True
