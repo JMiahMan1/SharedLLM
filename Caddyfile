@@ -225,6 +225,30 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
     }
 }
 
+# Music Assistant's own web interface, at its own hostname. It cannot be mounted
+# under a path: its pages load root-absolute assets (/assets/...) and its
+# WebSocket lives at /ws. TLS ends on the public proxy, which forwards this
+# hostname here with the Host header kept (MUSIC_ASSISTANT_EXTERNAL_HOST in
+# .env). Music Assistant is on the host network, so it is reached at
+# host.docker.internal:8095. Its own login is the gate: an account exists per
+# member, and only an administrator can set a password on one.
+http://{$MUSIC_ASSISTANT_EXTERNAL_HOST:music.invalid} {
+    log {
+        output stdout
+        level INFO
+        format filter {
+            wrap json
+            fields {
+                request>headers>Authorization delete
+                request>headers>X-Internal-Secret delete
+                request>headers>X-Api-Key delete
+                request>headers>Cookie delete
+            }
+        }
+    }
+    reverse_proxy {$MUSIC_ASSISTANT_UPSTREAM:host.docker.internal:8095}
+}
+
 # Standard Routes
 :80 {
     log {

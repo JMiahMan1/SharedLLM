@@ -69,6 +69,10 @@ services:
       # The companion app's host name and the hub behind it (Caddyfile; homehub mobile_app_api).
       - HOMEHUB_EXTERNAL_HOST=${HOMEHUB_EXTERNAL_HOST:-homehub.invalid}
       - HOMEHUB_UPSTREAM=${HOMEHUB_UPSTREAM:-host.docker.internal:8123}
+      # Music Assistant's own web interface, at its own hostname (Caddyfile; the
+      # default name never resolves, so nothing is published until .env names one).
+      - MUSIC_ASSISTANT_EXTERNAL_HOST=${MUSIC_ASSISTANT_EXTERNAL_HOST:-music.invalid}
+      - MUSIC_ASSISTANT_UPSTREAM=${MUSIC_ASSISTANT_UPSTREAM:-host.docker.internal:8095}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
