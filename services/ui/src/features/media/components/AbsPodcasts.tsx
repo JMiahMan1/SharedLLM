@@ -96,9 +96,20 @@ export function lineFor(show: AbsPodcastShow): string {
   return `${episodes} · newest ${shortDate(show.newest_episode_at)}${when}`;
 }
 
-/** The one thing worth saying about a show, or '' when nothing is wrong. */
+/**
+ * The one thing worth saying about a show, or '' when nothing is wrong.
+ *
+ * The order is what the listener can act on first. A missing feed address is
+ * unfixable from here. Episodes sitting in the feed that Audiobookshelf has not
+ * taken is the fault the family actually notices, and it is a better answer than
+ * "not checked since July" because it says how much is waiting.
+ */
 export function problemFor(show: AbsPodcastShow): string {
   if (show.needs_feed) return 'No feed address saved for this show';
+  if (show.feed_newer) {
+    const one = show.feed_newer === 1;
+    return `${show.feed_newer} ${one ? 'episode' : 'episodes'} in its feed that have not been taken`;
+  }
   if (show.stale_check) return 'Its feed has not been checked';
   if (show.behind) return 'Nothing new for a while';
   return '';

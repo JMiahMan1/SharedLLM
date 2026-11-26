@@ -35,6 +35,8 @@ const show = (over: Record<string, unknown> = {}) => ({
   never_checked: false,
   stale_check: false,
   behind: false,
+  feed_newer: null,
+  feed_newest_at: null,
   ...over,
 });
 
@@ -160,6 +162,13 @@ describe('the podcast line and the problem', () => {
     expect(problemFor(show({ needs_feed: true, stale_check: true, behind: true }) as never))
       .toBe('No feed address saved for this show');
     expect(problemFor(show({ stale_check: true, behind: true }) as never)).toBe('Its feed has not been checked');
+    // What the family notices: episodes in the feed that Audiobookshelf never took.
+    expect(problemFor(show({ stale_check: true, behind: true, feed_newer: 12 }) as never))
+      .toBe('12 episodes in its feed that have not been taken');
+    expect(problemFor(show({ feed_newer: 1 }) as never)).toBe('1 episode in its feed that have not been taken');
+    // Nothing waiting reads as nothing wrong, however quiet the show is.
+    expect(problemFor(show({ stale_check: true, behind: true, feed_newer: 0 }) as never))
+      .toBe('Its feed has not been checked');
     expect(problemFor(show({ behind: true }) as never)).toBe('Nothing new for a while');
   });
 

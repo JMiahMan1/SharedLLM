@@ -265,6 +265,10 @@ export interface AbsPodcastShow {
   never_checked: boolean
   stale_check: boolean
   behind: boolean
+  /** Episodes its feed lists that Audiobookshelf has not taken. Null when the
+   *  feed was not read (the show is keeping up, or has no feed address). */
+  feed_newer: number | null
+  feed_newest_at: string | null
   error?: string
 }
 

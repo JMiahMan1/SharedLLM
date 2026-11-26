@@ -9,10 +9,22 @@ has its own remedy, so the report keeps them apart instead of one "stale" flag.
 
 Nothing here knows a show by name. The podcast libraries come from the server's
 own library list and every fact below comes from the show's own record.
+
+The one thing a show's own record cannot say is whether the maker has published
+something Audiobookshelf was never told about, so a show that already looks quiet
+has its feed read as well. That is what tells "the show is on a break" apart from
+"the download is broken", and it is only asked of shows where it changes the
+answer.
 """
 import asyncio
+import re
 import time
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
+from xml.etree import ElementTree
+
+import aiohttp
 
 from services.execution import abs_client
 
@@ -28,6 +40,98 @@ STALE_CHECK_DAYS = 7
 #: How many shows are fetched at once. The whole report is one round trip per
 #: show (ABS keeps episodes on the item, not in the library list).
 FANOUT = 6
+
+#: A feed is fetched only for a show that already looks quiet, so this bounds a
+#: rare request rather than a page load. The cap stops a feed that answers with
+#: something enormous from being read into memory.
+FEED_TIMEOUT = 8.0
+FEED_MAX_BYTES = 2_000_000
+
+
+def _when(text: str) -> float | None:
+    """A feed date as epoch seconds. RSS writes RFC 822, Atom writes ISO, and
+    a feed in the wild can write either."""
+    try:
+        return parsedate_to_datetime(text).timestamp()
+    except (TypeError, ValueError, OverflowError):
+        pass
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _tag(element: ElementTree.Element) -> str:
+    """The element's own name, without its namespace."""
+    return str(element.tag).split("}")[-1].lower()
+
+
+#: The date element of an RSS item or an Atom entry, for feeds a parser refuses.
+_DATE_ELEMENT = re.compile(rb"<(?:pubDate|published|updated|date)>\s*([^<]{4,80}?)\s*<")
+
+
+def feed_dates(xml: bytes) -> list[float]:
+    """Every publication date in an RSS or Atom feed, newest first.
+
+    An entry with no readable date is skipped rather than failing the feed: one
+    odd item is not a reason to say nothing about the other thirty.
+
+    A feed that does not parse is read by its date elements instead of being
+    given up on. Publishers ship truncated responses and descriptions with an
+    unbalanced CDATA section far more often than one would like, and the dates
+    are plain text that does not need a parser to find.
+    """
+    dates: list[float] = []
+    try:
+        root = ElementTree.fromstring(xml)
+    except ElementTree.ParseError:
+        return _plain_dates(xml)
+    for entry in root.iter():
+        if _tag(entry) not in ("item", "entry"):
+            continue
+        for child in entry:
+            if _tag(child) not in ("pubdate", "published", "updated", "date"):
+                continue
+            at = _when((child.text or "").strip())
+            if at is not None:
+                dates.append(at)
+            break
+    dates.sort(reverse=True)
+    return dates
+
+
+def _plain_dates(xml: bytes) -> list[float]:
+    """The same dates, read out of a feed no parser will accept."""
+    found = []
+    for match in _DATE_ELEMENT.finditer(xml):
+        at = _when(match.group(1).decode("utf-8", "replace").strip())
+        if at is not None:
+            found.append(at)
+    found.sort(reverse=True)
+    return found
+
+
+async def feed_dates_from(feed_url: str) -> list[float]:
+    """The dates a feed lists, or nothing at all when it cannot be read."""
+    if not feed_url:
+        return []
+    timeout = aiohttp.ClientTimeout(total=FEED_TIMEOUT, connect=4.0)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+            feed_url,
+            headers={"User-Agent": "Jarvis (Audiobookshelf podcast report)"},
+            allow_redirects=True,
+        ) as response:
+            if response.status != 200:
+                return []
+            raw = await response.content.read(FEED_MAX_BYTES)
+    except (TimeoutError, aiohttp.ClientError, ValueError):
+        return []
+    return feed_dates(raw)
+
+
+def _feed_url(item: dict) -> str:
+    return str(((item.get("media") or {}).get("metadata") or {}).get("feedUrl") or "").strip()
 
 
 def _ms(value: Any) -> float | None:
@@ -104,6 +208,9 @@ def describe_show(item: dict, *, library_id: str, library_name: str, now: float)
         "never_checked": checked_at is None,
         "stale_check": days_since_check is None or days_since_check >= STALE_CHECK_DAYS,
         "behind": (days_since_episode is None or days_since_episode >= BEHIND_DAYS),
+        # Filled in only for a show that looks quiet, by asking the feed itself.
+        "feed_newer": None,
+        "feed_newest_at": None,
     }
 
 
@@ -117,6 +224,24 @@ def podcast_libraries(libraries: list[dict]) -> list[dict]:
         if "podcast" in media_type and lib.get("id"):
             found.append({"id": lib["id"], "name": lib.get("name") or "Podcasts"})
     return found
+
+
+async def _ask_the_feed(row: dict, item: dict) -> None:
+    """How many episodes the feed lists that Audiobookshelf has not taken.
+
+    Only asked of a show that already looks quiet: a show that is keeping up
+    needs no second opinion, and asking anyway would be one request per show on
+    every load for an answer that cannot change anything.
+    """
+    if not row.get("has_feed") or not (row.get("behind") or row.get("stale_check")):
+        return
+    dates = await feed_dates_from(_feed_url(item))
+    if not dates:
+        return
+    newest = _newest(_episodes(item.get("media") or {}))[0]
+    newer = [at for at in dates if newest is None or at > newest]
+    row["feed_newer"] = len(newer)
+    row["feed_newest_at"] = _iso(max(dates))
 
 
 async def _one_show(abs_url: str, abs_api_key: str, item: dict, library: dict, now: float,
@@ -136,7 +261,9 @@ async def _one_show(abs_url: str, abs_api_key: str, item: dict, library: dict, n
                 row["error"] = detail["error"]
                 return row
             raw = {**detail, "id": item.get("id") or detail.get("id")}
-        return describe_show(raw, library_id=library["id"], library_name=library["name"], now=now)
+        row = describe_show(raw, library_id=library["id"], library_name=library["name"], now=now)
+        await _ask_the_feed(row, raw)
+        return row
 
 
 async def podcast_report(abs_url: str, abs_api_key: str, *, now: float | None = None) -> dict:
@@ -168,6 +295,7 @@ async def podcast_report(abs_url: str, abs_api_key: str, *, now: float | None = 
     shows.sort(key=lambda row: (
         not row.get("behind"),
         not row.get("needs_feed"),
+        -(row.get("feed_newer") or 0),
         (row.get("title") or "").lower(),
     ))
     return {
