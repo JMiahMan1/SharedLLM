@@ -393,3 +393,59 @@ async def test_sync_user_abs_aborts_flow_when_ma_refuses_credentials():
         )
     assert err.value.status == 422
     assert any(c == "config/flows/abort" for c, _ in conn.sent)
+
+
+def test_the_accounts_list_says_who_exists_and_never_a_password():
+    hub, _ = hub_with(conn=Conn(users=[
+        {"user_id": "u1", "username": "Sam", "role": "user", "enabled": True, "password": "secret-hash"},
+        {"user_id": "u2", "username": "robin", "role": "admin", "enabled": False},
+    ]))
+    out = asyncio.run(mas.list_accounts(hub))
+
+    assert [u["username"] for u in out["users"]] == ["Sam", "robin"]
+    assert out["users"][1]["role"] == "admin" and out["users"][1]["enabled"] is False
+    assert out["server"] == "http://192.0.2.205:8095"
+    assert "secret-hash" not in str(out)
+
+
+def test_setting_a_password_matches_the_name_in_any_case_and_sends_it_once():
+    conn = Conn(users=[{"user_id": "u1", "username": "Sam", "role": "user"}])
+    hub, _ = hub_with(conn=conn)
+
+    out = asyncio.run(mas.set_password(hub, "sam", "long-enough"))
+
+    assert out == {"username": "Sam", "user_id": "u1", "changed": True}
+    assert ("auth/user/update", {"user_id": "u1", "password": "long-enough"}) in conn.sent
+    assert "long-enough" not in str(out)
+
+
+def test_a_short_password_is_refused_before_music_assistant_sees_it():
+    conn = Conn(users=[{"user_id": "u1", "username": "Sam", "role": "user"}])
+    hub, _ = hub_with(conn=conn)
+
+    with pytest.raises(mas.AccountError) as err:
+        asyncio.run(mas.set_password(hub, "sam", "short"))
+    assert err.value.status == 400 and "8 characters" in str(err.value)
+    assert not [c for c, _ in conn.sent if c == "auth/user/update"]
+
+
+def test_a_password_for_nobody_says_there_is_no_such_account():
+    hub, _ = hub_with(conn=Conn(users=[{"user_id": "u1", "username": "Sam", "role": "user"}]))
+
+    with pytest.raises(mas.AccountError) as err:
+        asyncio.run(mas.set_password(hub, "nobody", "long-enough"))
+    assert err.value.status == 404 and "no account called nobody" in str(err.value)
+
+
+def test_music_assistant_refusing_the_password_is_reported_with_its_reason():
+    class Refusing(Conn):
+        async def command(self, command, **args):
+            if command == "auth/user/update":
+                raise HubError("password is too weak")
+            return await super().command(command, **args)
+
+    hub, _ = hub_with(conn=Refusing(users=[{"user_id": "u1", "username": "Sam", "role": "user"}]))
+
+    with pytest.raises(mas.AccountError) as err:
+        asyncio.run(mas.set_password(hub, "sam", "long-enough"))
+    assert "Music Assistant refused: password is too weak" in str(err.value)

@@ -752,3 +752,61 @@ async def check_music_assistant(data: dict[str, Any]) -> None:
         raise NeedsInput([], str(exc), error=f"Not saved: {exc}") from exc
     finally:
         await conn.close()
+
+
+#: Music Assistant refuses a password shorter than this (auth/user/create, auth/user/update).
+MIN_PASSWORD = 8
+
+
+async def list_accounts(hub: Any) -> dict[str, Any]:
+    """Every Music Assistant account, and the address people open it at.
+
+    Music Assistant keeps only a hash of a password, so this cannot say whether
+    one was ever set; it says who exists and which of them may administer the
+    server, which is what an administrator needs before handing out logins.
+    """
+    conn = _connection(hub)
+    users = await conn.command("auth/users") or []
+    return {
+        "users": [
+            {
+                "username": user.get("username"),
+                "user_id": user.get("user_id"),
+                "display_name": user.get("display_name"),
+                "role": user.get("role"),
+                "enabled": bool(user.get("enabled", True)),
+            }
+            for user in users
+        ],
+        "server": household_server(hub).get("url"),
+    }
+
+
+async def set_password(hub: Any, username: str, password: str) -> dict[str, Any]:
+    """Set a person's Music Assistant password, so they can sign in to Music Assistant itself.
+
+    An account HomeHub makes is given a random password nobody knows: the Jarvis
+    app signs in with a token instead, so no password is needed for it. That
+    leaves the person unable to open Music Assistant's own web interface until an
+    administrator sets one, which is what this does. The password is sent once and
+    never returned or logged; Music Assistant keeps only a hash.
+    """
+    name = (username or "").strip().lower()
+    if len(name) < 2:
+        raise AccountError("A Music Assistant username needs at least 2 characters", 400)
+    if len(password or "") < MIN_PASSWORD:
+        raise AccountError(f"A Music Assistant password needs at least {MIN_PASSWORD} characters", 400)
+    conn = _connection(hub)
+    from services.homehub.core import HubError
+
+    users = await conn.command("auth/users") or []
+    match = next((u for u in users if str(u.get("username") or "").strip().lower() == name), None)
+    if match is None:
+        raise AccountError(f"Music Assistant has no account called {name}", 404)
+    async with _account_lock(name):
+        try:
+            await conn.command("auth/user/update", user_id=match.get("user_id"), password=password)
+        except HubError as exc:
+            raise AccountError(f"Music Assistant refused: {exc}") from exc
+    log.info("Music Assistant: password set for %s", name)
+    return {"username": match.get("username"), "user_id": match.get("user_id"), "changed": True}

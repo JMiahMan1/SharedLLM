@@ -20474,6 +20474,69 @@ async def provision_abs_users(request: Request):
     }
 
 
+# Music Assistant accounts: the login people open Music Assistant itself with
+
+async def _ma_via_homehub(method: str, path: str, payload: Any = None) -> tuple[int, Any]:
+    """Ask HomeHub, which holds the household's Music Assistant login (no other service does)."""
+    from services.gateway import automation_routes
+
+    return await automation_routes._hub(
+        method, path, json=payload, timeout=aiohttp.ClientTimeout(total=20, connect=5)
+    )
+
+
+@app.get("/api/media/music-assistant/users")
+async def list_ma_users(request: Request):
+    """The household's Music Assistant accounts and where to open the server (admin).
+
+    An account HomeHub makes for a person is given a random password nobody knows,
+    because the Jarvis app signs in with a token. This list is how an administrator
+    sees who has an account before setting one below.
+    """
+    await _require_admin(request)
+    try:
+        status, body = await _ma_via_homehub("GET", "/hub/music_assistant/users")
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE",
+                                                      "message": f"HomeHub unreachable: {type(e).__name__}"})
+    if status != 200 or not isinstance(body, dict):
+        detail = body.get("detail") if isinstance(body, dict) else None
+        return JSONResponse(status_code=502, content={"status": "FAILURE",
+                                                      "message": detail or f"HomeHub answered {status}"})
+    return {"status": "SUCCESS", **body}
+
+
+@app.post("/api/media/music-assistant/users/password")
+async def set_ma_user_password(request: Request):
+    """Set the password a member signs in to Music Assistant's own web interface with (admin)."""
+    await _require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    username = str((body or {}).get("username") or "").strip()
+    password = str((body or {}).get("password") or "")
+    if not username or not password:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "FAILURE", "message": "A username and a password are required."},
+        )
+    try:
+        status, answer = await _ma_via_homehub(
+            "POST", "/hub/music_assistant/users/password", {"username": username, "password": password}
+        )
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE",
+                                                      "message": f"HomeHub unreachable: {type(e).__name__}"})
+    if status != 200 or not isinstance(answer, dict):
+        detail = answer.get("detail") if isinstance(answer, dict) else None
+        return JSONResponse(
+            status_code=status if status in (400, 404) else 502,
+            content={"status": "FAILURE", "message": detail or f"HomeHub answered {status}"},
+        )
+    return {"status": "SUCCESS", **answer}
+
+
 @app.post("/api/media/audiobookshelf/users/tokens")
 async def issue_abs_user_tokens(request: Request):
     """Give members their own Audiobookshelf token, from the household's admin one.

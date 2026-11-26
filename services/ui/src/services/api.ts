@@ -5863,6 +5863,41 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * The household's Music Assistant accounts, and the address people open it at.
+   * Admin only: an account Jarvis made has a random password nobody knows (the
+   * app signs in with a token), so this is what an administrator reads before
+   * giving someone a login they can use themselves.
+   */
+  async musicAssistantUsers(): Promise<{
+    status: string;
+    users: Array<{
+      username: string;
+      user_id?: string;
+      display_name?: string | null;
+      role: string;
+      enabled: boolean;
+    }>;
+    server?: string | null;
+  }> {
+    const resp = await apiClient.get('/api/media/music-assistant/users');
+    return resp.data;
+  },
+
+  /** The password that person signs in to Music Assistant itself with. Admin only. */
+  async setMusicAssistantPassword(username: string, password: string): Promise<{
+    status: string;
+    username: string;
+    changed: boolean;
+  }> {
+    const resp = await apiClient.post(
+      '/api/media/music-assistant/users/password',
+      { username, password },
+      { timeout: 30000 },
+    );
+    return resp.data;
+  },
+
   async playAudiobook(payload: {
     book_id: string;
     entity_id?: string;
