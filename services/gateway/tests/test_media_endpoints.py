@@ -91,6 +91,39 @@ def test_home_merges_ma_shelves_with_abs_last_played(client, upstream, ma):
     assert favorite_calls and favorite_calls[0]["favorite"] is True
 
 
+def test_a_podcast_in_last_played_is_a_podcast_not_a_book(client, upstream, ma):
+    """Continue listening carries both; a show opens to its episodes."""
+    for command in (
+        "music/recently_played_items",
+        "music/in_progress_items",
+        "music/playlists/library_items",
+        "music/tracks/library_items",
+        "music/radios/library_items",
+    ):
+        ma["responses"][command] = []
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [
+                    {"id": "b1", "title": "A Book", "has_podcast": False},
+                    {"id": "p1", "title": "A Show", "has_podcast": True},
+                ]
+            },
+        },
+    )
+
+    resp = client.get("/api/media/home")
+
+    assert resp.status_code == 200, resp.text
+    recent = {item["name"]: item for item in resp.json()["recent"]}
+    assert recent["A Book"]["media_type"] == "audiobook"
+    assert recent["A Show"]["media_type"] == "podcast"
+
+
 def test_home_partial_when_ma_is_unreachable(client, upstream, ma):
     for command in (
         "music/recently_played_items",

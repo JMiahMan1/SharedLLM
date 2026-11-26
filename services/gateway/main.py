@@ -20582,7 +20582,9 @@ def _media_abs_book_item(book: dict) -> dict:
     return {
         "uri": f"abs://{book.get('id') or ''}",
         "name": book.get("title") or "",
-        "media_type": "audiobook",
+        # A podcast in the last-played list is a podcast: it opens to its episodes
+        # rather than to a book page (execution reports ABS's isPodcast here).
+        "media_type": "podcast" if book.get("has_podcast") else "audiobook",
         "artist": book.get("author") or "",
         "album": book.get("series") or "",
         "image": _media_abs_cover(book.get("id"), book.get("cover_path") or book.get("cover")),
