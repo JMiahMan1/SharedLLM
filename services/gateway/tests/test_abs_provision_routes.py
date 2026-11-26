@@ -6,6 +6,8 @@ account's own token, so the household needs exactly one administrator credential
 member by name: Identity lists the members and Audiobookshelf lists the accounts,
 both read at the time of the call.
 """
+import json
+
 import pytest
 
 from services.gateway import main as gateway_main
@@ -18,6 +20,14 @@ class _Resp:
 
     async def json(self):
         return self._payload
+
+
+class _Answer:
+    """What ``_execution_post_as`` hands back: a JSONResponse with a body."""
+
+    def __init__(self, payload, status=200):
+        self.status = status
+        self.body = json.dumps(payload).encode()
 
 
 class _Client:
@@ -65,11 +75,11 @@ def test_provisioning_is_for_administrators_only(client):
 
 
 def test_a_password_is_required_before_anything_is_created(client):
-    async def exec_abs(creds, params, *, timeout=10.0):  # pragma: no cover - must not run
+    async def post_as(creds, endpoint, payload):  # pragma: no cover - must not run
         raise AssertionError("no account may be created without a password")
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(gateway_main, "_media_exec_audiobookshelf", exec_abs)
+        mp.setattr(gateway_main, "_execution_post_as", post_as)
         resp = client.post("/api/media/audiobookshelf/users/provision", json={})
 
     assert resp.status_code == 400
@@ -80,14 +90,16 @@ def test_one_account_is_created_and_its_token_filed(client):
     fake = _Client()
     seen = []
 
-    async def exec_abs(creds, params, *, timeout=10.0):
-        seen.append(params)
-        if params["action"] == "user_create":
-            return {"user": {"id": "u9", "username": params["username"], "type": "user", "has_token": True, "token": "new-token"}}
-        return _accounts()
+    async def post_as(creds, endpoint, payload):
+        seen.append(payload)
+        assert endpoint == "/execute/audiobookshelf"
+        return _Answer({
+            "status": "SUCCESS",
+            "detail": {"user": {"id": "u9", "username": payload["username"], "type": "user", "has_token": True, "token": "new-token"}},
+        })
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(gateway_main, "_media_exec_audiobookshelf", exec_abs)
+        mp.setattr(gateway_main, "_execution_post_as", post_as)
         mp.setattr(gateway_main, "shared_http_client", lambda: _Ctx(fake))
         resp = client.post("/api/media/audiobookshelf/users", json={"username": "Kaleb", "password": "temp-pass"})
 
@@ -103,14 +115,20 @@ def test_provisioning_creates_the_missing_and_files_everyone(client):
     made = []
 
     async def exec_abs(creds, params, *, timeout=10.0):
-        if params["action"] == "user_create":
-            made.append(params["username"])
-            return {"user": {"id": f"id-{params['username']}", "username": params["username"], "type": "user", "has_token": True, "token": f"{params['username']}-token"}}
         # sam already has an account; newbie does not.
         return _accounts({"id": "u1", "username": "sam", "type": "user", "has_token": True, "token": "sam-token"})
 
+    async def post_as(creds, endpoint, payload):
+        made.append(payload["username"])
+        assert payload["action"] == "user_create"
+        return _Answer({
+            "status": "SUCCESS",
+            "detail": {"user": {"id": f"id-{payload['username']}", "username": payload["username"], "type": "user", "has_token": True, "token": f"{payload['username']}-token"}},
+        })
+
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(gateway_main, "_media_exec_audiobookshelf", exec_abs)
+        mp.setattr(gateway_main, "_execution_post_as", post_as)
         mp.setattr(gateway_main, "shared_http_client", lambda: _Ctx(fake))
         resp = client.post("/api/media/audiobookshelf/users/provision", json={"password": "temp-pass"})
 
@@ -131,12 +149,14 @@ def test_an_account_that_cannot_be_created_is_reported_not_swallowed(client):
     fake = _Client()
 
     async def exec_abs(creds, params, *, timeout=10.0):
-        if params["action"] == "user_create":
-            return {"user": {}}
         return _accounts({"id": "u1", "username": "sam", "type": "user", "has_token": True, "token": "sam-token"})
+
+    async def post_as(creds, endpoint, payload):
+        return _Answer({"status": "SUCCESS", "detail": {"user": {}}})
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(gateway_main, "_media_exec_audiobookshelf", exec_abs)
+        mp.setattr(gateway_main, "_execution_post_as", post_as)
         mp.setattr(gateway_main, "shared_http_client", lambda: _Ctx(fake))
         resp = client.post("/api/media/audiobookshelf/users/provision", json={"password": "temp-pass", "usernames": ["newbie"]})
 

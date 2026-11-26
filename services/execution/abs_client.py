@@ -471,14 +471,18 @@ async def create_user(abs_url: str, abs_api_key: str, username: str, password: s
         "username": username,
         "password": password,
         "type": "user",
+        # ABS 2.33 validates this object whole: a permissions dict that leaves
+        # createEreader out is a 400 Bad Request, which reads as "the server
+        # refused the account" rather than "one key is missing".
         "permissions": {
             "download": True,
             "update": True,
             "delete": False,
             "upload": True,
+            "createEreader": True,
             "accessAllLibraries": True,
             "accessAllTags": True,
-            "accessExplicitContent": True,
+            "accessExplicitContent": False,
         },
     })
 
