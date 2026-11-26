@@ -334,3 +334,39 @@ def test_a_calibration_from_an_older_version_is_not_reused():
     assert voice.calibration_is_current({"key": "ge2e:abc", "threshold": 0.782}, "ge2e:abc") is False
     assert voice.calibration_is_current(None, "ge2e:abc") is False
     assert voice.calibration_is_current(current, "ge2e:other") is False
+
+
+def test_the_windows_of_a_quiet_command_carry_the_voice_the_mean_lost():
+    """A short command is one or two 1.6 s windows; their mean sits near nobody."""
+    base = _direction(1)
+    dad = _profile("dad", base, takes=4, wobble=0.4)
+    # Two clean windows of dad, but an average that has drifted towards another voice.
+    windows = [_take(base, 10, 0.05), _take(base, 11, 0.05)]
+    embedding = _mix(base, _direction(9), 0.55)
+
+    without = voice.rank(embedding, [dad])[0]
+    with_windows = voice.rank(embedding, [dad], windows)[0]
+
+    assert without["window_score"] is None
+    assert with_windows["window_score"] is not None
+    assert with_windows["score"] > without["score"]
+    assert with_windows["score"] >= 0.8
+
+
+def test_one_lucky_window_is_not_enough_to_name_someone():
+    """Two windows have to agree: a single glimpse of the room could resemble anyone."""
+    base, stranger = _direction(2), _direction(7)
+    dad = _profile("dad", base, takes=4, wobble=0.4)
+    windows = [_take(stranger, 20, 0.02), _take(base, 21, 0.6)]
+
+    scored = voice.rank(_mix(base, stranger, 0.5), [dad], windows)[0]
+
+    assert scored["window_score"] is not None
+    assert scored["score"] < 0.8
+
+
+def test_a_take_keeps_its_windows_only_when_they_are_usable():
+    good = _direction(3)
+    assert voice.valid_partials([good, [1.0, 2.0], "nonsense"]) == [good]
+    assert voice.valid_partials(None) == []
+    assert len(voice.valid_partials([good] * 20)) == voice.MAX_PARTIALS

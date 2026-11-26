@@ -154,7 +154,11 @@ async def identify(samples: np.ndarray) -> dict | None:
         async with aiohttp.ClientSession() as client:
             resp = await client.post(
                 f"{IDENTITY_SVC_URL}/api/voice/identify",
-                json={"embedding": signature["embedding"], "model": signature["model"]},
+                json={
+                    "embedding": signature["embedding"],
+                    "partials": signature.get("partials") or [],
+                    "model": signature["model"],
+                },
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=_IDENTIFY_TIMEOUT,
             )
@@ -171,6 +175,7 @@ async def identify(samples: np.ndarray) -> dict | None:
     # Identity only returns the verdict. The proxy needs the signature to offer
     # this take to a learning or teaching session without running the model twice.
     verdict["embedding"] = signature["embedding"]
+    verdict["partials"] = signature.get("partials") or []
     verdict["model"] = signature.get("model")
     verdict["speech_seconds"] = signature.get("speech_seconds")
     verdict["snr_db"] = snr_db
