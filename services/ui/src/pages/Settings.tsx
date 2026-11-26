@@ -622,6 +622,16 @@ const AppUpdatesSection = () => {
     releaseNotes?: string;
     hasUpdate?: boolean;
   }>({ version: '', gitSha: '…' });
+  // A tap can start an async install; the component may be gone before it
+  // settles, and setting state then is a teardown error (and a promise left
+  // unhandled). Keep every late callback from touching this instance.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -659,6 +669,7 @@ const AppUpdatesSection = () => {
     setChecking(true);
     try {
       const res = await checkForAppUpdates({ silent: false });
+      if (!aliveRef.current) return;
       setUpdateInfo((prev) => ({
         ...prev,
         remoteSha: res.remoteGitSha,
@@ -668,10 +679,12 @@ const AppUpdatesSection = () => {
       }));
       // Re-probe for the full APK detail (version code, size) the combined
       // check does not return, so the notice reflects this press.
-      setApk(await checkApkUpdate());
+      const detail = await checkApkUpdate();
+      if (!aliveRef.current) return;
+      setApk(detail);
       setLastChecked(new Date());
     } finally {
-      setChecking(false);
+      if (aliveRef.current) setChecking(false);
     }
   };
 
@@ -937,8 +950,11 @@ const AppUpdatesSection = () => {
                   setApkError(null);
                   setApkPhase('installing');
                   void installVerifiedApk()
-                    .then(() => toast.success('Installer opened. Tap Install.', { id: 'apk-install' }))
+                    .then(() => {
+                      if (aliveRef.current) toast.success('Installer opened. Tap Install.', { id: 'apk-install' });
+                    })
                     .catch((err) => {
+                      if (!aliveRef.current) return;
                       setApkPhase('ready');
                       setApkError(err instanceof Error ? err.message : String(err));
                     });
@@ -956,12 +972,16 @@ const AppUpdatesSection = () => {
                   setApkError(null);
                   setApkPhase('downloading');
                   setProgress(null);
-                  void downloadApkWithProgress(apk.apkUrl!, apk.apkSha256!, (p) => setProgress(p))
+                  void downloadApkWithProgress(apk.apkUrl!, apk.apkSha256!, (p) => {
+                    if (aliveRef.current) setProgress(p);
+                  })
                     .then(() => {
+                      if (!aliveRef.current) return;
                       trigger('medium');
                       setApkPhase('ready');
                     })
                     .catch((err) => {
+                      if (!aliveRef.current) return;
                       setApkPhase('idle');
                       setApkError(err instanceof Error ? err.message : String(err));
                     });
@@ -981,7 +1001,7 @@ const AppUpdatesSection = () => {
               <button
                 onClick={() => {
                   trigger('medium');
-                  void downloadAndInstallApk(apk.apkUrl!);
+                  void downloadAndInstallApk(apk.apkUrl!).catch(() => {});
                 }}
                 className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
               >

@@ -2028,8 +2028,8 @@ export const api = {
   },
 
   // Presence
-  async getUserPresence(userId: string): Promise<{ status: string; user_id: string; presence: { room: string; confidence: number } | null }> {
-    const resp = await apiClient.get(`/api/presence/${userId}`);
+  async getUserPresence(userId: string, signal?: AbortSignal): Promise<{ status: string; user_id: string; presence: { room: string; confidence: number } | null }> {
+    const resp = await apiClient.get(`/api/presence/${userId}`, { signal });
     return resp.data;
   },
 
