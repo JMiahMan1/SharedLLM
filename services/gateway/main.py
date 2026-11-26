@@ -2798,6 +2798,27 @@ async def _resolve_identity_allow_anonymous(
     return await resolve_identity(payload)
 
 
+def _credential_presented(request, body) -> bool:
+    """Whether the caller offered a credential at all.
+
+    Deliberately forgiving about the shape of ``request``: the voice context is
+    read by tests and by loose callers with request-likes that have no ``url``,
+    and a credential check must never be able to fail a turn. Only presence is
+    reported - the route itself is what verifies the key.
+    """
+    try:
+        headers = getattr(request, "headers", None) or {}
+        if headers.get("Authorization") or headers.get("authorization"):
+            return True
+        url = getattr(request, "url", None)
+        query = getattr(url, "query", "") if url is not None else str(getattr(request, "query_params", "") or "")
+        if query and ("token=" in query or "api_key=" in query):
+            return True
+    except Exception:
+        pass
+    return bool((body or {}).get("api_key"))
+
+
 def _presented_api_key(request: Request) -> str:
     """The API key this request presents, from the header or the query string."""
     auth_header = request.headers.get("Authorization")
@@ -4312,7 +4333,7 @@ def _voice_context_from(request: Request, body: dict) -> dict | None:
         from services.common import voice_phone
 
         context = voice_phone.app_context(
-            raw, authenticated=bool(_presented_api_key(request) or body.get("api_key")))
+            raw, authenticated=_credential_presented(request, body))
         if context is None:
             log.warning("[ChatHandler] voice_context ignored: the caller is not internal")
         return context
