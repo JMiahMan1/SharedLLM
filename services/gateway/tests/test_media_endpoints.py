@@ -343,7 +343,7 @@ def test_item_abs_podcast_episode_numbers_that_are_not_numbers(client, upstream,
             "media": {
                 "metadata": {"title": "Night Signals", "authorName": "Someone"},
                 "episodes": [
-                    {"id": "ep1", "title": "Mass Hysteria", "duration": 60, "episode": ""},
+                    {"id": "ep1", "title": "Pilot Episode", "duration": 60, "episode": ""},
                     {"id": "ep2", "title": "An Extra", "duration": 60, "episode": "Bonus"},
                     {"id": "ep3", "title": "Third", "duration": 60, "episode": "3"},
                 ],
@@ -972,15 +972,15 @@ def test_search_lists_a_mirrored_podcast_once_as_the_audiobookshelf_item(client,
             "status": "SUCCESS",
             "detail": {
                 "books": [],
-                "podcasts": [{"id": "abs-haunted", "title": "Night Signals"}],
+                "podcasts": [{"id": "abs-signals", "title": "Night Signals"}],
                 "authors": [],
             },
         },
     )
-    body = client.get("/api/media/search", params={"q": "haunted"}).json()
+    body = client.get("/api/media/search", params={"q": "signals"}).json()
 
     uris = [item["uri"] for item in body["podcasts"]]
-    assert uris.count("abs://abs-haunted") == 1
+    assert uris.count("abs://abs-signals") == 1
     assert "library://podcast/15" not in uris
     # A show only Music Assistant has is not hidden by the one ABS knows.
     assert "library://podcast/22" in uris
@@ -998,8 +998,29 @@ def test_a_podcast_title_that_differs_only_in_punctuation_is_still_the_same_show
         ABS_DETAIL_URL,
         payload={
             "status": "SUCCESS",
-            "detail": {"books": [], "podcasts": [{"id": "abs-kings", "title": "the pioneers journal"}], "authors": []},
+            "detail": {"books": [], "podcasts": [{"id": "abs-journal", "title": "the pioneers journal"}], "authors": []},
         },
     )
-    body = client.get("/api/media/search", params={"q": "kings"}).json()
-    assert [item["uri"] for item in body["podcasts"]] == ["abs://abs-kings"]
+    body = client.get("/api/media/search", params={"q": "pioneers"}).json()
+    assert [item["uri"] for item in body["podcasts"]] == ["abs://abs-journal"]
+
+
+def test_blank_abs_podcast_title_does_not_drop_non_ascii_ma_podcasts(client, upstream, ma):
+    """An ABS entry whose title normalizes to empty must not wipe out non-ASCII MA shows."""
+    ma["responses"]["music/search"] = {
+        "podcasts": [
+            {"uri": "library://podcast/31", "name": "東京ポッドキャスト", "media_type": "podcast"},
+        ],
+    }
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {"books": [], "podcasts": [{"id": "abs-blank", "title": "..."}], "authors": []},
+        },
+    )
+    body = client.get("/api/media/search", params={"q": "podcast"}).json()
+    uris = [item["uri"] for item in body["podcasts"]]
+    assert "library://podcast/31" in uris

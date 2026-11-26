@@ -1,4 +1,4 @@
-import { useState, FC } from 'react';
+import { useState, useRef, FC } from 'react';
 import { 
   Cloud, 
   Music, 
@@ -131,14 +131,23 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
       ? (userData as Record<string, string>)?.[connectionKey]?.replace(/^https?:\/\//, '')
       : 'DISCONNECTED';
 
+  const pendingMissingRef = useRef<string[]>([]);
+
   const updateMutation = useMutation({
     mutationFn: (data: Partial<UserProfile>) => api.updateProfile(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['me'] });
       setIsOpen(false);
-      toast.success(`${name} configuration updated`);
+      const missing = pendingMissingRef.current;
+      pendingMissingRef.current = [];
+      if (missing.length) {
+        toast(`Saved. Still needed before it works: ${missing.join(', ')}`, { icon: '⚠️' });
+      } else {
+        toast.success(`${name} configuration updated`);
+      }
     },
     onError: (err: unknown) => {
+      pendingMissingRef.current = [];
       if (err instanceof Error) {
         toast.error(err.message || 'Update failed');
       } else {
@@ -424,11 +433,9 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             )}
             <button 
               onClick={() => {
-                if (missingList.length) {
-                  // Saved anyway: a token with no address is a half-finished login,
-                  // not a refusal. The warning below says what is still needed.
-                  toast(`Saved. Still needed before it works: ${missingList.join(', ')}`, { icon: '⚠️' });
-                }
+                // Saved anyway: a token with no address is a half-finished login,
+                // not a refusal. Show the warning only once the save actually succeeds.
+                pendingMissingRef.current = [...missingList];
                 // Only filled fields: blank keeps what is saved.
                 const finalForm: Record<string, unknown> = {
                   ...credentialPayload(form as Record<string, unknown>, fieldKeys, [], { saved: savedSecrets, prefilled }),

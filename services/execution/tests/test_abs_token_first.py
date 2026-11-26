@@ -42,11 +42,18 @@ async def test_the_filed_token_is_used_without_trying_the_password(monkeypatch) 
         audiobookshelf_pass="a password changed elsewhere",
     )
 
-    result = await abs_handler.handle_audiobookshelf(_req(ctx))
+    from services.execution import abs_session_state
 
-    assert result.status == "SUCCESS"
-    assert logins == [], "the password must not be tried when a token is filed"
-    assert used == ["filed-token"]
+    token = abs_session_state.current_relogin.set(None)
+    try:
+        result = await abs_handler.handle_audiobookshelf(_req(ctx))
+
+        assert result.status == "SUCCESS"
+        assert logins == [], "the password must not be tried when a token is filed"
+        assert used == ["filed-token"]
+        assert abs_session_state.current_relogin.get() is None
+    finally:
+        abs_session_state.current_relogin.reset(token)
 
 
 @pytest.mark.asyncio
@@ -72,8 +79,16 @@ async def test_a_stored_password_is_still_the_way_in_when_no_token_is_filed(monk
         audiobookshelf_pass="the household password",
     )
 
-    result = await abs_handler.handle_audiobookshelf(_req(ctx))
+    from services.execution import abs_session_state
 
-    assert result.status == "SUCCESS"
-    assert logins == [("https://abs.example.com", "jarvis", "the household password")]
-    assert used == ["minted-token"]
+    token = abs_session_state.current_relogin.set(None)
+    try:
+        result = await abs_handler.handle_audiobookshelf(_req(ctx))
+
+        assert result.status == "SUCCESS"
+        assert logins == [("https://abs.example.com", "jarvis", "the household password")]
+        assert used == ["minted-token"]
+        # Sessions opened via password login must register relogin so expired tokens can refresh.
+        assert callable(abs_session_state.current_relogin.get())
+    finally:
+        abs_session_state.current_relogin.reset(token)
