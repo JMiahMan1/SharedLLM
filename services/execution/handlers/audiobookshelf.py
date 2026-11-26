@@ -25,10 +25,12 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
             message="Audiobookshelf URL not configured.",
             service="audiobookshelf",
         )
-    if username and password:
-        # Prefer a fresh token; the stored API key may be stale/expired. If the
-        # login does not come back we still have the stored key, but say so:
-        # silently continuing hides a broken login route behind a working cache.
+    if username and password and not abs_key:
+        # A filed token is the credential an administrator minted for this household,
+        # so a login is only the way in when there is no token at all. A stored
+        # password can go stale without anyone noticing (the account's password was
+        # changed elsewhere), and trying it first turned every request into a 401 in
+        # the log before the working key was used.
         fresh = await abs_client.abs_login(abs_url, username, password)
         if fresh:
             abs_key = fresh
@@ -38,7 +40,7 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
                 "If requests start failing with 401, check the ABS username/password.",
                 username,
             )
-    if username and password:
+    if username and password and not abs_key:
         # Sessions started for this request can log in again if their token expires mid-listen.
         abs_session_state.current_relogin.set(
             lambda: abs_client.abs_login(abs_url, username, password, force=True)
