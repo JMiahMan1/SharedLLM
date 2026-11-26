@@ -291,6 +291,9 @@ SCHEMA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("useravatarimage", "original_mime", "ALTER TABLE useravatarimage ADD COLUMN original_mime VARCHAR"),
     ("useravatarimage", "crop", "ALTER TABLE useravatarimage ADD COLUMN crop VARCHAR"),
     ("deviceassignment", "revoked", "ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0"),
+    # The app a child installed, as the phone described it: version, source, size, what it can
+    # reach, its signer and file hash. An install already holding an answer keeps an empty one.
+    ("guardrequest", "meta", "ALTER TABLE guardrequest ADD COLUMN meta VARCHAR NOT NULL DEFAULT ''"),
 )
 
 
