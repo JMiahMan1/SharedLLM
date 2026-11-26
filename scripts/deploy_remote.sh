@@ -46,6 +46,7 @@ if [ -z "$SERVICES" ]; then
     echo "       $0 <host> <path> <service> [service...]"
     exit 1
 fi
+
 echo "[OK] Services to deploy on ${HOST}: $SERVICES"
 
 # Function to wait ONLY for the image build (Build & Push Images) to finish.
@@ -119,6 +120,20 @@ wait_for_build() {
 # services/common since (CI only rebuilds changed services, so an unchanged
 # one legitimately keeps the image of the last commit that changed it).
 # Anything else, or no report at all, fails the deploy and names the service.
+#: The paths an image is built from, for "did CI rebuild this service since
+#: that revision" questions. Caddy is the one service whose image comes from a
+#: file at the repository root rather than services/<name>, so testing it
+#: against services/caddy claimed a stale image every time services/common
+#: moved, and failed a deploy whose caddy image was in fact current.
+built_from() {
+    case "$1" in
+        caddy) echo "Caddyfile" ;;
+        ui) echo "services/ui" ;;
+        *) echo "services/$1 services/common" ;;
+    esac
+}
+
+
 verify_deployed_revisions() {
     local expect="$1" log="$2" service rev bad=0
     shift 2
@@ -140,7 +155,7 @@ verify_deployed_revisions() {
             echo "[OK] $service is on ${expect:0:12}"
         elif git cat-file -e "${rev}^{commit}" 2>/dev/null \
             && git merge-base --is-ancestor "$rev" "$expect" 2>/dev/null \
-            && [ -z "$(git log --format=%H "${rev}..${expect}" -- "services/${service}" services/common 2>/dev/null)" ]; then
+            && [ -z "$(git log --format=%H "${rev}..${expect}" -- $(built_from "$service") 2>/dev/null)" ]; then
             echo "[OK] $service is on ${rev:0:12} (unchanged since; CI did not rebuild it)"
         else
             echo "[FAIL] $service is running revision ${rev:0:12}, expected ${expect:0:12}"
@@ -400,6 +415,24 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
     # server sit on a months-old commit while deploys reported success.
     DEPLOYED_SHA=\$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     echo "Server now at commit: \$DEPLOYED_SHA"
+
+    # A name that is not in the compose file does not fail just itself: docker
+    # compose rejects the whole invocation ("no such service: cast_watch") and
+    # both the pull and the recreate do nothing, so the deploy then fails
+    # verification with every service still on its old image. Checked here,
+    # where the .env the compose file needs is present, and before anything is
+    # pulled or recreated.
+    UNKNOWN=""
+    for service in $SERVICES; do
+        docker compose config --services 2>/dev/null | grep -qx "\$service" || UNKNOWN="\$UNKNOWN \$service"
+    done
+    if [ -n "\$UNKNOWN" ]; then
+        echo "[FAIL] Not a service in docker-compose.yml:\$UNKNOWN"
+        echo "       Compose would refuse the whole deploy. Known services:"
+        docker compose config --services 2>/dev/null | tr '\\n' ' ' | fold -s -w 100 | sed 's/^/       /'
+        echo ""
+        exit 1
+    fi
 
     echo "Pulling latest images from GHCR and starting Docker containers..."
     # Scoped to the services this deploy rebuilt. With no service names this
