@@ -101,12 +101,12 @@ def test_one_account_is_created_and_its_token_filed(client):
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(gateway_main, "_execution_post_as", post_as)
         mp.setattr(gateway_main, "shared_http_client", lambda: _Ctx(fake))
-        resp = client.post("/api/media/audiobookshelf/users", json={"username": "Kaleb", "password": "temp-pass"})
+        resp = client.post("/api/media/audiobookshelf/users", json={"username": "Robin", "password": "temp-pass"})
 
     assert resp.status_code == 200, resp.text
-    assert seen[0] == {"action": "user_create", "username": "Kaleb", "password": "temp-pass"}
+    assert seen[0] == {"action": "user_create", "username": "Robin", "password": "temp-pass"}
     # The browser is told the account exists; it is never handed the token.
-    assert resp.json()["user"] == {"id": "u9", "username": "Kaleb", "type": "user", "has_token": True}
+    assert resp.json()["user"] == {"id": "u9", "username": "Robin", "type": "user", "has_token": True}
     assert "new-token" not in resp.text
 
 

@@ -85,7 +85,7 @@ def _search_result(*, abs_id: str = NARNIA_ABS_ID, uri: str = "library://audiobo
                     {
                         "item_id": abs_id,
                         "provider_domain": "audiobookshelf",
-                        "provider_instance": "audiobookshelf--EpUcRzwM",
+                        "provider_instance": "audiobookshelf--testinst",
                         "available": available,
                         "in_library": True,
                     }
@@ -567,7 +567,7 @@ def _podcast_search(abs_id: str = NARNIA_ABS_ID) -> dict:
 def _episode(n: int, published: int) -> dict:
     return {
         "name": f"Episode {n}", "duration": 1800, "position": published,
-        "uri": f"audiobookshelf--EpUcRzwM://podcast_episode/{NARNIA_ABS_ID} ep-{n}",
+        "uri": f"audiobookshelf--testinst://podcast_episode/{NARNIA_ABS_ID} ep-{n}",
     }
 
 
@@ -596,14 +596,14 @@ async def test_episodes_of_a_book_are_refused(fake_connect):
 
 def _provider_item(*, abs_id: str = NARNIA_ABS_ID, media_type: str = "audiobook", available=True) -> dict:
     return {
-        "uri": f"audiobookshelf--EpUcRzwM://{media_type}/{abs_id}",
+        "uri": f"audiobookshelf--testinst://{media_type}/{abs_id}",
         "name": "A Book Added Today",
-        "provider": "audiobookshelf--EpUcRzwM",
+        "provider": "audiobookshelf--testinst",
         "provider_mappings": [
             {
                 "item_id": abs_id,
                 "provider_domain": "audiobookshelf",
-                "provider_instance": "audiobookshelf--EpUcRzwM",
+                "provider_instance": "audiobookshelf--testinst",
                 "available": available,
             }
         ],
@@ -630,7 +630,7 @@ class TestNotYetInMALibrary:
         assert resolved.ma_uri == "library://audiobook/200"
         sent = [(f["command"], f.get("args")) for f in opened[0].sent]
         assert ("music/item_by_uri", {"uri": f"audiobookshelf://audiobook/{NARNIA_ABS_ID}"}) in sent
-        assert ("music/library/add_item", {"item": f"audiobookshelf--EpUcRzwM://audiobook/{NARNIA_ABS_ID}"}) in sent
+        assert ("music/library/add_item", {"item": f"audiobookshelf--testinst://audiobook/{NARNIA_ABS_ID}"}) in sent
 
     async def test_plays_by_provider_uri_when_the_library_add_fails(self, fake_connect):
         fake_connect({
@@ -640,7 +640,7 @@ class TestNotYetInMALibrary:
             "music/library/add_item": MAError("read-only library"),
         })
         resolved = await _resolve()
-        assert resolved.ma_uri == f"audiobookshelf--EpUcRzwM://audiobook/{NARNIA_ABS_ID}"
+        assert resolved.ma_uri == f"audiobookshelf--testinst://audiobook/{NARNIA_ABS_ID}"
 
     async def test_a_provider_item_for_another_id_is_not_a_match(self, fake_connect):
         fake_connect({
@@ -702,7 +702,7 @@ class TestPerUserProviderFilterIsolation:
                     "provider_filter": ["opensubsonic--m1", "audiobookshelf--zach1"],
                 },
             },
-            "music/search": _search_result(),  # provider_instance is audiobookshelf--EpUcRzwM
+            "music/search": _search_result(),  # provider_instance is audiobookshelf--testinst
             "music/item_by_uri": zach_provider_item,
             "music/library/add_item": {"uri": "library://audiobook/260", "name": "The Chronicles of Narnia"},
         })
