@@ -5821,6 +5821,25 @@ export const api = {
   },
 
   /**
+   * Create any missing Audiobookshelf account for a household member and file each
+   * one's own token. Needs a temporary password for the accounts it creates, and an
+   * administrator token on the default account. Admin only.
+   */
+  async provisionAudiobookshelfAccounts(password: string, usernames?: string[]): Promise<{
+    status: string;
+    created: string[];
+    filed: Array<{ username: string; audiobookshelf_user: string }>;
+    skipped: Array<{ username: string; reason: string }>;
+  }> {
+    const resp = await apiClient.post(
+      '/api/media/audiobookshelf/users/provision',
+      usernames && usernames.length ? { password, usernames } : { password },
+      { timeout: 120000 },
+    );
+    return resp.data;
+  },
+
+  /**
    * Give each member their own Audiobookshelf token, copied from the account of
    * the same name (Audiobookshelf issues one token per account and has no API to
    * mint another). Admin only. Names are read at the time of the call, so

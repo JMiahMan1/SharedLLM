@@ -119,4 +119,31 @@ describe('Identity credentials', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('1 given their own token');
     expect(screen.getByRole('status')).toHaveTextContent('sam (no Audiobookshelf account with that name)');
   });
+
+  it('creates the missing Audiobookshelf accounts with the password the admin types', async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.post('/api/media/audiobookshelf/users/provision', async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({
+          status: 'SUCCESS',
+          created: ['kaleb', 'noah'],
+          filed: [{ username: 'kaleb', audiobookshelf_user: 'kaleb' }],
+          skipped: [{ username: 'noah', reason: 'Identity answered 500' }],
+        });
+      }),
+    );
+
+    renderWithProviders(<Identity />);
+    const user = await openTile('Audiobookshelf');
+
+    await user.type(await screen.findByLabelText('Temporary password for any account created here'), 'temp-pass');
+    await user.click(screen.getByTestId('abs-provision-accounts'));
+
+    await waitFor(() => expect(bodies).toEqual([{ password: 'temp-pass' }]));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('2 account(s) created');
+    expect(status).toHaveTextContent('1 given a token');
+    expect(status).toHaveTextContent('noah (Identity answered 500)');
+  });
 });

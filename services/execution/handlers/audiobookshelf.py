@@ -114,6 +114,9 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
         elif action == "users":
             return await _handle_users(abs_url, abs_key)
 
+        elif action == "user_create":
+            return await _handle_user_create(abs_url, abs_key, req)
+
         return ExecutionResult(
             status="FAILURE",
             message=f"Action '{action}' not supported.",
@@ -1313,6 +1316,39 @@ async def _handle_users(abs_url: str, abs_key: str) -> ExecutionResult:
         message=f"Found {len(users)} Audiobookshelf user(s).",
         service="audiobookshelf",
         detail={"users": users},
+    )
+
+
+async def _handle_user_create(abs_url: str, abs_key: str, req: AudiobookshelfRequest) -> ExecutionResult:
+    """Make an Audiobookshelf account, and hand back the token it comes with.
+
+    Only an administrator credential can do this, which is why the household keeps
+    one on the default account rather than on a person's own login.
+    """
+    username = (req.username or "").strip()
+    password = req.password or ""
+    if not username:
+        return ExecutionResult(status="FAILURE", message="A username is required to create an Audiobookshelf account.", service="audiobookshelf")
+    if not password:
+        return ExecutionResult(status="FAILURE", message="A password is required to create an Audiobookshelf account.", service="audiobookshelf")
+    reply = await abs_client.create_user(abs_url, abs_key, username, password)
+    user = (reply or {}).get("user") or {}
+    if not user or (reply or {}).get("error"):
+        reason = (reply or {}).get("error") or "Audiobookshelf did not return the new account"
+        return ExecutionResult(status="FAILURE", message=f"Could not create the Audiobookshelf account: {reason}", service="audiobookshelf")
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Created the Audiobookshelf account {user.get('username')}.",
+        service="audiobookshelf",
+        detail={
+            "user": {
+                "id": user.get("id"),
+                "username": user.get("username"),
+                "type": user.get("type"),
+                "has_token": bool(user.get("token")),
+                "token": user.get("token"),
+            }
+        },
     )
 
 

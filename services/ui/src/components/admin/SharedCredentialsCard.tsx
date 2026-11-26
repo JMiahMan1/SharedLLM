@@ -1,6 +1,6 @@
 import { useState, type FC } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, Users } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, UserPlus, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { useIntegrations } from '../../hooks/useIntegrations';
@@ -29,6 +29,8 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
   const queryClient = useQueryClient();
   const [note, setNote] = useState('');
   const [tokenResult, setTokenResult] = useState<string>('');
+  const [absPassword, setAbsPassword] = useState('');
+  const [showAbsPassword, setShowAbsPassword] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['credential-shares', username],
@@ -75,6 +77,30 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : 'Could not file the tokens');
+    },
+  });
+
+  // An administrator token is enough for Audiobookshelf to make accounts, and it
+  // answers with each new account's own token, so the household can be set up from
+  // here without anyone signing in to the server by hand.
+  const provision = useMutation({
+    mutationFn: () => api.provisionAudiobookshelfAccounts(absPassword),
+    onSuccess: (result) => {
+      const created = result.created.length;
+      const filed = result.filed.length;
+      const skipped = result.skipped;
+      setTokenResult(
+        `${created} account(s) created, ${filed} given a token` +
+          (skipped.length
+            ? `; ${skipped.length} not: ` + skipped.map((s) => `${s.username} (${s.reason})`).join(', ')
+            : ''),
+      );
+      setAbsPassword('');
+      queryClient.invalidateQueries({ queryKey: ['me'] });
+      toast.success(`${filed} member(s) now have their own Audiobookshelf token`);
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Could not set the accounts up');
     },
   });
 
@@ -186,6 +212,45 @@ export const SharedCredentialsCard: FC<{ username: string; isAdmin: boolean; isS
               {tokenResult}
             </p>
           ) : null}
+
+          <div className="pt-2 space-y-2">
+            <label className="block text-[10px] text-slate-500" htmlFor="abs-account-password">
+              Temporary password for any account created here
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                id="abs-account-password"
+                type={showAbsPassword ? 'text' : 'password'}
+                value={absPassword}
+                onChange={(e) => setAbsPassword(e.target.value)}
+                autoComplete="new-password"
+                className="glass-input flex-1 text-xs py-2 bg-black/20 font-mono"
+              />
+              <button
+                type="button"
+                aria-label={showAbsPassword ? 'Hide password' : 'Show password'}
+                onClick={() => setShowAbsPassword((on) => !on)}
+                className="glass-button min-h-11 px-2"
+              >
+                {showAbsPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+            <button
+              type="button"
+              data-testid="abs-provision-accounts"
+              onClick={() => provision.mutate()}
+              disabled={provision.isPending || !absPassword}
+              className="glass-button min-h-11 px-3 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 disabled:opacity-40"
+            >
+              <UserPlus size={14} />
+              {provision.isPending ? 'Setting accounts up…' : 'Create missing Audiobookshelf accounts'}
+            </button>
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              Anyone in this household without an Audiobookshelf account gets one with this password (they can
+              change it), and everyone&apos;s own token is filed straight after. Only works while the default
+              account holds an administrator token.
+            </p>
+          </div>
         </div>
       ) : null}
     </div>

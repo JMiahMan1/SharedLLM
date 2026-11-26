@@ -20286,6 +20286,138 @@ async def list_abs_users(request: Request):
     return {"status": "SUCCESS", "users": users}
 
 
+@app.post("/api/media/audiobookshelf/users")
+async def create_abs_user(request: Request):
+    """Make one Audiobookshelf account with the household's administrator token."""
+    await _require_admin(request)
+    creds = await _resolve_identity_from_request(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    username = str(body.get("username") or "").strip()
+    password = str(body.get("password") or "")
+    if not username or not password:
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "A username and a password are required."})
+    try:
+        detail = await _media_exec_audiobookshelf(
+            creds,
+            {"action": "user_create", "username": username, "password": password},
+            timeout=ABS_PODCAST_TIMEOUT,
+        )
+    except _MediaUpstreamError as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": str(e)})
+    user = detail.get("user") or {}
+    return {"status": "SUCCESS", "user": {"id": user.get("id"), "username": user.get("username"), "type": user.get("type"), "has_token": user.get("has_token", False)}}
+
+
+@app.post("/api/media/audiobookshelf/users/provision")
+async def provision_abs_users(request: Request):
+    """Create any missing Audiobookshelf account, then file everyone their token.
+
+    Audiobookshelf lets an administrator create an account and answers with that
+    account's token, so one administrator credential - kept on the default account -
+    is enough to set the whole household up. Nothing is hardcoded: the members come
+    from Identity and the accounts from Audiobookshelf, both read at call time.
+    """
+    admin = await _require_admin(request)
+    creds = await _resolve_identity_from_request(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    password = str(body.get("password") or "")
+    if not password:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "FAILURE", "message": "A temporary password is required to create an account."},
+        )
+    wanted = [str(name).strip().lower() for name in (body.get("usernames") or []) if str(name).strip()]
+
+    if not wanted:
+        try:
+            async with shared_http_client() as client:
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/users",
+                    headers={
+                        "Authorization": request.headers.get("authorization", ""),
+                        "X-Internal-Secret": INTERNAL_SECRET,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=8.0),
+                )
+                people = await resp.json() if resp.status == 200 else []
+        except (TimeoutError, aiohttp.ClientError):
+            people = []
+        wanted = sorted({
+            str(person.get("username") or "").strip().lower()
+            for person in (people if isinstance(people, list) else [])
+            if str(person.get("username") or "").strip()
+        })
+
+    try:
+        detail = await _media_exec_audiobookshelf(creds, {"action": "users"}, timeout=ABS_PODCAST_TIMEOUT)
+    except _MediaUpstreamError as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": str(e)})
+    accounts = {(entry.get("username") or "").strip().lower(): entry for entry in detail.get("users") or []}
+
+    created: list[str] = []
+    skipped: list[dict] = []
+    reported: set[str] = set()
+    for username in wanted:
+        if username in accounts:
+            continue
+        try:
+            made = await _media_exec_audiobookshelf(
+                creds,
+                {"action": "user_create", "username": username, "password": password},
+                timeout=ABS_PODCAST_TIMEOUT,
+            )
+        except _MediaUpstreamError as e:
+            skipped.append({"username": username, "reason": f"could not create: {e}"})
+            reported.add(username)
+            continue
+        user = made.get("user") or {}
+        if not user:
+            skipped.append({"username": username, "reason": "Audiobookshelf did not return the new account"})
+            reported.add(username)
+            continue
+        # Filed below. An account that came back without a token is reported there
+        # once, as a token that is not there yet, rather than twice here.
+        accounts[username] = user
+        created.append(username)
+
+    filed: list[dict] = []
+    async with shared_http_client() as client:
+        for username in wanted:
+            if username in reported:
+                continue
+            account = accounts.get(username)
+            if not account:
+                skipped.append({"username": username, "reason": "no Audiobookshelf account with that name"})
+                continue
+            token = str(account.get("token") or "").strip()
+            if not token:
+                skipped.append({"username": username, "reason": "Audiobookshelf has no token for this account yet"})
+                continue
+            try:
+                resp = await client.post(
+                    f"{IDENTITY_SVC}/api/users/{username}/audiobookshelf-token",
+                    json={"token": token, "audiobookshelf_user": account.get("username")},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if resp.status != 200:
+                    skipped.append({"username": username, "reason": f"Identity answered {resp.status}"})
+                    continue
+            except (TimeoutError, aiohttp.ClientError) as e:
+                skipped.append({"username": username, "reason": f"Identity unreachable: {type(e).__name__}"})
+                continue
+            filed.append({"username": username, "audiobookshelf_user": account.get("username")})
+
+    log.info(f"[abs/users] {admin} created {len(created)} account(s), filed {len(filed)} token(s), skipped {len(skipped)}")
+    return {"status": "SUCCESS", "created": created, "filed": filed, "skipped": skipped}
+
+
 @app.post("/api/media/audiobookshelf/users/tokens")
 async def issue_abs_user_tokens(request: Request):
     """Give members their own Audiobookshelf token, from the household's admin one.
