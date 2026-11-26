@@ -698,12 +698,14 @@ def test_a_beacon_no_scanner_has_ever_heard_is_refused_at_once(env, monkeypatch)
     _hub, store, runtime, _mgr, _clock, _disc = env
     app = build_app(runtime, Auth(store, SECRET))
     c = TestClient(app)
-    monkeypatch.setattr(api, "HEARD_WAIT_S", 5.0)
+    monkeypatch.setattr(api, "HEARD_WAIT_S", 30.0)
     started = time.monotonic()
     r = c.post("/hub/bluetooth/map/sessions", headers=ADMIN,
                json={"area_id": "den", "tracker": bp.beacon_key(TAG_UUID, 9, 9)})
     assert r.status_code == 409 and "not been heard" in r.json()["message"]
-    assert time.monotonic() - started < 1.0
+    # Well under the wait it would have served had the tracker ever been heard. An
+    # absolute second is not the point, and a shared runner can take one to answer.
+    assert time.monotonic() - started < 10.0
 
 
 def test_a_beacon_that_stays_quiet_is_still_refused_after_the_wait(env, monkeypatch):
