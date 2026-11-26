@@ -256,9 +256,26 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
 
               return (
                 <div key={key}>
-                  <div className="flex items-center mb-2">
+                  <div className="flex items-center gap-2 mb-2">
                     <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</span>
                     <HelpTooltip docName="INTEGRATIONS.md" sectionTitle={name} label={label} />
+                    {savedSecrets.has(key) && !isReadOnly && (
+                      // Removing one saved value, not the whole login: a token
+                      // that has expired can go without retyping the address.
+                      <button
+                        type="button"
+                        data-testid={`credential-remove-${key}`}
+                        onClick={() => {
+                          setForm({ ...form, [key]: '' });
+                          updateMutation.mutate({ clear_fields: [key] } as Partial<UserProfile>);
+                        }}
+                        disabled={updateMutation.isPending}
+                        className="ml-auto text-[10px] font-bold uppercase tracking-widest text-rose-300 hover:underline min-h-11 px-2"
+                        title={`Remove the saved ${label}`}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                   {isSecret ? (
                     <SecretInput
@@ -408,8 +425,9 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             <button 
               onClick={() => {
                 if (missingList.length) {
-                  toast.error(`Fill in ${missingList.join(', ')} before saving`);
-                  return;
+                  // Saved anyway: a token with no address is a half-finished login,
+                  // not a refusal. The warning below says what is still needed.
+                  toast(`Saved. Still needed before it works: ${missingList.join(', ')}`, { icon: '⚠️' });
                 }
                 // Only filled fields: blank keeps what is saved.
                 const finalForm: Record<string, unknown> = {
@@ -424,8 +442,8 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                 }
                 updateMutation.mutate(finalForm as Partial<UserProfile>);
               }}
-              disabled={updateMutation.isPending || missingList.length > 0}
-              title={missingList.length ? `Still needed: ${missingList.join(', ')}` : undefined}
+              disabled={updateMutation.isPending}
+              title={missingList.length ? `Still needed before it works: ${missingList.join(', ')}` : undefined}
               className="glass-button flex-1 py-3 bg-purple-600/40 border-purple-500/30 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest"
             >
               <Save size={18} />
@@ -433,7 +451,9 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             </button>
           </div>
           {missingList.length > 0 && (
-            <p className="text-[11px] text-amber-300">Still needed: {missingList.join(', ')}</p>
+            <p className="text-[11px] text-amber-300">
+              Still needed before {name} works: {missingList.join(', ')}. You can save what you have.
+            </p>
           )}
           {isConnected && !(name === 'Skylight' && !userData?.is_system_default) && (
             <div className="border-t border-white/5 pt-3">

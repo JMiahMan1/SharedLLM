@@ -2748,6 +2748,11 @@ def _apply_user_update(user: User, update_data: dict, clear_fields: list[str] | 
         value = _coerce_profile_value(key, value)
         if value is None and key != "display_name":
             continue  # blank: unchanged (use clear_fields to erase)
+        if isinstance(value, str) and not value.strip() and key != "display_name":
+            # An empty string is blank too, and blank never erases. Writing it
+            # stored "" on a plain field (a URL, a username), which then read as
+            # "never set" everywhere except the database, where it was a value.
+            continue
         setattr(user, key, value)
 
 
