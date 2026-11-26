@@ -11,7 +11,7 @@ const web = vi.hoisted(() => ({ state: {} as Record<string, unknown> }));
 vi.mock('../../../context/MediaPlayerContext', () => ({ useSharedMAWebPlayer: () => web.state }));
 
 import Media from '../../../pages/Media';
-import { lineFor, problemFor, shortDate } from '../components/AbsPodcasts';
+import { lineFor, problemFor, shortDate } from '../components/absPodcastsText';
 
 const today = new Date();
 const daysAgo = (days: number) => new Date(today.getTime() - days * 86_400_000).toISOString();
