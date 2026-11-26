@@ -33,7 +33,7 @@ public class JarvisAssistPlugin extends Plugin {
     };
 
     @Override
-    protected void load() {
+    public void load() {
         AssistService.addListener(listener);
     }
 

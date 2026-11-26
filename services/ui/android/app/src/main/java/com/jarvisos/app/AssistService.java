@@ -256,7 +256,7 @@ public final class AssistService extends Service {
 
             @Override
             public void failed(String reason) {
-                if (VoiceTurnRules.signInProblem(reason)) {
+                if (VoiceClient.signInProblem(reason)) {
                     emit(EV_ERROR, "Sign in to Jarvis again on this phone.", 0);
                 } else if (firstSentenceAt == 0) {
                     emit(EV_ERROR, VoiceTurnRules.ack(VoiceTurnRules.Ack.NO_ANSWER), 0);

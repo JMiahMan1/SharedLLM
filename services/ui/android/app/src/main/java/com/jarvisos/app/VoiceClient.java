@@ -137,7 +137,7 @@ final class VoiceClient {
                     continue;          // a partial or an SSE comment: skip, never fail the turn
                 }
                 if (chunk.optBoolean("speech") && chunk.optJSONObject("message") != null) {
-                    String said = chunk.getJSONObject("message").optString("content", "");
+                    String said = chunk.optJSONObject("message").optString("content", "");
                     if (!said.trim().isEmpty()) stream.sentence(said.trim());
                 }
                 if (chunk.optBoolean("done")) {
