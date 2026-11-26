@@ -290,7 +290,10 @@ final class GuardApi {
 
     /** New apps wait for a parent's OK (the server's word; off until it has spoken). */
     static boolean installApprovalRequired(Context context) {
-        return lastStatus(context).optBoolean("install_approval", false);
+        // On until the server says otherwise: an app installed before this phone
+        // has ever reached the server is held, not let through. A parent who
+        // switches the rule off is believed on the next status.
+        return lastStatus(context).optBoolean("install_approval", true);
     }
 
     /**
@@ -349,12 +352,24 @@ final class GuardApi {
     }
 
     static String askParent(Context context, String kind, String target, String label, String note) {
+        return askParent(context, kind, target, label, note, null);
+    }
+
+    /**
+     * The same, with the app's own profile (name, version, where it came from,
+     * what it can reach, who signed it) so the parent is looking at the app
+     * rather than at its package name. A profile the package manager could not
+     * give is left out, never filled in with a guess.
+     */
+    static String askParent(Context context, String kind, String target, String label, String note,
+                            JSONObject profile) {
         try {
             JSONObject body = new JSONObject();
             body.put("kind", kind);
             body.put("target", target);
             if (label != null && !label.isEmpty()) body.put("label", label);
             if (note != null && !note.trim().isEmpty()) body.put("note", note.trim());
+            if (profile != null) body.put("profile", profile);
             HttpResult r = send(context, "POST", "/api/guard/requests", body.toString());
             if (r == null) return "No connection to Jarvis. Try again when the " + DeviceNoun.of(context) + " is online.";
             if (r.status == 200) return null;

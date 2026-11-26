@@ -150,4 +150,34 @@ describe('RequestsCard with a verdict', () => {
     expect(screen.getByTestId('request-verdict-5')).toHaveTextContent('Checking its Play listing and reviews');
   });
 
+  it("shows the app's own profile and the scan of it, so the parent is not deciding on a package name", async () => {
+    server.use(
+      http.get('*/api/guard/requests', () => HttpResponse.json({ requests: [{
+        id: 6, username: 'kid', kind: 'app', target: 'com.example.starchart', label: 'Star Chart', note: '',
+        status: 'pending', until: null, decided_by: null, created_at: '2026-11-15T10:00:00Z', decided_at: null,
+        meta: { version_name: '4.2.1', version_code: 4210, installer: null, size_bytes: 12 * 1024 * 1024,
+          permissions: ['camera'], capabilities: ['sms_send'], special_access: ['accessibility'],
+          cert_sha1: ['AB'.repeat(20)], apk_sha256: 'a'.repeat(64), apk_hash_state: 'ok' },
+        vetting: { lookup: 'found', line: 'Rated Everyone.',
+          security: [{ check: 'sideloaded', severity: 'medium',
+            text: 'Not installed from Google Play, and Android does not say where it came from' },
+            { check: 'risky_access', severity: 'high', text: 'It can send text messages, which can cost money' }],
+          security_level: 'high', concerns: [] },
+      }] })),
+      http.get('*/api/screen-time/requests', () => HttpResponse.json({ requests: [] })),
+    );
+    renderWithProviders(<RequestsCard username="kid" name="Sam" kinds={['app']} />);
+    const profile = await screen.findByTestId('app-profile-6');
+    expect(profile).toHaveTextContent('Version 4.2.1 (4210)');
+    expect(profile).toHaveTextContent('Installed directly, not from a store (sideloaded)');
+    expect(profile).toHaveTextContent('12 MB');
+    expect(profile).toHaveTextContent('read everything on the screen');
+    expect(profile).toHaveTextContent('send texts');
+    expect(profile).toHaveTextContent('Signed by ABABABABABAB');
+    expect(profile).toHaveTextContent('checked against known bad apps');
+    const verdict = screen.getByTestId('request-verdict-6');
+    expect(verdict).toHaveTextContent('Not installed from Google Play');
+    expect(verdict).toHaveTextContent('It can send text messages');
+  });
+
 });

@@ -6658,7 +6658,7 @@ def _clean_screen_rules(body: dict) -> dict:
             if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 1440:
                 raise HTTPException(status_code=422, detail=f"{key} must be whole minutes from 0 to 1440")
             out[key] = value
-    # The weekly schedule (Family Link's "a limit per day"): {weekday: minutes},
+    # The weekly schedule (a limit per day): {weekday: minutes},
     # each day overriding the daily and weekend limits.
     if body.get("day_limits") is not None:
         days = body["day_limits"]
@@ -7399,8 +7399,8 @@ def decide_screen_time_request(request_id: int, body: dict, session: Session = D
 
 @app.post("/api/screen-time/{username}/bonus")
 def give_screen_time_bonus(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A parent adds minutes to today without being asked (Family Link's bonus
-    time); a grown member may add their own."""
+    """A parent adds minutes to today without being asked (bonus time); a
+    grown member may add their own."""
     subject = _screen_subject(session, username)
     if not _may_edit_screen_time(caller, subject):
         raise HTTPException(status_code=403, detail="Only a parent can add a minor's time")
@@ -7582,11 +7582,22 @@ def internal_decide_chore_check(check_id: int, body: dict, session: Session = De
 GUARD_REQUEST_KINDS = ("app", "app_unblock", "permission", "site")
 
 
+def _guard_request_meta(r: GuardRequest) -> dict:
+    """The app profile the phone sent, or {} when there was none (or it is unreadable)."""
+    if not r.meta:
+        return {}
+    try:
+        value = json.loads(r.meta)
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def _guard_request_read(r: GuardRequest) -> dict:
     return {
         "id": r.id, "username": r.username, "kind": r.kind, "target": r.target, "label": r.label,
-        "note": r.note, "status": r.status, "until": r.until, "decided_by": r.decided_by,
-        "created_at": r.created_at, "decided_at": r.decided_at,
+        "note": r.note, "meta": _guard_request_meta(r), "status": r.status, "until": r.until,
+        "decided_by": r.decided_by, "created_at": r.created_at, "decided_at": r.decided_at,
     }
 
 
@@ -7621,6 +7632,32 @@ def _clean_guard_target(kind: str, target: str) -> str:
     return domain
 
 
+#: The version fields a phone sends with an app request; bounded, never trusted raw.
+_GUARD_PROFILE_VERSION_CHARS = 40
+
+
+def _clean_guard_profile(kind: str, raw: object, target: str) -> dict:
+    """The app profile on a request, cleaned by the same rules as an inventory row.
+
+    A phone sends what its package manager knows about the app it just installed
+    (version, installer, size, what it can reach, who signed it) so the parent is
+    deciding about the app, not its package name. Anything unrecognised is
+    dropped: the scan and the age rating are computed from these fields, so a
+    made-up one must not reach them.
+    """
+    if kind not in ("app", "app_unblock") or not isinstance(raw, dict):
+        return {}
+    cleaned = app_vetting.clean_inventory_app({**raw, "package": target})
+    if not cleaned:
+        return {}
+    version_name = raw.get("version_name")
+    version_code = raw.get("version_code")
+    cleaned["version_name"] = str(version_name)[:_GUARD_PROFILE_VERSION_CHARS] if version_name else None
+    cleaned["version_code"] = (int(version_code) if isinstance(version_code, int) and not isinstance(version_code, bool)
+                              and 0 <= version_code < 10 ** 12 else None)
+    return cleaned
+
+
 @app.post("/api/guard/requests")
 def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     """A child asks a parent first: ``{"kind": "app"|"app_unblock"|"permission"|"site", "target", "label"?, "note"?}``.
@@ -7641,8 +7678,16 @@ def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: Us
             GuardRequest.username == caller.username, GuardRequest.kind == kind, GuardRequest.target == target
         )
     ).all()
+    profile = _clean_guard_profile(kind, (body or {}).get("profile"), target)
     latest = max(existing, key=lambda r: (r.created_at, r.id or 0)) if existing else None
     if latest is not None and (latest.status == "pending" or kind not in ("site", "app_unblock")):
+        # The answer already stands, but a request made before the phone sent a
+        # profile gains one now: the parent may not have looked at it yet.
+        if profile and not latest.meta:
+            latest.meta = json.dumps(profile)
+            session.add(latest)
+            session.commit()
+            session.refresh(latest)
         return {"request": _guard_request_read(latest), "notify": []}
     request = GuardRequest(
         username=caller.username,
@@ -7650,6 +7695,7 @@ def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: Us
         target=target,
         label=str((body or {}).get("label") or "")[:120],
         note=str((body or {}).get("note") or "")[:200],
+        meta=json.dumps(profile) if profile else "",
     )
     session.add(request)
     session.commit()

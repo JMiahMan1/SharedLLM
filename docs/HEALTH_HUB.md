@@ -597,7 +597,7 @@ live search is the ecosystem-standard pattern.
       `services/gateway/tests/test_health_hub_gateway.py`,
       `services/ui/src/components/health/SharedWithYouCard.test.tsx`.
 
-### Phase 11 - family guardianship and discipleship (full Bark / Qustodio / Family Link parity; planned 2026-10-23)
+### Phase 11 - family guardianship and discipleship (full parity with the parental-control suites; planned 2026-10-23)
 
 The whole feature set of the parental-control apps - **surveillance included** - kept on our
 own server: no cloud account, no subscription, nothing leaves the house. On top of the
@@ -685,7 +685,7 @@ point.
 
 ### Guarding
 
-- [ ] **Time budgets and routines (Family Link / Qustodio).** Daily limits per device, bedtime
+- [ ] **Time budgets and routines.** One daily budget per child across their devices, bedtime
       and school weekly schedules, pause/grace, bonus time, child extension requests a parent
       grants - with Qustodio's semantics (midnight reset, "always allowed" list, lock
       navigation vs lock device).
@@ -745,8 +745,8 @@ point.
         parent), `ChoresCard` (approvals), `ScreenTimeCard` (the child: earned today, saved from
         earlier this week, chores waiting, how to earn more); the Android lock says "Chores first".
 - [x] **App control.** Block apps, per-app daily limits, install approvals, per-permission
-      gating; Accessibility-service enforcement on the device with Family Link's one-minute
-      grace warning before a block lands.
+      gating; Accessibility-service enforcement on the device with a one-minute grace warning
+      before a block lands.
       **Blocking and per-app limits built (2026-10-24, needs the APK after 437):** a parent
       switches an app off or gives it its own daily minutes from the apps the child's phone
       reported this week (`AppControls`, under the child's screen-time controls; rules

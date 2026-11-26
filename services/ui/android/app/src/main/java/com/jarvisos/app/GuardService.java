@@ -828,7 +828,10 @@ public class GuardService extends AccessibilityService {
                     GuardApi.installApprovalRequired(this), installed, baseline, approvals, GuardApi.installApps(this));
             awaitingApproval = waiting;
             for (String pkg : InstallApprovals.toAsk(waiting, approvals)) {
-                GuardApi.askParent(this, "app", pkg, UnifiedPushDistributor.label(this, pkg));
+                // The profile goes with the question: a parent deciding about an app
+                // should see its version, where it came from and what it can reach.
+                GuardApi.askParent(this, "app", pkg, UnifiedPushDistributor.label(this, pkg), null,
+                        AppInventory.profile(this, pkg));
             }
         } catch (Exception ignored) {
             // Tried again at the next refresh.

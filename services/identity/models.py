@@ -1007,6 +1007,10 @@ class GuardRequest(SQLModel, table=True):  # type: ignore
     target: str = Field(index=True)
     label: str = ""
     note: str = ""
+    #: JSON of the app's own profile (version, where it came from, what it can
+    #: reach, who signed it), sent by the phone so the parent decides about the
+    #: app rather than about its package name. Empty for permissions and sites.
+    meta: str = ""
     status: str = Field(default="pending", index=True)  # pending | approved | denied
     until: str | None = None  # a site allowed for a while: when it runs out
     decided_by: str | None = None

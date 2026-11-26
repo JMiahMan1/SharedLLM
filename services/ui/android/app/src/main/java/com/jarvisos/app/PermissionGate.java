@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Per-permission gating (Phase 11 step 5, Family Link's app permissions): a
+ * Per-permission gating (Phase 11 step 5, app permissions): a
  * parent chooses kinds of permission (camera, location, ...) that an app on
  * the child's phone may only be given once a parent approves it for that app.
  *

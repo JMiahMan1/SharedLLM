@@ -8,8 +8,8 @@ import { GRANT_MAX, GRANT_MIN, QUICK_PICKS, grantMinutes } from '../../lib/timeG
 import { relativeTime } from '../../lib/wanderTrips';
 import MemberCard from '../member/MemberCard';
 import { guardRequestsQuery, timeRequestsQuery } from '../../lib/memberPage';
-import { LEVEL_STYLES, LEVEL_WORDS, factChips, ratingLine } from '../../lib/appVetting';
-import type { GuardRequest, RequestVetting, ScreenTimeRequest } from '../../types/api';
+import { LEVEL_STYLES, LEVEL_WORDS, factChips, profileLines, ratingLine } from '../../lib/appVetting';
+import type { GuardAppProfile, GuardRequest, RequestVetting, ScreenTimeRequest } from '../../types/api';
 
 type Kind = GuardRequest['kind'] | 'time';
 type Row =
@@ -25,6 +25,20 @@ function historyLine(row: Row): string {
   }
   const r = row.request as GuardRequest;
   return `${requestLine(r).replace(' - waiting for your OK', '')}: ${r.status === 'approved' ? 'yes' : 'no'}${r.decided_by ? ` (${r.decided_by})` : ''}`;
+}
+
+/** What the phone said about the app: version, where it came from, size, what
+ *  it can reach, who signed it. Nothing is shown that the phone did not send. */
+function AppProfile({ id, profile }: { id: number; profile?: GuardAppProfile }) {
+  const lines = profileLines(profile);
+  if (lines.length === 0) return null;
+  return (
+    <ul className="space-y-0.5 rounded-lg border border-white/10 bg-white/[0.02] p-2.5 text-xs text-slate-300" data-testid={`app-profile-${id}`}>
+      {lines.map((line) => (
+        <li key={line} className="break-words">{line}</li>
+      ))}
+    </ul>
+  );
 }
 
 /** App vetting's verdict on an app request: the rating against the limit, the
@@ -45,6 +59,16 @@ function RequestVerdict({ id, vetting }: { id: number; vetting: RequestVetting }
       ) : !found ? (
         <p className="break-words text-slate-300">{vetting.line}</p>
       ) : null}
+      {(vetting.security || []).length > 0 && (
+        <ul className="space-y-1" aria-label="Security">
+          {(vetting.security || []).map((f) => (
+            <li key={`${f.check}-${f.text}`} className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${LEVEL_STYLES[f.severity]}`}>{LEVEL_WORDS[f.severity]}</span>
+              <span className="min-w-0 break-words text-slate-200">{f.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {(vetting.concerns || []).length > 0 && (
         <ul className="space-y-1">
           {(vetting.concerns || []).map((c) => (
@@ -198,6 +222,7 @@ export default function RequestsCard({ username, name, kinds = ALL_KINDS, histor
                   {relativeTime(row.at)}
                 </span>
               </div>
+              {row.kind !== 'time' && <AppProfile id={row.id} profile={(row.request as GuardRequest).meta} />}
               {row.kind !== 'time' && (row.request as GuardRequest).vetting && (
                 <RequestVerdict id={row.id} vetting={(row.request as GuardRequest).vetting as RequestVetting} />
               )}

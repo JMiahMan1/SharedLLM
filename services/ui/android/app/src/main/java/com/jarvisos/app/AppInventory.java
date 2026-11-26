@@ -65,24 +65,77 @@ final class AppInventory {
     private AppInventory() {}
 
     static JSONArray collect(Context context) {
-        PackageManager pm = context.getPackageManager();
-        long now = System.currentTimeMillis();
-        boolean usageAccess = PhoneUsagePlugin.hasUsageAccess(context);
-        Map<String, UsageStats> usage = usageAccess ? usage(context, now) : Collections.emptyMap();
-        Map<String, Set<String>> declared = declaredComponents(pm);
-        Set<String> accessibilityOn = AppInventoryRules.packagesIn(secure(context, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES));
-        Set<String> listenersOn = AppInventoryRules.packagesIn(secure(context, "enabled_notification_listeners"));
-        Set<String> adminsOn = activeAdmins(context);
-        SharedPreferences hashes = context.getSharedPreferences(HASH_PREFS, Context.MODE_PRIVATE);
-        SharedPreferences.Editor hashEdits = hashes.edit();
-        Set<String> listedPackages = new HashSet<>();
-        long[] budget = {AppInventoryRules.HASH_BUDGET_BYTES};
+        Scan scan = new Scan(context);
         JSONArray out = new JSONArray();
-        List<PackageInfo> packages = pm.getInstalledPackages(
-                PackageManager.GET_PERMISSIONS | PackageManager.GET_SIGNING_CERTIFICATES);
-        for (PackageInfo info : packages) {
+        Set<String> listed = new HashSet<>();
+        for (PackageInfo info : scan.packages()) {
+            JSONObject row = scan.row(info, listed);
+            if (row != null) out.put(row);
+        }
+        scan.forgetUnlisted(listed);
+        return out;
+    }
+
+    /**
+     * One app's profile, for the request a parent answers before the app is
+     * allowed to open (same fields a report's row carries, so the server reads
+     * the profile and the inventory the same way). Null when the app cannot be
+     * read at all: the request then goes without it rather than with a guess.
+     */
+    static JSONObject profile(Context context, String packageName) {
+        try {
+            PackageInfo info = context.getPackageManager().getPackageInfo(
+                    packageName, PackageManager.GET_PERMISSIONS | PackageManager.GET_SIGNING_CERTIFICATES);
+            return new Scan(context).row(info, null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * What is read once for a whole report: the installed list, usage, the
+     * declared components, the special access switched on, and the hash cache
+     * and budget. A single app's profile uses the same object, so a profile and
+     * a report never disagree about the same app.
+     */
+    private static final class Scan {
+        private final Context context;
+        private final PackageManager pm;
+        private final Map<String, UsageStats> usage;
+        private final Map<String, Set<String>> declared;
+        private final Set<String> accessibilityOn;
+        private final Set<String> listenersOn;
+        private final Set<String> adminsOn;
+        private final SharedPreferences hashes;
+        private final SharedPreferences.Editor hashEdits;
+        private final long[] budget = {AppInventoryRules.HASH_BUDGET_BYTES};
+
+        Scan(Context context) {
+            this.context = context;
+            this.pm = context.getPackageManager();
+            long now = System.currentTimeMillis();
+            this.usage = PhoneUsagePlugin.hasUsageAccess(context)
+                    ? AppInventory.usage(context, now) : Collections.emptyMap();
+            this.declared = declaredComponents(pm);
+            this.accessibilityOn = AppInventoryRules.packagesIn(
+                    secure(context, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES));
+            this.listenersOn = AppInventoryRules.packagesIn(secure(context, "enabled_notification_listeners"));
+            this.adminsOn = activeAdmins(context);
+            this.hashes = context.getSharedPreferences(HASH_PREFS, Context.MODE_PRIVATE);
+            this.hashEdits = hashes.edit();
+        }
+
+        List<PackageInfo> packages() {
+            return pm.getInstalledPackages(PackageManager.GET_PERMISSIONS | PackageManager.GET_SIGNING_CERTIFICATES);
+        }
+
+        /** One app's row, or null when it is not an app this device reports. */
+        JSONObject row(PackageInfo info, Set<String> listed) {
             ApplicationInfo app = info.applicationInfo;
-            if (app == null || !AppInventoryRules.listed(info.packageName, app.flags, context.getPackageName())) continue;
+            if (app == null || !AppInventoryRules.listed(info.packageName, app.flags, context.getPackageName())) {
+                return null;
+            }
+            long now = System.currentTimeMillis();
             try {
                 JSONObject row = new JSONObject();
                 row.put("package", info.packageName);
@@ -90,6 +143,8 @@ final class AppInventory {
                 row.put("installer", installer(pm, info.packageName));
                 row.put("first_install", info.firstInstallTime);
                 row.put("last_update", info.lastUpdateTime);
+                row.put("version_name", String.valueOf(info.versionName));
+                row.put("version_code", info.getLongVersionCode());
                 row.put("launchable", pm.getLaunchIntentForPackage(info.packageName) != null);
                 JSONArray groups = new JSONArray();
                 List<String> requested = info.requestedPermissions == null
@@ -100,7 +155,7 @@ final class AppInventory {
                 Long lastUsed = stats == null ? null
                         : AppInventoryRules.lastUsed(stats.getLastTimeUsed(), info.firstInstallTime, now);
                 row.put("last_used", lastUsed == null ? JSONObject.NULL : lastUsed);
-                Long size = usageAccess ? size(context, app) : null;
+                Long size = usageAccess() ? size(context, app) : null;
                 row.put("size_bytes", size == null ? JSONObject.NULL : size);
 
                 Set<String> mine = declared.containsKey(info.packageName)
@@ -114,18 +169,26 @@ final class AppInventory {
                 if (listenersOn.contains(info.packageName)) special.put(AppInventoryRules.DECLARES_NOTIFICATION_LISTENER);
                 row.put("special_access", special);
                 row.put("cert_sha1", certificates(info.signingInfo));
-                listedPackages.add(info.packageName);
+                if (listed != null) listed.add(info.packageName);
                 apkHash(row, app, info, hashes, hashEdits, budget);
-                out.put(row);
+                return row;
             } catch (Exception ignored) {
                 // One app that cannot be read is left out; the rest still report.
+                return null;
             }
         }
-        for (String cachedPackage : hashes.getAll().keySet()) {
-            if (!listedPackages.contains(cachedPackage)) hashEdits.remove(cachedPackage);
+
+        /** A cached hash whose app is gone is dropped, so the cache cannot grow forever. */
+        void forgetUnlisted(Set<String> listed) {
+            for (String cachedPackage : hashes.getAll().keySet()) {
+                if (!listed.contains(cachedPackage)) hashEdits.remove(cachedPackage);
+            }
+            hashEdits.apply();
         }
-        hashEdits.apply();
-        return out;
+
+        private boolean usageAccess() {
+            return PhoneUsagePlugin.hasUsageAccess(context);
+        }
     }
 
     /** Each package's declared system components (accessibility, notification listener, VPN, device admin). */

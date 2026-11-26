@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ageFrom, factChips, inventoryFingerprint, lookupWords, ratingLine, shouldSendInventory, sinceWords, sizeWords,
-  unusedLine, worstLevel, type InstalledAppRow,
+  ageFrom, factChips, inventoryFingerprint, lookupWords, profileLines, ratingLine, shouldSendInventory, sinceWords,
+  sizeWords, unusedLine, worstLevel, type InstalledAppRow,
 } from './appVetting';
 import { CHAT_GAME, CHECKING, verdict } from '../test/appVettingFixtures';
 
@@ -106,5 +106,33 @@ describe('the outside checks in words', () => {
     expect(commonSenseChip({ status: 'found', reason: null, age: 13, age_label: 'age 13+' })).toBe('Common Sense age 13+');
     expect(commonSenseChip({ status: 'not_found', reason: null })).toBeNull();
     expect(commonSenseChip(null)).toBeNull();
+  });
+});
+
+describe('what the phone says about an app it is asking about', () => {
+  it('puts the version, where it came from, the size, what it can reach and who signed it', () => {
+    const lines = profileLines({
+      version_name: '4.2.1', version_code: 4210, installer: 'com.android.vending', size_bytes: 12 * 1024 * 1024,
+      permissions: ['camera'], capabilities: ['overlay'], special_access: [], cert_sha1: ['AB'.repeat(20)],
+      apk_sha256: 'a'.repeat(64), apk_hash_state: 'ok',
+    });
+    expect(lines).toEqual([
+      'Version 4.2.1 (4210)',
+      'Installed by Google Play',
+      '12 MB',
+      'Can draw over other apps, use the camera',
+      'Signed by ABABABABABAB',
+      'Its file was read and checked against known bad apps',
+    ]);
+  });
+
+  it('says a sideload is a sideload, and an unread file is unread', () => {
+    const lines = profileLines({ installer: null, apk_hash_state: 'too_large' });
+    expect(lines).toEqual(['Installed directly, not from a store (sideloaded)', 'Its file was not read yet']);
+  });
+
+  it('shows nothing when the phone sent nothing, and never invents a value', () => {
+    expect(profileLines(undefined)).toEqual([]);
+    expect(profileLines({})).toEqual([]);
   });
 });
