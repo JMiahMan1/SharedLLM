@@ -20476,6 +20476,13 @@ async def provision_abs_users(request: Request):
 
 # Music Assistant accounts: the login people open Music Assistant itself with
 
+def _hub_reason(body: Any) -> str:
+    """HomeHub's own words for a refusal (its error handler says ``message``; FastAPI says ``detail``)."""
+    if not isinstance(body, dict):
+        return ""
+    return str(body.get("detail") or body.get("message") or "")
+
+
 async def _ma_via_homehub(method: str, path: str, payload: Any = None) -> tuple[int, Any]:
     """Ask HomeHub, which holds the household's Music Assistant login (no other service does)."""
     from services.gateway import automation_routes
@@ -20500,7 +20507,7 @@ async def list_ma_users(request: Request):
         return JSONResponse(status_code=502, content={"status": "FAILURE",
                                                       "message": f"HomeHub unreachable: {type(e).__name__}"})
     if status != 200 or not isinstance(body, dict):
-        detail = body.get("detail") if isinstance(body, dict) else None
+        detail = _hub_reason(body)
         return JSONResponse(status_code=502, content={"status": "FAILURE",
                                                       "message": detail or f"HomeHub answered {status}"})
     return {"status": "SUCCESS", **body}
@@ -20529,10 +20536,9 @@ async def set_ma_user_password(request: Request):
         return JSONResponse(status_code=502, content={"status": "FAILURE",
                                                       "message": f"HomeHub unreachable: {type(e).__name__}"})
     if status != 200 or not isinstance(answer, dict):
-        detail = answer.get("detail") if isinstance(answer, dict) else None
         return JSONResponse(
             status_code=status if status in (400, 404) else 502,
-            content={"status": "FAILURE", "message": detail or f"HomeHub answered {status}"},
+            content={"status": "FAILURE", "message": _hub_reason(answer) or f"HomeHub answered {status}"},
         )
     return {"status": "SUCCESS", **answer}
 
