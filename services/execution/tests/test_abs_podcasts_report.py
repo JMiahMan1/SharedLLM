@@ -355,3 +355,22 @@ def test_a_truncated_feed_is_read_by_its_dates_rather_than_dropped():
     truncated = RSS[: RSS.index(b"</channel>")]
 
     assert len(abs_podcasts.feed_dates(truncated)) == 2
+
+def test_a_feed_larger_than_a_page_is_still_read():
+    """A big feed must not be cut before its dates.
+
+    One show's Anchor feed is 5.7 MB for five episodes: an earlier 2 MB cap
+    stopped reading it and the report could say nothing about how much was
+    waiting.
+    """
+    assert abs_podcasts.FEED_MAX_BYTES >= 6_000_000
+    filler = "x" * 3_000_000
+    feed = (
+        "<rss><channel>"
+        f"<item><title>One</title><description>{filler}</description>"
+        "<pubDate>Tue, 28 Jul 2026 07:00:00 +0000</pubDate></item>"
+        "</channel></rss>"
+    )
+    assert len(feed) > 2_000_000
+    dates = abs_podcasts.feed_dates(feed)
+    assert len(dates) == 1

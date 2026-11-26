@@ -43,9 +43,12 @@ FANOUT = 6
 
 #: A feed is fetched only for a show that already looks quiet, so this bounds a
 #: rare request rather than a page load. The cap stops a feed that answers with
-#: something enormous from being read into memory.
+#: something enormous from being read into memory; it is set well above the feeds
+#: this household has, because a cap that cuts a feed before its dates is silent.
+#: Anchor's feed for one show here is 5.7 MB for five episodes, the whole episode
+#: description carried in XML.
 FEED_TIMEOUT = 8.0
-FEED_MAX_BYTES = 2_000_000
+FEED_MAX_BYTES = 8_000_000
 
 
 def _when(text: str) -> float | None:
