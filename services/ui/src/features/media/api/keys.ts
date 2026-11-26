@@ -13,6 +13,7 @@ export const mediaKeys = {
   library: (tab: string, libraryId?: string) => [...mediaKeys.all, 'library', tab, libraryId ?? ''] as const,
   favorites: () => [...mediaKeys.all, 'favorites'] as const,
   podcastEpisodes: (absId: string) => [...mediaKeys.all, 'podcast-episodes', absId] as const,
+  absPodcasts: () => [...mediaKeys.all, 'abs-podcasts'] as const,
   status: () => [...mediaKeys.all, 'status'] as const,
   entities: () => [...mediaKeys.all, 'entities'] as const,
 };

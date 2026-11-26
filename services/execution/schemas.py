@@ -1197,7 +1197,7 @@ class AudiobookshelfRequest(BaseRequest):
     Interacts with Audiobookshelf (ABS) for searching, playing, and tracking audiobooks.
     """
     user_context: UserContext
-    action: Literal["search", "play", "play_by", "play_podcast_episode", "resume", "progress", "libraries", "list", "get_book", "last_played", "update_progress"]
+    action: Literal["search", "play", "play_by", "play_podcast_episode", "resume", "progress", "libraries", "list", "get_book", "last_played", "update_progress", "podcasts", "podcast_auto_download"]
     query: str | None = Field(None, description="Search query or book title")
     author: str | None = Field(None, description="play_by: the author whose book to play (misheard names are matched to the library)")
     series: str | None = Field(None, description="play_by: the series whose book to play")
@@ -1213,6 +1213,7 @@ class AudiobookshelfRequest(BaseRequest):
     is_finished: bool = Field(False, description="Mark the item finished for update_progress")
     limit: int = Field(10, ge=1, le=50, description="Max results to return")
     page: int = Field(0, ge=0, description="0-based page for action=list (ABS /api/libraries/{id}/items)")
+    auto_download: bool = Field(False, description="podcast_auto_download: download new episodes automatically")
 
 
 class BibleRequest(BaseRequest):

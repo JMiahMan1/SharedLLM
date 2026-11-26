@@ -244,3 +244,36 @@ export interface MediaStatus {
   shuffle?: boolean | null
   repeat?: string | null
 }
+
+/** One podcast show in Audiobookshelf, and why it may look quiet. */
+export interface AbsPodcastShow {
+  library_id: string
+  library_name: string
+  id: string
+  title: string
+  author: string
+  cover_path: string
+  episodes: number
+  newest_episode_at: string | null
+  newest_episode_title: string | null
+  last_checked_at: string | null
+  days_since_episode: number | null
+  days_since_check: number | null
+  auto_download: boolean
+  has_feed: boolean
+  needs_feed: boolean
+  never_checked: boolean
+  stale_check: boolean
+  behind: boolean
+  error?: string
+}
+
+/** GET /api/media/audiobookshelf/podcasts */
+export interface AbsPodcastsResponse {
+  status: string
+  libraries: Array<{ id: string; name: string }>
+  shows: AbsPodcastShow[]
+  behind_days?: number | null
+  stale_check_days?: number | null
+  notice?: string
+}

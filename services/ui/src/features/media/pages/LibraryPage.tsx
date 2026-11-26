@@ -2,13 +2,14 @@ import { useMemo } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Library as LibraryIcon } from 'lucide-react';
 import type { LibraryTab } from '../api/client';
-import { useMediaFavorites, useMediaLibrary } from '../api/queries';
+import { useAbsPodcasts, useMediaFavorites, useMediaLibrary } from '../api/queries';
 import type { MediaItem, MediaLibrary } from '../types';
 import { serviceProblem } from '../copy';
 import { ItemList } from '../components/ItemList';
 import { EmptyState, ErrorRetry, PartialNotice, RowSkeletons } from '../components/StateViews';
 import { OutputPicker } from '../components/OutputPicker';
 import { SearchEntry } from '../components/SearchEntry';
+import { AbsPodcasts } from '../components/AbsPodcasts';
 import { chip, muted, row, text } from '../components/ui';
 
 type Tab = LibraryTab | 'favorites';
@@ -52,11 +53,25 @@ export default function LibraryPage() {
           </Link>
         ))}
       </nav>
-      {known.id === 'favorites' ? <FavoritesTab empty={known.empty} /> : known.id === 'audiobooks' ? <BooksTab empty={known.empty} /> : (
+      {known.id === 'favorites' ? <FavoritesTab empty={known.empty} />
+        : known.id === 'audiobooks' ? <BooksTab empty={known.empty} />
+          : known.id === 'podcasts' ? <PodcastsTab empty={known.empty} />
+            : (
         <MaTab key={known.id} tab={known.id} label={known.label} empty={known.empty} />
       )}
     </>
   );
+}
+
+/**
+ * Podcasts: the family's Audiobookshelf shows with what each one is doing, and
+ * Music Assistant's podcast library when Audiobookshelf has none to show.
+ */
+function PodcastsTab({ empty }: { empty: string }) {
+  const abs = useAbsPodcasts();
+  const shows = abs.data?.shows ?? [];
+  if (shows.length) return <AbsPodcasts report={abs.data!} />;
+  return <MaTab tab="podcasts" label="Podcasts" empty={empty} />;
 }
 
 function MaTab({ tab, label, empty }: { tab: LibraryTab; label: string; empty: string }) {

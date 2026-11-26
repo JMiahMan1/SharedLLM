@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 
 from services.common import ma_identity
-from services.execution import abs_client, abs_session_state, ha_client, media_vocabulary
+from services.execution import abs_client, abs_podcasts, abs_session_state, ha_client, media_vocabulary
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult
 from services.shared import ma_library
 from services.shared.ma_player import is_music_assistant_player
@@ -102,6 +102,12 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
 
         elif action == "update_progress":
             return await _handle_update_progress(abs_url, abs_key, req)
+
+        elif action == "podcasts":
+            return await _handle_podcasts(abs_url, abs_key)
+
+        elif action == "podcast_auto_download":
+            return await _handle_podcast_auto_download(abs_url, abs_key, req)
 
         return ExecutionResult(
             status="FAILURE",
@@ -1249,3 +1255,38 @@ def ctx_mass_token(req) -> str:
 
 def ctx_user(req) -> str:
     return getattr(req.user_context, "user", "") or ""
+
+
+async def _handle_podcasts(abs_url: str, abs_key: str) -> ExecutionResult:
+    """Every podcast show, its newest episode and the reason it may look quiet.
+
+    Read-only. The Media page shows this instead of guessing why a show has not
+    moved: no feed address, a feed nobody polls, or new episodes nothing
+    downloads are three different problems.
+    """
+    report = await abs_podcasts.podcast_report(abs_url, abs_key)
+    if "error" in report:
+        return ExecutionResult(status="FAILURE", message=report["error"], service="audiobookshelf")
+
+    shows = report.get("shows", [])
+    attention = sum(1 for show in shows if show.get("behind") or show.get("needs_feed") or show.get("stale_check"))
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Found {len(shows)} podcast(s); {attention} need a look.",
+        service="audiobookshelf",
+        detail=report,
+    )
+
+
+async def _handle_podcast_auto_download(abs_url: str, abs_key: str, req) -> ExecutionResult:
+    """Turn a show's automatic downloading on or off."""
+    reply = await abs_podcasts.set_auto_download(abs_url, abs_key, req.item_id or "", bool(req.auto_download))
+    if "error" in reply:
+        return ExecutionResult(status="FAILURE", message=reply["error"], service="audiobookshelf")
+    state = "on" if reply["auto_download"] else "off"
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Downloading new episodes is {state} for that show.",
+        service="audiobookshelf",
+        detail=reply,
+    )
