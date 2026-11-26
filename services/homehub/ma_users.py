@@ -97,8 +97,13 @@ async def reconcile(hub: Any, members: list[str], *, password: str | None = None
     skipped: list[dict[str, str]] = []
     for name in names:
         key = name.lower()
-        instance = own.get(key) or fallback
         user = by_name.get(key)
+        mine = own.get(key)
+        # A person who already has an Audiobookshelf view keeps it: an existing
+        # household view must not be joined by a second one, which is what gave
+        # two members both the household instance and somebody else's.
+        has_one = any(ABS_DOMAIN in str(item) for item in ((user or {}).get("provider_filter") or []))
+        instance = mine or (None if has_one else fallback)
         if user is None:
             if not password or len(password) < MIN_PASSWORD:
                 skipped.append({"username": name, "reason": "a Music Assistant password of at least 8 characters is needed"})
@@ -118,11 +123,13 @@ async def reconcile(hub: Any, members: list[str], *, password: str | None = None
             created.append(name)
             continue
         if not instance:
+            if has_one:
+                continue  # their own view already stands
             skipped.append({"username": name, "reason": "Music Assistant has no Audiobookshelf instance to give them"})
             continue
         # Keep every other provider the person already has; only Audiobookshelf is ours to set.
         current = list(user.get("provider_filter") or [])
-        keep = [item for item in current if item not in set(own.values()) | ({fallback} if fallback else set())]
+        keep = [item for item in current if ABS_DOMAIN not in str(item)]
         wanted = [*keep, instance]
         if wanted == current:
             continue
