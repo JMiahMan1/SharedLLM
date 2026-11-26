@@ -20293,11 +20293,14 @@ async def _abs_create_user(creds: Any, username: str, password: str) -> dict:
     name and its password travel in ``AudiobookshelfRequest``, and the GET helper
     only carries a user id and query parameters.
     """
-    resp = await _execution_post_as(
-        creds,
-        "/execute/audiobookshelf",
-        {"action": "user_create", "username": username, "password": password},
-    )
+    try:
+        resp = await _execution_post_as(
+            creds,
+            "/execute/audiobookshelf",
+            {"action": "user_create", "username": username, "password": password},
+        )
+    except (TimeoutError, aiohttp.ClientError) as e:
+        raise _MediaUpstreamError(f"Audiobookshelf is unreachable ({type(e).__name__})") from e
     try:
         body = json.loads(bytes(resp.body) or b"{}")
     except (json.JSONDecodeError, ValueError):
@@ -20348,7 +20351,9 @@ async def provision_abs_users(request: Request):
             status_code=400,
             content={"status": "FAILURE", "message": "A temporary password is required to create an account."},
         )
-    wanted = [str(name).strip().lower() for name in (body.get("usernames") or []) if str(name).strip()]
+    wanted = list(dict.fromkeys(
+        str(name).strip().lower() for name in (body.get("usernames") or []) if str(name).strip()
+    ))
 
     if not wanted:
         try:
@@ -20364,10 +20369,15 @@ async def provision_abs_users(request: Request):
                 people = await resp.json() if resp.status == 200 else []
         except (TimeoutError, aiohttp.ClientError):
             people = []
+        # Never create or overwrite the system default account: it holds the
+        # household's administrator ABS token, so turning it into a regular user
+        # account would replace that admin credential with a non-admin token.
         wanted = sorted({
-            str(person.get("username") or "").strip().lower()
+            uname
             for person in (people if isinstance(people, list) else [])
-            if str(person.get("username") or "").strip()
+            if not person.get("is_system_default")
+            and (uname := str(person.get("username") or "").strip().lower())
+            and uname != "default"
         })
 
     try:
@@ -20412,7 +20422,7 @@ async def provision_abs_users(request: Request):
                 continue
             try:
                 resp = await client.post(
-                    f"{IDENTITY_SVC}/api/users/{username}/audiobookshelf-token",
+                    f"{IDENTITY_SVC}/api/users/{quote(username, safe='')}/audiobookshelf-token",
                     json={"token": token, "audiobookshelf_user": account.get("username")},
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=10.0),
@@ -20446,7 +20456,9 @@ async def issue_abs_user_tokens(request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    wanted = [str(name).strip().lower() for name in (body.get("usernames") or []) if str(name).strip()]
+    wanted = list(dict.fromkeys(
+        str(name).strip().lower() for name in (body.get("usernames") or []) if str(name).strip()
+    ))
 
     try:
         detail = await _media_exec_audiobookshelf(creds, {"action": "users"}, timeout=ABS_PODCAST_TIMEOUT)
@@ -20456,7 +20468,8 @@ async def issue_abs_user_tokens(request: Request):
 
     if not wanted:
         # Everyone this household knows, by name. Identity is the list of members;
-        # ABS is the list of accounts.
+        # ABS is the list of accounts. The system default account holds the
+        # household's administrator credential and must never be overwritten here.
         try:
             async with shared_http_client() as client:
                 resp = await client.get(
@@ -20471,9 +20484,11 @@ async def issue_abs_user_tokens(request: Request):
         except (TimeoutError, aiohttp.ClientError):
             people = []
         wanted = sorted({
-            str(person.get("username") or "").strip().lower()
+            uname
             for person in (people if isinstance(people, list) else [])
-            if str(person.get("username") or "").strip()
+            if not person.get("is_system_default")
+            and (uname := str(person.get("username") or "").strip().lower())
+            and uname != "default"
         })
 
     issued: list[dict] = []
@@ -20490,7 +20505,7 @@ async def issue_abs_user_tokens(request: Request):
                 continue
             try:
                 resp = await client.post(
-                    f"{IDENTITY_SVC}/api/users/{username}/audiobookshelf-token",
+                    f"{IDENTITY_SVC}/api/users/{quote(username, safe='')}/audiobookshelf-token",
                     json={"token": token, "audiobookshelf_user": account.get("username")},
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=10.0),
@@ -20917,10 +20932,10 @@ def _media_title_key(name: Any) -> str:
     """
     text = str(name or "").casefold()
     text = re.sub(r"\(.*?\)|\[.*?\]", " ", text)
-    # An apostrophe joins the letters either side ("King's" is "kings"), where
+    # An apostrophe joins the letters either side ("Pioneer's" is "pioneers"), where
     # every other mark separates words.
-    text = text.replace("'", "").replace("\u2019", "")
-    return re.sub(r"[^0-9a-z]+", " ", text).strip()
+    text = text.replace("'", "").replace("\u2019", "").replace("_", " ")
+    return re.sub(r"[^\w]+", " ", text).strip()
 
 
 @app.get("/api/media/search")
@@ -21009,7 +21024,9 @@ async def search_media(request: Request, q: str = "", types: str = "", limit: in
     # entry wins and the mirrored copy is dropped by title. A show only MA knows
     # is still listed.
     abs_podcast_keys = {
-        _media_title_key(podcast.get("title")) for podcast in (abs_detail.get("podcasts") or [])
+        key
+        for podcast in (abs_detail.get("podcasts") or [])
+        if (key := _media_title_key(podcast.get("title")))
     }
     if abs_podcast_keys:
         buckets["podcasts"] = [

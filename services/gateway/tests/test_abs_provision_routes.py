@@ -167,3 +167,35 @@ def test_an_account_that_cannot_be_created_is_reported_not_swallowed(client):
     assert data["created"] == []
     assert data["filed"] == []
     assert data["skipped"] == [{"username": "newbie", "reason": "Audiobookshelf did not return the new account"}]
+
+
+def test_provisioning_never_creates_or_overwrites_the_system_default_account(client):
+    """The system default account holds the household's admin ABS token and must never be touched."""
+    class _WithDefault(_Client):
+        async def get(self, url, **kwargs):
+            self.gets.append({"url": url, "headers": kwargs.get("headers")})
+            return _Resp(payload=[
+                {"username": "default", "is_system_default": True},
+                {"username": "household", "is_system_default": True},
+                {"username": "sam", "is_system_default": False},
+            ])
+
+    fake = _WithDefault()
+    made = []
+
+    async def exec_abs(creds, params, *, timeout=10.0):
+        return _accounts({"id": "u1", "username": "sam", "type": "user", "has_token": True, "token": "sam-token"})
+
+    async def post_as(creds, endpoint, payload):
+        made.append(payload["username"])
+        return _Answer({"status": "SUCCESS", "detail": {"user": {"id": "u2", "username": payload["username"], "type": "user", "has_token": True, "token": "t"}}})
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(gateway_main, "_media_exec_audiobookshelf", exec_abs)
+        mp.setattr(gateway_main, "_execution_post_as", post_as)
+        mp.setattr(gateway_main, "shared_http_client", lambda: _Ctx(fake))
+        resp = client.post("/api/media/audiobookshelf/users/provision", json={"password": "temp-pass"})
+
+    assert resp.status_code == 200, resp.text
+    assert made == []
+    assert [entry["username"] for entry in resp.json()["filed"]] == ["sam"]

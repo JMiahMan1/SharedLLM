@@ -111,3 +111,33 @@ async def test_a_new_account_is_activated_or_its_token_is_useless(monkeypatch):
     assert calls[1] == ("patch", "/api/users/u1", {"isActive": True})
     assert reply["user"]["isActive"] is True
     assert reply["user"]["token"] == "new-token"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_activation_does_not_claim_the_account_is_active(monkeypatch):
+    """If PATCH /api/users/{id} fails, isActive stays False and _handle_user_create fails."""
+    from services.execution.handlers.audiobookshelf import _handle_user_create
+    from services.execution.schemas import AudiobookshelfRequest, UserContext
+
+    async def fake_post(abs_url, abs_api_key, path, json=None):
+        return {"user": {"id": "u1", "username": "Robin", "type": "user", "isActive": False, "token": "new-token"}}
+
+    async def fake_patch(abs_url, abs_api_key, path, json=None):
+        return {"error": "ABS returned 500: Internal Server Error"}
+
+    monkeypatch.setattr(abs_client, "abs_post", fake_post)
+    monkeypatch.setattr(abs_client, "abs_patch", fake_patch)
+
+    reply = await abs_client.create_user("http://abs.local:13378", "admin-key", "Robin", "temp-pass")
+    assert reply["user"]["isActive"] is False
+    assert "500" in reply["user"]["activation_error"]
+
+    req = AudiobookshelfRequest(
+        action="user_create",
+        username="Robin",
+        password="temp-pass",
+        user_context=UserContext(user="default"),
+    )
+    result = await _handle_user_create("http://abs.local:13378", "admin-key", req)
+    assert result.status == "FAILURE"
+    assert "activate" in result.message.lower()

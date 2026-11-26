@@ -25,6 +25,7 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
             message="Audiobookshelf URL not configured.",
             service="audiobookshelf",
         )
+    had_filed_key = bool(abs_key)
     if username and password and not abs_key:
         # A filed token is the credential an administrator minted for this household,
         # so a login is only the way in when there is no token at all. A stored
@@ -40,7 +41,7 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
                 "If requests start failing with 401, check the ABS username/password.",
                 username,
             )
-    if username and password and not abs_key:
+    if username and password and not had_filed_key and abs_key:
         # Sessions started for this request can log in again if their token expires mid-listen.
         abs_session_state.current_relogin.set(
             lambda: abs_client.abs_login(abs_url, username, password, force=True)
@@ -1336,6 +1337,9 @@ async def _handle_user_create(abs_url: str, abs_key: str, req: AudiobookshelfReq
     if not user or (reply or {}).get("error"):
         reason = (reply or {}).get("error") or "Audiobookshelf did not return the new account"
         return ExecutionResult(status="FAILURE", message=f"Could not create the Audiobookshelf account: {reason}", service="audiobookshelf")
+    if user.get("activation_error") or user.get("isActive") is False:
+        reason = user.get("activation_error") or "account remained inactive"
+        return ExecutionResult(status="FAILURE", message=f"Created the Audiobookshelf account but could not activate it: {reason}", service="audiobookshelf")
     return ExecutionResult(
         status="SUCCESS",
         message=f"Created the Audiobookshelf account {user.get('username')}.",

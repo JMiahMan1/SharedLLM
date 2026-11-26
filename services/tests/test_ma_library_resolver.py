@@ -466,12 +466,12 @@ class TestPodcastLookup:
                 "auth": {"authenticated": True},
                 "music/search": self._podcast_payload(
                     abs_id=self.POD_ID, uri="library://podcast/24",
-                    available=True, name="Culture Apothecary",
+                    available=True, name="Field Notes Daily",
                 ),
             }
         )
         resolved = await ma_library.resolve_audiobook_uri(
-            MASS_URL, MASS_TOKEN, self.POD_ID, "Culture Apothecary"
+            MASS_URL, MASS_TOKEN, self.POD_ID, "Field Notes Daily"
         )
         assert resolved.ma_uri == "library://podcast/24"
 
@@ -482,7 +482,7 @@ class TestPodcastLookup:
                 "auth": {"authenticated": True},
                 "music/search": self._podcast_payload(
                     abs_id=self.POD_ID, uri="library://podcast/16",
-                    available=True, name="The King's Hall",
+                    available=True, name="The Pioneer's Journal",
                 ),
             }
         )
@@ -679,17 +679,17 @@ class TestNotYetInMALibrary:
 
 class TestPerUserProviderFilterIsolation:
     async def test_ignores_other_users_abs_instance_and_queries_own_instance(self, fake_connect):
-        # Search returns a library item only backed by Jeremiah's ABS instance, while Zachary's
-        # MA auth reply scopes him to audiobookshelf--zach1.
-        zach_provider_item = {
-            "uri": f"audiobookshelf--zach1://audiobook/{NARNIA_ABS_ID}",
+        # Search returns a library item only backed by another member's ABS instance,
+        # while Jordan's MA auth reply scopes them to audiobookshelf--jordan1.
+        jordan_provider_item = {
+            "uri": f"audiobookshelf--jordan1://audiobook/{NARNIA_ABS_ID}",
             "name": "The Chronicles of Narnia",
-            "provider": "audiobookshelf--zach1",
+            "provider": "audiobookshelf--jordan1",
             "provider_mappings": [
                 {
                     "item_id": NARNIA_ABS_ID,
                     "provider_domain": "audiobookshelf",
-                    "provider_instance": "audiobookshelf--zach1",
+                    "provider_instance": "audiobookshelf--jordan1",
                     "available": True,
                 }
             ],
@@ -698,25 +698,25 @@ class TestPerUserProviderFilterIsolation:
             "auth": {
                 "authenticated": True,
                 "user": {
-                    "username": "zachary",
-                    "provider_filter": ["opensubsonic--m1", "audiobookshelf--zach1"],
+                    "username": "jordan",
+                    "provider_filter": ["opensubsonic--m1", "audiobookshelf--jordan1"],
                 },
             },
             "music/search": _search_result(),  # provider_instance is audiobookshelf--testinst
-            "music/item_by_uri": zach_provider_item,
+            "music/item_by_uri": jordan_provider_item,
             "music/library/add_item": {"uri": "library://audiobook/260", "name": "The Chronicles of Narnia"},
         })
         resolved = await _resolve()
         assert resolved.ma_uri == "library://audiobook/260"
         sent = [(f["command"], f.get("args")) for f in opened[0].sent]
-        assert ("music/item_by_uri", {"uri": f"audiobookshelf--zach1://audiobook/{NARNIA_ABS_ID}"}) in sent
+        assert ("music/item_by_uri", {"uri": f"audiobookshelf--jordan1://audiobook/{NARNIA_ABS_ID}"}) in sent
 
     async def test_user_with_shared_only_provider_filter_cannot_use_another_users_abs(self, fake_connect):
         opened, _ = fake_connect({
             "auth": {
                 "authenticated": True,
                 "user": {
-                    "username": "michele",
+                    "username": "casey",
                     "provider_filter": ["opensubsonic--m1", "radiobrowser--r1"],
                 },
             },

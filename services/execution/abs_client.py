@@ -489,15 +489,22 @@ async def create_user(abs_url: str, abs_api_key: str, username: str, password: s
     user = dict((created or {}).get("user") or {})
     if user and user.get("isActive") is not True:
         token = user.get("token")
-        patched = await abs_patch(abs_url, abs_api_key, f"/api/users/{user['id']}", {"isActive": True})
-        user.update((patched or {}).get("user") or {})
-        user["isActive"] = True
+        user_id = user.get("id")
+        if not user_id:
+            user["activation_error"] = "Audiobookshelf did not return an account id to activate"
+            user["isActive"] = False
+        else:
+            patched = await abs_patch(abs_url, abs_api_key, f"/api/users/{user_id}", {"isActive": True})
+            if (patched or {}).get("error"):
+                user["activation_error"] = patched["error"]
+                user["isActive"] = False
+            else:
+                user.update((patched or {}).get("user") or {})
+                user["isActive"] = True
         # Activation answers with the account, not with its token: keep the one
         # creation handed back, or the account would be made and left unusable.
         if token:
             user["token"] = token
-        if (patched or {}).get("error"):
-            user["activation_error"] = patched["error"]
     if not user:
         return created
     return {"user": user}

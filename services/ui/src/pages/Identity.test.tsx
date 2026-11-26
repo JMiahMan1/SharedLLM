@@ -65,7 +65,7 @@ describe('Identity page', () => {
     const bodies: Array<Record<string, unknown>> = [];
     server.use(
       http.get('/api/users/me', () => HttpResponse.json({
-        ...defaultUser, gitlab_url: '', gitlab_user: 'jeremiah.summers@gmail.com', saved_credentials: ['gitlab_token', 'gitlab_user'],
+        ...defaultUser, gitlab_url: '', gitlab_user: 'dev@example.test', saved_credentials: ['gitlab_token', 'gitlab_user'],
       })),
       http.patch('/api/users/me', async ({ request }) => {
         bodies.push((await request.json()) as Record<string, unknown>);
@@ -88,7 +88,7 @@ describe('Identity page', () => {
     const bodies: Array<Record<string, unknown>> = [];
     server.use(
       http.get('/api/users/me', () => HttpResponse.json({
-        ...defaultUser, gitlab_url: '', gitlab_user: 'jeremiah.summers@gmail.com', saved_credentials: ['gitlab_user'],
+        ...defaultUser, gitlab_url: '', gitlab_user: 'dev@example.test', saved_credentials: ['gitlab_user'],
       })),
       http.patch('/api/users/me', async ({ request }) => {
         bodies.push((await request.json()) as Record<string, unknown>);

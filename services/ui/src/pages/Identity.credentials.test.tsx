@@ -127,9 +127,9 @@ describe('Identity credentials', () => {
         bodies.push(await request.json());
         return HttpResponse.json({
           status: 'SUCCESS',
-          created: ['kaleb', 'noah'],
-          filed: [{ username: 'kaleb', audiobookshelf_user: 'kaleb' }],
-          skipped: [{ username: 'noah', reason: 'Identity answered 500' }],
+          created: ['robin', 'taylor'],
+          filed: [{ username: 'robin', audiobookshelf_user: 'robin' }],
+          skipped: [{ username: 'taylor', reason: 'Identity answered 500' }],
         });
       }),
     );
@@ -144,6 +144,6 @@ describe('Identity credentials', () => {
     const status = await screen.findByRole('status');
     expect(status).toHaveTextContent('2 account(s) created');
     expect(status).toHaveTextContent('1 given a token');
-    expect(status).toHaveTextContent('noah (Identity answered 500)');
+    expect(status).toHaveTextContent('taylor (Identity answered 500)');
   });
 });
