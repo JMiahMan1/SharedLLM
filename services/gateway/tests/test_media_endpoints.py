@@ -947,3 +947,59 @@ def test_search_and_home_drop_music_assistant_mirrored_audiobooks(client, upstre
     home = client.get("/api/media/home").json()
     assert [i["uri"] for i in home["recent"]] == ["library://track/1", "abs://abs-wild-1"]
     assert [i["uri"] for i in home["continue"]] == ["library://podcast/9"]
+
+
+def test_search_lists_a_mirrored_podcast_once_as_the_audiobookshelf_item(client, upstream, ma):
+    """The same show arrived twice and only one of the two entries worked.
+
+    Music Assistant mirrors the Audiobookshelf podcast library, so searching for
+    a show returned its abs:// item (episodes, artwork, download settings) next to
+    MA's library://podcast/<n> copy of the same show. The Audiobookshelf entry is
+    the one that opens, so the mirror is dropped by title while a show only MA
+    knows is still listed.
+    """
+    ma["responses"]["music/search"] = {
+        "podcasts": [
+            {"uri": "library://podcast/15", "name": "Haunted Cosmos", "media_type": "podcast"},
+            {"uri": "library://podcast/22", "name": "Something MA Only Has", "media_type": "podcast"},
+        ],
+    }
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [],
+                "podcasts": [{"id": "abs-haunted", "title": "Haunted Cosmos"}],
+                "authors": [],
+            },
+        },
+    )
+    body = client.get("/api/media/search", params={"q": "haunted"}).json()
+
+    uris = [item["uri"] for item in body["podcasts"]]
+    assert uris.count("abs://abs-haunted") == 1
+    assert "library://podcast/15" not in uris
+    # A show only Music Assistant has is not hidden by the one ABS knows.
+    assert "library://podcast/22" in uris
+
+
+def test_a_podcast_title_that_differs_only_in_punctuation_is_still_the_same_show(client, upstream, ma):
+    ma["responses"]["music/search"] = {
+        "podcasts": [
+            {"uri": "library://podcast/15", "name": "The King's Hall (Audio)", "media_type": "podcast"},
+        ],
+    }
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {"books": [], "podcasts": [{"id": "abs-kings", "title": "the kings hall"}], "authors": []},
+        },
+    )
+    body = client.get("/api/media/search", params={"q": "kings"}).json()
+    assert [item["uri"] for item in body["podcasts"]] == ["abs://abs-kings"]
