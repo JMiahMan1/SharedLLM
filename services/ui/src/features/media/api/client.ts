@@ -1,5 +1,6 @@
 import { apiClient, directRequestConfig } from '../../../services/api';
 import type {
+  AbsPodcastsResponse,
   AbsProgressRequest,
   AbsProgressResponse,
   MediaFavoritesResponse,
@@ -56,6 +57,25 @@ export async function getMediaLibrary(
 export async function getMediaFavorites(limit = 50): Promise<MediaFavoritesResponse> {
   const resp = await apiClient.get('/api/media/favorites', { params: { limit }, timeout: 20_000 });
   return resp.data as MediaFavoritesResponse;
+}
+
+/**
+ * What every podcast in Audiobookshelf is doing: newest episode, when the feed
+ * was last read, whether the feed address is even set, and whether new
+ * episodes download. Three separate faults, three separate answers.
+ */
+export async function getAbsPodcasts(): Promise<AbsPodcastsResponse> {
+  const resp = await apiClient.get('/api/media/audiobookshelf/podcasts', { timeout: 35_000 });
+  return resp.data as AbsPodcastsResponse;
+}
+
+/** Turn automatic downloading of one show's new episodes on or off. */
+export async function setPodcastAutoDownload(itemId: string, enabled: boolean): Promise<void> {
+  await apiClient.post(
+    `/api/media/audiobookshelf/podcasts/${encodeURIComponent(itemId)}/auto-download`,
+    { enabled },
+    { timeout: 20_000 },
+  );
 }
 
 export async function postAbsProgress(req: AbsProgressRequest): Promise<AbsProgressResponse> {

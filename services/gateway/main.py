@@ -20190,6 +20190,69 @@ async def search_abs(q: str, request: Request, limit: int = Query(20, ge=1, le=1
     return {"status": "SUCCESS", "books": [], "podcasts": [], "authors": [], "total": 0, "notice": "ABS unavailable"}
 
 
+# ABS podcasts: what each show is doing, and the one setting worth changing
+
+@app.get("/api/media/audiobookshelf/podcasts")
+async def get_abs_podcasts(request: Request):
+    """Every podcast show with its newest episode and why it may be quiet.
+
+    Nothing here knows a show by name: the podcast libraries and the shows come
+    from the caller's own Audiobookshelf. "Stale" is deliberately three separate
+    facts (no feed address, a feed nobody has polled, a show that is simply
+    between episodes) because each has a different remedy.
+    """
+    creds = await _resolve_identity_from_request(request)  # [abs/podcasts]
+    try:
+        detail = await _media_exec_audiobookshelf(creds, {"action": "podcasts"}, timeout=ABS_PODCAST_TIMEOUT)
+        return {
+            "status": "SUCCESS",
+            "libraries": detail.get("libraries", []),
+            "shows": detail.get("shows", []),
+            "behind_days": detail.get("behind_days"),
+            "stale_check_days": detail.get("stale_check_days"),
+        }
+    except _MediaUpstreamError as e:
+        log.warning(f"[abs/podcasts] {e}")
+    except (TimeoutError, aiohttp.ClientConnectionError) as e:
+        log.warning(f"[abs/podcasts] ABS timeout: {e}")
+    except Exception as e:
+        log.warning(f"[abs/podcasts] ABS error: {e}")
+    return {"status": "SUCCESS", "libraries": [], "shows": [], "notice": "ABS unavailable"}
+
+
+@app.post("/api/media/audiobookshelf/podcasts/{item_id}/auto-download")
+async def set_abs_podcast_auto_download(item_id: str, request: Request):
+    """Turn automatic downloading of a show's new episodes on or off."""
+    creds = await _resolve_identity_from_request(request)  # [abs/podcasts/auto-download]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    enabled = bool(body.get("enabled")) if isinstance(body, dict) else False
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/audiobookshelf",
+                json={
+                    "action": "podcast_auto_download",
+                    "item_id": item_id,
+                    "auto_download": enabled,
+                    "user_context": {"user": creds.get("user") or ""},
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT),
+            )
+            data = await resp.json()
+    except (TimeoutError, aiohttp.ClientError) as e:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "FAILURE", "message": f"Audiobookshelf is unreachable: {type(e).__name__}"},
+        )
+    if data.get("status") == "FAILURE":
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": data.get("message") or "ABS refused"})
+    return {"status": "SUCCESS", **(data.get("detail") or {})}
+
+
 # ABS connectivity status
 
 @app.get("/api/media/audiobookshelf/status")
@@ -20239,6 +20302,9 @@ async def get_abs_status(request: Request):
 _MEDIA_UPSTREAM_TIMEOUT = 4.0
 _MEDIA_CHILD_TIMEOUT = 8.0
 _MEDIA_EXEC_TIMEOUT = 10.0
+# The podcast report is one round trip per show on the caller's own server, so it
+# gets more room than a single listing does.
+ABS_PODCAST_TIMEOUT = 30.0
 
 _MEDIA_LIBRARY_TABS = frozenset(
     {"tracks", "albums", "artists", "playlists", "radio", "podcasts", "audiobooks"}
