@@ -24,7 +24,7 @@ import android.widget.TextView;
  * What the screen guard shows instead of a blocked screen, built in code (no
  * layout files) so the Accessibility cover ({@link GuardScreenActivity}) and
  * the full-screen lock overlay ({@link GuardOverlay}) show exactly the same
- * thing. The look follows the Family Link family of screens: one clear
+ * thing. The look is one screen that says one thing: one clear
  * reason, one clear next step for the child, and the parents' way in - as a
  * quiet text action beside the child's buttons, and as the parent card itself
  * at the bottom of the screen.
@@ -805,7 +805,7 @@ final class GuardScreenView {
     }
 
     /**
-     * The panel painted over the lock, Family Link style: a dimmed lock behind a
+     * The panel painted over the lock: a dimmed lock behind a
      * bottom sheet with a grabber, one accent, and a way back. Only one is up at a
      * time and it never removes the lock under it.
      */

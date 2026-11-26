@@ -940,6 +940,32 @@ export interface GuardianConcern {
 }
 
 /** A child asking a parent first: a new app, an app's permission, or a blocked site. */
+/**
+ * What the phone knows about the app behind a request: the profile it sends the
+ * moment a new app is held, so a parent decides about the app itself. Every
+ * field is optional: a phone that could not read one leaves it out.
+ */
+export interface GuardAppProfile {
+  label?: string;
+  version_name?: string | null;
+  version_code?: number | null;
+  /** The package that installed it (a store), or null when it was sideloaded. */
+  installer?: string | null;
+  size_bytes?: number | null;
+  first_install?: number | null;
+  last_update?: number | null;
+  /** Dangerous permission groups it asks for. */
+  permissions?: string[];
+  /** Risky things it declares or asks for (accessibility, texts, overlay...). */
+  capabilities?: string[];
+  /** Special access switched on for it now. */
+  special_access?: string[];
+  /** SHA-1 of its signing certificates, newest first. */
+  cert_sha1?: string[];
+  apk_sha256?: string | null;
+  apk_hash_state?: string | null;
+}
+
 export interface GuardRequest {
   id: number;
   username: string;
@@ -948,6 +974,8 @@ export interface GuardRequest {
   target: string;
   label: string;
   note: string;
+  /** The app's own profile on an app request; empty for permissions and sites. */
+  meta?: GuardAppProfile;
   status: 'pending' | 'approved' | 'denied';
   until: string | null;
   decided_by: string | null;
@@ -1121,6 +1149,9 @@ export interface RequestVetting {
   stars?: number | null;
   installs?: string | null;
   concerns?: Array<Pick<AppConcern, 'label' | 'severity' | 'why'>>;
+  /** The security scan on the app's own profile, most serious first. */
+  security?: AppSecurityFinding[];
+  security_level?: ConcernLevel | null;
   /** The verdict in one or two sentences. */
   line: string;
 }

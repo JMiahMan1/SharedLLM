@@ -6,7 +6,7 @@ left and whether the phone should be locked now, and why. Pure on purpose:
 the gateway's status route, the parents' view and the phone all read the same
 answer, and every case is testable without a clock or a device.
 
-Semantics follow Family Link and Qustodio:
+The semantics are the ones parents expect from a family-safety suite:
 - the daily limit resets at local midnight; a weekend limit replaces it on
   Saturday and Sunday when set, and a day of the weekly schedule
   (``day_limits``) replaces both on that day; bonus minutes extend today's limit only;
@@ -18,7 +18,7 @@ Semantics follow Family Link and Qustodio:
   daily minutes; an app past its minutes is blocked until midnight while the
   rest of the phone keeps working;
 - the next lock is named ahead of time (``next_lock_at``/``next_lock_reason``)
-  so the phone can give Family Link's one-minute warning before it lands;
+  so the phone can warn a minute before it lands;
 - install approvals and permission gating are decided on the phone (only it
   knows which apps are new and which dialog is open); the server passes the
   parents' answers through (``approvals`` from identity);
@@ -118,13 +118,13 @@ def _window(now: datetime, start: time | None, end: time | None) -> tuple[bool, 
     return False, None
 
 
-# The kinds of permission a parent can ask to approve first (Family Link's
-# per-permission controls). The phone recognises Android's grant dialog for
+# The kinds of permission a parent can ask to approve first (per-permission
+# controls). The phone recognises Android's grant dialog for
 # each one; anything not listed here is never gated.
 PERMISSION_GROUPS = ("location", "camera", "microphone", "contacts", "sms", "phone", "photos", "calendar", "nearby")
 
 # One-tap website categories a parent can block on a child's web filter
-# (Qustodio / Family Link style). An entry in web_filter.allow (or allow_until)
+# (one-tap categories). An entry in web_filter.allow (or allow_until)
 # still wins over a blocked category so a parent can allow one site inside it.
 WEB_FILTER_CATEGORIES: dict[str, tuple[str, ...]] = {
     "social": (

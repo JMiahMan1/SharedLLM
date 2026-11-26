@@ -12,7 +12,7 @@ copied); the guarding side now has its own top-level `/guardian` page.
 | **Aura** | **9.6 / 10, ranked #1** | One dashboard with every family member at a glance; each child's profile has a **Pause** button at the top, **Bonus Time** as a reward, daily limit plus per-app and per-category limits, Bedtime / Focus Time / custom Schedules, screen time broken down by app and website, safe-zone location alerts |
 | Bark | 9.5, #2 | Alerts with the triggering context, a severity and talking points; weekly summary of top apps, contacts and trends |
 | Qustodio | 9.3, #3 | A minute-by-minute **activity timeline** (sites, apps, searches, YouTube), 7/15/30-day averages, weekday vs weekend rules |
-| Google Family Link | free baseline | A child profile with a **Controls** tab: daily limit by weekly schedule, bedtime, app limits, app-install approvals, device location, remote lock |
+| The phone's own controls (Android's screen-time tools) | free baseline | A child profile with a **Controls** tab: daily limit by weekly schedule, bedtime, app limits, app-install approvals, device location, remote lock |
 
 We follow **Aura**, the highest rated, for the structure: members at a glance,
 then one profile per child with the urgent actions on top and controls one
@@ -74,7 +74,7 @@ a loading, empty and error state; nothing is invented when data is missing.
    (more time, app installs, websites) with approve/deny inline; concerns
    (severity, context, what to say); location mini-map; last night's sleep;
    the next routine ("Bedtime in 2 h 10 min").
-4. **Time:** weekly daily-limit schedule (Family Link style, a row per day),
+4. **Time:** weekly daily-limit schedule (a row per day),
    Bedtime / Focus / School routines, per-app and per-category limits, bonus
    time, an hour × day usage heatmap for the last 14 days, request history.
 5. **Apps & web:** apps with today's and the week's time, category and state

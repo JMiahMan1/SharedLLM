@@ -278,3 +278,26 @@ def test_a_request_card_shows_common_sense_and_excerpts(wired, monkeypatch):
     assert summary["age_source"] == "common_sense" and summary["common_sense"]["age"] == 13
     assert summary["review_excerpts"][0]["source"] == "lowest"
     assert "Common Sense Media says age 13+" in summary["line"]
+
+
+async def test_a_request_carrying_a_profile_is_scanned_as_that_app(wired):
+    """Without the profile the scan has nothing to look at: the same request with
+    one gets the sideload and the risky-access findings."""
+    wired["answers"][("identity", "GET", "/api/internal/guardian/children")] = (200, {"children": [
+        {"username": "kid", "birth_date": "2016-01-01", "app_policy": {}}]})
+    wired["answers"][("telemetry", "POST", "/api/telemetry/apps/catalog")] = (200, {"catalog": {
+        "com.example.starchart": {"listing": {"status": "found", "hash": "s",
+                                              "listing": {"content_rating": "Everyone"}}}}})
+
+    bare = await routes.vet_requests("dad", [{
+        "username": "kid", "kind": "app", "target": "com.example.starchart", "label": "Star Chart"}])
+    assert bare[0]["vetting"]["security"] == [] and bare[0]["vetting"]["security_level"] is None
+
+    profiled = await routes.vet_requests("dad", [{
+        "username": "kid", "kind": "app", "target": "com.example.starchart", "label": "Star Chart",
+        "meta": {"installer": None, "capabilities": ["sms_send"], "special_access": [],
+                 "cert_sha1": ["AB" * 20], "apk_sha256": "a" * 64, "version_name": "4.2.1"}}])
+    found = [f["text"] for f in profiled[0]["vetting"]["security"]]
+    assert "Not installed from Google Play, and Android does not say where it came from" in found
+    assert any("text messages" in text for text in found)
+    assert profiled[0]["vetting"]["security_level"] == "high"

@@ -133,7 +133,10 @@ function AppControls({ owner }: { owner: string }) {
   });
   if (isLoading) return <p className="text-xs text-slate-500">Loading app control…</p>;
   if (error || !data) return <p className="text-xs text-amber-300/90">App control could not be read for @{owner}.</p>;
-  const installApproval = data.install_approval ?? false;
+  // The server holds new installs unless a parent switches this off, and the
+  // phone assumes the same, so an answer that has not arrived yet must not read
+  // as "off": that would show the hold defeated while it is in force.
+  const installApproval = data.install_approval ?? true;
   const kioskMode = data.kiosk_mode ?? data.rules?.kiosk_mode ?? false;
   const currentBlocked = blocked ?? (data.rules?.blocked_apps ?? data.blocked_apps ?? []).join(', ');
   const currentUninstall = uninstall ?? (data.uninstall_apps ?? data.rules?.uninstall_apps ?? []).join(', ');
