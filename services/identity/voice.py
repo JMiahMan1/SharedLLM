@@ -24,6 +24,8 @@ DIMENSIONS = 256
 #: Samples before a profile is used for identification. One sentence already
 #: separates speakers; three averages out how a single take was spoken.
 MIN_SAMPLES = 3
+#: Windows kept per take: one every 1.6 s, which is the encoder's own slice.
+MAX_PARTIALS = 8
 #: More takes stop moving the mean; keeping the newest few lets a profile
 #: follow a voice that changes (a child's, or a new microphone).
 MAX_SAMPLES = 6
@@ -124,6 +126,19 @@ def load_samples(raw: str | None) -> list[dict]:
     return [s for s in samples if isinstance(s, dict) and isinstance(s.get("embedding"), list)]
 
 
+def valid_partials(raw: object) -> list[list[float]]:
+    """The usable window vectors from a request or a stored take (capped)."""
+    out: list[list[float]] = []
+    if not isinstance(raw, list):
+        return out
+    for w in raw[:MAX_PARTIALS]:
+        try:
+            out.append(valid_embedding(w))
+        except ValueError:
+            continue
+    return out
+
+
 def centroid(samples: list[dict]) -> list[float]:
     vectors = [_norm(s["embedding"]) for s in samples]
     return _norm([sum(col) / len(vectors) for col in zip(*vectors, strict=True)])
@@ -157,27 +172,68 @@ def age_group(role: str | None) -> str:
     return "child" if (role or "") in CHILD_ROLES else "adult"
 
 
-def rank(embedding: list[float], profiles: list[dict]) -> list[dict]:
+def _windows(sample: dict) -> list[list[float]]:
+    """The per-window vectors of one take, when the recording kept them."""
+    out = []
+    for w in sample.get("partials") or []:
+        try:
+            out.append(valid_embedding(w))
+        except ValueError:
+            continue
+    return out
+
+
+def _agreed_window(probe: list[list[float]], stored: list[list[float]]) -> float | None:
+    """How close the probe's windows sit, counting only windows that agree.
+
+    A single window is a 1.6 s glimpse of a room, so it can resemble a stranger by
+    luck. Taking the best two windows and averaging them keeps that from being
+    enough on its own: the same luck would have to happen twice.
+    """
+    if not probe or not stored:
+        return None
+    best = sorted((max(cosine(w, v) for v in stored) for w in probe), reverse=True)
+    if len(best) >= 2:
+        return (best[0] + best[1]) / 2
+    return best[0]
+
+
+def rank(embedding: list[float], profiles: list[dict], partials: list[list[float]] | None = None) -> list[dict]:
     """``profiles`` are ``{username, name, samples, role?}``; best match first.
 
-    A profile is scored by its centroid and by its closest single take, and the
-    better of the two counts. A take recorded on a good microphone can sit much
-    closer to the voice than the mean of five takes does, and leaving it out is
-    what made quiet, short commands score just under the line.
+    A profile is scored by its centroid, by its closest single take, and - when the
+    recordings kept their windows - by the best two agreeing windows, the highest of
+    the three counting. A take recorded on a good microphone can sit much closer to
+    the voice than the mean of five takes does, and a short or quiet command is
+    mostly one or two windows, which the mean washes out. That combination is what
+    made quiet commands score just under the line.
     """
+    probe = [embedding]
+    for w in partials or []:
+        try:
+            probe.append(valid_embedding(w))
+        except ValueError:
+            continue
     scored = []
     for p in profiles:
         if len(p["samples"]) < MIN_SAMPLES:
             continue
         centroid_score = cosine(embedding, centroid(p["samples"]))
         take_score = max(cosine(embedding, s["embedding"]) for s in p["samples"])
+        stored = [centroid(p["samples"])]
+        for s in p["samples"]:
+            stored.append(s["embedding"])
+            stored.extend(_windows(s))
+        window_score = _agreed_window(probe[1:], stored) if len(probe) > 1 else None
+        best = max(centroid_score, take_score, window_score or 0.0)
         scored.append(
             {
                 "username": p["username"],
                 "name": p["name"],
-                "score": round(max(centroid_score, take_score), 3),
+                "score": round(best, 3),
                 "centroid_score": round(centroid_score, 3),
                 "take_score": round(take_score, 3),
+                "window_score": round(window_score, 3) if window_score is not None else None,
                 "group": age_group(p.get("role")),
             }
         )

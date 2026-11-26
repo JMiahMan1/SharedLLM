@@ -24,6 +24,9 @@ SAMPLE_RATE = 16000
 #: Kokoro voices: one sentence (~3 s) already separates speakers cleanly, and
 #: 2 s leaves room for a short phrase without accepting a cough.
 MIN_SPEECH_SECONDS = 2.0
+#: How many 1.6 s windows a recording keeps. Enough to show what a voice sounds
+#: like across a sentence without making every stored take large.
+PARTIALS_MAX = 8
 #: A spoken command ("turn off the kitchen lights") is often under 2 s. It is
 #: still worth trying: a short clip scores lower, and identity's threshold and
 #: margin then answer "not sure" rather than naming the wrong person.
@@ -148,9 +151,11 @@ def embed_samples(samples: np.ndarray, min_speech_seconds: float = MIN_SPEECH_SE
             f"Only {speech_seconds:.1f}s of speech was heard; at least {min_speech_seconds:.0f}s is needed. "
             "Speak a full sentence close to the microphone."
         )
-    vector = _get_encoder().embed_utterance(speech)
+    vector, partials = _get_encoder().embed_utterance(speech, return_partials=True)
+    windows = [[round(float(x), 6) for x in w] for w in list(partials)[:PARTIALS_MAX]]
     return {
         "embedding": [round(float(x), 6) for x in vector],
+        "partials": windows if len(windows) > 1 else [],
         "speech_seconds": round(speech_seconds, 2),
         "model": MODEL,
     }

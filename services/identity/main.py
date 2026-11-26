@@ -2012,6 +2012,9 @@ async def check_my_voice(
 
 class VoiceIdentifyRequest(BaseModel):
     embedding: list[float]
+    #: The probe's own windows, when the caller kept them: a short or quiet command
+    #: is one or two windows, and the mean of them is what scores badly.
+    partials: list[list[float]] | None = None
     model: str = voice.MODEL
     threshold: float | None = None
 
@@ -2019,6 +2022,7 @@ class VoiceIdentifyRequest(BaseModel):
 class VoiceLearnRequest(BaseModel):
     username: str
     embedding: list[float]
+    partials: list[list[float]] | None = None
     speech_seconds: float | None = None
     model: str = voice.MODEL
 
@@ -2055,6 +2059,7 @@ def learn_voice(request: Request, req: VoiceLearnRequest, session: Session = Dep
         return {"status": "SKIPPED", "reason": "already known", **_voice_status(row)}
     samples.append({
         "embedding": embedding,
+        "partials": voice.valid_partials(req.partials),
         "speech_seconds": req.speech_seconds,
         "recorded_at": datetime.now(UTC).isoformat(),
         "source": "learned",
@@ -2271,7 +2276,7 @@ def identify_voice(req: VoiceIdentifyRequest, session: Session = Depends(get_ses
     if req.threshold is not None and not 0.0 < req.threshold <= 1.0:
         raise HTTPException(status_code=422, detail="threshold must be in (0, 1].")
     profiles = _voice_profiles(session)
-    candidates = voice.rank(embedding, profiles)
+    candidates = voice.rank(embedding, profiles, voice.valid_partials(req.partials))
     if not candidates:
         raise HTTPException(status_code=404, detail="Nobody has enrolled a voice yet.")
     calibration = _voice_calibration(session, profiles)
