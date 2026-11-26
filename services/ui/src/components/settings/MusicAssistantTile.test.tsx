@@ -48,6 +48,17 @@ describe('MusicAssistantTile', () => {
     expect(within(dialog).queryByRole('button', { name: 'Use the household Music Assistant' })).toBeNull();
   });
 
+  it('opens the server in use, so a person can see and sign in to it themselves', async () => {
+    vi.mocked(api.getMusicAssistantStatus).mockResolvedValue(status({}));
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage Music Assistant' }));
+    const dialog = await screen.findByTestId('music-assistant-dialog');
+    fireEvent.click(within(dialog).getByTestId('music-assistant-open'));
+    expect(open).toHaveBeenCalledWith('http://music.example.test:8095', '_blank', 'noopener,noreferrer');
+    open.mockRestore();
+  });
+
   it('shows an own server that does not answer as an error, and offers the household one explicitly', async () => {
     vi.mocked(api.getMusicAssistantStatus).mockResolvedValue(status({
       server: 'own', own_url: 'http://mine.example.test:8095', url: 'http://mine.example.test:8095', can_use_household: true,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertCircle, CheckCircle, House, Info, ListMusic, RefreshCcw, Save } from 'lucide-react';
+import { AlertCircle, CheckCircle, ExternalLink, House, Info, ListMusic, RefreshCcw, Save } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
@@ -32,6 +32,7 @@ export default function MusicAssistantTile({ userData }: { userData?: UserProfil
   const line = status.isError ? 'Status unavailable' : musicAssistantLine(data, status.isLoading);
   const bad = status.isError || musicAssistantIsError(data);
   const tokenSaved = (userData?.saved_credentials ?? []).includes('mass_token');
+  const serverUrl = data?.url ?? '';
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: STATUS_KEY });
@@ -101,6 +102,17 @@ export default function MusicAssistantTile({ userData }: { userData?: UserProfil
               {data?.url && <p className="mt-1 text-slate-400 break-all">Server: {data.url.replace(/^https?:\/\//, '')}</p>}
             </div>
           </div>
+
+          {serverUrl && (
+            // The person's own login lives on their server; opening it is how they see
+            // what Jarvis is playing through, and change what only they can change.
+            <button type="button" data-testid="music-assistant-open"
+              onClick={() => window.open(serverUrl, '_blank', 'noopener,noreferrer')}
+              className="glass-button w-full min-h-11 py-3 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest">
+              <ExternalLink size={16} aria-hidden />
+              Open Music Assistant
+            </button>
+          )}
 
           {offersHousehold(data) && (
             <button type="button" onClick={() => save.mutate({ clear_fields: ['mass_url'] } as Partial<UserProfile>)}
