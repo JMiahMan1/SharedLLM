@@ -5820,6 +5820,25 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * Give each member their own Audiobookshelf token, copied from the account of
+   * the same name (Audiobookshelf issues one token per account and has no API to
+   * mint another). Admin only. Names are read at the time of the call, so
+   * nothing here knows a household member by name.
+   */
+  async issueAudiobookshelfTokens(usernames?: string[]): Promise<{
+    status: string;
+    issued: Array<{ username: string; audiobookshelf_user: string }>;
+    skipped: Array<{ username: string; reason: string }>;
+  }> {
+    const resp = await apiClient.post(
+      '/api/media/audiobookshelf/users/tokens',
+      usernames && usernames.length ? { usernames } : {},
+      { timeout: 60000 },
+    );
+    return resp.data;
+  },
+
   async playAudiobook(payload: {
     book_id: string;
     entity_id?: string;

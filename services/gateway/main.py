@@ -20257,6 +20257,113 @@ async def set_abs_podcast_auto_download(item_id: str, request: Request):
     return {"status": "SUCCESS", **(data.get("detail") or {})}
 
 
+# ABS accounts: who the server knows, and giving each member their own token
+
+@app.get("/api/media/audiobookshelf/users")
+async def list_abs_users(request: Request):
+    """The ABS accounts this household can hand out credentials for (admin).
+
+    The token each account carries is deliberately not returned: this list says
+    who exists and whether a token is already there, and the route below is what
+    moves one into a member's account.
+    """
+    await _require_admin(request)
+    creds = await _resolve_identity_from_request(request)
+    try:
+        detail = await _media_exec_audiobookshelf(creds, {"action": "users"}, timeout=ABS_PODCAST_TIMEOUT)
+    except _MediaUpstreamError as e:
+        return {"status": "SUCCESS", "users": [], "notice": str(e)}
+    users = [
+        {
+            "id": entry.get("id"),
+            "username": entry.get("username"),
+            "type": entry.get("type"),
+            "is_active": entry.get("is_active", True),
+            "has_token": entry.get("has_token", False),
+        }
+        for entry in detail.get("users") or []
+    ]
+    return {"status": "SUCCESS", "users": users}
+
+
+@app.post("/api/media/audiobookshelf/users/tokens")
+async def issue_abs_user_tokens(request: Request):
+    """Give members their own Audiobookshelf token, from the household's admin one.
+
+    Audiobookshelf issues one token per account and hands it to an administrator,
+    so the household keeps one administrator credential on the default account
+    and this copies each account's own token onto the member of the same name.
+    Nothing is invented and no names are written down here: the ABS accounts and
+    the Jarvis accounts are both read at the time of the call, and a member with
+    no account of that name is reported, not guessed at.
+    """
+    admin = await _require_admin(request)
+    creds = await _resolve_identity_from_request(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    wanted = [str(name).strip().lower() for name in (body.get("usernames") or []) if str(name).strip()]
+
+    try:
+        detail = await _media_exec_audiobookshelf(creds, {"action": "users"}, timeout=ABS_PODCAST_TIMEOUT)
+    except _MediaUpstreamError as e:
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": str(e)})
+    accounts = {(entry.get("username") or "").strip().lower(): entry for entry in detail.get("users") or []}
+
+    if not wanted:
+        # Everyone this household knows, by name. Identity is the list of members;
+        # ABS is the list of accounts.
+        try:
+            async with shared_http_client() as client:
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/users",
+                    headers={
+                        "Authorization": request.headers.get("authorization", ""),
+                        "X-Internal-Secret": INTERNAL_SECRET,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=8.0),
+                )
+                people = await resp.json() if resp.status == 200 else []
+        except (TimeoutError, aiohttp.ClientError):
+            people = []
+        wanted = sorted({
+            str(person.get("username") or "").strip().lower()
+            for person in (people if isinstance(people, list) else [])
+            if str(person.get("username") or "").strip()
+        })
+
+    issued: list[dict] = []
+    skipped: list[dict] = []
+    async with shared_http_client() as client:
+        for username in wanted:
+            account = accounts.get(username)
+            if not account:
+                skipped.append({"username": username, "reason": "no Audiobookshelf account with that name"})
+                continue
+            token = str(account.get("token") or "").strip()
+            if not token:
+                skipped.append({"username": username, "reason": "Audiobookshelf has no token for this account yet"})
+                continue
+            try:
+                resp = await client.post(
+                    f"{IDENTITY_SVC}/api/users/{username}/audiobookshelf-token",
+                    json={"token": token, "audiobookshelf_user": account.get("username")},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if resp.status != 200:
+                    skipped.append({"username": username, "reason": f"Identity answered {resp.status}"})
+                    continue
+            except (TimeoutError, aiohttp.ClientError) as e:
+                skipped.append({"username": username, "reason": f"Identity unreachable: {type(e).__name__}"})
+                continue
+            issued.append({"username": username, "audiobookshelf_user": account.get("username")})
+
+    log.info(f"[abs/tokens] {admin} issued {len(issued)} token(s), skipped {len(skipped)}")
+    return {"status": "SUCCESS", "issued": issued, "skipped": skipped}
+
+
 # ABS connectivity status
 
 @app.get("/api/media/audiobookshelf/status")

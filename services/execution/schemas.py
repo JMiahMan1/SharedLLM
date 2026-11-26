@@ -1197,7 +1197,7 @@ class AudiobookshelfRequest(BaseRequest):
     Interacts with Audiobookshelf (ABS) for searching, playing, and tracking audiobooks.
     """
     user_context: UserContext
-    action: Literal["search", "play", "play_by", "play_podcast_episode", "resume", "progress", "libraries", "list", "get_book", "last_played", "update_progress", "podcasts", "podcast_auto_download"]
+    action: Literal["search", "play", "play_by", "play_podcast_episode", "resume", "progress", "libraries", "list", "get_book", "last_played", "update_progress", "podcasts", "podcast_auto_download", "users"]
     query: str | None = Field(None, description="Search query or book title")
     author: str | None = Field(None, description="play_by: the author whose book to play (misheard names are matched to the library)")
     series: str | None = Field(None, description="play_by: the series whose book to play")

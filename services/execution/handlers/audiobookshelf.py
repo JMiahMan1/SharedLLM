@@ -109,6 +109,9 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
         elif action == "podcast_auto_download":
             return await _handle_podcast_auto_download(abs_url, abs_key, req)
 
+        elif action == "users":
+            return await _handle_users(abs_url, abs_key)
+
         return ExecutionResult(
             status="FAILURE",
             message=f"Action '{action}' not supported.",
@@ -1275,6 +1278,39 @@ async def _handle_podcasts(abs_url: str, abs_key: str) -> ExecutionResult:
         message=f"Found {len(shows)} podcast(s); {attention} need a look.",
         service="audiobookshelf",
         detail=report,
+    )
+
+
+async def _handle_users(abs_url: str, abs_key: str) -> ExecutionResult:
+    """Who the server knows, and whether each of them already has a token.
+
+    Audiobookshelf mints one token per account and shows it to an administrator;
+    there is no API to mint another (``POST /api/users/{id}/token`` is a 404 on
+    2.33). So the account's own token travels to the gateway, which files it in
+    that member's identity row, and the browser-facing route drops it again.
+    """
+    payload = await abs_client.get_users(abs_url, abs_key)
+    if payload.get("error"):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Audiobookshelf did not list its users: {payload['error']}",
+            service="audiobookshelf",
+        )
+    users = []
+    for entry in payload.get("users") or []:
+        users.append({
+            "id": entry.get("id"),
+            "username": entry.get("username"),
+            "type": entry.get("type"),
+            "is_active": bool(entry.get("isActive", True)),
+            "has_token": bool(entry.get("token")),
+            "token": entry.get("token") or "",
+        })
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Found {len(users)} Audiobookshelf user(s).",
+        service="audiobookshelf",
+        detail={"users": users},
     )
 
 

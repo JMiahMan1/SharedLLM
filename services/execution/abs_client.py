@@ -459,6 +459,16 @@ async def get_libraries(abs_url: str, abs_api_key: str) -> dict:
     return await abs_get(abs_url, abs_api_key, "/api/libraries")
 
 
+async def get_users(abs_url: str, abs_api_key: str) -> dict:
+    """List the server's users, and the API token each one carries.
+
+    ``/api/users`` answers with a token per user and is root/admin only, which is
+    what lets one administrator credential hand every household member their own
+    (``GET /api/users`` -> ``{"users": [...]}``, or ``{"error": ...}``).
+    """
+    return await abs_get(abs_url, abs_api_key, "/api/users")
+
+
 async def authorize_token(abs_url: str, abs_api_key: str) -> dict:
     """Validate API token and get user/server info.
 

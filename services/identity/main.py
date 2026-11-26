@@ -2920,6 +2920,56 @@ def update_user(username: str, body: UserUpdate, request: Request, session: Sess
     return user
 
 
+@app.post("/api/users/{username}/audiobookshelf-token")
+def set_audiobookshelf_token(
+    username: str,
+    body: dict,
+    request: Request,
+    session: Session = Depends(get_session),
+    authorization: str = Header(None),
+    x_internal_secret: str = Header(None, alias="X-Internal-Secret"),
+):
+    """Store one member's own Audiobookshelf token.
+
+    The token is issued by Audiobookshelf to the administrator credential the
+    default account holds, so it is read as a secret and never returned: the
+    gateway mints it, this stores it, and the person's own reads then use their
+    own token instead of the household one. Internal calls (the gateway) send
+    X-Internal-Secret; a user request must be an admin, because this writes a
+    secret onto somebody's account.
+    """
+    is_internal = _matches_internal_secret(x_internal_secret)
+    if not is_internal:
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Missing authorization")
+        caller = require_api_key(authorization, session)
+        if not caller.is_admin and caller.username != username.lower():
+            raise HTTPException(status_code=403, detail="Only the account owner or an admin can set this")
+    target = session.exec(select(User).where(User.username == username.lower())).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    token = str(body.get("token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="token is required")
+    before = audit.snapshot(target)
+    target.audiobookshelf_api_key_enc = encrypt(token)
+    abs_user = str(body.get("audiobookshelf_user") or "").strip()
+    if abs_user:
+        target.audiobookshelf_user = abs_user
+    session.add(target)
+    session.commit()
+    session.refresh(target)
+    _audit(
+        request, session, "credential.set", target.username, actor=None,
+        before=before, after=audit.snapshot(target),
+    )
+    return {
+        "username": target.username,
+        "stored": True,
+        "audiobookshelf_user": target.audiobookshelf_user,
+    }
+
+
 @app.post("/api/users/{username}/reveal")
 def reveal_credential(username: str, body: dict, request: Request, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     """A saved credential's value, for the show/hide eye on a password field.
