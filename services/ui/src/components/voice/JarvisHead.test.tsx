@@ -1,138 +1,159 @@
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import JarvisHead from './JarvisHead';
-import { FACE_STATES, THINKING_DOTS } from './jarvisFace';
+import { FACE_LABELS, FACE_STATES } from './jarvisFace';
+
+const draw = (props: Parameters<typeof JarvisHead>[0]) => render(<JarvisHead {...props} />);
+
+const parts = (container: HTMLElement, part: string): Element[] =>
+  Array.from(container.querySelectorAll(`[data-part="${part}"]`));
+
+/** The width of the head shell where it is widest, from the icon's path. */
+const SHELL_LEFT = 30;
+const SHELL_RIGHT = 78;
 
 describe('JarvisHead', () => {
-  it('renders every state with its own look', () => {
+  it('draws every state and says what it is doing', () => {
     for (const state of FACE_STATES) {
-      const { container, unmount } = render(<JarvisHead state={state} />);
-      const svg = container.querySelector('svg');
-      expect(svg?.getAttribute('data-face-state')).toBe(state);
-      expect(svg?.getAttribute('aria-label')).toBeTruthy();
+      const { container, unmount } = draw({ state, tickMs: 400 });
+      const svg = container.querySelector('svg')!;
+      expect(svg.getAttribute('data-face-state')).toBe(state);
+      expect(svg.getAttribute('aria-label')).toBe(`Jarvis, ${FACE_LABELS[state]}`);
+      expect(svg.getAttribute('viewBox')).toBe('0 0 108 108');
       unmount();
     }
   });
 
-  it('is a rounded companion head, not the pointy shield', () => {
-    const { container } = render(<JarvisHead state="idle" />);
-    const shell = container.querySelector('rect[data-part="shell"]');
-    expect(shell).not.toBeNull();
-    // The v1 heraldic shield started with this exact path; it must be gone.
-    expect(container.querySelector('path[d^="M60 6 L104 21"]')).toBeNull();
-    // A squircle: the corner radius is a big fraction of the shorter side, so it
-    // reads as a head rather than as a badge.
-    const width = Number(shell?.getAttribute('width'));
-    const height = Number(shell?.getAttribute('height'));
-    const radius = Number(shell?.getAttribute('rx'));
-    expect(radius).toBeGreaterThan(Math.min(width, height) * 0.3);
+  it('is the launcher mascot, not a helmet', () => {
+    const { container } = draw({ state: 'idle', tickMs: 0 });
+    const shell = parts(container, 'shell')[0];
+    expect(shell).toBeTruthy();
+    expect(shell.getAttribute('d')).toMatch(/^M30,54 C30,37 40,27 54,27/);
+    // the crest and the visor are the icon's too
+    expect(parts(container, 'crest')[0].querySelector('path')!.getAttribute('d')).toMatch(
+      /^M58,12 L46,26/,
+    );
+    expect(parts(container, 'visor')[0].getAttribute('d')).toMatch(/^M39,45 h30/);
   });
 
-  it('keeps every facial light inside the dark visor', () => {
-    // This is the bug that shipped in v1: the mouth and the voice bars were
-    // drawn in the accent colour on top of the accent-coloured shield, so a
-    // speaking face looked identical to a silent one. Everything luminous must
-    // be enclosed by the dark glass.
-    const { container } = render(<JarvisHead state="speaking" />);
-    const visor = container.querySelector('rect[data-part="visor"]');
-    const top = Number(visor?.getAttribute('y'));
-    const bottom = top + Number(visor?.getAttribute('height'));
-    const left = Number(visor?.getAttribute('x'));
-    const right = left + Number(visor?.getAttribute('width'));
+  it('gives him two ears, symmetrical about the middle and outside the head', () => {
+    const { container } = draw({ state: 'idle', tickMs: 0 });
+    const ears = parts(container, 'ear');
+    expect(ears).toHaveLength(2);
 
-    for (const eye of container.querySelectorAll('[data-part="eye"] ellipse')) {
-      const cy = Number(eye.getAttribute('cy'));
-      const ry = Number(eye.getAttribute('ry'));
-      expect(cy - ry).toBeGreaterThan(top);
-      expect(cy + ry).toBeLessThan(bottom);
+    const boxes = ears.map((ear) => {
+      const rect = ear.querySelector('rect')!;
+      const x = Number(rect.getAttribute('x'));
+      const width = Number(rect.getAttribute('width'));
+      return { x, width, edge: x + width };
+    });
+
+    const left = boxes.find((box) => box.edge < 54)!;
+    const right = boxes.find((box) => box.x > 54)!;
+
+    // symmetry about the mascot's centre line
+    expect(54 - left.x).toBe(right.edge - 54);
+    // and both actually stick out past the shell, which is what went wrong
+    // in the version that hid one ear behind the head
+    expect(left.x).toBeLessThan(SHELL_LEFT);
+    expect(right.edge).toBeGreaterThan(SHELL_RIGHT);
+    expect(parts(container, 'ear')[0].getAttribute('data-side')).toBe('left');
+    expect(parts(container, 'ear')[1].getAttribute('data-side')).toBe('right');
+  });
+
+  it('keeps the friendly eyes: a sparkle on both, no pupils, no brows', () => {
+    for (const state of FACE_STATES) {
+      const { container, unmount } = draw({ state, tickMs: 400 });
+      expect(parts(container, 'brow')).toHaveLength(0);
+      expect(parts(container, 'pupil')).toHaveLength(0);
+      // A happy face swaps in `^ ^` arcs instead of the ovals.
+      if (state === 'happy') {
+        expect(parts(container, 'eye-smile')).toHaveLength(2);
+      } else {
+        expect(parts(container, 'eye')).toHaveLength(2);
+        if (state !== 'sleeping') expect(parts(container, 'catchlight')).toHaveLength(2);
+      }
+      unmount();
     }
-    for (const bar of container.querySelectorAll('[data-part="bars"] rect')) {
-      const y = Number(bar.getAttribute('y'));
-      const h = Number(bar.getAttribute('height'));
+  });
+
+  it('shuts the eyes when asleep and opens them when listening', () => {
+    const asleep = draw({ state: 'sleeping', tickMs: 100 }).container.querySelector('svg')!;
+    const awake = draw({ state: 'listening', tickMs: 100 }).container.querySelector('svg')!;
+    expect(asleep.getAttribute('data-eye-open')).toBe('0.00');
+    expect(Number(awake.getAttribute('data-eye-open'))).toBeGreaterThan(1);
+  });
+
+  it('lights both ears with the room', () => {
+    const quiet = draw({ state: 'listening', level: 0, tickMs: 400 }).container.querySelector('svg')!;
+    const loud = draw({ state: 'listening', level: 95, tickMs: 400 }).container.querySelector('svg')!;
+    expect(Number(loud.getAttribute('data-ear'))).toBeGreaterThan(
+      Number(quiet.getAttribute('data-ear')),
+    );
+    expect(Number(loud.getAttribute('data-crest'))).toBeGreaterThan(
+      Number(quiet.getAttribute('data-crest')),
+    );
+  });
+
+  it('speaks inside a dark mouth well, with bars that move', () => {
+    const { container } = draw({ state: 'speaking', tickMs: 100 });
+    const well = parts(container, 'mouth-well')[0]!;
+    expect(well.getAttribute('fill')).toBe('#1e1b4b');
+    const box = {
+      x: Number(well.getAttribute('x')),
+      y: Number(well.getAttribute('y')),
+      right: Number(well.getAttribute('x')) + Number(well.getAttribute('width')),
+      bottom: Number(well.getAttribute('y')) + Number(well.getAttribute('height')),
+    };
+
+    const bars = parts(container, 'bar');
+    expect(bars).toHaveLength(5);
+    for (const bar of bars) {
       const x = Number(bar.getAttribute('x'));
-      const w = Number(bar.getAttribute('width'));
-      expect(y).toBeGreaterThan(top);
-      expect(y + h).toBeLessThan(bottom);
-      expect(x).toBeGreaterThan(left);
-      expect(x + w).toBeLessThan(right);
+      const y = Number(bar.getAttribute('y'));
+      expect(bar.getAttribute('fill')).toBe('#ffffff');
+      expect(x).toBeGreaterThanOrEqual(box.x);
+      expect(x + Number(bar.getAttribute('width'))).toBeLessThanOrEqual(box.right);
+      expect(y).toBeGreaterThanOrEqual(box.y);
+      expect(y + Number(bar.getAttribute('height'))).toBeLessThanOrEqual(box.bottom);
     }
+
+    const later = draw({ state: 'speaking', tickMs: 260 });
+    const heights = (list: Element[]) =>
+      list.map((bar) => Number(bar.getAttribute('height')));
+    expect(heights(bars)).not.toEqual(heights(parts(later.container, 'bar')));
   });
 
-  it('draws the mouth inside the visor when it is not speaking', () => {
-    const { container } = render(<JarvisHead state="idle" />);
-    const visor = container.querySelector('rect[data-part="visor"]')!;
-    const bottom = Number(visor.getAttribute('y')) + Number(visor.getAttribute('height'));
-    expect(container.querySelector('[data-part="mouth"]')).not.toBeNull();
-    // The mouth curve sits at y=78 and sags by at most 5.5.
-    expect(bottom).toBeGreaterThan(84);
+  it('shows three dots and no mouth while thinking', () => {
+    const { container } = draw({ state: 'thinking', tickMs: 700 });
+    expect(parts(container, 'dot')).toHaveLength(3);
+    expect(parts(container, 'mouth')).toHaveLength(0);
+    expect(parts(container, 'bar')).toHaveLength(0);
   });
 
-  it('closes his eyes when he is resting and opens them when he listens', () => {
-    const asleep = render(<JarvisHead state="sleeping" />);
-    expect(asleep.container.querySelector('svg')?.getAttribute('data-eye-open')).toBe('0.00');
-    asleep.unmount();
-
-    const awake = render(<JarvisHead state="listening" />);
-    expect(awake.container.querySelector('svg')?.getAttribute('data-eye-open')).toBe('1.00');
+  it('turns amber and tips his head when something goes wrong', () => {
+    const { container } = draw({ state: 'error', tickMs: 0 });
+    const crest = parts(container, 'crest')[0].querySelector('path')!;
+    expect(crest.getAttribute('fill')).toBe('var(--jarvis-warm, #fbbf24)');
+    const group = container.querySelector('g[transform]')!;
+    expect(group.getAttribute('transform')).toContain('rotate(-5.00');
+    expect(parts(container, 'brow')).toHaveLength(0);
   });
 
-  it('lights its ear-pods from the microphone level', () => {
-    const quiet = render(<JarvisHead state="listening" level={0} />);
-    const loud = render(<JarvisHead state="listening" level={100} />);
-    const read = (c: HTMLElement) => Number(c.querySelector('svg')?.getAttribute('data-pod'));
-    expect(read(loud.container)).toBeGreaterThan(read(quiet.container));
-    expect(loud.container.querySelectorAll('[data-part="pod"]')).toHaveLength(2);
+  it('keeps gradient ids unique so two heads never collide', () => {
+    const first = draw({ state: 'idle', tickMs: 0 }).container.innerHTML;
+    const second = draw({ state: 'idle', tickMs: 0 }).container.innerHTML;
+    const ids = (html: string) => Array.from(html.matchAll(/id="([^"]+)"/g)).map((m) => m[1]);
+    expect(ids(first)).toHaveLength(3);
+    expect(ids(first).some((id) => ids(second).includes(id))).toBe(false);
   });
 
-  it('shows five bright voice bars while speaking and a mouth otherwise', () => {
-    const talking = render(<JarvisHead state="speaking" />);
-    expect(talking.container.querySelectorAll('[data-part="bars"] rect[rx="2"]')).toHaveLength(5);
-    // Each bar also gets a white core, which is what reads as speech.
-    expect(talking.container.querySelectorAll('[data-part="bars"] rect[fill="#ffffff"]')).toHaveLength(5);
-    talking.unmount();
-
-    const quiet = render(<JarvisHead state="idle" />);
-    expect(quiet.container.querySelectorAll('[data-part="bars"] rect[rx="2"]')).toHaveLength(0);
-  });
-
-  it('shows three thinking dots instead of a mouth while thinking', () => {
-    const { container } = render(<JarvisHead state="thinking" />);
-    expect(container.querySelectorAll('[data-part="dots"] circle')).toHaveLength(THINKING_DOTS);
-    expect(container.querySelector('[data-part="mouth"]')).toBeNull();
-  });
-
-  it('lifts its brows when something is wrong and lowers them never', () => {
-    const worried = render(<JarvisHead state="error" />);
-    expect(worried.container.querySelector('[data-part="brow"]')).not.toBeNull();
-    worried.unmount();
-
-    const calm = render(<JarvisHead state="idle" />);
-    expect(calm.container.querySelector('[data-part="brow"]')).toBeNull();
-  });
-
-  it('gives each instance its own gradient ids so two heads do not collide', () => {
-    const a = render(<JarvisHead state="idle" />);
-    const b = render(<JarvisHead state="idle" />);
-    const first = a.container.querySelector('linearGradient')?.getAttribute('id');
-    const second = b.container.querySelector('linearGradient')?.getAttribute('id');
-    expect(first).toBeTruthy();
-    expect(second).toBeTruthy();
-    expect(first).not.toBe(second);
-  });
-
-  it('keeps its details out of the way at icon size', () => {
-    const { container } = render(<JarvisHead state="idle" size={32} compact />);
-    // No blur filters (expensive and muddy at 24 px) and no pupils.
-    expect(container.querySelector('[filter]')).toBeNull();
-    expect(container.querySelectorAll('[data-part="eye"] circle')).toHaveLength(0);
-    // It is still recognisably Jarvis: shell, visor, eyes.
-    expect(container.querySelector('rect[data-part="shell"]')).not.toBeNull();
-    expect(container.querySelector('rect[data-part="visor"]')).not.toBeNull();
-    expect(container.querySelectorAll('[data-part="eye"]')).toHaveLength(2);
-  });
-
-  it('still shows the speaking bars at icon size', () => {
-    const { container } = render(<JarvisHead state="speaking" size={32} compact />);
-    expect(container.querySelectorAll('[data-part="bars"] rect[rx="2"]')).toHaveLength(5);
+  it('stays legible at 24-32px in compact mode', () => {
+    const { container } = draw({ state: 'speaking', size: 32, compact: true, tickMs: 100 });
+    expect(parts(container, 'glow')).toHaveLength(0);
+    expect(container.querySelectorAll('[filter]')).toHaveLength(0);
+    expect(parts(container, 'ear')).toHaveLength(2);
+    expect(parts(container, 'eye')).toHaveLength(2);
+    expect(parts(container, 'bar')).toHaveLength(5);
   });
 });
