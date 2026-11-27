@@ -43,6 +43,11 @@ export default function VoiceAssistantOverlay({ isOpen, onClose, userId }: Props
     void JarvisAssist.addListener('assist', (event: AssistEvent) => {
       if (event.type === 'state' && event.text) setState(event.text as AssistState);
       if (event.type === 'level') setLevel(typeof event.level === 'number' ? event.level : 0);
+      if (event.type === 'partial' && event.text) {
+        // Words as they are spoken: the orb stops looking dead while the
+        // person is still talking. The finished take replaces them.
+        setHeard(event.text);
+      }
       if (event.type === 'transcript' && event.text) {
         setHeard(event.text);
       }

@@ -21,7 +21,8 @@ import { api } from '../services/api';
  */
 export interface AssistEvent {
   /** `status` is a short diagnostic line (microphone state), so a silent sheet says why. */
-  type: 'state' | 'level' | 'transcript' | 'sentence' | 'reply' | 'error' | 'status';
+  /** `partial` is the take so far, so words appear while the person is still talking. */
+  type: 'state' | 'level' | 'partial' | 'transcript' | 'sentence' | 'reply' | 'error' | 'status';
   text?: string;
   level?: number;
 }
@@ -71,6 +72,12 @@ let audioStop: (() => void) | null = null;
 let meter: number | null = null;
 /** Ends the take when the person stops talking; waiting out a fixed cap reads as a dead button. */
 let silenceWatch: number | null = null;
+/** Transcribes the take as it goes, so the sheet shows words instead of a silent orb. */
+let partialWatch: number | null = null;
+/** Only one partial request at a time: the server has one card to answer with. */
+let partialBusy = false;
+/** Bumped when a take ends, so a slow partial cannot overwrite the real transcript. */
+let partialToken = 0;
 let state: AssistState = 'idle';
 /** The turn in flight, so closing the sheet stops it instead of letting it talk to an empty room. */
 let turnAbort: AbortController | null = null;
@@ -92,6 +99,10 @@ function stopMeter() {
   if (silenceWatch !== null) {
     window.clearInterval(silenceWatch);
     silenceWatch = null;
+  }
+  if (partialWatch !== null) {
+    window.clearInterval(partialWatch);
+    partialWatch = null;
   }
 }
 
@@ -267,6 +278,27 @@ export async function askJarvis(text: string, userId?: string): Promise<void> {
   }
 }
 
+async function partialListen() {
+  if (partialBusy) return;
+  if (!recorder || recorder.state !== 'recording') return;
+  const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+  // Under about a second there is nothing worth showing, and an empty answer
+  // would wipe the words already on screen.
+  if (blob.size < 6000) return;
+  partialBusy = true;
+  const token = partialToken;
+  try {
+    const audioB64 = await blobToBase64(blob);
+    const heard = await api.voiceListen(audioB64, blob.type || 'audio/webm');
+    const text = withoutWake((heard?.text || '').trim());
+    if (token === partialToken && text) emit({ type: 'partial', text });
+  } catch {
+    // A partial is a convenience; the finished take still does the real work.
+  } finally {
+    partialBusy = false;
+  }
+}
+
 async function finishTurn(blob: Blob) {
   let answered = false;
   try {
@@ -345,6 +377,8 @@ async function webStart() {
     if (event.data && event.data.size > 0) chunks.push(event.data);
   };
   recorder.onstop = () => {
+    // Anything still in flight belongs to the take that just ended.
+    partialToken += 1;
     const blob = new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' });
     recorder = null;
     if (discard) {
@@ -368,6 +402,13 @@ async function webStart() {
   };
   recorder.start(250);  // periodic chunks: a WebView may send nothing until the end
   setState('listening');
+  // Live words: the take is transcribed every 1.5 s so the sheet shows the person
+  // being heard. One request at a time, and only the newest take's words show.
+  partialToken += 1;
+  const takeToken = partialToken;
+  partialWatch = window.setInterval(() => {
+    if (takeToken === partialToken) void partialListen();
+  }, 1500);
   // The level meter also ends the take: once the person has spoken and then
   // gone quiet there is no reason to make them wait out a timer, and waiting
   // out a fixed 15 s is what made the button feel dead. A WebView with no Web
