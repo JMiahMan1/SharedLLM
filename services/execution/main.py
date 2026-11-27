@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import aiohttp
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -4243,9 +4243,53 @@ async def execute_location(req: dict, x_internal_secret: str = Header(None)):
 
 
 # Speech-to-Text (Section 3.9)
+# Whisper models are loaded once and kept: a phone's live words re-transcribe the
+# take every 1.5 s, and loading from disk per request blocked the whole event loop.
+_WHISPER_MODELS: dict[tuple[int, str], object] = {}
+_WHISPER_LOCK = threading.Lock()
+
+_AUDIO_SUFFIX = {
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/mp4": ".m4a",
+    "audio/m4a": ".m4a",
+    "audio/mpeg": ".mp3",
+    "audio/flac": ".flac",
+}
+
+
+def _whisper_suffix(filename: str | None, content_type: str | None) -> str:
+    """The container whisper should decode, taken from what the caller sent."""
+    if filename:
+        stem, dot, ext = filename.rpartition(".")
+        if dot and 1 <= len(ext) <= 5 and ext.isalnum():
+            return "." + ext.lower()
+    kind = (content_type or "").split(";")[0].strip().lower()
+    return _AUDIO_SUFFIX.get(kind, ".wav")
+
+
+def _whisper_model(module: object, name: str) -> object:
+    """Load a Whisper model once per (package, name); a reload per request is minutes of I/O."""
+    key = (id(module), name)
+    with _WHISPER_LOCK:
+        cached = _WHISPER_MODELS.get(key)
+        if cached is None:
+            cached = module.load_model(name)  # pyright: ignore[reportAttributeAccessIssue]
+            _WHISPER_MODELS[key] = cached
+        return cached
+
+
 @app.post("/execute/stt/transcribe")
-async def transcribe_audio(file: UploadFile = File(...), model: str = "base", language: str = "en"):
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    model: str = Form("base"),
+    language: str = Form("en"),
+):
     """Transcribe audio file using Whisper STT."""
+    import asyncio
     import os
     import tempfile
     try:
@@ -4256,21 +4300,24 @@ async def transcribe_audio(file: UploadFile = File(...), model: str = "base", la
             content={"status": "FAILURE", "message": "Whisper not installed. Run: pip install openai-whisper"}
         )
 
+    content = await file.read()
+    suffix = _whisper_suffix(file.filename, file.content_type)
     try:
-        model_obj = whisper.load_model(model)
+        model_obj = await asyncio.to_thread(_whisper_model, whisper, model)
     except Exception as e:
         return JSONResponse(
             status_code=500,
             content={"status": "FAILURE", "message": f"Failed to load Whisper model: {e}"}
         )
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        content = await file.read()
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
 
     try:
-        result = model_obj.transcribe(tmp_path, language=language)
+        # Whisper is CPU-bound: on the event loop it stalled every other request,
+        # including the next partial of the same take.
+        result = await asyncio.to_thread(model_obj.transcribe, tmp_path, language=language)
         transcript = result.get("text", "").strip()
         return {"status": "SUCCESS", "transcript": transcript, "language": language, "model": model}
     except Exception as e:
