@@ -38,6 +38,8 @@ export interface JarvisAssistPlugin {
   speak(options: { text: string }): Promise<void>;
   /** The phrase that starts a turn when always-listening is on. */
   setWakePhrase(options: { phrase: string }): Promise<void>;
+  /** Only the microphone permission, for the browser turn. Optional: an older APK has none. */
+  requestMicrophone?(): Promise<{ granted: boolean }>;
   /** Whether this phone can make Jarvis its assistant, and whether it has. */
   assistantRole(): Promise<{ canHold: boolean; held: boolean }>;
   /** Ask Android to make Jarvis the assistant (long-press home). */
@@ -56,6 +58,8 @@ type Listener = (event: AssistEvent) => void;
 
 const listeners = new Set<Listener>();
 let recorder: MediaRecorder | null = null;
+/** While the assistant screen is open it keeps listening after each answer. */
+let handsFree = false;
 let stream: MediaStream | null = null;
 let chunks: Blob[] = [];
 let audio: HTMLAudioElement | null = null;
@@ -118,12 +122,18 @@ function playBase64(b64: string, mime: string): Promise<void> {
   });
 }
 
+/** "Hey Jarvis, what time is it" is the question "what time is it". */
+function withoutWake(text: string): string {
+  const cut = text.replace(/^(hey\s+)?jarvis\b[,.!:]?\s*/i, '').trim();
+  return cut || text;
+}
+
 async function finishTurn(blob: Blob) {
   try {
     setState('thinking');
     const audioB64 = await blobToBase64(blob);
     const heard = await api.voiceListen(audioB64, blob.type || 'audio/webm');
-    const text = (heard?.text || '').trim();
+    const text = withoutWake((heard?.text || '').trim());
     if (!text) {
       emit({ type: 'error', text: "I didn't catch that." });
       setState('idle');
@@ -146,6 +156,8 @@ async function finishTurn(blob: Blob) {
   } finally {
     releaseMic();
     setState('idle');
+    // Keep listening while the screen is open, so nobody has to tap again.
+    if (handsFree) window.setTimeout(() => { if (handsFree) void webStart(); }, 700);
   }
 }
 
@@ -153,6 +165,13 @@ async function webStart() {
   if (recorder && recorder.state === 'recording') {
     recorder.stop();
     return;
+  }
+  // A WebView will not record until Android has granted the microphone, and only
+  // the native side can ask. Without this the sheet opens and hears nothing.
+  try {
+    if (Capacitor.isNativePlatform()) await native.requestMicrophone?.();
+  } catch {
+    // Ask the browser anyway; a refusal is reported below.
   }
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -218,9 +237,11 @@ async function webStart() {
 
 const web: JarvisAssistPlugin = {
   async start() {
+    handsFree = true;
     await webStart();
   },
   async stop() {
+    handsFree = false;
     if (recorder && recorder.state === 'recording') recorder.stop();
     releaseMic();
     setState('idle');
@@ -245,7 +266,13 @@ const web: JarvisAssistPlugin = {
       setState('idle');
     }
   },
-  async setWakePhrase() {},
+  async setWakePhrase(options) {
+    try {
+      localStorage.setItem('jarvis_wake_phrase', options.phrase);
+    } catch {
+      // A private window cannot remember it; the default phrase still works.
+    }
+  },
   async assistantRole() {
     return { canHold: false, held: false };
   },
