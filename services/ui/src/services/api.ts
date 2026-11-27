@@ -2012,6 +2012,46 @@ export const api = {
     }
   },
 
+  /**
+   * Hear one recorded turn. The clip never leaves the house: the gateway hands
+   * it to the household's own Whisper and answers with the words.
+   */
+  async voiceListen(audioB64: string, mime = 'audio/wav'): Promise<{ text: string }> {
+    const resp = await apiClient.post('/api/voice/listen', { audio_b64: audioB64, mime }, { timeout: 120_000 });
+    return { text: String(resp.data?.text || '') };
+  },
+
+  /**
+   * Speak a line in this person's own voice (their Kokoro voice when they have
+   * chosen one, the house voice otherwise). Returns base64 WAV for the caller
+   * to play, so the sheet can speak the first sentence while the rest arrives.
+   */
+  async voiceSpeak(text: string, voice?: string): Promise<{ audio_b64: string; mime: string; voice: string | null }> {
+    const resp = await apiClient.post('/api/voice/speak', { text, voice }, { timeout: 120_000 });
+    return {
+      audio_b64: String(resp.data?.audio_b64 || ''),
+      mime: String(resp.data?.mime || 'audio/wav'),
+      voice: (resp.data?.voice as string | null) ?? null,
+    };
+  },
+
+  /** The words in a chat answer, whichever shape the gateway answered in. */
+  replyText(data: unknown): string {
+    if (typeof data === 'string') return data;
+    if (!data || typeof data !== 'object') return '';
+    const d = data as Record<string, unknown>;
+    const direct = d.reply ?? d.response ?? d.text ?? d.answer;
+    if (typeof direct === 'string' && direct.trim()) return direct;
+    const message = d.message as { content?: unknown } | undefined;
+    if (message && typeof message.content === 'string' && message.content.trim()) return message.content;
+    const inner = d.data as Record<string, unknown> | undefined;
+    if (inner) {
+      const value = inner.reply ?? inner.response ?? inner.text ?? inner.answer;
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return '';
+  },
+
   async chat(message: string, workspaceId?: string, userId?: string, stream = false): Promise<unknown> {
     // A non-streaming turn is billed to the model, so it outlives the 15s
     // axios default: the quick assistant aborted every question it asked and
